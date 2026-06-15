@@ -68,6 +68,9 @@
     // Cache API bucket name where downloaded mp3 files are stored for replay
     const AUDIO_CACHE = "mureka_audio_cache_v1";
 
+    // localStorage key that remembers whether the panel is minimized
+    const MINIMIZED_KEY = "mureka_player_minimized";
+
     // Cached data, loaded once on startup
     let cache = loadCache();
 
@@ -113,6 +116,11 @@
     let feedButton = null;
     let cacheButton = null;
     let downloadButton = null;
+
+    // The collapsible body and the minimize indicator
+    let bodyEl = null;
+    let minimizeBtn = null;
+    let minimized = false;
 
     // The view buttons, keyed by view name
     let viewButtons = {};
@@ -1560,6 +1568,26 @@
             "width:300px"
         ].join(";");
 
+        // Header bar, clicking it minimizes or expands the panel
+        const header = document.createElement("div");
+        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none;-moz-user-select:none";
+        header.title = "Click to minimize or expand";
+
+        const headerTitle = document.createElement("div");
+        headerTitle.textContent = "Mureka Player";
+        headerTitle.style.cssText = "font-weight:600";
+
+        minimizeBtn = document.createElement("span");
+        minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
+
+        header.appendChild(headerTitle);
+        header.appendChild(minimizeBtn);
+        header.addEventListener("click", toggleMinimize);
+
+        // Everything below the header lives in the body, which can collapse
+        bodyEl = document.createElement("div");
+        bodyEl.style.marginTop = "10px";
+
         statusEl = document.createElement("div");
         statusEl.style.marginBottom = "8px";
 
@@ -1729,13 +1757,16 @@
         listEl = document.createElement("div");
         listEl.style.cssText = "position:relative;height:240px;box-sizing:border-box;overflow:auto;border-top:1px solid #333;padding-top:6px;margin-top:6px";
 
-        panel.appendChild(statusEl);
-        panel.appendChild(rowOne);
-        panel.appendChild(rowThree);
-        panel.appendChild(playerEl);
-        panel.appendChild(searchRow);
-        panel.appendChild(viewRow);
-        panel.appendChild(listEl);
+        bodyEl.appendChild(statusEl);
+        bodyEl.appendChild(rowOne);
+        bodyEl.appendChild(rowThree);
+        bodyEl.appendChild(playerEl);
+        bodyEl.appendChild(searchRow);
+        bodyEl.appendChild(viewRow);
+        bodyEl.appendChild(listEl);
+
+        panel.appendChild(header);
+        panel.appendChild(bodyEl);
         document.body.appendChild(panel);
 
         renderList();
@@ -1746,6 +1777,43 @@
         refreshCachedIds();
         updateShuffleButton();
         updateViewButtons();
+
+        // Restore whether the panel was left minimized last time
+        let startMinimized = false;
+
+        try {
+            startMinimized = localStorage.getItem(MINIMIZED_KEY) === "1";
+        } catch (e) {
+        }
+
+        setMinimized(startMinimized);
+    }
+
+    // Collapse or expand the panel body and remember the choice
+    function toggleMinimize() {
+
+        setMinimized(!minimized);
+
+        try {
+            localStorage.setItem(MINIMIZED_KEY, minimized ? "1" : "0");
+        } catch (e) {
+        }
+    }
+
+    // Apply the minimized state to the body and the indicator
+    function setMinimized(value) {
+
+        minimized = value;
+
+        if (bodyEl) {
+            bodyEl.style.display = minimized ? "none" : "block";
+        }
+
+        if (minimizeBtn) {
+
+            // Up triangle to expand, down triangle to collapse
+            minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
+        }
     }
 
     // Helper that builds a styled button wired to a handler
