@@ -1,0 +1,60 @@
+{
+    "manifest_version": 3,
+    "name": "Mureka Player",
+    "version": "1.0.0",
+    "description": "Loads all your published Mureka songs into one player with caching, search, shuffle and automatic folder downloads.",
+    "author": "EvTheFuture",
+    "homepage_url": "https://github.com/EvTheFuture/MurekaPlayer",
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "mureka-player@evthefuture.dev",
+            "strict_min_version": "140.0",
+            "data_collection_permissions": {
+                "required": ["none"]
+            }
+        },
+        "gecko_android": {
+            "strict_min_version": "142.0"
+        }
+    },
+    "icons": {
+        "48": "icons/icon-48.png",
+        "96": "icons/icon-96.png",
+        "128": "icons/icon-128.png"
+    },
+    "permissions": [
+        "downloads"
+    ],
+    "host_permissions": [
+        "*://www.mureka.ai/*",
+        "*://mureka.ai/*",
+        "*://static-cos.mureka.ai/*"
+    ],
+    "background": {
+        "scripts": [
+            "src/background.js"
+        ]
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "*://www.mureka.ai/*",
+                "*://mureka.ai/*"
+            ],
+            "js": [
+                "src/content.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "src/page.js"
+            ],
+            "matches": [
+                "*://*.mureka.ai/*"
+            ]
+        }
+    ]
+}
