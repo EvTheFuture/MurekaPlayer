@@ -826,6 +826,52 @@
         setStatus("Saving to the Mureka folder: " + (song.title || "Untitled"));
     }
 
+    // Re-fetch one song from the detail endpoint to pick up a changed title etc
+    async function refreshOne(song) {
+
+        setStatus("Refreshing: " + (song.title || "Untitled"));
+
+        try {
+            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+            const res = await fetch(url, { credentials: "include" });
+
+            if (!res.ok) {
+                setStatus("Refresh failed, HTTP " + res.status);
+                return;
+            }
+
+            const json = await res.json();
+            const fresh = json && json.data && json.data.song;
+
+            if (!fresh || fresh.song_id !== song.song_id) {
+                setStatus("Refresh returned no matching song");
+                return;
+            }
+
+            const idx = cache.songs.findIndex(function (s) {
+                return s.song_id === song.song_id;
+            });
+
+            if (idx === -1) {
+                return;
+            }
+
+            // Mutate in place so the queue and current song see the update too
+            Object.assign(cache.songs[idx], trim(fresh));
+            saveCache();
+            renderList();
+
+            if (currentSong && currentSong.song_id === song.song_id) {
+                updatePlayerInfo(currentSong);
+            }
+
+            setStatus("Refreshed: " + (cache.songs[idx].title || "Untitled"));
+
+        } catch (e) {
+            setStatus("Refresh failed");
+        }
+    }
+
     // Format a number of seconds as m:ss
     function formatTime(seconds) {
 
@@ -1140,12 +1186,9 @@
 
         if (listView === "queue") {
 
-            if (queuePos < 0 || queuePos >= queue.length) {
-                return [];
-            }
-
-            // The current song first, then everything queued after it
-            return queue.slice(queuePos);
+            // The full queue, played songs included so you can scroll back
+            // Played songs are greyed out in renderSongs
+            return queue.slice();
         }
 
         // Default Mureka view, the published order
@@ -1934,13 +1977,18 @@
 
     // Build one list row for a song
     // number may be null to leave the number column blank, as for a pinned song
-    function buildSongRow(song, number, isPlaying) {
+    // dimmed greys the row, used for already played songs in the queue view
+    function buildSongRow(song, number, isPlaying, dimmed) {
 
         const title = (song.title || "").trim() || "Untitled";
 
         const item = document.createElement("div");
         item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;user-select:none;-moz-user-select:none";
         item.title = "Click to play, right-click for options";
+
+        if (dimmed) {
+            item.style.opacity = "0.45";
+        }
 
         // A dot marks a cached song, hidden state keeps the text aligned
         const dot = document.createElement("span");
@@ -2013,6 +2061,13 @@
         const query = searchQuery;
         let shown = 0;
 
+        // In the queue view, songs before the current position are already played
+        const playedIds = (listView === "queue" && queuePos > 0)
+            ? new Set(queue.slice(0, queuePos).map(function (s) {
+                return s.song_id;
+            }))
+            : null;
+
         songs.forEach(function (song) {
 
             const title = (song.title || "").trim() || "Untitled";
@@ -2025,7 +2080,8 @@
             shown += 1;
 
             const isPlaying = song.song_id === playingId;
-            const item = buildSongRow(song, numberById.get(song.song_id), isPlaying);
+            const dimmed = playedIds ? playedIds.has(song.song_id) : false;
+            const item = buildSongRow(song, numberById.get(song.song_id), isPlaying, dimmed);
 
             if (isPlaying) {
                 playingItemEl = item;
@@ -2136,6 +2192,10 @@
 
         addMenuRow("Play", "#fff", function () {
             playFrom(song.song_id);
+        });
+
+        addMenuRow("Refresh", "#fff", function () {
+            refreshOne(song);
         });
 
         addMenuRow("Download", "#fff", function () {
