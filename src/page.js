@@ -68,8 +68,14 @@
     // Cache API bucket name where downloaded mp3 files are stored for replay
     const AUDIO_CACHE = "mureka_audio_cache_v1";
 
+    // How many upcoming songs to cache ahead, so playback never waits on the net
+    const PREFETCH_COUNT = 3;
+
     // localStorage key that remembers whether the panel is minimized
     const MINIMIZED_KEY = "mureka_player_minimized";
+
+    // localStorage key that remembers the panel position
+    const POS_KEY = "mureka_player_pos";
 
     // Cached data, loaded once on startup
     let cache = loadCache();
@@ -117,7 +123,8 @@
     let cacheButton = null;
     let downloadButton = null;
 
-    // The collapsible body and the minimize indicator
+    // The panel, its collapsible body and the minimize indicator
+    let panelEl = null;
     let bodyEl = null;
     let minimizeBtn = null;
     let minimized = false;
@@ -127,6 +134,9 @@
 
     // Set of song_ids whose mp3 is present in the audio cache
     let cachedIds = new Set();
+
+    // Set of song_ids that are being cached right now, shown by a pulsing dot
+    let cachingIds = new Set();
 
     // Current search box text, lowercased, empty means show all
     let searchQuery = "";
@@ -631,6 +641,10 @@
 
             if (!resp) {
 
+                // Mark as caching so its dot pulses while the file downloads
+                cachingIds.add(song.song_id);
+                renderList();
+
                 const net = await fetch(direct);
 
                 if (net && net.ok) {
@@ -639,8 +653,10 @@
 
                     // The full file is now stored, so light its cached marker
                     cachedIds.add(song.song_id);
-                    renderList();
                 }
+
+                cachingIds.delete(song.song_id);
+                renderList();
             }
 
             if (resp) {
@@ -649,6 +665,11 @@
                 return URL.createObjectURL(blob);
             }
         } catch (e) {
+
+            // Make sure a failed fetch does not leave the dot pulsing
+            if (cachingIds.delete(song.song_id)) {
+                renderList();
+            }
         }
 
         return direct;
@@ -670,6 +691,10 @@
                 return true;
             }
 
+            // Mark as caching so its dot pulses while the file downloads
+            cachingIds.add(song.song_id);
+            renderList();
+
             const net = await fetch(url);
 
             if (!net || !net.ok) {
@@ -677,10 +702,16 @@
             }
 
             await store.put(url, net.clone());
+            cachedIds.add(song.song_id);
 
             return true;
         } catch (e) {
             return false;
+        } finally {
+
+            if (cachingIds.delete(song.song_id)) {
+                renderList();
+            }
         }
     }
 
@@ -1246,6 +1277,35 @@
 
         setCurrentSrc(url);
         audio.play();
+
+        // The current song is cached now, get upcoming songs ready in the background
+        prefetchNext();
+    }
+
+    // Cache the next songs in the queue so playback does not wait on the network
+    async function prefetchNext() {
+
+        for (let i = 1; i <= PREFETCH_COUNT; i += 1) {
+
+            const pos = queuePos + i;
+
+            if (pos >= queue.length) {
+                break;
+            }
+
+            const song = queue[pos];
+
+            if (!song || cachedIds.has(song.song_id)) {
+                continue;
+            }
+
+            const ok = await fetchToCache(song);
+
+            if (ok) {
+                cachedIds.add(song.song_id);
+                renderList();
+            }
+        }
     }
 
     // Point the audio element at a URL, cleaning up the previous blob URL
@@ -1596,11 +1656,12 @@
     function buildPanel() {
 
         const panel = document.createElement("div");
+        panelEl = panel;
 
         panel.style.cssText = [
             "position:fixed",
-            "bottom:16px",
-            "right:16px",
+            "top:16px",
+            "left:16px",
             "z-index:999999",
             "background:#1d1d22",
             "color:#fff",
@@ -1611,10 +1672,10 @@
             "width:300px"
         ].join(";");
 
-        // Header bar, clicking it minimizes or expands the panel
+        // Header bar, drag to move the panel, click to minimize or expand
         const header = document.createElement("div");
-        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none;-moz-user-select:none";
-        header.title = "Click to minimize or expand";
+        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:move;user-select:none;-moz-user-select:none";
+        header.title = "Drag to move, click to minimize or expand";
 
         const headerTitle = document.createElement("div");
         headerTitle.textContent = "Mureka Player";
@@ -1625,7 +1686,7 @@
 
         header.appendChild(headerTitle);
         header.appendChild(minimizeBtn);
-        header.addEventListener("click", toggleMinimize);
+        header.addEventListener("mousedown", startDrag);
 
         // Everything below the header lives in the body, which can collapse
         bodyEl = document.createElement("div");
@@ -1755,7 +1816,8 @@
         const placeholderStyle = document.createElement("style");
         placeholderStyle.textContent =
             "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
-            + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}";
+            + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
+            + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}";
         document.head.appendChild(placeholderStyle);
 
         // Filter the list as the user types
@@ -1821,6 +1883,9 @@
         updateShuffleButton();
         updateViewButtons();
 
+        // Place the panel where it was left, or default to the bottom right
+        restorePosition();
+
         // Restore whether the panel was left minimized last time
         let startMinimized = false;
 
@@ -1830,6 +1895,101 @@
         }
 
         setMinimized(startMinimized);
+    }
+
+    // Keep a position inside the visible viewport, with a small margin
+    function clampPosition(left, top) {
+
+        const w = panelEl.offsetWidth;
+        const h = panelEl.offsetHeight;
+        const maxLeft = Math.max(8, window.innerWidth - w - 8);
+        const maxTop = Math.max(8, window.innerHeight - h - 8);
+
+        return {
+            left: Math.max(8, Math.min(left, maxLeft)),
+            top: Math.max(8, Math.min(top, maxTop))
+        };
+    }
+
+    // Save the current panel position
+    function savePosition() {
+
+        const rect = panelEl.getBoundingClientRect();
+
+        try {
+            localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top }));
+        } catch (e) {
+        }
+    }
+
+    // Restore the saved panel position, or default to the bottom right
+    function restorePosition() {
+
+        let saved = null;
+
+        try {
+            saved = JSON.parse(localStorage.getItem(POS_KEY));
+        } catch (e) {
+        }
+
+        let left;
+        let top;
+
+        if (saved && typeof saved.left === "number" && typeof saved.top === "number") {
+            left = saved.left;
+            top = saved.top;
+        } else {
+            left = window.innerWidth - panelEl.offsetWidth - 16;
+            top = window.innerHeight - panelEl.offsetHeight - 16;
+        }
+
+        const pos = clampPosition(left, top);
+        panelEl.style.left = pos.left + "px";
+        panelEl.style.top = pos.top + "px";
+    }
+
+    // Drag the panel by its header, a click without movement toggles minimize
+    function startDrag(ev) {
+
+        if (ev.button !== 0) {
+            return;
+        }
+
+        ev.preventDefault();
+
+        const rect = panelEl.getBoundingClientRect();
+        const offsetX = ev.clientX - rect.left;
+        const offsetY = ev.clientY - rect.top;
+        const startX = ev.clientX;
+        const startY = ev.clientY;
+
+        let moved = false;
+
+        const onMove = function (e) {
+
+            if (Math.abs(e.clientX - startX) > 4 || Math.abs(e.clientY - startY) > 4) {
+                moved = true;
+            }
+
+            const pos = clampPosition(e.clientX - offsetX, e.clientY - offsetY);
+            panelEl.style.left = pos.left + "px";
+            panelEl.style.top = pos.top + "px";
+        };
+
+        const onUp = function () {
+
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+
+            if (moved) {
+                savePosition();
+            } else {
+                toggleMinimize();
+            }
+        };
+
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
     }
 
     // Collapse or expand the panel body and remember the choice
@@ -1843,8 +2003,20 @@
         }
     }
 
-    // Apply the minimized state to the body and the indicator
+    // Apply the minimized state, anchoring to the nearer screen edge so the
+    // panel collapses and expands toward the top or bottom that it sits closest to
     function setMinimized(value) {
+
+        if (!panelEl) {
+            minimized = value;
+            return;
+        }
+
+        // Decide the anchor from the position before the height changes
+        const rect = panelEl.getBoundingClientRect();
+        const anchorBottom = (rect.top + rect.height / 2) > (window.innerHeight / 2);
+        const bottomEdge = rect.bottom;
+        const topEdge = rect.top;
 
         minimized = value;
 
@@ -1857,6 +2029,15 @@
             // Up triangle to expand, down triangle to collapse
             minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
         }
+
+        // Re-anchor vertically using the new height
+        const newTop = anchorBottom
+            ? (bottomEdge - panelEl.offsetHeight)
+            : topEdge;
+
+        const pos = clampPosition(rect.left, newTop);
+        panelEl.style.left = pos.left + "px";
+        panelEl.style.top = pos.top + "px";
     }
 
     // Helper that builds a styled button wired to a handler
@@ -1990,11 +2171,20 @@
             item.style.opacity = "0.45";
         }
 
-        // A dot marks a cached song, hidden state keeps the text aligned
+        // The dot marks cache state, hidden keeps the text aligned
+        // Pulsing while caching, solid once cached
+        const caching = cachingIds.has(song.song_id);
+        const cached = cachedIds.has(song.song_id);
+
         const dot = document.createElement("span");
         dot.textContent = "\u25CF";
         dot.style.cssText = "color:#48e1eb;margin-right:6px;flex:0 0 auto;visibility:"
-            + (cachedIds.has(song.song_id) ? "visible" : "hidden");
+            + ((caching || cached) ? "visible" : "hidden");
+
+        if (caching) {
+            dot.style.animation = "mureka-pulse 1s ease-in-out infinite";
+            dot.title = "Caching";
+        }
 
         // Number column, right aligned and fixed width so titles line up
         const numEl = document.createElement("span");
