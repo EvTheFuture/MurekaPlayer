@@ -77,6 +77,9 @@
     // localStorage key that remembers the panel position
     const POS_KEY = "mureka_player_pos";
 
+    // localStorage key that remembers the repeat mode
+    const REPEAT_KEY = "mureka_player_repeat";
+
     // Cached data, loaded once on startup
     let cache = loadCache();
 
@@ -114,6 +117,9 @@
 
     // When true the queue is built and rebuilt in random order
     let shuffleMode = false;
+
+    // Repeat mode, one of all, one or none, defaults to all
+    let repeatMode = "all";
 
     // UI element references
     let statusEl = null;
@@ -158,6 +164,7 @@
     let remTimeEl = null;
     let playPauseBtn = null;
     let shuffleBtn = null;
+    let repeatBtn = null;
 
     // True while the user is dragging the seek bar, so timeupdate does not fight it
     let isSeeking = false;
@@ -927,7 +934,7 @@
         audio = new Audio();
 
         audio.addEventListener("ended", function () {
-            playNext();
+            handleSongEnded();
         });
 
         // A song that starts playing proves the audio base URL is correct
@@ -1092,6 +1099,17 @@
     }
 
     // Advance to the next song in the queue
+    // Called when a song finishes on its own, repeat one replays the same song
+    function handleSongEnded() {
+
+        if (repeatMode === "one") {
+            playCurrent();
+            return;
+        }
+
+        playNext();
+    }
+
     function playNext() {
 
         if (queuePos < queue.length - 1) {
@@ -1100,7 +1118,14 @@
             return;
         }
 
-        // Past the end, report finished
+        // At the end, loop back to the start when repeating all
+        if (repeatMode === "all" && queue.length > 0) {
+            queuePos = 0;
+            playCurrent();
+            return;
+        }
+
+        // Otherwise report finished
         queuePos = queue.length;
         playCurrent();
     }
@@ -1115,6 +1140,11 @@
 
         if (queuePos > 0) {
             queuePos -= 1;
+            playCurrent();
+        } else if (repeatMode === "all" && queue.length > 0) {
+
+            // At the first song, wrap around to the last when repeating all
+            queuePos = queue.length - 1;
             playCurrent();
         } else if (audio) {
             audio.currentTime = 0;
@@ -1161,6 +1191,58 @@
 
         shuffleBtn.style.background = shuffleMode ? "#48e1eb" : "#333";
         shuffleBtn.style.color = shuffleMode ? "#000" : "#fff";
+    }
+
+    // Readable label for the current repeat mode
+    function repeatLabel() {
+
+        if (repeatMode === "all") {
+            return "all";
+        }
+
+        if (repeatMode === "one") {
+            return "one";
+        }
+
+        return "off";
+    }
+
+    // Cycle repeat through all, one and none, remembering the choice
+    function cycleRepeat() {
+
+        if (repeatMode === "all") {
+            repeatMode = "one";
+        } else if (repeatMode === "one") {
+            repeatMode = "none";
+        } else {
+            repeatMode = "all";
+        }
+
+        updateRepeatButton();
+
+        try {
+            localStorage.setItem(REPEAT_KEY, repeatMode);
+        } catch (e) {
+        }
+
+        setStatus("Repeat: " + repeatLabel());
+    }
+
+    // Update the repeat button icon and highlight to match the mode
+    function updateRepeatButton() {
+
+        if (!repeatBtn) {
+            return;
+        }
+
+        // Replace the icon, repeat one shows a 1 inside the loop
+        repeatBtn.textContent = "";
+        repeatBtn.appendChild(makeRepeatIcon(repeatMode === "one"));
+
+        const on = repeatMode !== "none";
+        repeatBtn.style.background = on ? "#48e1eb" : "#333";
+        repeatBtn.style.color = on ? "#000" : "#fff";
+        repeatBtn.title = "Repeat: " + repeatLabel();
     }
 
     // Switch the list view and refresh
@@ -1773,7 +1855,7 @@
         seekRow.appendChild(seekBar);
         seekRow.appendChild(remTimeEl);
 
-        // Transport row, icon buttons for previous, play/pause, next, shuffle, stop
+        // Transport row, icon buttons for previous, play/pause, next, shuffle, repeat, stop
         const controlRow = document.createElement("div");
         controlRow.style.cssText = "display:flex;gap:6px";
 
@@ -1782,12 +1864,14 @@
         const nextBtn = makeIconButton("\u23ED", "Next", playNext);
 
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
+        repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
         const stopBtn = makeIconButton("\u23F9", "Stop", stopPlay);
 
         controlRow.appendChild(prevBtn);
         controlRow.appendChild(playPauseBtn);
         controlRow.appendChild(nextBtn);
         controlRow.appendChild(shuffleBtn);
+        controlRow.appendChild(repeatBtn);
         controlRow.appendChild(stopBtn);
 
         playerEl.appendChild(playerArt);
@@ -1882,6 +1966,18 @@
         refreshCachedIds();
         updateShuffleButton();
         updateViewButtons();
+
+        // Restore the saved repeat mode, defaulting to all
+        try {
+            const savedRepeat = localStorage.getItem(REPEAT_KEY);
+
+            if (savedRepeat === "all" || savedRepeat === "one" || savedRepeat === "none") {
+                repeatMode = savedRepeat;
+            }
+        } catch (e) {
+        }
+
+        updateRepeatButton();
 
         // Place the panel where it was left, or default to the bottom right
         restorePosition();
@@ -2130,6 +2226,57 @@
 
             svg.appendChild(el);
         });
+
+        return svg;
+    }
+
+    // Build the repeat icon as SVG nodes, withOne adds a 1 for repeat one
+    function makeRepeatIcon(withOne) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+
+        svg.setAttribute("width", "16");
+        svg.setAttribute("height", "16");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+
+        const shapes = [
+            ["polyline", { points: "17 1 21 5 17 9" }],
+            ["path", { d: "M3 11V9a4 4 0 0 1 4-4h14" }],
+            ["polyline", { points: "7 23 3 19 7 15" }],
+            ["path", { d: "M21 13v2a4 4 0 0 1-4 4H3" }]
+        ];
+
+        shapes.forEach(function (shape) {
+
+            const el = document.createElementNS(ns, shape[0]);
+            const attrs = shape[1];
+
+            Object.keys(attrs).forEach(function (key) {
+                el.setAttribute(key, attrs[key]);
+            });
+
+            svg.appendChild(el);
+        });
+
+        if (withOne) {
+
+            const t = document.createElementNS(ns, "text");
+            t.setAttribute("x", "12");
+            t.setAttribute("y", "15.5");
+            t.setAttribute("text-anchor", "middle");
+            t.setAttribute("font-size", "10");
+            t.setAttribute("font-family", "sans-serif");
+            t.setAttribute("fill", "currentColor");
+            t.setAttribute("stroke", "none");
+            t.textContent = "1";
+            svg.appendChild(t);
+        }
 
         return svg;
     }
