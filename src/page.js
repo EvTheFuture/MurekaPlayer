@@ -121,6 +121,12 @@
     // Repeat mode, one of all, one or none, defaults to all
     let repeatMode = "all";
 
+    // Saved playback state so Stop can be resumed by Play
+    let resumeState = null;
+
+    // A one-shot seek applied once the next song has loaded, used when resuming
+    let pendingSeek = 0;
+
     // UI element references
     let statusEl = null;
     let listEl = null;
@@ -129,11 +135,17 @@
     let cacheButton = null;
     let downloadButton = null;
 
-    // The panel, its collapsible body and the minimize indicator
+    // The panel, its header, its collapsible body and the minimize indicator
     let panelEl = null;
+    let headerEl = null;
     let bodyEl = null;
     let minimizeBtn = null;
     let minimized = false;
+
+    // Current anchor, the side and edge offset are kept so growth keeps the dock
+    let anchorLeft = 8;
+    let anchorSide = "bottom";
+    let anchorOffset = 16;
 
     // The view buttons, keyed by view name
     let viewButtons = {};
@@ -948,6 +960,17 @@
 
         // Set the seek bar range once the duration is known
         audio.addEventListener("loadedmetadata", function () {
+
+            // Apply a one-shot resume seek now that the duration is known
+            if (pendingSeek > 0 && isFinite(audio.duration)) {
+
+                try {
+                    audio.currentTime = Math.min(pendingSeek, audio.duration - 0.5);
+                } catch (e) {
+                }
+            }
+
+            pendingSeek = 0;
             updateSeekDisplay();
         });
 
@@ -1079,6 +1102,17 @@
             return;
         }
 
+        // Resume from where Stop left off, restoring the queue and position
+        if (resumeState && resumeState.queue.length) {
+
+            queue = resumeState.queue;
+            queuePos = resumeState.queuePos;
+            pendingSeek = resumeState.time || 0;
+            resumeState = null;
+            playCurrent();
+            return;
+        }
+
         buildQueue(null);
         playCurrent();
     }
@@ -1179,7 +1213,7 @@
             renderList();
         }
 
-        setStatus(shuffleMode ? "Shuffle on" : "Shuffle off");
+        setStatus(modeStatusText());
     }
 
     // Highlight the shuffle button when shuffle mode is active
@@ -1207,6 +1241,12 @@
         return "off";
     }
 
+    // Combined mode line showing both shuffle and repeat state
+    function modeStatusText() {
+
+        return "Shuffle " + (shuffleMode ? "on" : "off") + ", repeat " + repeatLabel();
+    }
+
     // Cycle repeat through all, one and none, remembering the choice
     function cycleRepeat() {
 
@@ -1225,7 +1265,7 @@
         } catch (e) {
         }
 
-        setStatus("Repeat: " + repeatLabel());
+        setStatus(modeStatusText());
     }
 
     // Update the repeat button icon and highlight to match the mode
@@ -1413,16 +1453,34 @@
             audio.pause();
         }
 
+        // Remember where we were so Play resumes the same song and queue
+        if (currentSong && queue.length) {
+
+            resumeState = {
+                queue: queue,
+                queuePos: queuePos,
+                time: (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0
+            };
+        }
+
         if (currentObjectUrl) {
             URL.revokeObjectURL(currentObjectUrl);
             currentObjectUrl = null;
         }
 
+        // Unload the audio so Play routes through resume instead of the old song
+        if (audio) {
+            audio.removeAttribute("src");
+            audio.load();
+        }
+
+        // Clear the live state so the art and queue highlight disappear
         currentSong = null;
         queue = [];
         queuePos = -1;
         renderList();
         updatePlayerInfo(null);
+        updatePlayPause();
         setStatus("Stopped");
     }
 
@@ -1751,11 +1809,15 @@
             "padding:12px",
             "border-radius:10px",
             "box-shadow:0 4px 16px rgba(0,0,0,0.4)",
-            "width:300px"
+            "width:300px",
+            "display:flex",
+            "flex-direction:column",
+            "gap:10px"
         ].join(";");
 
         // Header bar, drag to move the panel, click to minimize or expand
         const header = document.createElement("div");
+        headerEl = header;
         header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:move;user-select:none;-moz-user-select:none";
         header.title = "Drag to move, click to minimize or expand";
 
@@ -1772,7 +1834,6 @@
 
         // Everything below the header lives in the body, which can collapse
         bodyEl = document.createElement("div");
-        bodyEl.style.marginTop = "10px";
 
         statusEl = document.createElement("div");
         statusEl.style.marginBottom = "8px";
@@ -1855,7 +1916,7 @@
         seekRow.appendChild(seekBar);
         seekRow.appendChild(remTimeEl);
 
-        // Transport row, icon buttons for previous, play/pause, next, shuffle, repeat, stop
+        // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
         const controlRow = document.createElement("div");
         controlRow.style.cssText = "display:flex;gap:6px";
 
@@ -1869,10 +1930,10 @@
 
         controlRow.appendChild(prevBtn);
         controlRow.appendChild(playPauseBtn);
+        controlRow.appendChild(stopBtn);
         controlRow.appendChild(nextBtn);
         controlRow.appendChild(shuffleBtn);
         controlRow.appendChild(repeatBtn);
-        controlRow.appendChild(stopBtn);
 
         playerEl.appendChild(playerArt);
         playerEl.appendChild(playerTitle);
@@ -2007,18 +2068,48 @@
         };
     }
 
-    // Save the current panel position
+    // Position the panel and choose which edge to anchor in CSS, so the browser
+    // keeps that edge fixed whenever the content grows or shrinks on its own.
+    // Nearer the top anchors the top edge and grows downward, nearer the bottom
+    // anchors the bottom edge and grows upward
+    function applyPosition(left, top) {
+
+        const pos = clampPosition(left, top);
+        const bottomEdge = pos.top + panelEl.offsetHeight;
+        const distanceTop = pos.top;
+        const distanceBottom = window.innerHeight - bottomEdge;
+
+        panelEl.style.left = pos.left + "px";
+        anchorLeft = pos.left;
+
+        if (distanceTop < distanceBottom) {
+            panelEl.style.top = pos.top + "px";
+            panelEl.style.bottom = "auto";
+            anchorSide = "top";
+            anchorOffset = pos.top;
+        } else {
+            panelEl.style.top = "auto";
+            panelEl.style.bottom = (window.innerHeight - bottomEdge) + "px";
+            anchorSide = "bottom";
+            anchorOffset = window.innerHeight - bottomEdge;
+        }
+    }
+
+    // Save the current anchor, the side and edge offset rather than a raw top,
+    // so the dock survives the panel changing height
     function savePosition() {
 
-        const rect = panelEl.getBoundingClientRect();
-
         try {
-            localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top }));
+            localStorage.setItem(POS_KEY, JSON.stringify({
+                left: anchorLeft,
+                side: anchorSide,
+                offset: anchorOffset
+            }));
         } catch (e) {
         }
     }
 
-    // Restore the saved panel position, or default to the bottom right
+    // Restore the saved anchor, or default to the bottom right
     function restorePosition() {
 
         let saved = null;
@@ -2028,20 +2119,36 @@
         } catch (e) {
         }
 
-        let left;
-        let top;
+        const valid = saved
+            && typeof saved.left === "number"
+            && (saved.side === "top" || saved.side === "bottom")
+            && typeof saved.offset === "number";
 
-        if (saved && typeof saved.left === "number" && typeof saved.top === "number") {
-            left = saved.left;
-            top = saved.top;
-        } else {
-            left = window.innerWidth - panelEl.offsetWidth - 16;
-            top = window.innerHeight - panelEl.offsetHeight - 16;
+        if (valid) {
+
+            const maxLeft = Math.max(8, window.innerWidth - panelEl.offsetWidth - 8);
+
+            anchorLeft = Math.max(8, Math.min(saved.left, maxLeft));
+            anchorSide = saved.side;
+            anchorOffset = Math.max(8, saved.offset);
+
+            panelEl.style.left = anchorLeft + "px";
+
+            if (anchorSide === "top") {
+                panelEl.style.top = anchorOffset + "px";
+                panelEl.style.bottom = "auto";
+            } else {
+                panelEl.style.bottom = anchorOffset + "px";
+                panelEl.style.top = "auto";
+            }
+
+            return;
         }
 
-        const pos = clampPosition(left, top);
-        panelEl.style.left = pos.left + "px";
-        panelEl.style.top = pos.top + "px";
+        // Default to the bottom right corner
+        const left = window.innerWidth - panelEl.offsetWidth - 16;
+        const top = window.innerHeight - panelEl.offsetHeight - 16;
+        applyPosition(left, top);
     }
 
     // Drag the panel by its header, a click without movement toggles minimize
@@ -2067,9 +2174,11 @@
                 moved = true;
             }
 
+            // Drag with a fixed top edge, the final edge anchor is set on release
             const pos = clampPosition(e.clientX - offsetX, e.clientY - offsetY);
-            panelEl.style.left = pos.left + "px";
+            panelEl.style.bottom = "auto";
             panelEl.style.top = pos.top + "px";
+            panelEl.style.left = pos.left + "px";
         };
 
         const onUp = function () {
@@ -2078,6 +2187,10 @@
             document.removeEventListener("mouseup", onUp);
 
             if (moved) {
+
+                // Re-anchor to the nearer edge so later growth goes the right way
+                const rect = panelEl.getBoundingClientRect();
+                applyPosition(rect.left, rect.top);
                 savePosition();
             } else {
                 toggleMinimize();
@@ -2099,20 +2212,10 @@
         }
     }
 
-    // Apply the minimized state, anchoring to the nearer screen edge so the
-    // panel collapses and expands toward the top or bottom that it sits closest to
+    // Apply the minimized state. The panel is anchored to its nearer edge in CSS
+    // (see applyPosition), so collapsing and expanding, like any size change,
+    // automatically keeps that edge fixed and grows in the right direction
     function setMinimized(value) {
-
-        if (!panelEl) {
-            minimized = value;
-            return;
-        }
-
-        // Decide the anchor from the position before the height changes
-        const rect = panelEl.getBoundingClientRect();
-        const anchorBottom = (rect.top + rect.height / 2) > (window.innerHeight / 2);
-        const bottomEdge = rect.bottom;
-        const topEdge = rect.top;
 
         minimized = value;
 
@@ -2125,15 +2228,6 @@
             // Up triangle to expand, down triangle to collapse
             minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
         }
-
-        // Re-anchor vertically using the new height
-        const newTop = anchorBottom
-            ? (bottomEdge - panelEl.offsetHeight)
-            : topEdge;
-
-        const pos = clampPosition(rect.left, newTop);
-        panelEl.style.left = pos.left + "px";
-        panelEl.style.top = pos.top + "px";
     }
 
     // Helper that builds a styled button wired to a handler
