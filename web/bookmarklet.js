@@ -21,7 +21,7 @@
 //   web/bookmarklet.min.js       latest release, cached and fast
 //   web/bookmarklet-dev.min.js   newest in-development code, re-fetched each run
 // The dev form only differs by its src, which is:
-//   https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js?v=<timestamp>
+//   https://evthefuture.github.io/MurekaPlayer/src/player.js?v=<timestamp>
 // To use one, bookmark mureka.ai, set the bookmark URL to the one-liner, then
 // run it from the Bookmarks menu while logged in.
 

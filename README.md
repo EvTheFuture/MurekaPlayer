@@ -68,12 +68,12 @@ javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerTogg
 
 ### Newest in-development version
 
-Loads the most recent code and re-downloads it on every run, so it is never
+Loads the most recent committed code, re-fetched on every run so it is never
 stale. Use this only if you want the bleeding edge, as it is a little slower to
 open.
 
 ```
-javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js?v="+Date.now();document.body.appendChild(s)})();
+javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://evthefuture.github.io/MurekaPlayer/src/player.js?v="+Date.now();document.body.appendChild(s)})();
 ```
 
 ## Downloads and caching

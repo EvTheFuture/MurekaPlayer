@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.0";
+    const VERSION = "1.2.2";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -108,6 +108,15 @@
 
     // localStorage key that remembers the repeat mode
     const REPEAT_KEY = "mureka_player_repeat";
+
+    // localStorage key that remembers the user settings object
+    const SETTINGS_KEY = "mureka_player_settings";
+
+    // User settings, loaded once on startup, published is the default start feed
+    let settings = loadSettings();
+
+    // Honor the chosen start feed before the cache for that feed is loaded
+    feedMode = settings.startFeed;
 
     // Cached data, loaded once on startup
     let cache = loadCache();
@@ -197,6 +206,11 @@
     // The right-click options popup, built once and reused
     let contextMenuEl = null;
 
+    // The settings overlay and its controls, built once and reused
+    let settingsEl = null;
+    let startPublishedBtn = null;
+    let startAllBtn = null;
+
     // Player UI element references
     let artWrapEl = null;
     let playerArt = null;
@@ -265,6 +279,54 @@
         try {
             localStorage.setItem(feed().cacheKey, JSON.stringify(cache));
         } catch (e) {
+        }
+    }
+
+    // Read the settings from localStorage, falling back to safe defaults
+    // Published is the default start feed, refresh on open is off for both feeds
+    function loadSettings() {
+
+        const defaults = {
+            startFeed: "published",
+            refreshOnStart: { published: false, all: false }
+        };
+
+        try {
+            const raw = localStorage.getItem(SETTINGS_KEY);
+
+            if (raw) {
+
+                const parsed = JSON.parse(raw);
+                const ros = parsed.refreshOnStart || {};
+
+                return {
+                    startFeed: parsed.startFeed === "all" ? "all" : "published",
+                    refreshOnStart: {
+                        published: ros.published === true,
+                        all: ros.all === true
+                    }
+                };
+            }
+        } catch (e) {
+        }
+
+        return defaults;
+    }
+
+    // Persist the settings object to localStorage
+    function saveSettings() {
+
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch (e) {
+        }
+    }
+
+    // Refresh the active feed on open when the user has asked for it
+    function maybeAutoRefresh() {
+
+        if (settings.refreshOnStart[feedMode]) {
+            run();
         }
     }
 
@@ -617,6 +679,9 @@
         setStatus(feed().label + " feed, " + n + " cached song"
             + (n === 1 ? "" : "s")
             + (n === 0 ? ", press Load" : ""));
+
+        // Refresh the newly opened feed when the user asked for it
+        maybeAutoRefresh();
     }
 
     // Show the active feed name on the feed button
@@ -1310,6 +1375,14 @@
 
             queue = played.concat(upcoming);
             renderList();
+
+            // The upcoming order changed, so refresh the coverflow neighbors
+            setArtTransition("none");
+            setArtSources();
+            positionArt(0);
+
+            // Start caching the newly ordered upcoming songs
+            prefetchNext();
         }
 
         setStatus(modeStatusText());
@@ -2121,8 +2194,30 @@
         minimizeBtn = document.createElement("span");
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
 
+        // Gear that opens the settings overlay
+        const settingsBtn = document.createElement("span");
+        settingsBtn.textContent = "\u2699";
+        settingsBtn.title = "Settings";
+        settingsBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:15px;cursor:pointer;line-height:1";
+
+        // Keep the gear from starting a drag or toggling minimize
+        settingsBtn.addEventListener("mousedown", function (ev) {
+            ev.stopPropagation();
+        });
+
+        settingsBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            openSettings();
+        });
+
+        // Right side of the header holds the gear and the minimize indicator
+        const headerRight = document.createElement("div");
+        headerRight.style.cssText = "display:flex;align-items:center;gap:10px;flex:0 0 auto";
+        headerRight.appendChild(settingsBtn);
+        headerRight.appendChild(minimizeBtn);
+
         header.appendChild(headerTitle);
-        header.appendChild(minimizeBtn);
+        header.appendChild(headerRight);
         header.addEventListener("mousedown", startDrag);
 
         // Everything below the header lives in the body, which can collapse
@@ -2305,7 +2400,7 @@
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
-            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:10px !important;box-sizing:border-box !important;font-size:12px !important}"
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:10px !important;box-sizing:border-box !important;font-size:12px !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
             + "}";
@@ -2370,6 +2465,7 @@
         setStatus("Cached songs: " + cache.songs.length);
 
         buildContextMenu();
+        buildSettings();
         requestPersistentStorage();
         refreshCachedIds();
         updateShuffleButton();
@@ -2399,6 +2495,19 @@
         }
 
         setMinimized(startMinimized);
+
+        // Size the panel to the real visible area and keep it in sync as iOS
+        // Safari shows or hides its toolbar
+        fitMobile();
+        window.addEventListener("resize", fitMobile);
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", fitMobile);
+            window.visualViewport.addEventListener("scroll", fitMobile);
+        }
+
+        // Refresh the start feed on launch when the user asked for it
+        maybeAutoRefresh();
     }
 
     // Keep a position inside the visible viewport, with a small margin
@@ -2496,6 +2605,41 @@
         const left = window.innerWidth - panelEl.offsetWidth - 16;
         const top = window.innerHeight - panelEl.offsetHeight - 16;
         applyPosition(left, top);
+    }
+
+    // On phones the panel fills the screen, but iOS Safari changes the visible
+    // height when it shows or hides its toolbar, and CSS viewport units lag
+    // behind that. Size the panel to the actual visible rectangle instead, so
+    // the top controls and the list never spill off screen
+    function fitMobile() {
+
+        if (!panelEl) {
+            return;
+        }
+
+        const mobile = window.innerWidth <= 640;
+
+        if (!mobile) {
+
+            // Hand sizing back to the draggable desktop dock
+            panelEl.style.removeProperty("top");
+            panelEl.style.removeProperty("height");
+            restorePosition();
+            return;
+        }
+
+        const vv = window.visualViewport;
+        const top = vv ? vv.offsetTop : 0;
+        const height = vv ? vv.height : window.innerHeight;
+
+        // Inline important beats the media query so the exact pixels win
+        panelEl.style.setProperty("top", top + "px", "important");
+        panelEl.style.setProperty("height", height + "px", "important");
+
+        // The art height may have changed, re-seat the coverflow strip
+        if (!swipeActive) {
+            positionArt(0);
+        }
     }
 
     // Drag the panel by its header, a click without movement toggles minimize
@@ -2894,6 +3038,151 @@
             empty.textContent = "Queue is empty, press play";
             empty.style.cssText = "padding:6px 2px;color:#888";
             listEl.appendChild(empty);
+        }
+    }
+
+    // Highlight the start feed buttons to match the saved choice
+    function updateStartButtons() {
+
+        if (!startPublishedBtn || !startAllBtn) {
+            return;
+        }
+
+        const pub = settings.startFeed === "published";
+
+        startPublishedBtn.style.background = pub ? "#48e1eb" : "#333";
+        startPublishedBtn.style.color = pub ? "#000" : "#fff";
+        startAllBtn.style.background = pub ? "#333" : "#48e1eb";
+        startAllBtn.style.color = pub ? "#fff" : "#000";
+    }
+
+    // Set an On or Off look on a toggle button
+    function updateToggleButton(btn, on) {
+
+        btn.textContent = on ? "On" : "Off";
+        btn.style.background = on ? "#48e1eb" : "#333";
+        btn.style.color = on ? "#000" : "#fff";
+    }
+
+    // Build a labeled On / Off row bound to a refresh on start flag
+    function makeRefreshRow(label, key) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const name = document.createElement("span");
+        name.textContent = label;
+
+        const btn = makeButton("Off", "#333", "#fff", function () {
+            settings.refreshOnStart[key] = !settings.refreshOnStart[key];
+            saveSettings();
+            updateToggleButton(btn, settings.refreshOnStart[key]);
+        });
+
+        btn.style.flex = "0 0 auto";
+        btn.style.minWidth = "56px";
+        btn.style.padding = "6px 12px";
+
+        updateToggleButton(btn, settings.refreshOnStart[key]);
+
+        row.appendChild(name);
+        row.appendChild(btn);
+
+        return row;
+    }
+
+    // Build the settings overlay once, it covers the panel until closed
+    function buildSettings() {
+
+        settingsEl = document.createElement("div");
+        settingsEl.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:#1d1d22",
+            "border-radius:10px",
+            "padding:12px",
+            "box-sizing:border-box",
+            "overflow:auto",
+            "display:none",
+            "flex-direction:column",
+            "gap:12px"
+        ].join(";");
+
+        // Heading row with a Done button that closes the overlay
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const heading = document.createElement("div");
+        heading.textContent = "Settings";
+        heading.style.cssText = "font-weight:600";
+
+        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeSettings);
+        doneBtn.style.flex = "0 0 auto";
+        doneBtn.style.padding = "6px 14px";
+
+        head.appendChild(heading);
+        head.appendChild(doneBtn);
+
+        // Start feed section, which list the player opens on
+        const startLabel = document.createElement("div");
+        startLabel.textContent = "Start with";
+        startLabel.style.cssText = "color:#bbb";
+
+        const startRow = document.createElement("div");
+        startRow.style.cssText = "display:flex;gap:6px";
+
+        startPublishedBtn = makeButton("Published", "#333", "#fff", function () {
+            settings.startFeed = "published";
+            saveSettings();
+            updateStartButtons();
+        });
+
+        startAllBtn = makeButton("All", "#333", "#fff", function () {
+            settings.startFeed = "all";
+            saveSettings();
+            updateStartButtons();
+        });
+
+        startRow.appendChild(startPublishedBtn);
+        startRow.appendChild(startAllBtn);
+
+        // Refresh on open section, one independent flag per feed
+        const refreshLabel = document.createElement("div");
+        refreshLabel.textContent = "Refresh on open";
+        refreshLabel.style.cssText = "color:#bbb";
+
+        const pubRow = makeRefreshRow("Published", "published");
+        const allRow = makeRefreshRow("All", "all");
+
+        settingsEl.appendChild(head);
+        settingsEl.appendChild(startLabel);
+        settingsEl.appendChild(startRow);
+        settingsEl.appendChild(refreshLabel);
+        settingsEl.appendChild(pubRow);
+        settingsEl.appendChild(allRow);
+
+        panelEl.appendChild(settingsEl);
+
+        updateStartButtons();
+    }
+
+    // Show the settings overlay, expanding the panel first if it is minimized
+    function openSettings() {
+
+        if (minimized) {
+            setMinimized(false);
+        }
+
+        if (settingsEl) {
+            settingsEl.style.display = "flex";
+        }
+    }
+
+    // Hide the settings overlay
+    function closeSettings() {
+
+        if (settingsEl) {
+            settingsEl.style.display = "none";
         }
     }
 
