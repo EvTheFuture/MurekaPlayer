@@ -35,6 +35,10 @@
 
     window.__murekaPlayerLoaded = true;
 
+    // Player version, shown in the panel header so an update is easy to confirm
+    // Keep this in sync with the version field in manifest.json
+    const VERSION = "1.2.0";
+
     // The two feeds this player can load
     // published returns only your published songs
     // all returns every song you made, including drafts and unpublished ones
@@ -2107,6 +2111,12 @@
         const headerTitle = document.createElement("div");
         headerTitle.textContent = "Mureka Player";
         headerTitle.style.cssText = "font-weight:600";
+
+        // Show the running version so an update is easy to confirm at a glance
+        const versionEl = document.createElement("span");
+        versionEl.textContent = "v" + VERSION;
+        versionEl.style.cssText = "margin-left:6px;font-weight:400;color:#888;font-size:11px";
+        headerTitle.appendChild(versionEl);
 
         minimizeBtn = document.createElement("span");
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";

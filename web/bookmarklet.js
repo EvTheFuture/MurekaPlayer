@@ -1,9 +1,6 @@
 /*
- * Mureka Player - load and play all your Mureka songs
- * Bookmarklet loader, injects the shared player into the mureka.ai page
- *
+ * Mureka Player bookmarklet loader
  * Copyright (C) 2026 EvTheFuture
- * https://github.com/EvTheFuture/MurekaPlayer
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -12,17 +9,21 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Readable source of the bookmarklet loader. The minified, paste-ready form is
-// in web/bookmarklet.min.js, and the README shows it too. To use it, save a
-// bookmark on mureka.ai, set the bookmark URL to that one-liner, then run it
-// from the Bookmarks menu while logged in.
+// Readable source of the bookmarklet loader. Two paste-ready minified forms
+// live next to this file:
+//   web/bookmarklet.min.js       latest release, cached and fast
+//   web/bookmarklet-dev.min.js   newest in-development code, re-fetched each run
+// The dev form only differs by its src, which is:
+//   https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js?v=<timestamp>
+// To use one, bookmark mureka.ai, set the bookmark URL to the one-liner, then
+// run it from the Bookmarks menu while logged in.
 
 (function () {
     "use strict";
@@ -33,10 +34,10 @@
         return;
     }
 
-    // Inject the shared player, served from this repo through jsDelivr
+    // Inject the shared player, latest release served from this repo via jsDelivr
     const script = document.createElement("script");
 
-    script.src = "https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js";
+    script.src = "https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@latest/src/player.js";
 
     document.body.appendChild(script);
 })();

@@ -33,12 +33,14 @@ small bookmarklet.
 
 ## Files
 
-- manifest.json        Extension manifest
-- src/player.js        The player
-- src/content.js       Injects the player and relays downloads
-- src/background.js    Saves downloads into the Mureka folder
-- web/bookmarklet.js   The bookmarklet loader
-- icons/               Add-on icons
+- manifest.json              Extension manifest
+- src/player.js              The player
+- src/content.js             Injects the player and relays downloads
+- src/background.js          Saves downloads into the Mureka folder
+- web/bookmarklet.js         The bookmarklet loader (readable source)
+- web/bookmarklet.min.js     Bookmarklet for the latest release
+- web/bookmarklet-dev.min.js Bookmarklet for the newest in-development version
+- icons/                     Add-on icons
 
 ## Install the add-on (Firefox / LibreWolf)
 
@@ -48,23 +50,30 @@ Android. The player appears on mureka.ai automatically.
 ## Use without the add-on (iPhone and other browsers)
 
 On browsers that cannot run add-ons, a bookmarklet loads the same player into
-the mureka.ai page.
+the mureka.ai page. To set one up: bookmark any page, edit that bookmark and
+replace its URL with one of the one-liners below, open mureka.ai while logged
+in, then run the bookmark from the Bookmarks menu. On iPhone it must be run from
+the Bookmarks menu, not the address bar, because iOS does not allow bookmarklets
+to start from the address bar. The player opens over the page, and running the
+bookmark again minimizes or restores it. On desktop you can instead drag the
+bookmarklet to your bookmarks toolbar.
 
-1. Copy the one-liner below
-2. Bookmark any page, then edit that bookmark and replace its URL with the
-   copied one-liner
-3. Open mureka.ai and make sure you are logged in
-4. Run the bookmark from the Bookmarks menu. On iPhone this must be the
-   Bookmarks menu, not the address bar, because iOS does not allow bookmarklets
-   to start from the address bar
-5. The player opens over the page. Run the bookmark again to minimize or restore
-   it
+### Latest release (recommended)
 
-On desktop you can drag the bookmarklet to your bookmarks toolbar and click it
-while on mureka.ai.
+Loads the latest released version. The browser can cache it, so it opens fast.
 
 ```
-javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js";document.body.appendChild(s)})();
+javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@latest/src/player.js";document.body.appendChild(s)})();
+```
+
+### Newest in-development version
+
+Loads the most recent code and re-downloads it on every run, so it is never
+stale. Use this only if you want the bleeding edge, as it is a little slower to
+open.
+
+```
+javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js?v="+Date.now();document.body.appendChild(s)})();
 ```
 
 ## Downloads and caching
