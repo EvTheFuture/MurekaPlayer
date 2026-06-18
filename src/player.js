@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.2";
+    const VERSION = "1.2.4";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -85,13 +85,13 @@
     // Cache API bucket name where downloaded mp3 files are stored for replay
     const AUDIO_CACHE = "mureka_audio_cache_v1";
 
-    // How many upcoming songs to cache ahead, so playback never waits on the net
-    const PREFETCH_COUNT = 3;
+    // Default number of upcoming songs to cache ahead, now also a user setting
+    const PREFETCH_DEFAULT = 3;
 
     // Album art coverflow, the center cover takes this fraction of the width and
     // the previous and next covers peek in on the sides. Lower shows more of the
     // neighbors, 0.5 shows exactly half of each
-    const ART_CENTER_FRACTION = 0.6;
+    const ART_CENTER_FRACTION = 0.5;
 
     // Strongest blur on a side cover at its furthest from center, in pixels
     const ART_SIDE_BLUR = 3;
@@ -105,9 +105,6 @@
 
     // localStorage key that remembers the panel position
     const POS_KEY = "mureka_player_pos";
-
-    // localStorage key that remembers the repeat mode
-    const REPEAT_KEY = "mureka_player_repeat";
 
     // localStorage key that remembers the user settings object
     const SETTINGS_KEY = "mureka_player_settings";
@@ -154,10 +151,12 @@
     let queuePos = -1;
 
     // When true the queue is built and rebuilt in random order
-    let shuffleMode = false;
+    // Starts from the default play mode chosen in settings
+    let shuffleMode = settings.shuffle;
 
-    // Repeat mode, one of all, one or none, defaults to all
-    let repeatMode = "all";
+    // Repeat mode, one of all, one or none
+    // Starts from the default repeat chosen in settings
+    let repeatMode = settings.repeat;
 
     // Saved playback state so Stop can be resumed by Play
     let resumeState = null;
@@ -284,11 +283,16 @@
 
     // Read the settings from localStorage, falling back to safe defaults
     // Published is the default start feed, refresh on open is off for both feeds
+    // Autoplay is off, the default play mode is not shuffled, repeat is all
     function loadSettings() {
 
         const defaults = {
             startFeed: "published",
-            refreshOnStart: { published: false, all: false }
+            refreshOnStart: { published: false, all: false },
+            autoPlay: false,
+            shuffle: false,
+            repeat: "all",
+            prefetchCount: PREFETCH_DEFAULT
         };
 
         try {
@@ -298,13 +302,30 @@
 
                 const parsed = JSON.parse(raw);
                 const ros = parsed.refreshOnStart || {};
+                const repeat = (parsed.repeat === "one" || parsed.repeat === "none")
+                    ? parsed.repeat
+                    : "all";
+
+                let prefetchCount = parseInt(parsed.prefetchCount, 10);
+
+                if (!isFinite(prefetchCount) || prefetchCount < 0) {
+                    prefetchCount = PREFETCH_DEFAULT;
+                }
+
+                if (prefetchCount > 50) {
+                    prefetchCount = 50;
+                }
 
                 return {
                     startFeed: parsed.startFeed === "all" ? "all" : "published",
                     refreshOnStart: {
                         published: ros.published === true,
                         all: ros.all === true
-                    }
+                    },
+                    autoPlay: parsed.autoPlay === true,
+                    shuffle: parsed.shuffle === true,
+                    repeat: repeat,
+                    prefetchCount: prefetchCount
                 };
             }
         } catch (e) {
@@ -327,6 +348,14 @@
 
         if (settings.refreshOnStart[feedMode]) {
             run();
+        }
+    }
+
+    // Start playback on open when the user has asked for it and songs exist
+    function maybeAutoPlay() {
+
+        if (settings.autoPlay && cache.songs.length > 0) {
+            startPlay();
         }
     }
 
@@ -1296,6 +1325,32 @@
         playCurrent();
     }
 
+    // Insert a song to play right after the current one
+    // With nothing playing yet, just start from that song
+    function addNext(song) {
+
+        if (queuePos < 0 || queuePos >= queue.length) {
+            playFrom(song.song_id);
+            return;
+        }
+
+        // Drop any later copy so the song does not also play again further on
+        for (let i = queue.length - 1; i > queuePos; i -= 1) {
+
+            if (queue[i].song_id === song.song_id) {
+                queue.splice(i, 1);
+            }
+        }
+
+        queue.splice(queuePos + 1, 0, song);
+        renderList();
+
+        // Make sure the new next song is cached ready to play
+        prefetchNext();
+
+        setStatus("Playing next: " + (song.title || "Untitled"));
+    }
+
     // Advance to the next song in the queue
     // Called when a song finishes on its own, repeat one replays the same song
     function handleSongEnded() {
@@ -1419,7 +1474,8 @@
         return "Shuffle " + (shuffleMode ? "on" : "off") + ", repeat " + repeatLabel();
     }
 
-    // Cycle repeat through all, one and none, remembering the choice
+    // Cycle repeat through all, one and none for this session
+    // The startup value comes from the default repeat in settings
     function cycleRepeat() {
 
         if (repeatMode === "all") {
@@ -1431,12 +1487,6 @@
         }
 
         updateRepeatButton();
-
-        try {
-            localStorage.setItem(REPEAT_KEY, repeatMode);
-        } catch (e) {
-        }
-
         setStatus(modeStatusText());
     }
 
@@ -1579,7 +1629,7 @@
     // Cache the next songs in the queue so playback does not wait on the network
     async function prefetchNext() {
 
-        for (let i = 1; i <= PREFETCH_COUNT; i += 1) {
+        for (let i = 1; i <= settings.prefetchCount; i += 1) {
 
             const pos = queuePos + i;
 
@@ -2252,6 +2302,11 @@
         const playerEl = document.createElement("div");
         playerEl.style.marginBottom = "8px";
 
+        // A box that holds the masked strip, plus optional side nav buttons that
+        // must sit outside the mask so they are not faded at the edges
+        const artBox = document.createElement("div");
+        artBox.style.cssText = "position:relative";
+
         // The album art is a coverflow strip, the center cover with side covers
         // that peek in and fade and blur toward the edges
         artWrapEl = document.createElement("div");
@@ -2299,6 +2354,59 @@
                 positionArt(0);
             }
         });
+
+        artBox.appendChild(artWrapEl);
+
+        // On a mouse device the swipe gesture is unavailable, so add subtle
+        // chevron buttons over the peeking side covers to move between tracks
+        const desktopPointer = !!(window.matchMedia
+            && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
+
+        if (desktopPointer) {
+
+            const makeArtNav = function (side, glyph, title, handler) {
+
+                const btn = document.createElement("button");
+
+                btn.textContent = glyph;
+                btn.title = title;
+                btn.style.cssText = [
+                    "position:absolute",
+                    "top:0",
+                    side + ":0",
+                    "height:100%",
+                    "width:22%",
+                    "border:none",
+                    "background:transparent",
+                    "color:#fff",
+                    "opacity:0.4",
+                    "display:flex",
+                    "align-items:center",
+                    "justify-content:center",
+                    "font-size:26px",
+                    "line-height:1",
+                    "cursor:pointer",
+                    "z-index:3",
+                    "text-shadow:0 1px 4px rgba(0,0,0,0.85)",
+                    "transition:opacity 0.15s"
+                ].join(";");
+
+                btn.addEventListener("mouseenter", function () {
+                    btn.style.opacity = "0.9";
+                });
+
+                btn.addEventListener("mouseleave", function () {
+                    btn.style.opacity = "0.4";
+                });
+
+                btn.addEventListener("click", handler);
+
+                return btn;
+            };
+
+            artBox.appendChild(makeArtNav("left", "\u2039", "Previous", playPrev));
+            artBox.appendChild(makeArtNav("right", "\u203A", "Next", playNext));
+        }
 
         playerTitle = document.createElement("div");
         playerTitle.textContent = "Nothing playing";
@@ -2369,7 +2477,7 @@
         controlRow.appendChild(shuffleBtn);
         controlRow.appendChild(repeatBtn);
 
-        playerEl.appendChild(artWrapEl);
+        playerEl.appendChild(artBox);
         playerEl.appendChild(playerTitle);
         playerEl.appendChild(seekRow);
         playerEl.appendChild(controlRow);
@@ -2403,6 +2511,7 @@
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:10px !important;box-sizing:border-box !important;font-size:12px !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
+            + "#mureka-player-list > div{font-size:15px !important;padding:9px 2px !important}"
             + "}";
         document.head.appendChild(placeholderStyle);
 
@@ -2415,6 +2524,25 @@
         // Keep typing from triggering any of the site own keyboard shortcuts
         searchInput.addEventListener("keydown", function (ev) {
             ev.stopPropagation();
+        });
+
+        // On a phone the keyboard covers the lower panel, so while the search
+        // field has focus hide the tall player block to lift the field and the
+        // list up where they stay visible
+        searchInput.addEventListener("focus", function () {
+
+            if (window.innerWidth <= 640) {
+                playerEl.style.display = "none";
+            }
+        });
+
+        searchInput.addEventListener("blur", function () {
+
+            playerEl.style.display = "block";
+
+            if (!swipeActive) {
+                positionArt(0);
+            }
         });
 
         // Search box on its own row
@@ -2471,16 +2599,7 @@
         updateShuffleButton();
         updateViewButtons();
 
-        // Restore the saved repeat mode, defaulting to all
-        try {
-            const savedRepeat = localStorage.getItem(REPEAT_KEY);
-
-            if (savedRepeat === "all" || savedRepeat === "one" || savedRepeat === "none") {
-                repeatMode = savedRepeat;
-            }
-        } catch (e) {
-        }
-
+        // Shuffle and repeat already start from the settings defaults
         updateRepeatButton();
 
         // Place the panel where it was left, or default to the bottom right
@@ -2508,6 +2627,9 @@
 
         // Refresh the start feed on launch when the user asked for it
         maybeAutoRefresh();
+
+        // Start playing on launch when the user asked for it
+        maybeAutoPlay();
     }
 
     // Keep a position inside the visible viewport, with a small margin
@@ -2896,8 +3018,8 @@
         const title = (song.title || "").trim() || "Untitled";
 
         const item = document.createElement("div");
-        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;user-select:none;-moz-user-select:none";
-        item.title = "Click to play, right-click for options";
+        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;user-select:none;-moz-user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
+        item.title = "Play; long press or right-click for options";
 
         if (dimmed) {
             item.style.opacity = "0.45";
@@ -2947,7 +3069,28 @@
             item.appendChild(badge);
         }
 
-        item.addEventListener("click", function () {
+        // Long press on touch opens the same menu as right-click on desktop
+        let pressTimer = null;
+        let longPressed = false;
+
+        const cancelPress = function () {
+
+            if (pressTimer) {
+                clearTimeout(pressTimer);
+                pressTimer = null;
+            }
+        };
+
+        item.addEventListener("click", function (ev) {
+
+            // A long press already opened the menu, so do not also play
+            if (longPressed) {
+                longPressed = false;
+                ev.preventDefault();
+                ev.stopPropagation();
+                return;
+            }
+
             playFrom(song.song_id);
         });
 
@@ -2955,6 +3098,29 @@
             ev.preventDefault();
             showContextMenu(ev.clientX, ev.clientY, song);
         });
+
+        item.addEventListener("touchstart", function (ev) {
+
+            if (ev.touches.length !== 1) {
+                return;
+            }
+
+            longPressed = false;
+
+            const x = ev.touches[0].clientX;
+            const y = ev.touches[0].clientY;
+
+            cancelPress();
+
+            pressTimer = setTimeout(function () {
+                longPressed = true;
+                showContextMenu(x, y, song);
+            }, 500);
+        }, { passive: true });
+
+        item.addEventListener("touchmove", cancelPress, { passive: true });
+        item.addEventListener("touchend", cancelPress);
+        item.addEventListener("touchcancel", cancelPress);
 
         return item;
     }
@@ -3064,8 +3230,8 @@
         btn.style.color = on ? "#000" : "#fff";
     }
 
-    // Build a labeled On / Off row bound to a refresh on start flag
-    function makeRefreshRow(label, key) {
+    // Build a labeled On / Off row backed by a getter and a setter
+    function makeBoolRow(label, get, set) {
 
         const row = document.createElement("div");
         row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
@@ -3074,19 +3240,108 @@
         name.textContent = label;
 
         const btn = makeButton("Off", "#333", "#fff", function () {
-            settings.refreshOnStart[key] = !settings.refreshOnStart[key];
+            const next = !get();
+
+            set(next);
             saveSettings();
-            updateToggleButton(btn, settings.refreshOnStart[key]);
+            updateToggleButton(btn, next);
         });
 
         btn.style.flex = "0 0 auto";
         btn.style.minWidth = "56px";
         btn.style.padding = "6px 12px";
 
-        updateToggleButton(btn, settings.refreshOnStart[key]);
+        updateToggleButton(btn, get());
 
         row.appendChild(name);
         row.appendChild(btn);
+
+        return row;
+    }
+
+    // Build a row of mutually exclusive choice buttons backed by getter / setter
+    function makeChoiceRow(choices, get, set) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:6px";
+
+        const buttons = [];
+
+        const highlight = function () {
+
+            const current = get();
+
+            buttons.forEach(function (entry) {
+
+                const on = entry.value === current;
+
+                entry.btn.style.background = on ? "#48e1eb" : "#333";
+                entry.btn.style.color = on ? "#000" : "#fff";
+            });
+        };
+
+        choices.forEach(function (choice) {
+
+            const btn = makeButton(choice.label, "#333", "#fff", function () {
+                set(choice.value);
+                saveSettings();
+                highlight();
+            });
+
+            buttons.push({ btn: btn, value: choice.value });
+            row.appendChild(btn);
+        });
+
+        highlight();
+
+        return row;
+    }
+
+    // Build a labeled minus / value / plus stepper backed by getter / setter
+    function makeStepperRow(label, get, set, min, max) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const name = document.createElement("span");
+        name.textContent = label;
+
+        const controls = document.createElement("div");
+        controls.style.cssText = "display:flex;align-items:center;gap:8px;flex:0 0 auto";
+
+        const value = document.createElement("span");
+        value.style.cssText = "min-width:24px;text-align:center;font-variant-numeric:tabular-nums";
+
+        const render = function () {
+            value.textContent = String(get());
+        };
+
+        const minus = makeButton("-", "#333", "#fff", function () {
+            set(Math.max(min, get() - 1));
+            saveSettings();
+            render();
+        });
+
+        const plus = makeButton("+", "#333", "#fff", function () {
+            set(Math.min(max, get() + 1));
+            saveSettings();
+            render();
+        });
+
+        [minus, plus].forEach(function (b) {
+            b.style.flex = "0 0 auto";
+            b.style.minWidth = "40px";
+            b.style.padding = "6px 0";
+        });
+
+        render();
+
+        controls.appendChild(minus);
+        controls.appendChild(value);
+        controls.appendChild(plus);
+
+        row.appendChild(name);
+        row.appendChild(controls);
 
         return row;
     }
@@ -3151,8 +3406,44 @@
         refreshLabel.textContent = "Refresh on open";
         refreshLabel.style.cssText = "color:#bbb";
 
-        const pubRow = makeRefreshRow("Published", "published");
-        const allRow = makeRefreshRow("All", "all");
+        const pubRow = makeBoolRow("Published",
+            function () { return settings.refreshOnStart.published; },
+            function (v) { settings.refreshOnStart.published = v; });
+
+        const allRow = makeBoolRow("All",
+            function () { return settings.refreshOnStart.all; },
+            function (v) { settings.refreshOnStart.all = v; });
+
+        // Playback section, autoplay plus the default play mode and repeat
+        const playbackLabel = document.createElement("div");
+        playbackLabel.textContent = "Playback";
+        playbackLabel.style.cssText = "color:#bbb";
+
+        const autoplayRow = makeBoolRow("Autoplay on start",
+            function () { return settings.autoPlay; },
+            function (v) { settings.autoPlay = v; });
+
+        const shuffleRow = makeBoolRow("Shuffle",
+            function () { return settings.shuffle; },
+            function (v) { settings.shuffle = v; });
+
+        const repeatLabel = document.createElement("div");
+        repeatLabel.textContent = "Repeat";
+        repeatLabel.style.cssText = "color:#bbb";
+
+        const repeatRow = makeChoiceRow(
+            [
+                { label: "All", value: "all" },
+                { label: "One", value: "one" },
+                { label: "Off", value: "none" }
+            ],
+            function () { return settings.repeat; },
+            function (v) { settings.repeat = v; });
+
+        const cacheRow = makeStepperRow("Cache ahead",
+            function () { return settings.prefetchCount; },
+            function (v) { settings.prefetchCount = v; },
+            0, 50);
 
         settingsEl.appendChild(head);
         settingsEl.appendChild(startLabel);
@@ -3160,6 +3451,12 @@
         settingsEl.appendChild(refreshLabel);
         settingsEl.appendChild(pubRow);
         settingsEl.appendChild(allRow);
+        settingsEl.appendChild(playbackLabel);
+        settingsEl.appendChild(autoplayRow);
+        settingsEl.appendChild(shuffleRow);
+        settingsEl.appendChild(repeatLabel);
+        settingsEl.appendChild(repeatRow);
+        settingsEl.appendChild(cacheRow);
 
         panelEl.appendChild(settingsEl);
 
@@ -3259,6 +3556,10 @@
 
         addMenuRow("Play", "#fff", function () {
             playFrom(song.song_id);
+        });
+
+        addMenuRow("Play next", "#fff", function () {
+            addNext(song);
         });
 
         addMenuRow("Refresh", "#fff", function () {
