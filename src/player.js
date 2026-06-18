@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.5";
+    const VERSION = "1.2.7";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1494,6 +1494,12 @@
         }
 
         updateRepeatButton();
+
+        // Update the playing row badge and the side cover greying for the new mode
+        renderList();
+        setArtTransition("none");
+        positionArt(0);
+
         setStatus(modeStatusText());
     }
 
@@ -1892,6 +1898,10 @@
 
         const base = (w - cover) / 2;
 
+        // In repeat one the sides are not where playback heads next, so grey
+        // and fade them as a hint that the current song keeps repeating
+        const repeatingOne = repeatMode === "one";
+
         for (let i = 0; i < artTiles.length; i += 1) {
 
             const rel = i - ART_SIDE_TILES;
@@ -1905,7 +1915,19 @@
             const factor = Math.min(1, dist / cover);
             const blur = factor * ART_SIDE_BLUR;
 
-            artTiles[i].style.filter = blur > 0.05 ? "blur(" + blur.toFixed(2) + "px)" : "none";
+            const isSide = rel !== 0;
+            const filters = [];
+
+            if (blur > 0.05) {
+                filters.push("blur(" + blur.toFixed(2) + "px)");
+            }
+
+            if (repeatingOne && isSide) {
+                filters.push("grayscale(1)");
+            }
+
+            artTiles[i].style.filter = filters.length ? filters.join(" ") : "none";
+            artTiles[i].style.opacity = (repeatingOne && isSide) ? "0.3" : "1";
         }
     }
 
@@ -3076,6 +3098,16 @@
             item.appendChild(badge);
         }
 
+        // Show on the playing row when it is set to repeat just this song
+        if (isPlaying && repeatMode === "one") {
+
+            const rep = document.createElement("span");
+            rep.textContent = "\u21BB 1";
+            rep.title = "Repeat one";
+            rep.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;background:#48e1eb;color:#000;font-size:11px;line-height:16px;font-weight:600";
+            item.appendChild(rep);
+        }
+
         // Long press on touch opens the same menu as right-click on desktop
         let pressTimer = null;
         let longPressed = false;
@@ -3156,12 +3188,24 @@
         const query = searchQuery;
         let shown = 0;
 
-        // In the queue view, songs before the current position are already played
-        const playedIds = (listView === "queue" && queuePos > 0)
-            ? new Set(queue.slice(0, queuePos).map(function (s) {
-                return s.song_id;
-            }))
-            : null;
+        // In the queue view dim the rows that will not play next. That is the
+        // already played songs before the current one, and in repeat one also
+        // the upcoming songs, since playback stays on the current track
+        let dimmedIds = null;
+
+        if (listView === "queue") {
+
+            dimmedIds = new Set();
+
+            queue.forEach(function (s, i) {
+
+                if (i < queuePos) {
+                    dimmedIds.add(s.song_id);
+                } else if (i > queuePos && repeatMode === "one") {
+                    dimmedIds.add(s.song_id);
+                }
+            });
+        }
 
         songs.forEach(function (song) {
 
@@ -3175,7 +3219,7 @@
             shown += 1;
 
             const isPlaying = song.song_id === playingId;
-            const dimmed = playedIds ? playedIds.has(song.song_id) : false;
+            const dimmed = dimmedIds ? dimmedIds.has(song.song_id) : false;
             const item = buildSongRow(song, numberById.get(song.song_id), isPlaying, dimmed);
 
             if (isPlaying) {
