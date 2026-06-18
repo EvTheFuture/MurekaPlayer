@@ -36,7 +36,7 @@
     // Inject the shared player, served from this repo through jsDelivr
     const script = document.createElement("script");
 
-    script.src = "https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@main/src/player.js";
+    script.src = "https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js";
 
     document.body.appendChild(script);
 })();

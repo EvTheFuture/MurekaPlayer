@@ -64,7 +64,7 @@ On desktop you can drag the bookmarklet to your bookmarks toolbar and click it
 while on mureka.ai.
 
 ```
-javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@main/src/player.js";document.body.appendChild(s)})();
+javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@master/src/player.js";document.body.appendChild(s)})();
 ```
 
 ## Downloads and caching
