@@ -84,6 +84,18 @@
     // How many upcoming songs to cache ahead, so playback never waits on the net
     const PREFETCH_COUNT = 3;
 
+    // Album art coverflow, the center cover takes this fraction of the width and
+    // the previous and next covers peek in on the sides. Lower shows more of the
+    // neighbors, 0.5 shows exactly half of each
+    const ART_CENTER_FRACTION = 0.6;
+
+    // Strongest blur on a side cover at its furthest from center, in pixels
+    const ART_SIDE_BLUR = 3;
+
+    // How many covers to keep ready on each side, two lets a swipe pull the next
+    // one in from beyond the edge
+    const ART_SIDE_TILES = 2;
+
     // localStorage key that remembers whether the panel is minimized
     const MINIMIZED_KEY = "mureka_player_minimized";
 
@@ -182,6 +194,7 @@
     let contextMenuEl = null;
 
     // Player UI element references
+    let artWrapEl = null;
     let playerArt = null;
     let playerTitle = null;
     let seekBar = null;
@@ -193,6 +206,15 @@
 
     // True while the user is dragging the seek bar, so timeupdate does not fight it
     let isSeeking = false;
+
+    // Album art coverflow and swipe state
+    // artTiles is the row of cover images, the middle one is the current song
+    let artTiles = [];
+    let swipeActive = false;
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    let swipeDir = 0;
+    let currentSwipeOffset = 0;
 
     // Small promise based delay helper
     function sleep(ms) {
@@ -1673,7 +1695,198 @@
         }
     }
 
-    // Update the album art and title shown in the player
+    // The song one step from the current one, honoring the repeat all wrap
+    function neighborSong(step) {
+
+        if (queue.length === 0) {
+            return null;
+        }
+
+        const pos = queuePos + step;
+
+        if (pos < 0) {
+            return repeatMode === "all" ? queue[queue.length - 1] : null;
+        }
+
+        if (pos >= queue.length) {
+            return repeatMode === "all" ? queue[0] : null;
+        }
+
+        return queue[pos];
+    }
+
+    // Set the same CSS transition on every cover tile
+    function setArtTransition(value) {
+
+        artTiles.forEach(function (img) {
+            img.style.transition = value;
+        });
+    }
+
+    // Point each cover tile at the song that many steps from the current one
+    function setArtSources() {
+
+        for (let i = 0; i < artTiles.length; i += 1) {
+
+            const rel = i - ART_SIDE_TILES;
+            const song = (rel === 0) ? currentSong : neighborSong(rel);
+            const cover = song ? coverUrl(song) : "";
+
+            if (cover) {
+                artTiles[i].src = cover;
+                artTiles[i].style.visibility = "visible";
+            } else {
+                artTiles[i].removeAttribute("src");
+                artTiles[i].style.visibility = "hidden";
+            }
+        }
+    }
+
+    // Lay out the tiles for a drag offset, blurring each by its distance from center
+    function positionArt(drag) {
+
+        if (!artWrapEl) {
+            return;
+        }
+
+        const w = artWrapEl.clientWidth;
+        const cover = artWrapEl.clientHeight;
+
+        if (cover === 0) {
+            return;
+        }
+
+        const base = (w - cover) / 2;
+
+        for (let i = 0; i < artTiles.length; i += 1) {
+
+            const rel = i - ART_SIDE_TILES;
+            const x = base + rel * cover + drag;
+
+            artTiles[i].style.transform = "translateX(" + x + "px)";
+
+            // Blur grows with how far the tile center sits from the wrapper center
+            const tileCenter = x + cover / 2;
+            const dist = Math.abs(tileCenter - w / 2);
+            const factor = Math.min(1, dist / cover);
+            const blur = factor * ART_SIDE_BLUR;
+
+            artTiles[i].style.filter = blur > 0.05 ? "blur(" + blur.toFixed(2) + "px)" : "none";
+        }
+    }
+
+    // The distance one swipe travels to change song, equal to a cover width
+    function artStep() {
+
+        return artWrapEl ? artWrapEl.clientHeight : 0;
+    }
+
+    // After the glide settles, run the song change, which re-seats the strip
+    function finishArtSwipe(action) {
+
+        setTimeout(function () {
+
+            setArtTransition("none");
+            currentSwipeOffset = 0;
+
+            // The song only changes now, on release, never during the drag
+            if (action) {
+                action();
+            } else {
+                positionArt(0);
+            }
+        }, 220);
+    }
+
+    // Begin tracking a swipe on the cover
+    function onArtTouchStart(ev) {
+
+        if (!currentSong || ev.touches.length !== 1) {
+            return;
+        }
+
+        const t = ev.touches[0];
+
+        swipeActive = true;
+        swipeDir = 0;
+        swipeStartX = t.clientX;
+        swipeStartY = t.clientY;
+
+        setArtTransition("none");
+    }
+
+    // Glide the whole strip with the finger once a horizontal swipe is locked in
+    function onArtTouchMove(ev) {
+
+        if (!swipeActive) {
+            return;
+        }
+
+        const t = ev.touches[0];
+        const dx = t.clientX - swipeStartX;
+        const dy = t.clientY - swipeStartY;
+
+        // Lock the gesture direction on the first real movement
+        if (swipeDir === 0) {
+
+            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) {
+                return;
+            }
+
+            swipeDir = Math.abs(dx) > Math.abs(dy) ? 1 : 2;
+        }
+
+        // A vertical gesture is a scroll, leave it to the page
+        if (swipeDir !== 1) {
+            return;
+        }
+
+        // Keep the page from scrolling or going back during the swipe
+        ev.preventDefault();
+
+        currentSwipeOffset = dx;
+        positionArt(dx);
+    }
+
+    // On release, advance to the neighbor if dragged far enough, else snap back
+    function onArtTouchEnd() {
+
+        if (!swipeActive) {
+            return;
+        }
+
+        swipeActive = false;
+
+        if (swipeDir !== 1) {
+            return;
+        }
+
+        const moved = currentSwipeOffset;
+        const step = artStep();
+        const threshold = Math.max(40, step * 0.3);
+
+        setArtTransition("transform 0.2s ease, filter 0.2s ease");
+
+        if (moved <= -threshold && neighborSong(1)) {
+
+            // Glide fully to the next cover, then play it on landing
+            positionArt(-step);
+            finishArtSwipe(playNext);
+
+        } else if (moved >= threshold && neighborSong(-1)) {
+
+            positionArt(step);
+            finishArtSwipe(playPrev);
+
+        } else {
+
+            // Not far enough, snap back with no change
+            positionArt(0);
+            currentSwipeOffset = 0;
+        }
+    }
+
+    // Update the title and the cover strip for the current song
     function updatePlayerInfo(song) {
 
         updateMediaMetadata(song);
@@ -1686,9 +1899,8 @@
 
             playerTitle.textContent = "Nothing playing";
 
-            if (playerArt) {
-                playerArt.style.display = "none";
-                playerArt.removeAttribute("src");
+            if (artWrapEl) {
+                artWrapEl.style.display = "none";
             }
 
             updateSeekDisplay();
@@ -1698,18 +1910,15 @@
 
         playerTitle.textContent = song.title || "Untitled";
 
-        const cover = coverUrl(song);
-
-        if (playerArt) {
-
-            if (cover) {
-                playerArt.src = cover;
-                playerArt.style.display = "block";
-            } else {
-                playerArt.style.display = "none";
-                playerArt.removeAttribute("src");
-            }
+        if (artWrapEl) {
+            artWrapEl.style.display = coverUrl(song) ? "block" : "none";
         }
+
+        // Refill the strip around the new current song and reset its position
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        currentSwipeOffset = 0;
 
         updatePlayPause();
     }
@@ -1938,9 +2147,53 @@
         const playerEl = document.createElement("div");
         playerEl.style.marginBottom = "8px";
 
-        playerArt = document.createElement("img");
+        // The album art is a coverflow strip, the center cover with side covers
+        // that peek in and fade and blur toward the edges
+        artWrapEl = document.createElement("div");
+        artWrapEl.id = "mureka-player-art-wrap";
+        artWrapEl.style.cssText = "position:relative;width:100%;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#000;display:none;touch-action:pan-y";
+
+        // A short, wide window, the center cover is a square of this height
+        artWrapEl.style.aspectRatio = String(1 / ART_CENTER_FRACTION);
+
+        // Fade the sides out toward the edges, clear where they meet the center
+        const seamLeft = (1 - ART_CENTER_FRACTION) / 2 * 100;
+        const seamRight = 100 - seamLeft;
+        const artMask = "linear-gradient(to right, transparent 0%, #000 "
+            + seamLeft.toFixed(1) + "%, #000 " + seamRight.toFixed(1) + "%, transparent 100%)";
+
+        artWrapEl.style.webkitMaskImage = artMask;
+        artWrapEl.style.maskImage = artMask;
+
+        // Build the row of cover tiles, the middle one is the current song
+        artTiles = [];
+
+        for (let i = 0; i < ART_SIDE_TILES * 2 + 1; i += 1) {
+
+            const tile = document.createElement("img");
+
+            tile.style.cssText = "position:absolute;top:0;left:0;height:100%;aspect-ratio:1/1;object-fit:cover;will-change:transform,filter";
+            artWrapEl.appendChild(tile);
+            artTiles.push(tile);
+        }
+
+        // Keep a handle on the center tile
+        playerArt = artTiles[ART_SIDE_TILES];
         playerArt.id = "mureka-player-art";
-        playerArt.style.cssText = "width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;margin-bottom:8px;display:none;background:#000";
+
+        // Swipe the covers left or right to move to the next or previous song
+        artWrapEl.addEventListener("touchstart", onArtTouchStart, { passive: true });
+        artWrapEl.addEventListener("touchmove", onArtTouchMove, { passive: false });
+        artWrapEl.addEventListener("touchend", onArtTouchEnd);
+        artWrapEl.addEventListener("touchcancel", onArtTouchEnd);
+
+        // Re-seat the strip when the viewport changes, for example on rotation
+        window.addEventListener("resize", function () {
+
+            if (!swipeActive) {
+                positionArt(0);
+            }
+        });
 
         playerTitle = document.createElement("div");
         playerTitle.textContent = "Nothing playing";
@@ -2011,7 +2264,7 @@
         controlRow.appendChild(shuffleBtn);
         controlRow.appendChild(repeatBtn);
 
-        playerEl.appendChild(playerArt);
+        playerEl.appendChild(artWrapEl);
         playerEl.appendChild(playerTitle);
         playerEl.appendChild(seekRow);
         playerEl.appendChild(controlRow);
@@ -2045,7 +2298,6 @@
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:10px !important;box-sizing:border-box !important;font-size:12px !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
-            + "#mureka-player-art{height:30vh !important;aspect-ratio:auto !important}"
             + "}";
         document.head.appendChild(placeholderStyle);
 
