@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.4";
+    const VERSION = "1.2.5";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1137,6 +1137,13 @@
         }
 
         audio = new Audio();
+
+        // Attach the element to the page. Firefox only exposes a media element
+        // to the OS media controls and MPRIS, where playerctl can see it, when
+        // it is connected to the document. A detached element is not registered
+        audio.id = "mureka-player-audio";
+        audio.preload = "auto";
+        (document.body || document.documentElement).appendChild(audio);
 
         audio.addEventListener("ended", function () {
             handleSongEnded();
