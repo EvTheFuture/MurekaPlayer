@@ -1,6 +1,6 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * The player, injected into the mureka.ai page
+ * Standalone bookmarklet player, runs inside the mureka.ai page
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -21,6 +21,19 @@
 
 (function () {
     "use strict";
+
+    // Guard against the bookmarklet being tapped twice
+    // If the player is already on the page, toggle it instead of building another
+    if (window.__murekaPlayerLoaded) {
+
+        if (typeof window.__murekaPlayerToggle === "function") {
+            window.__murekaPlayerToggle();
+        }
+
+        return;
+    }
+
+    window.__murekaPlayerLoaded = true;
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -734,11 +747,27 @@
         }
     }
 
-    // Get the mp3 blob for a song, using the cache and storing it if missing
-    // Ask the extension to save these files into the Mureka download folder
-    // The content script relays this to the background downloads API, which
-    // writes to a subfolder with no Save As dialog
+    // The player runs either inside the extension or as a web bookmarklet
+    // The extension content script tags the document, so the player knows to use
+    // the folder download relay, otherwise it falls back to a browser download
+    function isExtensionHost() {
+
+        return document.documentElement.getAttribute("data-mureka-host") === "extension";
+    }
+
+    // Pick the download path for the current host
     function requestDownload(items) {
+
+        if (isExtensionHost()) {
+            downloadViaExtension(items);
+        } else {
+            downloadViaBrowser(items);
+        }
+    }
+
+    // Extension path, relay to the content script, which saves into the Mureka
+    // folder through the background downloads API with no Save As dialog
+    function downloadViaExtension(items) {
 
         window.postMessage({
             source: "mureka-player-page",
@@ -765,6 +794,50 @@
                 + (data.fail ? ", " + data.fail + " failed" : ""));
         }
     });
+
+    // Web path, save through a normal browser download, best effort
+    // A plain page cannot choose a folder, and a cross origin download needs the
+    // audio host to allow CORS. When it does, the blob is fetched and saved with
+    // a real file name, otherwise the file is counted as failed
+    async function downloadViaBrowser(items) {
+
+        let ok = 0;
+        let fail = 0;
+
+        for (const item of items) {
+
+            try {
+                const res = await fetch(item.url);
+
+                if (!res.ok) {
+                    throw new Error("HTTP " + res.status);
+                }
+
+                const blob = await res.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+
+                // Drop the Mureka/ prefix, a page download cannot set a folder
+                a.href = objectUrl;
+                a.download = item.filename.replace(/^Mureka\//, "");
+
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(objectUrl);
+
+                ok += 1;
+            } catch (e) {
+                fail += 1;
+            }
+
+            // A short gap keeps the browser from dropping a big batch
+            await sleep(200);
+        }
+
+        setStatus("Saved " + ok
+            + (fail ? ", " + fail + " failed, the audio host blocked the download" : ""));
+    }
 
     // Build a safe file name for a downloaded song
     function fileName(song) {
@@ -1797,6 +1870,7 @@
 
         const panel = document.createElement("div");
         panelEl = panel;
+        panel.id = "mureka-player-panel";
 
         panel.style.cssText = [
             "position:fixed",
@@ -1834,6 +1908,7 @@
 
         // Everything below the header lives in the body, which can collapse
         bodyEl = document.createElement("div");
+        bodyEl.id = "mureka-player-body";
 
         statusEl = document.createElement("div");
         statusEl.style.marginBottom = "8px";
@@ -1864,6 +1939,7 @@
         playerEl.style.marginBottom = "8px";
 
         playerArt = document.createElement("img");
+        playerArt.id = "mureka-player-art";
         playerArt.style.cssText = "width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;margin-bottom:8px;display:none;background:#000";
 
         playerTitle = document.createElement("div");
@@ -1962,7 +2038,15 @@
         placeholderStyle.textContent =
             "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
-            + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}";
+            + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
+            // On a phone, fill the screen, shrink the art a touch and let the
+            // list grow into the remaining height instead of a fixed box
+            + "@media (max-width:640px){"
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:10px !important;box-sizing:border-box !important;font-size:12px !important}"
+            + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
+            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
+            + "#mureka-player-art{height:30vh !important;aspect-ratio:auto !important}"
+            + "}";
         document.head.appendChild(placeholderStyle);
 
         // Filter the list as the user types
@@ -2005,6 +2089,7 @@
         viewRow.appendChild(viewButtons.alpha);
 
         listEl = document.createElement("div");
+        listEl.id = "mureka-player-list";
         listEl.style.cssText = "position:relative;height:240px;box-sizing:border-box;overflow:auto;border-top:1px solid #333;padding-top:6px;margin-top:6px";
 
         bodyEl.appendChild(statusEl);
@@ -2658,7 +2743,10 @@
         contextMenuEl.style.top = Math.max(8, top) + "px";
     }
 
-    // Wait for the document body before injecting the panel
+    // Expose a toggle so a second bookmarklet tap minimizes or restores the panel
+    window.__murekaPlayerToggle = toggleMinimize;
+
+    // The bookmarklet runs after load, so build now, otherwise wait for the body
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", buildPanel);
     } else {

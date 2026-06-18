@@ -1,6 +1,6 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * Content script, injects the player and relays downloads
+ * Content script, marks the host, injects the shared player and relays downloads
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -21,17 +21,21 @@
 
 // Mureka Player content script
 // Runs in the isolated extension world on mureka.ai pages
-// It injects the player into the page context so the player has full page
-// privileges, and relays the player download requests to the background
-// script, which performs folder downloads through the downloads API
+// It tags the document so the shared player uses the folder download relay,
+// injects the player into the page context for full page privileges, and relays
+// the player download requests to the background script
 
 (function () {
     "use strict";
 
-    // Inject the player so it runs in the page context with full page privileges
+    // Tag the document so the shared player knows it runs inside the extension
+    // and should use the folder download relay instead of a browser download
+    document.documentElement.setAttribute("data-mureka-host", "extension");
+
+    // Inject the shared player so it runs in the page context with full privileges
     const script = document.createElement("script");
 
-    script.src = browser.runtime.getURL("src/page.js");
+    script.src = browser.runtime.getURL("src/player.js");
 
     script.addEventListener("load", function () {
         script.remove();
