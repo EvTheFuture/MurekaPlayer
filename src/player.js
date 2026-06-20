@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.7";
+    const VERSION = "1.2.8";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -109,6 +109,10 @@
     // localStorage key that remembers the user settings object
     const SETTINGS_KEY = "mureka_player_settings";
 
+    // localStorage key that enables developer only features like Copy JSON
+    // Toggle from the console with localStorage.setItem("mureka_player_debug", "1")
+    const DEBUG_KEY = "mureka_player_debug";
+
     // User settings, loaded once on startup, published is the default start feed
     let settings = loadSettings();
 
@@ -120,6 +124,10 @@
 
     // True while a load run is in progress
     let running = false;
+
+    // Identifies the active load run, bumped to cancel a run and to stop a load
+    // that started on one feed from writing into another after a feed switch
+    let loadToken = 0;
 
     // True while a cache-all run is in progress
     let cacheRunning = false;
@@ -166,6 +174,7 @@
 
     // UI element references
     let statusEl = null;
+    let countsEl = null;
     let listEl = null;
     let loadButton = null;
     let feedButton = null;
@@ -186,6 +195,9 @@
 
     // The view buttons, keyed by view name
     let viewButtons = {};
+
+    // The vocals filter buttons, keyed by filter value
+    let filterButtons = {};
 
     // Set of song_ids whose mp3 is present in the audio cache
     let cachedIds = new Set();
@@ -214,6 +226,7 @@
     let artWrapEl = null;
     let playerArt = null;
     let playerTitle = null;
+    let playerMetaEl = null;
     let seekBar = null;
     let curTimeEl = null;
     let remTimeEl = null;
@@ -292,7 +305,8 @@
             autoPlay: false,
             shuffle: false,
             repeat: "all",
-            prefetchCount: PREFETCH_DEFAULT
+            prefetchCount: PREFETCH_DEFAULT,
+            vocalFilter: "all"
         };
 
         try {
@@ -316,6 +330,11 @@
                     prefetchCount = 50;
                 }
 
+                const vocalFilter = (parsed.vocalFilter === "vocal"
+                    || parsed.vocalFilter === "instrumental")
+                    ? parsed.vocalFilter
+                    : "all";
+
                 return {
                     startFeed: parsed.startFeed === "all" ? "all" : "published",
                     refreshOnStart: {
@@ -325,7 +344,8 @@
                     autoPlay: parsed.autoPlay === true,
                     shuffle: parsed.shuffle === true,
                     repeat: repeat,
-                    prefetchCount: prefetchCount
+                    prefetchCount: prefetchCount,
+                    vocalFilter: vocalFilter
                 };
             }
         } catch (e) {
@@ -373,8 +393,36 @@
             share_key: s.share_key,
             generate_at: s.generate_at,
             publish_state: s.publish_state,
-            publish_at: s.publish_at
+            publish_at: s.publish_at,
+            is_liked: s.is_liked === true,
+            description: s.description,
+            model: s.model,
+            bpm: s.bpm,
+            generation_method: s.generation_method
         };
+    }
+
+    // True when a song has no vocals
+    // Mureka encodes this as generation_method 7, every other value, including
+    // the remix and studio methods, counts as having vocals
+    function isInstrumental(song) {
+
+        return song.generation_method === 7;
+    }
+
+    // Whether a song passes the current vocals filter
+    // all shows everything, vocal hides instrumentals, instrumental shows only them
+    function passesVocalFilter(song) {
+
+        if (settings.vocalFilter === "vocal") {
+            return !isInstrumental(song);
+        }
+
+        if (settings.vocalFilter === "instrumental") {
+            return isInstrumental(song);
+        }
+
+        return true;
     }
 
     // Remove duplicate songs by song_id, keeping the first occurrence
@@ -487,19 +535,24 @@
     async function run() {
 
         if (running) {
+
+            // A second press stops the load, invalidate the active run
             running = false;
+            loadToken += 1;
+            updateButton();
             return;
         }
 
         running = true;
+        const myToken = ++loadToken;
         updateButton();
 
         try {
 
             if (cache.complete === true) {
-                await refreshNew();
+                await refreshNew(myToken);
             } else {
-                await continueLoad();
+                await continueLoad(myToken);
             }
 
         } catch (e) {
@@ -509,16 +562,20 @@
 
         } finally {
 
-            running = false;
+            // Only clear the running state if a newer run has not taken over
+            if (myToken === loadToken) {
+                running = false;
+                updateButton();
+            }
+
             renderList();
             refreshCachedIds();
-            updateButton();
         }
     }
 
     // Keep fetching older pages from where we left off until the end is reached
     // Progress and the cursor are saved each page, so it can resume after a stop
-    async function continueLoad() {
+    async function continueLoad(myToken) {
 
         const known = new Set(cache.songs.map(function (s) {
             return s.song_id;
@@ -526,7 +583,7 @@
 
         let cursor = cache.lastCursor || null;
 
-        while (running) {
+        while (running && myToken === loadToken) {
 
             let page;
 
@@ -534,6 +591,12 @@
                 page = await fetchPage(cursor);
             } catch (e) {
                 setStatus("Network error, paused");
+                break;
+            }
+
+            // A feed switch or stop happened during the request
+            // Drop this page unwritten so it cannot land in the wrong cache
+            if (myToken !== loadToken) {
                 break;
             }
 
@@ -603,7 +666,7 @@
 
     // Walk the newest pages and add new or republished songs to the front
     // Stops after a run of cached songs, which marks the old data boundary
-    async function refreshNew() {
+    async function refreshNew(myToken) {
 
         const known = new Set(cache.songs.map(function (s) {
             return s.song_id;
@@ -615,7 +678,7 @@
         let newCount = 0;
         let stop = false;
 
-        while (running && !stop) {
+        while (running && myToken === loadToken && !stop) {
 
             let page;
 
@@ -624,6 +687,12 @@
             } catch (e) {
                 setStatus("Network error, stopped");
                 break;
+            }
+
+            // A feed switch or stop happened during the request
+            // Drop this page unwritten so it cannot land in the wrong cache
+            if (myToken !== loadToken) {
+                return;
             }
 
             const songs = extractSongs(page);
@@ -674,6 +743,11 @@
             await sleep(PAGE_DELAY);
         }
 
+        // A feed switch during the last await would make this write the wrong cache
+        if (myToken !== loadToken) {
+            return;
+        }
+
         // New and republished songs move to the front, duplicates are dropped
         cache.songs = dedupe(fresh.concat(cache.songs));
         cache.updated = Date.now();
@@ -694,6 +768,15 @@
     // Switch between the published feed and the all songs feed
     // Each feed keeps its own cache, so this just swaps which one is shown
     function switchFeed() {
+
+        // Cancel any load in progress so it cannot write into the new feed cache
+        if (running) {
+            running = false;
+            updateButton();
+        }
+
+        // Invalidate the active load token even if the flag was already cleared
+        loadToken += 1;
 
         feedMode = feedMode === "published" ? "all" : "published";
         updateFeedButton();
@@ -1257,7 +1340,20 @@
     // Sequential keeps the Mureka order, shuffle randomizes it
     function buildQueue(startId) {
 
-        const songs = cache.songs.slice();
+        let songs = cache.songs.filter(passesVocalFilter);
+
+        // If the chosen start song is hidden by the filter, fall back to the full
+        // library so a direct play request always works
+        if (startId !== null && startId !== undefined) {
+
+            const inPool = songs.some(function (s) {
+                return s.song_id === startId;
+            });
+
+            if (!inPool) {
+                songs = cache.songs.slice();
+            }
+        }
 
         if (songs.length === 0) {
             queue = [];
@@ -1411,42 +1507,51 @@
         }
     }
 
+    // Rebuild the upcoming part of the queue, keeping the current song and history
+    // Applies the vocals filter and shuffle mode, then refreshes caching and art
+    // Does nothing when nothing is playing, the next play picks up the changes
+    function rebuildUpcoming() {
+
+        if (queuePos < 0 || queuePos >= queue.length) {
+            return;
+        }
+
+        const played = queue.slice(0, queuePos + 1);
+
+        const playedIds = new Set(played.map(function (s) {
+            return s.song_id;
+        }));
+
+        // Songs not yet reached, kept in Mureka order then optionally shuffled
+        // The vocals filter applies so the queue respects the current choice
+        let upcoming = cache.songs.filter(function (s) {
+            return !playedIds.has(s.song_id) && passesVocalFilter(s);
+        });
+
+        if (shuffleMode) {
+            upcoming = shuffleCopy(upcoming);
+        }
+
+        queue = played.concat(upcoming);
+        renderList();
+
+        // Start caching the newly ordered upcoming songs first, so a slow or
+        // failing coverflow refresh can never block the prefetch
+        prefetchNext();
+
+        // The upcoming order changed, so refresh the coverflow neighbors
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+    }
+
     // Toggle shuffle as a mode
     // While playing, this rebuilds only the upcoming songs, the current one stays
     function toggleShuffle() {
 
         shuffleMode = !shuffleMode;
         updateShuffleButton();
-
-        if (queuePos >= 0 && queuePos < queue.length) {
-
-            const played = queue.slice(0, queuePos + 1);
-
-            const playedIds = new Set(played.map(function (s) {
-                return s.song_id;
-            }));
-
-            // Songs not yet reached, kept in Mureka order then optionally shuffled
-            let upcoming = cache.songs.filter(function (s) {
-                return !playedIds.has(s.song_id);
-            });
-
-            if (shuffleMode) {
-                upcoming = shuffleCopy(upcoming);
-            }
-
-            queue = played.concat(upcoming);
-            renderList();
-
-            // The upcoming order changed, so refresh the coverflow neighbors
-            setArtTransition("none");
-            setArtSources();
-            positionArt(0);
-
-            // Start caching the newly ordered upcoming songs
-            prefetchNext();
-        }
-
+        rebuildUpcoming();
         setStatus(modeStatusText());
     }
 
@@ -1555,6 +1660,37 @@
             }
 
             const active = name === listView;
+
+            btn.style.background = active ? "#48e1eb" : "#333";
+            btn.style.color = active ? "#000" : "#fff";
+        });
+    }
+
+    // Change the vocals filter, save it and re-render the list
+    function setVocalFilter(value) {
+
+        settings.vocalFilter = value;
+        saveSettings();
+        updateFilterButtons();
+
+        // Rebuild the upcoming queue so the filter takes effect while playing,
+        // then re-render so the list and counts update in every view
+        rebuildUpcoming();
+        renderList();
+    }
+
+    // Highlight the active vocals filter button
+    function updateFilterButtons() {
+
+        Object.keys(filterButtons).forEach(function (value) {
+
+            const btn = filterButtons[value];
+
+            if (!btn) {
+                return;
+            }
+
+            const active = value === settings.vocalFilter;
 
             btn.style.background = active ? "#48e1eb" : "#333";
             btn.style.color = active ? "#000" : "#fff";
@@ -2043,6 +2179,31 @@
     }
 
     // Update the title and the cover strip for the current song
+    // Build the small meta line shown under the now playing title
+    // Joins the genres, moods, bpm and model that are present
+    function playerMetaText(song) {
+
+        const parts = [];
+
+        if (song.genres && song.genres.length) {
+            parts.push(song.genres.join("/"));
+        }
+
+        if (song.moods && song.moods.length) {
+            parts.push(song.moods.join("/"));
+        }
+
+        if (song.bpm) {
+            parts.push(song.bpm + " BPM");
+        }
+
+        if (song.model) {
+            parts.push(song.model);
+        }
+
+        return parts.join("  \u00B7  ");
+    }
+
     function updatePlayerInfo(song) {
 
         updateMediaMetadata(song);
@@ -2055,6 +2216,10 @@
 
             playerTitle.textContent = "Nothing playing";
 
+            if (playerMetaEl) {
+                playerMetaEl.textContent = "";
+            }
+
             if (artWrapEl) {
                 artWrapEl.style.display = "none";
             }
@@ -2065,6 +2230,10 @@
         }
 
         playerTitle.textContent = song.title || "Untitled";
+
+        if (playerMetaEl) {
+            playerMetaEl.textContent = playerMetaText(song);
+        }
 
         if (artWrapEl) {
             artWrapEl.style.display = coverUrl(song) ? "block" : "none";
@@ -2441,6 +2610,10 @@
         playerTitle.textContent = "Nothing playing";
         playerTitle.style.cssText = "font-weight:600;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
 
+        // Small meta line under the title, genre, mood, bpm and model
+        playerMetaEl = document.createElement("div");
+        playerMetaEl.style.cssText = "color:#9a9aa5;font-size:12px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+
         const seekRow = document.createElement("div");
         seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
 
@@ -2508,6 +2681,7 @@
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(playerTitle);
+        playerEl.appendChild(playerMetaEl);
         playerEl.appendChild(seekRow);
         playerEl.appendChild(controlRow);
 
@@ -2602,6 +2776,33 @@
         viewRow.appendChild(viewButtons.queue);
         viewRow.appendChild(viewButtons.alpha);
 
+        // Vocals filter row, always visible so it is easy to reach
+        const filterRow = document.createElement("div");
+        filterRow.style.cssText = "display:flex;gap:6px;margin-top:6px";
+
+        filterButtons.all = makeButton("All", "#333", "#fff", function () {
+            setVocalFilter("all");
+        });
+        filterButtons.all.title = "Show every song";
+
+        filterButtons.vocal = makeButton("Vocals", "#333", "#fff", function () {
+            setVocalFilter("vocal");
+        });
+        filterButtons.vocal.title = "Hide instrumental songs";
+
+        filterButtons.instrumental = makeButton("Instrumental", "#333", "#fff", function () {
+            setVocalFilter("instrumental");
+        });
+        filterButtons.instrumental.title = "Show only instrumental songs";
+
+        filterRow.appendChild(filterButtons.all);
+        filterRow.appendChild(filterButtons.vocal);
+        filterRow.appendChild(filterButtons.instrumental);
+
+        // Counts line, shown songs against the total plus the queue length
+        countsEl = document.createElement("div");
+        countsEl.style.cssText = "margin-top:6px;color:#888;font-size:12px";
+
         listEl = document.createElement("div");
         listEl.id = "mureka-player-list";
         listEl.style.cssText = "position:relative;height:240px;box-sizing:border-box;overflow:auto;border-top:1px solid #333;padding-top:6px;margin-top:6px";
@@ -2612,6 +2813,8 @@
         bodyEl.appendChild(playerEl);
         bodyEl.appendChild(searchRow);
         bodyEl.appendChild(viewRow);
+        bodyEl.appendChild(filterRow);
+        bodyEl.appendChild(countsEl);
         bodyEl.appendChild(listEl);
 
         panel.appendChild(header);
@@ -2627,6 +2830,7 @@
         refreshCachedIds();
         updateShuffleButton();
         updateViewButtons();
+        updateFilterButtons();
 
         // Shuffle and repeat already start from the settings defaults
         updateRepeatButton();
@@ -3042,6 +3246,66 @@
     // Build one list row for a song
     // number may be null to leave the number column blank, as for a pinned song
     // dimmed greys the row, used for already played songs in the queue view
+    // Set a heart element to the liked or outline state
+    function paintHeart(heartEl, liked) {
+
+        if (!heartEl) {
+            return;
+        }
+
+        heartEl.textContent = liked ? "\u2665" : "\u2661";
+        heartEl.title = liked ? "Liked, click to unlike" : "Click to like";
+        heartEl.style.color = liked ? "#ff6b8a" : "#777";
+    }
+
+    // Like or unlike a song through the Mureka favorite endpoint
+    // The heart flips immediately and reverts if the request fails
+    // state 1 likes the song, state 2 removes the like
+    async function toggleLike(song, heartEl) {
+
+        const makeLiked = !song.is_liked;
+
+        // Optimistic update so the heart responds without waiting on the network
+        song.is_liked = makeLiked;
+        paintHeart(heartEl, makeLiked);
+
+        try {
+            const res = await fetch("/api/pgc/user/song/favorite", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: song.song_id,
+                    state: makeLiked ? 1 : 2,
+                    playlist_id: 0,
+                    home_module_id: 0
+                })
+            });
+
+            const json = await res.json();
+
+            if (!res.ok || !json || json.code !== 0) {
+                throw new Error("favorite failed");
+            }
+
+            // The server echoes the new state, 1 liked and 2 not liked
+            const liked = json.data && json.data.state === 1;
+
+            song.is_liked = liked;
+            paintHeart(heartEl, liked);
+            saveCache();
+            setStatus((liked ? "Liked: " : "Unliked: ") + (song.title || "Untitled"));
+
+        } catch (e) {
+
+            // Revert the optimistic change on any failure
+            song.is_liked = !makeLiked;
+            paintHeart(heartEl, song.is_liked);
+            setStatus("Could not update like, try again");
+        }
+    }
+
     function buildSongRow(song, number, isPlaying, dimmed) {
 
         const title = (song.title || "").trim() || "Untitled";
@@ -3089,6 +3353,15 @@
         item.appendChild(numEl);
         item.appendChild(titleEl);
 
+        // Song length, right aligned next to the title
+        if (song.duration_milliseconds) {
+
+            const dur = document.createElement("span");
+            dur.textContent = formatTime(song.duration_milliseconds / 1000);
+            dur.style.cssText = "flex:0 0 auto;margin-left:8px;color:#888;font-variant-numeric:tabular-nums";
+            item.appendChild(dur);
+        }
+
         // Mark a song that is not published, in any view
         if (song.publish_state != null && song.publish_state !== 1) {
 
@@ -3107,6 +3380,21 @@
             rep.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;background:#48e1eb;color:#000;font-size:11px;line-height:16px;font-weight:600";
             item.appendChild(rep);
         }
+
+        // Like control, filled heart when liked, outline heart to like it
+        // Always present so the duration column stays aligned across rows
+        const heart = document.createElement("span");
+        heart.style.cssText = "flex:0 0 auto;width:20px;margin-left:6px;text-align:center;cursor:pointer";
+        paintHeart(heart, song.is_liked === true);
+
+        heart.addEventListener("click", function (ev) {
+
+            // Do not also play the song when the heart is clicked
+            ev.stopPropagation();
+            toggleLike(song, heart);
+        });
+
+        item.appendChild(heart);
 
         // Long press on touch opens the same menu as right-click on desktop
         let pressTimer = null;
@@ -3211,6 +3499,12 @@
 
             const title = (song.title || "").trim() || "Untitled";
 
+            // Skip rows hidden by the vocals filter
+            // The queue view always shows the real queue, so it is never filtered
+            if (listView !== "queue" && !passesVocalFilter(song)) {
+                return;
+            }
+
             // Skip rows that do not match the current search text
             if (query && title.toLowerCase().indexOf(query) === -1) {
                 return;
@@ -3229,6 +3523,12 @@
             listEl.appendChild(item);
         });
 
+        // Update the counts line, shown rows against the library total and queue
+        if (countsEl) {
+            countsEl.textContent = "Shown " + shown + " of " + cache.songs.length
+                + "  \u00B7  Queue " + queue.length;
+        }
+
         // Amnesty, pin the playing song on top when this view does not contain it
         // This keeps a song from another feed visible until the next song starts
         if (currentSong && !playingItemEl && !query) {
@@ -3238,8 +3538,10 @@
             listEl.insertBefore(item, listEl.firstChild);
         }
 
-        // Tell the user when a search hides everything
-        if (query && shown === 0) {
+        // Tell the user when the search or vocals filter hides everything
+        const vocalFiltering = listView !== "queue" && settings.vocalFilter !== "all";
+
+        if ((query || vocalFiltering) && shown === 0 && !playingItemEl) {
 
             const empty = document.createElement("div");
             empty.textContent = "No matches";
@@ -3534,6 +3836,93 @@
         }
     }
 
+    // Whether developer only features are enabled
+    // Toggle with localStorage.setItem("mureka_player_debug", "1")
+    function isDebug() {
+
+        try {
+            return localStorage.getItem(DEBUG_KEY) === "1";
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Whether this is a desktop style device with a precise pointer
+    function isDesktop() {
+
+        try {
+            return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Copy a string to the clipboard, with a fallback for older browsers
+    async function copyText(text) {
+
+        try {
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (e) {
+        }
+
+        // Fallback, an off screen textarea and execCommand
+        try {
+            const area = document.createElement("textarea");
+
+            area.value = text;
+            area.style.position = "fixed";
+            area.style.top = "-1000px";
+            area.style.left = "-1000px";
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+
+            const ok = document.execCommand("copy");
+
+            area.remove();
+
+            return ok;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Fetch the full untrimmed song object and copy it to the clipboard
+    // Developer only helper for inspecting the raw API fields, including lyrics
+    async function copyJson(song) {
+
+        setStatus("Fetching JSON: " + (song.title || "Untitled"));
+
+        let payload = song;
+
+        try {
+            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+            const res = await fetch(url, { credentials: "include" });
+
+            if (res.ok) {
+
+                const json = await res.json();
+                const fresh = json && json.data && json.data.song;
+
+                // Prefer the full detail object, fall back to the cached song
+                if (fresh && fresh.song_id === song.song_id) {
+                    payload = fresh;
+                }
+            }
+        } catch (e) {
+        }
+
+        const ok = await copyText(JSON.stringify(payload, null, 2));
+
+        setStatus(ok
+            ? "Copied JSON to clipboard: " + (song.title || "Untitled")
+            : "Could not copy to clipboard");
+    }
+
     // Build the reusable right-click options popup once
     function buildContextMenu() {
 
@@ -3631,6 +4020,14 @@
 
             addMenuRow("Cache", "#48e1eb", function () {
                 cacheOne(song);
+            });
+        }
+
+        // Developer only and desktop only, copy the full song JSON to the clipboard
+        if (isDebug() && isDesktop()) {
+
+            addMenuRow("Copy JSON", "#ffd479", function () {
+                copyJson(song);
             });
         }
 
