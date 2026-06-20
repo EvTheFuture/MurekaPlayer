@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.8";
+    const VERSION = "1.2.9";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -113,6 +113,27 @@
     // Toggle from the console with localStorage.setItem("mureka_player_debug", "1")
     const DEBUG_KEY = "mureka_player_debug";
 
+    // localStorage key that remembers which songs have been downloaded to disk
+    // The extension cannot read the download folder, so we track requests here
+    const DOWNLOADED_KEY = "mureka_player_downloaded";
+
+    // Shared style for the floating dropdowns, positioned and shown at runtime
+    const POPUP_CSS = [
+        "position:fixed",
+        "z-index:1000001",
+        "background:#26262c",
+        "color:#fff",
+        "font:13px/1.4 sans-serif",
+        "border:1px solid #3a3a42",
+        "border-radius:8px",
+        "box-shadow:0 8px 24px rgba(0,0,0,0.5)",
+        "padding:8px",
+        "box-sizing:border-box",
+        "display:none",
+        "flex-direction:column",
+        "gap:6px"
+    ].join(";");
+
     // User settings, loaded once on startup, published is the default start feed
     let settings = loadSettings();
 
@@ -121,6 +142,26 @@
 
     // Cached data, loaded once on startup
     let cache = loadCache();
+
+    // Set of song_ids that have been requested for download to disk
+    // The extension cannot read the folder, so this is the best we can track
+    let downloadedIds = loadDownloadedIds();
+
+    // The user playlists, loaded on demand, and the currently selected one
+    // activePlaylist is null for the whole library, or {playlist_id, name, ids}
+    let playlists = [];
+    let activePlaylist = null;
+
+    // True while a playlist load is in progress
+    let playlistsLoading = false;
+
+    // Play, favorite and share counts for the now playing song, or null
+    let nowPlayingCounts = null;
+
+    // Whether the floating action and view dropdowns are open
+    // Both start closed so the panel opens compact every time
+    let actionsOpen = false;
+    let viewMenuOpen = false;
 
     // True while a load run is in progress
     let running = false;
@@ -222,11 +263,25 @@
     let startPublishedBtn = null;
     let startAllBtn = null;
 
+    // The collapsible top action menu and its toggle in the header
+    let actionsWrapEl = null;
+    let actionsToggleBtn = null;
+
+    // The floating view and filter dropdown and the bar that toggles it
+    let viewMenuEl = null;
+    let viewMenuBar = null;
+
+    // The playlists overlay, its list container and the open button
+    let playlistsEl = null;
+    let playlistsListEl = null;
+    let playlistButton = null;
+
     // Player UI element references
     let artWrapEl = null;
     let playerArt = null;
     let playerTitle = null;
     let playerMetaEl = null;
+    let playerCountsEl = null;
     let seekBar = null;
     let curTimeEl = null;
     let remTimeEl = null;
@@ -306,7 +361,8 @@
             shuffle: false,
             repeat: "all",
             prefetchCount: PREFETCH_DEFAULT,
-            vocalFilter: "all"
+            vocalFilter: "all",
+            reportPlays: true
         };
 
         try {
@@ -345,7 +401,8 @@
                     shuffle: parsed.shuffle === true,
                     repeat: repeat,
                     prefetchCount: prefetchCount,
-                    vocalFilter: vocalFilter
+                    vocalFilter: vocalFilter,
+                    reportPlays: parsed.reportPlays !== false
                 };
             }
         } catch (e) {
@@ -359,6 +416,30 @@
 
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch (e) {
+        }
+    }
+
+    // Read the set of downloaded song_ids from localStorage
+    function loadDownloadedIds() {
+
+        try {
+            const raw = localStorage.getItem(DOWNLOADED_KEY);
+
+            if (raw) {
+                return new Set(JSON.parse(raw));
+            }
+        } catch (e) {
+        }
+
+        return new Set();
+    }
+
+    // Persist the set of downloaded song_ids
+    function saveDownloadedIds() {
+
+        try {
+            localStorage.setItem(DOWNLOADED_KEY, JSON.stringify(Array.from(downloadedIds)));
         } catch (e) {
         }
     }
@@ -423,6 +504,23 @@
         }
 
         return true;
+    }
+
+    // Whether a song belongs to the active playlist
+    // With no active playlist the whole library passes
+    function passesPlaylist(song) {
+
+        if (!activePlaylist) {
+            return true;
+        }
+
+        return activePlaylist.ids.has(song.song_id);
+    }
+
+    // Whether a song passes every active filter, vocals and playlist together
+    function passesFilters(song) {
+
+        return passesVocalFilter(song) && passesPlaylist(song);
     }
 
     // Remove duplicate songs by song_id, keeping the first occurrence
@@ -765,6 +863,15 @@
     // Wipe the cache and reset the view
     function clearCache() {
 
+        // Stop any load in progress so it cannot refill the cache we just cleared
+        if (running) {
+            running = false;
+            updateButton();
+        }
+
+        // Invalidate the active load token even if the flag was already cleared
+        loadToken += 1;
+
         cache = { songs: [], updated: 0, complete: false, lastCursor: null };
         saveCache();
         cachedIds = new Set();
@@ -807,7 +914,7 @@
     function updateFeedButton() {
 
         if (feedButton) {
-            feedButton.textContent = feed().label;
+            feedButton.labelEl.textContent = feed().label;
         }
     }
 
@@ -1156,6 +1263,12 @@
         }
 
         requestDownload([{ url: url, filename: "Mureka/" + fileName(song) }]);
+
+        // Remember it so a later Download all can skip it
+        downloadedIds.add(song.song_id);
+        saveDownloadedIds();
+        renderList();
+
         setStatus("Saving to the Mureka folder: " + (song.title || "Untitled"));
     }
 
@@ -1275,11 +1388,23 @@
         });
 
         audio.addEventListener("play", function () {
+
             updatePlayPause();
+
+            // Clear a stale Stopped or Paused line once playback is running
+            if (currentSong) {
+                setStatus("Playing: " + (currentSong.title || "Untitled"));
+            }
         });
 
         audio.addEventListener("pause", function () {
+
             updatePlayPause();
+
+            // Stop clears currentSong first, so this only fires for a real pause
+            if (currentSong) {
+                setStatus("Paused: " + (currentSong.title || "Untitled"));
+            }
         });
     }
 
@@ -1347,7 +1472,7 @@
     // Sequential keeps the Mureka order, shuffle randomizes it
     function buildQueue(startId) {
 
-        let songs = cache.songs.filter(passesVocalFilter);
+        let songs = cache.songs.filter(passesFilters);
 
         // If the chosen start song is hidden by the filter, fall back to the full
         // library so a direct play request always works
@@ -1428,6 +1553,18 @@
         });
 
         if (!exists) {
+            return;
+        }
+
+        // Clicking the song that is already playing just restarts it, the queue
+        // is left untouched so shuffle order is not regenerated
+        if (currentSong && currentSong.song_id === songId) {
+
+            if (audio) {
+                audio.currentTime = 0;
+                audio.play();
+            }
+
             return;
         }
 
@@ -1529,7 +1666,7 @@
         }));
 
         let added = cache.songs.filter(function (s) {
-            return passesVocalFilter(s) && !inQueue.has(s.song_id);
+            return passesFilters(s) && !inQueue.has(s.song_id);
         });
 
         if (added.length === 0) {
@@ -1559,9 +1696,9 @@
         }));
 
         // Songs not yet reached, kept in Mureka order then optionally shuffled
-        // The vocals filter applies so the queue respects the current choice
+        // The vocals and playlist filters apply so the queue respects the choice
         let upcoming = cache.songs.filter(function (s) {
-            return !playedIds.has(s.song_id) && passesVocalFilter(s);
+            return !playedIds.has(s.song_id) && passesFilters(s);
         });
 
         if (shuffleMode) {
@@ -1589,6 +1726,10 @@
         updateShuffleButton();
         rebuildUpcoming();
         setStatus(modeStatusText());
+
+        // Remember the choice for the next session
+        settings.shuffle = shuffleMode;
+        saveSettings();
     }
 
     // Highlight the shuffle button when shuffle mode is active
@@ -1622,8 +1763,7 @@
         return "Shuffle " + (shuffleMode ? "on" : "off") + ", repeat " + repeatLabel();
     }
 
-    // Cycle repeat through all, one and none for this session
-    // The startup value comes from the default repeat in settings
+    // Cycle repeat through all, one and none, remembering the choice
     function cycleRepeat() {
 
         if (repeatMode === "all") {
@@ -1642,6 +1782,10 @@
         positionArt(0);
 
         setStatus(modeStatusText());
+
+        // Remember the choice for the next session
+        settings.repeat = repeatMode;
+        saveSettings();
     }
 
     // Update the repeat button icon and highlight to match the mode
@@ -1666,6 +1810,8 @@
 
         listView = view;
         updateViewButtons();
+        updateViewMenuBar();
+        closeViewMenu();
         renderList();
         scrollToPlaying();
     }
@@ -1708,6 +1854,8 @@
         settings.vocalFilter = value;
         saveSettings();
         updateFilterButtons();
+        updateViewMenuBar();
+        closeViewMenu();
 
         // Rebuild the upcoming queue so the filter takes effect while playing,
         // then re-render so the list and counts update in every view
@@ -1731,6 +1879,24 @@
             btn.style.background = active ? "#48e1eb" : "#333";
             btn.style.color = active ? "#000" : "#fff";
         });
+    }
+
+    // Update the compact bar label to show the current view and filter
+    function updateViewMenuBar() {
+
+        if (!viewMenuBar) {
+            return;
+        }
+
+        const v = listView === "queue"
+            ? "Queue"
+            : (listView === "alpha" ? "A-Z" : "Mureka");
+
+        const f = settings.vocalFilter === "vocal"
+            ? "Vocals"
+            : (settings.vocalFilter === "instrumental" ? "Instrumental" : "All");
+
+        viewMenuBar.textContent = v + "  \u00B7  " + f + "  \u25BE";
     }
 
     // The songs to show for the current view
@@ -1778,6 +1944,9 @@
         ensureAudio();
         currentSong = song;
 
+        // Drop counts from the previous song until the detail call returns
+        nowPlayingCounts = null;
+
         // Show art and title right away, even while the audio is still loading
         updatePlayerInfo(song);
         renderList();
@@ -1807,8 +1976,68 @@
         setCurrentSrc(url);
         audio.play();
 
+        // Tell Mureka the song was played, unless the user opted out
+        if (settings.reportPlays) {
+            reportPlay(song);
+        }
+
+        // Fetch play and like counts to show under the now playing title
+        fetchNowPlayingCounts(song);
+
         // The current song is cached now, get upcoming songs ready in the background
         prefetchNext();
+    }
+
+    // Report a play to Mureka, fire and forget so it never blocks playback
+    // The body matches the site, play_type 1 is a normal play, playlist_id 0
+    async function reportPlay(song) {
+
+        try {
+            await fetch("/api/pgc/song/play/report", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: song.song_id,
+                    play_type: 1,
+                    playlist_id: 0
+                })
+            });
+        } catch (e) {
+        }
+    }
+
+    // Fetch play, favorite and share counts for the now playing song
+    // The counts live at the data level of the detail response, beside song
+    // Only apply them while this song is still the current one
+    async function fetchNowPlayingCounts(song) {
+
+        try {
+            const url = "/api/pgc/song/detail?time=" + Date.now()
+                + "&song_id=" + song.song_id;
+
+            const res = await fetch(url, { credentials: "include" });
+            const json = await res.json();
+
+            if (!json || json.code !== 0 || !json.data) {
+                return;
+            }
+
+            if (!currentSong || currentSong.song_id !== song.song_id) {
+                return;
+            }
+
+            nowPlayingCounts = {
+                song_id: song.song_id,
+                play_count: json.data.play_count,
+                fav_count: json.data.fav_count,
+                share_count: json.data.share_count
+            };
+
+            refreshNowPlayingMeta();
+        } catch (e) {
+        }
     }
 
     // Cache the next songs in the queue so playback does not wait on the network
@@ -1943,7 +2172,8 @@
         }
     }
 
-    // Save every cached song mp3 into the Mureka download folder
+    // Save the songs visible under the current filters into the Mureka folder
+    // Honors the vocals and playlist filters and skips already downloaded songs
     async function downloadAll() {
 
         if (cache.songs.length === 0) {
@@ -1951,11 +2181,29 @@
             return;
         }
 
-        const items = cache.songs.map(function (s) {
+        // Only the songs that pass the active filters, minus the ones we have
+        // already requested before, so repeat runs only fetch the new ones
+        const pending = cache.songs.filter(function (s) {
+            return passesFilters(s) && !downloadedIds.has(s.song_id);
+        });
+
+        const items = pending.map(function (s) {
             return { url: songUrl(s), filename: "Mureka/" + fileName(s) };
         }).filter(function (it) {
             return it.url;
         });
+
+        if (items.length === 0) {
+            setStatus("Nothing new to download for the current view");
+            return;
+        }
+
+        // Mark them as downloaded up front, the folder is not readable from here
+        pending.forEach(function (s) {
+            downloadedIds.add(s.song_id);
+        });
+        saveDownloadedIds();
+        renderList();
 
         setStatus("Saving " + items.length + " songs to the Mureka folder...");
         requestDownload(items);
@@ -1964,9 +2212,98 @@
     // Reflect the running state on the cache button
     function updateCacheButton() {
 
-        if (cacheButton) {
-            cacheButton.textContent = cacheRunning ? "Stop" : "Cache all";
+        if (!cacheButton) {
+            return;
         }
+
+        cacheButton.labelEl.textContent = cacheRunning ? "Stop" : "Cache all";
+        setButtonIcon(cacheButton, cacheRunning ? iconStop() : iconCache());
+    }
+
+    // Position a floating dropdown just under an anchor, spanning the panel width
+    // Fixed positioning keeps it above the player without reflowing the content
+    function placePopupUnder(popup, anchorEl) {
+
+        const pr = panelEl.getBoundingClientRect();
+        const ar = anchorEl.getBoundingClientRect();
+        const margin = 8;
+
+        let left = pr.left + margin;
+        let width = pr.width - margin * 2;
+        let top = ar.bottom + 4;
+
+        // Keep the dropdown inside the viewport
+        const maxTop = Math.max(8, window.innerHeight - 60);
+
+        if (top > maxTop) {
+            top = maxTop;
+        }
+
+        popup.style.left = left + "px";
+        popup.style.width = width + "px";
+        popup.style.top = top + "px";
+    }
+
+    // Close the floating action dropdown
+    function closeActions() {
+
+        actionsOpen = false;
+
+        if (actionsWrapEl) {
+            actionsWrapEl.style.display = "none";
+        }
+    }
+
+    // Close the floating view and filter dropdown
+    function closeViewMenu() {
+
+        viewMenuOpen = false;
+
+        if (viewMenuEl) {
+            viewMenuEl.style.display = "none";
+        }
+    }
+
+    // Open or close the floating action dropdown
+    function toggleActions() {
+
+        if (actionsOpen) {
+            closeActions();
+            return;
+        }
+
+        // Only one dropdown open at a time
+        closeViewMenu();
+        actionsOpen = true;
+
+        if (actionsWrapEl) {
+            actionsWrapEl.style.display = "flex";
+            placePopupUnder(actionsWrapEl, actionsToggleBtn);
+        }
+    }
+
+    // Open or close the floating view and filter dropdown
+    function toggleViewMenu() {
+
+        if (viewMenuOpen) {
+            closeViewMenu();
+            return;
+        }
+
+        closeActions();
+        viewMenuOpen = true;
+
+        if (viewMenuEl) {
+            viewMenuEl.style.display = "flex";
+            placePopupUnder(viewMenuEl, viewMenuBar);
+        }
+    }
+
+    // Close both dropdowns, used on outside clicks, scroll, resize and drag
+    function closeDropdowns() {
+
+        closeActions();
+        closeViewMenu();
     }
 
     // Toggle between play and pause for the current song
@@ -2240,6 +2577,44 @@
         return parts.join("  \u00B7  ");
     }
 
+    // Build the plays and likes line for the current song, empty until known
+    function playerCountsText(song) {
+
+        if (!nowPlayingCounts || nowPlayingCounts.song_id !== song.song_id) {
+            return "";
+        }
+
+        const c = nowPlayingCounts;
+        const parts = [];
+
+        if (typeof c.play_count === "number") {
+            parts.push("\u25B6 " + c.play_count + " plays");
+        }
+
+        if (typeof c.fav_count === "number") {
+            parts.push("\u2665 " + c.fav_count + " likes");
+        }
+
+        return parts.join("  \u00B7  ");
+    }
+
+    // Rewrite the meta and counts lines for the current song
+    // Used directly and again when the counts call returns
+    function refreshNowPlayingMeta() {
+
+        if (!currentSong) {
+            return;
+        }
+
+        if (playerMetaEl) {
+            playerMetaEl.textContent = playerMetaText(currentSong);
+        }
+
+        if (playerCountsEl) {
+            playerCountsEl.textContent = playerCountsText(currentSong);
+        }
+    }
+
     function updatePlayerInfo(song) {
 
         updateMediaMetadata(song);
@@ -2251,9 +2626,14 @@
         if (!song) {
 
             playerTitle.textContent = "Nothing playing";
+            nowPlayingCounts = null;
 
             if (playerMetaEl) {
                 playerMetaEl.textContent = "";
+            }
+
+            if (playerCountsEl) {
+                playerCountsEl.textContent = "";
             }
 
             if (artWrapEl) {
@@ -2269,6 +2649,10 @@
 
         if (playerMetaEl) {
             playerMetaEl.textContent = playerMetaText(song);
+        }
+
+        if (playerCountsEl) {
+            playerCountsEl.textContent = playerCountsText(song);
         }
 
         if (artWrapEl) {
@@ -2478,6 +2862,22 @@
         minimizeBtn = document.createElement("span");
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
 
+        // Hamburger that collapses or expands the top action menu to save space
+        actionsToggleBtn = document.createElement("span");
+        actionsToggleBtn.textContent = "\u2630";
+        actionsToggleBtn.title = "Show or hide the action buttons";
+        actionsToggleBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:14px;cursor:pointer;line-height:1";
+
+        // Keep the toggle from starting a drag or minimizing the panel
+        actionsToggleBtn.addEventListener("mousedown", function (ev) {
+            ev.stopPropagation();
+        });
+
+        actionsToggleBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            toggleActions();
+        });
+
         // Gear that opens the settings overlay
         const settingsBtn = document.createElement("span");
         settingsBtn.textContent = "\u2699";
@@ -2494,9 +2894,10 @@
             openSettings();
         });
 
-        // Right side of the header holds the gear and the minimize indicator
+        // Right side of the header holds the action toggle, gear and minimize
         const headerRight = document.createElement("div");
         headerRight.style.cssText = "display:flex;align-items:center;gap:10px;flex:0 0 auto";
+        headerRight.appendChild(actionsToggleBtn);
         headerRight.appendChild(settingsBtn);
         headerRight.appendChild(minimizeBtn);
 
@@ -2512,11 +2913,11 @@
         statusEl.style.marginBottom = "8px";
 
         const rowOne = document.createElement("div");
-        rowOne.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        rowOne.style.cssText = "display:flex;gap:6px";
 
-        loadButton = makeButton("Load", "#48e1eb", "#000", run);
-        const clearButton = makeButton("Clear", "#444", "#fff", clearCache);
-        feedButton = makeButton(feed().label, "#444", "#fff", switchFeed);
+        loadButton = makeActionButton(iconLoad(), "Load", "#48e1eb", "#000", run);
+        const clearButton = makeActionButton(iconClear(), "Clear", "#444", "#fff", clearCache);
+        feedButton = makeActionButton(iconFeed(), feed().label, "#444", "#fff", switchFeed);
         feedButton.title = "Switch between published and all songs";
 
         rowOne.appendChild(loadButton);
@@ -2524,13 +2925,35 @@
         rowOne.appendChild(feedButton);
 
         const rowThree = document.createElement("div");
-        rowThree.style.cssText = "display:flex;gap:6px;margin-bottom:8px";
+        rowThree.style.cssText = "display:flex;gap:6px";
 
-        cacheButton = makeButton("Cache all", "#444", "#fff", cacheAll);
-        downloadButton = makeButton("Download all", "#444", "#fff", downloadAll);
+        cacheButton = makeActionButton(iconCache(), "Cache all", "#444", "#fff", cacheAll);
+        downloadButton = makeActionButton(iconDownload(), "Download list", "#444", "#fff", downloadAll);
+        downloadButton.title = "Download the songs shown under the current filter";
+        playlistButton = makeActionButton(iconPlaylists(), "Playlists", "#444", "#fff", openPlaylists);
 
         rowThree.appendChild(cacheButton);
         rowThree.appendChild(downloadButton);
+        rowThree.appendChild(playlistButton);
+
+        // Floating dropdown for the action buttons, opens over the player
+        // It lives on the body and is fixed positioned, so toggling it does not
+        // move the player content around
+        actionsWrapEl = document.createElement("div");
+        actionsWrapEl.style.cssText = POPUP_CSS;
+        actionsWrapEl.appendChild(rowOne);
+        actionsWrapEl.appendChild(rowThree);
+
+        // Keep clicks inside the dropdown from closing it
+        actionsWrapEl.addEventListener("mousedown", function (ev) {
+            ev.stopPropagation();
+        });
+
+        actionsWrapEl.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+
+        document.body.appendChild(actionsWrapEl);
 
         // Player block, album art on top, then title, seek bar and play control
         const playerEl = document.createElement("div");
@@ -2650,6 +3073,11 @@
         playerMetaEl = document.createElement("div");
         playerMetaEl.style.cssText = "color:#9a9aa5;font-size:12px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
 
+        // Plays and likes for the current song on their own line so they show
+        // even when the meta line above is long enough to be clipped
+        playerCountsEl = document.createElement("div");
+        playerCountsEl.style.cssText = "color:#9a9aa5;font-size:12px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+
         const seekRow = document.createElement("div");
         seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
 
@@ -2718,6 +3146,7 @@
         playerEl.appendChild(artBox);
         playerEl.appendChild(playerTitle);
         playerEl.appendChild(playerMetaEl);
+        playerEl.appendChild(playerCountsEl);
         playerEl.appendChild(seekRow);
         playerEl.appendChild(controlRow);
 
@@ -2747,7 +3176,8 @@
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
-            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:10px !important;box-sizing:border-box !important;font-size:12px !important}"
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important}"
+            + "#mureka-player-art-wrap{max-width:220px !important;margin-left:auto !important;margin-right:auto !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
             + "#mureka-player-list > div{font-size:15px !important;padding:9px 2px !important}"
@@ -2791,19 +3221,19 @@
 
         // View selector, three segments sharing one row
         const viewRow = document.createElement("div");
-        viewRow.style.cssText = "display:flex;gap:6px;margin-top:6px";
+        viewRow.style.cssText = "display:flex;gap:6px";
 
-        viewButtons.mureka = makeButton("Mureka", "#333", "#fff", function () {
+        viewButtons.mureka = makeActionButton(iconMureka(), "Mureka", "#333", "#fff", function () {
             setView("mureka");
         });
         viewButtons.mureka.title = "Published order";
 
-        viewButtons.queue = makeButton("Queue", "#333", "#fff", function () {
+        viewButtons.queue = makeActionButton(iconQueue(), "Queue", "#333", "#fff", function () {
             setView("queue");
         });
         viewButtons.queue.title = "Current song and what plays next";
 
-        viewButtons.alpha = makeButton("A-Z", "#333", "#fff", function () {
+        viewButtons.alpha = makeActionButton(iconAlpha(), "A-Z", "#333", "#fff", function () {
             setView("alpha");
         });
         viewButtons.alpha.title = "Alphabetical by title";
@@ -2812,21 +3242,21 @@
         viewRow.appendChild(viewButtons.queue);
         viewRow.appendChild(viewButtons.alpha);
 
-        // Vocals filter row, always visible so it is easy to reach
+        // Vocals filter row
         const filterRow = document.createElement("div");
-        filterRow.style.cssText = "display:flex;gap:6px;margin-top:6px";
+        filterRow.style.cssText = "display:flex;gap:6px";
 
-        filterButtons.all = makeButton("All", "#333", "#fff", function () {
+        filterButtons.all = makeActionButton(iconAll(), "All", "#333", "#fff", function () {
             setVocalFilter("all");
         });
         filterButtons.all.title = "Show every song";
 
-        filterButtons.vocal = makeButton("Vocals", "#333", "#fff", function () {
+        filterButtons.vocal = makeActionButton(iconVocals(), "Vocals", "#333", "#fff", function () {
             setVocalFilter("vocal");
         });
         filterButtons.vocal.title = "Hide instrumental songs";
 
-        filterButtons.instrumental = makeButton("Instrumental", "#333", "#fff", function () {
+        filterButtons.instrumental = makeActionButton(iconInstrumental(), "Instrumental", "#333", "#fff", function () {
             setVocalFilter("instrumental");
         });
         filterButtons.instrumental.title = "Show only instrumental songs";
@@ -2834,6 +3264,37 @@
         filterRow.appendChild(filterButtons.all);
         filterRow.appendChild(filterButtons.vocal);
         filterRow.appendChild(filterButtons.instrumental);
+
+        // Floating dropdown that holds the view and filter rows, opens over the
+        // list without moving the content, just like the action dropdown
+        viewMenuEl = document.createElement("div");
+        viewMenuEl.style.cssText = POPUP_CSS;
+        viewMenuEl.appendChild(viewRow);
+        viewMenuEl.appendChild(filterRow);
+
+        viewMenuEl.addEventListener("mousedown", function (ev) {
+            ev.stopPropagation();
+        });
+
+        viewMenuEl.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+
+        document.body.appendChild(viewMenuEl);
+
+        // Compact bar that stays visible, shows the current view and filter and
+        // toggles the dropdown above
+        viewMenuBar = makeButton("", "#333", "#fff", toggleViewMenu);
+        viewMenuBar.style.flex = "none";
+        viewMenuBar.style.width = "100%";
+        viewMenuBar.style.marginTop = "6px";
+        viewMenuBar.style.textAlign = "center";
+        viewMenuBar.title = "Choose the list view and filter";
+
+        // The toggle runs on click, this only keeps it from also closing itself
+        viewMenuBar.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
 
         // Counts line, shown songs against the total plus the queue length
         countsEl = document.createElement("div");
@@ -2844,12 +3305,9 @@
         listEl.style.cssText = "position:relative;height:240px;box-sizing:border-box;overflow:auto;border-top:1px solid #333;padding-top:6px;margin-top:6px";
 
         bodyEl.appendChild(statusEl);
-        bodyEl.appendChild(rowOne);
-        bodyEl.appendChild(rowThree);
         bodyEl.appendChild(playerEl);
         bodyEl.appendChild(searchRow);
-        bodyEl.appendChild(viewRow);
-        bodyEl.appendChild(filterRow);
+        bodyEl.appendChild(viewMenuBar);
         bodyEl.appendChild(countsEl);
         bodyEl.appendChild(listEl);
 
@@ -2862,13 +3320,24 @@
 
         buildContextMenu();
         buildSettings();
+        buildPlaylists();
         requestPersistentStorage();
         refreshCachedIds();
         updateShuffleButton();
         updateViewButtons();
         updateFilterButtons();
+        updateViewMenuBar();
 
-        // Shuffle and repeat already start from the settings defaults
+        // A click outside a dropdown closes it, the dropdowns stop their own
+        // clicks from bubbling so this does not fire for clicks inside them
+        document.addEventListener("click", closeDropdowns);
+
+        // Scrolling or resizing would leave a dropdown floating in the wrong
+        // spot, so close it instead of trying to follow
+        window.addEventListener("scroll", closeDropdowns, true);
+        window.addEventListener("resize", closeDropdowns);
+
+        // Shuffle and repeat start from the remembered state of the last session
         updateRepeatButton();
 
         // Place the panel where it was left, or default to the bottom right
@@ -3041,6 +3510,9 @@
         }
 
         ev.preventDefault();
+
+        // A floating dropdown would be left behind by a move, so close it
+        closeDropdowns();
 
         const rect = panelEl.getBoundingClientRect();
         const offsetX = ev.clientX - rect.left;
@@ -3265,12 +3737,234 @@
         }
     }
 
+    // Build an SVG icon from a list of shapes, stroked in the current text color
+    // Built with the DOM instead of innerHTML, so nothing parses markup
+    function makeSvgIcon(shapes, size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        const s = size || 18;
+
+        svg.setAttribute("width", String(s));
+        svg.setAttribute("height", String(s));
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+
+        shapes.forEach(function (shape) {
+
+            const el = document.createElementNS(ns, shape[0]);
+            const attrs = shape[1];
+
+            Object.keys(attrs).forEach(function (key) {
+                el.setAttribute(key, attrs[key]);
+            });
+
+            svg.appendChild(el);
+        });
+
+        return svg;
+    }
+
+    // Named action icons, one builder each so a fresh node is returned per call
+    function iconLoad() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "23 4 23 10 17 10" }],
+            ["polyline", { points: "1 20 1 14 7 14" }],
+            ["path", { d: "M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" }]
+        ]);
+    }
+
+    function iconStop() {
+
+        return makeSvgIcon([
+            ["rect", { x: "5", y: "5", width: "14", height: "14", rx: "2", fill: "currentColor", stroke: "none" }]
+        ]);
+    }
+
+    function iconClear() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "3 6 5 6 21 6" }],
+            ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }],
+            ["line", { x1: "10", y1: "11", x2: "10", y2: "17" }],
+            ["line", { x1: "14", y1: "11", x2: "14", y2: "17" }]
+        ]);
+    }
+
+    function iconFeed() {
+
+        return makeSvgIcon([
+            ["polygon", { points: "12 2 2 7 12 12 22 7 12 2" }],
+            ["polyline", { points: "2 17 12 22 22 17" }],
+            ["polyline", { points: "2 12 12 17 22 12" }]
+        ]);
+    }
+
+    function iconCache() {
+
+        return makeSvgIcon([
+            ["polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }]
+        ]);
+    }
+
+    function iconDownload() {
+
+        return makeSvgIcon([
+            ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }],
+            ["polyline", { points: "7 10 12 15 17 10" }],
+            ["line", { x1: "12", y1: "15", x2: "12", y2: "3" }]
+        ]);
+    }
+
+    function iconPlaylists() {
+
+        return makeSvgIcon([
+            ["line", { x1: "8", y1: "6", x2: "21", y2: "6" }],
+            ["line", { x1: "8", y1: "12", x2: "21", y2: "12" }],
+            ["line", { x1: "8", y1: "18", x2: "21", y2: "18" }],
+            ["line", { x1: "3", y1: "6", x2: "3.01", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "3.01", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "3.01", y2: "18" }]
+        ]);
+    }
+
+    // Mureka view, a hash to suggest the numbered published order
+    function iconMureka() {
+
+        return makeSvgIcon([
+            ["line", { x1: "4", y1: "9", x2: "20", y2: "9" }],
+            ["line", { x1: "4", y1: "15", x2: "20", y2: "15" }],
+            ["line", { x1: "10", y1: "3", x2: "8", y2: "21" }],
+            ["line", { x1: "16", y1: "3", x2: "14", y2: "21" }]
+        ]);
+    }
+
+    // Queue view, a small play marker ahead of a short list
+    function iconQueue() {
+
+        return makeSvgIcon([
+            ["polygon", { points: "2 6 2 14 8 10", fill: "currentColor", stroke: "none" }],
+            ["line", { x1: "12", y1: "7", x2: "21", y2: "7" }],
+            ["line", { x1: "12", y1: "12", x2: "21", y2: "12" }],
+            ["line", { x1: "12", y1: "17", x2: "21", y2: "17" }]
+        ]);
+    }
+
+    // A to Z view, lines of decreasing length to suggest a sort
+    function iconAlpha() {
+
+        return makeSvgIcon([
+            ["line", { x1: "3", y1: "6", x2: "17", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "13", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "9", y2: "18" }]
+        ]);
+    }
+
+    // All filter, a grid to suggest the whole set
+    function iconAll() {
+
+        return makeSvgIcon([
+            ["rect", { x: "3", y: "3", width: "7", height: "7" }],
+            ["rect", { x: "14", y: "3", width: "7", height: "7" }],
+            ["rect", { x: "14", y: "14", width: "7", height: "7" }],
+            ["rect", { x: "3", y: "14", width: "7", height: "7" }]
+        ]);
+    }
+
+    // Vocals filter, a microphone
+    function iconVocals() {
+
+        return makeSvgIcon([
+            ["path", { d: "M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" }],
+            ["path", { d: "M19 10v2a7 7 0 0 1-14 0v-2" }],
+            ["line", { x1: "12", y1: "19", x2: "12", y2: "23" }],
+            ["line", { x1: "8", y1: "23", x2: "16", y2: "23" }]
+        ]);
+    }
+
+    // Instrumental filter, a music note
+    function iconInstrumental() {
+
+        return makeSvgIcon([
+            ["path", { d: "M9 18V5l12-2v13" }],
+            ["circle", { cx: "6", cy: "18", r: "3" }],
+            ["circle", { cx: "18", cy: "16", r: "3" }]
+        ]);
+    }
+
+    // Build a compact action tile, an icon stacked over a small label
+    // The label never wraps, so a long name does not push the tile to two lines
+    function makeActionButton(iconNode, label, bg, fg, handler) {
+
+        const b = document.createElement("button");
+
+        b.style.cssText = [
+            "flex:1",
+            "display:flex",
+            "flex-direction:column",
+            "align-items:center",
+            "justify-content:center",
+            "gap:5px",
+            "min-width:0",
+            "padding:9px 4px",
+            "border:none",
+            "border-radius:8px",
+            "background:" + bg,
+            "color:" + fg,
+            "font:600 11px/1 sans-serif",
+            "cursor:pointer"
+        ].join(";");
+
+        const iconEl = document.createElement("span");
+        iconEl.style.cssText = "display:flex;align-items:center;justify-content:center;height:18px";
+
+        if (iconNode) {
+            iconEl.appendChild(iconNode);
+        }
+
+        const labelEl = document.createElement("span");
+        labelEl.textContent = label;
+        labelEl.style.cssText = "white-space:nowrap";
+
+        b.appendChild(iconEl);
+        b.appendChild(labelEl);
+        b.addEventListener("click", handler);
+
+        // Expose the parts so callers can update the label or swap the icon
+        b.iconEl = iconEl;
+        b.labelEl = labelEl;
+
+        return b;
+    }
+
+    // Replace the icon inside an action tile built by makeActionButton
+    function setButtonIcon(btn, iconNode) {
+
+        if (!btn || !btn.iconEl) {
+            return;
+        }
+
+        btn.iconEl.textContent = "";
+
+        if (iconNode) {
+            btn.iconEl.appendChild(iconNode);
+        }
+    }
+
     // Reflect the running state on the load button
     function updateButton() {
 
-        if (loadButton) {
-            loadButton.textContent = running ? "Stop" : "Load";
+        if (!loadButton) {
+            return;
         }
+
+        loadButton.labelEl.textContent = running ? "Stop" : "Load";
+        setButtonIcon(loadButton, running ? iconStop() : iconLoad());
     }
 
     // Render the cached song list
@@ -3535,9 +4229,9 @@
 
             const title = (song.title || "").trim() || "Untitled";
 
-            // Skip rows hidden by the vocals filter
+            // Skip rows hidden by the vocals or playlist filter
             // The queue view always shows the real queue, so it is never filtered
-            if (listView !== "queue" && !passesVocalFilter(song)) {
+            if (listView !== "queue" && !passesFilters(song)) {
                 return;
             }
 
@@ -3560,9 +4254,17 @@
         });
 
         // Update the counts line, shown rows against the library total and queue
+        // When a playlist is active its name leads the line
         if (countsEl) {
-            countsEl.textContent = "Shown " + shown + " of " + cache.songs.length
+
+            let text = "Shown " + shown + " of " + cache.songs.length
                 + "  \u00B7  Queue " + queue.length;
+
+            if (activePlaylist) {
+                text = activePlaylist.name + "  \u00B7  " + text;
+            }
+
+            countsEl.textContent = text;
         }
 
         // Amnesty, pin the playing song on top when this view does not contain it
@@ -3574,10 +4276,11 @@
             listEl.insertBefore(item, listEl.firstChild);
         }
 
-        // Tell the user when the search or vocals filter hides everything
-        const vocalFiltering = listView !== "queue" && settings.vocalFilter !== "all";
+        // Tell the user when the search, vocals or playlist filter hides everything
+        const filtering = listView !== "queue"
+            && (settings.vocalFilter !== "all" || activePlaylist);
 
-        if ((query || vocalFiltering) && shown === 0 && !playingItemEl) {
+        if ((query || filtering) && shown === 0 && !playingItemEl) {
 
             const empty = document.createElement("div");
             empty.textContent = "No matches";
@@ -3803,7 +4506,7 @@
             function () { return settings.refreshOnStart.all; },
             function (v) { settings.refreshOnStart.all = v; });
 
-        // Playback section, autoplay plus the default play mode and repeat
+        // Playback section, autoplay on open
         const playbackLabel = document.createElement("div");
         playbackLabel.textContent = "Playback";
         playbackLabel.style.cssText = "color:#bbb";
@@ -3812,22 +4515,9 @@
             function () { return settings.autoPlay; },
             function (v) { settings.autoPlay = v; });
 
-        const shuffleRow = makeBoolRow("Shuffle",
-            function () { return settings.shuffle; },
-            function (v) { settings.shuffle = v; });
-
-        const repeatLabel = document.createElement("div");
-        repeatLabel.textContent = "Repeat";
-        repeatLabel.style.cssText = "color:#bbb";
-
-        const repeatRow = makeChoiceRow(
-            [
-                { label: "All", value: "all" },
-                { label: "One", value: "one" },
-                { label: "Off", value: "none" }
-            ],
-            function () { return settings.repeat; },
-            function (v) { settings.repeat = v; });
+        const reportRow = makeBoolRow("Report plays to Mureka",
+            function () { return settings.reportPlays; },
+            function (v) { settings.reportPlays = v; });
 
         const cacheRow = makeStepperRow("Cache ahead",
             function () { return settings.prefetchCount; },
@@ -3842,9 +4532,7 @@
         settingsEl.appendChild(allRow);
         settingsEl.appendChild(playbackLabel);
         settingsEl.appendChild(autoplayRow);
-        settingsEl.appendChild(shuffleRow);
-        settingsEl.appendChild(repeatLabel);
-        settingsEl.appendChild(repeatRow);
+        settingsEl.appendChild(reportRow);
         settingsEl.appendChild(cacheRow);
 
         panelEl.appendChild(settingsEl);
@@ -3854,6 +4542,8 @@
 
     // Show the settings overlay, expanding the panel first if it is minimized
     function openSettings() {
+
+        closeDropdowns();
 
         if (minimized) {
             setMinimized(false);
@@ -3870,6 +4560,222 @@
         if (settingsEl) {
             settingsEl.style.display = "none";
         }
+    }
+
+    // Build the playlists overlay once, it covers the panel until closed
+    function buildPlaylists() {
+
+        playlistsEl = document.createElement("div");
+        playlistsEl.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:#1d1d22",
+            "border-radius:10px",
+            "padding:12px",
+            "box-sizing:border-box",
+            "overflow:auto",
+            "display:none",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        // Heading row with a Done button that closes the overlay
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const heading = document.createElement("div");
+        heading.textContent = "Playlists";
+        heading.style.cssText = "font-weight:600";
+
+        const doneBtn = makeButton("Done", "#48e1eb", "#000", closePlaylists);
+        doneBtn.style.flex = "0 0 auto";
+        doneBtn.style.padding = "6px 14px";
+
+        head.appendChild(heading);
+        head.appendChild(doneBtn);
+
+        // All songs entry clears the active playlist and shows the whole library
+        const allBtn = makeButton("All songs", "#333", "#fff", clearPlaylist);
+        allBtn.style.textAlign = "left";
+
+        // Container that the playlist rows are rendered into
+        playlistsListEl = document.createElement("div");
+        playlistsListEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
+
+        playlistsEl.appendChild(head);
+        playlistsEl.appendChild(allBtn);
+        playlistsEl.appendChild(playlistsListEl);
+
+        panelEl.appendChild(playlistsEl);
+    }
+
+    // Show the playlists overlay, loading the list the first time it opens
+    function openPlaylists() {
+
+        closeDropdowns();
+
+        if (minimized) {
+            setMinimized(false);
+        }
+
+        if (playlistsEl) {
+            playlistsEl.style.display = "flex";
+        }
+
+        if (playlists.length === 0 && !playlistsLoading) {
+            loadPlaylists();
+        }
+    }
+
+    // Hide the playlists overlay
+    function closePlaylists() {
+
+        if (playlistsEl) {
+            playlistsEl.style.display = "none";
+        }
+    }
+
+    // Fetch the user playlists, following pagination, keeping only own lists
+    // Each playlist carries its song_ids inline, so no detail call is needed
+    async function loadPlaylists() {
+
+        playlistsLoading = true;
+        renderPlaylists();
+
+        const collected = [];
+        let lastId = null;
+        let guard = 0;
+
+        try {
+
+            while (guard < 50) {
+
+                guard += 1;
+
+                let url = "/api/pgc/playlists?time=" + Date.now() + "&size=24&sort_type=2";
+
+                if (lastId) {
+                    url += "&last_id=" + lastId;
+                }
+
+                const res = await fetch(url, { credentials: "include" });
+                const json = await res.json();
+
+                if (!json || json.code !== 0 || !json.data) {
+                    break;
+                }
+
+                const list = json.data.list || [];
+
+                list.forEach(function (p) {
+
+                    // Followed lists from other users carry a parent_id, skip them
+                    if (p.parent_id) {
+                        return;
+                    }
+
+                    collected.push({
+                        playlist_id: p.playlist_id,
+                        name: p.name || "Untitled",
+                        song_count: p.song_count || (p.song_ids ? p.song_ids.length : 0),
+                        ids: new Set(p.song_ids || [])
+                    });
+                });
+
+                lastId = json.data.last_id;
+
+                // Stop when the page was not full or there is no cursor to follow
+                if (!lastId || list.length < 24) {
+                    break;
+                }
+            }
+
+            playlists = collected;
+        } catch (e) {
+            playlists = collected;
+        }
+
+        playlistsLoading = false;
+        renderPlaylists();
+    }
+
+    // Render the playlist rows, or a loading or empty message
+    function renderPlaylists() {
+
+        if (!playlistsListEl) {
+            return;
+        }
+
+        playlistsListEl.textContent = "";
+
+        if (playlistsLoading) {
+
+            const msg = document.createElement("div");
+            msg.textContent = "Loading playlists...";
+            msg.style.cssText = "color:#888;padding:4px 2px";
+            playlistsListEl.appendChild(msg);
+            return;
+        }
+
+        if (playlists.length === 0) {
+
+            const msg = document.createElement("div");
+            msg.textContent = "No playlists found";
+            msg.style.cssText = "color:#888;padding:4px 2px";
+            playlistsListEl.appendChild(msg);
+            return;
+        }
+
+        playlists.forEach(function (pl) {
+
+            const active = activePlaylist && activePlaylist.playlist_id === pl.playlist_id;
+            const bg = active ? "#48e1eb" : "#333";
+            const fg = active ? "#000" : "#fff";
+
+            const btn = makeButton(pl.name + "  (" + pl.song_count + ")", bg, fg, function () {
+                selectPlaylist(pl);
+            });
+
+            btn.style.textAlign = "left";
+            playlistsListEl.appendChild(btn);
+        });
+    }
+
+    // Select a playlist as the active filter, then refresh the list and queue
+    function selectPlaylist(pl) {
+
+        activePlaylist = { playlist_id: pl.playlist_id, name: pl.name, ids: pl.ids };
+
+        updatePlaylistButton();
+        rebuildUpcoming();
+        renderList();
+        renderPlaylists();
+        closePlaylists();
+    }
+
+    // Clear the active playlist so the whole library shows again
+    function clearPlaylist() {
+
+        activePlaylist = null;
+
+        updatePlaylistButton();
+        rebuildUpcoming();
+        renderList();
+        renderPlaylists();
+        closePlaylists();
+    }
+
+    // Tint the Playlists button while a playlist filter is active
+    function updatePlaylistButton() {
+
+        if (!playlistButton) {
+            return;
+        }
+
+        const active = activePlaylist !== null;
+
+        playlistButton.style.background = active ? "#48e1eb" : "#444";
+        playlistButton.style.color = active ? "#000" : "#fff";
     }
 
     // Whether developer only features are enabled
@@ -3942,11 +4848,13 @@
             if (res.ok) {
 
                 const json = await res.json();
-                const fresh = json && json.data && json.data.song;
+                const data = json && json.data;
+                const fresh = data && data.song;
 
-                // Prefer the full detail object, fall back to the cached song
+                // Prefer the whole data object, it carries the song plus the
+                // play, favorite and share counts and the user block beside it
                 if (fresh && fresh.song_id === song.song_id) {
-                    payload = fresh;
+                    payload = data;
                 }
             }
         } catch (e) {
