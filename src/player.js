@@ -618,6 +618,9 @@
                 }
             }
 
+            // Grow the active queue with the songs just loaded
+            extendQueueWithNew();
+
             const newCursor = getCursor(page, songs);
             const more = hasMore(page);
 
@@ -752,6 +755,10 @@
         cache.songs = dedupe(fresh.concat(cache.songs));
         cache.updated = Date.now();
         saveCache();
+
+        // Grow the active queue with any songs the refresh brought in
+        extendQueueWithNew();
+
         setStatus("Up to date, total: " + cache.songs.length + ", new: " + newCount);
     }
 
@@ -1505,6 +1512,35 @@
         } else if (audio) {
             audio.currentTime = 0;
         }
+    }
+
+    // Append newly loaded songs to the active queue so a running play-all keeps
+    // growing as the library finishes loading
+    // Existing order is preserved, only filter passing songs not already queued
+    // are added, at the end, so the current upcoming order is not disturbed
+    function extendQueueWithNew() {
+
+        if (queuePos < 0 || queue.length === 0) {
+            return;
+        }
+
+        const inQueue = new Set(queue.map(function (s) {
+            return s.song_id;
+        }));
+
+        let added = cache.songs.filter(function (s) {
+            return passesVocalFilter(s) && !inQueue.has(s.song_id);
+        });
+
+        if (added.length === 0) {
+            return;
+        }
+
+        if (shuffleMode) {
+            added = shuffleCopy(added);
+        }
+
+        queue = queue.concat(added);
     }
 
     // Rebuild the upcoming part of the queue, keeping the current song and history
