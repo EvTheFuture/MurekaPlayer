@@ -2222,21 +2222,44 @@
 
     // Position a floating dropdown just under an anchor, spanning the panel width
     // Fixed positioning keeps it above the player without reflowing the content
+    // Everything is clamped to the viewport so the dropdown never runs off screen
     function placePopupUnder(popup, anchorEl) {
 
+        const margin = 8;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
         const pr = panelEl.getBoundingClientRect();
         const ar = anchorEl.getBoundingClientRect();
-        const margin = 8;
 
+        // Follow the panel width, but never wider than the viewport
+        let width = Math.min(pr.width, vw) - margin * 2;
+
+        if (width < 120) {
+            width = vw - margin * 2;
+        }
+
+        // Align with the panel, then keep the whole dropdown on screen
         let left = pr.left + margin;
-        let width = pr.width - margin * 2;
-        let top = ar.bottom + 4;
+        const maxLeft = vw - width - margin;
 
-        // Keep the dropdown inside the viewport
-        const maxTop = Math.max(8, window.innerHeight - 60);
+        if (left > maxLeft) {
+            left = maxLeft;
+        }
+
+        if (left < margin) {
+            left = margin;
+        }
+
+        // Sit just under the anchor, clamped to the viewport height
+        let top = ar.bottom + 4;
+        const maxTop = vh - 60;
 
         if (top > maxTop) {
             top = maxTop;
+        }
+
+        if (top < 4) {
+            top = 4;
         }
 
         popup.style.left = left + "px";
@@ -3176,7 +3199,7 @@
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
-            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important}"
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
             + "#mureka-player-art-wrap{max-width:220px !important;margin-left:auto !important;margin-right:auto !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
@@ -3481,19 +3504,30 @@
 
         if (!mobile) {
 
-            // Hand sizing back to the draggable desktop dock
+            // Hand sizing back to the draggable desktop dock at its fixed width
             panelEl.style.removeProperty("top");
             panelEl.style.removeProperty("height");
+            panelEl.style.removeProperty("right");
+            panelEl.style.removeProperty("left");
+            panelEl.style.setProperty("width", "300px");
             restorePosition();
             return;
         }
 
+        // Pin the panel to the real visible viewport rather than relying on
+        // 100vw, which on iOS can be wider than what is actually on screen and
+        // pushes the panel and its content off both edges
         const vv = window.visualViewport;
         const top = vv ? vv.offsetTop : 0;
+        const left = vv ? vv.offsetLeft : 0;
+        const width = vv ? vv.width : window.innerWidth;
         const height = vv ? vv.height : window.innerHeight;
 
         // Inline important beats the media query so the exact pixels win
         panelEl.style.setProperty("top", top + "px", "important");
+        panelEl.style.setProperty("left", left + "px", "important");
+        panelEl.style.setProperty("right", "auto", "important");
+        panelEl.style.setProperty("width", width + "px", "important");
         panelEl.style.setProperty("height", height + "px", "important");
 
         // The art height may have changed, re-seat the coverflow strip
