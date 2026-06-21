@@ -1,5 +1,7 @@
 # Mureka Player
 
+[![Latest release](https://img.shields.io/github/v/release/EvTheFuture/MurekaPlayer?display_name=tag&label=Latest%20release)](https://github.com/EvTheFuture/MurekaPlayer/releases/latest)
+
 A Firefox / LibreWolf add-on that loads all of your published Mureka songs into
 one panel on mureka.ai and plays them with a full player. The same player also
 runs on browsers without add-on support, such as Safari on iPhone, through a
