@@ -8,6 +8,7 @@ on:
 jobs:
   purge:
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Purge player.js on jsDelivr
         run: |
