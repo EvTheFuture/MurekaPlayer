@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.2.9";
+    const VERSION = "1.3.0";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -63,7 +63,21 @@
     let feedMode = "published";
 
     // Shortcut to the active feed config
+    // While a creator is selected this returns a creator config instead, so the
+    // loader, cache key and status line all follow that creator transparently
     function feed() {
+
+        if (creatorSource) {
+
+            return {
+                label: creatorSource.stage_name,
+                endpoint: "/api/pgc/user/published/songs",
+                creator: true,
+                user_id: creatorSource.user_id,
+                cacheKey: "mureka_autoload_creator_" + creatorSource.user_id
+            };
+        }
+
         return FEEDS[feedMode];
     }
 
@@ -117,6 +131,19 @@
     // The extension cannot read the download folder, so we track requests here
     const DOWNLOADED_KEY = "mureka_player_downloaded";
 
+    // localStorage key that remembers the logged in user id once it is learned
+    // It is read from your own feed so the followed creators list can load
+    const SELF_KEY = "mureka_player_self";
+
+    // localStorage key that remembers creators added by hand in the picker
+    const CREATORS_KEY = "mureka_player_creators";
+
+    // localStorage key that remembers the last source, your feed or a creator
+    const SOURCE_KEY = "mureka_player_source";
+
+    // localStorage key that remembers the play queue across restarts
+    const QUEUE_KEY = "mureka_player_queue";
+
     // Shared style for the floating dropdowns, positioned and shown at runtime
     const POPUP_CSS = [
         "position:fixed",
@@ -137,8 +164,22 @@
     // User settings, loaded once on startup, published is the default start feed
     let settings = loadSettings();
 
-    // Honor the chosen start feed before the cache for that feed is loaded
-    feedMode = settings.startFeed;
+    // The last browsed source, used to reopen on your feed or a creator
+    let startupSource = loadSource();
+
+    // Honor the remembered feed, or the chosen start feed, before its cache loads
+    // A remembered creator is applied after the UI is built, see applyStartupSource
+    feedMode = (startupSource && startupSource.kind === "feed")
+        ? startupSource.feed
+        : settings.startFeed;
+
+    // The creator whose library is being browsed, or null for your own library
+    // When set, feed() returns a creator config so the loader and cache follow it
+    // This must be declared before the cache is loaded below, because loadCache
+    // calls feed(), which reads creatorSource. A later declaration would leave it
+    // in its temporal dead zone, making feed() throw and the cache load come up
+    // empty, which forced a full reload on every startup
+    let creatorSource = null;
 
     // Cached data, loaded once on startup
     let cache = loadCache();
@@ -154,6 +195,19 @@
 
     // True while a playlist load is in progress
     let playlistsLoading = false;
+
+    // The logged in user id, learned from your own feed, used to list who you follow
+    let selfUserId = loadSelfUserId();
+
+    // Creators you follow plus any added by hand, loaded on demand into the picker
+    let followedCreators = [];
+    let savedCreators = loadSavedCreators();
+
+    // True while the followed creators list is loading
+    let creatorsLoading = false;
+
+    // Live filter text for the creator picker, lowercased, empty shows all
+    let creatorQuery = "";
 
     // Play, favorite and share counts for the now playing song, or null
     let nowPlayingCounts = null;
@@ -212,6 +266,9 @@
 
     // A one-shot seek applied once the next song has loaded, used when resuming
     let pendingSeek = 0;
+
+    // Timestamp of the last periodic queue save, throttles writes during play
+    let lastQueueSave = 0;
 
     // UI element references
     let statusEl = null;
@@ -276,6 +333,12 @@
     let playlistsListEl = null;
     let playlistButton = null;
 
+    // Creator picker overlay parts and the action tile that opens it
+    let creatorsEl = null;
+    let creatorsListEl = null;
+    let creatorsInputEl = null;
+    let creatorButton = null;
+
     // Player UI element references
     let artWrapEl = null;
     let playerArt = null;
@@ -324,6 +387,12 @@
                     parsed.songs = [];
                 }
 
+                // Re-trim so old caches shed dropped fields on their next save
+                // Skip anything not a real song so one bad entry cannot throw here
+                parsed.songs = parsed.songs.filter(function (s) {
+                    return s && s.song_id !== undefined && s.song_id !== null;
+                }).map(trim);
+
                 if (typeof parsed.complete !== "boolean") {
                     parsed.complete = false;
                 }
@@ -340,11 +409,47 @@
         return { songs: [], updated: 0, complete: false, lastCursor: null };
     }
 
-    // Persist the cache to localStorage
-    function saveCache() {
+    // Remove every other creator cache, freeing space for the active one
+    // The own feed caches and the active key are kept
+    function pruneCreatorCaches(keepKey) {
 
         try {
-            localStorage.setItem(feed().cacheKey, JSON.stringify(cache));
+            const remove = [];
+
+            for (let i = 0; i < localStorage.length; i += 1) {
+
+                const k = localStorage.key(i);
+
+                if (k && k.indexOf("mureka_autoload_creator_") === 0 && k !== keepKey) {
+                    remove.push(k);
+                }
+            }
+
+            remove.forEach(function (k) {
+                localStorage.removeItem(k);
+            });
+        } catch (e) {
+        }
+    }
+
+    // Persist the cache to localStorage
+    // If storage is full, drop other creator caches and retry once so the
+    // active library always saves and survives a restart
+    function saveCache() {
+
+        const key = feed().cacheKey;
+        const payload = JSON.stringify(cache);
+
+        try {
+            localStorage.setItem(key, payload);
+            return;
+        } catch (e) {
+        }
+
+        pruneCreatorCaches(key);
+
+        try {
+            localStorage.setItem(key, payload);
         } catch (e) {
         }
     }
@@ -444,11 +549,387 @@
         }
     }
 
+    // Read the remembered logged in user id, or null when not learned yet
+    function loadSelfUserId() {
+
+        try {
+            const raw = localStorage.getItem(SELF_KEY);
+
+            if (raw) {
+                return raw;
+            }
+        } catch (e) {
+        }
+
+        return null;
+    }
+
+    // Read creators added by hand, an array of {user_id, stage_name}
+    function loadSavedCreators() {
+
+        try {
+            const raw = localStorage.getItem(CREATORS_KEY);
+
+            if (raw) {
+
+                const parsed = JSON.parse(raw);
+
+                if (Array.isArray(parsed)) {
+                    return parsed;
+                }
+            }
+        } catch (e) {
+        }
+
+        return [];
+    }
+
+    // Persist the hand added creators list
+    function saveSavedCreators() {
+
+        try {
+            localStorage.setItem(CREATORS_KEY, JSON.stringify(savedCreators));
+        } catch (e) {
+        }
+    }
+
+    // Add a creator to the saved list if it is not already there
+    function addSavedCreator(userId, name) {
+
+        const id = String(userId);
+
+        const exists = savedCreators.some(function (c) {
+            return String(c.user_id) === id;
+        });
+
+        if (!exists) {
+            savedCreators.push({ user_id: id, stage_name: name || ("User " + id) });
+            saveSavedCreators();
+        }
+    }
+
+    // Remove a creator from the saved list by id
+    function removeSavedCreator(userId) {
+
+        const id = String(userId);
+
+        savedCreators = savedCreators.filter(function (c) {
+            return String(c.user_id) !== id;
+        });
+
+        saveSavedCreators();
+    }
+
+    // Learn the logged in user id from your own feed response the first time
+    // Only called outside creator mode, where every feed item is yours
+    function recordSelfUserId(root) {
+
+        if (selfUserId !== null) {
+            return;
+        }
+
+        try {
+            const data = root && root.data;
+
+            if (!data) {
+                return;
+            }
+
+            // The own feed family carries items under feeds, some under list
+            const arrays = [data.feeds, data.list];
+
+            for (const arr of arrays) {
+
+                if (Array.isArray(arr)) {
+
+                    for (const f of arr) {
+
+                        if (f && f.user && f.user.user_id) {
+                            selfUserId = String(f.user.user_id);
+                            localStorage.setItem(SELF_KEY, selfUserId);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Fallback, your own songs store files under a path with your id
+            // This catches feeds that omit the user object on your own songs
+            const m = JSON.stringify(root).match(/files\/(\d{6,})\//);
+
+            if (m) {
+                selfUserId = m[1];
+                localStorage.setItem(SELF_KEY, selfUserId);
+            }
+        } catch (e) {
+        }
+    }
+
+    // Resolve the logged in user id on demand by probing your published feed
+    // This lets the picker map your own profile to your library before a Load
+    async function ensureSelfUserId() {
+
+        if (selfUserId !== null) {
+            return selfUserId;
+        }
+
+        try {
+            const params = new URLSearchParams();
+
+            params.set("time", String(Date.now()));
+            params.set("t", FEEDS.published.t);
+            params.set("size", "20");
+            params.set("query_type", FEEDS.published.queryType);
+            params.set("listRenderType", FEEDS.published.queryType);
+
+            const url = FEEDS.published.endpoint + "?" + params.toString();
+            const res = await fetch(url, { credentials: "include" });
+
+            if (res.ok) {
+
+                const json = await res.json();
+
+                recordSelfUserId(json);
+            }
+        } catch (e) {
+        }
+
+        return selfUserId;
+    }
+
+    // Reopen on the last browsed source without ever forcing a full reload
+    // A remembered creator is restored only from its cache, never loaded fresh
+    function applyStartupSource() {
+
+        if (!startupSource || startupSource.kind !== "creator") {
+
+            // Own feed, feedMode and cache were already set at init, nothing to do
+            return;
+        }
+
+        // Your own profile is just your own library, never a separate creator view
+        if (selfUserId !== null && String(startupSource.user_id) === String(selfUserId)) {
+            return;
+        }
+
+        creatorSource = { user_id: startupSource.user_id, stage_name: startupSource.stage_name };
+
+        // A creator has no access to your playlists, so drop the filter
+        activePlaylist = null;
+        updatePlaylistButton();
+
+        const creatorCache = loadCache();
+
+        // Restore the creator only when its songs are cached, never reload here
+        if (creatorCache.songs.length > 0) {
+
+            cache = creatorCache;
+            cachedIds = new Set();
+
+            updateCreatorButton();
+            updateFeedButton();
+            renderList();
+            refreshCachedIds();
+
+            const n = cache.songs.length;
+
+            setStatus("Browsing " + creatorSource.stage_name + ", " + n
+                + " cached song" + (n === 1 ? "" : "s"));
+
+        } else {
+
+            // No cached songs for this creator, stay on your own library
+            creatorSource = null;
+            updateCreatorButton();
+            updateFeedButton();
+        }
+    }
+
+    // Persist which source is showing now, your own feed or a creator
+    function saveSource() {
+
+        try {
+            let data;
+
+            if (creatorSource) {
+
+                data = {
+                    kind: "creator",
+                    user_id: creatorSource.user_id,
+                    stage_name: creatorSource.stage_name
+                };
+
+            } else {
+
+                data = { kind: "feed", feed: feedMode };
+            }
+
+            localStorage.setItem(SOURCE_KEY, JSON.stringify(data));
+        } catch (e) {
+        }
+    }
+
+    // Read the remembered source, returning null when there is none or it is bad
+    function loadSource() {
+
+        try {
+            const raw = localStorage.getItem(SOURCE_KEY);
+
+            if (raw) {
+
+                const p = JSON.parse(raw);
+
+                if (p && p.kind === "creator" && p.user_id) {
+
+                    return {
+                        kind: "creator",
+                        user_id: String(p.user_id),
+                        stage_name: p.stage_name || ("User " + p.user_id)
+                    };
+                }
+
+                if (p && p.kind === "feed") {
+
+                    return { kind: "feed", feed: p.feed === "all" ? "all" : "published" };
+                }
+            }
+        } catch (e) {
+        }
+
+        return null;
+    }
+
+    // Persist the current queue so it survives a restart
+    // Falls back to the resume state when nothing is live, as after Stop
+    function saveQueue() {
+
+        try {
+            let q = queue;
+            let pos = queuePos;
+
+            // Use the live position while playing, otherwise keep the resume time
+            // so closing before pressing Play does not reset it to the start
+            let time = 0;
+
+            if (audio && audio.src && isFinite(audio.currentTime)) {
+                time = audio.currentTime;
+            } else if (resumeState && resumeState.time) {
+                time = resumeState.time;
+            }
+
+            // After Stop the live queue is empty, persist the resume point instead
+            if ((pos < 0 || q.length === 0) && resumeState && resumeState.queue.length) {
+                q = resumeState.queue;
+                pos = resumeState.queuePos;
+                time = resumeState.time || 0;
+            }
+
+            if (pos < 0 || pos >= q.length || q.length === 0) {
+                localStorage.removeItem(QUEUE_KEY);
+                return;
+            }
+
+            const cur = q[pos];
+
+            localStorage.setItem(QUEUE_KEY, JSON.stringify({
+                ids: q.map(function (s) {
+                    return s.song_id;
+                }),
+                currentId: cur ? cur.song_id : null,
+                pos: pos,
+                time: time,
+                shuffle: shuffleMode
+            }));
+        } catch (e) {
+        }
+    }
+
+    // Rebuild the saved queue from the songs now loaded, ready to resume on Play
+    // Songs no longer present are dropped, the position follows the saved song
+    function restoreQueue() {
+
+        let saved = null;
+
+        try {
+            saved = JSON.parse(localStorage.getItem(QUEUE_KEY));
+        } catch (e) {
+        }
+
+        if (!saved || !Array.isArray(saved.ids) || saved.ids.length === 0) {
+            return;
+        }
+
+        const byId = new Map(cache.songs.map(function (s) {
+            return [s.song_id, s];
+        }));
+
+        const rebuilt = [];
+
+        saved.ids.forEach(function (id) {
+
+            const s = byId.get(id);
+
+            if (s) {
+                rebuilt.push(s);
+            }
+        });
+
+        // None of the saved songs are in this library, so this queue is not ours
+        if (rebuilt.length === 0) {
+            return;
+        }
+
+        queue = rebuilt;
+
+        // Point at the saved current song, falling back to the saved index
+        let pos = 0;
+
+        if (saved.currentId !== undefined && saved.currentId !== null) {
+
+            const i = queue.findIndex(function (s) {
+                return s.song_id === saved.currentId;
+            });
+
+            if (i !== -1) {
+                pos = i;
+            }
+        } else if (typeof saved.pos === "number") {
+            pos = saved.pos;
+        }
+
+        if (pos < 0) {
+            pos = 0;
+        }
+
+        if (pos >= queue.length) {
+            pos = queue.length - 1;
+        }
+
+        queuePos = pos;
+
+        // Restore the shuffle state the queue was built with
+        if (typeof saved.shuffle === "boolean" && saved.shuffle !== shuffleMode) {
+            shuffleMode = saved.shuffle;
+            updateShuffleButton();
+        }
+
+        // Show the song as loaded and paused, Play resumes it at the saved time
+        currentSong = queue[queuePos];
+        resumeState = { queue: queue, queuePos: queuePos, time: saved.time || 0 };
+
+        updatePlayerInfo(currentSong);
+        renderList();
+        scrollToPlaying();
+
+        setStatus("Resumed queue, press play to continue");
+    }
+
     // Refresh the active feed on open when the user has asked for it
+    // This only checks the top for new songs, it never re-pages the library
     function maybeAutoRefresh() {
 
         if (settings.refreshOnStart[feedMode]) {
-            run();
+            run(true);
         }
     }
 
@@ -461,6 +942,7 @@
     }
 
     // Keep only the fields we actually need, to save space
+    // description and publish_at are not used anywhere, so they are dropped
     function trim(s) {
 
         return {
@@ -474,9 +956,7 @@
             share_key: s.share_key,
             generate_at: s.generate_at,
             publish_state: s.publish_state,
-            publish_at: s.publish_at,
             is_liked: s.is_liked === true,
-            description: s.description,
             model: s.model,
             bpm: s.bpm,
             generation_method: s.generation_method
@@ -564,6 +1044,12 @@
 
         if (node && typeof node === "object") {
 
+            // A single song object, as the creator endpoint nests under feeds[].song
+            // Return it directly so we do not recurse into its own fields
+            if ("song_id" in node) {
+                return [node];
+            }
+
             for (const key of Object.keys(node)) {
                 out = out.concat(extractSongs(node[key]));
             }
@@ -605,13 +1091,25 @@
         const params = new URLSearchParams();
 
         params.set("time", String(Date.now()));
-        params.set("t", feed().t);
-        params.set("size", String(PAGE_SIZE));
-        params.set("query_type", feed().queryType);
-        params.set("listRenderType", feed().queryType);
 
-        if (cursor !== null && cursor !== undefined) {
-            params.set("last_id", String(cursor));
+        if (feed().creator) {
+
+            // The creator endpoint pages a single user public songs by user_id
+            // It expects last_id 0 for the first page, then the returned last_id
+            params.set("user_id", String(feed().user_id));
+            params.set("size", String(PAGE_SIZE));
+            params.set("last_id", (cursor === null || cursor === undefined) ? "0" : String(cursor));
+
+        } else {
+
+            params.set("t", feed().t);
+            params.set("size", String(PAGE_SIZE));
+            params.set("query_type", feed().queryType);
+            params.set("listRenderType", feed().queryType);
+
+            if (cursor !== null && cursor !== undefined) {
+                params.set("last_id", String(cursor));
+            }
         }
 
         const url = feed().endpoint + "?" + params.toString();
@@ -630,7 +1128,7 @@
     // Entry point for the Load / refresh button
     // While the library is not fully cached it resumes loading older songs
     // Once everything is cached it only checks the top for new songs
-    async function run() {
+    async function run(light) {
 
         if (running) {
 
@@ -647,7 +1145,16 @@
 
         try {
 
-            if (cache.complete === true) {
+            // Refresh on open only checks the top for new songs, it never re-pages
+            // the whole library, even when the cache is not marked complete
+            // The strict true guard keeps a click event, passed as the argument
+            // by the Load button, from taking this path
+            if (light === true && cache.songs.length > 0) {
+                await refreshNew(myToken);
+
+            // A cache marked complete but holding no songs never really loaded,
+            // for example one a parsing bug left empty, so load it from scratch
+            } else if (cache.complete === true && cache.songs.length > 0) {
                 await refreshNew(myToken);
             } else {
                 await continueLoad(myToken);
@@ -696,6 +1203,11 @@
             // Drop this page unwritten so it cannot land in the wrong cache
             if (myToken !== loadToken) {
                 break;
+            }
+
+            // Learn the logged in user id from your own feed for the picker
+            if (!creatorSource) {
+                recordSelfUserId(page);
             }
 
             const songs = extractSongs(page);
@@ -796,6 +1308,11 @@
                 return;
             }
 
+            // Learn the logged in user id from your own feed for the picker
+            if (!creatorSource) {
+                recordSelfUserId(page);
+            }
+
             const songs = extractSongs(page);
 
             if (songs.length === 0) {
@@ -881,6 +1398,7 @@
 
     // Switch between the published feed and the all songs feed
     // Each feed keeps its own cache, so this just swaps which one is shown
+    // While browsing a creator this instead returns to your own current feed
     function switchFeed() {
 
         // Cancel any load in progress so it cannot write into the new feed cache
@@ -892,7 +1410,17 @@
         // Invalidate the active load token even if the flag was already cleared
         loadToken += 1;
 
-        feedMode = feedMode === "published" ? "all" : "published";
+        if (creatorSource) {
+
+            // Leave creator mode without toggling, returning to your own feed
+            creatorSource = null;
+            updateCreatorButton();
+
+        } else {
+
+            feedMode = feedMode === "published" ? "all" : "published";
+        }
+
         updateFeedButton();
 
         cache = loadCache();
@@ -906,15 +1434,18 @@
             + (n === 1 ? "" : "s")
             + (n === 0 ? ", press Load" : ""));
 
+        saveSource();
+
         // Refresh the newly opened feed when the user asked for it
         maybeAutoRefresh();
     }
 
     // Show the active feed name on the feed button
+    // This always reflects your own feed, creator state shows on its own tile
     function updateFeedButton() {
 
         if (feedButton) {
-            feedButton.labelEl.textContent = feed().label;
+            feedButton.labelEl.textContent = FEEDS[feedMode].label;
         }
     }
 
@@ -1385,6 +1916,14 @@
             if (!isSeeking) {
                 updateSeekDisplay();
             }
+
+            // Persist the position now and then so a restart resumes near here
+            const now = Date.now();
+
+            if (now - lastQueueSave > 5000) {
+                lastQueueSave = now;
+                saveQueue();
+            }
         });
 
         audio.addEventListener("play", function () {
@@ -1400,6 +1939,9 @@
         audio.addEventListener("pause", function () {
 
             updatePlayPause();
+
+            // Keep the saved position current when the user pauses
+            saveQueue();
 
             // Stop clears currentSong first, so this only fires for a real pause
             if (currentSong) {
@@ -1558,12 +2100,11 @@
 
         // Clicking the song that is already playing just restarts it, the queue
         // is left untouched so shuffle order is not regenerated
-        if (currentSong && currentSong.song_id === songId) {
+        // With no audio loaded yet, as just after a restored queue, fall through
+        if (currentSong && currentSong.song_id === songId && audio && audio.src) {
 
-            if (audio) {
-                audio.currentTime = 0;
-                audio.play();
-            }
+            audio.currentTime = 0;
+            audio.play();
 
             return;
         }
@@ -1707,6 +2248,9 @@
 
         queue = played.concat(upcoming);
         renderList();
+
+        // The upcoming order changed, keep the saved queue in step
+        saveQueue();
 
         // Start caching the newly ordered upcoming songs first, so a slow or
         // failing coverflow refresh can never block the prefetch
@@ -1976,6 +2520,9 @@
         setCurrentSrc(url);
         audio.play();
 
+        // Remember the queue and position so a restart can resume here
+        saveQueue();
+
         // Tell Mureka the song was played, unless the user opted out
         if (settings.reportPlays) {
             reportPlay(song);
@@ -2098,6 +2645,9 @@
                 time: (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0
             };
         }
+
+        // Persist the resume point so it also survives a restart
+        saveQueue();
 
         if (currentObjectUrl) {
             URL.revokeObjectURL(currentObjectUrl);
@@ -2953,11 +3503,20 @@
         cacheButton = makeActionButton(iconCache(), "Cache all", "#444", "#fff", cacheAll);
         downloadButton = makeActionButton(iconDownload(), "Download list", "#444", "#fff", downloadAll);
         downloadButton.title = "Download the songs shown under the current filter";
-        playlistButton = makeActionButton(iconPlaylists(), "Playlists", "#444", "#fff", openPlaylists);
 
         rowThree.appendChild(cacheButton);
         rowThree.appendChild(downloadButton);
-        rowThree.appendChild(playlistButton);
+
+        // A row for the two collection browsers, your playlists and other creators
+        const rowFour = document.createElement("div");
+        rowFour.style.cssText = "display:flex;gap:6px";
+
+        playlistButton = makeActionButton(iconPlaylists(), "Playlists", "#444", "#fff", openPlaylists);
+        creatorButton = makeActionButton(iconCreators(), "Creators", "#444", "#fff", openCreators);
+        creatorButton.title = "Browse another creator published songs";
+
+        rowFour.appendChild(playlistButton);
+        rowFour.appendChild(creatorButton);
 
         // Floating dropdown for the action buttons, opens over the player
         // It lives on the body and is fixed positioned, so toggling it does not
@@ -2966,6 +3525,7 @@
         actionsWrapEl.style.cssText = POPUP_CSS;
         actionsWrapEl.appendChild(rowOne);
         actionsWrapEl.appendChild(rowThree);
+        actionsWrapEl.appendChild(rowFour);
 
         // Keep clicks inside the dropdown from closing it
         actionsWrapEl.addEventListener("mousedown", function (ev) {
@@ -3344,6 +3904,7 @@
         buildContextMenu();
         buildSettings();
         buildPlaylists();
+        buildCreators();
         requestPersistentStorage();
         refreshCachedIds();
         updateShuffleButton();
@@ -3386,8 +3947,26 @@
             window.visualViewport.addEventListener("scroll", fitMobile);
         }
 
-        // Refresh the start feed on launch when the user asked for it
-        maybeAutoRefresh();
+        // Persist the queue position when the tab is hidden or about to unload
+        window.addEventListener("pagehide", saveQueue);
+
+        document.addEventListener("visibilitychange", function () {
+
+            if (document.hidden) {
+                saveQueue();
+            }
+        });
+
+        // Reopen on the remembered source from cache, never a full reload here
+        applyStartupSource();
+
+        // Refresh on launch only when asked, and only for your own feed
+        if (!creatorSource) {
+            maybeAutoRefresh();
+        }
+
+        // Bring back the queue from last time, ready to resume
+        restoreQueue();
 
         // Start playing on launch when the user asked for it
         maybeAutoPlay();
@@ -3867,6 +4446,15 @@
         ]);
     }
 
+    // Creators picker, a single person to suggest browsing another user
+    function iconCreators() {
+
+        return makeSvgIcon([
+            ["path", { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }],
+            ["circle", { cx: "12", cy: "7", r: "4" }]
+        ]);
+    }
+
     // Mureka view, a hash to suggest the numbered published order
     function iconMureka() {
 
@@ -4288,14 +4876,24 @@
         });
 
         // Update the counts line, shown rows against the library total and queue
-        // When a playlist is active its name leads the line
+        // An active creator and playlist lead the line so the scope stays clear
         if (countsEl) {
 
             let text = "Shown " + shown + " of " + cache.songs.length
                 + "  \u00B7  Queue " + queue.length;
 
+            const scope = [];
+
+            if (creatorSource) {
+                scope.push(creatorSource.stage_name);
+            }
+
             if (activePlaylist) {
-                text = activePlaylist.name + "  \u00B7  " + text;
+                scope.push(activePlaylist.name);
+            }
+
+            if (scope.length > 0) {
+                text = scope.join("  \u00B7  ") + "  \u00B7  " + text;
             }
 
             countsEl.textContent = text;
@@ -4578,6 +5176,8 @@
     function openSettings() {
 
         closeDropdowns();
+        closePlaylists();
+        closeCreators();
 
         if (minimized) {
             setMinimized(false);
@@ -4647,6 +5247,8 @@
     function openPlaylists() {
 
         closeDropdowns();
+        closeSettings();
+        closeCreators();
 
         if (minimized) {
             setMinimized(false);
@@ -4812,6 +5414,532 @@
         playlistButton.style.color = active ? "#000" : "#fff";
     }
 
+    // Tint the Creators button while another creator library is being browsed
+    function updateCreatorButton() {
+
+        if (!creatorButton) {
+            return;
+        }
+
+        const active = creatorSource !== null;
+
+        creatorButton.style.background = active ? "#48e1eb" : "#444";
+        creatorButton.style.color = active ? "#000" : "#fff";
+    }
+
+    // Browse another creator published songs, each creator keeps its own cache
+    // This mirrors switchFeed, swapping the cache and reloading from scratch
+    // Selecting your own profile shows your existing library, not a new cache
+    async function selectCreator(userId, name) {
+
+        // Resolve who you are so picking yourself maps to your own library
+        if (selfUserId === null) {
+            await ensureSelfUserId();
+        }
+
+        if (selfUserId !== null && String(userId) === String(selfUserId)) {
+            selectOwnLibrary();
+            return;
+        }
+
+        // Cancel any load in progress so it cannot write into the new cache
+        if (running) {
+            running = false;
+            updateButton();
+        }
+
+        loadToken += 1;
+
+        creatorSource = { user_id: String(userId), stage_name: name || ("User " + userId) };
+
+        // Your own playlists do not apply to a creator, so drop the filter
+        activePlaylist = null;
+        updatePlaylistButton();
+
+        cache = loadCache();
+        cachedIds = new Set();
+
+        updateCreatorButton();
+        updateFeedButton();
+        renderList();
+        refreshCachedIds();
+        closeCreators();
+        closeDropdowns();
+
+        const n = cache.songs.length;
+
+        setStatus("Browsing " + creatorSource.stage_name + ", " + n + " cached song"
+            + (n === 1 ? "" : "s")
+            + (n === 0 ? ", loading..." : ""));
+
+        saveSource();
+
+        // Pull the catalogue the first time this creator is opened
+        if (cache.songs.length === 0 || cache.complete !== true) {
+            run();
+        }
+    }
+
+    // Leave creator mode and show your own published library as usual
+    // Your creator profile and your published feed are the same songs
+    function selectOwnLibrary() {
+
+        if (running) {
+            running = false;
+            updateButton();
+        }
+
+        loadToken += 1;
+
+        creatorSource = null;
+        feedMode = "published";
+
+        cache = loadCache();
+        cachedIds = new Set();
+
+        updateCreatorButton();
+        updateFeedButton();
+        renderList();
+        refreshCachedIds();
+        closeCreators();
+        closeDropdowns();
+
+        const n = cache.songs.length;
+
+        setStatus(feed().label + " feed, " + n + " cached song"
+            + (n === 1 ? "" : "s")
+            + (n === 0 ? ", loading..." : ""));
+
+        saveSource();
+
+        // Populate your library if it has not been loaded yet
+        if (cache.songs.length === 0 || cache.complete !== true) {
+            run();
+        }
+    }
+
+    // Leave creator mode and return to your own current feed
+    function clearCreator() {
+
+        if (!creatorSource) {
+            closeCreators();
+            return;
+        }
+
+        if (running) {
+            running = false;
+            updateButton();
+        }
+
+        loadToken += 1;
+
+        creatorSource = null;
+
+        cache = loadCache();
+        cachedIds = new Set();
+
+        updateCreatorButton();
+        updateFeedButton();
+        renderList();
+        refreshCachedIds();
+        closeCreators();
+
+        const n = cache.songs.length;
+
+        setStatus(feed().label + " feed, " + n + " cached song" + (n === 1 ? "" : "s"));
+
+        saveSource();
+    }
+
+    // Build the creators overlay once, it covers the panel until closed
+    function buildCreators() {
+
+        creatorsEl = document.createElement("div");
+        creatorsEl.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:#1d1d22",
+            "border-radius:10px",
+            "padding:12px",
+            "box-sizing:border-box",
+            "overflow:auto",
+            "display:none",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        // Heading row with a Done button that closes the overlay
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const heading = document.createElement("div");
+        heading.textContent = "Creators";
+        heading.style.cssText = "font-weight:600";
+
+        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeCreators);
+        doneBtn.style.flex = "0 0 auto";
+        doneBtn.style.padding = "6px 14px";
+
+        head.appendChild(heading);
+        head.appendChild(doneBtn);
+
+        // My library entry leaves creator mode and shows your own songs again
+        const mineBtn = makeButton("My library", "#333", "#fff", clearCreator);
+        mineBtn.style.textAlign = "left";
+
+        // Search and add row, typing filters the list, an id or link can be added
+        const addRow = document.createElement("div");
+        addRow.style.cssText = "display:flex;gap:6px";
+
+        creatorsInputEl = document.createElement("input");
+        creatorsInputEl.type = "text";
+        creatorsInputEl.placeholder = "Search creators, or paste an id / link";
+        creatorsInputEl.style.cssText = [
+            "flex:1",
+            "min-width:0",
+            "padding:7px 8px",
+            "border:1px solid #3a3a42",
+            "border-radius:6px",
+            "background:#26262c",
+            "color:#fff",
+            "box-sizing:border-box"
+        ].join(";");
+
+        // Typing filters the rows by name, no request is made
+        creatorsInputEl.addEventListener("input", function () {
+            creatorQuery = creatorsInputEl.value.trim().toLowerCase();
+            renderCreators();
+        });
+
+        // Enter only fetches by id when the text looks like an id or a link
+        creatorsInputEl.addEventListener("keydown", function (ev) {
+
+            if (ev.key === "Enter" && looksLikeCreatorId(creatorsInputEl.value)) {
+                ev.preventDefault();
+                addCreatorFromInput(creatorsInputEl.value);
+            }
+        });
+
+        const addBtn = makeButton("Add", "#444", "#fff", function () {
+            addCreatorFromInput(creatorsInputEl.value);
+        });
+
+        addBtn.style.flex = "0 0 auto";
+        addBtn.style.padding = "7px 14px";
+        addBtn.title = "Fetch a creator by numeric id or profile link";
+
+        addRow.appendChild(creatorsInputEl);
+        addRow.appendChild(addBtn);
+
+        // Container that the creator rows are rendered into
+        creatorsListEl = document.createElement("div");
+        creatorsListEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
+
+        creatorsEl.appendChild(head);
+        creatorsEl.appendChild(mineBtn);
+        creatorsEl.appendChild(addRow);
+        creatorsEl.appendChild(creatorsListEl);
+
+        panelEl.appendChild(creatorsEl);
+    }
+
+    // Show the creators overlay, loading who you follow the first time it opens
+    function openCreators() {
+
+        closeDropdowns();
+        closeSettings();
+        closePlaylists();
+
+        if (minimized) {
+            setMinimized(false);
+        }
+
+        if (creatorsEl) {
+            creatorsEl.style.display = "flex";
+        }
+
+        renderCreators();
+
+        // Load the discoverable pool once, featured creators need no self id
+        if (followedCreators.length === 0 && !creatorsLoading) {
+            loadCreators();
+        }
+    }
+
+    // Hide the creators overlay
+    function closeCreators() {
+
+        if (creatorsEl) {
+            creatorsEl.style.display = "none";
+        }
+    }
+
+    // Whether typed text looks like a creator id or a link carrying one
+    function looksLikeCreatorId(value) {
+
+        const v = (value || "").trim();
+
+        return /^\d+$/.test(v) || /\d{6,}/.test(v);
+    }
+
+    // Page through a users endpoint, handing each user to a collector
+    // Handles both the time based follow lists and the featured creators module
+    async function collectCreatorUsers(baseUrl, addUser) {
+
+        let lastId = null;
+        let guard = 0;
+
+        while (guard < 10) {
+
+            guard += 1;
+
+            let url = baseUrl + (baseUrl.indexOf("?") === -1 ? "?" : "&") + "time=" + Date.now();
+
+            if (lastId) {
+                url += "&last_id=" + lastId;
+            }
+
+            const res = await fetch(url, { credentials: "include" });
+            const json = await res.json();
+
+            if (!json || json.code !== 0 || !json.data) {
+                break;
+            }
+
+            const users = json.data.users || [];
+
+            users.forEach(addUser);
+
+            const next = json.data.last_id;
+            const more = json.data.has_more;
+
+            // Stop at the end, when the cursor stalls, on an empty page, or
+            // when the endpoint says there are no more results
+            if (users.length === 0 || !next || next === lastId || more === false) {
+                break;
+            }
+
+            lastId = next;
+        }
+    }
+
+    // Build the discoverable creator pool for the picker search
+    // Featured creators need no self id, the follow lists need it
+    async function loadCreators() {
+
+        creatorsLoading = true;
+        renderCreators();
+
+        // Resolve who you are so the follow lists below can be requested
+        if (selfUserId === null) {
+            await ensureSelfUserId();
+        }
+
+        const byId = new Map();
+
+        const addUser = function (u) {
+
+            if (!u || u.user_id === undefined || u.user_id === null) {
+                return;
+            }
+
+            const id = String(u.user_id);
+
+            if (!byId.has(id)) {
+                byId.set(id, { user_id: id, stage_name: u.stage_name || ("User " + id) });
+            }
+        };
+
+        try {
+
+            // Featured creators are available without knowing who you are
+            await collectCreatorUsers("/api/pgc/home/modules/featured-users?module_id=6&page_size=50", addUser);
+
+            // The follow lists round out the pool once the self id is known
+            if (selfUserId !== null) {
+                await collectCreatorUsers("/api/user/followings?user_id=" + selfUserId, addUser);
+                await collectCreatorUsers("/api/user/followers?user_id=" + selfUserId, addUser);
+            }
+
+        } catch (e) {
+        }
+
+        // Sort by name so the filtered list reads alphabetically
+        followedCreators = Array.from(byId.values()).sort(function (a, b) {
+            return a.stage_name.toLowerCase().localeCompare(b.stage_name.toLowerCase());
+        });
+
+        creatorsLoading = false;
+        renderCreators();
+    }
+
+    // Render the saved and followed creator rows, or a loading or empty message
+    function renderCreators() {
+
+        if (!creatorsListEl) {
+            return;
+        }
+
+        creatorsListEl.textContent = "";
+
+        const q = creatorQuery;
+
+        // A row matches when its name contains the query, empty query shows all
+        const match = function (c) {
+            return !q || (c.stage_name || "").toLowerCase().indexOf(q) !== -1;
+        };
+
+        // Saved creators come first, each with its own remove control
+        const savedShown = savedCreators.filter(match);
+
+        savedShown.forEach(function (c) {
+
+            creatorsListEl.appendChild(buildCreatorRow(c, true));
+        });
+
+        // Pooled creators next, skipping any already in the saved list
+        const savedIds = new Set(savedCreators.map(function (c) {
+            return String(c.user_id);
+        }));
+
+        const followed = followedCreators.filter(function (c) {
+            return !savedIds.has(String(c.user_id)) && match(c);
+        });
+
+        if (creatorsLoading) {
+
+            const msg = document.createElement("div");
+            msg.textContent = "Loading creators...";
+            msg.style.cssText = "color:#888;padding:4px 2px";
+            creatorsListEl.appendChild(msg);
+        }
+
+        followed.forEach(function (c) {
+
+            creatorsListEl.appendChild(buildCreatorRow(c, false));
+        });
+
+        // Guidance when nothing matches or nothing has loaded yet
+        if (!creatorsLoading && savedShown.length === 0 && followed.length === 0) {
+
+            const msg = document.createElement("div");
+            msg.style.cssText = "color:#888;padding:4px 2px;line-height:1.5";
+
+            if (q) {
+                msg.textContent = "No matching creators in your follows, followers"
+                    + " or featured. Paste the creator id or a profile link, then Add.";
+            } else if (selfUserId === null) {
+                msg.textContent = "Press Load on your own library once so people you"
+                    + " follow appear here, or add a creator by id above.";
+            } else {
+                msg.textContent = "No creators found. Add one by id or profile link above.";
+            }
+
+            creatorsListEl.appendChild(msg);
+        }
+    }
+
+    // Build one creator row, a select button plus an optional remove control
+    function buildCreatorRow(creator, removable) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:6px;align-items:stretch";
+
+        const active = creatorSource && String(creatorSource.user_id) === String(creator.user_id);
+        const bg = active ? "#48e1eb" : "#333";
+        const fg = active ? "#000" : "#fff";
+
+        const selectBtn = makeButton(creator.stage_name, bg, fg, function () {
+            selectCreator(creator.user_id, creator.stage_name);
+        });
+
+        selectBtn.style.textAlign = "left";
+        row.appendChild(selectBtn);
+
+        if (removable) {
+
+            const removeBtn = makeButton("\u2715", "#444", "#fff", function () {
+                removeSavedCreator(creator.user_id);
+                renderCreators();
+            });
+
+            removeBtn.style.flex = "0 0 auto";
+            removeBtn.style.padding = "7px 12px";
+            removeBtn.title = "Remove from saved creators";
+            row.appendChild(removeBtn);
+        }
+
+        return row;
+    }
+
+    // Resolve a typed creator id or profile link, then save and open it
+    async function addCreatorFromInput(value) {
+
+        const raw = (value || "").trim();
+
+        if (!raw) {
+            return;
+        }
+
+        let id = null;
+
+        if (/^\d+$/.test(raw)) {
+            id = raw;
+        } else {
+
+            // Pull a long run of digits out of a pasted profile link
+            const m = raw.match(/(\d{6,})/);
+
+            if (m) {
+                id = m[1];
+            }
+        }
+
+        if (!id) {
+            setStatus("Enter a numeric creator id or a profile link with an id");
+            return;
+        }
+
+        // Pasting your own id should open your library, not save you as a creator
+        if (selfUserId === null) {
+            await ensureSelfUserId();
+        }
+
+        if (selfUserId !== null && String(id) === String(selfUserId)) {
+
+            if (creatorsInputEl) {
+                creatorsInputEl.value = "";
+            }
+
+            creatorQuery = "";
+            selectOwnLibrary();
+            return;
+        }
+
+        // Resolve the stage name from the public profile, falling back to the id
+        let name = "User " + id;
+
+        try {
+
+            const url = "/api/pgc/personal/profile?time=" + Date.now() + "&user_id=" + id;
+            const res = await fetch(url, { credentials: "include" });
+            const json = await res.json();
+
+            if (json && json.code === 0 && json.data && json.data.user) {
+                name = json.data.user.stage_name || name;
+            }
+        } catch (e) {
+        }
+
+        if (creatorsInputEl) {
+            creatorsInputEl.value = "";
+        }
+
+        addSavedCreator(id, name);
+        renderCreators();
+        selectCreator(id, name);
+    }
+
     // Whether developer only features are enabled
     // Toggle with localStorage.setItem("mureka_player_debug", "1")
     function isDebug() {
@@ -4901,6 +6029,55 @@
             : "Could not copy to clipboard");
     }
 
+    // Build the share link for a song and copy it to the clipboard
+    // The link is the public song detail page keyed by the song share key
+    async function copyLink(song) {
+
+        let key = song.share_key;
+
+        // Older cached songs may predate the share key being stored, fetch it
+        if (!key) {
+
+            try {
+                const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+                const res = await fetch(url, { credentials: "include" });
+
+                if (res.ok) {
+
+                    const json = await res.json();
+                    const fresh = json && json.data && json.data.song;
+
+                    if (fresh && fresh.share_key) {
+                        key = fresh.share_key;
+
+                        // Persist it so the next copy needs no fetch
+                        const idx = cache.songs.findIndex(function (s) {
+                            return s.song_id === song.song_id;
+                        });
+
+                        if (idx !== -1) {
+                            cache.songs[idx].share_key = key;
+                            saveCache();
+                        }
+                    }
+                }
+            } catch (e) {
+            }
+        }
+
+        if (!key) {
+            setStatus("No link for this song");
+            return;
+        }
+
+        const link = "https://www.mureka.ai/song-detail/" + key;
+        const ok = await copyText(link);
+
+        setStatus(ok
+            ? "Copied link: " + (song.title || "Untitled")
+            : "Could not copy to clipboard");
+    }
+
     // Build the reusable right-click options popup once
     function buildContextMenu() {
 
@@ -4986,6 +6163,10 @@
 
         addMenuRow("Download", "#fff", function () {
             downloadOne(song);
+        });
+
+        addMenuRow("Copy link", "#fff", function () {
+            copyLink(song);
         });
 
         if (cached) {
