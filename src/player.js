@@ -312,7 +312,7 @@
     let playingItemEl = null;
 
     // Which list view is active, one of mureka, queue or alpha
-    let listView = "mureka";
+    let listView = settings.view;
 
     // The right-click options popup, built once and reused
     let contextMenuEl = null;
@@ -469,6 +469,7 @@
             repeat: "all",
             prefetchCount: PREFETCH_DEFAULT,
             vocalFilter: "all",
+            view: "mureka",
             reportPlays: true
         };
 
@@ -498,6 +499,11 @@
                     ? parsed.vocalFilter
                     : "all";
 
+                // Remembered list view, one of mureka, queue or alpha
+                const view = (parsed.view === "queue" || parsed.view === "alpha")
+                    ? parsed.view
+                    : "mureka";
+
                 return {
                     startFeed: parsed.startFeed === "all" ? "all" : "published",
                     refreshOnStart: {
@@ -509,6 +515,7 @@
                     repeat: repeat,
                     prefetchCount: prefetchCount,
                     vocalFilter: vocalFilter,
+                    view: view,
                     reportPlays: parsed.reportPlays !== false
                 };
             }
@@ -2483,6 +2490,11 @@
     function setView(view) {
 
         listView = view;
+
+        // Remember the view so the next startup opens on it
+        settings.view = view;
+        saveSettings();
+
         updateViewButtons();
         updateViewMenuBar();
         closeViewMenu();
