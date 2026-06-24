@@ -37,7 +37,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.0";
+    const VERSION = "1.3.1";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -283,6 +283,7 @@
     // The panel, its header, its collapsible body and the minimize indicator
     let panelEl = null;
     let headerEl = null;
+    let selfNameEl = null;
     let bodyEl = null;
     let minimizeBtn = null;
     let minimized = false;
@@ -1138,6 +1139,22 @@
         return res.json();
     }
 
+    // Show the logged in user name in the header, or hide it when not known
+    function setSelfName(name) {
+
+        if (!selfNameEl) {
+            return;
+        }
+
+        if (name) {
+            selfNameEl.textContent = name;
+            selfNameEl.style.display = "block";
+        } else {
+            selfNameEl.textContent = "";
+            selfNameEl.style.display = "none";
+        }
+    }
+
     // Show or hide the logged out warning banner
     function setAuthWarn(show) {
 
@@ -1175,8 +1192,14 @@
                     }
                 }
 
+                // Show who is logged in
+                setSelfName(user.stage_name || "");
+
                 return true;
             }
+
+            // Logged out, drop the name from the header
+            setSelfName(null);
 
             return false;
 
@@ -3538,6 +3561,11 @@
         versionEl.textContent = "v" + VERSION;
         versionEl.style.cssText = "margin-left:6px;font-weight:400;color:#888;font-size:11px";
         headerTitle.appendChild(versionEl);
+
+        // Logged in user name, filled by the profile probe, hidden until known
+        selfNameEl = document.createElement("div");
+        selfNameEl.style.cssText = "display:none;margin-top:1px;font-weight:400;color:#48e1eb;font-size:11px";
+        headerTitle.appendChild(selfNameEl);
 
         minimizeBtn = document.createElement("span");
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
