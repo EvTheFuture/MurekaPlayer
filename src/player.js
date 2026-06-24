@@ -1050,6 +1050,18 @@
                 return [node];
             }
 
+            // A feed wrapper holds the song under "song" with the viewer like flag
+            // beside it as is_liked. The wrapper flag is the authoritative one for
+            // the logged in user, so copy it onto the song before returning it
+            if (node.song && typeof node.song === "object" && "song_id" in node.song) {
+
+                if (typeof node.is_liked === "boolean") {
+                    node.song.is_liked = node.is_liked;
+                }
+
+                return [node.song];
+            }
+
             for (const key of Object.keys(node)) {
                 out = out.concat(extractSongs(node[key]));
             }
@@ -1145,19 +1157,26 @@
 
         try {
 
-            // Refresh on open only checks the top for new songs, it never re-pages
-            // the whole library, even when the cache is not marked complete
-            // The strict true guard keeps a click event, passed as the argument
-            // by the Load button, from taking this path
-            if (light === true && cache.songs.length > 0) {
+            if (cache.songs.length === 0) {
+
+                // Nothing cached yet, do the initial load from the top downward
+                await continueLoad(myToken);
+
+            } else {
+
+                // Always check the top for new or republished songs first, so new
+                // tracks are picked up whether or not the library finished loading
                 await refreshNew(myToken);
 
-            // A cache marked complete but holding no songs never really loaded,
-            // for example one a parsing bug left empty, so load it from scratch
-            } else if (cache.complete === true && cache.songs.length > 0) {
-                await refreshNew(myToken);
-            } else {
-                await continueLoad(myToken);
+                // A full Load also keeps filling older songs when not yet complete
+                // Refresh on open stays light and skips this
+                if (light !== true
+                    && cache.complete !== true
+                    && running
+                    && myToken === loadToken) {
+
+                    await continueLoad(myToken);
+                }
             }
 
         } catch (e) {
@@ -1182,8 +1201,9 @@
     // Progress and the cursor are saved each page, so it can resume after a stop
     async function continueLoad(myToken) {
 
-        const known = new Set(cache.songs.map(function (s) {
-            return s.song_id;
+        // Map of cached songs by id, so we can update fields on ones we already have
+        const known = new Map(cache.songs.map(function (s) {
+            return [s.song_id, s];
         }));
 
         let cursor = cache.lastCursor || null;
@@ -1222,9 +1242,18 @@
 
             for (const s of songs) {
 
-                if (!known.has(s.song_id)) {
-                    known.add(s.song_id);
-                    cache.songs.push(trim(s));
+                const existing = known.get(s.song_id);
+
+                if (!existing) {
+
+                    const fresh = trim(s);
+                    known.set(s.song_id, fresh);
+                    cache.songs.push(fresh);
+
+                } else {
+
+                    // Keep the like flag current on a song we already cached
+                    existing.is_liked = s.is_liked === true;
                 }
             }
 
@@ -2198,27 +2227,31 @@
     // are added, at the end, so the current upcoming order is not disturbed
     function extendQueueWithNew() {
 
-        if (queuePos < 0 || queue.length === 0) {
-            return;
+        try {
+
+            if (queuePos < 0 || queue.length === 0) {
+                return;
+            }
+
+            const inQueue = new Set(queue.map(function (s) {
+                return s.song_id;
+            }));
+
+            let added = cache.songs.filter(function (s) {
+                return passesFilters(s) && !inQueue.has(s.song_id);
+            });
+
+            if (added.length === 0) {
+                return;
+            }
+
+            if (shuffleMode) {
+                added = shuffleCopy(added);
+            }
+
+            queue = queue.concat(added);
+        } catch (e) {
         }
-
-        const inQueue = new Set(queue.map(function (s) {
-            return s.song_id;
-        }));
-
-        let added = cache.songs.filter(function (s) {
-            return passesFilters(s) && !inQueue.has(s.song_id);
-        });
-
-        if (added.length === 0) {
-            return;
-        }
-
-        if (shuffleMode) {
-            added = shuffleCopy(added);
-        }
-
-        queue = queue.concat(added);
     }
 
     // Rebuild the upcoming part of the queue, keeping the current song and history
