@@ -272,6 +272,7 @@
 
     // UI element references
     let statusEl = null;
+    let authWarnEl = null;
     let countsEl = null;
     let listEl = null;
     let loadButton = null;
@@ -1137,6 +1138,66 @@
         return res.json();
     }
 
+    // Show or hide the logged out warning banner
+    function setAuthWarn(show) {
+
+        if (authWarnEl) {
+            authWarnEl.style.display = show ? "block" : "none";
+        }
+    }
+
+    // Ask Mureka for your own profile to confirm you are logged in
+    // Returns true when logged in, false when logged out, null when it could
+    // not be determined, for example a network error
+    async function checkAuth() {
+
+        try {
+            const url = "/api/pgc/profile?time=" + Date.now();
+            const res = await fetch(url, { credentials: "include" });
+
+            if (!res.ok) {
+                return null;
+            }
+
+            const json = await res.json();
+            const user = json && json.code === 0 && json.data && json.data.user;
+
+            if (user && user.user_id != null) {
+
+                // Capture the logged in user id while we have it
+                if (selfUserId === null) {
+
+                    selfUserId = String(user.user_id);
+
+                    try {
+                        localStorage.setItem(SELF_KEY, selfUserId);
+                    } catch (e) {
+                    }
+                }
+
+                return true;
+            }
+
+            return false;
+
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Probe the profile endpoint and update the logged out banner
+    // A null result leaves the banner as it is, so a blip does not flip it
+    async function refreshAuthBanner() {
+
+        const authed = await checkAuth();
+
+        if (authed === true) {
+            setAuthWarn(false);
+        } else if (authed === false) {
+            setAuthWarn(true);
+        }
+    }
+
     // Entry point for the Load / refresh button
     // While the library is not fully cached it resumes loading older songs
     // Once everything is cached it only checks the top for new songs
@@ -1153,6 +1214,12 @@
 
         running = true;
         const myToken = ++loadToken;
+
+        // Confirm login state for your own feed and warn if logged out
+        if (!creatorSource) {
+            refreshAuthBanner();
+        }
+
         updateButton();
 
         try {
@@ -1464,6 +1531,13 @@
             + (n === 0 ? ", press Load" : ""));
 
         saveSource();
+
+        // Creator feeds never warn, your own feed re-checks login state
+        if (creatorSource) {
+            setAuthWarn(false);
+        } else {
+            refreshAuthBanner();
+        }
 
         // Refresh the newly opened feed when the user asked for it
         maybeAutoRefresh();
@@ -3518,6 +3592,23 @@
         statusEl = document.createElement("div");
         statusEl.style.marginBottom = "8px";
 
+        // Hidden warning banner, shown when a load looks like you are logged out
+        authWarnEl = document.createElement("div");
+        authWarnEl.style.cssText = [
+            "display:none",
+            "margin-bottom:8px",
+            "padding:7px 9px",
+            "border-radius:6px",
+            "background:#5a1f22",
+            "border:1px solid #b3464b",
+            "color:#ffd9db",
+            "font-size:12px",
+            "line-height:1.35"
+        ].join(";");
+        authWarnEl.textContent = "You appear to be logged out of Mureka. Songs"
+            + " still load, but your likes, plays and private drafts are missing."
+            + " Open mureka.ai, sign in, then press Load again.";
+
         const rowOne = document.createElement("div");
         rowOne.style.cssText = "display:flex;gap:6px";
 
@@ -3921,6 +4012,7 @@
         listEl.style.cssText = "position:relative;height:240px;box-sizing:border-box;overflow:auto;border-top:1px solid #333;padding-top:6px;margin-top:6px";
 
         bodyEl.appendChild(statusEl);
+        bodyEl.appendChild(authWarnEl);
         bodyEl.appendChild(playerEl);
         bodyEl.appendChild(searchRow);
         bodyEl.appendChild(viewMenuBar);
@@ -3992,6 +4084,11 @@
 
         // Reopen on the remembered source from cache, never a full reload here
         applyStartupSource();
+
+        // Check login state on launch so a logout shows without pressing Load
+        if (!creatorSource) {
+            refreshAuthBanner();
+        }
 
         // Refresh on launch only when asked, and only for your own feed
         if (!creatorSource) {
@@ -5507,6 +5604,9 @@
 
         saveSource();
 
+        // The logged out banner is about your own feed, not a creator
+        setAuthWarn(false);
+
         // Pull the catalogue the first time this creator is opened
         if (cache.songs.length === 0 || cache.complete !== true) {
             run();
@@ -5545,6 +5645,9 @@
 
         saveSource();
 
+        // Back on your own feed, re-check login state for the banner
+        refreshAuthBanner();
+
         // Populate your library if it has not been loaded yet
         if (cache.songs.length === 0 || cache.complete !== true) {
             run();
@@ -5582,6 +5685,9 @@
         setStatus(feed().label + " feed, " + n + " cached song" + (n === 1 ? "" : "s"));
 
         saveSource();
+
+        // Back on your own feed, re-check login state for the banner
+        refreshAuthBanner();
     }
 
     // Build the creators overlay once, it covers the panel until closed
