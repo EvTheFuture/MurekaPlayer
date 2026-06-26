@@ -3593,6 +3593,8 @@
             "background:#1d1d22",
             "color:#fff",
             "font:13px/1.4 sans-serif",
+            "text-size-adjust:100%",
+            "-webkit-text-size-adjust:100%",
             "padding:12px",
             "border-radius:10px",
             "box-shadow:0 4px 16px rgba(0,0,0,0.4)",
@@ -4173,6 +4175,31 @@
             window.visualViewport.addEventListener("resize", fitMobile);
             window.visualViewport.addEventListener("scroll", fitMobile);
         }
+
+        // On Safari a freshly injected fixed panel can render at the unzoomed
+        // size until a later zoom or resize event re-applies the page zoom
+        // Reading a layout value forces that to happen, so re-fit once the
+        // layout has settled, after the first frames and after full load
+        const settleLayout = function () {
+
+            if (!panelEl) {
+                return;
+            }
+
+            // Touching a layout property forces the current zoom to apply
+            void panelEl.offsetHeight;
+            fitMobile();
+
+            if (!swipeActive) {
+                positionArt(0);
+            }
+        };
+
+        requestAnimationFrame(function () {
+            requestAnimationFrame(settleLayout);
+        });
+
+        window.addEventListener("load", settleLayout);
 
         // Persist the queue position when the tab is hidden or about to unload
         window.addEventListener("pagehide", saveQueue);
