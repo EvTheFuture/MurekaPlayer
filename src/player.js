@@ -284,6 +284,8 @@
     let panelEl = null;
     let headerEl = null;
     let selfNameEl = null;
+    let sourceSepEl = null;
+    let sourceEl = null;
     let bodyEl = null;
     let minimizeBtn = null;
     let minimized = false;
@@ -1146,6 +1148,21 @@
         return res.json();
     }
 
+    // Show the dash only when both the user name and the source are visible
+    function updateSourceSeparator() {
+
+        if (!sourceSepEl) {
+            return;
+        }
+
+        const bothShown = selfNameEl
+            && selfNameEl.style.display !== "none"
+            && sourceEl
+            && sourceEl.style.display !== "none";
+
+        sourceSepEl.style.display = bothShown ? "inline" : "none";
+    }
+
     // Show the logged in user name in the header, or hide it when not known
     function setSelfName(name) {
 
@@ -1155,11 +1172,13 @@
 
         if (name) {
             selfNameEl.textContent = name;
-            selfNameEl.style.display = "block";
+            selfNameEl.style.display = "inline";
         } else {
             selfNameEl.textContent = "";
             selfNameEl.style.display = "none";
         }
+
+        updateSourceSeparator();
     }
 
     // Show or hide the logged out warning banner
@@ -1575,11 +1594,30 @@
 
     // Show the active feed name on the feed button
     // This always reflects your own feed, creator state shows on its own tile
+    // Show the current source under the title, the active feed or creator name
+    function updateSourceLabel() {
+
+        if (!sourceEl) {
+            return;
+        }
+
+        if (creatorSource) {
+            sourceEl.textContent = creatorSource.stage_name || "Creator";
+        } else {
+            sourceEl.textContent = FEEDS[feedMode].label + " feed";
+        }
+
+        sourceEl.style.display = "inline";
+        updateSourceSeparator();
+    }
+
     function updateFeedButton() {
 
         if (feedButton) {
             feedButton.labelEl.textContent = FEEDS[feedMode].label;
         }
+
+        updateSourceLabel();
     }
 
     // Try to learn the audio base URL from the site own audio element
@@ -2292,11 +2330,17 @@
             return;
         }
 
-        // At the end, loop back to the start when repeating all
-        if (repeatMode === "all" && queue.length > 0) {
-            queuePos = 0;
-            playCurrent();
-            return;
+        // At the end, rebuild the whole queue and start over when repeating all
+        // Rebuilding respects the active vocal filter and reshuffles, instead of
+        // replaying earlier songs that no longer match the current filter
+        if (repeatMode === "all") {
+
+            buildQueue(null);
+
+            if (queue.length > 0) {
+                playCurrent();
+                return;
+            }
         }
 
         // Otherwise report finished
@@ -3574,10 +3618,28 @@
         versionEl.style.cssText = "margin-left:6px;font-weight:400;color:#888;font-size:11px";
         headerTitle.appendChild(versionEl);
 
+        // Sub line under the title, the logged in user name then the active
+        // source separated by a dash, for example: EvTheFuture - All feed
+        const headerSub = document.createElement("div");
+        headerSub.style.cssText = "margin-top:1px;font-weight:400;font-size:11px";
+
         // Logged in user name, filled by the profile probe, hidden until known
-        selfNameEl = document.createElement("div");
-        selfNameEl.style.cssText = "display:none;margin-top:1px;font-weight:400;color:#48e1eb;font-size:11px";
-        headerTitle.appendChild(selfNameEl);
+        selfNameEl = document.createElement("span");
+        selfNameEl.style.cssText = "display:none;color:#48e1eb";
+
+        // Dash between the name and the source, shown only when both are present
+        sourceSepEl = document.createElement("span");
+        sourceSepEl.textContent = " - ";
+        sourceSepEl.style.cssText = "display:none;color:#888";
+
+        // Current source, your active feed (Published / All) or the creator name
+        sourceEl = document.createElement("span");
+        sourceEl.style.cssText = "display:none;color:#888";
+
+        headerSub.appendChild(selfNameEl);
+        headerSub.appendChild(sourceSepEl);
+        headerSub.appendChild(sourceEl);
+        headerTitle.appendChild(headerSub);
 
         minimizeBtn = document.createElement("span");
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
@@ -4124,6 +4186,9 @@
 
         // Reopen on the remembered source from cache, never a full reload here
         applyStartupSource();
+
+        // Show the feed / source indicator on startup, not only after a press
+        updateFeedButton();
 
         // Check login state on launch so a logout shows without pressing Load
         if (!creatorSource) {
@@ -4884,12 +4949,18 @@
             item.appendChild(dur);
         }
 
-        // Mark a song that is not published, in any view
-        if (song.publish_state != null && song.publish_state !== 1) {
+        // In your own All feed, mark each song as published or still a draft
+        // Drafts have no publish_state at all, so test for the published value
+        if (!creatorSource && feedMode === "all") {
+
+            const published = song.publish_state === 1;
 
             const badge = document.createElement("span");
-            badge.textContent = "draft";
-            badge.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;background:#3a3a42;color:#bbb;font-size:11px;line-height:16px";
+            badge.textContent = published ? "published" : "draft";
+            badge.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;font-size:11px;line-height:16px;"
+                + (published
+                    ? "background:#1f3a2a;color:#7fd6a0"
+                    : "background:#3a3a42;color:#bbb");
             item.appendChild(badge);
         }
 
