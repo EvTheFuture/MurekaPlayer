@@ -4854,7 +4854,7 @@
     // Render the cached song list
     function renderList() {
 
-        renderSongs(displaySongs());
+        renderSongs(displaySongs(), listView === "queue");
     }
 
     // Build one list row for a song
@@ -5073,7 +5073,7 @@
     }
 
     // Render any list of songs, the number shown is always the Mureka position
-    function renderSongs(songs) {
+    function renderSongs(songs, fromQueue) {
 
         if (!listEl) {
             return;
@@ -5096,26 +5096,13 @@
         const query = searchQuery;
         let shown = 0;
 
-        // In the queue view dim the rows that will not play next. That is the
-        // already played songs before the current one, and in repeat one also
-        // the upcoming songs, since playback stays on the current track
-        let dimmedIds = null;
+        // The queue can hold the same song more than once, played earlier and
+        // queued again, so the queue view decides played, current and upcoming
+        // by the row position in the queue rather than by song id, which would
+        // otherwise grey out a replayed song that is actually still upcoming
+        const byQueueIndex = fromQueue === true;
 
-        if (listView === "queue") {
-
-            dimmedIds = new Set();
-
-            queue.forEach(function (s, i) {
-
-                if (i < queuePos) {
-                    dimmedIds.add(s.song_id);
-                } else if (i > queuePos && repeatMode === "one") {
-                    dimmedIds.add(s.song_id);
-                }
-            });
-        }
-
-        songs.forEach(function (song) {
+        songs.forEach(function (song, i) {
 
             const title = (song.title || "").trim() || "Untitled";
 
@@ -5132,8 +5119,23 @@
 
             shown += 1;
 
-            const isPlaying = song.song_id === playingId;
-            const dimmed = dimmedIds ? dimmedIds.has(song.song_id) : false;
+            let isPlaying;
+            let dimmed;
+
+            if (byQueueIndex) {
+
+                isPlaying = i === queuePos;
+
+                // Grey out already played songs, and in repeat one the upcoming
+                // ones too, since playback stays on the current track
+                dimmed = i < queuePos || (i > queuePos && repeatMode === "one");
+
+            } else {
+
+                isPlaying = song.song_id === playingId;
+                dimmed = false;
+            }
+
             const item = buildSongRow(song, numberById.get(song.song_id), isPlaying, dimmed);
 
             if (isPlaying) {
