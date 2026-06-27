@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.2b";
+    const VERSION = "1.3.2";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5202,15 +5202,16 @@
         // Identify the playing song by its id so the highlight is feed independent
         const playingId = currentSong ? currentSong.song_id : null;
 
-        // The displayed number is the song position in the Mureka order, fixed
-        // across every view so a song keeps the same number everywhere
-        // Number from oldest to newest, so the oldest song is 1 and the newest
-        // is the highest. cache.songs is newest first, so reverse the index.
-        // This keeps every old song number stable when newer songs appear on top
+        // The displayed number is the song rank in the canonical order for the
+        // current source, so the column runs in step with the list. Oldest is 1
+        // and the newest is the highest, and a song keeps that number across the
+        // Queue and A-Z views. For the Published feed the order is by publish
+        // date, so the number tracks the publish sorted list shown here
+        const ordered = orderedSongs();
         const numberById = new Map();
-        const total = cache.songs.length;
+        const total = ordered.length;
 
-        cache.songs.forEach(function (s, i) {
+        ordered.forEach(function (s, i) {
             numberById.set(s.song_id, total - i);
         });
 
