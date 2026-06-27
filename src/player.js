@@ -35,9 +35,30 @@
 
     window.__murekaPlayerLoaded = true;
 
+    // The player only works on mureka.ai, where it can reach the API with your
+    // session cookie. Keep the site origin in one place for redirects and links
+    const SITE_ORIGIN = "https://www.mureka.ai";
+
+    // Whether the current page is mureka.ai or one of its subdomains
+    function onMurekaSite() {
+
+        const host = location.hostname;
+
+        return host === "mureka.ai"
+            || host === "www.mureka.ai"
+            || host.endsWith(".mureka.ai");
+    }
+
+    // Run from another site the bookmarklet cannot reach the API, so send the
+    // browser to mureka.ai instead of building a player that cannot load
+    if (!onMurekaSite()) {
+        location.href = SITE_ORIGIN + "/";
+        return;
+    }
+
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.1";
+    const VERSION = "1.3.2";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -219,6 +240,9 @@
 
     // True while a load run is in progress
     let running = false;
+
+    // The last raw feed response, kept for the debug Copy last feed JSON action
+    let lastFeedResponse = null;
 
     // Identifies the active load run, bumped to cancel a run and to stop a load
     // that started on one feed from writing into another after a feed switch
@@ -1145,7 +1169,12 @@
             throw new Error("HTTP " + res.status);
         }
 
-        return res.json();
+        const json = await res.json();
+
+        // Keep the raw page for the debug Copy last feed JSON action
+        lastFeedResponse = json;
+
+        return json;
     }
 
     // Show the dash only when both the user name and the source are visible
@@ -3697,6 +3726,7 @@
         statusEl.style.marginBottom = "8px";
 
         // Hidden warning banner, shown when a load looks like you are logged out
+        // Tapping it opens mureka.ai so you can sign in
         authWarnEl = document.createElement("div");
         authWarnEl.style.cssText = [
             "display:none",
@@ -3707,11 +3737,17 @@
             "border:1px solid #b3464b",
             "color:#ffd9db",
             "font-size:12px",
-            "line-height:1.35"
+            "line-height:1.35",
+            "cursor:pointer"
         ].join(";");
-        authWarnEl.textContent = "You appear to be logged out of Mureka. Songs"
-            + " still load, but your likes, plays and private drafts are missing."
-            + " Open mureka.ai, sign in, then press Load again.";
+        authWarnEl.title = "Open mureka.ai to sign in";
+        authWarnEl.textContent = "You appear to be logged out of Mureka. Tap here"
+            + " to open the sign in page. Songs still load, but your likes, plays"
+            + " and private drafts are missing.";
+
+        authWarnEl.addEventListener("click", function () {
+            location.href = SITE_ORIGIN + "/";
+        });
 
         const rowOne = document.createElement("div");
         rowOne.style.cssText = "display:flex;gap:6px";
@@ -5084,10 +5120,14 @@
 
         // The displayed number is the song position in the Mureka order, fixed
         // across every view so a song keeps the same number everywhere
+        // Number from oldest to newest, so the oldest song is 1 and the newest
+        // is the highest. cache.songs is newest first, so reverse the index.
+        // This keeps every old song number stable when newer songs appear on top
         const numberById = new Map();
+        const total = cache.songs.length;
 
         cache.songs.forEach(function (s, i) {
-            numberById.set(s.song_id, i + 1);
+            numberById.set(s.song_id, total - i);
         });
 
         listEl.textContent = "";
@@ -5426,6 +5466,17 @@
             function (v) { settings.prefetchCount = v; },
             0, 50);
 
+        // Developer section, turn on debug tools and share raw API data
+        const devLabel = document.createElement("div");
+        devLabel.textContent = "Developer";
+        devLabel.style.cssText = "color:#bbb";
+
+        const debugRow = makeBoolRow("Debug mode",
+            function () { return isDebug(); },
+            function (v) { setDebug(v); });
+
+        const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
+
         settingsEl.appendChild(head);
         settingsEl.appendChild(startLabel);
         settingsEl.appendChild(startRow);
@@ -5436,6 +5487,9 @@
         settingsEl.appendChild(autoplayRow);
         settingsEl.appendChild(reportRow);
         settingsEl.appendChild(cacheRow);
+        settingsEl.appendChild(devLabel);
+        settingsEl.appendChild(debugRow);
+        settingsEl.appendChild(copyFeedBtn);
 
         panelEl.appendChild(settingsEl);
 
@@ -6274,6 +6328,47 @@
         }
     }
 
+    // Enable or disable developer only features from the settings toggle
+    function setDebug(on) {
+
+        try {
+
+            if (on) {
+                localStorage.setItem(DEBUG_KEY, "1");
+            } else {
+                localStorage.removeItem(DEBUG_KEY);
+            }
+        } catch (e) {
+        }
+    }
+
+    // JSON.stringify replacer that drops the huge wave_list field at any depth
+    // The waveform data is large and not useful when sharing a response
+    function dropWaveList(key, value) {
+
+        if (key === "wave_list") {
+            return undefined;
+        }
+
+        return value;
+    }
+
+    // Copy the last raw feed response to the clipboard, without the wave lists
+    // Developer only helper, the feed list is the JSON most useful to share
+    async function copyFeedJson() {
+
+        if (!lastFeedResponse) {
+            setStatus("No feed response yet, press Load first");
+            return;
+        }
+
+        const ok = await copyText(JSON.stringify(lastFeedResponse, dropWaveList, 2));
+
+        setStatus(ok
+            ? "Copied the last feed response to the clipboard"
+            : "Could not copy to clipboard");
+    }
+
     // Fetch the full untrimmed song object and copy it to the clipboard
     // Developer only helper for inspecting the raw API fields, including lyrics
     async function copyJson(song) {
@@ -6301,7 +6396,7 @@
         } catch (e) {
         }
 
-        const ok = await copyText(JSON.stringify(payload, null, 2));
+        const ok = await copyText(JSON.stringify(payload, dropWaveList, 2));
 
         setStatus(ok
             ? "Copied JSON to clipboard: " + (song.title || "Untitled")
@@ -6461,8 +6556,9 @@
             });
         }
 
-        // Developer only and desktop only, copy the full song JSON to the clipboard
-        if (isDebug() && isDesktop()) {
+        // Developer only, copy the full song JSON to the clipboard
+        // Available on the bookmarklet too, where there is no console
+        if (isDebug()) {
 
             addMenuRow("Copy JSON", "#ffd479", function () {
                 copyJson(song);
