@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.2";
+    const VERSION = "1.3.2b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1343,6 +1343,45 @@
         }
     }
 
+    // Deep refresh, page the whole feed from the top without clearing first
+    // Adds new songs and refreshes the publish date, like flag and publish
+    // state on songs already cached, so a late published older song appears
+    // and every field is brought up to date in place
+    async function rescan() {
+
+        if (running) {
+
+            running = false;
+            loadToken += 1;
+            updateButton();
+            return;
+        }
+
+        running = true;
+        const myToken = ++loadToken;
+
+        if (!creatorSource) {
+            refreshAuthBanner();
+        }
+
+        updateButton();
+
+        try {
+            await refreshNew(myToken, true);
+        } catch (e) {
+            setStatus("Could not reach Mureka, showing " + cache.songs.length + " cached songs");
+        } finally {
+
+            if (myToken === loadToken) {
+                running = false;
+                updateButton();
+            }
+
+            renderList();
+            refreshCachedIds();
+        }
+    }
+
     // Keep fetching older pages from where we left off until the end is reached
     // Progress and the cursor are saved each page, so it can resume after a stop
     async function continueLoad(myToken) {
@@ -1454,7 +1493,7 @@
 
     // Walk the newest pages and add new or republished songs to the front
     // Stops after a run of cached songs, which marks the old data boundary
-    async function refreshNew(myToken) {
+    async function refreshNew(myToken, deep) {
 
         const known = new Set(cache.songs.map(function (s) {
             return s.song_id;
@@ -1465,6 +1504,7 @@
         let knownStreak = 0;
         let newCount = 0;
         let stop = false;
+        let reachedEnd = false;
 
         while (running && myToken === loadToken && !stop) {
 
@@ -1491,6 +1531,7 @@
             const songs = extractSongs(page);
 
             if (songs.length === 0) {
+                reachedEnd = true;
                 break;
             }
 
@@ -1505,14 +1546,16 @@
 
                 fresh.push(trim(s));
 
-                // A long enough run of cached songs means we reached old data
-                if (knownStreak >= KNOWN_STREAK_STOP) {
+                // A deep rescan pages the whole feed, the streak stop that ends
+                // a quick refresh early is skipped so every song is revisited
+                if (!deep && knownStreak >= KNOWN_STREAK_STOP) {
                     stop = true;
                     break;
                 }
             }
 
-            setStatus("Checking for new songs, found: " + newCount);
+            setStatus((deep ? "Rescanning, songs: " : "Checking for new songs, found: ")
+                + (deep ? fresh.length : newCount));
             renderSongs(fresh.concat(cache.songs));
 
             if (stop) {
@@ -1522,12 +1565,14 @@
             const more = hasMore(page);
 
             if (more === false) {
+                reachedEnd = true;
                 break;
             }
 
             const newCursor = getCursor(page, songs);
 
             if (newCursor === null || newCursor === cursor) {
+                reachedEnd = true;
                 break;
             }
 
@@ -1542,14 +1587,24 @@
         }
 
         // New and republished songs move to the front, duplicates are dropped
+        // A deep rescan rebuilds the whole list, so the fresh fields, publish
+        // date, like flag and publish state, replace the older cached copies
         cache.songs = dedupe(fresh.concat(cache.songs));
         cache.updated = Date.now();
+
+        // A deep rescan that ran to the end has now seen the entire library
+        if (deep && reachedEnd) {
+            cache.complete = true;
+            cache.lastCursor = null;
+        }
+
         saveCache();
 
         // Grow the active queue with any songs the refresh brought in
         extendQueueWithNew();
 
-        setStatus("Up to date, total: " + cache.songs.length + ", new: " + newCount);
+        setStatus((deep ? "Rescan complete, total: " : "Up to date, total: ")
+            + cache.songs.length + ", new: " + newCount);
     }
 
     // Wipe the cache and reset the view
@@ -3779,6 +3834,16 @@
         rowOne.appendChild(clearButton);
         rowOne.appendChild(feedButton);
 
+        // A full width deep refresh, pages the whole library without clearing
+        const rowRescan = document.createElement("div");
+        rowRescan.style.cssText = "display:flex;gap:6px";
+
+        const rescanButton = makeActionButton(iconLoad(), "Rescan", "#444", "#fff", rescan);
+        rescanButton.title = "Full refresh, page the whole library and update publish"
+            + " dates and likes in place, no need to Clear first";
+
+        rowRescan.appendChild(rescanButton);
+
         const rowThree = document.createElement("div");
         rowThree.style.cssText = "display:flex;gap:6px";
 
@@ -3806,6 +3871,7 @@
         actionsWrapEl = document.createElement("div");
         actionsWrapEl.style.cssText = POPUP_CSS;
         actionsWrapEl.appendChild(rowOne);
+        actionsWrapEl.appendChild(rowRescan);
         actionsWrapEl.appendChild(rowThree);
         actionsWrapEl.appendChild(rowFour);
 
