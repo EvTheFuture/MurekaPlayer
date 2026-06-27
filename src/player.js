@@ -991,6 +991,7 @@
             share_key: s.share_key,
             generate_at: s.generate_at,
             publish_state: s.publish_state,
+            publish_at: s.publish_at,
             is_liked: s.is_liked === true,
             model: s.model,
             bpm: s.bpm,
@@ -2214,7 +2215,7 @@
     // Sequential keeps the Mureka order, shuffle randomizes it
     function buildQueue(startId) {
 
-        let songs = cache.songs.filter(passesFilters);
+        let songs = orderedSongs().filter(passesFilters);
 
         // If the chosen start song is hidden by the filter, fall back to the full
         // library so a direct play request always works
@@ -2225,7 +2226,7 @@
             });
 
             if (!inPool) {
-                songs = cache.songs.slice();
+                songs = orderedSongs().slice();
             }
         }
 
@@ -2660,6 +2661,23 @@
 
     // The songs to show for the current view
     // The number shown per song is always its Mureka position, set in renderSongs
+    // The songs in their canonical order for the current source
+    // Your own Published feed, once fully loaded, is ordered by publish date
+    // newest published first, matching the Mureka website, so a freshly
+    // published older song appears at the top. Every other case keeps the
+    // creation order the API returns
+    function orderedSongs() {
+
+        if (!creatorSource && feedMode === "published" && cache.complete) {
+
+            return cache.songs.slice().sort(function (a, b) {
+                return (b.publish_at || 0) - (a.publish_at || 0);
+            });
+        }
+
+        return cache.songs;
+    }
+
     function displaySongs() {
 
         if (listView === "alpha") {
@@ -2676,8 +2694,8 @@
             return queue.slice();
         }
 
-        // Default Mureka view, the published order
-        return cache.songs;
+        // Default Mureka view, the canonical order for the current source
+        return orderedSongs();
     }
 
     // Play whatever song the queue currently points at
