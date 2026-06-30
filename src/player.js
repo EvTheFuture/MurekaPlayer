@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.3b";
+    const VERSION = "1.3.3";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -307,7 +307,7 @@
     let toTopDir = "up";
     let toTopTimer = 0;
     let lastListScroll = 0;
-    let viewSwitchAt = 0;
+    let programmaticScrollAt = 0;
     let loadButton = null;
     let feedButton = null;
     let cacheButton = null;
@@ -2659,7 +2659,7 @@
         // Drop the scroll button on a view change and ignore the scroll that
         // the re-render and scroll into view trigger right after
         fadeToTopBtn();
-        viewSwitchAt = Date.now();
+        programmaticScrollAt = Date.now();
 
         renderList();
         scrollToPlaying();
@@ -2677,6 +2677,9 @@
         const target = playingItemEl.offsetTop
             - (listEl.clientHeight / 2)
             + (playingItemEl.offsetHeight / 2);
+
+        // This is our own scroll, not the user, so the jump button stays hidden
+        programmaticScrollAt = Date.now();
 
         listEl.scrollTop = Math.max(0, target);
     }
@@ -4515,8 +4518,8 @@
             const delta = top - lastListScroll;
             lastListScroll = top;
 
-            // Ignore the programmatic scroll that follows a view switch
-            if (Date.now() - viewSwitchAt < 400) {
+            // Ignore programmatic scrolls, view switches and song changes
+            if (Date.now() - programmaticScrollAt < 400) {
                 return;
             }
 
