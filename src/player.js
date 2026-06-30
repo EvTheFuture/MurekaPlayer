@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.4";
+    const VERSION = "1.3.4b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -4040,6 +4040,10 @@
         // Everything below the header lives in the body, which can collapse
         bodyEl = document.createElement("div");
         bodyEl.id = "mureka-player-body";
+
+        // Keep the list and coverflow z-indexes in their own stacking context,
+        // so they cannot paint over the overlays that open on top of the panel
+        bodyEl.style.isolation = "isolate";
 
         statusEl = document.createElement("div");
         statusEl.style.marginBottom = "8px";
