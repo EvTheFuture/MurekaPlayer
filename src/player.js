@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.3b";
+    const VERSION = "1.3.3";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -351,6 +351,11 @@
 
     // The right-click options popup, built once and reused
     let contextMenuEl = null;
+
+    // The song information overlay, built once and repopulated per song
+    let infoEl = null;
+    let infoBodyEl = null;
+    let infoToken = 0;
 
     // The settings overlay and its controls, built once and reused
     let settingsEl = null;
@@ -4556,6 +4561,7 @@
 
         buildContextMenu();
         buildSettings();
+        buildInfo();
         buildPlaylists();
         buildCreators();
         requestPersistentStorage();
@@ -5891,6 +5897,7 @@
         closeDropdowns();
         closePlaylists();
         closeCreators();
+        closeInfo();
 
         if (minimized) {
             setMinimized(false);
@@ -5906,6 +5913,365 @@
 
         if (settingsEl) {
             settingsEl.style.display = "none";
+        }
+    }
+
+    // Build a copy glyph as SVG nodes, two overlapping rounded squares
+    function makeCopyIcon() {
+
+        return makeSvgIcon([
+            ["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }],
+            ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }]
+        ], 16);
+    }
+
+    // Build a check glyph as SVG nodes, shown briefly after a copy
+    function makeCheckIcon() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "20 6 9 17 4 12" }]
+        ], 16);
+    }
+
+    // A small copy button that reads its text live at click time, so a block
+    // filled in after the detail fetch still copies the right content
+    function makeCopyButton(getText) {
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.title = "Copy";
+        btn.style.cssText = "flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:none;border-radius:6px;background:#333;color:#fff;cursor:pointer";
+        btn.appendChild(makeCopyIcon());
+
+        let timer = 0;
+
+        btn.addEventListener("click", async function (ev) {
+
+            ev.stopPropagation();
+
+            const ok = await copyText(getText() || "");
+
+            btn.textContent = "";
+            btn.appendChild(ok ? makeCheckIcon() : makeCopyIcon());
+
+            if (timer) {
+                window.clearTimeout(timer);
+            }
+
+            // Revert the glyph after a moment so it is ready for the next copy
+            timer = window.setTimeout(function () {
+                btn.textContent = "";
+                btn.appendChild(makeCopyIcon());
+            }, 1200);
+        });
+
+        return btn;
+    }
+
+    // Format a unix timestamp in seconds as a compact local date and time
+    function fmtDate(sec) {
+
+        if (!sec) {
+            return "-";
+        }
+
+        const d = new Date(sec * 1000);
+
+        if (isNaN(d.getTime())) {
+            return "-";
+        }
+
+        const p = function (n) {
+            return (n < 10 ? "0" : "") + n;
+        };
+
+        return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate())
+            + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+    }
+
+    // Show a number when present, otherwise zero, used for the social counts
+    function numOr(n) {
+
+        return (typeof n === "number") ? String(n) : "0";
+    }
+
+    // Rebuild the timed lyrics array into plain readable text. Each segment
+    // becomes its tag on a line, then one line per row, with a blank line
+    // between segments. Segments with no rows, like Intro or Break, keep the tag
+    function buildLyricsText(lyrics) {
+
+        if (!Array.isArray(lyrics) || lyrics.length === 0) {
+            return "";
+        }
+
+        const parts = [];
+
+        lyrics.forEach(function (seg) {
+
+            const lines = [];
+
+            if (seg && seg.user_input_tag) {
+                lines.push(seg.user_input_tag);
+            }
+
+            if (seg && Array.isArray(seg.rows)) {
+
+                seg.rows.forEach(function (r) {
+
+                    if (r && typeof r.text === "string") {
+                        lines.push(r.text);
+                    }
+                });
+            }
+
+            if (lines.length > 0) {
+                parts.push(lines.join("\n"));
+            }
+        });
+
+        return parts.join("\n\n");
+    }
+
+    // Fetch the full detail object for a song, the song plus its social counts
+    function fetchSongDetail(songId) {
+
+        const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + songId;
+
+        return fetch(url, { credentials: "include" }).then(function (res) {
+
+            if (!res.ok) {
+                return null;
+            }
+
+            return res.json();
+
+        }).then(function (json) {
+
+            if (json && json.code === 0 && json.data) {
+                return json.data;
+            }
+
+            return null;
+
+        }).catch(function () {
+            return null;
+        });
+    }
+
+    // Build the information overlay once, it covers the panel until closed
+    function buildInfo() {
+
+        infoEl = document.createElement("div");
+        infoEl.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:#1d1d22",
+            "border-radius:10px",
+            "padding:12px",
+            "box-sizing:border-box",
+            "display:none",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        // Heading row with a Done button that closes the overlay
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;flex:0 0 auto";
+
+        const heading = document.createElement("div");
+        heading.textContent = "Information";
+        heading.style.cssText = "font-weight:600";
+
+        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeInfo);
+        doneBtn.style.flex = "0 0 auto";
+        doneBtn.style.padding = "6px 14px";
+
+        head.appendChild(heading);
+        head.appendChild(doneBtn);
+
+        // The body scrolls, so long lyrics stay inside the panel
+        infoBodyEl = document.createElement("div");
+        infoBodyEl.style.cssText = "flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px";
+
+        infoEl.appendChild(head);
+        infoEl.appendChild(infoBodyEl);
+        panelEl.appendChild(infoEl);
+    }
+
+    // One label and value line in the metadata block, returns the value node
+    // so a count filled in after the detail fetch can update in place
+    function addInfoRow(label, value) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:8px;align-items:baseline";
+
+        const labelEl = document.createElement("span");
+        labelEl.textContent = label;
+        labelEl.style.cssText = "flex:0 0 88px;color:#888";
+
+        const valueEl = document.createElement("span");
+        valueEl.textContent = value;
+        valueEl.style.cssText = "flex:1;min-width:0;color:#eee;word-break:break-word";
+
+        row.appendChild(labelEl);
+        row.appendChild(valueEl);
+        infoBodyEl.appendChild(row);
+
+        return valueEl;
+    }
+
+    // A titled block with a copy button and a text body, used for the style
+    // prompt and the lyrics. Returns the wrapper and a setter for the text
+    function addCopyBlock(label, scrollable) {
+
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;border-top:1px solid #333;padding-top:8px";
+
+        const headRow = document.createElement("div");
+        headRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const title = document.createElement("span");
+        title.textContent = label;
+        title.style.cssText = "color:#bbb;font-weight:600";
+
+        const body = document.createElement("div");
+        body.style.cssText = "white-space:pre-wrap;color:#eee;font:13px/1.5 sans-serif"
+            + (scrollable ? ";max-height:200px;overflow:auto;background:#26262c;border-radius:6px;padding:8px" : "");
+
+        const copyBtn = makeCopyButton(function () {
+            return body.textContent;
+        });
+
+        headRow.appendChild(title);
+        headRow.appendChild(copyBtn);
+        wrap.appendChild(headRow);
+        wrap.appendChild(body);
+        infoBodyEl.appendChild(wrap);
+
+        return {
+            wrap: wrap,
+            set: function (text) {
+                body.textContent = text;
+            }
+        };
+    }
+
+    // Open the information overlay for a song. The cached song gives genre,
+    // mood, BPM, model, duration and dates at once, then the detail fetch fills
+    // in the style prompt, the lyrics and the social counts
+    async function openInfo(song) {
+
+        closeDropdowns();
+        closePlaylists();
+        closeCreators();
+        closeSettings();
+        hideContextMenu();
+
+        if (minimized) {
+            setMinimized(false);
+        }
+
+        if (!infoEl || !infoBodyEl) {
+            return;
+        }
+
+        const myToken = ++infoToken;
+
+        infoBodyEl.textContent = "";
+        infoBodyEl.scrollTop = 0;
+
+        // Header, cover thumbnail beside the title
+        const header = document.createElement("div");
+        header.style.cssText = "display:flex;gap:10px;align-items:center";
+
+        const cover = coverUrl(song);
+
+        if (cover) {
+
+            const img = document.createElement("img");
+            img.src = cover;
+            img.style.cssText = "width:56px;height:56px;flex:0 0 auto;border-radius:6px;object-fit:cover;background:#000";
+            header.appendChild(img);
+        }
+
+        const titleEl = document.createElement("div");
+        titleEl.textContent = song.title || "Untitled";
+        titleEl.style.cssText = "font-weight:600;font-size:15px;word-break:break-word";
+        header.appendChild(titleEl);
+        infoBodyEl.appendChild(header);
+
+        // Metadata available straight from the cached song
+        addInfoRow("Genre", (song.genres || []).join(", ") || "-");
+        addInfoRow("Mood", (song.moods || []).join(", ") || "-");
+        addInfoRow("BPM", song.bpm ? String(song.bpm) : "-");
+        addInfoRow("Model", song.model || "-");
+        addInfoRow("Duration", formatTime((song.duration_milliseconds || 0) / 1000));
+
+        // Counts arrive with the detail fetch, start as a placeholder
+        const playsEl = addInfoRow("Plays", "...");
+        const likesEl = addInfoRow("Likes", "...");
+        const sharesEl = addInfoRow("Shares", "...");
+        const commentsEl = addInfoRow("Comments", "...");
+
+        addInfoRow("Created", fmtDate(song.generate_at));
+        addInfoRow("Published", song.publish_at ? fmtDate(song.publish_at) : "-");
+        addInfoRow("Song ID", String(song.song_id));
+
+        // Style prompt and lyrics come from the detail fetch
+        const promptBlock = addCopyBlock("Style prompt", false);
+        promptBlock.set("...");
+
+        const lyricsBlock = addCopyBlock("Lyrics", true);
+        lyricsBlock.wrap.style.display = "none";
+
+        infoEl.style.display = "flex";
+
+        const data = await fetchSongDetail(song.song_id);
+
+        // The overlay was closed or another song opened while fetching
+        if (myToken !== infoToken) {
+            return;
+        }
+
+        if (!data) {
+            promptBlock.set("Could not load details");
+            playsEl.textContent = "-";
+            likesEl.textContent = "-";
+            sharesEl.textContent = "-";
+            commentsEl.textContent = "-";
+            return;
+        }
+
+        const detail = data.song || {};
+
+        playsEl.textContent = numOr(data.play_count);
+        likesEl.textContent = numOr(data.fav_count);
+        sharesEl.textContent = numOr(data.share_count);
+        commentsEl.textContent = numOr(data.comment_count);
+
+        const prompt = detail.description || "";
+
+        if (prompt) {
+            promptBlock.set(prompt);
+        } else {
+            promptBlock.wrap.style.display = "none";
+        }
+
+        const lyricsText = buildLyricsText(detail.lyrics);
+
+        if (lyricsText) {
+            lyricsBlock.set(lyricsText);
+            lyricsBlock.wrap.style.display = "";
+        }
+    }
+
+    // Hide the information overlay and void any in flight detail fetch
+    function closeInfo() {
+
+        infoToken += 1;
+
+        if (infoEl) {
+            infoEl.style.display = "none";
         }
     }
 
@@ -5962,6 +6328,7 @@
         closeDropdowns();
         closeSettings();
         closeCreators();
+        closeInfo();
 
         if (minimized) {
             setMinimized(false);
@@ -6371,6 +6738,7 @@
         closeDropdowns();
         closeSettings();
         closePlaylists();
+        closeInfo();
 
         if (minimized) {
             setMinimized(false);
@@ -6930,6 +7298,10 @@
 
         addMenuRow("Copy link", "#fff", function () {
             copyLink(song);
+        });
+
+        addMenuRow("Information", "#fff", function () {
+            openInfo(song);
         });
 
         if (cached) {
