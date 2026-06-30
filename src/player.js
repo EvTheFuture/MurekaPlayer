@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.3";
+    const VERSION = "1.3.3b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -302,6 +302,12 @@
     let listWrapEl = null;
     let pullEl = null;
     let toTopBtn = null;
+
+    // Direction aware scroll button state
+    let toTopDir = "up";
+    let toTopTimer = 0;
+    let lastListScroll = 0;
+    let viewSwitchAt = 0;
     let loadButton = null;
     let feedButton = null;
     let cacheButton = null;
@@ -2649,8 +2655,16 @@
         updateViewButtons();
         updateViewMenuBar();
         closeViewMenu();
+
+        // Drop the scroll button on a view change and ignore the scroll that
+        // the re-render and scroll into view trigger right after
+        fadeToTopBtn();
+        viewSwitchAt = Date.now();
+
         renderList();
         scrollToPlaying();
+
+        lastListScroll = listEl ? listEl.scrollTop : 0;
     }
 
     // Scroll the list so the currently playing song is centered, if present
@@ -2667,14 +2681,67 @@
         listEl.scrollTop = Math.max(0, target);
     }
 
-    // Smoothly return the list to the top when the to top button is tapped
-    function scrollListToTop() {
+    // Point the scroll button at the matching edge for the scroll direction,
+    // down jumps to the end of the list, up jumps back to the beginning
+    function setToTopArrow(dir) {
+
+        if (!toTopBtn || toTopDir === dir) {
+            return;
+        }
+
+        toTopDir = dir;
+
+        const down = dir === "down";
+
+        toTopBtn.textContent = down ? "\u2193" : "\u2191";
+        toTopBtn.title = down ? "Scroll to end" : "Scroll to top";
+        toTopBtn.setAttribute("aria-label", down ? "Scroll to end" : "Scroll to top");
+    }
+
+    // Reveal the scroll button and arm the idle fade timer
+    function showToTopBtn() {
+
+        if (!toTopBtn) {
+            return;
+        }
+
+        toTopBtn.style.opacity = "1";
+        toTopBtn.style.pointerEvents = "auto";
+
+        if (toTopTimer) {
+            window.clearTimeout(toTopTimer);
+        }
+
+        // Fade the button away after a spell with no scrolling
+        toTopTimer = window.setTimeout(fadeToTopBtn, 5000);
+    }
+
+    // Fade the scroll button out and stop it catching taps
+    function fadeToTopBtn() {
+
+        if (toTopTimer) {
+            window.clearTimeout(toTopTimer);
+            toTopTimer = 0;
+        }
+
+        if (!toTopBtn) {
+            return;
+        }
+
+        toTopBtn.style.opacity = "0";
+        toTopBtn.style.pointerEvents = "none";
+    }
+
+    // Jump to the end when the down arrow shows, the beginning when up shows
+    function scrollListEdge() {
 
         if (!listEl) {
             return;
         }
 
-        listEl.scrollTo({ top: 0, behavior: "smooth" });
+        const target = toTopDir === "down" ? listEl.scrollHeight : 0;
+
+        listEl.scrollTo({ top: target, behavior: "smooth" });
     }
 
     // How far the list must be pulled before a release triggers a refresh
@@ -4426,27 +4493,40 @@
         // An opaque background hides the pull indicator until the list is pulled
         listEl.style.cssText = "position:relative;z-index:1;height:240px;box-sizing:border-box;overflow:auto;padding-top:6px;background:#1d1d22";
 
-        // A round button that jumps the list back to the top, shown when scrolled
+        // A round button that jumps to an end of the list, direction aware, it
+        // points down to the end while scrolling down and up to the top while
+        // scrolling up. It fades in on scroll and out again after a short idle
         toTopBtn = document.createElement("button");
         toTopBtn.type = "button";
         toTopBtn.setAttribute("aria-label", "Scroll to top");
         toTopBtn.title = "Scroll to top";
-        toTopBtn.style.cssText = "position:absolute;right:10px;bottom:10px;z-index:3;width:36px;height:36px;border-radius:50%;border:none;background:rgba(72,225,235,0.92);color:#0c0c0f;font-size:20px;line-height:36px;text-align:center;cursor:pointer;display:none;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
+        toTopBtn.style.cssText = "position:absolute;right:10px;bottom:10px;z-index:3;width:36px;height:36px;border-radius:50%;border:none;background:rgba(72,225,235,0.92);color:#0c0c0f;font-size:20px;line-height:36px;text-align:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.25s ease;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
         toTopBtn.textContent = "\u2191";
-        toTopBtn.addEventListener("click", scrollListToTop);
+        toTopBtn.addEventListener("click", scrollListEdge);
 
         listWrapEl.appendChild(pullEl);
         listWrapEl.appendChild(listEl);
         listWrapEl.appendChild(toTopBtn);
 
-        // Show or hide the scroll to top button as the list is scrolled
+        // React to scrolling, show a direction aware jump button that idles away
         listEl.addEventListener("scroll", function () {
 
-            if (listEl.scrollTop > 120) {
-                toTopBtn.style.display = "block";
-            } else {
-                toTopBtn.style.display = "none";
+            const top = listEl.scrollTop;
+            const delta = top - lastListScroll;
+            lastListScroll = top;
+
+            // Ignore the programmatic scroll that follows a view switch
+            if (Date.now() - viewSwitchAt < 400) {
+                return;
             }
+
+            // Ignore jitter and lists too short to be worth jumping around
+            if (Math.abs(delta) < 3 || listEl.scrollHeight - listEl.clientHeight < 40) {
+                return;
+            }
+
+            setToTopArrow(delta > 0 ? "down" : "up");
+            showToTopBtn();
         });
 
         // Pull to refresh, touch only so the desktop is unaffected
