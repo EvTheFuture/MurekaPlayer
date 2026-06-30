@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.3";
+    const VERSION = "1.3.4";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -6069,6 +6069,7 @@
             "border-radius:10px",
             "padding:12px",
             "box-sizing:border-box",
+            "overflow:auto",
             "display:none",
             "flex-direction:column",
             "gap:10px"
@@ -6089,9 +6090,9 @@
         head.appendChild(heading);
         head.appendChild(doneBtn);
 
-        // The body scrolls, so long lyrics stay inside the panel
+        // The whole overlay scrolls as one, so the body is a plain stack
         infoBodyEl = document.createElement("div");
-        infoBodyEl.style.cssText = "flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px";
+        infoBodyEl.style.cssText = "display:flex;flex-direction:column;gap:10px";
 
         infoEl.appendChild(head);
         infoEl.appendChild(infoBodyEl);
@@ -6122,7 +6123,7 @@
 
     // A titled block with a copy button and a text body, used for the style
     // prompt and the lyrics. Returns the wrapper and a setter for the text
-    function addCopyBlock(label, scrollable) {
+    function addCopyBlock(label, boxed) {
 
         const wrap = document.createElement("div");
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;border-top:1px solid #333;padding-top:8px";
@@ -6136,7 +6137,7 @@
 
         const body = document.createElement("div");
         body.style.cssText = "white-space:pre-wrap;color:#eee;font:13px/1.5 sans-serif"
-            + (scrollable ? ";max-height:200px;overflow:auto;background:#26262c;border-radius:6px;padding:8px" : "");
+            + (boxed ? ";background:#26262c;border-radius:6px;padding:8px" : "");
 
         const copyBtn = makeCopyButton(function () {
             return body.textContent;
