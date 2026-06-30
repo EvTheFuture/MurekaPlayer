@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.3";
+    const VERSION = "1.3.3b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2498,7 +2498,7 @@
                 return s.song_id;
             }));
 
-            let added = cache.songs.filter(function (s) {
+            let added = orderedSongs().filter(function (s) {
                 return passesFilters(s) && !inQueue.has(s.song_id);
             });
 
@@ -2530,9 +2530,10 @@
             return s.song_id;
         }));
 
-        // Songs not yet reached, kept in Mureka order then optionally shuffled
-        // The vocals and playlist filters apply so the queue respects the choice
-        let upcoming = cache.songs.filter(function (s) {
+        // Songs not yet reached, kept in the Mureka sorted order then optionally
+        // shuffled. orderedSongs is the displayed order, so with shuffle off the
+        // queue matches the list. The vocals and playlist filters still apply
+        let upcoming = orderedSongs().filter(function (s) {
             return !playedIds.has(s.song_id) && passesFilters(s);
         });
 
