@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.2";
+    const VERSION = "1.3.3";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -299,6 +299,9 @@
     let authWarnEl = null;
     let countsEl = null;
     let listEl = null;
+    let listWrapEl = null;
+    let pullEl = null;
+    let toTopBtn = null;
     let loadButton = null;
     let feedButton = null;
     let cacheButton = null;
@@ -391,6 +394,13 @@
     let swipeStartY = 0;
     let swipeDir = 0;
     let currentSwipeOffset = 0;
+
+    // Pull to refresh state for the song list
+    let pullArmed = false;
+    let pulling = false;
+    let pullStartY = 0;
+    let pullDist = 0;
+    let refreshing = false;
 
     // Small promise based delay helper
     function sleep(ms) {
@@ -1499,6 +1509,10 @@
             return s.song_id;
         }));
 
+        // Snapshot the original list so each progress merge concatenates the
+        // fresh pages with the unchanged base, not with a previous merge
+        const baseSongs = cache.songs.slice();
+
         const fresh = [];
         let cursor = null;
         let knownStreak = 0;
@@ -1556,7 +1570,15 @@
 
             setStatus((deep ? "Rescanning, songs: " : "Checking for new songs, found: ")
                 + (deep ? fresh.length : newCount));
-            renderSongs(fresh.concat(cache.songs));
+
+            // Merge the pages seen so far into the cache and render through the
+            // normal path, so during the scan the list is deduped and publish
+            // sorted exactly as it will be after a restart, not a raw concat.
+            // The token guard skips this if the feed was switched mid scan
+            if (myToken === loadToken) {
+                cache.songs = dedupe(fresh.concat(baseSongs));
+                renderList();
+            }
 
             if (stop) {
                 break;
@@ -1589,7 +1611,7 @@
         // New and republished songs move to the front, duplicates are dropped
         // A deep rescan rebuilds the whole list, so the fresh fields, publish
         // date, like flag and publish state, replace the older cached copies
-        cache.songs = dedupe(fresh.concat(cache.songs));
+        cache.songs = dedupe(fresh.concat(baseSongs));
         cache.updated = Date.now();
 
         // A deep rescan that ran to the end has now seen the entire library
@@ -2643,6 +2665,154 @@
             + (playingItemEl.offsetHeight / 2);
 
         listEl.scrollTop = Math.max(0, target);
+    }
+
+    // Smoothly return the list to the top when the to top button is tapped
+    function scrollListToTop() {
+
+        if (!listEl) {
+            return;
+        }
+
+        listEl.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    // How far the list must be pulled before a release triggers a refresh
+    const PULL_TRIGGER = 64;
+
+    // The maximum visual travel of the pull, the drag past this is absorbed
+    const PULL_MAX = 90;
+
+    // Convert raw finger travel into a damped pull so it feels rubbery
+    function dampPull(dy) {
+
+        return Math.min(PULL_MAX, dy * 0.5);
+    }
+
+    // Reflect the current pull distance on the indicator, fully lit when ready
+    function updatePullIndicator(dist) {
+
+        if (!pullEl) {
+            return;
+        }
+
+        const ratio = Math.min(1, dist / PULL_TRIGGER);
+        pullEl.style.opacity = String(ratio);
+        pullEl.firstChild.style.transform = "rotate(" + (dist * 3) + "deg)";
+    }
+
+    // Animate the list back to rest and clear the pull state
+    function resetPull() {
+
+        pulling = false;
+        pullArmed = false;
+        pullDist = 0;
+
+        if (!listEl) {
+            return;
+        }
+
+        listEl.style.transition = "transform 0.2s ease";
+        listEl.style.transform = "translateY(0)";
+
+        if (pullEl) {
+            pullEl.style.opacity = "0";
+            pullEl.firstChild.style.animation = "";
+        }
+
+        // Drop the transition again so the next live drag is not animated
+        window.setTimeout(function () {
+
+            if (listEl) {
+                listEl.style.transition = "";
+            }
+        }, 220);
+    }
+
+    // Hold the list open with a spinning icon while a refresh runs
+    async function triggerPullRefresh() {
+
+        if (running) {
+            resetPull();
+            return;
+        }
+
+        refreshing = true;
+        listEl.style.transition = "transform 0.2s ease";
+        listEl.style.transform = "translateY(44px)";
+
+        if (pullEl) {
+            pullEl.style.opacity = "1";
+            pullEl.firstChild.style.transform = "";
+            pullEl.firstChild.style.animation = "mureka-spin 0.8s linear infinite";
+        }
+
+        try {
+            await run();
+        } catch (err) {
+            // Ignore, run reports its own status
+        }
+
+        refreshing = false;
+        resetPull();
+    }
+
+    // Begin a possible pull only when the list is already at the very top
+    function onListTouchStart(ev) {
+
+        if (refreshing || ev.touches.length !== 1) {
+            pullArmed = false;
+            return;
+        }
+
+        if (listEl.scrollTop <= 0) {
+            pullArmed = true;
+            pulling = false;
+            pullStartY = ev.touches[0].clientY;
+        } else {
+            pullArmed = false;
+        }
+    }
+
+    // Track the drag, taking over only while pulling down from the top
+    function onListTouchMove(ev) {
+
+        if (!pullArmed || refreshing) {
+            return;
+        }
+
+        const dy = ev.touches[0].clientY - pullStartY;
+
+        if (dy > 0 && listEl.scrollTop <= 0) {
+            pulling = true;
+            ev.preventDefault();
+            pullDist = dampPull(dy);
+            listEl.style.transform = "translateY(" + pullDist + "px)";
+            updatePullIndicator(pullDist);
+        } else if (dy < 0) {
+
+            // The finger moved up, hand the gesture back to normal scrolling
+            if (pulling) {
+                resetPull();
+            }
+
+            pullArmed = false;
+        }
+    }
+
+    // On release, refresh if pulled far enough, otherwise spring back
+    function onListTouchEnd() {
+
+        if (!pulling) {
+            pullArmed = false;
+            return;
+        }
+
+        if (pullDist >= PULL_TRIGGER) {
+            triggerPullRefresh();
+        } else {
+            resetPull();
+        }
     }
 
     // Highlight the active view button
@@ -4104,12 +4274,14 @@
             "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
+            + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
             + "#mureka-player-art-wrap{max-width:220px !important;margin-left:auto !important;margin-right:auto !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
+            + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
             + "#mureka-player-list > div{font-size:15px !important;padding:9px 2px !important}"
             + "}";
@@ -4231,9 +4403,57 @@
         countsEl = document.createElement("div");
         countsEl.style.cssText = "margin-top:6px;color:#888;font-size:12px";
 
+        // The list lives inside a relative wrapper so the pull to refresh
+        // indicator can sit behind it and the scroll to top button can float
+        // over it. The cosmetic top border and spacing move to the wrapper
+        listWrapEl = document.createElement("div");
+        listWrapEl.id = "mureka-player-list-wrap";
+        listWrapEl.style.cssText = "position:relative;overflow:hidden;border-top:1px solid #333;margin-top:6px";
+
+        // The reload indicator revealed when the list is pulled down past the top
+        pullEl = document.createElement("div");
+        pullEl.style.cssText = "position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:center;color:#48e1eb;opacity:0;pointer-events:none";
+
+        const pullIcon = iconLoad();
+        pullIcon.style.width = "22px";
+        pullIcon.style.height = "22px";
+        pullIcon.style.transformOrigin = "center";
+        pullEl.appendChild(pullIcon);
+
         listEl = document.createElement("div");
         listEl.id = "mureka-player-list";
-        listEl.style.cssText = "position:relative;height:240px;box-sizing:border-box;overflow:auto;border-top:1px solid #333;padding-top:6px;margin-top:6px";
+
+        // An opaque background hides the pull indicator until the list is pulled
+        listEl.style.cssText = "position:relative;z-index:1;height:240px;box-sizing:border-box;overflow:auto;padding-top:6px;background:#1d1d22";
+
+        // A round button that jumps the list back to the top, shown when scrolled
+        toTopBtn = document.createElement("button");
+        toTopBtn.type = "button";
+        toTopBtn.setAttribute("aria-label", "Scroll to top");
+        toTopBtn.title = "Scroll to top";
+        toTopBtn.style.cssText = "position:absolute;right:10px;bottom:10px;z-index:3;width:36px;height:36px;border-radius:50%;border:none;background:rgba(72,225,235,0.92);color:#0c0c0f;font-size:20px;line-height:36px;text-align:center;cursor:pointer;display:none;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
+        toTopBtn.textContent = "\u2191";
+        toTopBtn.addEventListener("click", scrollListToTop);
+
+        listWrapEl.appendChild(pullEl);
+        listWrapEl.appendChild(listEl);
+        listWrapEl.appendChild(toTopBtn);
+
+        // Show or hide the scroll to top button as the list is scrolled
+        listEl.addEventListener("scroll", function () {
+
+            if (listEl.scrollTop > 120) {
+                toTopBtn.style.display = "block";
+            } else {
+                toTopBtn.style.display = "none";
+            }
+        });
+
+        // Pull to refresh, touch only so the desktop is unaffected
+        listEl.addEventListener("touchstart", onListTouchStart, { passive: true });
+        listEl.addEventListener("touchmove", onListTouchMove, { passive: false });
+        listEl.addEventListener("touchend", onListTouchEnd);
+        listEl.addEventListener("touchcancel", onListTouchEnd);
 
         bodyEl.appendChild(statusEl);
         bodyEl.appendChild(authWarnEl);
@@ -4241,7 +4461,7 @@
         bodyEl.appendChild(searchRow);
         bodyEl.appendChild(viewMenuBar);
         bodyEl.appendChild(countsEl);
-        bodyEl.appendChild(listEl);
+        bodyEl.appendChild(listWrapEl);
 
         panel.appendChild(header);
         panel.appendChild(bodyEl);
