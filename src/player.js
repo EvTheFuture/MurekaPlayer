@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.4b";
+    const VERSION = "1.3.5";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -263,6 +263,13 @@
 
     // The song object currently playing, null when nothing plays
     let currentSong = null;
+
+    // A local object URL for the current cover, handed to the Media Session so
+    // Bluetooth reads image bytes rather than refetching a remote URL each track
+    let currentArtBlobUrl = null;
+    let currentArtBlobId = null;
+    let currentArtBlobType = "image/jpeg";
+    let artFetchToken = 0;
 
     // Shared audio element for the built in player
     let audio = null;
@@ -3858,7 +3865,114 @@
         });
     }
 
-    // Tell the OS what is playing, so playerctl metadata and art are correct
+    // Guess an image MIME type from a URL, defaulting to jpeg
+    function guessImageType(url) {
+
+        const u = (url || "").toLowerCase();
+
+        if (u.indexOf(".png") !== -1) {
+            return "image/png";
+        }
+
+        if (u.indexOf(".webp") !== -1) {
+            return "image/webp";
+        }
+
+        return "image/jpeg";
+    }
+
+    // Build the Media Session artwork list, the one cover repeated at the sizes
+    // iOS picks from, smallest first, each tagged with an explicit type
+    function artworkList(src, type) {
+
+        if (!src) {
+            return [];
+        }
+
+        return ["128x128", "256x256", "512x512"].map(function (size) {
+            return { src: src, sizes: size, type: type };
+        });
+    }
+
+    // Set the Media Session metadata for a song with a given artwork list
+    function setMediaMetadata(song, artwork) {
+
+        try {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: song.title || "Untitled",
+                artist: (song.genres || []).join(", ") || "Mureka",
+                album: "Mureka",
+                artwork: artwork
+            });
+        } catch (e) {
+        }
+    }
+
+    // Free the current cover blob, if any
+    function clearArtBlob() {
+
+        if (currentArtBlobUrl) {
+            URL.revokeObjectURL(currentArtBlobUrl);
+            currentArtBlobUrl = null;
+            currentArtBlobId = null;
+        }
+    }
+
+    // Fetch the cover as a local blob and swap it into the Media Session. Local
+    // bytes mean Bluetooth does not have to refetch a remote URL for every
+    // track, which is what makes the art drop to a generic icon over time
+    async function loadArtBlob(song, url) {
+
+        if (!url) {
+            return;
+        }
+
+        const id = song.song_id;
+
+        // Already holding the blob for this song
+        if (currentArtBlobId === id && currentArtBlobUrl) {
+            return;
+        }
+
+        const token = ++artFetchToken;
+        let blob;
+
+        try {
+            const res = await fetch(url);
+
+            if (!res || !res.ok) {
+                return;
+            }
+
+            blob = await res.blob();
+        } catch (e) {
+            return;
+        }
+
+        // A newer song started while fetching, drop this stale cover
+        if (token !== artFetchToken) {
+            return;
+        }
+
+        if (!currentSong || currentSong.song_id !== id) {
+            return;
+        }
+
+        // Replace the previous blob, freeing its memory
+        if (currentArtBlobUrl) {
+            URL.revokeObjectURL(currentArtBlobUrl);
+        }
+
+        currentArtBlobUrl = URL.createObjectURL(blob);
+        currentArtBlobId = id;
+        currentArtBlobType = blob.type || "image/jpeg";
+
+        setMediaMetadata(song, artworkList(currentArtBlobUrl, currentArtBlobType));
+    }
+
+    // Tell the OS what is playing, so playerctl and the lock screen show the
+    // right title and art. The cover is shown at once from its remote URL, then
+    // swapped for a local blob that Bluetooth reads more reliably
     function updateMediaMetadata(song) {
 
         if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") {
@@ -3866,6 +3980,8 @@
         }
 
         if (!song) {
+
+            clearArtBlob();
 
             try {
                 navigator.mediaSession.playbackState = "none";
@@ -3875,17 +3991,20 @@
             return;
         }
 
-        try {
-            const art = coverUrl(song);
-            const artwork = art ? [{ src: art, sizes: "512x512" }] : [];
+        // Reuse the local blob when we already have it for this song, otherwise
+        // show the remote cover now and fetch the blob to swap in
+        if (currentArtBlobId === song.song_id && currentArtBlobUrl) {
 
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: song.title || "Untitled",
-                artist: (song.genres || []).join(", ") || "Mureka",
-                album: "Mureka",
-                artwork: artwork
-            });
-        } catch (e) {
+            setMediaMetadata(song, artworkList(currentArtBlobUrl, currentArtBlobType));
+            return;
+        }
+
+        const art = coverUrl(song);
+
+        setMediaMetadata(song, artworkList(art, guessImageType(art)));
+
+        if (art) {
+            loadArtBlob(song, art);
         }
     }
 
@@ -3993,6 +4112,11 @@
 
         minimizeBtn = document.createElement("span");
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
+
+        // The bookmarklet panel is fullscreen, so a minimize arrow is not useful
+        if (!isExtensionHost()) {
+            minimizeBtn.style.display = "none";
+        }
 
         // Hamburger that collapses or expands the top action menu to save space
         actionsToggleBtn = document.createElement("span");
