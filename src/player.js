@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5";
+    const VERSION = "1.3.5b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -126,7 +126,7 @@
     // Album art coverflow, the center cover takes this fraction of the width and
     // the previous and next covers peek in on the sides. Lower shows more of the
     // neighbors, 0.5 shows exactly half of each
-    const ART_CENTER_FRACTION = 0.5;
+    const ART_CENTER_FRACTION = 0.6;
 
     // Strongest blur on a side cover at its furthest from center, in pixels
     const ART_SIDE_BLUR = 3;
@@ -267,6 +267,7 @@
     // A local object URL for the current cover, handed to the Media Session so
     // Bluetooth reads image bytes rather than refetching a remote URL each track
     let currentArtBlobUrl = null;
+    let currentArtSmallUrl = null;
     let currentArtBlobId = null;
     let currentArtBlobType = "image/jpeg";
     let artFetchToken = 0;
@@ -391,6 +392,7 @@
     // Player UI element references
     let artWrapEl = null;
     let playerArt = null;
+    let artPlaceholderEl = null;
     let playerTitle = null;
     let playerMetaEl = null;
     let playerCountsEl = null;
@@ -3750,8 +3752,8 @@
                 playerCountsEl.textContent = "";
             }
 
-            if (artWrapEl) {
-                artWrapEl.style.display = "none";
+            if (artPlaceholderEl) {
+                artPlaceholderEl.style.display = "flex";
             }
 
             updateSeekDisplay();
@@ -3769,8 +3771,8 @@
             playerCountsEl.textContent = playerCountsText(song);
         }
 
-        if (artWrapEl) {
-            artWrapEl.style.display = coverUrl(song) ? "block" : "none";
+        if (artPlaceholderEl) {
+            artPlaceholderEl.style.display = coverUrl(song) ? "none" : "flex";
         }
 
         // Refill the strip around the new current song and reset its position
@@ -3881,6 +3883,60 @@
         return "image/jpeg";
     }
 
+    // Draw a cover blob down to a real 128px square and return an object URL for
+    // it, or null on failure. iOS has long preferred a small primary artwork, so
+    // a genuine downscale is more likely to stick than the full size relabelled
+    async function makeSmallCover(blob) {
+
+        try {
+            let bmp;
+
+            if (self.createImageBitmap) {
+                bmp = await createImageBitmap(blob);
+            } else {
+                return null;
+            }
+
+            const size = 128;
+            const canvas = document.createElement("canvas");
+            canvas.width = size;
+            canvas.height = size;
+
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(bmp, 0, 0, size, size);
+
+            if (bmp.close) {
+                bmp.close();
+            }
+
+            return await new Promise(function (resolve) {
+
+                canvas.toBlob(function (out) {
+                    resolve(out ? URL.createObjectURL(out) : null);
+                }, "image/jpeg", 0.9);
+            });
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Build an artwork list from local blobs, the real 128px downscale first as
+    // the primary, then the full cover for the large lock screen view
+    function blobArtworkList(smallUrl, fullUrl, type) {
+
+        const list = [];
+
+        if (smallUrl) {
+            list.push({ src: smallUrl, sizes: "128x128", type: "image/jpeg" });
+        }
+
+        if (fullUrl) {
+            list.push({ src: fullUrl, sizes: "512x512", type: type });
+        }
+
+        return list;
+    }
+
     // Build the Media Session artwork list, the one cover repeated at the sizes
     // iOS picks from, smallest first, each tagged with an explicit type
     function artworkList(src, type) {
@@ -3914,8 +3970,14 @@
         if (currentArtBlobUrl) {
             URL.revokeObjectURL(currentArtBlobUrl);
             currentArtBlobUrl = null;
-            currentArtBlobId = null;
         }
+
+        if (currentArtSmallUrl) {
+            URL.revokeObjectURL(currentArtSmallUrl);
+            currentArtSmallUrl = null;
+        }
+
+        currentArtBlobId = null;
     }
 
     // Fetch the cover as a local blob and swap it into the Media Session. Local
@@ -3958,16 +4020,29 @@
             return;
         }
 
-        // Replace the previous blob, freeing its memory
+        // Replace the previous blobs, freeing their memory
         if (currentArtBlobUrl) {
             URL.revokeObjectURL(currentArtBlobUrl);
+        }
+
+        if (currentArtSmallUrl) {
+            URL.revokeObjectURL(currentArtSmallUrl);
+            currentArtSmallUrl = null;
         }
 
         currentArtBlobUrl = URL.createObjectURL(blob);
         currentArtBlobId = id;
         currentArtBlobType = blob.type || "image/jpeg";
 
-        setMediaMetadata(song, artworkList(currentArtBlobUrl, currentArtBlobType));
+        // A genuine 128px downscale as the primary artwork, best chance on iOS
+        currentArtSmallUrl = await makeSmallCover(blob);
+
+        // Still the current song after the async downscale
+        if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
+            return;
+        }
+
+        setMediaMetadata(song, blobArtworkList(currentArtSmallUrl, currentArtBlobUrl, currentArtBlobType));
     }
 
     // Tell the OS what is playing, so playerctl and the lock screen show the
@@ -3995,7 +4070,7 @@
         // show the remote cover now and fetch the blob to swap in
         if (currentArtBlobId === song.song_id && currentArtBlobUrl) {
 
-            setMediaMetadata(song, artworkList(currentArtBlobUrl, currentArtBlobType));
+            setMediaMetadata(song, blobArtworkList(currentArtSmallUrl, currentArtBlobUrl, currentArtBlobType));
             return;
         }
 
@@ -4267,13 +4342,13 @@
         // A box that holds the masked strip, plus optional side nav buttons that
         // must sit outside the mask so they are not faded at the edges
         const artBox = document.createElement("div");
-        artBox.style.cssText = "position:relative";
+        artBox.style.cssText = "position:relative;border-radius:8px;overflow:hidden;margin-bottom:8px";
 
         // The album art is a coverflow strip, the center cover with side covers
         // that peek in and fade and blur toward the edges
         artWrapEl = document.createElement("div");
         artWrapEl.id = "mureka-player-art-wrap";
-        artWrapEl.style.cssText = "position:relative;width:100%;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#000;display:none;touch-action:pan-y";
+        artWrapEl.style.cssText = "position:relative;width:100%;overflow:hidden;background:#0a0a0d;touch-action:pan-y";
 
         // A short, wide window, the center cover is a square of this height
         artWrapEl.style.aspectRatio = String(1 / ART_CENTER_FRACTION);
@@ -4370,18 +4445,52 @@
             artBox.appendChild(makeArtNav("right", "\u203A", "Next", playNext));
         }
 
+        // Now playing title, overlaid at the bottom of the art over a scrim
         playerTitle = document.createElement("div");
         playerTitle.textContent = "Nothing playing";
-        playerTitle.style.cssText = "font-weight:600;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        playerTitle.style.cssText = "font-weight:700;font-size:18px;line-height:1.15;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9),0 0 2px rgba(0,0,0,0.8)";
 
         // Small meta line under the title, genre, mood, bpm and model
         playerMetaEl = document.createElement("div");
-        playerMetaEl.style.cssText = "color:#9a9aa5;font-size:12px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
 
         // Plays and likes for the current song on their own line so they show
         // even when the meta line above is long enough to be clipped
         playerCountsEl = document.createElement("div");
-        playerCountsEl.style.cssText = "color:#9a9aa5;font-size:12px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        playerCountsEl.style.cssText = "color:#dcdce0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+
+        // A faint note shown in the art area when the current song has no cover
+        artPlaceholderEl = document.createElement("div");
+        artPlaceholderEl.textContent = "\u266A";
+        artPlaceholderEl.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2e2e36;font-size:64px;pointer-events:none";
+
+        // Dark gradient behind the top status so its text stays readable
+        const topScrim = document.createElement("div");
+        topScrim.style.cssText = "position:absolute;left:0;right:0;top:0;height:40%;background:linear-gradient(to bottom,rgba(0,0,0,0.75),transparent);pointer-events:none";
+
+        // Dark gradient behind the bottom title block for the same reason
+        const bottomScrim = document.createElement("div");
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:62%;background:linear-gradient(to top,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.55) 45%,transparent 100%);pointer-events:none";
+
+        // Status sits at the top of the art, one clipped line, never blocks swipe
+        const topWrap = document.createElement("div");
+        topWrap.style.cssText = "position:absolute;left:10px;right:10px;top:7px;pointer-events:none;z-index:4";
+        statusEl.style.cssText = "font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+        topWrap.appendChild(statusEl);
+
+        // Title, meta and counts sit at the bottom of the art over the scrim
+        const bottomWrap = document.createElement("div");
+        bottomWrap.style.cssText = "position:absolute;left:10px;right:10px;bottom:8px;pointer-events:none;z-index:4";
+        bottomWrap.appendChild(playerTitle);
+        bottomWrap.appendChild(playerMetaEl);
+        bottomWrap.appendChild(playerCountsEl);
+
+        // Layer the overlays over the coverflow, the tiles stay swipeable below
+        artBox.appendChild(artPlaceholderEl);
+        artBox.appendChild(topScrim);
+        artBox.appendChild(bottomScrim);
+        artBox.appendChild(topWrap);
+        artBox.appendChild(bottomWrap);
 
         const seekRow = document.createElement("div");
         seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
@@ -4449,9 +4558,6 @@
         controlRow.appendChild(repeatBtn);
 
         playerEl.appendChild(artBox);
-        playerEl.appendChild(playerTitle);
-        playerEl.appendChild(playerMetaEl);
-        playerEl.appendChild(playerCountsEl);
         playerEl.appendChild(seekRow);
         playerEl.appendChild(controlRow);
 
@@ -4483,7 +4589,7 @@
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
-            + "#mureka-player-art-wrap{max-width:220px !important;margin-left:auto !important;margin-right:auto !important}"
+            + "#mureka-player-art-wrap{max-width:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
@@ -4672,7 +4778,6 @@
         listEl.addEventListener("touchend", onListTouchEnd);
         listEl.addEventListener("touchcancel", onListTouchEnd);
 
-        bodyEl.appendChild(statusEl);
         bodyEl.appendChild(authWarnEl);
         bodyEl.appendChild(playerEl);
         bodyEl.appendChild(searchRow);
