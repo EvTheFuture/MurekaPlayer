@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5d";
+    const VERSION = "1.3.5e";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -264,13 +264,22 @@
     // The song object currently playing, null when nothing plays
     let currentSong = null;
 
-    // A local object URL for the current cover, handed to the Media Session so
-    // Bluetooth reads image bytes rather than refetching a remote URL each track
-    let currentArtBlobUrl = null;
-    let currentArtSmallUrl = null;
-    let currentArtBlobId = null;
-    let currentArtBlobType = "image/jpeg";
+    // Cache of recent cover blob urls by song id, so returning to a recent
+    // track shows its art at once without a refetch, which iOS can be slow at
+    const ART_CACHE_MAX = 5;
+    const artCache = new Map();
+
+    // The song id whose art is currently set on the media session
+    let currentArtId = null;
+
+    // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
+
+    // iOS turns a seekable timeline into plus and minus skip buttons and hides
+    // the next and previous track buttons, so on iOS we skip the timeline and
+    // the seekto handler to keep the track buttons that most apps show
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
     // Shared audio element for the built in player
     let audio = null;
@@ -3867,13 +3876,19 @@
             stopPlay();
         });
 
-        setHandler("seekto", function (details) {
+        // On iOS a seekto handler plus a position timeline makes the lock screen
+        // show plus and minus skip buttons instead of next and previous, so only
+        // offer interactive seeking off iOS
+        if (!isIos) {
 
-            if (audio && details && typeof details.seekTime === "number") {
-                audio.currentTime = details.seekTime;
-                updateSeekDisplay();
-            }
-        });
+            setHandler("seekto", function (details) {
+
+                if (audio && details && typeof details.seekTime === "number") {
+                    audio.currentTime = details.seekTime;
+                    updateSeekDisplay();
+                }
+            });
+        }
     }
 
     // Guess an image MIME type from a URL, defaulting to jpeg
@@ -3973,20 +3988,50 @@
         }
     }
 
-    // Free the current cover blob, if any
+    // Revoke both blob urls held by a cache entry
+    function artCacheRevoke(entry) {
+
+        if (!entry) {
+            return;
+        }
+
+        if (entry.full) {
+            URL.revokeObjectURL(entry.full);
+        }
+
+        if (entry.small) {
+            URL.revokeObjectURL(entry.small);
+        }
+    }
+
+    // Store a song's cover blobs, evicting and freeing the oldest over the limit
+    function artCachePut(id, entry) {
+
+        if (artCache.has(id)) {
+            artCacheRevoke(artCache.get(id));
+            artCache.delete(id);
+        }
+
+        artCache.set(id, entry);
+
+        while (artCache.size > ART_CACHE_MAX) {
+
+            const oldest = artCache.keys().next().value;
+
+            artCacheRevoke(artCache.get(oldest));
+            artCache.delete(oldest);
+        }
+    }
+
+    // Free every cached cover blob
     function clearArtBlob() {
 
-        if (currentArtBlobUrl) {
-            URL.revokeObjectURL(currentArtBlobUrl);
-            currentArtBlobUrl = null;
-        }
+        artCache.forEach(function (entry) {
+            artCacheRevoke(entry);
+        });
 
-        if (currentArtSmallUrl) {
-            URL.revokeObjectURL(currentArtSmallUrl);
-            currentArtSmallUrl = null;
-        }
-
-        currentArtBlobId = null;
+        artCache.clear();
+        currentArtId = null;
     }
 
     // Fetch the cover as a local blob and swap it into the Media Session. Local
@@ -4000,8 +4045,8 @@
 
         const id = song.song_id;
 
-        // Already holding the blob for this song
-        if (currentArtBlobId === id && currentArtBlobUrl) {
+        // Already have this song's art cached
+        if (artCache.has(id)) {
             return;
         }
 
@@ -4029,29 +4074,28 @@
             return;
         }
 
-        // Replace the previous blobs, freeing their memory
-        if (currentArtBlobUrl) {
-            URL.revokeObjectURL(currentArtBlobUrl);
-        }
-
-        if (currentArtSmallUrl) {
-            URL.revokeObjectURL(currentArtSmallUrl);
-            currentArtSmallUrl = null;
-        }
-
-        currentArtBlobUrl = URL.createObjectURL(blob);
-        currentArtBlobId = id;
-        currentArtBlobType = blob.type || "image/jpeg";
+        const fullUrl = URL.createObjectURL(blob);
+        const type = blob.type || "image/jpeg";
 
         // A genuine 128px downscale as the primary artwork, best chance on iOS
-        currentArtSmallUrl = await makeSmallCover(blob);
+        const smallUrl = await makeSmallCover(blob);
 
-        // Still the current song after the async downscale
+        // A newer track took over during the async downscale, drop this cover
         if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
+
+            URL.revokeObjectURL(fullUrl);
+
+            if (smallUrl) {
+                URL.revokeObjectURL(smallUrl);
+            }
+
             return;
         }
 
-        setMediaMetadata(song, blobArtworkList(currentArtSmallUrl, currentArtBlobUrl, currentArtBlobType));
+        artCachePut(id, { full: fullUrl, small: smallUrl, type: type });
+        currentArtId = id;
+
+        setMediaMetadata(song, blobArtworkList(smallUrl, fullUrl, type));
     }
 
     // Tell the OS what is playing, so playerctl and the lock screen show the
@@ -4088,11 +4132,15 @@
             return;
         }
 
-        // Reuse the local blob when we already have it for this song, otherwise
-        // show the remote cover now and fetch the blob to swap in
-        if (currentArtBlobId === song.song_id && currentArtBlobUrl) {
+        // Reuse a cached blob when we have one for this song, so going back to a
+        // recent track shows its art at once, otherwise show the remote cover
+        // now and fetch the blob to swap in
+        const cached = artCache.get(song.song_id);
 
-            setMediaMetadata(song, blobArtworkList(currentArtSmallUrl, currentArtBlobUrl, currentArtBlobType));
+        if (cached) {
+
+            currentArtId = song.song_id;
+            setMediaMetadata(song, blobArtworkList(cached.small, cached.full, cached.type));
             return;
         }
 
@@ -4109,6 +4157,12 @@
     function updateMediaPosition() {
 
         if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState) {
+            return;
+        }
+
+        // A position timeline on iOS summons plus and minus skip buttons and
+        // hides the track buttons, so skip it there
+        if (isIos) {
             return;
         }
 
