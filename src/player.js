@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5g";
+    const VERSION = "1.3.5h";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -274,6 +274,15 @@
 
     // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
+
+    // Only iOS crowds out the next and previous buttons with plus and minus
+    // skip buttons whenever a seek handler is present, so the seek handler
+    // suppression below is limited to iOS to leave other platforms untouched
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+    // True once setActionHandler has been wrapped to block seek handlers
+    let mediaGuardInstalled = false;
 
     // Shared audio element for the built in player
     let audio = null;
@@ -3833,6 +3842,9 @@
             return;
         }
 
+        // Block seek handlers first so Mureka cannot re-add them after us
+        installMediaSessionGuard();
+
         // setActionHandler throws for actions the browser does not support
         const setHandler = function (action, fn) {
 
@@ -3970,9 +3982,40 @@
     // register seekbackward and seekforward on it. When those are present iOS
     // shows plus and minus skip buttons and hides next and previous, so clear
     // them whenever we assert our own now playing state
+    // Wrap setActionHandler so any seekbackward or seekforward registration,
+    // including Mureka re-registering after us, is forced to null. iOS shows the
+    // plus and minus skip buttons whenever a seek handler is present, so this is
+    // what keeps the lock screen and notification on next and previous
+    function installMediaSessionGuard() {
+
+        if (mediaGuardInstalled || !isIos || !("mediaSession" in navigator)) {
+            return;
+        }
+
+        const ms = navigator.mediaSession;
+        const original = ms.setActionHandler;
+
+        if (typeof original !== "function") {
+            return;
+        }
+
+        const bound = original.bind(ms);
+
+        ms.setActionHandler = function (action, handler) {
+
+            if (action === "seekbackward" || action === "seekforward") {
+                return bound(action, null);
+            }
+
+            return bound(action, handler);
+        };
+
+        mediaGuardInstalled = true;
+    }
+
     function suppressSeekHandlers() {
 
-        if (!("mediaSession" in navigator)) {
+        if (!isIos || !("mediaSession" in navigator)) {
             return;
         }
 
