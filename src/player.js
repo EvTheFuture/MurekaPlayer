@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5d";
+    const VERSION = "1.3.5h";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -264,13 +264,25 @@
     // The song object currently playing, null when nothing plays
     let currentSong = null;
 
-    // A local object URL for the current cover, handed to the Media Session so
-    // Bluetooth reads image bytes rather than refetching a remote URL each track
-    let currentArtBlobUrl = null;
-    let currentArtSmallUrl = null;
-    let currentArtBlobId = null;
-    let currentArtBlobType = "image/jpeg";
+    // Cache of recent cover blob urls by song id, so returning to a recent
+    // track shows its art at once without a refetch, which iOS can be slow at
+    const ART_CACHE_MAX = 5;
+    const artCache = new Map();
+
+    // The song id whose art is currently set on the media session
+    let currentArtId = null;
+
+    // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
+
+    // Only iOS crowds out the next and previous buttons with plus and minus
+    // skip buttons whenever a seek handler is present, so the seek handler
+    // suppression below is limited to iOS to leave other platforms untouched
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+    // True once setActionHandler has been wrapped to block seek handlers
+    let mediaGuardInstalled = false;
 
     // Shared audio element for the built in player
     let audio = null;
@@ -3830,6 +3842,9 @@
             return;
         }
 
+        // Block seek handlers first so Mureka cannot re-add them after us
+        installMediaSessionGuard();
+
         // setActionHandler throws for actions the browser does not support
         const setHandler = function (action, fn) {
 
@@ -3874,6 +3889,9 @@
                 updateSeekDisplay();
             }
         });
+
+        // Clear any seek handlers Mureka already installed on the shared session
+        suppressSeekHandlers();
     }
 
     // Guess an image MIME type from a URL, defaulting to jpeg
@@ -3960,6 +3978,58 @@
     }
 
     // Set the Media Session metadata for a song with a given artwork list
+    // Mureka's own page player shares this document's media session and may
+    // register seekbackward and seekforward on it. When those are present iOS
+    // shows plus and minus skip buttons and hides next and previous, so clear
+    // them whenever we assert our own now playing state
+    // Wrap setActionHandler so any seekbackward or seekforward registration,
+    // including Mureka re-registering after us, is forced to null. iOS shows the
+    // plus and minus skip buttons whenever a seek handler is present, so this is
+    // what keeps the lock screen and notification on next and previous
+    function installMediaSessionGuard() {
+
+        if (mediaGuardInstalled || !isIos || !("mediaSession" in navigator)) {
+            return;
+        }
+
+        const ms = navigator.mediaSession;
+        const original = ms.setActionHandler;
+
+        if (typeof original !== "function") {
+            return;
+        }
+
+        const bound = original.bind(ms);
+
+        ms.setActionHandler = function (action, handler) {
+
+            if (action === "seekbackward" || action === "seekforward") {
+                return bound(action, null);
+            }
+
+            return bound(action, handler);
+        };
+
+        mediaGuardInstalled = true;
+    }
+
+    function suppressSeekHandlers() {
+
+        if (!isIos || !("mediaSession" in navigator)) {
+            return;
+        }
+
+        try {
+            navigator.mediaSession.setActionHandler("seekbackward", null);
+        } catch (e) {
+        }
+
+        try {
+            navigator.mediaSession.setActionHandler("seekforward", null);
+        } catch (e) {
+        }
+    }
+
     function setMediaMetadata(song, artwork) {
 
         try {
@@ -3971,22 +4041,55 @@
             });
         } catch (e) {
         }
+
+        // Clear any seek handlers Mureka set so our next and previous win
+        suppressSeekHandlers();
     }
 
-    // Free the current cover blob, if any
+    // Revoke both blob urls held by a cache entry
+    function artCacheRevoke(entry) {
+
+        if (!entry) {
+            return;
+        }
+
+        if (entry.full) {
+            URL.revokeObjectURL(entry.full);
+        }
+
+        if (entry.small) {
+            URL.revokeObjectURL(entry.small);
+        }
+    }
+
+    // Store a song's cover blobs, evicting and freeing the oldest over the limit
+    function artCachePut(id, entry) {
+
+        if (artCache.has(id)) {
+            artCacheRevoke(artCache.get(id));
+            artCache.delete(id);
+        }
+
+        artCache.set(id, entry);
+
+        while (artCache.size > ART_CACHE_MAX) {
+
+            const oldest = artCache.keys().next().value;
+
+            artCacheRevoke(artCache.get(oldest));
+            artCache.delete(oldest);
+        }
+    }
+
+    // Free every cached cover blob
     function clearArtBlob() {
 
-        if (currentArtBlobUrl) {
-            URL.revokeObjectURL(currentArtBlobUrl);
-            currentArtBlobUrl = null;
-        }
+        artCache.forEach(function (entry) {
+            artCacheRevoke(entry);
+        });
 
-        if (currentArtSmallUrl) {
-            URL.revokeObjectURL(currentArtSmallUrl);
-            currentArtSmallUrl = null;
-        }
-
-        currentArtBlobId = null;
+        artCache.clear();
+        currentArtId = null;
     }
 
     // Fetch the cover as a local blob and swap it into the Media Session. Local
@@ -4000,8 +4103,8 @@
 
         const id = song.song_id;
 
-        // Already holding the blob for this song
-        if (currentArtBlobId === id && currentArtBlobUrl) {
+        // Already have this song's art cached
+        if (artCache.has(id)) {
             return;
         }
 
@@ -4029,29 +4132,28 @@
             return;
         }
 
-        // Replace the previous blobs, freeing their memory
-        if (currentArtBlobUrl) {
-            URL.revokeObjectURL(currentArtBlobUrl);
-        }
-
-        if (currentArtSmallUrl) {
-            URL.revokeObjectURL(currentArtSmallUrl);
-            currentArtSmallUrl = null;
-        }
-
-        currentArtBlobUrl = URL.createObjectURL(blob);
-        currentArtBlobId = id;
-        currentArtBlobType = blob.type || "image/jpeg";
+        const fullUrl = URL.createObjectURL(blob);
+        const type = blob.type || "image/jpeg";
 
         // A genuine 128px downscale as the primary artwork, best chance on iOS
-        currentArtSmallUrl = await makeSmallCover(blob);
+        const smallUrl = await makeSmallCover(blob);
 
-        // Still the current song after the async downscale
+        // A newer track took over during the async downscale, drop this cover
         if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
+
+            URL.revokeObjectURL(fullUrl);
+
+            if (smallUrl) {
+                URL.revokeObjectURL(smallUrl);
+            }
+
             return;
         }
 
-        setMediaMetadata(song, blobArtworkList(currentArtSmallUrl, currentArtBlobUrl, currentArtBlobType));
+        artCachePut(id, { full: fullUrl, small: smallUrl, type: type });
+        currentArtId = id;
+
+        setMediaMetadata(song, blobArtworkList(smallUrl, fullUrl, type));
     }
 
     // Tell the OS what is playing, so playerctl and the lock screen show the
@@ -4088,11 +4190,15 @@
             return;
         }
 
-        // Reuse the local blob when we already have it for this song, otherwise
-        // show the remote cover now and fetch the blob to swap in
-        if (currentArtBlobId === song.song_id && currentArtBlobUrl) {
+        // Reuse a cached blob when we have one for this song, so going back to a
+        // recent track shows its art at once, otherwise show the remote cover
+        // now and fetch the blob to swap in
+        const cached = artCache.get(song.song_id);
 
-            setMediaMetadata(song, blobArtworkList(currentArtSmallUrl, currentArtBlobUrl, currentArtBlobType));
+        if (cached) {
+
+            currentArtId = song.song_id;
+            setMediaMetadata(song, blobArtworkList(cached.small, cached.full, cached.type));
             return;
         }
 
