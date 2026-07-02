@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5e";
+    const VERSION = "1.3.5g";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -274,12 +274,6 @@
 
     // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
-
-    // iOS turns a seekable timeline into plus and minus skip buttons and hides
-    // the next and previous track buttons, so on iOS we skip the timeline and
-    // the seekto handler to keep the track buttons that most apps show
-    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
-        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
     // Shared audio element for the built in player
     let audio = null;
@@ -3876,19 +3870,16 @@
             stopPlay();
         });
 
-        // On iOS a seekto handler plus a position timeline makes the lock screen
-        // show plus and minus skip buttons instead of next and previous, so only
-        // offer interactive seeking off iOS
-        if (!isIos) {
+        setHandler("seekto", function (details) {
 
-            setHandler("seekto", function (details) {
+            if (audio && details && typeof details.seekTime === "number") {
+                audio.currentTime = details.seekTime;
+                updateSeekDisplay();
+            }
+        });
 
-                if (audio && details && typeof details.seekTime === "number") {
-                    audio.currentTime = details.seekTime;
-                    updateSeekDisplay();
-                }
-            });
-        }
+        // Clear any seek handlers Mureka already installed on the shared session
+        suppressSeekHandlers();
     }
 
     // Guess an image MIME type from a URL, defaulting to jpeg
@@ -3975,6 +3966,27 @@
     }
 
     // Set the Media Session metadata for a song with a given artwork list
+    // Mureka's own page player shares this document's media session and may
+    // register seekbackward and seekforward on it. When those are present iOS
+    // shows plus and minus skip buttons and hides next and previous, so clear
+    // them whenever we assert our own now playing state
+    function suppressSeekHandlers() {
+
+        if (!("mediaSession" in navigator)) {
+            return;
+        }
+
+        try {
+            navigator.mediaSession.setActionHandler("seekbackward", null);
+        } catch (e) {
+        }
+
+        try {
+            navigator.mediaSession.setActionHandler("seekforward", null);
+        } catch (e) {
+        }
+    }
+
     function setMediaMetadata(song, artwork) {
 
         try {
@@ -3986,6 +3998,9 @@
             });
         } catch (e) {
         }
+
+        // Clear any seek handlers Mureka set so our next and previous win
+        suppressSeekHandlers();
     }
 
     // Revoke both blob urls held by a cache entry
@@ -4157,12 +4172,6 @@
     function updateMediaPosition() {
 
         if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState) {
-            return;
-        }
-
-        // A position timeline on iOS summons plus and minus skip buttons and
-        // hides the track buttons, so skip it there
-        if (isIos) {
             return;
         }
 
