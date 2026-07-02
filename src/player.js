@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5b";
+    const VERSION = "1.3.5d";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2183,7 +2183,12 @@
 
         // A song that starts playing proves the audio base URL is correct
         audio.addEventListener("playing", function () {
+
             playbackWorks = true;
+
+            // Some systems only latch the art while audio is truly running, so
+            // assert it again here as well as on the play event
+            reassertNowPlaying();
         });
 
         audio.addEventListener("error", function () {
@@ -2232,6 +2237,10 @@
             if (currentSong) {
                 setStatus("Playing: " + (currentSong.title || "Untitled"));
             }
+
+            // Refresh the lock screen and Bluetooth art on resume, not only on
+            // a track change, so it recovers after a call or app interruption
+            reassertNowPlaying();
         });
 
         audio.addEventListener("pause", function () {
@@ -4048,6 +4057,19 @@
     // Tell the OS what is playing, so playerctl and the lock screen show the
     // right title and art. The cover is shown at once from its remote URL, then
     // swapped for a local blob that Bluetooth reads more reliably
+    // Re-assert the Now Playing metadata for the current song. Pressing play
+    // after a call or another app took the media slot must refresh the lock
+    // screen and Bluetooth art, which are otherwise only set on a track change
+    function reassertNowPlaying() {
+
+        if (!currentSong) {
+            return;
+        }
+
+        updateMediaMetadata(currentSong);
+        updateMediaPosition();
+    }
+
     function updateMediaMetadata(song) {
 
         if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") {
@@ -4342,13 +4364,13 @@
         // A box that holds the masked strip, plus optional side nav buttons that
         // must sit outside the mask so they are not faded at the edges
         const artBox = document.createElement("div");
-        artBox.style.cssText = "position:relative;border-radius:8px;overflow:hidden;margin-bottom:8px";
+        artBox.style.cssText = "position:relative;margin-bottom:8px";
 
         // The album art is a coverflow strip, the center cover with side covers
         // that peek in and fade and blur toward the edges
         artWrapEl = document.createElement("div");
         artWrapEl.id = "mureka-player-art-wrap";
-        artWrapEl.style.cssText = "position:relative;width:100%;overflow:hidden;background:#0a0a0d;touch-action:pan-y";
+        artWrapEl.style.cssText = "position:relative;width:100%;border-radius:8px;overflow:hidden;background:#0a0a0d;touch-action:pan-y";
 
         // A short, wide window, the center cover is a square of this height
         artWrapEl.style.aspectRatio = String(1 / ART_CENTER_FRACTION);
@@ -4466,11 +4488,11 @@
 
         // Dark gradient behind the top status so its text stays readable
         const topScrim = document.createElement("div");
-        topScrim.style.cssText = "position:absolute;left:0;right:0;top:0;height:40%;background:linear-gradient(to bottom,rgba(0,0,0,0.75),transparent);pointer-events:none";
+        topScrim.style.cssText = "position:absolute;left:0;right:0;top:0;height:40%;border-radius:8px 8px 0 0;background:linear-gradient(to bottom,rgba(0,0,0,0.75),transparent);pointer-events:none";
 
         // Dark gradient behind the bottom title block for the same reason
         const bottomScrim = document.createElement("div");
-        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:62%;background:linear-gradient(to top,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.55) 45%,transparent 100%);pointer-events:none";
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:62%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.55) 45%,transparent 100%);pointer-events:none";
 
         // Status sits at the top of the art, one clipped line, never blocks swipe
         const topWrap = document.createElement("div");
