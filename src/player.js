@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5l";
+    const VERSION = "1.3.5m";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -331,6 +331,9 @@
 
     // The logged in user's stage name, used for the ${artist} template tag
     let selfName = "";
+
+    // Refreshers for the live template previews shown in settings
+    let metaPreviewUpdaters = [];
     let sourceSepEl = null;
     let sourceEl = null;
     let bodyEl = null;
@@ -4083,6 +4086,19 @@
         return result.trim();
     }
 
+    // Preview text for a template using the currently loaded song
+    function metaPreviewText(template) {
+
+        if (!currentSong) {
+
+            return "(no song loaded)";
+        }
+
+        const out = formatMeta(template, currentSong);
+
+        return out || "(empty)";
+    }
+
     function setMediaMetadata(song, artwork) {
 
         // Build the two visible lines from the user templates, falling back to
@@ -6080,7 +6096,7 @@
     // Build a labeled On / Off row backed by a getter and a setter
     // Build a settings row with a label above a full width text input, used for
     // the now playing templates. Saves and re-asserts metadata on every edit
-    function makeTextRow(label, get, set) {
+    function makeTextRow(label, get, set, previewFn) {
 
         const row = document.createElement("div");
         row.style.cssText = "display:flex;flex-direction:column;gap:4px";
@@ -6103,19 +6119,44 @@
             "font:13px/1.4 monospace"
         ].join(";");
 
+        row.appendChild(name);
+        row.appendChild(input);
+
+        // Live preview of the expanded template for the current song
+        let refresh = null;
+
+        if (previewFn) {
+
+            const preview = document.createElement("div");
+            preview.style.cssText = "font-size:12px;color:#48e1eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:16px";
+            row.appendChild(preview);
+
+            refresh = function () {
+
+                preview.textContent = previewFn(input.value);
+            };
+
+            refresh();
+            metaPreviewUpdaters.push(refresh);
+        }
+
         input.addEventListener("input", function () {
+
             set(input.value);
             saveSettings();
             reassertNowPlaying();
+
+            if (refresh) {
+
+                refresh();
+            }
         });
 
         // Stop the site keyboard shortcuts from firing while typing
         input.addEventListener("keydown", function (ev) {
+
             ev.stopPropagation();
         });
-
-        row.appendChild(name);
-        row.appendChild(input);
 
         return row;
     }
@@ -6328,11 +6369,13 @@
 
         const titleTplRow = makeTextRow("Title line",
             function () { return settings.metaTitle; },
-            function (v) { settings.metaTitle = v; });
+            function (v) { settings.metaTitle = v; },
+            function (v) { return metaPreviewText(v); });
 
         const subtitleTplRow = makeTextRow("Second line",
             function () { return settings.metaSubtitle; },
-            function (v) { settings.metaSubtitle = v; });
+            function (v) { settings.metaSubtitle = v; },
+            function (v) { return metaPreviewText(v); });
 
         // Short reference for the available tags and the bracket rule
         const tplHint = document.createElement("div");
@@ -6390,6 +6433,12 @@
         if (settingsEl) {
             settingsEl.style.display = "flex";
         }
+
+        // Refresh the template previews for the currently loaded song
+        metaPreviewUpdaters.forEach(function (fn) {
+
+            fn();
+        });
     }
 
     // Hide the settings overlay
