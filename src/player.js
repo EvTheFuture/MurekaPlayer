@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5h";
+    const VERSION = "1.3.5j";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -274,15 +274,6 @@
 
     // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
-
-    // Only iOS crowds out the next and previous buttons with plus and minus
-    // skip buttons whenever a seek handler is present, so the seek handler
-    // suppression below is limited to iOS to leave other platforms untouched
-    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
-        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-
-    // True once setActionHandler has been wrapped to block seek handlers
-    let mediaGuardInstalled = false;
 
     // Shared audio element for the built in player
     let audio = null;
@@ -2391,13 +2382,22 @@
             return;
         }
 
-        // Resume from where Stop left off, restoring the queue and position
+        // Resume from where Stop or a restored session left off, keeping the
+        // saved position within the song
         if (resumeState && resumeState.queue.length) {
 
             queue = resumeState.queue;
             queuePos = resumeState.queuePos;
             pendingSeek = resumeState.time || 0;
             resumeState = null;
+            playCurrent();
+            return;
+        }
+
+        // A live queue is still loaded, for example after an interruption cleared
+        // the audio source. Continue it instead of building a fresh shuffle, so
+        // songs already played this session are not heard again
+        if (queue.length && queuePos >= 0 && queuePos < queue.length) {
             playCurrent();
             return;
         }
@@ -3842,9 +3842,6 @@
             return;
         }
 
-        // Block seek handlers first so Mureka cannot re-add them after us
-        installMediaSessionGuard();
-
         // setActionHandler throws for actions the browser does not support
         const setHandler = function (action, fn) {
 
@@ -3889,9 +3886,6 @@
                 updateSeekDisplay();
             }
         });
-
-        // Clear any seek handlers Mureka already installed on the shared session
-        suppressSeekHandlers();
     }
 
     // Guess an image MIME type from a URL, defaulting to jpeg
@@ -3986,50 +3980,6 @@
     // including Mureka re-registering after us, is forced to null. iOS shows the
     // plus and minus skip buttons whenever a seek handler is present, so this is
     // what keeps the lock screen and notification on next and previous
-    function installMediaSessionGuard() {
-
-        if (mediaGuardInstalled || !isIos || !("mediaSession" in navigator)) {
-            return;
-        }
-
-        const ms = navigator.mediaSession;
-        const original = ms.setActionHandler;
-
-        if (typeof original !== "function") {
-            return;
-        }
-
-        const bound = original.bind(ms);
-
-        ms.setActionHandler = function (action, handler) {
-
-            if (action === "seekbackward" || action === "seekforward") {
-                return bound(action, null);
-            }
-
-            return bound(action, handler);
-        };
-
-        mediaGuardInstalled = true;
-    }
-
-    function suppressSeekHandlers() {
-
-        if (!isIos || !("mediaSession" in navigator)) {
-            return;
-        }
-
-        try {
-            navigator.mediaSession.setActionHandler("seekbackward", null);
-        } catch (e) {
-        }
-
-        try {
-            navigator.mediaSession.setActionHandler("seekforward", null);
-        } catch (e) {
-        }
-    }
-
     function setMediaMetadata(song, artwork) {
 
         try {
@@ -4041,9 +3991,6 @@
             });
         } catch (e) {
         }
-
-        // Clear any seek handlers Mureka set so our next and previous win
-        suppressSeekHandlers();
     }
 
     // Revoke both blob urls held by a cache entry
