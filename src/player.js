@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5m";
+    const VERSION = "1.3.5n";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -3730,27 +3730,22 @@
     // Update the title and the cover strip for the current song
     // Build the small meta line shown under the now playing title
     // Joins the genres, moods, bpm and model that are present
-    function playerMetaText(song) {
+    // Set the album art overlay lines from the same templates used over Bluetooth
+    function applyCoverText(song) {
 
-        const parts = [];
+        if (!song) {
 
-        if (song.genres && song.genres.length) {
-            parts.push(song.genres.join("/"));
+            return;
         }
 
-        if (song.moods && song.moods.length) {
-            parts.push(song.moods.join("/"));
+        if (playerTitle) {
+            playerTitle.textContent = formatMeta(settings.metaTitle, song)
+                || (song.title || "Untitled");
         }
 
-        if (song.bpm) {
-            parts.push(song.bpm + " BPM");
+        if (playerMetaEl) {
+            playerMetaEl.textContent = formatMeta(settings.metaSubtitle, song);
         }
-
-        if (song.model) {
-            parts.push(song.model);
-        }
-
-        return parts.join("  \u00B7  ");
     }
 
     // Build the plays and likes line for the current song, empty until known
@@ -3782,13 +3777,15 @@
             return;
         }
 
-        if (playerMetaEl) {
-            playerMetaEl.textContent = playerMetaText(currentSong);
-        }
+        // Counts just arrived, so re-apply the templates on the art and over
+        // Bluetooth in case they use the plays or likes tags
+        applyCoverText(currentSong);
 
         if (playerCountsEl) {
             playerCountsEl.textContent = playerCountsText(currentSong);
         }
+
+        reassertNowPlaying();
     }
 
     function updatePlayerInfo(song) {
@@ -3821,11 +3818,7 @@
             return;
         }
 
-        playerTitle.textContent = song.title || "Untitled";
-
-        if (playerMetaEl) {
-            playerMetaEl.textContent = playerMetaText(song);
-        }
+        applyCoverText(song);
 
         if (playerCountsEl) {
             playerCountsEl.textContent = playerCountsText(song);
@@ -4029,6 +4022,17 @@
             ? formatTime(song.duration_milliseconds / 1000)
             : "";
 
+        // Play and like counts are fetched per song and only valid for that song
+        const counts = (nowPlayingCounts && nowPlayingCounts.song_id === song.song_id)
+            ? nowPlayingCounts
+            : null;
+        const plays = (counts && typeof counts.play_count === "number")
+            ? String(counts.play_count)
+            : "";
+        const likes = (counts && typeof counts.fav_count === "number")
+            ? String(counts.fav_count)
+            : "";
+
         return {
             title: song.title || "",
             genre: genre,
@@ -4037,6 +4041,8 @@
             model: song.model || "",
             artist: artist,
             duration: duration,
+            plays: plays,
+            likes: likes,
             ctime: song.generate_at ? fmtDate(song.generate_at) : "",
             ptime: song.publish_at ? fmtDate(song.publish_at) : "",
             mode: modeStatusText(),
@@ -6380,7 +6386,8 @@
         // Short reference for the available tags and the bracket rule
         const tplHint = document.createElement("div");
         tplHint.textContent = "Tags: ${title} ${genre} ${mood} ${bpm} ${model}"
-            + " ${artist} ${duration} ${ctime} ${ptime} ${mode} ${instrumental}."
+            + " ${artist} ${duration} ${plays} ${likes} ${ctime} ${ptime} ${mode}"
+            + " ${instrumental}."
             + " Text in [ ] is dropped when a tag inside it is empty.";
         tplHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
 
