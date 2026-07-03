@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5j";
+    const VERSION = "1.3.5l";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -328,6 +328,9 @@
     let panelEl = null;
     let headerEl = null;
     let selfNameEl = null;
+
+    // The logged in user's stage name, used for the ${artist} template tag
+    let selfName = "";
     let sourceSepEl = null;
     let sourceEl = null;
     let bodyEl = null;
@@ -529,7 +532,9 @@
             prefetchCount: PREFETCH_DEFAULT,
             vocalFilter: "all",
             view: "mureka",
-            reportPlays: true
+            reportPlays: true,
+            metaTitle: "${title}",
+            metaSubtitle: "${genre}"
         };
 
         try {
@@ -575,7 +580,13 @@
                     prefetchCount: prefetchCount,
                     vocalFilter: vocalFilter,
                     view: view,
-                    reportPlays: parsed.reportPlays !== false
+                    reportPlays: parsed.reportPlays !== false,
+                    metaTitle: typeof parsed.metaTitle === "string"
+                        ? parsed.metaTitle
+                        : "${title}",
+                    metaSubtitle: typeof parsed.metaSubtitle === "string"
+                        ? parsed.metaSubtitle
+                        : "${genre}"
                 };
             }
         } catch (e) {
@@ -1228,6 +1239,8 @@
 
     // Show the logged in user name in the header, or hide it when not known
     function setSelfName(name) {
+
+        selfName = name || "";
 
         if (!selfNameEl) {
             return;
@@ -2526,26 +2539,49 @@
         try {
 
             if (queuePos < 0 || queue.length === 0) {
+
                 return;
             }
 
             const inQueue = new Set(queue.map(function (s) {
+
                 return s.song_id;
             }));
 
-            let added = orderedSongs().filter(function (s) {
+            const added = orderedSongs().filter(function (s) {
+
                 return passesFilters(s) && !inQueue.has(s.song_id);
             });
 
             if (added.length === 0) {
+
                 return;
             }
 
+            // Keep the played history and the current song untouched, and weave
+            // the new songs into the not yet played part so nothing already in
+            // the queue is reordered. Random spots when shuffle is on, otherwise
+            // after the existing upcoming songs
+            const head = queue.slice(0, queuePos + 1);
+            const upcoming = queue.slice(queuePos + 1);
+
             if (shuffleMode) {
-                added = shuffleCopy(added);
+
+                for (const song of added) {
+
+                    const at = Math.floor(Math.random() * (upcoming.length + 1));
+                    upcoming.splice(at, 0, song);
+                }
+
+            } else {
+
+                for (const song of added) {
+
+                    upcoming.push(song);
+                }
             }
 
-            queue = queue.concat(added);
+            queue = head.concat(upcoming);
         } catch (e) {
         }
     }
@@ -3980,12 +4016,86 @@
     // including Mureka re-registering after us, is forced to null. iOS shows the
     // plus and minus skip buttons whenever a seek handler is present, so this is
     // what keeps the lock screen and notification on next and previous
+    // Values for the now playing template tags for one song
+    function metaTagValues(song) {
+
+        const genre = (song.genres && song.genres.length) ? song.genres.join(", ") : "";
+        const mood = (song.moods && song.moods.length) ? song.moods.join(", ") : "";
+        const artist = creatorSource ? (creatorSource.stage_name || "") : (selfName || "");
+        const duration = song.duration_milliseconds
+            ? formatTime(song.duration_milliseconds / 1000)
+            : "";
+
+        return {
+            title: song.title || "",
+            genre: genre,
+            mood: mood,
+            bpm: song.bpm ? String(song.bpm) : "",
+            model: song.model || "",
+            artist: artist,
+            duration: duration,
+            ctime: song.generate_at ? fmtDate(song.generate_at) : "",
+            ptime: song.publish_at ? fmtDate(song.publish_at) : "",
+            mode: modeStatusText(),
+            instrumental: isInstrumental(song) ? "Instrumental" : ""
+        };
+    }
+
+    // Expand a now playing template. ${tag} inserts a value. Text inside [ ] is
+    // kept only when every tag inside it has a value, so labels and separators
+    // disappear cleanly when a field is missing
+    function formatMeta(template, song) {
+
+        if (!template) {
+            return "";
+        }
+
+        const values = metaTagValues(song);
+
+        // Drop bracket sections that contain an empty tag, resolve the rest
+        let result = template.replace(/\[([^\[\]]*)\]/g, function (whole, inner) {
+
+            let filled = true;
+
+            const text = inner.replace(/\$\{(\w+)\}/g, function (m, key) {
+
+                const v = values[key];
+
+                if (v === undefined || v === "") {
+                    filled = false;
+                    return "";
+                }
+
+                return v;
+            });
+
+            return filled ? text : "";
+        });
+
+        // Resolve any tags outside brackets
+        result = result.replace(/\$\{(\w+)\}/g, function (m, key) {
+
+            const v = values[key];
+
+            return (v === undefined) ? "" : v;
+        });
+
+        return result.trim();
+    }
+
     function setMediaMetadata(song, artwork) {
+
+        // Build the two visible lines from the user templates, falling back to
+        // the title and genre when a template is empty or expands to nothing
+        const title = formatMeta(settings.metaTitle, song) || (song.title || "Untitled");
+        const subtitle = formatMeta(settings.metaSubtitle, song)
+            || (song.genres || []).join(", ")
+            || "Mureka";
 
         try {
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: song.title || "Untitled",
-                artist: (song.genres || []).join(", ") || "Mureka",
+                title: title,
+                artist: subtitle,
                 album: "Mureka",
                 artwork: artwork
             });
@@ -5968,6 +6078,48 @@
     }
 
     // Build a labeled On / Off row backed by a getter and a setter
+    // Build a settings row with a label above a full width text input, used for
+    // the now playing templates. Saves and re-asserts metadata on every edit
+    function makeTextRow(label, get, set) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;flex-direction:column;gap:4px";
+
+        const name = document.createElement("div");
+        name.textContent = label;
+        name.style.cssText = "font-size:12px;color:#ccc";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = get();
+        input.style.cssText = [
+            "width:100%",
+            "box-sizing:border-box",
+            "padding:6px 8px",
+            "border:1px solid #3a3a42",
+            "border-radius:6px",
+            "background:#26262c",
+            "color:#fff",
+            "font:13px/1.4 monospace"
+        ].join(";");
+
+        input.addEventListener("input", function () {
+            set(input.value);
+            saveSettings();
+            reassertNowPlaying();
+        });
+
+        // Stop the site keyboard shortcuts from firing while typing
+        input.addEventListener("keydown", function (ev) {
+            ev.stopPropagation();
+        });
+
+        row.appendChild(name);
+        row.appendChild(input);
+
+        return row;
+    }
+
     function makeBoolRow(label, get, set) {
 
         const row = document.createElement("div");
@@ -6169,6 +6321,26 @@
             function (v) { settings.prefetchCount = v; },
             0, 50);
 
+        // Now playing text shown on the lock screen and over Bluetooth
+        const nowPlayingLabel = document.createElement("div");
+        nowPlayingLabel.textContent = "Now Playing text";
+        nowPlayingLabel.style.cssText = "color:#bbb";
+
+        const titleTplRow = makeTextRow("Title line",
+            function () { return settings.metaTitle; },
+            function (v) { settings.metaTitle = v; });
+
+        const subtitleTplRow = makeTextRow("Second line",
+            function () { return settings.metaSubtitle; },
+            function (v) { settings.metaSubtitle = v; });
+
+        // Short reference for the available tags and the bracket rule
+        const tplHint = document.createElement("div");
+        tplHint.textContent = "Tags: ${title} ${genre} ${mood} ${bpm} ${model}"
+            + " ${artist} ${duration} ${ctime} ${ptime} ${mode} ${instrumental}."
+            + " Text in [ ] is dropped when a tag inside it is empty.";
+        tplHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+
         // Developer section, turn on debug tools and share raw API data
         const devLabel = document.createElement("div");
         devLabel.textContent = "Developer";
@@ -6190,6 +6362,10 @@
         settingsEl.appendChild(autoplayRow);
         settingsEl.appendChild(reportRow);
         settingsEl.appendChild(cacheRow);
+        settingsEl.appendChild(nowPlayingLabel);
+        settingsEl.appendChild(titleTplRow);
+        settingsEl.appendChild(subtitleTplRow);
+        settingsEl.appendChild(tplHint);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
         settingsEl.appendChild(copyFeedBtn);
