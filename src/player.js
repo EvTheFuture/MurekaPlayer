@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5q";
+    const VERSION = "1.3.5y";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -264,20 +264,11 @@
     // The song object currently playing, null when nothing plays
     let currentSong = null;
 
-    // Cache of recent cover blob urls by song id, so returning to a recent
-    // track shows its art at once without a refetch, which iOS can be slow at
+    // Cache of recent cover images by song id, held as data urls so returning
+    // to a recent track shows its art at once without a refetch. Data urls carry
+    // the bytes inline, avoiding the blob url loading and memory bugs on iOS
     const ART_CACHE_MAX = 5;
     const artCache = new Map();
-
-    // The song id whose artwork is currently set on the media session, and the
-    // artwork list handed over, reused so routine updates do not reload the image
-    let currentArtId = null;
-    let currentArtworkList = null;
-
-    // Object urls handed to the media session for the current song. They stay
-    // alive as long as this song is current, and are only retired when another
-    // song takes over, so the cover is never torn down while it is still showing
-    let liveArtUrls = [];
 
     // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
@@ -543,6 +534,7 @@
             vocalFilter: "all",
             view: "mureka",
             reportPlays: true,
+            artTest: false,
             metaTitle: "${title}",
             metaSubtitle: "${genre}"
         };
@@ -591,6 +583,7 @@
                     vocalFilter: vocalFilter,
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
+                    artTest: parsed.artTest === true,
                     metaTitle: typeof parsed.metaTitle === "string"
                         ? parsed.metaTitle
                         : "${title}",
@@ -2212,9 +2205,10 @@
 
             playbackWorks = true;
 
-            // Some systems only latch the art while audio is truly running, so
-            // assert it again here as well as on the play event
-            reassertNowPlaying(false);
+            // Only refresh the scrubber position here. iOS caps artwork updates
+            // per song, so we avoid re-sending the metadata, which carries the
+            // cover and would burn that budget
+            updateMediaPosition();
         });
 
         audio.addEventListener("error", function () {
@@ -2238,6 +2232,7 @@
         });
 
         setupMediaSession();
+
 
         // Move the seek bar and time labels as the song plays
         audio.addEventListener("timeupdate", function () {
@@ -2264,10 +2259,9 @@
                 setStatus("Playing: " + (currentSong.title || "Untitled"));
             }
 
-            // Refresh the lock screen and Bluetooth art on resume, not only on
-            // a track change, so it recovers after a call or app interruption.
-            // Force a fresh artwork url so the system reloads a lost cover
-            reassertNowPlaying(true);
+            // Only refresh the scrubber position on resume. Re-sending the
+            // metadata would re-send the cover, and iOS caps covers per song
+            updateMediaPosition();
         });
 
         audio.addEventListener("pause", function () {
@@ -3785,15 +3779,19 @@
             return;
         }
 
-        // Counts just arrived, so re-apply the templates on the art and over
-        // Bluetooth in case they use the plays or likes tags
+        // Counts just arrived, update the in-panel overlay text
         applyCoverText(currentSong);
 
         if (playerCountsEl) {
             playerCountsEl.textContent = playerCountsText(currentSong);
         }
 
-        reassertNowPlaying();
+        // Only re-push the media session metadata when the templates use the
+        // counts, since re-sending carries the cover and iOS caps covers per song
+        if (/\$\{(plays|likes)\}/.test((settings.metaTitle || "") + (settings.metaSubtitle || ""))) {
+
+            reassertNowPlaying();
+        }
     }
 
     function updatePlayerInfo(song) {
@@ -3929,37 +3927,22 @@
     }
 
     // Guess an image MIME type from a URL, defaulting to jpeg
-    function guessImageType(url) {
-
-        const u = (url || "").toLowerCase();
-
-        if (u.indexOf(".png") !== -1) {
-            return "image/png";
-        }
-
-        if (u.indexOf(".webp") !== -1) {
-            return "image/webp";
-        }
-
-        return "image/jpeg";
-    }
-
-    // Draw a cover blob down to a real 128px square and return an object URL for
-    // it, or null on failure. iOS has long preferred a small primary artwork, so
-    // a genuine downscale is more likely to stick than the full size relabelled
-    async function makeSmallCover(blob) {
+    // Draw a cover blob to a clean square JPEG of the given size and return it
+    // as a data url, or null on failure. Re-encoding through a canvas strips any
+    // odd format, color profile or metadata, and the data url form avoids the
+    // blob url loading and memory issues iOS has with media session artwork
+    async function makeScaledDataUrl(blob, size, quality) {
 
         try {
-            let bmp;
 
-            if (self.createImageBitmap) {
-                bmp = await createImageBitmap(blob);
-            } else {
+            if (!self.createImageBitmap) {
+
                 return null;
             }
 
-            const size = 128;
+            const bmp = await createImageBitmap(blob);
             const canvas = document.createElement("canvas");
+
             canvas.width = size;
             canvas.height = size;
 
@@ -3967,16 +3950,13 @@
             ctx.drawImage(bmp, 0, 0, size, size);
 
             if (bmp.close) {
+
                 bmp.close();
             }
 
-            return await new Promise(function (resolve) {
-
-                canvas.toBlob(function (out) {
-                    resolve(out || null);
-                }, "image/jpeg", 0.9);
-            });
+            return canvas.toDataURL("image/jpeg", quality);
         } catch (e) {
+
             return null;
         }
     }
@@ -3987,51 +3967,10 @@
     // Retire a batch of old object urls. The revoke waits a short grace so the
     // song that replaces them has time to load its own cover before the old
     // urls are released, which avoids blanking the art during the swap
-    function retireArtUrls(urls) {
-
-        if (!urls || urls.length === 0) {
-
-            return;
-        }
-
-        setTimeout(function () {
-
-            for (const u of urls) {
-
-                URL.revokeObjectURL(u);
-            }
-        }, 5000);
-    }
-
-    // Build a media session artwork list from a cache entry, creating fresh
-    // object urls and tracking them so they can be revoked on the next replace
-    function buildArtwork(entry) {
-
-        const list = [];
-
-        if (entry.small) {
-
-            const u = URL.createObjectURL(entry.small);
-
-            liveArtUrls.push(u);
-            list.push({ src: u, sizes: "128x128", type: "image/jpeg" });
-        }
-
-        if (entry.full) {
-
-            const u = URL.createObjectURL(entry.full);
-
-            liveArtUrls.push(u);
-            list.push({ src: u, sizes: "512x512", type: entry.type });
-        }
-
-        return list;
-    }
-
-    // Artwork list for a song from its cached blobs. Reuses the current list so
-    // routine updates do not reload the image, but force builds a fresh one with
-    // new urls, which is what makes the system reload the cover after it was lost
-    function artworkFor(song, force) {
+    // Artwork list for a song from its cached data urls, smallest first, which
+    // is the size iOS picks from. Data urls carry the image inline, so there is
+    // no blob url for iOS to load, cache badly, or leak
+    function artworkFor(song) {
 
         const entry = artCache.get(song.song_id);
 
@@ -4040,48 +3979,18 @@
             return [];
         }
 
-        if (!force && currentArtId === song.song_id && currentArtworkList) {
+        const list = [];
 
-            return currentArtworkList;
+        if (entry.small) {
+
+            list.push({ src: entry.small, sizes: "128x128", type: "image/jpeg" });
         }
 
-        // A different song is taking over, so retire the previous song's urls
-        // once the new cover has had time to load. The same song keeps its urls,
-        // so a forced refresh never tears down a cover that is still on screen
-        if (currentArtId !== song.song_id) {
-
-            retireArtUrls(liveArtUrls);
-            liveArtUrls = [];
-        }
-
-        currentArtworkList = buildArtwork(entry);
-        currentArtId = song.song_id;
-
-        return currentArtworkList;
+        return list;
     }
 
     // Build the Media Session artwork list, the one cover repeated at the sizes
     // iOS picks from, smallest first, each tagged with an explicit type
-    function artworkList(src, type) {
-
-        if (!src) {
-            return [];
-        }
-
-        return ["128x128", "256x256", "512x512"].map(function (size) {
-            return { src: src, sizes: size, type: type };
-        });
-    }
-
-    // Set the Media Session metadata for a song with a given artwork list
-    // Mureka's own page player shares this document's media session and may
-    // register seekbackward and seekforward on it. When those are present iOS
-    // shows plus and minus skip buttons and hides next and previous, so clear
-    // them whenever we assert our own now playing state
-    // Wrap setActionHandler so any seekbackward or seekforward registration,
-    // including Mureka re-registering after us, is forced to null. iOS shows the
-    // plus and minus skip buttons whenever a seek handler is present, so this is
-    // what keeps the lock screen and notification on next and previous
     // Values for the now playing template tags for one song
     function metaTagValues(song) {
 
@@ -4215,11 +4124,7 @@
     // Drop all cached covers and free the live object urls
     function clearArtBlob() {
 
-        retireArtUrls(liveArtUrls);
-        liveArtUrls = [];
         artCache.clear();
-        currentArtId = null;
-        currentArtworkList = null;
     }
 
     // Fetch the cover as a local blob and swap it into the Media Session. Local
@@ -4262,20 +4167,26 @@
             return;
         }
 
-        const type = blob.type || "image/jpeg";
+        // Re-encode the cover to clean square JPEG data urls, a small one for
+        // the compact slot and a larger one for the lock screen
+        // iOS grey-boxes artwork larger than 128px on the affected versions, so
+        // hand it a single small 128px cover, which shows reliably everywhere
+        const small = await makeScaledDataUrl(blob, 128, 0.85);
 
-        // A genuine 128px downscale as the primary artwork, best chance on iOS
-        const smallBlob = await makeSmallCover(blob);
-
-        // A newer track took over during the async downscale, drop this cover
+        // A newer track took over during the async work, drop this cover
         if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
 
             return;
         }
 
-        artCachePut(id, { full: blob, small: smallBlob, type: type });
+        if (!small) {
 
-        setMediaMetadata(song, artworkFor(song, true));
+            return;
+        }
+
+        artCachePut(id, { small: small });
+
+        setMediaMetadata(song, artworkFor(song));
     }
 
     // Tell the OS what is playing, so playerctl and the lock screen show the
@@ -4284,17 +4195,131 @@
     // Re-assert the Now Playing metadata for the current song. Pressing play
     // after a call or another app took the media slot must refresh the lock
     // screen and Bluetooth art, which are otherwise only set on a track change
-    function reassertNowPlaying(force) {
+    function reassertNowPlaying() {
 
         if (!currentSong) {
             return;
         }
 
-        updateMediaMetadata(currentSong, force);
+        updateMediaMetadata(currentSong);
         updateMediaPosition();
     }
 
-    function updateMediaMetadata(song, force) {
+    // Debug artwork test, a transparent tap area over the art cycles through
+    // marker covers plus the real one, to see which the system will show
+    let testBtn = null;
+    let testIcons = null;
+    let testArtIndex = 0;
+    let testArtToken = 0;
+
+    // Build a recognizable solid color marker cover with a big label as a data
+    // url, used by the artwork test button
+    function makeTestIcon(label, color) {
+
+        const size = 128;
+        const canvas = document.createElement("canvas");
+
+        canvas.width = size;
+        canvas.height = size;
+
+        const ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, size, size);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 72px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, size / 2, size / 2);
+
+        return canvas.toDataURL("image/jpeg", 0.9);
+    }
+
+    // The marker covers, built once on first use
+    function testArtSet() {
+
+        if (!testIcons) {
+
+            testIcons = [
+                { name: "Marker 1 red", art: makeTestIcon("1", "#cc3344") },
+                { name: "Marker 2 green", art: makeTestIcon("2", "#2f9e52") },
+                { name: "Marker 3 blue", art: makeTestIcon("3", "#3366cc") }
+            ];
+        }
+
+        return testIcons;
+    }
+
+    // Push the next test cover to the media session and show a two second sent
+    // note in the artist line so it can be checked over Bluetooth
+    function sendTestArt() {
+
+        if (!currentSong || !("mediaSession" in navigator)) {
+
+            return;
+        }
+
+        const icons = testArtSet();
+        const idx = testArtIndex % 4;
+
+        testArtIndex += 1;
+
+        let artwork;
+        let label;
+
+        if (idx < 3) {
+
+            artwork = [{ src: icons[idx].art, sizes: "128x128", type: "image/jpeg" }];
+            label = icons[idx].name;
+
+        } else {
+
+            artwork = artworkFor(currentSong);
+            label = "Real cover";
+        }
+
+        const title = formatMeta(settings.metaTitle, currentSong)
+            || currentSong.title
+            || "Untitled";
+
+        // Push the test cover now with a sent confirmation in the artist line
+        try {
+
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: title,
+                artist: "Sent: " + label,
+                album: "Mureka",
+                artwork: artwork
+            });
+        } catch (e) {
+        }
+
+        setStatus("Sent " + label);
+
+        const token = ++testArtToken;
+
+        // After two seconds, restore the normal artist line but keep the test
+        // cover on screen so it can still be inspected
+        setTimeout(function () {
+
+            if (currentSong && token === testArtToken) {
+
+                setMediaMetadata(currentSong, artwork);
+            }
+        }, 2000);
+    }
+
+    // Show the artwork test tap area only while debug mode is on
+    function updateTestButton() {
+
+        if (testBtn) {
+
+            testBtn.style.display = settings.artTest ? "block" : "none";
+        }
+    }
+
+    function updateMediaMetadata(song) {
 
         if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") {
             return;
@@ -4319,13 +4344,16 @@
 
         if (cached) {
 
-            setMediaMetadata(song, artworkFor(song, force));
+            setMediaMetadata(song, artworkFor(song));
             return;
         }
 
-        const art = coverUrl(song);
+        // Set the text now with no cover, then load and re-encode the real cover
+        // and set it once. Skipping the remote placeholder avoids sending a
+        // second distinct cover, since iOS caps covers per song
+        setMediaMetadata(song, []);
 
-        setMediaMetadata(song, artworkList(art, guessImageType(art)));
+        const art = coverUrl(song);
 
         if (art) {
             loadArtBlob(song, art);
@@ -4740,6 +4768,15 @@
         artBox.appendChild(bottomScrim);
         artBox.appendChild(topWrap);
         artBox.appendChild(bottomWrap);
+
+        // Transparent tap area over the art, shown only in debug mode, cycles
+        // the artwork test on each tap
+        testBtn = document.createElement("button");
+        testBtn.title = "Debug, send a test cover over Bluetooth";
+        testBtn.style.cssText = "position:absolute;left:0;top:0;right:0;bottom:0;z-index:5;border:none;background:transparent;cursor:pointer;display:none";
+        testBtn.addEventListener("click", sendTestArt);
+        artBox.appendChild(testBtn);
+        updateTestButton();
 
         const seekRow = document.createElement("div");
         seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
@@ -6442,6 +6479,10 @@
             function () { return isDebug(); },
             function (v) { setDebug(v); });
 
+        const artTestRow = makeBoolRow("Artwork test button (blocks swipe)",
+            function () { return settings.artTest; },
+            function (v) { settings.artTest = v; updateTestButton(); });
+
         const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
 
         settingsEl.appendChild(head);
@@ -6460,6 +6501,7 @@
         settingsEl.appendChild(tplHint);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
+        settingsEl.appendChild(artTestRow);
         settingsEl.appendChild(copyFeedBtn);
 
         panelEl.appendChild(settingsEl);
