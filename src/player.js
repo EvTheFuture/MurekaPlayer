@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5n";
+    const VERSION = "1.3.5o";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -269,8 +269,13 @@
     const ART_CACHE_MAX = 5;
     const artCache = new Map();
 
-    // The song id whose art is currently set on the media session
+    // The song id whose artwork is currently set on the media session, and the
+    // artwork list handed over, reused so routine updates do not reload the image
     let currentArtId = null;
+    let currentArtworkList = null;
+
+    // Object urls currently referenced by the media session, revoked on replace
+    let liveArtUrls = [];
 
     // Rising token so a slow cover fetch learns a newer track has taken over
     let artFetchToken = 0;
@@ -2207,7 +2212,7 @@
 
             // Some systems only latch the art while audio is truly running, so
             // assert it again here as well as on the play event
-            reassertNowPlaying();
+            reassertNowPlaying(false);
         });
 
         audio.addEventListener("error", function () {
@@ -2258,8 +2263,9 @@
             }
 
             // Refresh the lock screen and Bluetooth art on resume, not only on
-            // a track change, so it recovers after a call or app interruption
-            reassertNowPlaying();
+            // a track change, so it recovers after a call or app interruption.
+            // Force a fresh artwork url so the system reloads a lost cover
+            reassertNowPlaying(true);
         });
 
         audio.addEventListener("pause", function () {
@@ -3965,7 +3971,7 @@
             return await new Promise(function (resolve) {
 
                 canvas.toBlob(function (out) {
-                    resolve(out ? URL.createObjectURL(out) : null);
+                    resolve(out || null);
                 }, "image/jpeg", 0.9);
             });
         } catch (e) {
@@ -3975,19 +3981,64 @@
 
     // Build an artwork list from local blobs, the real 128px downscale first as
     // the primary, then the full cover for the large lock screen view
-    function blobArtworkList(smallUrl, fullUrl, type) {
+    // Revoke the object urls currently referenced by the media session
+    function revokeLiveArtUrls() {
+
+        for (const u of liveArtUrls) {
+
+            URL.revokeObjectURL(u);
+        }
+
+        liveArtUrls = [];
+    }
+
+    // Build a media session artwork list from a cache entry, creating fresh
+    // object urls and tracking them so they can be revoked on the next replace
+    function buildArtwork(entry) {
 
         const list = [];
 
-        if (smallUrl) {
-            list.push({ src: smallUrl, sizes: "128x128", type: "image/jpeg" });
+        if (entry.small) {
+
+            const u = URL.createObjectURL(entry.small);
+
+            liveArtUrls.push(u);
+            list.push({ src: u, sizes: "128x128", type: "image/jpeg" });
         }
 
-        if (fullUrl) {
-            list.push({ src: fullUrl, sizes: "512x512", type: type });
+        if (entry.full) {
+
+            const u = URL.createObjectURL(entry.full);
+
+            liveArtUrls.push(u);
+            list.push({ src: u, sizes: "512x512", type: entry.type });
         }
 
         return list;
+    }
+
+    // Artwork list for a song from its cached blobs. Reuses the current list so
+    // routine updates do not reload the image, but force builds a fresh one with
+    // new urls, which is what makes the system reload the cover after it was lost
+    function artworkFor(song, force) {
+
+        const entry = artCache.get(song.song_id);
+
+        if (!entry) {
+
+            return [];
+        }
+
+        if (!force && currentArtId === song.song_id && currentArtworkList) {
+
+            return currentArtworkList;
+        }
+
+        revokeLiveArtUrls();
+        currentArtworkList = buildArtwork(entry);
+        currentArtId = song.song_id;
+
+        return currentArtworkList;
     }
 
     // Build the Media Session artwork list, the one cover repeated at the sizes
@@ -4125,27 +4176,11 @@
         }
     }
 
-    // Revoke both blob urls held by a cache entry
-    function artCacheRevoke(entry) {
-
-        if (!entry) {
-            return;
-        }
-
-        if (entry.full) {
-            URL.revokeObjectURL(entry.full);
-        }
-
-        if (entry.small) {
-            URL.revokeObjectURL(entry.small);
-        }
-    }
-
-    // Store a song's cover blobs, evicting and freeing the oldest over the limit
+    // Store a song's cover blobs, evicting the oldest over the limit. The blobs
+    // are held directly, so evicted ones are freed by the garbage collector
     function artCachePut(id, entry) {
 
         if (artCache.has(id)) {
-            artCacheRevoke(artCache.get(id));
             artCache.delete(id);
         }
 
@@ -4154,21 +4189,17 @@
         while (artCache.size > ART_CACHE_MAX) {
 
             const oldest = artCache.keys().next().value;
-
-            artCacheRevoke(artCache.get(oldest));
             artCache.delete(oldest);
         }
     }
 
-    // Free every cached cover blob
+    // Drop all cached covers and free the live object urls
     function clearArtBlob() {
 
-        artCache.forEach(function (entry) {
-            artCacheRevoke(entry);
-        });
-
+        revokeLiveArtUrls();
         artCache.clear();
         currentArtId = null;
+        currentArtworkList = null;
     }
 
     // Fetch the cover as a local blob and swap it into the Media Session. Local
@@ -4211,28 +4242,20 @@
             return;
         }
 
-        const fullUrl = URL.createObjectURL(blob);
         const type = blob.type || "image/jpeg";
 
         // A genuine 128px downscale as the primary artwork, best chance on iOS
-        const smallUrl = await makeSmallCover(blob);
+        const smallBlob = await makeSmallCover(blob);
 
         // A newer track took over during the async downscale, drop this cover
         if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
 
-            URL.revokeObjectURL(fullUrl);
-
-            if (smallUrl) {
-                URL.revokeObjectURL(smallUrl);
-            }
-
             return;
         }
 
-        artCachePut(id, { full: fullUrl, small: smallUrl, type: type });
-        currentArtId = id;
+        artCachePut(id, { full: blob, small: smallBlob, type: type });
 
-        setMediaMetadata(song, blobArtworkList(smallUrl, fullUrl, type));
+        setMediaMetadata(song, artworkFor(song, true));
     }
 
     // Tell the OS what is playing, so playerctl and the lock screen show the
@@ -4241,17 +4264,17 @@
     // Re-assert the Now Playing metadata for the current song. Pressing play
     // after a call or another app took the media slot must refresh the lock
     // screen and Bluetooth art, which are otherwise only set on a track change
-    function reassertNowPlaying() {
+    function reassertNowPlaying(force) {
 
         if (!currentSong) {
             return;
         }
 
-        updateMediaMetadata(currentSong);
+        updateMediaMetadata(currentSong, force);
         updateMediaPosition();
     }
 
-    function updateMediaMetadata(song) {
+    function updateMediaMetadata(song, force) {
 
         if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") {
             return;
@@ -4276,8 +4299,7 @@
 
         if (cached) {
 
-            currentArtId = song.song_id;
-            setMediaMetadata(song, blobArtworkList(cached.small, cached.full, cached.type));
+            setMediaMetadata(song, artworkFor(song, force));
             return;
         }
 
