@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5o";
+    const VERSION = "1.3.5q";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -274,7 +274,9 @@
     let currentArtId = null;
     let currentArtworkList = null;
 
-    // Object urls currently referenced by the media session, revoked on replace
+    // Object urls handed to the media session for the current song. They stay
+    // alive as long as this song is current, and are only retired when another
+    // song takes over, so the cover is never torn down while it is still showing
     let liveArtUrls = [];
 
     // Rising token so a slow cover fetch learns a newer track has taken over
@@ -3982,14 +3984,23 @@
     // Build an artwork list from local blobs, the real 128px downscale first as
     // the primary, then the full cover for the large lock screen view
     // Revoke the object urls currently referenced by the media session
-    function revokeLiveArtUrls() {
+    // Retire a batch of old object urls. The revoke waits a short grace so the
+    // song that replaces them has time to load its own cover before the old
+    // urls are released, which avoids blanking the art during the swap
+    function retireArtUrls(urls) {
 
-        for (const u of liveArtUrls) {
+        if (!urls || urls.length === 0) {
 
-            URL.revokeObjectURL(u);
+            return;
         }
 
-        liveArtUrls = [];
+        setTimeout(function () {
+
+            for (const u of urls) {
+
+                URL.revokeObjectURL(u);
+            }
+        }, 5000);
     }
 
     // Build a media session artwork list from a cache entry, creating fresh
@@ -4034,7 +4045,15 @@
             return currentArtworkList;
         }
 
-        revokeLiveArtUrls();
+        // A different song is taking over, so retire the previous song's urls
+        // once the new cover has had time to load. The same song keeps its urls,
+        // so a forced refresh never tears down a cover that is still on screen
+        if (currentArtId !== song.song_id) {
+
+            retireArtUrls(liveArtUrls);
+            liveArtUrls = [];
+        }
+
         currentArtworkList = buildArtwork(entry);
         currentArtId = song.song_id;
 
@@ -4196,7 +4215,8 @@
     // Drop all cached covers and free the live object urls
     function clearArtBlob() {
 
-        revokeLiveArtUrls();
+        retireArtUrls(liveArtUrls);
+        liveArtUrls = [];
         artCache.clear();
         currentArtId = null;
         currentArtworkList = null;
