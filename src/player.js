@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.5y";
+    const VERSION = "1.3.6f";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -130,6 +130,10 @@
 
     // Strongest blur on a side cover at its furthest from center, in pixels
     const ART_SIDE_BLUR = 3;
+
+    // Side covers are drawn slightly smaller so they look like they sit behind
+    // the playing cover, 1 is the same size as the main cover
+    const ART_SIDE_SCALE = 0.8;
 
     // How many covers to keep ready on each side, two lets a swipe pull the next
     // one in from beyond the edge
@@ -421,6 +425,9 @@
     let swipeStartY = 0;
     let swipeDir = 0;
     let currentSwipeOffset = 0;
+
+    // Rising token so a new touch cancels any glide still animating
+    let artGlideToken = 0;
 
     // Pull to refresh state for the song list
     let pullArmed = false;
@@ -3551,7 +3558,45 @@
     }
 
     // Point each cover tile at the song that many steps from the current one
+    // Rotate the tile array so a tile already showing a given cover can become
+    // the center without swapping its image source. The array is reordered, the
+    // DOM is left alone since stacking is by explicit z-index
+    function rotateArtTiles(shift) {
+
+        const n = artTiles.length;
+        const s = ((shift % n) + n) % n;
+
+        if (s === 0) {
+
+            return;
+        }
+
+        artTiles = artTiles.slice(s).concat(artTiles.slice(0, s));
+        playerArt = artTiles[ART_SIDE_TILES];
+    }
+
     function setArtSources() {
+
+        // If the new current cover already sits on a neighbor tile, rotate the
+        // strip so that tile becomes the center. Swapping the center tile's own
+        // image source instead flashes the old cover while the new one decodes
+        if (currentSong) {
+
+            const curCover = coverUrl(currentSong);
+            const center = artTiles[ART_SIDE_TILES];
+
+            if (curCover && center.dataset.cover !== curCover) {
+
+                for (let i = 0; i < artTiles.length; i += 1) {
+
+                    if (i !== ART_SIDE_TILES && artTiles[i].dataset.cover === curCover) {
+
+                        rotateArtTiles(i - ART_SIDE_TILES);
+                        break;
+                    }
+                }
+            }
+        }
 
         for (let i = 0; i < artTiles.length; i += 1) {
 
@@ -3560,10 +3605,21 @@
             const cover = song ? coverUrl(song) : "";
 
             if (cover) {
-                artTiles[i].src = cover;
+
+                // Only touch the source when the cover actually changes, so a
+                // recycled tile keeps its already decoded image
+                if (artTiles[i].dataset.cover !== cover) {
+
+                    artTiles[i].src = cover;
+                    artTiles[i].dataset.cover = cover;
+                }
+
                 artTiles[i].style.visibility = "visible";
+
             } else {
+
                 artTiles[i].removeAttribute("src");
+                artTiles[i].dataset.cover = "";
                 artTiles[i].style.visibility = "hidden";
             }
         }
@@ -3583,7 +3639,19 @@
             return;
         }
 
-        const base = (w - cover) / 2;
+        // Slot geometry. The center slot holds the playing cover at full size.
+        // The side slots are anchored so the scaled cover's outer edge touches
+        // the container edge, sitting behind the center cover
+        const xC = (w - cover) / 2;
+        const xL = (ART_SIDE_SCALE - 1) * cover / 2;
+        const xR = w - (ART_SIDE_SCALE + 1) * cover / 2;
+
+        // Swipe progress, the center follows the finger and a full swipe spans
+        // the distance from the center slot to a side anchor
+        const travel = xC - xL;
+        const p = travel > 0 ? Math.max(-1, Math.min(1, drag / travel)) : 0;
+        const t = Math.abs(p);
+        const range = 1 - ART_SIDE_SCALE;
 
         // In repeat one the sides are not where playback heads next, so grey
         // and fade them as a hint that the current song keeps repeating
@@ -3592,17 +3660,57 @@
         for (let i = 0; i < artTiles.length; i += 1) {
 
             const rel = i - ART_SIDE_TILES;
-            const x = base + rel * cover + drag;
+            const isSide = rel !== 0;
 
-            artTiles[i].style.transform = "translateX(" + x + "px)";
+            let x;
+            let scale;
+            let z;
 
-            // Blur grows with how far the tile center sits from the wrapper center
-            const tileCenter = x + cover / 2;
-            const dist = Math.abs(tileCenter - w / 2);
-            const factor = Math.min(1, dist / cover);
+            if (rel === 0) {
+
+                // The playing cover follows the finger and shrinks toward the
+                // side size, dropping behind the incoming cover half way
+                x = xC + drag;
+                scale = 1 - t * range;
+                z = t > 0.5 ? 2 : 3;
+
+            } else if (rel === -1 && p > 0) {
+
+                // Swiping toward previous, this cover travels from its left
+                // anchor to the center, growing to full size on the way
+                x = xL + (xC - xL) * t;
+                scale = ART_SIDE_SCALE + range * t;
+                z = t > 0.5 ? 3 : 2;
+
+            } else if (rel === 1 && p < 0) {
+
+                // Swiping toward next, same journey from the right anchor
+                x = xR + (xC - xR) * t;
+                scale = ART_SIDE_SCALE + range * t;
+                z = t > 0.5 ? 3 : 2;
+
+            } else if (rel === -1 || rel === 1) {
+
+                // The far side stays pinned at its anchor beneath the moving cover
+                x = rel === -1 ? xL : xR;
+                scale = ART_SIDE_SCALE;
+                z = 1;
+
+            } else {
+
+                // Spare tiles wait hidden beneath the side anchors
+                x = rel < 0 ? xL : xR;
+                scale = ART_SIDE_SCALE;
+                z = 0;
+            }
+
+            artTiles[i].style.transform = "translateX(" + x + "px) scale(" + scale + ")";
+            artTiles[i].style.zIndex = String(z);
+
+            // Blur follows how far the tile is from full size
+            const factor = range > 0 ? (1 - scale) / range : 0;
             const blur = factor * ART_SIDE_BLUR;
 
-            const isSide = rel !== 0;
             const filters = [];
 
             if (blur > 0.05) {
@@ -3614,31 +3722,43 @@
             }
 
             artTiles[i].style.filter = filters.length ? filters.join(" ") : "none";
+
             artTiles[i].style.opacity = (repeatingOne && isSide) ? "0.3" : "1";
+
+            // Only the cover on top blends, and only on the side that overlaps
+            // the swap partner. A gradient mask makes that side semi transparent
+            // while the far side stays opaque, so the cover behind it stays
+            // hidden instead of shining through
+            let mask = "none";
+
+            if (t > 0 && z === 3) {
+
+                const cross = (0.5 + 0.5 * Math.min(1, Math.abs(t - 0.5) / 0.25)).toFixed(3);
+                const fadeRight = p < 0 ? t < 0.5 : t >= 0.5;
+
+                mask = fadeRight
+                    ? "linear-gradient(to right, #000 40%, rgba(0,0,0," + cross + ") 70%)"
+                    : "linear-gradient(to right, rgba(0,0,0," + cross + ") 30%, #000 60%)";
+            }
+
+            artTiles[i].style.webkitMaskImage = mask;
+            artTiles[i].style.maskImage = mask;
         }
     }
 
     // The distance one swipe travels to change song, equal to a cover width
+    // How far a swipe travels to complete, the distance from the center slot to
+    // an edge anchored side slot
     function artStep() {
 
-        return artWrapEl ? artWrapEl.clientHeight : 0;
-    }
+        if (!artWrapEl) {
+            return 0;
+        }
 
-    // After the glide settles, run the song change, which re-seats the strip
-    function finishArtSwipe(action) {
+        const w = artWrapEl.clientWidth;
+        const cover = artWrapEl.clientHeight;
 
-        setTimeout(function () {
-
-            setArtTransition("none");
-            currentSwipeOffset = 0;
-
-            // The song only changes now, on release, never during the drag
-            if (action) {
-                action();
-            } else {
-                positionArt(0);
-            }
-        }, 220);
+        return (w - ART_SIDE_SCALE * cover) / 2;
     }
 
     // Begin tracking a swipe on the cover
@@ -3650,6 +3770,7 @@
 
         const t = ev.touches[0];
 
+        artGlideToken += 1;
         swipeActive = true;
         swipeDir = 0;
         swipeStartX = t.clientX;
@@ -3708,25 +3829,63 @@
         const step = artStep();
         const threshold = Math.max(40, step * 0.3);
 
-        setArtTransition("transform 0.2s ease, filter 0.2s ease");
-
         if (moved <= -threshold && neighborSong(1)) {
 
             // Glide fully to the next cover, then play it on landing
-            positionArt(-step);
-            finishArtSwipe(playNext);
+            animateArt(moved, -step, function () {
+
+                currentSwipeOffset = 0;
+                playNext();
+            });
 
         } else if (moved >= threshold && neighborSong(-1)) {
 
-            positionArt(step);
-            finishArtSwipe(playPrev);
+            animateArt(moved, step, function () {
+
+                currentSwipeOffset = 0;
+                playPrev();
+            });
 
         } else {
 
-            // Not far enough, snap back with no change
-            positionArt(0);
-            currentSwipeOffset = 0;
+            // Not far enough, glide back with no change
+            animateArt(moved, 0, function () {
+
+                currentSwipeOffset = 0;
+            });
         }
+    }
+
+    // Glide the swipe offset from one value to another, driving positionArt each
+    // frame so the scale and crossfade animate smoothly through the crossover. A
+    // rising token lets a new touch cancel a glide in progress
+    function animateArt(from, to, done) {
+
+        const token = ++artGlideToken;
+        const start = performance.now();
+        const duration = 220;
+
+        setArtTransition("none");
+
+        const frame = function (now) {
+
+            if (token !== artGlideToken) {
+                return;
+            }
+
+            const k = Math.min(1, (now - start) / duration);
+            const eased = 1 - Math.pow(1 - k, 3);
+
+            positionArt(from + (to - from) * eased);
+
+            if (k < 1) {
+                requestAnimationFrame(frame);
+            } else if (done) {
+                done();
+            }
+        };
+
+        requestAnimationFrame(frame);
     }
 
     // Update the title and the cover strip for the current song
@@ -4625,19 +4784,10 @@
         // that peek in and fade and blur toward the edges
         artWrapEl = document.createElement("div");
         artWrapEl.id = "mureka-player-art-wrap";
-        artWrapEl.style.cssText = "position:relative;width:100%;border-radius:8px;overflow:hidden;background:#0a0a0d;touch-action:pan-y";
+        artWrapEl.style.cssText = "position:relative;width:100%;border-radius:8px;overflow:hidden;background:#1d1d22;touch-action:pan-y";
 
         // A short, wide window, the center cover is a square of this height
         artWrapEl.style.aspectRatio = String(1 / ART_CENTER_FRACTION);
-
-        // Fade the sides out toward the edges, clear where they meet the center
-        const seamLeft = (1 - ART_CENTER_FRACTION) / 2 * 100;
-        const seamRight = 100 - seamLeft;
-        const artMask = "linear-gradient(to right, transparent 0%, #000 "
-            + seamLeft.toFixed(1) + "%, #000 " + seamRight.toFixed(1) + "%, transparent 100%)";
-
-        artWrapEl.style.webkitMaskImage = artMask;
-        artWrapEl.style.maskImage = artMask;
 
         // Build the row of cover tiles, the middle one is the current song
         artTiles = [];
@@ -4743,11 +4893,11 @@
 
         // Dark gradient behind the top status so its text stays readable
         const topScrim = document.createElement("div");
-        topScrim.style.cssText = "position:absolute;left:0;right:0;top:0;height:40%;border-radius:8px 8px 0 0;background:linear-gradient(to bottom,rgba(0,0,0,0.75),transparent);pointer-events:none";
+        topScrim.style.cssText = "position:absolute;left:0;right:0;top:0;height:40%;border-radius:8px 8px 0 0;background:linear-gradient(to bottom,rgba(29,29,34,0.85),transparent);pointer-events:none;z-index:4";
 
         // Dark gradient behind the bottom title block for the same reason
         const bottomScrim = document.createElement("div");
-        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:62%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.55) 45%,transparent 100%);pointer-events:none";
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:62%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.7) 45%,transparent 100%);pointer-events:none;z-index:4";
 
         // Status sits at the top of the art, one clipped line, never blocks swipe
         const topWrap = document.createElement("div");
