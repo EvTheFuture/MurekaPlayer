@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6f";
+    const VERSION = "1.3.6g";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -428,6 +428,10 @@
 
     // Rising token so a new touch cancels any glide still animating
     let artGlideToken = 0;
+
+    // The landing action of a glide still in flight, so it can be committed
+    // rather than dropped if another gesture starts first
+    let artGlidePending = null;
 
     // Pull to refresh state for the song list
     let pullArmed = false;
@@ -3770,6 +3774,11 @@
 
         const t = ev.touches[0];
 
+        // Finish any glide still animating so its song change is not lost, then
+        // reset to a clean rest layout before the new gesture starts
+        commitArtGlide();
+        positionArt(0);
+
         artGlideToken += 1;
         swipeActive = true;
         swipeDir = 0;
@@ -3861,9 +3870,14 @@
     // rising token lets a new touch cancel a glide in progress
     function animateArt(from, to, done) {
 
+        // Commit any earlier glide first so its song change is not lost
+        commitArtGlide();
+
         const token = ++artGlideToken;
         const start = performance.now();
         const duration = 220;
+
+        artGlidePending = done || null;
 
         setArtTransition("none");
 
@@ -3879,13 +3893,35 @@
             positionArt(from + (to - from) * eased);
 
             if (k < 1) {
+
                 requestAnimationFrame(frame);
-            } else if (done) {
-                done();
+
+            } else {
+
+                artGlidePending = null;
+
+                if (done) {
+                    done();
+                }
             }
         };
 
         requestAnimationFrame(frame);
+    }
+
+    // Finish a glide still in flight at once, running its landing action so a
+    // fast follow up gesture cannot drop the pending song change
+    function commitArtGlide() {
+
+        if (!artGlidePending) {
+            return;
+        }
+
+        const done = artGlidePending;
+
+        artGlidePending = null;
+        artGlideToken += 1;
+        done();
     }
 
     // Update the title and the cover strip for the current song
