@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6k";
+    const VERSION = "1.3.6n";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -4166,6 +4166,41 @@
         }
     }
 
+    // Re-encode a cover to a clean JPEG data url at up to maxSize, never scaling
+    // past the source resolution so it stays as sharp as the original without
+    // wasting bytes. Returns the data url and its real pixel size, or null
+    async function makeCoverDataUrl(blob, maxSize, quality) {
+
+        try {
+
+            if (!self.createImageBitmap) {
+
+                return null;
+            }
+
+            const bmp = await createImageBitmap(blob);
+            const src = Math.max(bmp.width, bmp.height) || maxSize;
+            const size = Math.max(1, Math.min(maxSize, src));
+            const canvas = document.createElement("canvas");
+
+            canvas.width = size;
+            canvas.height = size;
+
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(bmp, 0, 0, size, size);
+
+            if (bmp.close) {
+
+                bmp.close();
+            }
+
+            return { url: canvas.toDataURL("image/jpeg", quality), size: size };
+        } catch (e) {
+
+            return null;
+        }
+    }
+
     // Build an artwork list from local blobs, the real 128px downscale first as
     // the primary, then the full cover for the large lock screen view
     // Revoke the object urls currently referenced by the media session
@@ -4189,6 +4224,13 @@
         if (entry.small) {
 
             list.push({ src: entry.small, sizes: "128x128", type: "image/jpeg" });
+        }
+
+        if (entry.large) {
+
+            const dim = entry.largeSize + "x" + entry.largeSize;
+
+            list.push({ src: entry.large, sizes: dim, type: "image/jpeg" });
         }
 
         return list;
@@ -4374,9 +4416,11 @@
 
         // Re-encode the cover to clean square JPEG data urls, a small one for
         // the compact slot and a larger one for the lock screen
-        // iOS grey-boxes artwork larger than 128px on the affected versions, so
-        // hand it a single small 128px cover, which shows reliably everywhere
+        // Re-encode the cover to clean JPEG data urls, a small one for compact
+        // slots and a large one up to 1024 for a sharp lock screen and car
+        // display. The large one is capped to the source so it never upscales
         const small = await makeScaledDataUrl(blob, 128, 0.85);
+        const big = await makeCoverDataUrl(blob, 1024, 0.82);
 
         // A newer track took over during the async work, drop this cover
         if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
@@ -4384,12 +4428,16 @@
             return;
         }
 
-        if (!small) {
+        if (!small && !big) {
 
             return;
         }
 
-        artCachePut(id, { small: small });
+        artCachePut(id, {
+            small: small,
+            large: big ? big.url : null,
+            largeSize: big ? big.size : 0
+        });
 
         // The cover for the wanted song decoded, send if playback is also running
         if (id === npWantId) {
@@ -4613,11 +4661,9 @@
         npPlaying = false;
         npCoverSent = false;
 
-        // Show the title and artist right away with no cover. An empty artwork
-        // is not a cover update, so it does not count against the per song cap
-        setMediaMetadata(song, []);
-
-        // Send anyway after a short wait if the cover or playback is slow
+        // Do not send yet, an empty artwork makes iOS show the page logo. Wait
+        // for the cover so the lock screen goes straight from the old cover to
+        // the new one, the send happens in the readiness gate below
         npFallback = setTimeout(forceNowPlaying, 700);
 
         // Decode the cover if we do not have it yet
