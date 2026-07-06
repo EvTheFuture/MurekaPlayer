@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6g";
+    const VERSION = "1.3.6k";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2216,9 +2216,19 @@
 
             playbackWorks = true;
 
-            // Only refresh the scrubber position here. iOS caps artwork updates
-            // per song, so we avoid re-sending the metadata, which carries the
-            // cover and would burn that budget
+            if (npCoverSent) {
+
+                // Resume of the same song, re-assert the cover after a call or
+                // other interruption dropped it
+                sendNowPlaying();
+
+            } else {
+
+                // First run of this song, send once the cover is also ready
+                npPlaying = true;
+                tryNowPlaying();
+            }
+
             updateMediaPosition();
         });
 
@@ -4381,7 +4391,10 @@
 
         artCachePut(id, { small: small });
 
-        setMediaMetadata(song, artworkFor(song));
+        // The cover for the wanted song decoded, send if playback is also running
+        if (id === npWantId) {
+            tryNowPlaying();
+        }
     }
 
     // Tell the OS what is playing, so playerctl and the lock screen show the
@@ -4396,7 +4409,7 @@
             return;
         }
 
-        updateMediaMetadata(currentSong);
+        sendNowPlaying();
         updateMediaPosition();
     }
 
@@ -4514,14 +4527,77 @@
         }
     }
 
+    // Now Playing send state. A track change coalesces into a single send once
+    // the cover has decoded and playback is running, so the cover goes out
+    // complete, after iOS has the session, and within the per song cover cap
+    let npWantId = null;
+    let npPlaying = false;
+    let npCoverSent = false;
+    let npFallback = null;
+
+    // Push the current metadata and cover to the media session now
+    function sendNowPlaying() {
+
+        if (currentSong) {
+            setMediaMetadata(currentSong, artworkFor(currentSong));
+        }
+    }
+
+    // Send the first cover for the current song once it has decoded and playback
+    // is running, and only once
+    function tryNowPlaying() {
+
+        if (npCoverSent || !currentSong) {
+            return;
+        }
+
+        if (!npPlaying || !artCache.has(currentSong.song_id)) {
+            return;
+        }
+
+        npCoverSent = true;
+
+        if (npFallback) {
+
+            clearTimeout(npFallback);
+            npFallback = null;
+        }
+
+        sendNowPlaying();
+    }
+
+    // Fallback when the cover or playback is slow, so the lock screen never
+    // stays blank. If the cover was not ready, tryNowPlaying still sends it later
+    function forceNowPlaying() {
+
+        npFallback = null;
+
+        if (npCoverSent || !currentSong) {
+            return;
+        }
+
+        sendNowPlaying();
+
+        if (artCache.has(currentSong.song_id)) {
+            npCoverSent = true;
+        }
+    }
+
     function updateMediaMetadata(song) {
 
         if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") {
             return;
         }
 
+        if (npFallback) {
+
+            clearTimeout(npFallback);
+            npFallback = null;
+        }
+
         if (!song) {
 
+            npWantId = null;
             clearArtBlob();
 
             try {
@@ -4532,27 +4608,29 @@
             return;
         }
 
-        // Reuse a cached blob when we have one for this song, so going back to a
-        // recent track shows its art at once, otherwise show the remote cover
-        // now and fetch the blob to swap in
-        const cached = artCache.get(song.song_id);
+        // Start a fresh coalesced send for this song
+        npWantId = song.song_id;
+        npPlaying = false;
+        npCoverSent = false;
 
-        if (cached) {
-
-            setMediaMetadata(song, artworkFor(song));
-            return;
-        }
-
-        // Set the text now with no cover, then load and re-encode the real cover
-        // and set it once. Skipping the remote placeholder avoids sending a
-        // second distinct cover, since iOS caps covers per song
+        // Show the title and artist right away with no cover. An empty artwork
+        // is not a cover update, so it does not count against the per song cap
         setMediaMetadata(song, []);
 
-        const art = coverUrl(song);
+        // Send anyway after a short wait if the cover or playback is slow
+        npFallback = setTimeout(forceNowPlaying, 700);
 
-        if (art) {
-            loadArtBlob(song, art);
+        // Decode the cover if we do not have it yet
+        if (!artCache.has(song.song_id)) {
+
+            const art = coverUrl(song);
+
+            if (art) {
+                loadArtBlob(song, art);
+            }
         }
+
+        tryNowPlaying();
     }
 
     // Report the current position so playerctl shows progress and can seek
