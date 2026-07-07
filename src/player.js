@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6r";
+    const VERSION = "1.3.6s";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -3671,6 +3671,13 @@
                 }
 
                 artTiles[i].style.visibility = "visible";
+
+                // A cover shown in the carousel has been downloaded to display
+                // it, so store it too. The current song is stored by the play
+                // path, so only the neighbors need it here
+                if (rel !== 0) {
+                    cacheArt(song);
+                }
 
             } else {
 
