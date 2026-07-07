@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6p";
+    const VERSION = "1.3.6r";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -359,6 +359,9 @@
 
     // Set of song_ids whose mp3 is present in the audio cache
     let cachedIds = new Set();
+
+    // Set of song_ids whose cover is present in the persistent art store
+    let artCachedIds = new Set();
 
     // Set of song_ids that are being cached right now, shown by a pulsing dot
     let cachingIds = new Set();
@@ -2063,6 +2066,31 @@
             }
 
             cachedIds = ids;
+            renderList();
+        } catch (e) {
+        }
+
+        refreshArtCachedIds();
+    }
+
+    // Rebuild the set of cover cached song_ids by scanning the art store keys
+    async function refreshArtCachedIds() {
+
+        try {
+
+            const store = await caches.open(ART_STORE);
+            const requests = await store.keys();
+            const prefix = "https://mureka-art-cache/";
+            const ids = new Set();
+
+            for (const r of requests) {
+
+                if (r.url.indexOf(prefix) === 0) {
+                    ids.add(decodeURIComponent(r.url.slice(prefix.length)));
+                }
+            }
+
+            artCachedIds = ids;
             renderList();
         } catch (e) {
         }
@@ -4428,8 +4456,28 @@
             await store.put(artStoreKey(id), new Response(body, {
                 headers: { "Content-Type": "application/json" }
             }));
+
+            artCachedIds.add(String(id));
+            scheduleDotRefresh();
         } catch (e) {
         }
+    }
+
+    // Coalesce list re-renders after covers are stored, so the dots update
+    // without redrawing on every single cover during a bulk cache
+    let dotRefreshTimer = null;
+
+    function scheduleDotRefresh() {
+
+        if (dotRefreshTimer) {
+            return;
+        }
+
+        dotRefreshTimer = setTimeout(function () {
+
+            dotRefreshTimer = null;
+            renderList();
+        }, 300);
     }
 
     // Fetch, re-encode and persist a song's cover so it is ready offline and on
@@ -6330,16 +6378,36 @@
         // The dot marks cache state, hidden keeps the text aligned
         // Pulsing while caching, solid once cached
         const caching = cachingIds.has(song.song_id);
-        const cached = cachedIds.has(song.song_id);
+        const audioCached = cachedIds.has(song.song_id);
+        const artCached = artCachedIds.has(String(song.song_id));
+        const anyCached = audioCached || artCached;
+
+        // Cyan when both the song and its cover are stored, otherwise a distinct
+        // color for whichever one is present so far
+        let dotColor = "#48e1eb";
+
+        if (audioCached && !artCached) {
+            dotColor = "#7db6ff";
+        } else if (artCached && !audioCached) {
+            dotColor = "#f0a94a";
+        }
 
         const dot = document.createElement("span");
         dot.textContent = "\u25CF";
-        dot.style.cssText = "color:#48e1eb;margin-right:6px;flex:0 0 auto;visibility:"
-            + ((caching || cached) ? "visible" : "hidden");
+        dot.style.cssText = "color:" + dotColor + ";margin-right:6px;flex:0 0 auto;visibility:"
+            + ((caching || anyCached) ? "visible" : "hidden");
 
         if (caching) {
+
             dot.style.animation = "mureka-pulse 1s ease-in-out infinite";
             dot.title = "Caching";
+
+        } else if (audioCached && artCached) {
+            dot.title = "Song and cover cached";
+        } else if (audioCached) {
+            dot.title = "Song cached, cover not yet";
+        } else if (artCached) {
+            dot.title = "Cover cached, song not yet";
         }
 
         // Number column, right aligned and fixed width so titles line up
