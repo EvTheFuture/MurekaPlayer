@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6n";
+    const VERSION = "1.3.6p";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -119,6 +119,10 @@
 
     // Cache API bucket name where downloaded mp3 files are stored for replay
     const AUDIO_CACHE = "mureka_audio_cache_v1";
+
+    // Cache API bucket for re-encoded cover art data urls, so a cover downloads
+    // and re-encodes only once and then persists across sessions, like the audio
+    const ART_STORE = "mureka_art_cache_v1";
 
     // Default number of upcoming songs to cache ahead, now also a user setting
     const PREFETCH_DEFAULT = 3;
@@ -3226,7 +3230,14 @@
 
             const song = queue[pos];
 
-            if (!song || cachedIds.has(song.song_id)) {
+            if (!song) {
+                continue;
+            }
+
+            // Pre-cache the cover too, cacheArt skips if it is already stored
+            await cacheArt(song);
+
+            if (cachedIds.has(song.song_id)) {
                 continue;
             }
 
@@ -3321,6 +3332,9 @@
             if (!cacheRunning) {
                 break;
             }
+
+            // Pre-cache the cover alongside the audio
+            await cacheArt(song);
 
             const success = await fetchToCache(song);
 
@@ -4377,6 +4391,102 @@
     // Fetch the cover as a local blob and swap it into the Media Session. Local
     // bytes mean Bluetooth does not have to refetch a remote URL for every
     // track, which is what makes the art drop to a generic icon over time
+    // A stable Cache API key for a song's stored cover entry
+    function artStoreKey(id) {
+
+        return "https://mureka-art-cache/" + encodeURIComponent(id);
+    }
+
+    // Read a song's re-encoded cover entry from the persistent cache, or null
+    async function loadArtFromStore(id) {
+
+        try {
+
+            const store = await caches.open(ART_STORE);
+            const res = await store.match(artStoreKey(id));
+
+            if (!res) {
+
+                return null;
+            }
+
+            return await res.json();
+        } catch (e) {
+
+            return null;
+        }
+    }
+
+    // Persist a song's re-encoded cover entry so it survives across sessions
+    async function saveArtToStore(id, entry) {
+
+        try {
+
+            const store = await caches.open(ART_STORE);
+            const body = JSON.stringify(entry);
+
+            await store.put(artStoreKey(id), new Response(body, {
+                headers: { "Content-Type": "application/json" }
+            }));
+        } catch (e) {
+        }
+    }
+
+    // Fetch, re-encode and persist a song's cover so it is ready offline and on
+    // first play, the same way the audio is cached. Skips the work if already
+    // stored, and does not touch the media session
+    async function cacheArt(song) {
+
+        const id = song.song_id;
+
+        // Already in memory for a recent song
+        if (artCache.has(id)) {
+            return;
+        }
+
+        const url = coverUrl(song);
+
+        if (!url) {
+            return;
+        }
+
+        // Already persisted from a previous session or run
+        const stored = await loadArtFromStore(id);
+
+        if (stored && stored.small) {
+            return;
+        }
+
+        let blob;
+
+        try {
+
+            const res = await fetch(url);
+
+            if (!res || !res.ok) {
+                return;
+            }
+
+            blob = await res.blob();
+        } catch (e) {
+
+            return;
+        }
+
+        const small = await makeScaledDataUrl(blob, 128, 0.85);
+        const big = await makeCoverDataUrl(blob, 1024, 0.82);
+
+        if (!small && !big) {
+            return;
+        }
+
+        saveArtToStore(id, {
+            small: small,
+            large: big ? big.url : null,
+            largeSize: big ? big.size : 0
+        });
+    }
+
     async function loadArtBlob(song, url) {
 
         if (!url) {
@@ -4385,12 +4495,32 @@
 
         const id = song.song_id;
 
-        // Already have this song's art cached
+        // Already have this song's art in memory
         if (artCache.has(id)) {
             return;
         }
 
         const token = ++artFetchToken;
+
+        // Persistent cache first. A stored cover skips both the download and the
+        // re-encode and survives across sessions, like the audio cache does
+        const stored = await loadArtFromStore(id);
+
+        if (stored && stored.small) {
+
+            if (token !== artFetchToken || !currentSong || currentSong.song_id !== id) {
+                return;
+            }
+
+            artCachePut(id, stored);
+
+            if (id === npWantId) {
+                tryNowPlaying();
+            }
+
+            return;
+        }
+
         let blob;
 
         try {
@@ -4414,8 +4544,6 @@
             return;
         }
 
-        // Re-encode the cover to clean square JPEG data urls, a small one for
-        // the compact slot and a larger one for the lock screen
         // Re-encode the cover to clean JPEG data urls, a small one for compact
         // slots and a large one up to 1024 for a sharp lock screen and car
         // display. The large one is capped to the source so it never upscales
@@ -4433,11 +4561,16 @@
             return;
         }
 
-        artCachePut(id, {
+        const entry = {
             small: small,
             large: big ? big.url : null,
             largeSize: big ? big.size : 0
-        });
+        };
+
+        artCachePut(id, entry);
+
+        // Persist so this cover never has to download or re-encode again
+        saveArtToStore(id, entry);
 
         // The cover for the wanted song decoded, send if playback is also running
         if (id === npWantId) {
@@ -4624,11 +4757,14 @@
             return;
         }
 
-        sendNowPlaying();
-
-        if (artCache.has(currentSong.song_id)) {
-            npCoverSent = true;
+        // Only force a send when the cover is ready. Sending with no cover makes
+        // iOS show the page logo, so wait for the cover to arrive instead
+        if (!artCache.has(currentSong.song_id)) {
+            return;
         }
+
+        sendNowPlaying();
+        npCoverSent = true;
     }
 
     function updateMediaMetadata(song) {
