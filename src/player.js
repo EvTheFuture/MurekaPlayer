@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6w";
+    const VERSION = "1.3.7d";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -419,10 +419,10 @@
     let playerMetaEl = null;
     let playerCountsEl = null;
 
-    // Synced lyric display, rows are {t: ms, text} for the current song only
-    let lyricPrevEl = null;
-    let lyricEl = null;
-    let lyricNextEl = null;
+    // Synced lyric display, five stacked rows rolled on advance, rows are
+    // {t: ms, text} for the current song only
+    let lyricBox = null;
+    let lyricSlots = [];
     let lyricRows = [];
     let lyricIdx = -1;
 
@@ -570,6 +570,11 @@
             artTest: false,
             lyricsOn: true,
             waveSeek: true,
+            lyricSize: 18,
+            lyricSideMul: 0.8,
+            lyricLineMul: 1.5,
+            lyricShift: 0,
+            lyricSideShift: 0,
             metaTitle: "${title}",
             metaSubtitle: "${genre}"
         };
@@ -621,6 +626,16 @@
                     artTest: parsed.artTest === true,
                     lyricsOn: parsed.lyricsOn !== false,
                     waveSeek: parsed.waveSeek !== false,
+                    lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
+                        ? parsed.lyricSize : 18,
+                    lyricSideMul: (typeof parsed.lyricSideMul === "number" && parsed.lyricSideMul >= 0.5 && parsed.lyricSideMul <= 1)
+                        ? parsed.lyricSideMul : 0.8,
+                    lyricLineMul: (typeof parsed.lyricLineMul === "number" && parsed.lyricLineMul >= 1 && parsed.lyricLineMul <= 2)
+                        ? parsed.lyricLineMul : 1.5,
+                    lyricShift: (typeof parsed.lyricShift === "number" && parsed.lyricShift >= -30 && parsed.lyricShift <= 30)
+                        ? parsed.lyricShift : 0,
+                    lyricSideShift: (typeof parsed.lyricSideShift === "number" && parsed.lyricSideShift >= -20 && parsed.lyricSideShift <= 20)
+                        ? parsed.lyricSideShift : 0,
                     metaTitle: typeof parsed.metaTitle === "string"
                         ? parsed.metaTitle
                         : "${title}",
@@ -4230,10 +4245,162 @@
         return out;
     }
 
-    // Show the lyric row matching the playback position, plus the next row
+    // Lyric roll layout, five stacked rows, index 0 exit above through 4 entry
+    // below, each with its resting y offset, font size, color and opacity. A one
+    // line advance animates every row up from the geometry of the row beneath it
+    // The five lyric slots, computed from the configurable current line size.
+    // Index 0 exit above, 1 previous, 2 current, 3 next, 4 entry below. Exit and
+    // entry sit only half a line beyond their neighbor and shrink, so a leaving
+    // or arriving line rolls a short way and fades in both opacity and size,
+    // like text curving over the back of a cylinder
+    let LYRIC_SLOTS = [];
+
+    // Uniform line box height for the lyric rows, set by computeLyricSlots
+    let lyricLineH = 24;
+
+    function computeLyricSlots() {
+
+        const base = Math.max(10, settings.lyricSize || 18);
+        const side = Math.round(base * (settings.lyricSideMul || 0.8));
+        const edge = Math.round(side * 0.7);
+        const dim = "#dddddd";
+        const white = "#ffffff";
+
+        // One line box height for every row keeps the gaps between lines even
+        // despite the different font sizes, with text vertically centered. The
+        // multiplier is configurable, smaller pulls the side lines closer
+        lyricLineH = Math.round(base * (settings.lyricLineMul || 1.5));
+        const half = Math.round(lyricLineH * 0.5);
+
+        // Optional horizontal inset for the non current lines
+        const sx = settings.lyricSideShift || 0;
+
+        const prevY = half;
+        const curY = prevY + lyricLineH;
+        const nextY = curY + lyricLineH;
+
+        LYRIC_SLOTS = [
+            { y: prevY - half, x: sx, size: edge, color: dim, op: 0, z: 0 },
+            { y: prevY, x: sx, size: side, color: dim, op: 0.75, z: 2 },
+            { y: curY, x: 0, size: base, color: white, op: 1, z: 3 },
+            { y: nextY, x: sx, size: side, color: dim, op: 0.75, z: 2 },
+            { y: nextY + half, x: sx, size: edge, color: dim, op: 0, z: 0 }
+        ];
+
+        return nextY + half + lyricLineH;
+    }
+
+    // Apply the computed slot geometry to the row elements and size the box
+    function applyLyricLayout() {
+
+        if (!lyricBox || lyricSlots.length < 5) {
+            return;
+        }
+
+        const boxH = computeLyricSlots();
+
+        for (let i = 0; i < 5; i += 1) {
+
+            const s = LYRIC_SLOTS[i];
+            const el = lyricSlots[i];
+
+            el.style.top = s.y + "px";
+            el.style.left = s.x + "px";
+            el.style.fontSize = s.size + "px";
+            el.style.lineHeight = lyricLineH + "px";
+            el.style.height = lyricLineH + "px";
+            el.style.color = s.color;
+            el.style.zIndex = String(s.z);
+            el.style.fontWeight = i === 2 ? "600" : "400";
+        }
+
+        lyricBox.style.height = boxH + "px";
+
+        // Positive shifts the whole lyric block down, negative up
+        lyricBox.style.transform = "translateY(" + (settings.lyricShift || 0) + "px)";
+
+        updateLyricLine(true);
+    }
+
+    // The text for the lyric row at the given offset from the current one
+    function lyricTextAt(off) {
+
+        const r = lyricIdx + off;
+
+        return (r >= 0 && r < lyricRows.length) ? lyricRows[r].text : "";
+    }
+
+    // Place the five rows at rest with no animation, used on load and on a jump
+    function setLyricRows(texts) {
+
+        for (let i = 0; i < 5; i += 1) {
+
+            const s = LYRIC_SLOTS[i];
+
+            lyricSlots[i].textContent = texts[i];
+            lyricSlots[i].style.transform = "translate(0px, 0px) scale(1)";
+            lyricSlots[i].style.color = s.color;
+            lyricSlots[i].style.zIndex = String(s.z);
+            lyricSlots[i].style.opacity = texts[i] ? String(s.op) : "0";
+        }
+    }
+
+    // Roll the five rows up one line. Each row shows the text that was one slot
+    // below it, so it animates from that lower slot's position, size, color and
+    // opacity into its own, which reads as the whole stack rolling up
+    function rollLyricRows(texts) {
+
+        for (let i = 0; i < 5; i += 1) {
+
+            const dest = LYRIC_SLOTS[i];
+            const from = LYRIC_SLOTS[i + 1] || dest;
+
+            lyricSlots[i].textContent = texts[i];
+            lyricSlots[i].style.transform = "translate(0px, 0px) scale(1)";
+            lyricSlots[i].style.color = dest.color;
+            lyricSlots[i].style.zIndex = String(dest.z);
+            lyricSlots[i].style.opacity = texts[i] ? String(dest.op) : "0";
+
+            if (!lyricSlots[i].animate) {
+                continue;
+            }
+
+            try {
+
+                lyricSlots[i].getAnimations().forEach(function (a) {
+                    a.cancel();
+                });
+            } catch (e) {
+            }
+
+            const fromX = from.x - dest.x;
+            const fromY = from.y - dest.y;
+            const fromScale = from.size / dest.size;
+            const fromOp = texts[i] ? from.op : 0;
+
+            lyricSlots[i].animate([
+                {
+                    transform: "translate(" + fromX + "px, " + fromY + "px) scale(" + fromScale + ")",
+                    opacity: fromOp,
+                    color: from.color
+                },
+                {
+                    transform: "translate(0px, 0px) scale(1)",
+                    opacity: texts[i] ? dest.op : 0,
+                    color: dest.color
+                }
+            ], {
+                duration: 340,
+                easing: "ease-out"
+            });
+        }
+    }
+
+    // Update the lyric rows to the current playback position. A single line
+    // advance rolls, any other change like a jump or a seek just sets in place
     function updateLyricLine(force) {
 
-        if (!lyricEl || !lyricNextEl || !lyricPrevEl) {
+        if (!lyricBox || lyricSlots.length < 5) {
             return;
         }
 
@@ -4241,11 +4408,12 @@
 
         if (!active) {
 
-            lyricPrevEl.style.display = "none";
-            lyricEl.style.display = "none";
-            lyricNextEl.style.display = "none";
+            lyricBox.style.display = "none";
+            lyricIdx = -1;
             return;
         }
+
+        lyricBox.style.display = "block";
 
         const ms = isFinite(audio.currentTime) ? audio.currentTime * 1000 : 0;
 
@@ -4265,54 +4433,23 @@
             return;
         }
 
+        const step = idx - lyricIdx;
+
         lyricIdx = idx;
 
-        const prev = idx > 0 ? lyricRows[idx - 1].text : "";
-        const cur = idx >= 0 ? lyricRows[idx].text : "";
-        const next = (idx + 1 < lyricRows.length) ? lyricRows[idx + 1].text : "";
-
-        lyricPrevEl.textContent = prev;
-        lyricEl.textContent = cur;
-        lyricNextEl.textContent = next;
-        lyricPrevEl.style.display = prev ? "block" : "none";
-        lyricEl.style.display = cur ? "block" : "none";
-        lyricNextEl.style.display = next ? "block" : "none";
-
-        if (prev || cur || next) {
-            animateLyricChange();
-        }
-    }
-
-    // Ease the lyric lines in on a change, a quick upward slide and fade so a
-    // new line scrolls into place instead of snapping
-    function animateLyricChange() {
-
-        const items = [
-            { el: lyricPrevEl, op: "0.75" },
-            { el: lyricEl, op: "1" },
-            { el: lyricNextEl, op: "0.75" }
+        const texts = [
+            lyricTextAt(-2),
+            lyricTextAt(-1),
+            lyricTextAt(0),
+            lyricTextAt(1),
+            lyricTextAt(2)
         ];
 
-        for (const item of items) {
-
-            item.el.style.transition = "none";
-            item.el.style.transform = "translateY(8px)";
-            item.el.style.opacity = "0";
+        if (step === 1 && !force) {
+            rollLyricRows(texts);
+        } else {
+            setLyricRows(texts);
         }
-
-        // Two frames so the start state paints before the transition begins
-        requestAnimationFrame(function () {
-
-            requestAnimationFrame(function () {
-
-                for (const item of items) {
-
-                    item.el.style.transition = "transform 0.18s ease, opacity 0.18s ease";
-                    item.el.style.transform = "translateY(0)";
-                    item.el.style.opacity = item.op;
-                }
-            });
-        });
     }
 
     // A stable Cache API key for a song's stored waveform
@@ -4463,18 +4600,10 @@
             waveData = w;
             updateSeekMode();
 
-            if (isDebug()) {
-                setStatus("Wave: " + w.length + " points");
-            }
-
         } else {
 
             // Not stored yet, collect it from the feed in the background. When
             // the scan reaches this song it re-loads and shows the wave
-            if (isDebug()) {
-                setStatus("Wave: not stored, collecting from the feed");
-            }
-
             collectWaves(id);
         }
     }
@@ -5765,10 +5894,9 @@
         playerMetaEl = document.createElement("div");
         playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
 
-        // Plays and likes for the current song on their own line so they show
-        // even when the meta line above is long enough to be clipped
+        // Plays and likes for the current song, shown at the top of the art
         playerCountsEl = document.createElement("div");
-        playerCountsEl.style.cssText = "color:#dcdce0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+        playerCountsEl.style.cssText = "color:#eaeaec;font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
 
         // A faint note shown in the art area when the current song has no cover
         artPlaceholderEl = document.createElement("div");
@@ -5781,35 +5909,46 @@
 
         // Dark gradient behind the bottom title block for the same reason
         const bottomScrim = document.createElement("div");
-        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:75%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.7) 45%,transparent 100%);pointer-events:none;z-index:4";
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:88%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.75) 55%,transparent 100%);pointer-events:none;z-index:4";
 
-        // Status sits at the top of the art, one clipped line, never blocks swipe
+        // Status sits at the top of the art, one clipped line, never blocks
+        // swipe, with the plays and likes in the upper right corner beside it
         const topWrap = document.createElement("div");
-        topWrap.style.cssText = "position:absolute;left:10px;right:10px;top:7px;pointer-events:none;z-index:4";
-        statusEl.style.cssText = "font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+        topWrap.style.cssText = "position:absolute;left:10px;right:10px;top:7px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;pointer-events:none;z-index:4";
+        statusEl.style.cssText = "flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+        playerCountsEl.style.cssText = "flex:0 0 auto;color:#eaeaec;font-size:12px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
         topWrap.appendChild(statusEl);
+        topWrap.appendChild(playerCountsEl);
 
         // Title, meta and counts sit at the bottom of the art over the scrim
         const bottomWrap = document.createElement("div");
         bottomWrap.style.cssText = "position:absolute;left:10px;right:10px;bottom:8px;pointer-events:none;z-index:4";
 
-        // Synced lyric lines, the previous and next rows faint around the
-        // current one, with a small gap before the title block
-        lyricPrevEl = document.createElement("div");
-        lyricPrevEl.style.cssText = "display:none;font-size:12px;color:#ddd;opacity:0.75;text-shadow:0 1px 3px rgba(0,0,0,0.8);margin-bottom:2px";
+        // Five stacked lyric rows in a positioned box, rolled by updateLyricLine.
+        // Geometry and box height come from applyLyricLayout, driven by the
+        // configurable font size, so the extra gap here is the air above the title
+        lyricBox = document.createElement("div");
+        lyricBox.style.cssText = "position:relative;overflow:visible;margin-bottom:20px";
 
-        lyricEl = document.createElement("div");
-        lyricEl.style.cssText = "display:none;font-size:15px;font-weight:600;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.8);margin-bottom:2px";
+        lyricSlots = [];
 
-        lyricNextEl = document.createElement("div");
-        lyricNextEl.style.cssText = "display:none;font-size:12px;color:#ddd;opacity:0.75;text-shadow:0 1px 3px rgba(0,0,0,0.8);margin-bottom:10px";
+        for (let i = 0; i < 5; i += 1) {
 
-        bottomWrap.appendChild(lyricPrevEl);
-        bottomWrap.appendChild(lyricEl);
-        bottomWrap.appendChild(lyricNextEl);
+            const el = document.createElement("div");
+
+            el.style.cssText = "position:absolute;left:0;right:0;opacity:0;"
+                + "text-shadow:0 1px 3px rgba(0,0,0,0.8);transform-origin:left center;"
+                + "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+
+            lyricSlots.push(el);
+            lyricBox.appendChild(el);
+        }
+
+        applyLyricLayout();
+
+        bottomWrap.appendChild(lyricBox);
         bottomWrap.appendChild(playerTitle);
         bottomWrap.appendChild(playerMetaEl);
-        bottomWrap.appendChild(playerCountsEl);
 
         // Layer the overlays over the coverflow, the tiles stay swipeable below
         artBox.appendChild(artPlaceholderEl);
@@ -7463,7 +7602,9 @@
     }
 
     // Build a labeled minus / value / plus stepper backed by getter / setter
-    function makeStepperRow(label, get, set, min, max) {
+    function makeStepperRow(label, get, set, min, max, step) {
+
+        const st = step || 1;
 
         const row = document.createElement("div");
         row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
@@ -7482,13 +7623,13 @@
         };
 
         const minus = makeButton("-", "#333", "#fff", function () {
-            set(Math.max(min, get() - 1));
+            set(Math.max(min, get() - st));
             saveSettings();
             render();
         });
 
         const plus = makeButton("+", "#333", "#fff", function () {
-            set(Math.min(max, get() + 1));
+            set(Math.min(max, get() + st));
             saveSettings();
             render();
         });
@@ -7654,11 +7795,36 @@
             function () { return settings.lyricsOn; },
             function (v) { settings.lyricsOn = v; updateLyricLine(true); });
 
+        const lyricSizeRow = makeStepperRow("Lyric size",
+            function () { return settings.lyricSize; },
+            function (v) { settings.lyricSize = v; applyLyricLayout(); }, 12, 30);
+
+        const lyricSideRow = makeStepperRow("Side line percent",
+            function () { return Math.round(settings.lyricSideMul * 100); },
+            function (v) { settings.lyricSideMul = v / 100; applyLyricLayout(); }, 50, 100, 5);
+
+        const lyricSpaceRow = makeStepperRow("Line spacing percent",
+            function () { return Math.round(settings.lyricLineMul * 100); },
+            function (v) { settings.lyricLineMul = v / 100; applyLyricLayout(); }, 100, 200, 5);
+
+        const lyricShiftRow = makeStepperRow("Lyric position",
+            function () { return settings.lyricShift; },
+            function (v) { settings.lyricShift = v; applyLyricLayout(); }, -30, 30, 2);
+
+        const lyricSideShiftRow = makeStepperRow("Side line offset",
+            function () { return settings.lyricSideShift; },
+            function (v) { settings.lyricSideShift = v; applyLyricLayout(); }, -20, 20, 1);
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
 
         settingsEl.appendChild(lyricsRow);
+        settingsEl.appendChild(lyricSizeRow);
+        settingsEl.appendChild(lyricSideRow);
+        settingsEl.appendChild(lyricSpaceRow);
+        settingsEl.appendChild(lyricShiftRow);
+        settingsEl.appendChild(lyricSideShiftRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
