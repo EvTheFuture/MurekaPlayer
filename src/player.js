@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.6s";
+    const VERSION = "1.3.6w";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -123,6 +123,10 @@
     // Cache API bucket for re-encoded cover art data urls, so a cover downloads
     // and re-encodes only once and then persists across sessions, like the audio
     const ART_STORE = "mureka_art_cache_v1";
+
+    // Cache API bucket for the per song waveform. Only the feed responses carry
+    // wave_list, so it is persisted here as feed pages arrive and read on play
+    const WAVE_STORE = "mureka_wave_cache_v1";
 
     // Default number of upcoming songs to cache ahead, now also a user setting
     const PREFETCH_DEFAULT = 3;
@@ -414,6 +418,17 @@
     let playerTitle = null;
     let playerMetaEl = null;
     let playerCountsEl = null;
+
+    // Synced lyric display, rows are {t: ms, text} for the current song only
+    let lyricPrevEl = null;
+    let lyricEl = null;
+    let lyricNextEl = null;
+    let lyricRows = [];
+    let lyricIdx = -1;
+
+    // Waveform seek bar, the normalized wave data for the current song
+    let waveData = null;
+    let waveCanvas = null;
     let seekBar = null;
     let curTimeEl = null;
     let remTimeEl = null;
@@ -553,6 +568,8 @@
             view: "mureka",
             reportPlays: true,
             artTest: false,
+            lyricsOn: true,
+            waveSeek: true,
             metaTitle: "${title}",
             metaSubtitle: "${genre}"
         };
@@ -602,6 +619,8 @@
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
                     artTest: parsed.artTest === true,
+                    lyricsOn: parsed.lyricsOn !== false,
+                    waveSeek: parsed.waveSeek !== false,
                     metaTitle: typeof parsed.metaTitle === "string"
                         ? parsed.metaTitle
                         : "${title}",
@@ -1044,6 +1063,12 @@
     // Keep only the fields we actually need, to save space
     // description and publish_at are not used anywhere, so they are dropped
     function trim(s) {
+
+        // The feed is the only response carrying the waveform, so persist it
+        // here before it is trimmed away. The store skips already saved songs
+        if (Array.isArray(s.wave_list) && s.wave_list.length > 0) {
+            saveWaveToStore(s.song_id, s.wave_list);
+        }
 
         return {
             song_id: s.song_id,
@@ -1719,6 +1744,10 @@
         // Invalidate the active load token even if the flag was already cleared
         loadToken += 1;
 
+        // The wave scan cursor belongs to the previous feed, start over
+        waveScanCursor = null;
+        waveScanDone = false;
+
         if (creatorSource) {
 
             // Leave creator mode without toggling, returning to your own feed
@@ -2293,6 +2322,8 @@
             if (!isSeeking) {
                 updateSeekDisplay();
             }
+
+            updateLyricLine();
 
             // Persist the position now and then so a restart resumes near here
             const now = Date.now();
@@ -3186,7 +3217,14 @@
             reportPlay(song);
         }
 
-        // Fetch play and like counts to show under the now playing title
+        // Fetch play and like counts to show under the now playing title. The
+        // previous song's lyrics and waveform must not linger while it loads
+        lyricRows = [];
+        lyricIdx = -1;
+        waveData = null;
+        updateLyricLine(true);
+        updateSeekMode();
+        loadWaveForSong(song);
         fetchNowPlayingCounts(song);
 
         // The current song is cached now, get upcoming songs ready in the background
@@ -3239,6 +3277,25 @@
                 fav_count: json.data.fav_count,
                 share_count: json.data.share_count
             };
+
+            // The same response carries the lyrics and the waveform, so take
+            // them here with no extra request
+            const d = json.data;
+
+            lyricRows = buildLyricRows(d.lyrics || (d.song && d.song.lyrics));
+            lyricIdx = -1;
+            updateLyricLine(true);
+
+            // The detail response is not known to carry the waveform, but if it
+            // ever does, take it, without clobbering one loaded from the store
+            const w = normalizeWave(extractWaveList(d));
+
+            if (w) {
+
+                waveData = w;
+                updateSeekMode();
+                saveWaveToStore(song.song_id, w);
+            }
 
             refreshNowPlayingMeta();
         } catch (e) {
@@ -4061,6 +4118,13 @@
             playerTitle.textContent = "Nothing playing";
             nowPlayingCounts = null;
 
+            // Drop the lyric line and waveform of the stopped song
+            lyricRows = [];
+            lyricIdx = -1;
+            waveData = null;
+            updateLyricLine(true);
+            updateSeekMode();
+
             if (playerMetaEl) {
                 playerMetaEl.textContent = "";
             }
@@ -4098,6 +4162,471 @@
     }
 
     // Update the seek bar position and the elapsed and remaining time labels
+    // Extract a lyric row's start time in milliseconds, accepting the field
+    // name variants the API might use, or null when the row has no timing
+    function rowStartMs(row) {
+
+        if (!row || typeof row !== "object") {
+            return null;
+        }
+
+        const keys = ["start_ms", "begin_ms", "start_time", "begin_time",
+            "start", "begin", "time", "offset"];
+
+        for (const key of keys) {
+
+            const v = row[key];
+
+            if (typeof v === "number" && isFinite(v) && v >= 0) {
+                return v;
+            }
+        }
+
+        return null;
+    }
+
+    // Flatten the timed lyric segments into one sorted list of {t, text}.
+    // Rows without timing are skipped, an empty result disables the display
+    function buildLyricRows(lyrics) {
+
+        const out = [];
+
+        if (!Array.isArray(lyrics)) {
+            return out;
+        }
+
+        lyrics.forEach(function (seg) {
+
+            if (!seg || !Array.isArray(seg.rows)) {
+                return;
+            }
+
+            seg.rows.forEach(function (r) {
+
+                if (!r || typeof r.text !== "string" || r.text === "") {
+                    return;
+                }
+
+                const t = rowStartMs(r);
+
+                if (t !== null) {
+                    out.push({ t: t, text: r.text });
+                }
+            });
+        });
+
+        out.sort(function (a, b) {
+            return a.t - b.t;
+        });
+
+        // Timestamps might be in seconds, convert when far too small to be ms
+        if (out.length > 0 && out[out.length - 1].t < 600) {
+
+            for (const r of out) {
+                r.t = r.t * 1000;
+            }
+        }
+
+        return out;
+    }
+
+    // Show the lyric row matching the playback position, plus the next row
+    function updateLyricLine(force) {
+
+        if (!lyricEl || !lyricNextEl || !lyricPrevEl) {
+            return;
+        }
+
+        const active = settings.lyricsOn && lyricRows.length > 0 && audio;
+
+        if (!active) {
+
+            lyricPrevEl.style.display = "none";
+            lyricEl.style.display = "none";
+            lyricNextEl.style.display = "none";
+            return;
+        }
+
+        const ms = isFinite(audio.currentTime) ? audio.currentTime * 1000 : 0;
+
+        // The rows are sorted, take the last one that has started
+        let idx = -1;
+
+        for (let i = 0; i < lyricRows.length; i += 1) {
+
+            if (lyricRows[i].t <= ms) {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+
+        if (idx === lyricIdx && !force) {
+            return;
+        }
+
+        lyricIdx = idx;
+
+        const prev = idx > 0 ? lyricRows[idx - 1].text : "";
+        const cur = idx >= 0 ? lyricRows[idx].text : "";
+        const next = (idx + 1 < lyricRows.length) ? lyricRows[idx + 1].text : "";
+
+        lyricPrevEl.textContent = prev;
+        lyricEl.textContent = cur;
+        lyricNextEl.textContent = next;
+        lyricPrevEl.style.display = prev ? "block" : "none";
+        lyricEl.style.display = cur ? "block" : "none";
+        lyricNextEl.style.display = next ? "block" : "none";
+
+        if (prev || cur || next) {
+            animateLyricChange();
+        }
+    }
+
+    // Ease the lyric lines in on a change, a quick upward slide and fade so a
+    // new line scrolls into place instead of snapping
+    function animateLyricChange() {
+
+        const items = [
+            { el: lyricPrevEl, op: "0.75" },
+            { el: lyricEl, op: "1" },
+            { el: lyricNextEl, op: "0.75" }
+        ];
+
+        for (const item of items) {
+
+            item.el.style.transition = "none";
+            item.el.style.transform = "translateY(8px)";
+            item.el.style.opacity = "0";
+        }
+
+        // Two frames so the start state paints before the transition begins
+        requestAnimationFrame(function () {
+
+            requestAnimationFrame(function () {
+
+                for (const item of items) {
+
+                    item.el.style.transition = "transform 0.18s ease, opacity 0.18s ease";
+                    item.el.style.transform = "translateY(0)";
+                    item.el.style.opacity = item.op;
+                }
+            });
+        });
+    }
+
+    // A stable Cache API key for a song's stored waveform
+    function waveStoreKey(id) {
+
+        return "https://mureka-wave-cache/" + encodeURIComponent(id);
+    }
+
+    // Persist a song's waveform, skipping songs already stored
+    async function saveWaveToStore(id, list) {
+
+        try {
+
+            const store = await caches.open(WAVE_STORE);
+            const key = waveStoreKey(id);
+
+            if (await store.match(key)) {
+                return;
+            }
+
+            await store.put(key, new Response(JSON.stringify(list), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        } catch (e) {
+        }
+    }
+
+    // Read a song's stored waveform, or null when it has none yet
+    async function loadWaveFromStore(id) {
+
+        try {
+
+            const store = await caches.open(WAVE_STORE);
+            const res = await store.match(waveStoreKey(id));
+
+            if (!res) {
+
+                return null;
+            }
+
+            return await res.json();
+        } catch (e) {
+
+            return null;
+        }
+    }
+
+    // Background wave collection. Songs cached before waves were persisted have
+    // no stored waveform, and only the feed carries it, so this scans the feed
+    // in the background, saving every wave it passes. The cursor persists for
+    // the session, so each scan resumes where the previous one stopped instead
+    // of re-reading the same pages
+    let waveScanRunning = false;
+    let waveScanCursor = null;
+    let waveScanDone = false;
+
+    async function collectWaves(wantId) {
+
+        // One scan at a time, and never beside a manual library load
+        if (waveScanRunning || waveScanDone || running) {
+            return;
+        }
+
+        waveScanRunning = true;
+
+        try {
+
+            let cursor = waveScanCursor;
+            let pages = 0;
+
+            // A cap keeps one run bounded, the next run resumes from the cursor
+            while (pages < 40) {
+
+                let page;
+
+                try {
+                    page = await fetchPage(cursor);
+                } catch (e) {
+                    break;
+                }
+
+                const songs = extractSongs(page);
+
+                if (songs.length === 0) {
+                    waveScanDone = true;
+                    break;
+                }
+
+                let foundWant = false;
+
+                for (const s of songs) {
+
+                    if (Array.isArray(s.wave_list) && s.wave_list.length > 0) {
+
+                        await saveWaveToStore(s.song_id, s.wave_list);
+
+                        if (wantId !== null && s.song_id === wantId) {
+                            foundWant = true;
+                        }
+                    }
+                }
+
+                pages += 1;
+
+                const more = hasMore(page);
+                const next = getCursor(page, songs);
+
+                if (more === false || next === null || next === cursor) {
+                    waveScanDone = true;
+                    break;
+                }
+
+                cursor = next;
+                waveScanCursor = cursor;
+
+                // The wanted song is covered, stop here and resume later
+                if (foundWant) {
+                    break;
+                }
+
+                await sleep(PAGE_DELAY);
+            }
+        } finally {
+            waveScanRunning = false;
+        }
+
+        // The wanted song may have its wave stored now, show it
+        if (wantId !== null && currentSong && currentSong.song_id === wantId && !waveData) {
+            loadWaveForSong(currentSong);
+        }
+    }
+
+    // Load the stored waveform for the song now starting, if it has one
+    async function loadWaveForSong(song) {
+
+        const id = song.song_id;
+        const stored = await loadWaveFromStore(id);
+
+        // A different song took over while reading
+        if (!currentSong || currentSong.song_id !== id) {
+            return;
+        }
+
+        const w = normalizeWave(stored);
+
+        if (w) {
+
+            waveData = w;
+            updateSeekMode();
+
+            if (isDebug()) {
+                setStatus("Wave: " + w.length + " points");
+            }
+
+        } else {
+
+            // Not stored yet, collect it from the feed in the background. When
+            // the scan reaches this song it re-loads and shows the wave
+            if (isDebug()) {
+                setStatus("Wave: not stored, collecting from the feed");
+            }
+
+            collectWaves(id);
+        }
+    }
+
+    // Find the wave list in a detail response, tolerating different locations
+    // and formats. It may sit beside the song or inside it, be a plain array,
+    // a JSON encoded string, or a comma separated string
+    function extractWaveList(d) {
+
+        if (!d || typeof d !== "object") {
+            return null;
+        }
+
+        const spots = [
+            d.wave_list,
+            d.song && d.song.wave_list,
+            d.waveform,
+            d.song && d.song.waveform,
+            d.wave,
+            d.song && d.song.wave
+        ];
+
+        for (let c of spots) {
+
+            if (typeof c === "string" && c.length > 0) {
+
+                // A JSON encoded array, or a bare comma separated list
+                try {
+                    c = JSON.parse(c);
+                } catch (e) {
+                    c = c.split(",");
+                }
+            }
+
+            if (Array.isArray(c) && c.length > 0) {
+                return c;
+            }
+        }
+
+        return null;
+    }
+
+    // Normalize a wave list to floats between 0 and 1, or null when unusable
+    function normalizeWave(w) {
+
+        if (!Array.isArray(w) || w.length === 0) {
+            return null;
+        }
+
+        let max = 0;
+
+        for (const v of w) {
+
+            const n = Number(v);
+
+            if (isFinite(n) && n > max) {
+                max = n;
+            }
+        }
+
+        if (max <= 0) {
+            return null;
+        }
+
+        return w.map(function (v) {
+
+            const n = Number(v);
+
+            return isFinite(n) && n > 0 ? n / max : 0;
+        });
+    }
+
+    // Choose between the waveform canvas and the classic slider
+    function updateSeekMode() {
+
+        if (!waveCanvas || !seekBar) {
+            return;
+        }
+
+        const useWave = settings.waveSeek && waveData !== null;
+
+        waveCanvas.style.display = useWave ? "block" : "none";
+        seekBar.style.display = useWave ? "none" : "";
+
+        if (useWave) {
+            drawWave();
+        }
+    }
+
+    // Draw the waveform bars, played part cyan, optionally previewing a seek
+    function drawWave(previewFrac) {
+
+        if (!waveCanvas || !waveData) {
+            return;
+        }
+
+        const cssW = waveCanvas.clientWidth;
+        const cssH = waveCanvas.clientHeight;
+
+        if (cssW === 0 || cssH === 0) {
+            return;
+        }
+
+        // Match the backing store to the display size and pixel density
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.round(cssW * dpr);
+        const h = Math.round(cssH * dpr);
+
+        if (waveCanvas.width !== w || waveCanvas.height !== h) {
+            waveCanvas.width = w;
+            waveCanvas.height = h;
+        }
+
+        const ctx = waveCanvas.getContext("2d");
+        ctx.clearRect(0, 0, w, h);
+
+        const barW = 2 * dpr;
+        const gap = 1 * dpr;
+        const count = Math.max(1, Math.floor(w / (barW + gap)));
+        const duration = (audio && isFinite(audio.duration)) ? audio.duration : 0;
+
+        let frac = 0;
+
+        if (typeof previewFrac === "number") {
+            frac = previewFrac;
+        } else if (duration > 0 && audio) {
+            frac = audio.currentTime / duration;
+        }
+
+        for (let i = 0; i < count; i += 1) {
+
+            // Each bar shows the peak of its slice of the wave
+            const a = Math.floor(i * waveData.length / count);
+            const b = Math.max(a + 1, Math.floor((i + 1) * waveData.length / count));
+            let peak = 0;
+
+            for (let j = a; j < b; j += 1) {
+
+                if (waveData[j] > peak) {
+                    peak = waveData[j];
+                }
+            }
+
+            const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
+            const x = i * (barW + gap);
+            const y = (h - bh) / 2;
+
+            ctx.fillStyle = ((i + 0.5) / count) <= frac ? "#48e1eb" : "#555";
+            ctx.fillRect(x, y, barW, bh);
+        }
+    }
+
     function updateSeekDisplay() {
 
         if (!seekBar) {
@@ -4122,6 +4651,10 @@
             const remaining = duration > 0 ? (duration - current) : 0;
 
             remTimeEl.textContent = "-" + formatTime(remaining);
+        }
+
+        if (waveCanvas && waveData && !isSeeking && waveCanvas.style.display !== "none") {
+            drawWave();
         }
 
         updateMediaPosition();
@@ -5248,7 +5781,7 @@
 
         // Dark gradient behind the bottom title block for the same reason
         const bottomScrim = document.createElement("div");
-        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:62%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.7) 45%,transparent 100%);pointer-events:none;z-index:4";
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:75%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.7) 45%,transparent 100%);pointer-events:none;z-index:4";
 
         // Status sits at the top of the art, one clipped line, never blocks swipe
         const topWrap = document.createElement("div");
@@ -5259,6 +5792,21 @@
         // Title, meta and counts sit at the bottom of the art over the scrim
         const bottomWrap = document.createElement("div");
         bottomWrap.style.cssText = "position:absolute;left:10px;right:10px;bottom:8px;pointer-events:none;z-index:4";
+
+        // Synced lyric lines, the previous and next rows faint around the
+        // current one, with a small gap before the title block
+        lyricPrevEl = document.createElement("div");
+        lyricPrevEl.style.cssText = "display:none;font-size:12px;color:#ddd;opacity:0.75;text-shadow:0 1px 3px rgba(0,0,0,0.8);margin-bottom:2px";
+
+        lyricEl = document.createElement("div");
+        lyricEl.style.cssText = "display:none;font-size:15px;font-weight:600;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.8);margin-bottom:2px";
+
+        lyricNextEl = document.createElement("div");
+        lyricNextEl.style.cssText = "display:none;font-size:12px;color:#ddd;opacity:0.75;text-shadow:0 1px 3px rgba(0,0,0,0.8);margin-bottom:10px";
+
+        bottomWrap.appendChild(lyricPrevEl);
+        bottomWrap.appendChild(lyricEl);
+        bottomWrap.appendChild(lyricNextEl);
         bottomWrap.appendChild(playerTitle);
         bottomWrap.appendChild(playerMetaEl);
         bottomWrap.appendChild(playerCountsEl);
@@ -5288,6 +5836,7 @@
 
         seekBar = document.createElement("input");
         seekBar.type = "range";
+        seekBar.id = "mureka-seek-bar";
         seekBar.min = "0";
         seekBar.max = "0";
         seekBar.value = "0";
@@ -5321,8 +5870,82 @@
             updateSeekDisplay();
         });
 
+        // Waveform seek canvas, shown instead of the slider when wave data is
+        // available and the setting is on. touch-action none keeps a seek drag
+        // from scrolling the page
+        waveCanvas = document.createElement("canvas");
+        waveCanvas.style.cssText = "flex:1;height:28px;min-width:0;display:none;cursor:pointer;touch-action:none";
+
+        // Fraction of the canvas width for a pointer event, clamped to 0..1
+        const waveFrac = function (ev) {
+
+            const rect = waveCanvas.getBoundingClientRect();
+
+            if (rect.width <= 0) {
+                return 0;
+            }
+
+            return Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+        };
+
+        // Preview the labels and progress while pressing or dragging
+        const wavePreview = function (frac) {
+
+            const duration = (audio && isFinite(audio.duration)) ? audio.duration : 0;
+            const t = frac * duration;
+
+            curTimeEl.textContent = formatTime(t);
+            remTimeEl.textContent = "-" + formatTime(duration > 0 ? duration - t : 0);
+            drawWave(frac);
+        };
+
+        waveCanvas.addEventListener("pointerdown", function (ev) {
+
+            if (!audio || !isFinite(audio.duration)) {
+                return;
+            }
+
+            ev.preventDefault();
+            isSeeking = true;
+
+            try {
+                waveCanvas.setPointerCapture(ev.pointerId);
+            } catch (e) {
+            }
+
+            wavePreview(waveFrac(ev));
+        });
+
+        waveCanvas.addEventListener("pointermove", function (ev) {
+
+            if (isSeeking && audio && isFinite(audio.duration)) {
+                wavePreview(waveFrac(ev));
+            }
+        });
+
+        waveCanvas.addEventListener("pointerup", function (ev) {
+
+            if (!isSeeking) {
+                return;
+            }
+
+            if (audio && isFinite(audio.duration)) {
+                audio.currentTime = waveFrac(ev) * audio.duration;
+            }
+
+            isSeeking = false;
+            updateSeekDisplay();
+        });
+
+        waveCanvas.addEventListener("pointercancel", function () {
+
+            isSeeking = false;
+            updateSeekDisplay();
+        });
+
         seekRow.appendChild(curTimeEl);
         seekRow.appendChild(seekBar);
+        seekRow.appendChild(waveCanvas);
         seekRow.appendChild(remTimeEl);
 
         // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
@@ -5370,6 +5993,12 @@
         placeholderStyle.textContent =
             "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
+            + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:20px}"
+            + "#mureka-seek-bar::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#555}"
+            + "#mureka-seek-bar::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#48e1eb;margin-top:-5px}"
+            + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
+            + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
+            + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:#48e1eb}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
             // On a phone, fill the screen, shrink the art a touch and let the
@@ -6394,7 +7023,7 @@
         let dotColor = "#48e1eb";
 
         if (audioCached && !artCached) {
-            dotColor = "#7db6ff";
+            dotColor = "#b388ff";
         } else if (artCached && !audioCached) {
             dotColor = "#f0a94a";
         }
@@ -7020,6 +7649,17 @@
         settingsEl.appendChild(titleTplRow);
         settingsEl.appendChild(subtitleTplRow);
         settingsEl.appendChild(tplHint);
+
+        const lyricsRow = makeBoolRow("Show lyrics on the art",
+            function () { return settings.lyricsOn; },
+            function (v) { settings.lyricsOn = v; updateLyricLine(true); });
+
+        const waveRow = makeBoolRow("Waveform seek bar",
+            function () { return settings.waveSeek; },
+            function (v) { settings.waveSeek = v; updateSeekMode(); });
+
+        settingsEl.appendChild(lyricsRow);
+        settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
         settingsEl.appendChild(artTestRow);
@@ -7677,6 +8317,10 @@
         loadToken += 1;
 
         creatorSource = { user_id: String(userId), stage_name: name || ("User " + userId) };
+
+        // The wave scan cursor belongs to the previous feed, start over
+        waveScanCursor = null;
+        waveScanDone = false;
 
         // Your own playlists do not apply to a creator, so drop the filter
         activePlaylist = null;
