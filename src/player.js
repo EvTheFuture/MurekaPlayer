@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.7d";
+    const VERSION = "1.4.0";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -152,6 +152,9 @@
 
     // localStorage key that remembers the panel position
     const POS_KEY = "mureka_player_pos";
+
+    // localStorage key that remembers the panel width and list height
+    const SIZE_KEY = "mureka_player_size";
 
     // localStorage key that remembers the user settings object
     const SETTINGS_KEY = "mureka_player_settings";
@@ -6145,6 +6148,7 @@
             + "@media (max-width:640px){"
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
+            + "#mureka-player-resize{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
@@ -6342,7 +6346,10 @@
 
         panel.appendChild(header);
         panel.appendChild(bodyEl);
+        panel.appendChild(buildResizeGrip());
         document.body.appendChild(panel);
+
+        restoreSize();
 
         renderList();
         setStatus("Cached songs: " + cache.songs.length);
@@ -6508,6 +6515,130 @@
     }
 
     // Restore the saved anchor, or default to the bottom right
+    // Clamp a requested panel width and list height to sane bounds
+    function clampSize(w, listH) {
+
+        return {
+            w: Math.max(280, Math.min(w, Math.min(700, window.innerWidth - 16))),
+            listH: Math.max(120, Math.min(listH, 600))
+        };
+    }
+
+    // Apply a panel width and list height, then relayout the parts that
+    // measure their container, the coverflow and the waveform canvas
+    function applySize(w, listH) {
+
+        const size = clampSize(w, listH);
+
+        panelEl.style.width = size.w + "px";
+
+        if (listEl) {
+            listEl.style.height = size.listH + "px";
+        }
+
+        positionArt(0);
+        drawWave();
+
+        return size;
+    }
+
+    // Persist the panel size
+    function saveSize(size) {
+
+        try {
+            localStorage.setItem(SIZE_KEY, JSON.stringify(size));
+        } catch (e) {
+        }
+    }
+
+    // Restore the saved panel size, leaving the defaults when none is stored
+    function restoreSize() {
+
+        let saved = null;
+
+        try {
+            saved = JSON.parse(localStorage.getItem(SIZE_KEY));
+        } catch (e) {
+        }
+
+        if (saved && typeof saved.w === "number" && typeof saved.listH === "number") {
+            applySize(saved.w, saved.listH);
+        }
+    }
+
+    // Build the corner grip that resizes the panel by dragging. Horizontal
+    // drag changes the panel width, vertical drag changes the list height.
+    // The phone layout is full screen, so the media rules hide the grip there
+    function buildResizeGrip() {
+
+        const grip = document.createElement("div");
+
+        grip.id = "mureka-player-resize";
+        grip.textContent = "\u25E2";
+        grip.title = "Drag to resize";
+        grip.style.cssText = [
+            "position:absolute",
+            "right:2px",
+            "bottom:2px",
+            "width:18px",
+            "height:18px",
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
+            "font-size:13px",
+            "line-height:1",
+            "color:rgba(255,255,255,0.3)",
+            "cursor:nwse-resize",
+            "user-select:none",
+            "-moz-user-select:none",
+            "touch-action:none",
+            "z-index:5"
+        ].join(";");
+
+        grip.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const startX = ev.clientX;
+            const startY = ev.clientY;
+            const startW = panelEl.offsetWidth;
+            const startList = listEl ? listEl.offsetHeight : 240;
+
+            try {
+                grip.setPointerCapture(ev.pointerId);
+            } catch (e) {
+            }
+
+            let last = { w: startW, listH: startList };
+
+            const onMove = function (e) {
+                last = applySize(startW + (e.clientX - startX), startList + (e.clientY - startY));
+            };
+
+            const onUp = function () {
+
+                grip.removeEventListener("pointermove", onMove);
+                grip.removeEventListener("pointerup", onUp);
+                grip.removeEventListener("pointercancel", onUp);
+
+                saveSize(last);
+
+                // Re-clamp and re-anchor so the grown panel stays on screen
+                const rect = panelEl.getBoundingClientRect();
+
+                applyPosition(rect.left, rect.top);
+                savePosition();
+            };
+
+            grip.addEventListener("pointermove", onMove);
+            grip.addEventListener("pointerup", onUp);
+            grip.addEventListener("pointercancel", onUp);
+        });
+
+        return grip;
+    }
+
     function restorePosition() {
 
         let saved = null;
