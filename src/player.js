@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.3.7d";
+    const VERSION = "1.4.0d";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -152,6 +152,9 @@
 
     // localStorage key that remembers the panel position
     const POS_KEY = "mureka_player_pos";
+
+    // localStorage key that remembers the panel width and list height
+    const SIZE_KEY = "mureka_player_size";
 
     // localStorage key that remembers the user settings object
     const SETTINGS_KEY = "mureka_player_settings";
@@ -423,6 +426,18 @@
     // {t: ms, text} for the current song only
     let lyricBox = null;
     let lyricSlots = [];
+
+    // Overlay elements controlled by the art overlay mode
+    let bottomScrimEl = null;
+    let bottomWrapEl = null;
+
+    // Toast shown when the overlay mode is cycled by a double tap
+    let artToastEl = null;
+
+    // Last tap on the art, for double tap detection on touch devices
+    let lastArtTapT = 0;
+    let lastArtTapX = 0;
+    let lastArtTapY = 0;
     let lyricRows = [];
     let lyricIdx = -1;
 
@@ -568,7 +583,7 @@
             view: "mureka",
             reportPlays: true,
             artTest: false,
-            lyricsOn: true,
+            artOverlayMode: "all",
             waveSeek: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
@@ -624,7 +639,9 @@
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
                     artTest: parsed.artTest === true,
-                    lyricsOn: parsed.lyricsOn !== false,
+                    artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
+                        ? parsed.artOverlayMode
+                        : (parsed.lyricsOn === false ? "info" : "all"),
                     waveSeek: parsed.waveSeek !== false,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
@@ -3953,7 +3970,7 @@
     }
 
     // On release, advance to the neighbor if dragged far enough, else snap back
-    function onArtTouchEnd() {
+    function onArtTouchEnd(ev) {
 
         if (!swipeActive) {
             return;
@@ -3962,6 +3979,33 @@
         swipeActive = false;
 
         if (swipeDir !== 1) {
+
+            // No swipe direction was locked, so this was a tap. Two taps close
+            // together in time and place cycle the art overlay mode
+            if (swipeDir === 0 && ev && ev.type === "touchend") {
+
+                const t = ev.changedTouches && ev.changedTouches[0];
+
+                if (t) {
+
+                    const now = Date.now();
+
+                    if (now - lastArtTapT < 320
+                        && Math.abs(t.clientX - lastArtTapX) < 24
+                        && Math.abs(t.clientY - lastArtTapY) < 24) {
+
+                        lastArtTapT = 0;
+                        cycleOverlayMode();
+
+                    } else {
+
+                        lastArtTapT = now;
+                        lastArtTapX = t.clientX;
+                        lastArtTapY = t.clientY;
+                    }
+                }
+            }
+
             return;
         }
 
@@ -4322,6 +4366,117 @@
         updateLyricLine(true);
     }
 
+    // Reflect the overlay mode on the scrim, the info block and the counts.
+    // The single scrim element animates its height and opacity between the
+    // per mode targets, so the fade stays one smooth gradient with no seams
+    function refreshOverlay(lyricActive) {
+
+        if (!bottomScrimEl || !bottomWrapEl) {
+            return;
+        }
+
+        const mode = settings.artOverlayMode;
+
+        if (mode === "none") {
+
+            bottomScrimEl.style.opacity = "0";
+            bottomWrapEl.style.opacity = "0";
+
+            if (playerCountsEl) {
+                playerCountsEl.style.opacity = "0";
+            }
+
+            if (statusEl) {
+                statusEl.style.opacity = "0";
+            }
+
+            return;
+        }
+
+        // Tall shading only while lyrics actually show. Info alone needs just
+        // enough to back the title and meta, so the art above stays untinted
+        bottomScrimEl.style.height = lyricActive ? "88%" : "26%";
+        bottomScrimEl.style.opacity = "1";
+        bottomWrapEl.style.opacity = "1";
+
+        if (playerCountsEl) {
+            playerCountsEl.style.opacity = "1";
+        }
+
+        if (statusEl) {
+            statusEl.style.opacity = "1";
+        }
+    }
+
+    // Advance the overlay mode, none to info to all, remember it and confirm
+    // with a short toast over the art
+    function cycleOverlayMode() {
+
+        const order = ["none", "info", "all"];
+        const labels = { none: "Overlays off", info: "Song info", all: "Info + lyrics" };
+        const idx = order.indexOf(settings.artOverlayMode);
+
+        settings.artOverlayMode = order[(idx + 1) % order.length];
+        saveSettings();
+        updateLyricLine(true);
+        showArtToast(labels[settings.artOverlayMode]);
+    }
+
+    // Show a short confirmation pill centered on the art
+    function showArtToast(text) {
+
+        if (!artWrapEl) {
+            return;
+        }
+
+        if (!artToastEl) {
+
+            artToastEl = document.createElement("div");
+            artToastEl.style.cssText = [
+                "position:absolute",
+                "left:50%",
+                "top:50%",
+                "transform:translate(-50%,-50%)",
+                "background:rgba(0,0,0,0.65)",
+                "color:#fff",
+                "font-size:13px",
+                "padding:6px 14px",
+                "border-radius:16px",
+                "pointer-events:none",
+                "opacity:0",
+                "z-index:6",
+                "white-space:nowrap"
+            ].join(";");
+
+            artWrapEl.appendChild(artToastEl);
+        }
+
+        artToastEl.textContent = text;
+
+        if (!artToastEl.animate) {
+
+            return;
+        }
+
+        try {
+
+            artToastEl.getAnimations().forEach(function (a) {
+                a.cancel();
+            });
+        } catch (e) {
+        }
+
+        artToastEl.animate([
+            { opacity: 0 },
+            { opacity: 1, offset: 0.15 },
+            { opacity: 1, offset: 0.75 },
+            { opacity: 0 }
+        ], {
+            duration: 1400,
+            easing: "ease-in-out"
+        });
+    }
+
     // The text for the lyric row at the given offset from the current one
     function lyricTextAt(off) {
 
@@ -4404,7 +4559,9 @@
             return;
         }
 
-        const active = settings.lyricsOn && lyricRows.length > 0 && audio;
+        const active = settings.artOverlayMode === "all" && lyricRows.length > 0 && audio;
+
+        refreshOverlay(active);
 
         if (!active) {
 
@@ -5824,6 +5981,13 @@
         artWrapEl.addEventListener("touchend", onArtTouchEnd);
         artWrapEl.addEventListener("touchcancel", onArtTouchEnd);
 
+        // Desktop counterpart of the touch double tap
+        artWrapEl.addEventListener("dblclick", function (ev) {
+
+            ev.preventDefault();
+            cycleOverlayMode();
+        });
+
         // Re-seat the strip when the viewport changes, for example on rotation
         window.addEventListener("resize", function () {
 
@@ -5909,20 +6073,22 @@
 
         // Dark gradient behind the bottom title block for the same reason
         const bottomScrim = document.createElement("div");
-        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:88%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.75) 55%,transparent 100%);pointer-events:none;z-index:4";
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:88%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.75) 55%,transparent 100%);pointer-events:none;z-index:4;transition:height 0.25s ease,opacity 0.25s ease";
+        bottomScrimEl = bottomScrim;
 
         // Status sits at the top of the art, one clipped line, never blocks
         // swipe, with the plays and likes in the upper right corner beside it
         const topWrap = document.createElement("div");
         topWrap.style.cssText = "position:absolute;left:10px;right:10px;top:7px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;pointer-events:none;z-index:4";
-        statusEl.style.cssText = "flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
-        playerCountsEl.style.cssText = "flex:0 0 auto;color:#eaeaec;font-size:12px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+        statusEl.style.cssText = "flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9);transition:opacity 0.25s ease";
+        playerCountsEl.style.cssText = "flex:0 0 auto;color:#eaeaec;font-size:12px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9);transition:opacity 0.25s ease";
         topWrap.appendChild(statusEl);
         topWrap.appendChild(playerCountsEl);
 
         // Title, meta and counts sit at the bottom of the art over the scrim
         const bottomWrap = document.createElement("div");
-        bottomWrap.style.cssText = "position:absolute;left:10px;right:10px;bottom:8px;pointer-events:none;z-index:4";
+        bottomWrap.style.cssText = "position:absolute;left:10px;right:10px;bottom:8px;pointer-events:none;z-index:4;transition:opacity 0.25s ease";
+        bottomWrapEl = bottomWrap;
 
         // Five stacked lyric rows in a positioned box, rolled by updateLyricLine.
         // Geometry and box height come from applyLyricLayout, driven by the
@@ -6145,6 +6311,7 @@
             + "@media (max-width:640px){"
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
+            + "#mureka-player-resize{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
@@ -6342,7 +6509,10 @@
 
         panel.appendChild(header);
         panel.appendChild(bodyEl);
+        panel.appendChild(buildResizeGrip());
         document.body.appendChild(panel);
+
+        restoreSize();
 
         renderList();
         setStatus("Cached songs: " + cache.songs.length);
@@ -6508,6 +6678,130 @@
     }
 
     // Restore the saved anchor, or default to the bottom right
+    // Clamp a requested panel width and list height to sane bounds
+    function clampSize(w, listH) {
+
+        return {
+            w: Math.max(280, Math.min(w, Math.min(700, window.innerWidth - 16))),
+            listH: Math.max(120, Math.min(listH, 600))
+        };
+    }
+
+    // Apply a panel width and list height, then relayout the parts that
+    // measure their container, the coverflow and the waveform canvas
+    function applySize(w, listH) {
+
+        const size = clampSize(w, listH);
+
+        panelEl.style.width = size.w + "px";
+
+        if (listEl) {
+            listEl.style.height = size.listH + "px";
+        }
+
+        positionArt(0);
+        drawWave();
+
+        return size;
+    }
+
+    // Persist the panel size
+    function saveSize(size) {
+
+        try {
+            localStorage.setItem(SIZE_KEY, JSON.stringify(size));
+        } catch (e) {
+        }
+    }
+
+    // Restore the saved panel size, leaving the defaults when none is stored
+    function restoreSize() {
+
+        let saved = null;
+
+        try {
+            saved = JSON.parse(localStorage.getItem(SIZE_KEY));
+        } catch (e) {
+        }
+
+        if (saved && typeof saved.w === "number" && typeof saved.listH === "number") {
+            applySize(saved.w, saved.listH);
+        }
+    }
+
+    // Build the corner grip that resizes the panel by dragging. Horizontal
+    // drag changes the panel width, vertical drag changes the list height.
+    // The phone layout is full screen, so the media rules hide the grip there
+    function buildResizeGrip() {
+
+        const grip = document.createElement("div");
+
+        grip.id = "mureka-player-resize";
+        grip.textContent = "\u25E2";
+        grip.title = "Drag to resize";
+        grip.style.cssText = [
+            "position:absolute",
+            "right:2px",
+            "bottom:2px",
+            "width:18px",
+            "height:18px",
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
+            "font-size:13px",
+            "line-height:1",
+            "color:rgba(255,255,255,0.3)",
+            "cursor:nwse-resize",
+            "user-select:none",
+            "-moz-user-select:none",
+            "touch-action:none",
+            "z-index:5"
+        ].join(";");
+
+        grip.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const startX = ev.clientX;
+            const startY = ev.clientY;
+            const startW = panelEl.offsetWidth;
+            const startList = listEl ? listEl.offsetHeight : 240;
+
+            try {
+                grip.setPointerCapture(ev.pointerId);
+            } catch (e) {
+            }
+
+            let last = { w: startW, listH: startList };
+
+            const onMove = function (e) {
+                last = applySize(startW + (e.clientX - startX), startList + (e.clientY - startY));
+            };
+
+            const onUp = function () {
+
+                grip.removeEventListener("pointermove", onMove);
+                grip.removeEventListener("pointerup", onUp);
+                grip.removeEventListener("pointercancel", onUp);
+
+                saveSize(last);
+
+                // Re-clamp and re-anchor so the grown panel stays on screen
+                const rect = panelEl.getBoundingClientRect();
+
+                applyPosition(rect.left, rect.top);
+                savePosition();
+            };
+
+            grip.addEventListener("pointermove", onMove);
+            grip.addEventListener("pointerup", onUp);
+            grip.addEventListener("pointercancel", onUp);
+        });
+
+        return grip;
+    }
+
     function restorePosition() {
 
         let saved = null;
@@ -7791,9 +8085,26 @@
         settingsEl.appendChild(subtitleTplRow);
         settingsEl.appendChild(tplHint);
 
-        const lyricsRow = makeBoolRow("Show lyrics on the art",
-            function () { return settings.lyricsOn; },
-            function (v) { settings.lyricsOn = v; updateLyricLine(true); });
+        // Three way art overlay mode, also cycled by double tapping the art
+        const overlayLabels = { none: "None", info: "Info", all: "Info + lyrics" };
+
+        const overlayRow = document.createElement("div");
+        overlayRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const overlayName = document.createElement("span");
+        overlayName.textContent = "Art overlays";
+
+        const overlayBtnWrap = document.createElement("div");
+        overlayBtnWrap.style.cssText = "flex:0 0 auto;min-width:110px;display:flex";
+
+        const overlayBtn = makeButton(overlayLabels[settings.artOverlayMode], "#333", "#fff", function () {
+            cycleOverlayMode();
+            overlayBtn.textContent = overlayLabels[settings.artOverlayMode];
+        });
+
+        overlayBtnWrap.appendChild(overlayBtn);
+        overlayRow.appendChild(overlayName);
+        overlayRow.appendChild(overlayBtnWrap);
 
         const lyricSizeRow = makeStepperRow("Lyric size",
             function () { return settings.lyricSize; },
@@ -7819,7 +8130,7 @@
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
 
-        settingsEl.appendChild(lyricsRow);
+        settingsEl.appendChild(overlayRow);
         settingsEl.appendChild(lyricSizeRow);
         settingsEl.appendChild(lyricSideRow);
         settingsEl.appendChild(lyricSpaceRow);
