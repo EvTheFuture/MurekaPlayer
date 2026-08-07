@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.0d";
+    const VERSION = "1.4.0e";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -4395,7 +4395,7 @@
 
         // Tall shading only while lyrics actually show. Info alone needs just
         // enough to back the title and meta, so the art above stays untinted
-        bottomScrimEl.style.height = lyricActive ? "88%" : "26%";
+        bottomScrimEl.style.height = lyricActive ? "88%" : "20%";
         bottomScrimEl.style.opacity = "1";
         bottomWrapEl.style.opacity = "1";
 
@@ -6073,7 +6073,7 @@
 
         // Dark gradient behind the bottom title block for the same reason
         const bottomScrim = document.createElement("div");
-        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:88%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.75) 55%,transparent 100%);pointer-events:none;z-index:4;transition:height 0.25s ease,opacity 0.25s ease";
+        bottomScrim.style.cssText = "position:absolute;left:0;right:0;bottom:0;height:88%;border-radius:0 0 8px 8px;background:linear-gradient(to top,rgba(29,29,34,0.95) 0%,rgba(29,29,34,0.75) 40%,rgba(29,29,34,0.35) 70%,rgba(29,29,34,0) 100%);pointer-events:none;z-index:4;transition:height 0.25s ease,opacity 0.25s ease";
         bottomScrimEl = bottomScrim;
 
         // Status sits at the top of the art, one clipped line, never blocks
