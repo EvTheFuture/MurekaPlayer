@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.0e";
+    const VERSION = "1.4.1";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -6311,7 +6311,7 @@
             + "@media (max-width:640px){"
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
-            + "#mureka-player-resize{display:none !important}"
+            + ".mureka-resize-handle{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
             + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
@@ -6509,7 +6509,7 @@
 
         panel.appendChild(header);
         panel.appendChild(bodyEl);
-        panel.appendChild(buildResizeGrip());
+        buildResizeHandles(panel);
         document.body.appendChild(panel);
 
         restoreSize();
@@ -6640,7 +6640,7 @@
     // keeps that edge fixed whenever the content grows or shrinks on its own.
     // Nearer the top anchors the top edge and grows downward, nearer the bottom
     // anchors the bottom edge and grows upward
-    function applyPosition(left, top) {
+    function applyPosition(left, top, keepSide) {
 
         const pos = clampPosition(left, top);
         const bottomEdge = pos.top + panelEl.offsetHeight;
@@ -6650,7 +6650,14 @@
         panelEl.style.left = pos.left + "px";
         anchorLeft = pos.left;
 
-        if (distanceTop < distanceBottom) {
+        // Growing a panel tall makes its top edge the nearer one, which would
+        // flip a bottom dock to the top and send minimize the wrong way, so a
+        // resize keeps the side it already had instead of picking again
+        const useTop = keepSide
+            ? anchorSide === "top"
+            : distanceTop < distanceBottom;
+
+        if (useTop) {
             panelEl.style.top = pos.top + "px";
             panelEl.style.bottom = "auto";
             anchorSide = "top";
@@ -6729,77 +6736,122 @@
         }
     }
 
-    // Build the corner grip that resizes the panel by dragging. Horizontal
-    // drag changes the panel width, vertical drag changes the list height.
-    // The phone layout is full screen, so the media rules hide the grip there
-    function buildResizeGrip() {
+    // Edge and corner resize handles. Each declares which axes it changes and
+    // which pointer direction grows the panel, so dragging a side edge only
+    // changes the width and dragging a top or bottom edge only changes the
+    // list height. The phone layout is full screen, so the media rules hide them
+    const RESIZE_HANDLES = [
+        { x: 0, y: -1, css: "top:0;left:12px;right:12px;height:6px;cursor:ns-resize" },
+        { x: 0, y: 1, css: "bottom:0;left:12px;right:12px;height:6px;cursor:ns-resize" },
+        { x: -1, y: 0, css: "left:0;top:12px;bottom:12px;width:6px;cursor:ew-resize" },
+        { x: 1, y: 0, css: "right:0;top:12px;bottom:12px;width:6px;cursor:ew-resize" },
+        { x: -1, y: -1, css: "top:0;left:0;width:12px;height:12px;cursor:nwse-resize;z-index:6" },
+        { x: 1, y: -1, css: "top:0;right:0;width:12px;height:12px;cursor:nesw-resize;z-index:6" },
+        { x: -1, y: 1, css: "bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize;z-index:6" },
+        { x: 1, y: 1, css: "bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize;z-index:6" }
+    ];
 
-        const grip = document.createElement("div");
+    // Drag one handle. The edge under the pointer is the one that moves, the
+    // opposite edge is pinned, so the panel never runs away from the cursor
+    function startResize(ev, spec, el) {
 
-        grip.id = "mureka-player-resize";
-        grip.textContent = "\u25E2";
-        grip.title = "Drag to resize";
-        grip.style.cssText = [
-            "position:absolute",
-            "right:2px",
-            "bottom:2px",
-            "width:18px",
-            "height:18px",
-            "display:flex",
-            "align-items:center",
-            "justify-content:center",
-            "font-size:13px",
-            "line-height:1",
-            "color:rgba(255,255,255,0.3)",
-            "cursor:nwse-resize",
-            "user-select:none",
-            "-moz-user-select:none",
-            "touch-action:none",
-            "z-index:5"
-        ].join(";");
+        const rect = panelEl.getBoundingClientRect();
+        const startX = ev.clientX;
+        const startY = ev.clientY;
+        const startW = panelEl.offsetWidth;
+        const startList = listEl ? listEl.offsetHeight : 240;
 
-        grip.addEventListener("pointerdown", function (ev) {
+        try {
+            el.setPointerCapture(ev.pointerId);
+        } catch (e) {
+        }
+
+        let size = { w: startW, listH: startList };
+
+        // Which edges this panel is docked to. Vertically that is the anchor
+        // the dock logic already keeps, horizontally it is the nearer side
+        const pinBottom = anchorSide === "bottom";
+        const pinRight = (window.innerWidth - rect.right) < rect.left;
+
+        const onMove = function (e) {
+
+            // Only the axes this handle owns change, the other keeps its value
+            const w = spec.x === 0 ? startW : startW + spec.x * (e.clientX - startX);
+            const listH = spec.y === 0 ? startList : startList + spec.y * (e.clientY - startY);
+
+            size = applySize(w, listH);
+
+            // Everything in the panel except the list, so the room left for the
+            // list can be worked out from the room left on screen
+            const chromeH = panelEl.offsetHeight - (listEl ? listEl.offsetHeight : 0);
+
+            // The panel may fill the viewport, minus the margin the dock logic
+            // keeps, so growth is only ever limited by the screen as a whole
+            const maxW = window.innerWidth - 16;
+            const maxList = window.innerHeight - 16 - chromeH;
+
+            if (size.w > maxW || size.listH > maxList) {
+                size = applySize(Math.min(size.w, maxW), Math.min(size.listH, maxList));
+            }
+
+            // Hold the edges the panel is docked to, so it grows away from them
+            // and shrinks back toward them instead of drifting off the dock
+            const wantLeft = pinRight ? rect.right - panelEl.offsetWidth : rect.left;
+            const wantTop = pinBottom ? rect.bottom - panelEl.offsetHeight : rect.top;
+            const pos = clampPosition(wantLeft, wantTop);
+
+            panelEl.style.bottom = "auto";
+            panelEl.style.left = Math.round(pos.left) + "px";
+            panelEl.style.top = Math.round(pos.top) + "px";
+        };
+
+        const onUp = function () {
+
+            document.removeEventListener("pointermove", onMove);
+            document.removeEventListener("pointerup", onUp);
+            document.removeEventListener("pointercancel", onUp);
+
+            saveSize(size);
+
+            // Re-anchor without flipping the dock, a resize is not a move
+            const now = panelEl.getBoundingClientRect();
+
+            applyPosition(now.left, now.top, true);
+            savePosition();
+        };
+
+        // Bound to the document, so a pointerup outside the handle still ends
+        // the drag instead of leaving a stale listener behind
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onUp);
+        document.addEventListener("pointercancel", onUp);
+    }
+
+    // Build one resize handle from its spec
+    function makeResizeHandle(spec) {
+
+        const el = document.createElement("div");
+
+        el.className = "mureka-resize-handle";
+        el.title = "Drag to resize";
+        el.style.cssText = "position:absolute;z-index:5;touch-action:none;" + spec.css;
+
+        el.addEventListener("pointerdown", function (ev) {
 
             ev.preventDefault();
             ev.stopPropagation();
-
-            const startX = ev.clientX;
-            const startY = ev.clientY;
-            const startW = panelEl.offsetWidth;
-            const startList = listEl ? listEl.offsetHeight : 240;
-
-            try {
-                grip.setPointerCapture(ev.pointerId);
-            } catch (e) {
-            }
-
-            let last = { w: startW, listH: startList };
-
-            const onMove = function (e) {
-                last = applySize(startW + (e.clientX - startX), startList + (e.clientY - startY));
-            };
-
-            const onUp = function () {
-
-                grip.removeEventListener("pointermove", onMove);
-                grip.removeEventListener("pointerup", onUp);
-                grip.removeEventListener("pointercancel", onUp);
-
-                saveSize(last);
-
-                // Re-clamp and re-anchor so the grown panel stays on screen
-                const rect = panelEl.getBoundingClientRect();
-
-                applyPosition(rect.left, rect.top);
-                savePosition();
-            };
-
-            grip.addEventListener("pointermove", onMove);
-            grip.addEventListener("pointerup", onUp);
-            grip.addEventListener("pointercancel", onUp);
+            startResize(ev, spec, el);
         });
 
-        return grip;
+        return el;
+    }
+
+    // Add every edge and corner handle to the panel
+    function buildResizeHandles(panel) {
+
+        for (const spec of RESIZE_HANDLES) {
+            panel.appendChild(makeResizeHandle(spec));
+        }
     }
 
     function restorePosition() {
@@ -6857,12 +6909,14 @@
 
         if (!mobile) {
 
-            // Hand sizing back to the draggable desktop dock at its fixed width
+            // Hand sizing back to the draggable desktop dock. The fixed width
+            // is only the fallback, restoreSize puts back what the user set
             panelEl.style.removeProperty("top");
             panelEl.style.removeProperty("height");
             panelEl.style.removeProperty("right");
             panelEl.style.removeProperty("left");
             panelEl.style.setProperty("width", "300px");
+            restoreSize();
             restorePosition();
             return;
         }
@@ -6946,6 +7000,7 @@
     function toggleMinimize() {
 
         setMinimized(!minimized);
+        savePosition();
 
         try {
             localStorage.setItem(MINIMIZED_KEY, minimized ? "1" : "0");
@@ -6968,6 +7023,16 @@
 
             // Up triangle to expand, down triangle to collapse
             minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
+        }
+
+        // The height just changed, so re-clamp into the viewport without
+        // changing the docked side. Expanding near an edge would otherwise
+        // push the panel off screen until the next drag corrected it
+        if (panelEl) {
+
+            const rect = panelEl.getBoundingClientRect();
+
+            applyPosition(rect.left, rect.top, true);
         }
     }
 
