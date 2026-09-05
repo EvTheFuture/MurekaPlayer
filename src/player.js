@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1b";
+    const VERSION = "1.4.1c";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1178,9 +1178,12 @@
         saveManualInstrumental();
         renderList();
 
-        // The now playing meta line shows the instrumental tag
+        // The now playing meta line shows the instrumental tag, and the lyric
+        // rows appear or disappear with the mark
         if (currentSong && currentSong.song_id === song.song_id) {
+
             refreshNowPlayingMeta();
+            updateLyricLine(true);
         }
     }
 
@@ -4717,7 +4720,12 @@
             return;
         }
 
-        const active = settings.artOverlayMode === "all" && lyricRows.length > 0 && audio;
+        // A song marked instrumental by hand has lyrics text only because
+        // Mureka needs instructions in the prompt, so never show them
+        const active = settings.artOverlayMode === "all"
+            && lyricRows.length > 0
+            && audio
+            && !(currentSong && isManualInstrumental(currentSong));
 
         refreshOverlay(active);
 
