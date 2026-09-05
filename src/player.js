@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1";
+    const VERSION = "1.4.1b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -123,6 +123,11 @@
     // Cache API bucket for re-encoded cover art data urls, so a cover downloads
     // and re-encodes only once and then persists across sessions, like the audio
     const ART_STORE = "mureka_art_cache_v1";
+
+    // localStorage key for songs the user marked as instrumental by hand.
+    // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
+    // track can carry lyrics text while still being an instrumental
+    const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
 
     // Cache API bucket for the per song waveform. Only the feed responses carry
     // wave_list, so it is persisted here as feed pages arrive and read on play
@@ -1121,12 +1126,71 @@
         };
     }
 
+    // Song ids the user marked as instrumental by hand, loaded once on startup
+    let manualInstrumental = loadManualInstrumental();
+
+    function loadManualInstrumental() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(MANUAL_INSTRUMENTAL_KEY));
+
+            if (Array.isArray(raw)) {
+                return new Set(raw.map(String));
+            }
+        } catch (e) {
+        }
+
+        return new Set();
+    }
+
+    function saveManualInstrumental() {
+
+        try {
+            localStorage.setItem(MANUAL_INSTRUMENTAL_KEY,
+                JSON.stringify(Array.from(manualInstrumental)));
+        } catch (e) {
+        }
+    }
+
+    // Whether the user marked this song as instrumental by hand
+    function isManualInstrumental(song) {
+
+        return manualInstrumental.has(String(song.song_id));
+    }
+
+    // Flip the manual instrumental mark and remember it across restarts
+    function toggleManualInstrumental(song) {
+
+        const id = String(song.song_id);
+
+        if (manualInstrumental.has(id)) {
+
+            manualInstrumental.delete(id);
+            setStatus("No longer marked instrumental: " + (song.title || "Untitled"));
+
+        } else {
+
+            manualInstrumental.add(id);
+            setStatus("Marked as instrumental: " + (song.title || "Untitled"));
+        }
+
+        saveManualInstrumental();
+        renderList();
+
+        // The now playing meta line shows the instrumental tag
+        if (currentSong && currentSong.song_id === song.song_id) {
+            refreshNowPlayingMeta();
+        }
+    }
+
     // True when a song has no vocals
     // Mureka encodes this as generation_method 7, every other value, including
-    // the remix and studio methods, counts as having vocals
+    // the remix and studio methods, counts as having vocals. A song the user
+    // marked by hand counts as instrumental whatever the server says
     function isInstrumental(song) {
 
-        return song.generation_method === 7;
+        return song.generation_method === 7 || isManualInstrumental(song);
     }
 
     // Whether a song passes the current vocals filter
@@ -1729,9 +1793,32 @@
         cache.updated = Date.now();
 
         // A deep rescan that ran to the end has now seen the entire library
+        let removed = 0;
+
         if (deep && reachedEnd) {
+
             cache.complete = true;
             cache.lastCursor = null;
+
+            // Everything the server still has was just seen, so anything left
+            // in the cache was deleted upstream. Drop it and its stored data
+            const live = new Set(fresh.map(function (s) {
+                return s.song_id;
+            }));
+
+            const gone = cache.songs.filter(function (s) {
+                return !live.has(s.song_id);
+            });
+
+            for (const s of gone) {
+
+                await forgetSong(s);
+                removed += 1;
+            }
+
+            if (removed > 0) {
+                saveManualInstrumental();
+            }
         }
 
         saveCache();
@@ -1740,7 +1827,8 @@
         extendQueueWithNew();
 
         setStatus((deep ? "Rescan complete, total: " : "Up to date, total: ")
-            + cache.songs.length + ", new: " + newCount);
+            + cache.songs.length + ", new: " + newCount
+            + (removed > 0 ? ", removed: " + removed : ""));
     }
 
     // Wipe the cache and reset the view
@@ -2173,6 +2261,76 @@
         } catch (e) {
             return false;
         }
+    }
+
+    // Remove every stored trace of a song, the audio, the cover and the wave
+    async function purgeSongData(song) {
+
+        const id = String(song.song_id);
+
+        await removeFromCache(song);
+
+        try {
+
+            const artStore = await caches.open(ART_STORE);
+
+            await artStore.delete(artStoreKey(song.song_id));
+        } catch (e) {
+        }
+
+        try {
+
+            const waveStore = await caches.open(WAVE_STORE);
+
+            await waveStore.delete(waveStoreKey(song.song_id));
+        } catch (e) {
+        }
+
+        cachedIds.delete(song.song_id);
+        artCachedIds.delete(id);
+        artCache.delete(song.song_id);
+    }
+
+    // Drop a song from the library list and throw away everything cached for
+    // it. Used both by the delete menu row and by the rescan prune
+    async function forgetSong(song) {
+
+        const idx = cache.songs.findIndex(function (s) {
+            return s.song_id === song.song_id;
+        });
+
+        if (idx !== -1) {
+            cache.songs.splice(idx, 1);
+        }
+
+        // Take it out of the queue too, keeping the current position sane
+        const qi = queue.findIndex(function (s) {
+            return s.song_id === song.song_id;
+        });
+
+        if (qi !== -1) {
+
+            queue.splice(qi, 1);
+
+            if (qi < queuePos) {
+                queuePos -= 1;
+            }
+        }
+
+        manualInstrumental.delete(String(song.song_id));
+        await purgeSongData(song);
+    }
+
+    // Delete one song from the list on request
+    async function deleteOne(song) {
+
+        const title = song.title || "Untitled";
+
+        await forgetSong(song);
+        saveManualInstrumental();
+        saveCache();
+        renderList();
+        setStatus("Removed from the list: " + title);
     }
 
     // Cache one song, then update its marker
@@ -9636,6 +9794,11 @@
             openInfo(song);
         });
 
+        addMenuRow(isManualInstrumental(song) ? "Not instrumental" : "Mark instrumental",
+            "#fff", function () {
+                toggleManualInstrumental(song);
+            });
+
         if (cached) {
 
             addMenuRow("Remove from cache", "#ff8a8a", function () {
@@ -9648,6 +9811,10 @@
                 cacheOne(song);
             });
         }
+
+        addMenuRow("Delete from list", "#ff8a8a", function () {
+            deleteOne(song);
+        });
 
         // Developer only, copy the full song JSON to the clipboard
         // Available on the bookmarklet too, where there is no console
