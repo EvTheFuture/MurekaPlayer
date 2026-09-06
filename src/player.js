@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1c";
+    const VERSION = "1.4.1e";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -356,6 +356,9 @@
     let sourceEl = null;
     let bodyEl = null;
     let minimizeBtn = null;
+
+    // Timestamp of the last header click, so minimize needs a double click
+    let lastHeaderClickT = 0;
     let minimized = false;
 
     // Current anchor, the side and edge offset are kept so growth keeps the dock
@@ -2746,6 +2749,11 @@
 
         queue.splice(queuePos + 1, 0, song);
         renderList();
+
+        // The next cover changed, so refresh the coverflow neighbors
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
 
         // Make sure the new next song is cached ready to play
         prefetchNext();
@@ -5958,7 +5966,19 @@
         headerTitle.appendChild(headerSub);
 
         minimizeBtn = document.createElement("span");
-        minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:12px";
+        minimizeBtn.title = "Minimize or expand";
+        minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:17px;cursor:pointer;line-height:1;padding:2px";
+
+        // The arrow is an explicit control, so one click is enough here
+        minimizeBtn.addEventListener("mousedown", function (ev) {
+            ev.stopPropagation();
+        });
+
+        minimizeBtn.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            toggleMinimize();
+        });
 
         // The bookmarklet panel is fullscreen, so a minimize arrow is not useful
         if (!isExtensionHost()) {
@@ -5969,7 +5989,7 @@
         actionsToggleBtn = document.createElement("span");
         actionsToggleBtn.textContent = "\u2630";
         actionsToggleBtn.title = "Show or hide the action buttons";
-        actionsToggleBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:14px;cursor:pointer;line-height:1";
+        actionsToggleBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:19px;cursor:pointer;line-height:1;padding:2px";
 
         // Keep the toggle from starting a drag or minimizing the panel
         actionsToggleBtn.addEventListener("mousedown", function (ev) {
@@ -5985,7 +6005,7 @@
         const settingsBtn = document.createElement("span");
         settingsBtn.textContent = "\u2699";
         settingsBtn.title = "Settings";
-        settingsBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:15px;cursor:pointer;line-height:1";
+        settingsBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:20px;cursor:pointer;line-height:1;padding:2px";
 
         // Keep the gear from starting a drag or toggling minimize
         settingsBtn.addEventListener("mousedown", function (ev) {
@@ -7154,7 +7174,19 @@
                 applyPosition(rect.left, rect.top);
                 savePosition();
             } else {
-                toggleMinimize();
+
+                // A single click on the header is far too easy to hit by
+                // accident, so only a double click collapses the panel
+                const now = Date.now();
+
+                if (now - lastHeaderClickT < 400) {
+
+                    lastHeaderClickT = 0;
+                    toggleMinimize();
+
+                } else {
+                    lastHeaderClickT = now;
+                }
             }
         };
 
@@ -7191,14 +7223,15 @@
             minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
         }
 
-        // The height just changed, so re-clamp into the viewport without
-        // changing the docked side. Expanding near an edge would otherwise
-        // push the panel off screen until the next drag corrected it
+        // The height just changed, so re-clamp into the viewport. Collapsing
+        // leaves a small panel, so it re-picks the nearer edge and snaps to it.
+        // Expanding keeps the docked side, since a tall panel would otherwise
+        // flip to the top edge and grow off the bottom of the screen
         if (panelEl) {
 
             const rect = panelEl.getBoundingClientRect();
 
-            applyPosition(rect.left, rect.top, true);
+            applyPosition(rect.left, rect.top, !minimized);
         }
     }
 
