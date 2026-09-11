@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1e";
+    const VERSION = "1.4.1h";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -444,6 +444,10 @@
 
     // Last tap on the art, for double tap detection on touch devices
     let lastArtTapT = 0;
+
+    // Time of the last touch end on the art, to ignore the dblclick that iOS
+    // synthesizes after a double tap
+    let lastArtTouchEndT = 0;
     let lastArtTapX = 0;
     let lastArtTapY = 0;
     let lyricRows = [];
@@ -461,6 +465,20 @@
 
     // True while the user is dragging the seek bar, so timeupdate does not fight it
     let isSeeking = false;
+
+    // True when the last pause came from the user, either the panel button or
+    // the MediaSession pause action. A pause without this flag is an operating
+    // system interruption, such as a call or another app taking the audio
+    let userPaused = false;
+
+    // True while a track change is swapping the source. The media load
+    // algorithm flips paused on a source change, and some engines fire a pause
+    // event for it, which must not be mistaken for an interruption
+    let switchingTrack = false;
+
+    // The playToken that already got one retry after a load error, so a play
+    // that fails twice stops instead of looping through retries
+    let errorRetryToken = -1;
 
     // Album art coverflow and swipe state
     // artTiles is the row of cover images, the middle one is the current song
@@ -592,6 +610,7 @@
             reportPlays: true,
             artTest: false,
             artOverlayMode: "all",
+            directAudio: true,
             waveSeek: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
@@ -650,6 +669,7 @@
                     artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
+                    directAudio: parsed.directAudio !== false,
                     waveSeek: parsed.waveSeek !== false,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
@@ -1101,7 +1121,7 @@
     }
 
     // Keep only the fields we actually need, to save space
-    // description and publish_at are not used anywhere, so they are dropped
+    // description is not used anywhere, so it is dropped
     function trim(s) {
 
         // The feed is the only response carrying the waveform, so persist it
@@ -2472,6 +2492,22 @@
         audio.addEventListener("playing", function () {
 
             playbackWorks = true;
+            userPaused = false;
+            switchingTrack = false;
+
+            // iOS drops the action handlers and the now playing ownership after
+            // an interruption, so claim them again every time playback starts
+            setupMediaSession();
+
+            // Direct mode streams the file into the element, so the copy kept
+            // for offline replay is fetched only once playback is running,
+            // never in parallel with the initial buffering
+            if (settings.directAudio && currentSong
+                && !cachedIds.has(currentSong.song_id)
+                && !cachingIds.has(currentSong.song_id)) {
+
+                fetchToCache(currentSong);
+            }
 
             if (npCoverSent) {
 
@@ -2490,6 +2526,10 @@
         });
 
         audio.addEventListener("error", function () {
+
+            // The source swap ended in an error rather than playing, so clear
+            // the flag or the next real interruption pause would be ignored
+            switchingTrack = false;
             handlePlayError();
         });
 
@@ -2532,7 +2572,19 @@
 
         audio.addEventListener("play", function () {
 
+            userPaused = false;
+
+            // Re-claim the controls, iOS hands them to whatever played last
+            setupMediaSession();
             updatePlayPause();
+
+            if ("mediaSession" in navigator) {
+
+                try {
+                    navigator.mediaSession.playbackState = "playing";
+                } catch (e) {
+                }
+            }
 
             // Clear a stale Stopped or Paused line once playback is running
             if (currentSong) {
@@ -2546,34 +2598,170 @@
 
         audio.addEventListener("pause", function () {
 
+            // A source swap flips paused and may fire this on some engines.
+            // The next song is already starting, so nothing below applies
+            if (switchingTrack) {
+                return;
+            }
+
             updatePlayPause();
 
             // Keep the saved position current when the user pauses
             saveQueue();
 
-            // Stop clears currentSong first, so this only fires for a real pause
-            if (currentSong) {
-                setStatus("Paused: " + (currentSong.title || "Untitled"));
+            if ("mediaSession" in navigator) {
+
+                try {
+                    navigator.mediaSession.playbackState = "paused";
+                } catch (e) {
+                }
             }
+
+            // Stop clears currentSong first, so this only fires for a real pause
+            if (!currentSong) {
+                return;
+            }
+
+            if (userPaused || audio.ended) {
+
+                setStatus("Paused: " + (currentSong.title || "Untitled"));
+                return;
+            }
+
+            // Nobody asked for this pause, so the system interrupted playback.
+            // Keep the song, the queue and the position, and re-assert the
+            // handlers so the next hardware play reaches us. The metadata is
+            // only re-sent once its cover already went out, an empty artwork
+            // list makes iOS show the page logo and spends a cover send
+            setupMediaSession();
+
+            if (npCoverSent) {
+                sendNowPlaying();
+            }
+
+            updateMediaPosition();
+            setStatus("Interrupted: " + (currentSong.title || "Untitled"));
         });
     }
 
-    // Remove a cached song that could not be played and move on
-    // Only prunes once something has played, so a wrong base does not wipe all
-    function handlePlayError() {
+    // Retry a failed play through fetch. A cached copy plays at once, otherwise
+    // the fetch yields a real HTTP status, which the media error never does.
+    // Returns playing, stale when a newer play took over, gone on a 404, or
+    // failed for anything transient such as a dropped connection
+    async function retryFromFetch(song) {
+
+        const direct = songUrl(song);
+
+        if (!direct) {
+            return "failed";
+        }
+
+        const token = playToken;
+
+        try {
+            const store = await caches.open(AUDIO_CACHE);
+            let resp = await store.match(direct);
+
+            if (!resp) {
+
+                // Pulse the dot while the file downloads, like fetchToCache
+                cachingIds.add(song.song_id);
+                renderList();
+
+                const net = await fetch(direct);
+
+                cachingIds.delete(song.song_id);
+                renderList();
+
+                // Only a 404 proves the file is gone. Anything else can be a
+                // dropped connection, a proxy error or an expired link
+                if (net.status === 404) {
+                    return "gone";
+                }
+
+                if (!net.ok) {
+                    return "failed";
+                }
+
+                await store.put(direct, net.clone());
+                cachedIds.add(song.song_id);
+                resp = net;
+            }
+
+            const blob = await resp.blob();
+
+            // The user moved on while the file was loading
+            if (token !== playToken || !currentSong || currentSong.song_id !== song.song_id) {
+                return "stale";
+            }
+
+            setCurrentSrc(URL.createObjectURL(blob));
+            startAudioPlayback();
+
+            return "playing";
+        } catch (e) {
+
+            if (cachingIds.delete(song.song_id)) {
+                renderList();
+            }
+
+            return "failed";
+        }
+    }
+
+    // Recover from a load error. The first failure of a play is retried through
+    // fetch, which serves the cached copy or reports a real HTTP status. Only a
+    // 404 removes the song from the list, a dropped connection never does, so
+    // a flaky link cannot quietly prune the library
+    async function handlePlayError() {
 
         if (!currentSong) {
             return;
         }
 
         const failed = currentSong;
+        const title = failed.title || "Untitled";
+        const token = playToken;
 
-        if (!playbackWorks) {
-            setStatus("Could not play, check the audio URL: " + (failed.title || "Untitled"));
+        // The retry itself failed, stop here and leave the queue in place so
+        // the next play press starts again from the same song
+        if (errorRetryToken === token) {
+
+            // A stored copy that will not decode is not worth keeping
+            removeFromCache(failed);
+            cachedIds.delete(failed.song_id);
+            renderList();
+            updatePlayPause();
+            setStatus("Could not play, press play to retry: " + title);
             return;
         }
 
-        // Treat an unplayable song as deleted on the server
+        errorRetryToken = token;
+
+        const outcome = await retryFromFetch(failed);
+
+        // A newer play took over during the retry, nothing more to do
+        if (token !== playToken) {
+            return;
+        }
+
+        if (outcome === "playing" || outcome === "stale") {
+            return;
+        }
+
+        if (outcome === "failed") {
+            updatePlayPause();
+            setStatus("Could not play, press play to retry: " + title);
+            return;
+        }
+
+        // The file is gone. Only prune once something has played, so a wrong
+        // audio base does not wipe the whole library
+        if (!playbackWorks) {
+            setStatus("Could not play, check the audio URL: " + title);
+            return;
+        }
+
         const idx = cache.songs.findIndex(function (s) {
             return s.song_id === failed.song_id;
         });
@@ -2583,7 +2771,7 @@
             saveCache();
         }
 
-        setStatus("Removed deleted song: " + (failed.title || "Untitled"));
+        setStatus("Removed deleted song: " + title);
 
         // Drop the failed song from the queue, the next one shifts into its place
         currentSong = null;
@@ -2721,7 +2909,7 @@
         if (currentSong && currentSong.song_id === songId && audio && audio.src) {
 
             audio.currentTime = 0;
-            audio.play();
+            startAudioPlayback();
 
             return;
         }
@@ -3390,25 +3578,47 @@
         const token = playToken + 1;
         playToken = token;
 
-        const url = await getPlayableUrl(song);
+        if (settings.directAudio) {
 
-        // A newer play started while fetching, drop this one
-        if (token !== playToken) {
+            // songUrl is synchronous, so the source is set and play is called
+            // with the user activation still valid. iOS drops that token across
+            // an await, which silently rejects the play and blocks a resume
+            const direct = songUrl(song);
 
-            if (url && url.indexOf("blob:") === 0) {
-                URL.revokeObjectURL(url);
+            if (!direct) {
+                setStatus("Could not build a URL for this song");
+                return;
             }
 
-            return;
-        }
+            setCurrentSrc(direct);
+            startAudioPlayback();
 
-        if (!url) {
-            setStatus("Could not build a URL for this song");
-            return;
-        }
+            // The copy for offline replay is fetched once playing fires, see
+            // the playing listener in ensureAudio, so it never competes with
+            // the stream for bandwidth
 
-        setCurrentSrc(url);
-        audio.play();
+        } else {
+
+            const url = await getPlayableUrl(song);
+
+            // A newer play started while fetching, drop this one
+            if (token !== playToken) {
+
+                if (url && url.indexOf("blob:") === 0) {
+                    URL.revokeObjectURL(url);
+                }
+
+                return;
+            }
+
+            if (!url) {
+                setStatus("Could not build a URL for this song");
+                return;
+            }
+
+            setCurrentSrc(url);
+            startAudioPlayback();
+        }
 
         // Remember the queue and position so a restart can resume here
         saveQueue();
@@ -3536,8 +3746,55 @@
         }
     }
 
+    // Start the element and deal with the returned promise. A rejected play is
+    // exactly what a blocked resume after an interruption looks like, so it is
+    // surfaced and the handlers are re-registered instead of failing silently
+    function startAudioPlayback() {
+
+        // Nothing loaded, as after Stop or a restored queue, so start or resume
+        // through the queue instead of playing an empty element
+        if (!audio || !audio.src) {
+            startPlay();
+            return;
+        }
+
+        // An element that failed to load stays dead until its source is reset,
+        // so a play press after a network error reloads the current song
+        if (audio.error) {
+            playCurrent();
+            return;
+        }
+
+        userPaused = false;
+
+        const started = audio.play();
+
+        if (!started || typeof started.catch !== "function") {
+            return;
+        }
+
+        started.catch(function (err) {
+
+            switchingTrack = false;
+
+            // A pending play is aborted by a quick skip to the next song, that
+            // is not a blocked resume and not worth a status line
+            if (err && err.name === "AbortError") {
+                return;
+            }
+
+            setStatus("Playback blocked: " + ((err && err.name) || "error"));
+            updatePlayPause();
+            setupMediaSession();
+        });
+    }
+
     // Point the audio element at a URL, cleaning up the previous blob URL
     function setCurrentSrc(url) {
+
+        // The load that follows flips paused, mark it so the pause listener
+        // does not read that as an interruption, cleared once playing fires
+        switchingTrack = true;
 
         if (currentObjectUrl) {
             URL.revokeObjectURL(currentObjectUrl);
@@ -3554,6 +3811,10 @@
 
     // Stop playback and clear the queue
     function stopPlay() {
+
+        // This pause is deliberate, so the pause listener must not take the
+        // interruption path and re-send now playing for a song being stopped
+        userPaused = true;
 
         if (audio) {
             audio.pause();
@@ -3816,8 +4077,12 @@
         }
 
         if (audio.paused) {
-            audio.play();
+
+            startAudioPlayback();
+
         } else {
+
+            userPaused = true;
             audio.pause();
         }
     }
@@ -4140,6 +4405,10 @@
 
     // On release, advance to the neighbor if dragged far enough, else snap back
     function onArtTouchEnd(ev) {
+
+        // Stamp every touch end, so a synthesized dblclick can be told apart
+        // from a real mouse double click
+        lastArtTouchEndT = Date.now();
 
         if (!swipeActive) {
             return;
@@ -5138,14 +5407,14 @@
 
         setHandler("play", function () {
 
-            if (audio) {
-                audio.play();
-            } else {
-                startPlay();
-            }
+            // Starts, resumes or reloads as needed, see startAudioPlayback
+            startAudioPlayback();
         });
 
         setHandler("pause", function () {
+
+            // A pause the user asked for, not an interruption
+            userPaused = true;
 
             if (audio) {
                 audio.pause();
@@ -5767,9 +6036,14 @@
     // Push the current metadata and cover to the media session now
     function sendNowPlaying() {
 
-        if (currentSong) {
-            setMediaMetadata(currentSong, artworkFor(currentSong));
+        if (!currentSong) {
+            return;
         }
+
+        // Ownership of the controls and the handlers go together on iOS, so
+        // re-register whenever the now playing metadata is pushed
+        setupMediaSession();
+        setMediaMetadata(currentSong, artworkFor(currentSong));
     }
 
     // Send the first cover for the current song once it has decoded and playback
@@ -6167,10 +6441,17 @@
         artWrapEl.addEventListener("touchend", onArtTouchEnd);
         artWrapEl.addEventListener("touchcancel", onArtTouchEnd);
 
-        // Desktop counterpart of the touch double tap
+        // Desktop counterpart of the touch double tap. iOS synthesizes a
+        // dblclick after a double tap as well, which would cycle the mode
+        // twice, so a recent touch tap makes this one a no-op
         artWrapEl.addEventListener("dblclick", function (ev) {
 
             ev.preventDefault();
+
+            if (Date.now() - lastArtTouchEndT < 700) {
+                return;
+            }
+
             cycleOverlayMode();
         });
 
@@ -8390,6 +8671,10 @@
             function () { return settings.lyricSideShift; },
             function (v) { settings.lyricSideShift = v; applyLyricLayout(); }, -20, 20, 1);
 
+        const directRow = makeBoolRow("Stream direct URL",
+            function () { return settings.directAudio; },
+            function (v) { settings.directAudio = v; });
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
@@ -8400,6 +8685,7 @@
         settingsEl.appendChild(lyricSpaceRow);
         settingsEl.appendChild(lyricShiftRow);
         settingsEl.appendChild(lyricSideShiftRow);
+        settingsEl.appendChild(directRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
