@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1f";
+    const VERSION = "1.4.1g";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -466,6 +466,15 @@
     // the MediaSession pause action. A pause without this flag is an operating
     // system interruption, such as a call or another app taking the audio
     let userPaused = false;
+
+    // True while a track change is swapping the source. The media load
+    // algorithm flips paused on a source change, and some engines fire a pause
+    // event for it, which must not be mistaken for an interruption
+    let switchingTrack = false;
+
+    // The playToken that already got one retry after a load error, so a play
+    // that fails twice stops instead of looping through retries
+    let errorRetryToken = -1;
 
     // Album art coverflow and swipe state
     // artTiles is the row of cover images, the middle one is the current song
@@ -1108,7 +1117,7 @@
     }
 
     // Keep only the fields we actually need, to save space
-    // description and publish_at are not used anywhere, so they are dropped
+    // description is not used anywhere, so it is dropped
     function trim(s) {
 
         // The feed is the only response carrying the waveform, so persist it
@@ -2480,10 +2489,21 @@
 
             playbackWorks = true;
             userPaused = false;
+            switchingTrack = false;
 
             // iOS drops the action handlers and the now playing ownership after
             // an interruption, so claim them again every time playback starts
             setupMediaSession();
+
+            // Direct mode streams the file into the element, so the copy kept
+            // for offline replay is fetched only once playback is running,
+            // never in parallel with the initial buffering
+            if (settings.directAudio && currentSong
+                && !cachedIds.has(currentSong.song_id)
+                && !cachingIds.has(currentSong.song_id)) {
+
+                fetchToCache(currentSong);
+            }
 
             if (npCoverSent) {
 
@@ -2570,6 +2590,12 @@
 
         audio.addEventListener("pause", function () {
 
+            // A source swap flips paused and may fire this on some engines.
+            // The next song is already starting, so nothing below applies
+            if (switchingTrack) {
+                return;
+            }
+
             updatePlayPause();
 
             // Keep the saved position current when the user pauses
@@ -2596,30 +2622,138 @@
 
             // Nobody asked for this pause, so the system interrupted playback.
             // Keep the song, the queue and the position, and re-assert the
-            // metadata and handlers so the next hardware play reaches us
+            // handlers so the next hardware play reaches us. The metadata is
+            // only re-sent once its cover already went out, an empty artwork
+            // list makes iOS show the page logo and spends a cover send
             setupMediaSession();
-            sendNowPlaying();
+
+            if (npCoverSent) {
+                sendNowPlaying();
+            }
+
             updateMediaPosition();
             setStatus("Interrupted: " + (currentSong.title || "Untitled"));
         });
     }
 
-    // Remove a cached song that could not be played and move on
-    // Only prunes once something has played, so a wrong base does not wipe all
-    function handlePlayError() {
+    // Retry a failed play through fetch. A cached copy plays at once, otherwise
+    // the fetch yields a real HTTP status, which the media error never does.
+    // Returns playing, stale when a newer play took over, gone on a 404, or
+    // failed for anything transient such as a dropped connection
+    async function retryFromFetch(song) {
+
+        const direct = songUrl(song);
+
+        if (!direct) {
+            return "failed";
+        }
+
+        const token = playToken;
+
+        try {
+            const store = await caches.open(AUDIO_CACHE);
+            let resp = await store.match(direct);
+
+            if (!resp) {
+
+                // Pulse the dot while the file downloads, like fetchToCache
+                cachingIds.add(song.song_id);
+                renderList();
+
+                const net = await fetch(direct);
+
+                cachingIds.delete(song.song_id);
+                renderList();
+
+                // Only a 404 proves the file is gone. Anything else can be a
+                // dropped connection, a proxy error or an expired link
+                if (net.status === 404) {
+                    return "gone";
+                }
+
+                if (!net.ok) {
+                    return "failed";
+                }
+
+                await store.put(direct, net.clone());
+                cachedIds.add(song.song_id);
+                resp = net;
+            }
+
+            const blob = await resp.blob();
+
+            // The user moved on while the file was loading
+            if (token !== playToken || !currentSong || currentSong.song_id !== song.song_id) {
+                return "stale";
+            }
+
+            setCurrentSrc(URL.createObjectURL(blob));
+            startAudioPlayback();
+
+            return "playing";
+        } catch (e) {
+
+            if (cachingIds.delete(song.song_id)) {
+                renderList();
+            }
+
+            return "failed";
+        }
+    }
+
+    // Recover from a load error. The first failure of a play is retried through
+    // fetch, which serves the cached copy or reports a real HTTP status. Only a
+    // 404 removes the song from the list, a dropped connection never does, so
+    // a flaky link cannot quietly prune the library
+    async function handlePlayError() {
 
         if (!currentSong) {
             return;
         }
 
         const failed = currentSong;
+        const title = failed.title || "Untitled";
+        const token = playToken;
 
-        if (!playbackWorks) {
-            setStatus("Could not play, check the audio URL: " + (failed.title || "Untitled"));
+        // The retry itself failed, stop here and leave the queue in place so
+        // the next play press starts again from the same song
+        if (errorRetryToken === token) {
+
+            // A stored copy that will not decode is not worth keeping
+            removeFromCache(failed);
+            cachedIds.delete(failed.song_id);
+            renderList();
+            updatePlayPause();
+            setStatus("Could not play, press play to retry: " + title);
             return;
         }
 
-        // Treat an unplayable song as deleted on the server
+        errorRetryToken = token;
+
+        const outcome = await retryFromFetch(failed);
+
+        // A newer play took over during the retry, nothing more to do
+        if (token !== playToken) {
+            return;
+        }
+
+        if (outcome === "playing" || outcome === "stale") {
+            return;
+        }
+
+        if (outcome === "failed") {
+            updatePlayPause();
+            setStatus("Could not play, press play to retry: " + title);
+            return;
+        }
+
+        // The file is gone. Only prune once something has played, so a wrong
+        // audio base does not wipe the whole library
+        if (!playbackWorks) {
+            setStatus("Could not play, check the audio URL: " + title);
+            return;
+        }
+
         const idx = cache.songs.findIndex(function (s) {
             return s.song_id === failed.song_id;
         });
@@ -2629,7 +2763,7 @@
             saveCache();
         }
 
-        setStatus("Removed deleted song: " + (failed.title || "Untitled"));
+        setStatus("Removed deleted song: " + title);
 
         // Drop the failed song from the queue, the next one shifts into its place
         currentSong = null;
@@ -2767,7 +2901,7 @@
         if (currentSong && currentSong.song_id === songId && audio && audio.src) {
 
             audio.currentTime = 0;
-            audio.play();
+            startAudioPlayback();
 
             return;
         }
@@ -3451,8 +3585,9 @@
             setCurrentSrc(direct);
             startAudioPlayback();
 
-            // Still keep a copy for offline replay, just not for playback
-            fetchToCache(song);
+            // The copy for offline replay is fetched once playing fires, see
+            // the playing listener in ensureAudio, so it never competes with
+            // the stream for bandwidth
 
         } else {
 
@@ -3603,13 +3738,22 @@
         }
     }
 
-    // Point the audio element at a URL, cleaning up the previous blob URL
     // Start the element and deal with the returned promise. A rejected play is
     // exactly what a blocked resume after an interruption looks like, so it is
     // surfaced and the handlers are re-registered instead of failing silently
     function startAudioPlayback() {
 
-        if (!audio) {
+        // Nothing loaded, as after Stop or a restored queue, so start or resume
+        // through the queue instead of playing an empty element
+        if (!audio || !audio.src) {
+            startPlay();
+            return;
+        }
+
+        // An element that failed to load stays dead until its source is reset,
+        // so a play press after a network error reloads the current song
+        if (audio.error) {
+            playCurrent();
             return;
         }
 
@@ -3623,13 +3767,26 @@
 
         started.catch(function (err) {
 
+            switchingTrack = false;
+
+            // A pending play is aborted by a quick skip to the next song, that
+            // is not a blocked resume and not worth a status line
+            if (err && err.name === "AbortError") {
+                return;
+            }
+
             setStatus("Playback blocked: " + ((err && err.name) || "error"));
             updatePlayPause();
             setupMediaSession();
         });
     }
 
+    // Point the audio element at a URL, cleaning up the previous blob URL
     function setCurrentSrc(url) {
+
+        // The load that follows flips paused, mark it so the pause listener
+        // does not read that as an interruption, cleared once playing fires
+        switchingTrack = true;
 
         if (currentObjectUrl) {
             URL.revokeObjectURL(currentObjectUrl);
@@ -5234,13 +5391,8 @@
 
         setHandler("play", function () {
 
-            if (audio) {
-
-                startAudioPlayback();
-
-            } else {
-                startPlay();
-            }
+            // Starts, resumes or reloads as needed, see startAudioPlayback
+            startAudioPlayback();
         });
 
         setHandler("pause", function () {
