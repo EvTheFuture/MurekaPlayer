@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1e";
+    const VERSION = "1.4.1f";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -462,6 +462,11 @@
     // True while the user is dragging the seek bar, so timeupdate does not fight it
     let isSeeking = false;
 
+    // True when the last pause came from the user, either the panel button or
+    // the MediaSession pause action. A pause without this flag is an operating
+    // system interruption, such as a call or another app taking the audio
+    let userPaused = false;
+
     // Album art coverflow and swipe state
     // artTiles is the row of cover images, the middle one is the current song
     let artTiles = [];
@@ -592,6 +597,7 @@
             reportPlays: true,
             artTest: false,
             artOverlayMode: "all",
+            directAudio: true,
             waveSeek: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
@@ -650,6 +656,7 @@
                     artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
+                    directAudio: parsed.directAudio !== false,
                     waveSeek: parsed.waveSeek !== false,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
@@ -2472,6 +2479,11 @@
         audio.addEventListener("playing", function () {
 
             playbackWorks = true;
+            userPaused = false;
+
+            // iOS drops the action handlers and the now playing ownership after
+            // an interruption, so claim them again every time playback starts
+            setupMediaSession();
 
             if (npCoverSent) {
 
@@ -2532,7 +2544,19 @@
 
         audio.addEventListener("play", function () {
 
+            userPaused = false;
+
+            // Re-claim the controls, iOS hands them to whatever played last
+            setupMediaSession();
             updatePlayPause();
+
+            if ("mediaSession" in navigator) {
+
+                try {
+                    navigator.mediaSession.playbackState = "playing";
+                } catch (e) {
+                }
+            }
 
             // Clear a stale Stopped or Paused line once playback is running
             if (currentSong) {
@@ -2551,10 +2575,32 @@
             // Keep the saved position current when the user pauses
             saveQueue();
 
-            // Stop clears currentSong first, so this only fires for a real pause
-            if (currentSong) {
-                setStatus("Paused: " + (currentSong.title || "Untitled"));
+            if ("mediaSession" in navigator) {
+
+                try {
+                    navigator.mediaSession.playbackState = "paused";
+                } catch (e) {
+                }
             }
+
+            // Stop clears currentSong first, so this only fires for a real pause
+            if (!currentSong) {
+                return;
+            }
+
+            if (userPaused || audio.ended) {
+
+                setStatus("Paused: " + (currentSong.title || "Untitled"));
+                return;
+            }
+
+            // Nobody asked for this pause, so the system interrupted playback.
+            // Keep the song, the queue and the position, and re-assert the
+            // metadata and handlers so the next hardware play reaches us
+            setupMediaSession();
+            sendNowPlaying();
+            updateMediaPosition();
+            setStatus("Interrupted: " + (currentSong.title || "Untitled"));
         });
     }
 
@@ -3390,25 +3436,46 @@
         const token = playToken + 1;
         playToken = token;
 
-        const url = await getPlayableUrl(song);
+        if (settings.directAudio) {
 
-        // A newer play started while fetching, drop this one
-        if (token !== playToken) {
+            // songUrl is synchronous, so the source is set and play is called
+            // with the user activation still valid. iOS drops that token across
+            // an await, which silently rejects the play and blocks a resume
+            const direct = songUrl(song);
 
-            if (url && url.indexOf("blob:") === 0) {
-                URL.revokeObjectURL(url);
+            if (!direct) {
+                setStatus("Could not build a URL for this song");
+                return;
             }
 
-            return;
-        }
+            setCurrentSrc(direct);
+            startAudioPlayback();
 
-        if (!url) {
-            setStatus("Could not build a URL for this song");
-            return;
-        }
+            // Still keep a copy for offline replay, just not for playback
+            fetchToCache(song);
 
-        setCurrentSrc(url);
-        audio.play();
+        } else {
+
+            const url = await getPlayableUrl(song);
+
+            // A newer play started while fetching, drop this one
+            if (token !== playToken) {
+
+                if (url && url.indexOf("blob:") === 0) {
+                    URL.revokeObjectURL(url);
+                }
+
+                return;
+            }
+
+            if (!url) {
+                setStatus("Could not build a URL for this song");
+                return;
+            }
+
+            setCurrentSrc(url);
+            startAudioPlayback();
+        }
 
         // Remember the queue and position so a restart can resume here
         saveQueue();
@@ -3537,6 +3604,31 @@
     }
 
     // Point the audio element at a URL, cleaning up the previous blob URL
+    // Start the element and deal with the returned promise. A rejected play is
+    // exactly what a blocked resume after an interruption looks like, so it is
+    // surfaced and the handlers are re-registered instead of failing silently
+    function startAudioPlayback() {
+
+        if (!audio) {
+            return;
+        }
+
+        userPaused = false;
+
+        const started = audio.play();
+
+        if (!started || typeof started.catch !== "function") {
+            return;
+        }
+
+        started.catch(function (err) {
+
+            setStatus("Playback blocked: " + ((err && err.name) || "error"));
+            updatePlayPause();
+            setupMediaSession();
+        });
+    }
+
     function setCurrentSrc(url) {
 
         if (currentObjectUrl) {
@@ -3816,8 +3908,12 @@
         }
 
         if (audio.paused) {
-            audio.play();
+
+            startAudioPlayback();
+
         } else {
+
+            userPaused = true;
             audio.pause();
         }
     }
@@ -5139,13 +5235,18 @@
         setHandler("play", function () {
 
             if (audio) {
-                audio.play();
+
+                startAudioPlayback();
+
             } else {
                 startPlay();
             }
         });
 
         setHandler("pause", function () {
+
+            // A pause the user asked for, not an interruption
+            userPaused = true;
 
             if (audio) {
                 audio.pause();
@@ -5767,9 +5868,14 @@
     // Push the current metadata and cover to the media session now
     function sendNowPlaying() {
 
-        if (currentSong) {
-            setMediaMetadata(currentSong, artworkFor(currentSong));
+        if (!currentSong) {
+            return;
         }
+
+        // Ownership of the controls and the handlers go together on iOS, so
+        // re-register whenever the now playing metadata is pushed
+        setupMediaSession();
+        setMediaMetadata(currentSong, artworkFor(currentSong));
     }
 
     // Send the first cover for the current song once it has decoded and playback
@@ -8390,6 +8496,10 @@
             function () { return settings.lyricSideShift; },
             function (v) { settings.lyricSideShift = v; applyLyricLayout(); }, -20, 20, 1);
 
+        const directRow = makeBoolRow("Stream direct URL",
+            function () { return settings.directAudio; },
+            function (v) { settings.directAudio = v; });
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
@@ -8400,6 +8510,7 @@
         settingsEl.appendChild(lyricSpaceRow);
         settingsEl.appendChild(lyricShiftRow);
         settingsEl.appendChild(lyricSideShiftRow);
+        settingsEl.appendChild(directRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
