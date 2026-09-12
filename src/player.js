@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1g";
+    const VERSION = "1.4.1h";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -444,6 +444,10 @@
 
     // Last tap on the art, for double tap detection on touch devices
     let lastArtTapT = 0;
+
+    // Time of the last touch end on the art, to ignore the dblclick that iOS
+    // synthesizes after a double tap
+    let lastArtTouchEndT = 0;
     let lastArtTapX = 0;
     let lastArtTapY = 0;
     let lyricRows = [];
@@ -2522,6 +2526,10 @@
         });
 
         audio.addEventListener("error", function () {
+
+            // The source swap ended in an error rather than playing, so clear
+            // the flag or the next real interruption pause would be ignored
+            switchingTrack = false;
             handlePlayError();
         });
 
@@ -3804,6 +3812,10 @@
     // Stop playback and clear the queue
     function stopPlay() {
 
+        // This pause is deliberate, so the pause listener must not take the
+        // interruption path and re-send now playing for a song being stopped
+        userPaused = true;
+
         if (audio) {
             audio.pause();
         }
@@ -4393,6 +4405,10 @@
 
     // On release, advance to the neighbor if dragged far enough, else snap back
     function onArtTouchEnd(ev) {
+
+        // Stamp every touch end, so a synthesized dblclick can be told apart
+        // from a real mouse double click
+        lastArtTouchEndT = Date.now();
 
         if (!swipeActive) {
             return;
@@ -6425,10 +6441,17 @@
         artWrapEl.addEventListener("touchend", onArtTouchEnd);
         artWrapEl.addEventListener("touchcancel", onArtTouchEnd);
 
-        // Desktop counterpart of the touch double tap
+        // Desktop counterpart of the touch double tap. iOS synthesizes a
+        // dblclick after a double tap as well, which would cycle the mode
+        // twice, so a recent touch tap makes this one a no-op
         artWrapEl.addEventListener("dblclick", function (ev) {
 
             ev.preventDefault();
+
+            if (Date.now() - lastArtTouchEndT < 700) {
+                return;
+            }
+
             cycleOverlayMode();
         });
 
