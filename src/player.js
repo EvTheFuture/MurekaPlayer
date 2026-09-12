@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1i";
+    const VERSION = "1.4.1j";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -485,6 +485,10 @@
     // that fails twice stops instead of looping through retries
     let errorRetryToken = -1;
 
+    // How many songs in a row failed to start. With no signal the queue should
+    // skip past songs it cannot load rather than stopping, but not forever
+    let playFailStreak = 0;
+
     // Album art coverflow and swipe state
     // artTiles is the row of cover images, the middle one is the current song
     let artTiles = [];
@@ -513,6 +517,31 @@
 
         return new Promise(function (resolve) {
             setTimeout(resolve, ms);
+        });
+    }
+
+    // fetch with a deadline. A request with no signal can hang until the
+    // network stack finally gives up, which ties up the connection pool and
+    // stalls the audio stream, so every background request uses this
+    function timedFetch(resource, options, ms) {
+
+        const opts = options || {};
+        const limit = ms || 15000;
+
+        if (typeof AbortController === "undefined") {
+            return fetch(resource, opts);
+        }
+
+        const controller = new AbortController();
+
+        const timer = setTimeout(function () {
+            controller.abort();
+        }, limit);
+
+        const merged = Object.assign({}, opts, { signal: controller.signal });
+
+        return fetch(resource, merged).finally(function () {
+            clearTimeout(timer);
         });
     }
 
@@ -871,7 +900,7 @@
             params.set("listRenderType", FEEDS.published.queryType);
 
             const url = FEEDS.published.endpoint + "?" + params.toString();
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (res.ok) {
 
@@ -1384,7 +1413,7 @@
         const url = feed().endpoint + "?" + params.toString();
 
         // credentials include sends the login cookies so the API authorises us
-        const res = await fetch(url, { credentials: "include" });
+        const res = await timedFetch(url, { credentials: "include" });
 
         // A rejected request must not be mistaken for an empty final page
         if (!res.ok) {
@@ -1449,7 +1478,7 @@
 
         try {
             const url = "/api/pgc/profile?time=" + Date.now();
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (!res.ok) {
                 return null;
@@ -2044,7 +2073,10 @@
                 cachingIds.add(song.song_id);
                 renderList();
 
-                const net = await fetch(direct);
+                // A longer deadline than the background work, this is the file
+                // being played, but it must still fail rather than hang, or
+                // playback dies silently with no error to recover from
+                const net = await timedFetch(direct, {}, 30000);
 
                 if (net && net.ok) {
                     await store.put(direct, net.clone());
@@ -2094,7 +2126,7 @@
             cachingIds.add(song.song_id);
             renderList();
 
-            const net = await fetch(url);
+            const net = await timedFetch(url);
 
             if (!net || !net.ok) {
                 return false;
@@ -2424,7 +2456,7 @@
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (!res.ok) {
                 setStatus("Refresh failed, HTTP " + res.status);
@@ -2503,6 +2535,7 @@
             playbackWorks = true;
             userPaused = false;
             switchingTrack = false;
+            playFailStreak = 0;
 
             // iOS drops the action handlers and the now playing ownership after
             // an interruption, so claim them again every time playback starts
@@ -2677,7 +2710,7 @@
                 cachingIds.add(song.song_id);
                 renderList();
 
-                const net = await fetch(direct);
+                const net = await timedFetch(direct);
 
                 cachingIds.delete(song.song_id);
                 renderList();
@@ -2759,7 +2792,20 @@
         }
 
         if (outcome === "failed") {
+
             updatePlayPause();
+            playFailStreak += 1;
+
+            // With no signal and no stored copy a song cannot start, so move
+            // on to the next one instead of leaving playback dead. A run of
+            // failures means the whole queue is unreachable, so stop then
+            if (playFailStreak < 3 && queuePos < queue.length - 1) {
+
+                setStatus("Skipping, could not play: " + title);
+                playNext();
+                return;
+            }
+
             setStatus("Could not play, press play to retry: " + title);
             return;
         }
@@ -3587,7 +3633,9 @@
         const token = playToken + 1;
         playToken = token;
 
-        if (settings.directAudio) {
+        // Offline the direct stream cannot work, so fall through to the cache
+        // path below, which serves the stored copy and keeps playback going
+        if (settings.directAudio && navigator.onLine !== false) {
 
             // songUrl is synchronous, so the source is set and play is called
             // with the user activation still valid. iOS drops that token across
@@ -3768,7 +3816,7 @@
             const url = "/api/pgc/song/detail?time=" + Date.now()
                 + "&song_id=" + song.song_id;
 
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
             if (!json || json.code !== 0 || !json.data) {
@@ -3812,6 +3860,10 @@
     // Bring a song's counts up to date without touching the display, used to
     // refresh the songs coming up next in the background
     async function prefetchDetail(song) {
+
+        if (navigator.onLine === false) {
+            return;
+        }
 
         const stored = await loadDetailFromStore(song.song_id);
 
@@ -3860,6 +3912,11 @@
 
     // Cache the next songs in the queue so playback does not wait on the network
     async function prefetchNext() {
+
+        // Nothing to gain from queueing requests that cannot succeed
+        if (navigator.onLine === false) {
+            return;
+        }
 
         for (let i = 1; i <= settings.prefetchCount; i += 1) {
 
@@ -5927,7 +5984,7 @@
 
         try {
 
-            const res = await fetch(url);
+            const res = await timedFetch(url);
 
             if (!res || !res.ok) {
                 return;
@@ -5990,7 +6047,7 @@
         let blob;
 
         try {
-            const res = await fetch(url);
+            const res = await timedFetch(url);
 
             if (!res || !res.ok) {
                 return;
@@ -9341,7 +9398,7 @@
                     url += "&last_id=" + lastId;
                 }
 
-                const res = await fetch(url, { credentials: "include" });
+                const res = await timedFetch(url, { credentials: "include" });
                 const json = await res.json();
 
                 if (!json || json.code !== 0 || !json.data) {
@@ -9760,7 +9817,7 @@
                 url += "&last_id=" + lastId;
             }
 
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
             if (!json || json.code !== 0 || !json.data) {
@@ -9983,7 +10040,7 @@
         try {
 
             const url = "/api/pgc/personal/profile?time=" + Date.now() + "&user_id=" + id;
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
             if (json && json.code === 0 && json.data && json.data.user) {
@@ -10107,7 +10164,7 @@
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (res.ok) {
 
@@ -10142,7 +10199,7 @@
 
             try {
                 const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
-                const res = await fetch(url, { credentials: "include" });
+                const res = await timedFetch(url, { credentials: "include" });
 
                 if (res.ok) {
 
