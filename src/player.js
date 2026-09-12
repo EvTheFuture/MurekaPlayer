@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1h";
+    const VERSION = "1.4.1i";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -128,6 +128,11 @@
     // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
     // track can carry lyrics text while still being an instrumental
     const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
+
+    // Cache API bucket for the per song detail payload, the play and like
+    // counts plus the timed lyrics. Counts change over time, so every entry
+    // carries the moment it was stored and is refetched once it is too old
+    const DETAIL_STORE = "mureka_detail_cache_v1";
 
     // Cache API bucket for the per song waveform. Only the feed responses carry
     // wave_list, so it is persisted here as feed pages arrive and read on play
@@ -611,6 +616,7 @@
             artTest: false,
             artOverlayMode: "all",
             directAudio: true,
+            countsMaxAge: 4,
             waveSeek: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
@@ -670,6 +676,9 @@
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
                     directAudio: parsed.directAudio !== false,
+                    countsMaxAge: (typeof parsed.countsMaxAge === "number"
+                        && parsed.countsMaxAge >= 1 && parsed.countsMaxAge <= 72)
+                        ? parsed.countsMaxAge : 4,
                     waveSeek: parsed.waveSeek !== false,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
@@ -3665,7 +3674,95 @@
     // Fetch play, favorite and share counts for the now playing song
     // The counts live at the data level of the detail response, beside song
     // Only apply them while this song is still the current one
-    async function fetchNowPlayingCounts(song) {
+    // A stable Cache API key for a song's stored detail entry
+    function detailStoreKey(id) {
+
+        return "https://mureka-detail-cache/" + encodeURIComponent(id);
+    }
+
+    // Read a song's stored detail entry, or null when it has none
+    async function loadDetailFromStore(id) {
+
+        try {
+
+            const store = await caches.open(DETAIL_STORE);
+            const res = await store.match(detailStoreKey(id));
+
+            if (!res) {
+
+                return null;
+            }
+
+            return await res.json();
+        } catch (e) {
+
+            return null;
+        }
+    }
+
+    // Persist a song's detail entry, replacing any older copy
+    async function saveDetailToStore(id, entry) {
+
+        try {
+
+            const store = await caches.open(DETAIL_STORE);
+
+            await store.put(detailStoreKey(id), new Response(JSON.stringify(entry), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        } catch (e) {
+        }
+    }
+
+    // Whether a stored entry is still inside the age allowed by the settings
+    function detailIsFresh(entry) {
+
+        if (!entry || typeof entry.t !== "number") {
+            return false;
+        }
+
+        const hours = settings.countsMaxAge || 4;
+
+        return (Date.now() - entry.t) < hours * 3600000;
+    }
+
+    // Pulse the counts line while the numbers are being refetched, the same
+    // fading blink the song list uses for a cover or song being cached
+    function setCountsLoading(on) {
+
+        if (!playerCountsEl) {
+            return;
+        }
+
+        playerCountsEl.style.animation = on
+            ? "mureka-pulse 1s ease-in-out infinite"
+            : "";
+    }
+
+    // Show a stored or freshly fetched detail entry for the song
+    function applyDetail(song, entry) {
+
+        if (!currentSong || currentSong.song_id !== song.song_id) {
+            return;
+        }
+
+        nowPlayingCounts = {
+            song_id: song.song_id,
+            play_count: entry.play_count,
+            fav_count: entry.fav_count,
+            share_count: entry.share_count
+        };
+
+        // The lyrics ride along in the same entry, so a stored one needs no
+        // request at all and the rows appear as soon as the song starts
+        lyricRows = Array.isArray(entry.lyrics) ? entry.lyrics : [];
+        lyricIdx = -1;
+        updateLyricLine(true);
+        refreshNowPlayingMeta();
+    }
+
+    // Fetch the detail endpoint and store what it gives us
+    async function fetchDetail(song) {
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now()
@@ -3675,27 +3772,20 @@
             const json = await res.json();
 
             if (!json || json.code !== 0 || !json.data) {
-                return;
+                return null;
             }
 
-            if (!currentSong || currentSong.song_id !== song.song_id) {
-                return;
-            }
-
-            nowPlayingCounts = {
-                song_id: song.song_id,
-                play_count: json.data.play_count,
-                fav_count: json.data.fav_count,
-                share_count: json.data.share_count
-            };
-
-            // The same response carries the lyrics and the waveform, so take
-            // them here with no extra request
             const d = json.data;
 
-            lyricRows = buildLyricRows(d.lyrics || (d.song && d.song.lyrics));
-            lyricIdx = -1;
-            updateLyricLine(true);
+            const entry = {
+                play_count: d.play_count,
+                fav_count: d.fav_count,
+                share_count: d.share_count,
+                lyrics: buildLyricRows(d.lyrics || (d.song && d.song.lyrics)),
+                t: Date.now()
+            };
+
+            saveDetailToStore(song.song_id, entry);
 
             // The detail response is not known to carry the waveform, but if it
             // ever does, take it, without clobbering one loaded from the store
@@ -3703,13 +3793,68 @@
 
             if (w) {
 
-                waveData = w;
-                updateSeekMode();
                 saveWaveToStore(song.song_id, w);
+
+                if (currentSong && currentSong.song_id === song.song_id) {
+
+                    waveData = w;
+                    updateSeekMode();
+                }
             }
 
-            refreshNowPlayingMeta();
+            return entry;
         } catch (e) {
+
+            return null;
+        }
+    }
+
+    // Bring a song's counts up to date without touching the display, used to
+    // refresh the songs coming up next in the background
+    async function prefetchDetail(song) {
+
+        const stored = await loadDetailFromStore(song.song_id);
+
+        if (detailIsFresh(stored)) {
+            return;
+        }
+
+        await fetchDetail(song);
+    }
+
+    // Show the counts and lyrics for the song now playing. A stored entry is
+    // shown at once, and only refetched when it is older than the setting
+    async function fetchNowPlayingCounts(song) {
+
+        const mine = currentSong && currentSong.song_id === song.song_id;
+
+        if (mine) {
+            setCountsLoading(false);
+        }
+
+        const stored = await loadDetailFromStore(song.song_id);
+
+        if (stored) {
+            applyDetail(song, stored);
+        }
+
+        if (detailIsFresh(stored)) {
+            return;
+        }
+
+        // Blink the numbers while they are being refreshed from the server
+        if (mine) {
+            setCountsLoading(true);
+        }
+
+        const entry = await fetchDetail(song);
+
+        if (currentSong && currentSong.song_id === song.song_id) {
+            setCountsLoading(false);
+        }
+
+        if (entry) {
+            applyDetail(song, entry);
         }
     }
 
@@ -3732,6 +3877,10 @@
 
             // Pre-cache the cover too, cacheArt skips if it is already stored
             await cacheArt(song);
+
+            // Refresh the counts ahead of time, so the numbers are already
+            // current when the song reaches the top of the queue
+            await prefetchDetail(song);
 
             if (cachedIds.has(song.song_id)) {
                 continue;
@@ -8675,6 +8824,10 @@
             function () { return settings.directAudio; },
             function (v) { settings.directAudio = v; });
 
+        const countsAgeRow = makeStepperRow("Counts max age in hours",
+            function () { return settings.countsMaxAge; },
+            function (v) { settings.countsMaxAge = v; }, 1, 72);
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
@@ -8686,6 +8839,7 @@
         settingsEl.appendChild(lyricShiftRow);
         settingsEl.appendChild(lyricSideShiftRow);
         settingsEl.appendChild(directRow);
+        settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
