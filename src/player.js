@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1h";
+    const VERSION = "1.4.1j";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -128,6 +128,11 @@
     // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
     // track can carry lyrics text while still being an instrumental
     const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
+
+    // Cache API bucket for the per song detail payload, the play and like
+    // counts plus the timed lyrics. Counts change over time, so every entry
+    // carries the moment it was stored and is refetched once it is too old
+    const DETAIL_STORE = "mureka_detail_cache_v1";
 
     // Cache API bucket for the per song waveform. Only the feed responses carry
     // wave_list, so it is persisted here as feed pages arrive and read on play
@@ -480,6 +485,10 @@
     // that fails twice stops instead of looping through retries
     let errorRetryToken = -1;
 
+    // How many songs in a row failed to start. With no signal the queue should
+    // skip past songs it cannot load rather than stopping, but not forever
+    let playFailStreak = 0;
+
     // Album art coverflow and swipe state
     // artTiles is the row of cover images, the middle one is the current song
     let artTiles = [];
@@ -508,6 +517,31 @@
 
         return new Promise(function (resolve) {
             setTimeout(resolve, ms);
+        });
+    }
+
+    // fetch with a deadline. A request with no signal can hang until the
+    // network stack finally gives up, which ties up the connection pool and
+    // stalls the audio stream, so every background request uses this
+    function timedFetch(resource, options, ms) {
+
+        const opts = options || {};
+        const limit = ms || 15000;
+
+        if (typeof AbortController === "undefined") {
+            return fetch(resource, opts);
+        }
+
+        const controller = new AbortController();
+
+        const timer = setTimeout(function () {
+            controller.abort();
+        }, limit);
+
+        const merged = Object.assign({}, opts, { signal: controller.signal });
+
+        return fetch(resource, merged).finally(function () {
+            clearTimeout(timer);
         });
     }
 
@@ -611,6 +645,7 @@
             artTest: false,
             artOverlayMode: "all",
             directAudio: true,
+            countsMaxAge: 4,
             waveSeek: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
@@ -670,6 +705,9 @@
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
                     directAudio: parsed.directAudio !== false,
+                    countsMaxAge: (typeof parsed.countsMaxAge === "number"
+                        && parsed.countsMaxAge >= 1 && parsed.countsMaxAge <= 72)
+                        ? parsed.countsMaxAge : 4,
                     waveSeek: parsed.waveSeek !== false,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
@@ -862,7 +900,7 @@
             params.set("listRenderType", FEEDS.published.queryType);
 
             const url = FEEDS.published.endpoint + "?" + params.toString();
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (res.ok) {
 
@@ -1375,7 +1413,7 @@
         const url = feed().endpoint + "?" + params.toString();
 
         // credentials include sends the login cookies so the API authorises us
-        const res = await fetch(url, { credentials: "include" });
+        const res = await timedFetch(url, { credentials: "include" });
 
         // A rejected request must not be mistaken for an empty final page
         if (!res.ok) {
@@ -1440,7 +1478,7 @@
 
         try {
             const url = "/api/pgc/profile?time=" + Date.now();
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (!res.ok) {
                 return null;
@@ -2035,7 +2073,10 @@
                 cachingIds.add(song.song_id);
                 renderList();
 
-                const net = await fetch(direct);
+                // A longer deadline than the background work, this is the file
+                // being played, but it must still fail rather than hang, or
+                // playback dies silently with no error to recover from
+                const net = await timedFetch(direct, {}, 30000);
 
                 if (net && net.ok) {
                     await store.put(direct, net.clone());
@@ -2085,7 +2126,7 @@
             cachingIds.add(song.song_id);
             renderList();
 
-            const net = await fetch(url);
+            const net = await timedFetch(url);
 
             if (!net || !net.ok) {
                 return false;
@@ -2415,7 +2456,7 @@
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (!res.ok) {
                 setStatus("Refresh failed, HTTP " + res.status);
@@ -2494,6 +2535,7 @@
             playbackWorks = true;
             userPaused = false;
             switchingTrack = false;
+            playFailStreak = 0;
 
             // iOS drops the action handlers and the now playing ownership after
             // an interruption, so claim them again every time playback starts
@@ -2668,7 +2710,7 @@
                 cachingIds.add(song.song_id);
                 renderList();
 
-                const net = await fetch(direct);
+                const net = await timedFetch(direct);
 
                 cachingIds.delete(song.song_id);
                 renderList();
@@ -2750,7 +2792,20 @@
         }
 
         if (outcome === "failed") {
+
             updatePlayPause();
+            playFailStreak += 1;
+
+            // With no signal and no stored copy a song cannot start, so move
+            // on to the next one instead of leaving playback dead. A run of
+            // failures means the whole queue is unreachable, so stop then
+            if (playFailStreak < 3 && queuePos < queue.length - 1) {
+
+                setStatus("Skipping, could not play: " + title);
+                playNext();
+                return;
+            }
+
             setStatus("Could not play, press play to retry: " + title);
             return;
         }
@@ -3578,7 +3633,9 @@
         const token = playToken + 1;
         playToken = token;
 
-        if (settings.directAudio) {
+        // Offline the direct stream cannot work, so fall through to the cache
+        // path below, which serves the stored copy and keeps playback going
+        if (settings.directAudio && navigator.onLine !== false) {
 
             // songUrl is synchronous, so the source is set and play is called
             // with the user activation still valid. iOS drops that token across
@@ -3665,37 +3722,118 @@
     // Fetch play, favorite and share counts for the now playing song
     // The counts live at the data level of the detail response, beside song
     // Only apply them while this song is still the current one
-    async function fetchNowPlayingCounts(song) {
+    // A stable Cache API key for a song's stored detail entry
+    function detailStoreKey(id) {
+
+        return "https://mureka-detail-cache/" + encodeURIComponent(id);
+    }
+
+    // Read a song's stored detail entry, or null when it has none
+    async function loadDetailFromStore(id) {
+
+        try {
+
+            const store = await caches.open(DETAIL_STORE);
+            const res = await store.match(detailStoreKey(id));
+
+            if (!res) {
+
+                return null;
+            }
+
+            return await res.json();
+        } catch (e) {
+
+            return null;
+        }
+    }
+
+    // Persist a song's detail entry, replacing any older copy
+    async function saveDetailToStore(id, entry) {
+
+        try {
+
+            const store = await caches.open(DETAIL_STORE);
+
+            await store.put(detailStoreKey(id), new Response(JSON.stringify(entry), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        } catch (e) {
+        }
+    }
+
+    // Whether a stored entry is still inside the age allowed by the settings
+    function detailIsFresh(entry) {
+
+        if (!entry || typeof entry.t !== "number") {
+            return false;
+        }
+
+        const hours = settings.countsMaxAge || 4;
+
+        return (Date.now() - entry.t) < hours * 3600000;
+    }
+
+    // Pulse the counts line while the numbers are being refetched, the same
+    // fading blink the song list uses for a cover or song being cached
+    function setCountsLoading(on) {
+
+        if (!playerCountsEl) {
+            return;
+        }
+
+        playerCountsEl.style.animation = on
+            ? "mureka-pulse 1s ease-in-out infinite"
+            : "";
+    }
+
+    // Show a stored or freshly fetched detail entry for the song
+    function applyDetail(song, entry) {
+
+        if (!currentSong || currentSong.song_id !== song.song_id) {
+            return;
+        }
+
+        nowPlayingCounts = {
+            song_id: song.song_id,
+            play_count: entry.play_count,
+            fav_count: entry.fav_count,
+            share_count: entry.share_count
+        };
+
+        // The lyrics ride along in the same entry, so a stored one needs no
+        // request at all and the rows appear as soon as the song starts
+        lyricRows = Array.isArray(entry.lyrics) ? entry.lyrics : [];
+        lyricIdx = -1;
+        updateLyricLine(true);
+        refreshNowPlayingMeta();
+    }
+
+    // Fetch the detail endpoint and store what it gives us
+    async function fetchDetail(song) {
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now()
                 + "&song_id=" + song.song_id;
 
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
             if (!json || json.code !== 0 || !json.data) {
-                return;
+                return null;
             }
 
-            if (!currentSong || currentSong.song_id !== song.song_id) {
-                return;
-            }
-
-            nowPlayingCounts = {
-                song_id: song.song_id,
-                play_count: json.data.play_count,
-                fav_count: json.data.fav_count,
-                share_count: json.data.share_count
-            };
-
-            // The same response carries the lyrics and the waveform, so take
-            // them here with no extra request
             const d = json.data;
 
-            lyricRows = buildLyricRows(d.lyrics || (d.song && d.song.lyrics));
-            lyricIdx = -1;
-            updateLyricLine(true);
+            const entry = {
+                play_count: d.play_count,
+                fav_count: d.fav_count,
+                share_count: d.share_count,
+                lyrics: buildLyricRows(d.lyrics || (d.song && d.song.lyrics)),
+                t: Date.now()
+            };
+
+            saveDetailToStore(song.song_id, entry);
 
             // The detail response is not known to carry the waveform, but if it
             // ever does, take it, without clobbering one loaded from the store
@@ -3703,18 +3841,82 @@
 
             if (w) {
 
-                waveData = w;
-                updateSeekMode();
                 saveWaveToStore(song.song_id, w);
+
+                if (currentSong && currentSong.song_id === song.song_id) {
+
+                    waveData = w;
+                    updateSeekMode();
+                }
             }
 
-            refreshNowPlayingMeta();
+            return entry;
         } catch (e) {
+
+            return null;
+        }
+    }
+
+    // Bring a song's counts up to date without touching the display, used to
+    // refresh the songs coming up next in the background
+    async function prefetchDetail(song) {
+
+        if (navigator.onLine === false) {
+            return;
+        }
+
+        const stored = await loadDetailFromStore(song.song_id);
+
+        if (detailIsFresh(stored)) {
+            return;
+        }
+
+        await fetchDetail(song);
+    }
+
+    // Show the counts and lyrics for the song now playing. A stored entry is
+    // shown at once, and only refetched when it is older than the setting
+    async function fetchNowPlayingCounts(song) {
+
+        const mine = currentSong && currentSong.song_id === song.song_id;
+
+        if (mine) {
+            setCountsLoading(false);
+        }
+
+        const stored = await loadDetailFromStore(song.song_id);
+
+        if (stored) {
+            applyDetail(song, stored);
+        }
+
+        if (detailIsFresh(stored)) {
+            return;
+        }
+
+        // Blink the numbers while they are being refreshed from the server
+        if (mine) {
+            setCountsLoading(true);
+        }
+
+        const entry = await fetchDetail(song);
+
+        if (currentSong && currentSong.song_id === song.song_id) {
+            setCountsLoading(false);
+        }
+
+        if (entry) {
+            applyDetail(song, entry);
         }
     }
 
     // Cache the next songs in the queue so playback does not wait on the network
     async function prefetchNext() {
+
+        // Nothing to gain from queueing requests that cannot succeed
+        if (navigator.onLine === false) {
+            return;
+        }
 
         for (let i = 1; i <= settings.prefetchCount; i += 1) {
 
@@ -3732,6 +3934,10 @@
 
             // Pre-cache the cover too, cacheArt skips if it is already stored
             await cacheArt(song);
+
+            // Refresh the counts ahead of time, so the numbers are already
+            // current when the song reaches the top of the queue
+            await prefetchDetail(song);
 
             if (cachedIds.has(song.song_id)) {
                 continue;
@@ -5778,7 +5984,7 @@
 
         try {
 
-            const res = await fetch(url);
+            const res = await timedFetch(url);
 
             if (!res || !res.ok) {
                 return;
@@ -5841,7 +6047,7 @@
         let blob;
 
         try {
-            const res = await fetch(url);
+            const res = await timedFetch(url);
 
             if (!res || !res.ok) {
                 return;
@@ -8675,6 +8881,10 @@
             function () { return settings.directAudio; },
             function (v) { settings.directAudio = v; });
 
+        const countsAgeRow = makeStepperRow("Counts max age in hours",
+            function () { return settings.countsMaxAge; },
+            function (v) { settings.countsMaxAge = v; }, 1, 72);
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
@@ -8686,6 +8896,7 @@
         settingsEl.appendChild(lyricShiftRow);
         settingsEl.appendChild(lyricSideShiftRow);
         settingsEl.appendChild(directRow);
+        settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
@@ -9187,7 +9398,7 @@
                     url += "&last_id=" + lastId;
                 }
 
-                const res = await fetch(url, { credentials: "include" });
+                const res = await timedFetch(url, { credentials: "include" });
                 const json = await res.json();
 
                 if (!json || json.code !== 0 || !json.data) {
@@ -9606,7 +9817,7 @@
                 url += "&last_id=" + lastId;
             }
 
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
             if (!json || json.code !== 0 || !json.data) {
@@ -9829,7 +10040,7 @@
         try {
 
             const url = "/api/pgc/personal/profile?time=" + Date.now() + "&user_id=" + id;
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
             if (json && json.code === 0 && json.data && json.data.user) {
@@ -9953,7 +10164,7 @@
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
-            const res = await fetch(url, { credentials: "include" });
+            const res = await timedFetch(url, { credentials: "include" });
 
             if (res.ok) {
 
@@ -9988,7 +10199,7 @@
 
             try {
                 const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
-                const res = await fetch(url, { credentials: "include" });
+                const res = await timedFetch(url, { credentials: "include" });
 
                 if (res.ok) {
 
