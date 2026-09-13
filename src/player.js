@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1l";
+    const VERSION = "1.4.1v";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -261,6 +261,9 @@
     // Whether the floating action and view dropdowns are open
     // Both start closed so the panel opens compact every time
     let actionsOpen = false;
+
+    // True while the settings panel is on screen, so the blackout holds off
+    let settingsOpen = false;
     let viewMenuOpen = false;
 
     // True while a load run is in progress
@@ -645,6 +648,12 @@
             artTest: false,
             artOverlayMode: "all",
             directAudio: true,
+            carBlackout: false,
+            carAutoBlack: 20,
+            blackoutText: "\u266A",
+            blackoutColor: "#333333",
+            blackoutSize: 64,
+            blackoutDrift: 25,
             countsMaxAge: 4,
             waveSeek: true,
             lyricSize: 18,
@@ -705,6 +714,20 @@
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
                     directAudio: parsed.directAudio !== false,
+                    carBlackout: parsed.carBlackout === true,
+                    carAutoBlack: (typeof parsed.carAutoBlack === "number"
+                        && parsed.carAutoBlack >= 0 && parsed.carAutoBlack <= 300)
+                        ? parsed.carAutoBlack : 20,
+                    blackoutText: typeof parsed.blackoutText === "string"
+                        ? parsed.blackoutText : "\u266A",
+                    blackoutColor: typeof parsed.blackoutColor === "string"
+                        ? parsed.blackoutColor : "#333333",
+                    blackoutSize: (typeof parsed.blackoutSize === "number"
+                        && parsed.blackoutSize >= 12 && parsed.blackoutSize <= 240)
+                        ? parsed.blackoutSize : 64,
+                    blackoutDrift: (typeof parsed.blackoutDrift === "number"
+                        && parsed.blackoutDrift >= 5 && parsed.blackoutDrift <= 120)
+                        ? parsed.blackoutDrift : 25,
                     countsMaxAge: (typeof parsed.countsMaxAge === "number"
                         && parsed.countsMaxAge >= 1 && parsed.countsMaxAge <= 72)
                         ? parsed.countsMaxAge : 4,
@@ -2537,6 +2560,10 @@
             switchingTrack = false;
             playFailStreak = 0;
 
+            // Keep the screen awake and start the countdown to the blackout
+            requestWakeLock();
+            resetIdleTimer();
+
             // iOS drops the action handlers and the now playing ownership after
             // an interruption, so claim them again every time playback starts
             setupMediaSession();
@@ -2663,6 +2690,14 @@
             if (!currentSong) {
                 return;
             }
+
+            // Nothing playing, so let the screen sleep normally again, unless
+            // the cover is up, which needs the phone to stay unlocked
+            if (!isBlackedOut()) {
+                releaseWakeLock();
+            }
+
+            resetIdleTimer();
 
             if (userPaused || audio.ended) {
 
@@ -4272,6 +4307,295 @@
         closeViewMenu();
     }
 
+    // Full screen black overlay used as a stand in for the screen switching
+    // off. The phone must stay unlocked to keep the controls reachable without
+    // Face ID, so the screen is kept awake and simply painted black instead
+    let blackoutEl = null;
+
+    // The screen wake lock, held while the player is visible and playing
+    let wakeLock = null;
+
+    // Idle timer that drops the blackout in when nothing has been touched
+    let idleTimer = null;
+
+    // The dim mark drawn on the cover, and the timer that keeps moving it
+    let blackoutMarkEl = null;
+    let driftTimer = null;
+
+    // When the cover went up. The tap that raises it also produces a pointer
+    // event afterwards, which would land on the cover and dismiss it at once,
+    // so events within a short grace period after showing are ignored
+    let blackoutShownAt = 0;
+
+    // Ask the system to keep the screen on, so the phone does not lock and
+    // ask for Face ID while driving. Safari has supported this since 16.4
+    async function requestWakeLock() {
+
+        if (!navigator.wakeLock || wakeLock || document.hidden) {
+            return;
+        }
+
+        try {
+            wakeLock = await navigator.wakeLock.request("screen");
+
+            // The system drops the lock whenever the page is hidden
+            wakeLock.addEventListener("release", function () {
+                wakeLock = null;
+            });
+        } catch (e) {
+
+            wakeLock = null;
+        }
+    }
+
+    // Give the screen back to the system
+    function releaseWakeLock() {
+
+        if (!wakeLock) {
+            return;
+        }
+
+        try {
+            wakeLock.release();
+        } catch (e) {
+        }
+
+        wakeLock = null;
+    }
+
+    // Cover everything with black. On an OLED screen the pixels are then off,
+    // so this costs almost nothing and reads as a screen that went dark, while
+    // the phone stays unlocked and one tap brings the player straight back
+    function showBlackout() {
+
+        if (!blackoutEl) {
+            buildBlackout();
+        }
+
+        blackoutEl.style.display = "block";
+        blackoutShownAt = Date.now();
+
+        // A dark screen is no use if the phone then locks and asks for Face ID
+        requestWakeLock();
+
+        // Fade in, so the screen dims rather than snapping to black
+        if (blackoutEl.animate) {
+
+            blackoutEl.animate([
+                { opacity: 0 },
+                { opacity: 1 }
+            ], { duration: 450, easing: "ease-out" });
+        }
+
+        // Real fullscreen hides the browser chrome, which is the difference
+        // between a dark screen and a dark page. iPhone Safari only allows it
+        // for video, so there it simply stays a page sized cover
+        if (blackoutEl.requestFullscreen) {
+
+            const started = blackoutEl.requestFullscreen();
+
+            if (started && typeof started.catch === "function") {
+
+                started.catch(function () {
+                });
+            }
+
+        } else if (blackoutEl.webkitRequestFullscreen) {
+
+            try {
+                blackoutEl.webkitRequestFullscreen();
+            } catch (e) {
+            }
+        }
+
+        startDrift();
+    }
+
+    // Build the cover once and keep it for later
+    function buildBlackout() {
+
+        blackoutEl = document.createElement("div");
+        blackoutEl.style.cssText = [
+            "position:fixed",
+            "inset:0",
+            "background:#000",
+            "z-index:2147483647",
+            "touch-action:none",
+            "cursor:pointer",
+            "overflow:hidden"
+        ].join(";");
+
+        // The mark that shows the screen is covered rather than off. It is kept
+        // dim and moved around, because a static bright element on an OLED
+        // panel is exactly how burn in happens
+        blackoutMarkEl = document.createElement("div");
+        blackoutMarkEl.style.cssText = "position:absolute;opacity:0;font:64px/1.1 sans-serif;white-space:nowrap;pointer-events:none";
+
+        blackoutEl.appendChild(blackoutMarkEl);
+
+        blackoutEl.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            // Ignore the tail of the gesture that opened the cover
+            if (Date.now() - blackoutShownAt < 600) {
+                return;
+            }
+
+            hideBlackout();
+        });
+
+        document.body.appendChild(blackoutEl);
+    }
+
+    // Put the mark somewhere new, well inside the edges, and fade it in and out
+    // again. Fading rather than sitting lit keeps the average brightness of any
+    // one pixel very low
+    function driftMark() {
+
+        if (!blackoutMarkEl || !settings.blackoutText) {
+            return;
+        }
+
+        blackoutMarkEl.textContent = settings.blackoutText;
+        blackoutMarkEl.style.color = settings.blackoutColor;
+        blackoutMarkEl.style.fontSize = (settings.blackoutSize || 64) + "px";
+
+        const w = blackoutEl.clientWidth || window.innerWidth;
+        const h = blackoutEl.clientHeight || window.innerHeight;
+        const markW = blackoutMarkEl.offsetWidth || 40;
+        const markH = blackoutMarkEl.offsetHeight || 20;
+
+        // Keep clear of the edges, where notches and rounded corners sit
+        const padX = Math.round(w * 0.12);
+        const padY = Math.round(h * 0.12);
+        const spanX = Math.max(1, w - markW - padX * 2);
+        const spanY = Math.max(1, h - markH - padY * 2);
+
+        blackoutMarkEl.style.left = Math.round(padX + Math.random() * spanX) + "px";
+        blackoutMarkEl.style.top = Math.round(padY + Math.random() * spanY) + "px";
+
+        if (!blackoutMarkEl.animate) {
+
+            blackoutMarkEl.style.opacity = "1";
+            return;
+        }
+
+        blackoutMarkEl.animate([
+            { opacity: 0 },
+            { opacity: 1, offset: 0.2 },
+            { opacity: 1, offset: 0.7 },
+            { opacity: 0 }
+        ], { duration: 6000 });
+    }
+
+    // Show the mark now and keep moving it for as long as the cover is up
+    function startDrift() {
+
+        stopDrift();
+
+        if (!settings.blackoutText) {
+            return;
+        }
+
+        driftMark();
+
+        driftTimer = setInterval(driftMark, (settings.blackoutDrift || 25) * 1000);
+    }
+
+    function stopDrift() {
+
+        if (driftTimer) {
+
+            clearInterval(driftTimer);
+            driftTimer = null;
+        }
+    }
+
+    // Take the black cover away and start counting idle time again
+    function hideBlackout() {
+
+        stopDrift();
+
+        if (blackoutEl) {
+
+            // Fade back out, then take the cover away once it is invisible
+            if (blackoutEl.animate) {
+
+                const out = blackoutEl.animate([
+                    { opacity: 1 },
+                    { opacity: 0 }
+                ], { duration: 350, easing: "ease-in" });
+
+                out.onfinish = function () {
+                    blackoutEl.style.display = "none";
+                };
+
+            } else {
+                blackoutEl.style.display = "none";
+            }
+        }
+
+        // Leave fullscreen, but only if the cover is what put us there
+        if (document.fullscreenElement === blackoutEl && document.exitFullscreen) {
+
+            const left = document.exitFullscreen();
+
+            if (left && typeof left.catch === "function") {
+
+                left.catch(function () {
+                });
+            }
+        }
+
+        resetIdleTimer();
+    }
+
+    // True while the black cover is up
+    function isBlackedOut() {
+
+        return blackoutEl !== null && blackoutEl.style.display !== "none";
+    }
+
+    // Restart the countdown to the blackout. It only ever arms while something
+    // is actually playing, so the panel never goes dark while it is being used
+    function resetIdleTimer() {
+
+        if (idleTimer) {
+
+            clearTimeout(idleTimer);
+            idleTimer = null;
+        }
+
+        const wait = settings.carAutoBlack;
+
+        if (!settings.carBlackout || !wait || wait <= 0) {
+            return;
+        }
+
+        idleTimer = setTimeout(function () {
+
+            idleTimer = null;
+
+            // Hidden tabs come back through the visibility handler, so just
+            // wait rather than arming a countdown nobody can see
+            if (document.hidden) {
+                return;
+            }
+
+            // Idle is idle, whether something is playing, paused, or has not
+            // been started at all. Turning the setting on is the consent
+            if (settingsOpen || actionsOpen || viewMenuOpen) {
+
+                resetIdleTimer();
+                return;
+            }
+
+            showBlackout();
+        }, wait * 1000);
+    }
+
     // The last time a stall was escalated to a full reload, so an element that
     // stays dead is not reloaded over and over
     let lastEscalateT = 0;
@@ -4290,6 +4614,9 @@
     // that it is playing while the clock stands still, because the audio
     // session was lost without the element noticing
     function resyncPlayback() {
+
+        // Coming back to the foreground drops the wake lock, so take it again
+        requestWakeLock();
 
         if (!audio) {
             return;
@@ -6716,8 +7043,16 @@
         downloadButton = makeActionButton(iconDownload(), "Download list", "#444", "#fff", downloadAll);
         downloadButton.title = "Download the songs shown under the current filter";
 
+        const blackoutButton = makeActionButton(iconBlackout(), "Screen off", "#444", "#fff", function () {
+
+            closeActions();
+            requestWakeLock();
+            showBlackout();
+        });
+
         rowThree.appendChild(cacheButton);
         rowThree.appendChild(downloadButton);
+        rowThree.appendChild(blackoutButton);
 
         // A row for the two collection browsers, your playlists and other creators
         const rowFour = document.createElement("div");
@@ -7119,6 +7454,8 @@
             + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
             + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
             + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:#48e1eb}"
+            + ".mureka-resize-handle{background:transparent;transition:background 0.12s ease}"
+            + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
             // On a phone, fill the screen, shrink the art a touch and let the
@@ -7359,6 +7696,10 @@
         // Place the panel where it was left, or default to the bottom right
         restorePosition();
 
+        // Start the countdown now, so the cover can appear without anything
+        // having been played yet
+        resetIdleTimer();
+
         // Restore whether the panel was left minimized last time
         let startMinimized = false;
 
@@ -7417,9 +7758,26 @@
 
             // Back in the foreground, so make sure playback really is running
             resyncPlayback();
+            resetIdleTimer();
         });
 
         window.addEventListener("focus", resyncPlayback);
+
+        // Any touch or key postpones the blackout, so it only arrives after a
+        // real stretch of not being used
+        document.addEventListener("pointerdown", function () {
+
+            if (!isBlackedOut()) {
+                resetIdleTimer();
+            }
+        }, true);
+
+        document.addEventListener("keydown", function () {
+
+            if (!isBlackedOut()) {
+                resetIdleTimer();
+            }
+        }, true);
 
         // Returning from the back forward cache can leave a dead element
         window.addEventListener("pageshow", function () {
@@ -7452,14 +7810,18 @@
     // Keep a position inside the visible viewport, with a small margin
     function clampPosition(left, top) {
 
-        const w = panelEl.offsetWidth;
-        const h = panelEl.offsetHeight;
-        const maxLeft = Math.max(8, window.innerWidth - w - 8);
-        const maxTop = Math.max(8, window.innerHeight - h - 8);
+        // A panel that has not been laid out yet measures zero, which would
+        // allow a position right at the far edge, leaving nothing on screen
+        const w = panelEl.offsetWidth || 300;
+        const h = panelEl.offsetHeight || 300;
+
+        // No margin, so the panel can be docked flush against any edge
+        const maxLeft = Math.max(0, window.innerWidth - w);
+        const maxTop = Math.max(0, window.innerHeight - h);
 
         return {
-            left: Math.max(8, Math.min(left, maxLeft)),
-            top: Math.max(8, Math.min(top, maxTop))
+            left: Math.max(0, Math.min(left, maxLeft)),
+            top: Math.max(0, Math.min(top, maxTop))
         };
     }
 
@@ -7515,9 +7877,10 @@
     // Clamp a requested panel width and list height to sane bounds
     function clampSize(w, listH) {
 
+        // Only the viewport limits the size, so the panel can fill the window
         return {
-            w: Math.max(280, Math.min(w, Math.min(700, window.innerWidth - 16))),
-            listH: Math.max(120, Math.min(listH, 600))
+            w: Math.max(280, Math.min(w, window.innerWidth)),
+            listH: Math.max(120, Math.min(listH, Math.max(120, window.innerHeight)))
         };
     }
 
@@ -7614,8 +7977,8 @@
 
             // The panel may fill the viewport, minus the margin the dock logic
             // keeps, so growth is only ever limited by the screen as a whole
-            const maxW = window.innerWidth - 16;
-            const maxList = window.innerHeight - 16 - chromeH;
+            const maxW = window.innerWidth;
+            const maxList = window.innerHeight - chromeH;
 
             if (size.w > maxW || size.listH > maxList) {
                 size = applySize(Math.min(size.w, maxW), Math.min(size.listH, maxList));
@@ -7717,8 +8080,9 @@
         }
 
         // Default to the bottom right corner
-        const left = window.innerWidth - panelEl.offsetWidth - 16;
-        const top = window.innerHeight - panelEl.offsetHeight - 16;
+        const left = window.innerWidth - (panelEl.offsetWidth || 300);
+        const top = window.innerHeight - (panelEl.offsetHeight || 300);
+
         applyPosition(left, top);
     }
 
@@ -8094,6 +8458,14 @@
             ["polygon", { points: "12 2 2 7 12 12 22 7 12 2" }],
             ["polyline", { points: "2 17 12 22 22 17" }],
             ["polyline", { points: "2 12 12 17 22 12" }]
+        ]);
+    }
+
+    // Crescent moon, for putting the screen to sleep
+    function iconBlackout() {
+
+        return makeSvgIcon([
+            ["path", { d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" }]
         ]);
     }
 
@@ -8669,6 +9041,33 @@
     // Build a labeled On / Off row backed by a getter and a setter
     // Build a settings row with a label above a full width text input, used for
     // the now playing templates. Saves and re-asserts metadata on every edit
+    // A labelled colour picker, for settings that pick a colour rather than text
+    function makeColorRow(label, get, set) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const name = document.createElement("span");
+        name.textContent = label;
+
+        const input = document.createElement("input");
+
+        input.type = "color";
+        input.value = get();
+        input.style.cssText = "flex:0 0 auto;width:44px;height:28px;padding:0;border:1px solid #3a3a42;border-radius:6px;background:#26262c";
+
+        input.addEventListener("input", function () {
+
+            set(input.value);
+            saveSettings();
+        });
+
+        row.appendChild(name);
+        row.appendChild(input);
+
+        return row;
+    }
+
     function makeTextRow(label, get, set, previewFn) {
 
         const row = document.createElement("div");
@@ -8814,12 +9213,63 @@
         const controls = document.createElement("div");
         controls.style.cssText = "display:flex;align-items:center;gap:8px;flex:0 0 auto";
 
-        const value = document.createElement("span");
-        value.style.cssText = "min-width:24px;text-align:center;font-variant-numeric:tabular-nums";
+        // A real input, so a value can be typed instead of stepped to. The
+        // number type also brings up the numeric keypad on a phone
+        const value = document.createElement("input");
+
+        value.type = "number";
+        value.min = String(min);
+        value.max = String(max);
+        value.step = String(st);
+        value.style.cssText = [
+            "width:56px",
+            "flex:0 0 auto",
+            "text-align:center",
+            "font-variant-numeric:tabular-nums",
+            "padding:6px 4px",
+            "border:1px solid #3a3a42",
+            "border-radius:6px",
+            "background:#26262c",
+            "color:#fff",
+            "font-size:13px"
+        ].join(";");
 
         const render = function () {
-            value.textContent = String(get());
+            value.value = String(get());
         };
+
+        // Apply what was typed, clamped to the allowed range. An empty or
+        // unreadable field falls back to the value that was there before
+        const commit = function () {
+
+            const typed = parseFloat(value.value);
+
+            if (!isFinite(typed)) {
+
+                render();
+                return;
+            }
+
+            set(Math.max(min, Math.min(max, typed)));
+            saveSettings();
+            render();
+        };
+
+        value.addEventListener("change", commit);
+        value.addEventListener("blur", commit);
+
+        // Enter applies straight away, and the site must not see the typing
+        value.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter") {
+
+                ev.preventDefault();
+                commit();
+                value.blur();
+            }
+        });
 
         const minus = makeButton("-", "#333", "#fff", function () {
             set(Math.max(min, get() - st));
@@ -9035,6 +9485,30 @@
             function () { return settings.directAudio; },
             function (v) { settings.directAudio = v; });
 
+        const carBlackoutRow = makeBoolRow("Screen off overlay",
+            function () { return settings.carBlackout; },
+            function (v) { settings.carBlackout = v; resetIdleTimer(); });
+
+        const blackTextRow = makeTextRow("Screen off mark, blank for none",
+            function () { return settings.blackoutText; },
+            function (v) { settings.blackoutText = v; });
+
+        const blackColorRow = makeColorRow("Screen off mark color",
+            function () { return settings.blackoutColor; },
+            function (v) { settings.blackoutColor = v; });
+
+        const blackSizeRow = makeStepperRow("Screen off mark size",
+            function () { return settings.blackoutSize; },
+            function (v) { settings.blackoutSize = v; }, 12, 240, 4);
+
+        const blackDriftRow = makeStepperRow("Mark moves every seconds",
+            function () { return settings.blackoutDrift; },
+            function (v) { settings.blackoutDrift = v; }, 5, 120, 5);
+
+        const carBlackRow = makeStepperRow("Screen off after seconds",
+            function () { return settings.carAutoBlack; },
+            function (v) { settings.carAutoBlack = v; resetIdleTimer(); }, 0, 300, 5);
+
         const countsAgeRow = makeStepperRow("Counts max age in hours",
             function () { return settings.countsMaxAge; },
             function (v) { settings.countsMaxAge = v; }, 1, 72);
@@ -9050,6 +9524,12 @@
         settingsEl.appendChild(lyricShiftRow);
         settingsEl.appendChild(lyricSideShiftRow);
         settingsEl.appendChild(directRow);
+        settingsEl.appendChild(carBlackoutRow);
+        settingsEl.appendChild(carBlackRow);
+        settingsEl.appendChild(blackTextRow);
+        settingsEl.appendChild(blackColorRow);
+        settingsEl.appendChild(blackSizeRow);
+        settingsEl.appendChild(blackDriftRow);
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
@@ -9075,6 +9555,7 @@
         }
 
         if (settingsEl) {
+            settingsOpen = true;
             settingsEl.style.display = "flex";
         }
 
@@ -9089,6 +9570,7 @@
     function closeSettings() {
 
         if (settingsEl) {
+            settingsOpen = false;
             settingsEl.style.display = "none";
         }
     }
