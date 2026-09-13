@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1k";
+    const VERSION = "1.4.1l";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2592,7 +2592,7 @@
         });
 
         setupMediaSession();
-
+        startWatchdog();
 
         // Move the seek bar and time labels as the song plays
         audio.addEventListener("timeupdate", function () {
@@ -4272,9 +4272,17 @@
         closeViewMenu();
     }
 
-    // The last time a stall recovery was attempted, so a session that stays
-    // dead does not get nudged over and over
-    let lastResyncT = 0;
+    // The last time a stall was escalated to a full reload, so an element that
+    // stays dead is not reloaded over and over
+    let lastEscalateT = 0;
+
+    // Pending stall check. Foregrounding fires visibilitychange, focus and
+    // sometimes pageshow together, and they must share a single check
+    let resyncTimer = null;
+
+    // The watchdog interval and the position it last sampled
+    let watchdogTimer = null;
+    let watchdogLast = -1;
 
     // Bring the UI and the element back in step after the page was in the
     // background. Two things go wrong on iOS. The element can be paused with
@@ -4289,7 +4297,6 @@
 
         // Always correct the display and the lock screen state, this is free
         updatePlayPause();
-        updateMediaPosition();
 
         if ("mediaSession" in navigator) {
 
@@ -4304,41 +4311,109 @@
             return;
         }
 
-        // Do not retry constantly when the session is genuinely gone
-        if (Date.now() - lastResyncT < 5000) {
-            return;
-        }
-
         if (audio.paused) {
 
-            lastResyncT = Date.now();
             setupMediaSession();
             startAudioPlayback();
             return;
         }
 
-        // It claims to be playing, so check that the clock is actually moving
+        // It claims to be playing, so check whether the clock is really moving
+        scheduleStallCheck();
+    }
+
+    // Sample the position now and judge it shortly after, with only one check
+    // in flight so the several foreground events cannot each nudge the element
+    function scheduleStallCheck() {
+
+        if (resyncTimer || !audio) {
+            return;
+        }
+
         const before = audio.currentTime;
 
+        resyncTimer = setTimeout(function () {
+
+            resyncTimer = null;
+            checkStalled(before);
+        }, 700);
+    }
+
+    // Decide whether playback is genuinely stuck and recover it if so
+    function checkStalled(before) {
+
+        if (!audio || audio.paused || !currentSong || userPaused) {
+            return;
+        }
+
+        if (audio.currentTime !== before) {
+
+            // Moving as it should, so bring the lock screen scrubber in step.
+            // Doing this only here keeps a frozen position off the lock screen
+            updateMediaPosition();
+            return;
+        }
+
+        // Frozen while claiming to play. Pausing and starting the same source
+        // is what recovers it by hand, so try that first, it keeps the position
+        const at = audio.currentTime;
+
+        audio.pause();
+        setupMediaSession();
+        startAudioPlayback();
+
+        // play on a stalled element can leave its promise pending for ever,
+        // never resolving and never rejecting, while paused flips to false so
+        // everything looks fine. So confirm the clock actually moved, and fall
+        // back to loading the source again when it did not
         setTimeout(function () {
 
-            if (!audio || audio.paused || !currentSong || userPaused) {
+            if (!audio || !currentSong || userPaused) {
                 return;
             }
 
-            if (audio.currentTime !== before) {
+            if (audio.currentTime !== at) {
                 return;
             }
 
-            // Frozen while claiming to play, the same state a manual pause and
-            // play recovers from, so do exactly that. Pausing and starting the
-            // same source keeps currentTime, so no seek is needed
-            lastResyncT = Date.now();
+            if (Date.now() - lastEscalateT < 10000) {
+                return;
+            }
 
-            audio.pause();
-            setupMediaSession();
-            startAudioPlayback();
-        }, 700);
+            lastEscalateT = Date.now();
+
+            // Come back a second early, so the resumed audio does not clip
+            pendingSeek = at > 1 ? at - 1 : 0;
+            setStatus("Restarting playback: " + (currentSong.title || "Untitled"));
+            playCurrent();
+        }, 1200);
+    }
+
+    // Catch a stall that happens while the page is in the foreground, which no
+    // visibility or focus event would report. Timers are frozen in the
+    // background on iOS, so this only runs when it can actually help
+    function startWatchdog() {
+
+        if (watchdogTimer) {
+            return;
+        }
+
+        watchdogTimer = setInterval(function () {
+
+            if (document.hidden || !audio || audio.paused || !currentSong || userPaused) {
+
+                watchdogLast = -1;
+                return;
+            }
+
+            const now = audio.currentTime;
+
+            if (watchdogLast >= 0 && now === watchdogLast) {
+                checkStalled(now);
+            }
+
+            watchdogLast = now;
+        }, 5000);
     }
 
     // Toggle between play and pause for the current song
