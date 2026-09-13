@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1j";
+    const VERSION = "1.4.1k";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -4272,6 +4272,75 @@
         closeViewMenu();
     }
 
+    // The last time a stall recovery was attempted, so a session that stays
+    // dead does not get nudged over and over
+    let lastResyncT = 0;
+
+    // Bring the UI and the element back in step after the page was in the
+    // background. Two things go wrong on iOS. The element can be paused with
+    // no pause event delivered, leaving the display stale, and it can report
+    // that it is playing while the clock stands still, because the audio
+    // session was lost without the element noticing
+    function resyncPlayback() {
+
+        if (!audio) {
+            return;
+        }
+
+        // Always correct the display and the lock screen state, this is free
+        updatePlayPause();
+        updateMediaPosition();
+
+        if ("mediaSession" in navigator) {
+
+            try {
+                navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
+            } catch (e) {
+            }
+        }
+
+        // Never fight a pause the user asked for, and nothing to do after Stop
+        if (!currentSong || userPaused || !audio.src) {
+            return;
+        }
+
+        // Do not retry constantly when the session is genuinely gone
+        if (Date.now() - lastResyncT < 5000) {
+            return;
+        }
+
+        if (audio.paused) {
+
+            lastResyncT = Date.now();
+            setupMediaSession();
+            startAudioPlayback();
+            return;
+        }
+
+        // It claims to be playing, so check that the clock is actually moving
+        const before = audio.currentTime;
+
+        setTimeout(function () {
+
+            if (!audio || audio.paused || !currentSong || userPaused) {
+                return;
+            }
+
+            if (audio.currentTime !== before) {
+                return;
+            }
+
+            // Frozen while claiming to play, the same state a manual pause and
+            // play recovers from, so do exactly that. Pausing and starting the
+            // same source keeps currentTime, so no seek is needed
+            lastResyncT = Date.now();
+
+            audio.pause();
+            setupMediaSession();
+            startAudioPlayback();
+        }, 700);
+    }
+
     // Toggle between play and pause for the current song
     function togglePlayPause() {
 
@@ -6928,20 +6997,18 @@
 
         // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
         const controlRow = document.createElement("div");
-        controlRow.style.cssText = "display:flex;gap:6px";
+        controlRow.style.cssText = "display:flex;gap:8px";
 
-        const prevBtn = makeIconButton("\u23EE", "Previous", playPrev);
+        // Previous and next live on the album art as a swipe, so the row keeps
+        // only four buttons and each one gets a much larger target, which
+        // matters when the panel is used in a car
         playPauseBtn = makeIconButton("\u25B6", "Play / Pause", togglePlayPause);
-        const nextBtn = makeIconButton("\u23ED", "Next", playNext);
-
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
         const stopBtn = makeIconButton("\u23F9", "Stop", stopPlay);
 
-        controlRow.appendChild(prevBtn);
         controlRow.appendChild(playPauseBtn);
         controlRow.appendChild(stopBtn);
-        controlRow.appendChild(nextBtn);
         controlRow.appendChild(shuffleBtn);
         controlRow.appendChild(repeatBtn);
 
@@ -7268,8 +7335,20 @@
         document.addEventListener("visibilitychange", function () {
 
             if (document.hidden) {
+
                 saveQueue();
+                return;
             }
+
+            // Back in the foreground, so make sure playback really is running
+            resyncPlayback();
+        });
+
+        window.addEventListener("focus", resyncPlayback);
+
+        // Returning from the back forward cache can leave a dead element
+        window.addEventListener("pageshow", function () {
+            resyncPlayback();
         });
 
         // Reopen on the remembered source from cache, never a full reload here
@@ -7762,12 +7841,12 @@
             "display:flex",
             "align-items:center",
             "justify-content:center",
-            "padding:8px 0",
+            "padding:14px 0",
             "border:none",
-            "border-radius:6px",
+            "border-radius:8px",
             "background:#333",
             "color:#fff",
-            "font-size:16px",
+            "font-size:22px",
             "line-height:1",
             "cursor:pointer"
         ].join(";");
@@ -7784,8 +7863,8 @@
         const ns = "http://www.w3.org/2000/svg";
         const svg = document.createElementNS(ns, "svg");
 
-        svg.setAttribute("width", "16");
-        svg.setAttribute("height", "16");
+        svg.setAttribute("width", "22");
+        svg.setAttribute("height", "22");
         svg.setAttribute("viewBox", "0 0 24 24");
         svg.setAttribute("fill", "none");
         svg.setAttribute("stroke", "currentColor");
@@ -7822,8 +7901,8 @@
         const ns = "http://www.w3.org/2000/svg";
         const svg = document.createElementNS(ns, "svg");
 
-        svg.setAttribute("width", "16");
-        svg.setAttribute("height", "16");
+        svg.setAttribute("width", "22");
+        svg.setAttribute("height", "22");
         svg.setAttribute("viewBox", "0 0 24 24");
         svg.setAttribute("fill", "none");
         svg.setAttribute("stroke", "currentColor");
