@@ -15,6 +15,9 @@ set -e
 
 OUT="mureka-player.zip"
 
+# Auto update the manifest version
+./update-manifest-version.sh
+
 # Refuse to build if the manifest and the player disagree on the version
 MANIFEST_VERSION=$(grep -m1 '"version"' manifest.json | cut -d'"' -f4)
 PLAYER_VERSION=$(grep -m1 'const VERSION' src/player.js | cut -d'"' -f2)
