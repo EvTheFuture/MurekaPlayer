@@ -99,3 +99,8 @@ to a normal browser download.
 - access to static-cos.mureka.ai: the host that serves the audio files
 
 [![buy-me-a-coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/EvTheFuture)
+
+# Development
+To run on firefox in Android
+`web-ext run -t firefox-android --adb-device IP_ADDRESS:5555 --firefox-apk org.mozilla.firefox`
+
