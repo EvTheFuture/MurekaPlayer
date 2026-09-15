@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3";
+    const VERSION = "1.4.3b";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -4344,6 +4344,9 @@
     // which a timer can never produce, so this manufactures the one tap needed
     let gateEl = null;
 
+    // The page background from before the cover went up, so it can be put back
+    let priorPageBackground = null;
+
     // When the cover went up. The tap that raises it also produces a pointer
     // event afterwards, which would land on the cover and dismiss it at once,
     // so events within a short grace period after showing are ignored
@@ -4394,14 +4397,27 @@
             buildBlackout();
         }
 
+        const wasUp = blackoutEl.style.display === "block";
+
         blackoutEl.style.display = "block";
         blackoutShownAt = Date.now();
+
+        // Paint the document itself black as well. The cover is one element,
+        // and anything that relayouts it, the system turning the screen off,
+        // fullscreen being dropped and re-entered, leaves a frame where the
+        // page shows through. A black page underneath makes that frame black
+        if (priorPageBackground === null) {
+
+            priorPageBackground = document.documentElement.style.background || "";
+            document.documentElement.style.background = "#000";
+        }
 
         // A dark screen is no use if the phone then locks and asks for Face ID
         requestWakeLock();
 
-        // Fade in, so the screen dims rather than snapping to black
-        if (blackoutEl.animate) {
+        // Fade in, so the screen dims rather than snapping to black. Skipped
+        // when the cover is already up, otherwise a re-show would flash
+        if (!wasUp && blackoutEl.animate) {
 
             blackoutEl.animate([
                 { opacity: 0 },
@@ -4670,6 +4686,13 @@
     function hideBlackout() {
 
         stopDrift();
+
+        // Give the page its own background back
+        if (priorPageBackground !== null) {
+
+            document.documentElement.style.background = priorPageBackground;
+            priorPageBackground = null;
+        }
 
         if (blackoutEl) {
 
@@ -7994,6 +8017,12 @@
             // Back in the foreground, so make sure playback really is running
             resyncPlayback();
             resetIdleTimer();
+
+            // The system drops the wake lock whenever the page is hidden, so
+            // claim it again if the cover is still meant to be holding it
+            if (isBlackedOut()) {
+                requestWakeLock();
+            }
         });
 
         window.addEventListener("focus", resyncPlayback);
