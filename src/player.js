@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.2i";
+    const VERSION = "1.4.2j";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -11221,6 +11221,22 @@
     }
 
     // Add one clickable row to the options popup
+    // A row that states something rather than offering an action. Greyed and
+    // inert, so it reads as information and cannot be tapped by mistake
+    function addDisabledMenuRow(label) {
+
+        const row = document.createElement("div");
+
+        row.textContent = label;
+        row.style.cssText = "padding:7px 10px;border-radius:6px;color:#777;cursor:default";
+
+        row.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+
+        contextMenuEl.appendChild(row);
+    }
+
     function addMenuRow(label, color, handler) {
 
         const row = document.createElement("div");
@@ -11280,10 +11296,20 @@
             openInfo(song);
         });
 
-        addMenuRow(isManualInstrumental(song) ? "Not instrumental" : "Mark instrumental",
-            "#fff", function () {
-                toggleManualInstrumental(song);
-            });
+        // A song the server already reports as instrumental cannot be marked
+        // by hand, the mark exists only for songs whose lyrics field holds
+        // prompt instructions rather than words that are sung
+        if (song.generation_method === 7) {
+
+            addDisabledMenuRow("Instrumental");
+
+        } else {
+
+            addMenuRow(isManualInstrumental(song) ? "Not instrumental" : "Mark instrumental",
+                "#fff", function () {
+                    toggleManualInstrumental(song);
+                });
+        }
 
         if (cached) {
 
