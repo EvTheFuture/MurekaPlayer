@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.1v";
+    const VERSION = "1.4.2g";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -264,6 +264,10 @@
 
     // True while the settings panel is on screen, so the blackout holds off
     let settingsOpen = false;
+
+    // Every settings row registers a redraw here, so opening the panel can put
+    // all of them back in step with what is actually stored
+    const settingsRefreshers = [];
     let viewMenuOpen = false;
 
     // True while a load run is in progress
@@ -649,8 +653,9 @@
             artOverlayMode: "all",
             directAudio: true,
             carBlackout: false,
+            carGate: false,
             carAutoBlack: 20,
-            blackoutText: "\u266A",
+            blackoutText: "\u266B",
             blackoutColor: "#333333",
             blackoutSize: 64,
             blackoutDrift: 25,
@@ -715,11 +720,12 @@
                         : (parsed.lyricsOn === false ? "info" : "all"),
                     directAudio: parsed.directAudio !== false,
                     carBlackout: parsed.carBlackout === true,
+                    carGate: parsed.carGate === true,
                     carAutoBlack: (typeof parsed.carAutoBlack === "number"
                         && parsed.carAutoBlack >= 0 && parsed.carAutoBlack <= 300)
                         ? parsed.carAutoBlack : 20,
                     blackoutText: typeof parsed.blackoutText === "string"
-                        ? parsed.blackoutText : "\u266A",
+                        ? parsed.blackoutText : "\u266B",
                     blackoutColor: typeof parsed.blackoutColor === "string"
                         ? parsed.blackoutColor : "#333333",
                     blackoutSize: (typeof parsed.blackoutSize === "number"
@@ -1444,6 +1450,8 @@
         }
 
         const json = await res.json();
+
+        apiOk = true;
 
         // Keep the raw page for the debug Copy last feed JSON action
         lastFeedResponse = json;
@@ -3858,6 +3866,8 @@
                 return null;
             }
 
+            apiOk = true;
+
             const d = json.data;
 
             const entry = {
@@ -4322,6 +4332,16 @@
     let blackoutMarkEl = null;
     let driftTimer = null;
 
+    // True once an API call has succeeded, which only happens with a live
+    // login. On the sign in page nothing succeeds, so the cover stays away
+    // instead of hiding the form the user is trying to fill in
+    let apiOk = false;
+
+    // The start gate, a single big button shown instead of the player until
+    // fullscreen has been entered. Fullscreen is only granted from a real tap,
+    // which a timer can never produce, so this manufactures the one tap needed
+    let gateEl = null;
+
     // When the cover went up. The tap that raises it also produces a pointer
     // event afterwards, which would land on the cover and dismiss it at once,
     // so events within a short grace period after showing are ignored
@@ -4388,11 +4408,132 @@
         }
 
         // Real fullscreen hides the browser chrome, which is the difference
-        // between a dark screen and a dark page. iPhone Safari only allows it
-        // for video, so there it simply stays a page sized cover
-        if (blackoutEl.requestFullscreen) {
+        // between a dark screen and a dark page. It is requested on the page
+        // rather than on the cover, because a fullscreen element that gets
+        // hidden drops fullscreen with it, and it must outlive the cover.
+        // Staying fullscreen is the whole point: the browser only grants this
+        // from a real tap, so the automatic blackout can never ask for itself.
+        // Enter it once from the Screen off button and every later cover is
+        // already free of the status and address bars
+        enterFullscreen();
 
-            const started = blackoutEl.requestFullscreen();
+        startDrift();
+    }
+
+    // Whether the gate should stand in front of the player right now
+    function gateWanted() {
+
+        // Independent of the screen off cover. Fullscreen is worth having on
+        // its own, since it gives the player the whole screen with no address
+        // bar, and it can only ever be entered from a real tap
+        if (!settings.carGate) {
+            return false;
+        }
+
+        return !(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    // Put the gate up, building it the first time it is needed
+    function showGate() {
+
+        if (!panelEl) {
+            return;
+        }
+
+        if (!gateEl) {
+
+            gateEl = document.createElement("div");
+            gateEl.style.cssText = [
+                "position:absolute",
+                "left:0",
+                "right:0",
+                "bottom:0",
+                "background:#1d1d22",
+                "display:flex",
+                "align-items:center",
+                "justify-content:center",
+                "padding:12px",
+                "box-sizing:border-box",
+                "z-index:9"
+            ].join(";");
+
+            const btn = document.createElement("button");
+
+            btn.textContent = "Activate Fullscreen";
+            btn.style.cssText = [
+                "width:100%",
+                "height:100%",
+                "min-height:120px",
+                "border:none",
+                "border-radius:12px",
+                "background:#48e1eb",
+                "color:#000",
+                "font:700 28px/1.2 sans-serif",
+                "padding:12px",
+                "white-space:normal",
+                "cursor:pointer"
+            ].join(";");
+
+            // The tap that dismisses the gate is the activation fullscreen
+            // needs, so ask for it here and nowhere else at startup
+            btn.addEventListener("click", function () {
+
+                enterFullscreen();
+                requestWakeLock();
+                hideGate();
+                resetIdleTimer();
+            });
+
+            gateEl.appendChild(btn);
+            panelEl.appendChild(gateEl);
+        }
+
+        // Start below the header, so the settings and actions buttons stay
+        // reachable and the gate can be turned off again. The header sits
+        // inside the panel padding, so its own height is not where it ends,
+        // its offset within the panel is. Measured on every show, because the
+        // header wraps differently at different panel widths
+        const headBottom = headerEl
+            ? headerEl.offsetTop + headerEl.offsetHeight
+            : 34;
+
+        gateEl.style.top = (headBottom + 10) + "px";
+        gateEl.style.display = "flex";
+    }
+
+    // Take the gate away and let the player through
+    function hideGate() {
+
+        if (gateEl) {
+            gateEl.style.display = "none";
+        }
+    }
+
+    // Keep the gate in step with the fullscreen state
+    function refreshGate() {
+
+        if (gateWanted()) {
+
+            showGate();
+            return;
+        }
+
+        hideGate();
+    }
+
+    // Ask for fullscreen on the page. Only a real user gesture is granted it,
+    // so a refusal from the idle timer is expected and simply ignored
+    function enterFullscreen() {
+
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            return;
+        }
+
+        const target = document.documentElement;
+
+        if (target.requestFullscreen) {
+
+            const started = target.requestFullscreen();
 
             if (started && typeof started.catch === "function") {
 
@@ -4400,15 +4541,13 @@
                 });
             }
 
-        } else if (blackoutEl.webkitRequestFullscreen) {
+        } else if (target.webkitRequestFullscreen) {
 
             try {
-                blackoutEl.webkitRequestFullscreen();
+                target.webkitRequestFullscreen();
             } catch (e) {
             }
         }
-
-        startDrift();
     }
 
     // Build the cover once and keep it for later
@@ -4429,7 +4568,7 @@
         // dim and moved around, because a static bright element on an OLED
         // panel is exactly how burn in happens
         blackoutMarkEl = document.createElement("div");
-        blackoutMarkEl.style.cssText = "position:absolute;opacity:0;font:64px/1.1 sans-serif;white-space:nowrap;pointer-events:none";
+        blackoutMarkEl.style.cssText = "position:absolute;opacity:0;font:64px/1.1 sans-serif;white-space:nowrap;pointer-events:none;max-width:100%;overflow:hidden";
 
         blackoutEl.appendChild(blackoutMarkEl);
 
@@ -4467,14 +4606,21 @@
         const markW = blackoutMarkEl.offsetWidth || 40;
         const markH = blackoutMarkEl.offsetHeight || 20;
 
-        // Keep clear of the edges, where notches and rounded corners sit
-        const padX = Math.round(w * 0.12);
-        const padY = Math.round(h * 0.12);
-        const spanX = Math.max(1, w - markW - padX * 2);
-        const spanY = Math.max(1, h - markH - padY * 2);
+        // Keep clear of the edges, where notches and rounded corners sit, but
+        // give the padding up rather than push the mark off screen when it is
+        // nearly as wide as the display
+        const roomX = Math.max(0, w - markW);
+        const roomY = Math.max(0, h - markH);
+        const padX = Math.min(Math.round(w * 0.12), Math.floor(roomX / 2));
+        const padY = Math.min(Math.round(h * 0.12), Math.floor(roomY / 2));
+        const spanX = Math.max(0, roomX - padX * 2);
+        const spanY = Math.max(0, roomY - padY * 2);
 
-        blackoutMarkEl.style.left = Math.round(padX + Math.random() * spanX) + "px";
-        blackoutMarkEl.style.top = Math.round(padY + Math.random() * spanY) + "px";
+        const left = Math.min(padX + Math.random() * spanX, roomX);
+        const top = Math.min(padY + Math.random() * spanY, roomY);
+
+        blackoutMarkEl.style.left = Math.round(left) + "px";
+        blackoutMarkEl.style.top = Math.round(top) + "px";
 
         if (!blackoutMarkEl.animate) {
 
@@ -4482,12 +4628,17 @@
             return;
         }
 
+        // The fade lasts as long as the gap between moves, so the mark is on
+        // screen nearly all the time rather than blinking once and leaving a
+        // long dark wait. It still moves, which is what avoids burn in
+        const span = Math.max(4, settings.blackoutDrift || 25) * 1000;
+
         blackoutMarkEl.animate([
             { opacity: 0 },
-            { opacity: 1, offset: 0.2 },
-            { opacity: 1, offset: 0.7 },
+            { opacity: 1, offset: 0.08 },
+            { opacity: 1, offset: 0.88 },
             { opacity: 0 }
-        ], { duration: 6000 });
+        ], { duration: span });
     }
 
     // Show the mark now and keep moving it for as long as the cover is up
@@ -4537,18 +4688,10 @@
             }
         }
 
-        // Leave fullscreen, but only if the cover is what put us there
-        if (document.fullscreenElement === blackoutEl && document.exitFullscreen) {
-
-            const left = document.exitFullscreen();
-
-            if (left && typeof left.catch === "function") {
-
-                left.catch(function () {
-                });
-            }
-        }
-
+        // Fullscreen deliberately stays. Waking the screen should not hand the
+        // address bar back, and keeping it means the next automatic cover is
+        // chrome free without needing a tap it is not allowed to ask for.
+        // The back gesture or Escape leaves it when actually wanted
         resetIdleTimer();
     }
 
@@ -4581,6 +4724,23 @@
             // Hidden tabs come back through the visibility handler, so just
             // wait rather than arming a countdown nobody can see
             if (document.hidden) {
+                return;
+            }
+
+            // Only once the session is known good. The add on injects into
+            // every mureka.ai page, including sign in, where covering the
+            // screen would hide the form and lock the user out
+            if (!apiOk && !currentSong) {
+                return;
+            }
+
+            // Never cover a field that is being typed into
+            const active = document.activeElement;
+
+            if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA"
+                || active.isContentEditable)) {
+
+                resetIdleTimer();
                 return;
             }
 
@@ -7700,6 +7860,12 @@
         // having been played yet
         resetIdleTimer();
 
+        // Stand the gate in front of the player until fullscreen is entered
+        refreshGate();
+
+        document.addEventListener("fullscreenchange", refreshGate);
+        document.addEventListener("webkitfullscreenchange", refreshGate);
+
         // Restore whether the panel was left minimized last time
         let startMinimized = false;
 
@@ -7709,6 +7875,18 @@
         }
 
         setMinimized(startMinimized);
+
+        // The add on injects into every mureka.ai page, including sign in. A
+        // panel that opens over the login form leaves no way to log in, so
+        // probe the API and collapse out of the way when it is not usable
+        if (!startMinimized) {
+
+            fetchPage(null).catch(function () {
+
+                setMinimized(true);
+                setStatus("Sign in to Mureka, then tap the header to open");
+            });
+        }
 
         // Size the panel to the real visible area and keep it in sync as iOS
         // Safari shows or hides its toolbar
@@ -8126,7 +8304,14 @@
         panelEl.style.setProperty("left", left + "px", "important");
         panelEl.style.setProperty("right", "auto", "important");
         panelEl.style.setProperty("width", width + "px", "important");
-        panelEl.style.setProperty("height", height + "px", "important");
+
+        // Collapsed it must shrink to its header, otherwise it keeps covering
+        // the whole page and there is no way to reach the site underneath
+        if (minimized) {
+            panelEl.style.setProperty("height", "auto", "important");
+        } else {
+            panelEl.style.setProperty("height", height + "px", "important");
+        }
 
         // The art height may have changed, re-seat the coverflow strip
         if (!swipeActive) {
@@ -8227,6 +8412,8 @@
             // Up triangle to expand, down triangle to collapse
             minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
         }
+
+        fitMobile();
 
         // The height just changed, so re-clamp into the viewport. Collapsing
         // leaves a small panel, so it re-picks the nearer edge and snaps to it.
@@ -9062,6 +9249,10 @@
             saveSettings();
         });
 
+        settingsRefreshers.push(function () {
+            input.value = get();
+        });
+
         row.appendChild(name);
         row.appendChild(input);
 
@@ -9130,6 +9321,14 @@
             ev.stopPropagation();
         });
 
+        settingsRefreshers.push(function () {
+
+            // Never fight the user while the field has the caret
+            if (document.activeElement !== input) {
+                input.value = get();
+            }
+        });
+
         return row;
     }
 
@@ -9154,6 +9353,10 @@
         btn.style.padding = "6px 12px";
 
         updateToggleButton(btn, get());
+
+        settingsRefreshers.push(function () {
+            updateToggleButton(btn, get());
+        });
 
         row.appendChild(name);
         row.appendChild(btn);
@@ -9290,6 +9493,7 @@
         });
 
         render();
+        settingsRefreshers.push(render);
 
         controls.appendChild(minus);
         controls.appendChild(value);
@@ -9487,7 +9691,7 @@
 
         const carBlackoutRow = makeBoolRow("Screen off overlay",
             function () { return settings.carBlackout; },
-            function (v) { settings.carBlackout = v; resetIdleTimer(); });
+            function (v) { settings.carBlackout = v; resetIdleTimer(); refreshGate(); });
 
         const blackTextRow = makeTextRow("Screen off mark, blank for none",
             function () { return settings.blackoutText; },
@@ -9504,6 +9708,40 @@
         const blackDriftRow = makeStepperRow("Mark moves every seconds",
             function () { return settings.blackoutDrift; },
             function (v) { settings.blackoutDrift = v; }, 5, 120, 5);
+
+        const carGateRow = makeBoolRow("Start in fullscreen",
+            function () { return settings.carGate; },
+            function (v) { settings.carGate = v; refreshGate(); });
+
+        const blackResetRow = document.createElement("div");
+        blackResetRow.style.cssText = "display:flex";
+
+        blackResetRow.appendChild(makeButton("Reset mark to default", "#444", "#fff", function () {
+
+            settings.blackoutText = "\u266B";
+            settings.blackoutColor = "#333333";
+            settings.blackoutSize = 64;
+            saveSettings();
+
+            // Put the fields back in step with what was just restored
+            const textInput = blackTextRow.querySelector("input");
+            const colorInput = blackColorRow.querySelector("input");
+            const sizeInput = blackSizeRow.querySelector("input");
+
+            if (textInput) {
+                textInput.value = settings.blackoutText;
+            }
+
+            if (colorInput) {
+                colorInput.value = settings.blackoutColor;
+            }
+
+            if (sizeInput) {
+                sizeInput.value = String(settings.blackoutSize);
+            }
+
+            setStatus("Screen off mark reset");
+        }));
 
         const carBlackRow = makeStepperRow("Screen off after seconds",
             function () { return settings.carAutoBlack; },
@@ -9525,11 +9763,13 @@
         settingsEl.appendChild(lyricSideShiftRow);
         settingsEl.appendChild(directRow);
         settingsEl.appendChild(carBlackoutRow);
+        settingsEl.appendChild(carGateRow);
         settingsEl.appendChild(carBlackRow);
         settingsEl.appendChild(blackTextRow);
         settingsEl.appendChild(blackColorRow);
         settingsEl.appendChild(blackSizeRow);
         settingsEl.appendChild(blackDriftRow);
+        settingsEl.appendChild(blackResetRow);
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
@@ -9556,6 +9796,16 @@
 
         if (settingsEl) {
             settingsOpen = true;
+
+            // Re-read from storage first. Another copy of the player in the
+            // same browser writes the same keys, and the rows were drawn when
+            // the panel was built, which may be long out of date by now
+            settings = loadSettings();
+
+            settingsRefreshers.forEach(function (fn) {
+                fn();
+            });
+
             settingsEl.style.display = "flex";
         }
 
