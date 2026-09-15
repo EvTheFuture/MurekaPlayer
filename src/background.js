@@ -23,6 +23,13 @@
 // Saves requested mp3 URLs into the Mureka subfolder of the download directory
 // Using saveAs false means no Save As dialog, even when the browser is set to
 // always ask, and the relative path puts every file under a Mureka folder
+//
+// This runs as an event page on Firefox and as a service worker on Chromium.
+// A service worker is stopped once it looks idle, which a long download batch
+// must survive, so the loop below keeps the worker busy while it works
+
+// Firefox exposes the promise based browser namespace, Chromium only has chrome
+const api = globalThis.browser || globalThis.chrome;
 
 // Small promise based delay helper
 function sleep(ms) {
@@ -32,40 +39,87 @@ function sleep(ms) {
     });
 }
 
+// Chromium stops a service worker after roughly thirty seconds of inactivity,
+// and a plain timer does not count as activity. Calling an extension API does,
+// so this ping holds the worker open while a batch is still running. Firefox
+// ignores it beyond the harmless call
+let keepAliveTimer = null;
+
+function startKeepAlive() {
+
+    if (keepAliveTimer || !api.runtime.getPlatformInfo) {
+        return;
+    }
+
+    keepAliveTimer = setInterval(function () {
+
+        try {
+            api.runtime.getPlatformInfo(function () {
+            });
+        } catch (e) {
+        }
+    }, 20000);
+}
+
+function stopKeepAlive() {
+
+    if (!keepAliveTimer) {
+        return;
+    }
+
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+}
+
 // Download a list of files one at a time into their given relative paths
 async function downloadMany(items) {
 
     let ok = 0;
     let fail = 0;
 
-    for (const item of items) {
+    startKeepAlive();
 
-        try {
+    try {
 
-            await browser.downloads.download({
-                url: item.url,
-                filename: item.filename,
-                saveAs: false,
-                conflictAction: "uniquify"
-            });
+        for (const item of items) {
 
-            ok += 1;
+            try {
 
-        } catch (e) {
-            fail += 1;
+                await api.downloads.download({
+                    url: item.url,
+                    filename: item.filename,
+                    saveAs: false,
+                    conflictAction: "uniquify"
+                });
+
+                ok += 1;
+
+            } catch (e) {
+                fail += 1;
+            }
+
+            // A short gap keeps the download manager from choking on a big batch
+            await sleep(200);
         }
 
-        // A short gap keeps the download manager from choking on a big batch
-        await sleep(200);
+    } finally {
+        stopKeepAlive();
     }
 
     return { ok: ok, fail: fail };
 }
 
-// Returning the promise sends its resolved value back as the response
-browser.runtime.onMessage.addListener(function (msg) {
+// Chromium does not accept a promise returned from a message listener, it wants
+// sendResponse with a truthy return to keep the channel open. Firefox supports
+// that form too, so this one shape works in both
+api.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
     if (msg && msg.type === "downloadMany") {
-        return downloadMany(msg.items);
+
+        downloadMany(msg.items).then(sendResponse, function () {
+            sendResponse({ ok: 0, fail: msg.items.length });
+        });
+
+        return true;
     }
 });

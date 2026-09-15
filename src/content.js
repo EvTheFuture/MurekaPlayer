@@ -28,6 +28,10 @@
 (function () {
     "use strict";
 
+    // Firefox exposes the promise based browser namespace, Chromium only has
+    // chrome. One alias keeps the rest of this file identical for both
+    const api = globalThis.browser || globalThis.chrome;
+
     // Tag the document so the shared player knows it runs inside the extension
     // and should use the folder download relay instead of a browser download
     document.documentElement.setAttribute("data-mureka-host", "extension");
@@ -35,13 +39,36 @@
     // Inject the shared player so it runs in the page context with full privileges
     const script = document.createElement("script");
 
-    script.src = browser.runtime.getURL("src/player.js");
+    script.src = api.runtime.getURL("src/player.js");
 
     script.addEventListener("load", function () {
         script.remove();
     });
 
     (document.head || document.documentElement).appendChild(script);
+
+    // Ask the background script to save the files, and hand back the outcome.
+    // Chromium resolves sendMessage with undefined when the worker goes away
+    // mid batch, so a missing reply is reported rather than throwing
+    async function relayDownload(items) {
+
+        try {
+
+            const result = await api.runtime.sendMessage({
+                type: "downloadMany",
+                items: items
+            });
+
+            if (result && typeof result.ok === "number") {
+                return result;
+            }
+
+            return { ok: 0, fail: items.length };
+        } catch (e) {
+
+            return { ok: 0, fail: items.length };
+        }
+    }
 
     // Relay download requests coming from the injected player
     window.addEventListener("message", async function (ev) {
@@ -58,15 +85,7 @@
 
         if (data.type === "downloadMany") {
 
-            let result = { ok: 0, fail: 0 };
-
-            try {
-                result = await browser.runtime.sendMessage({
-                    type: "downloadMany",
-                    items: data.items
-                });
-            } catch (e) {
-            }
+            const result = await relayDownload(data.items);
 
             // Report the outcome back to the player so it can update the status
             window.postMessage({
