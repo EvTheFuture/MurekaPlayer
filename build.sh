@@ -116,5 +116,5 @@ for archive in "$FIREFOX_OUT" "$CHROMIUM_OUT"; do
 done
 
 echo
-echo "Chromium manifest differences:"
+echo "Chromium manifest, generated:"
 unzip -p "$CHROMIUM_OUT" manifest.json | jq -c '{version, background}'
