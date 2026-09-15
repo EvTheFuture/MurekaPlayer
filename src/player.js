@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.2";
+    const VERSION = "1.4.2i";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -652,6 +652,7 @@
             artTest: false,
             artOverlayMode: "all",
             directAudio: true,
+            remoteArtwork: false,
             carBlackout: false,
             carGate: false,
             carAutoBlack: 20,
@@ -719,6 +720,7 @@
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
                     directAudio: parsed.directAudio !== false,
+                    remoteArtwork: parsed.remoteArtwork === true,
                     carBlackout: parsed.carBlackout === true,
                     carGate: parsed.carGate === true,
                     carAutoBlack: (typeof parsed.carAutoBlack === "number"
@@ -6234,11 +6236,20 @@
         }
 
         // setActionHandler throws for actions the browser does not support
+        // Track what the browser accepted, so a silently refused action can be
+        // seen instead of looking like a broken handler
+        const accepted = [];
+        const refused = [];
+
         const setHandler = function (action, fn) {
 
             try {
+
                 navigator.mediaSession.setActionHandler(action, fn);
+                accepted.push(action);
+
             } catch (e) {
+                refused.push(action);
             }
         };
 
@@ -6277,6 +6288,12 @@
                 updateSeekDisplay();
             }
         });
+
+        // In debug mode report what the browser took, since a refusal here is
+        // indistinguishable from a handler that simply never gets called
+        if (isDebug() && refused.length > 0) {
+            setStatus("Media actions refused: " + refused.join(", "));
+        }
     }
 
     // Guess an image MIME type from a URL, defaulting to jpeg
@@ -6359,6 +6376,17 @@
     // is the size iOS picks from. Data urls carry the image inline, so there is
     // no blob url for iOS to load, cache badly, or leak
     function artworkFor(song) {
+
+        // Chromium fetches artwork in the browser process and is happier with
+        // an ordinary https url than with a few hundred kilobytes of base64.
+        // The data urls exist because iOS would not take blob urls, so which
+        // form is used is a setting rather than a guess about the browser
+        if (settings.remoteArtwork) {
+
+            const remote = coverUrl(song);
+
+            return remote ? [{ src: remote, sizes: "512x512", type: "image/jpeg" }] : [];
+        }
 
         const entry = artCache.get(song.song_id);
 
@@ -7863,8 +7891,37 @@
         // Stand the gate in front of the player until fullscreen is entered
         refreshGate();
 
-        document.addEventListener("fullscreenchange", refreshGate);
-        document.addEventListener("webkitfullscreenchange", refreshGate);
+        // Entering or leaving fullscreen changes the visible viewport, since
+        // the address and status bars come and go. The panel is sized from
+        // those dimensions, so it has to be measured again, and not only once,
+        // because the new size is not final on the first frame
+        const onFullscreenChange = function () {
+
+            refreshGate();
+            fitMobile();
+
+            requestAnimationFrame(function () {
+
+                fitMobile();
+
+                if (!swipeActive) {
+                    positionArt(0);
+                }
+            });
+
+            // A late pass, for the browser chrome animating out of the way
+            setTimeout(function () {
+
+                fitMobile();
+
+                if (!swipeActive) {
+                    positionArt(0);
+                }
+            }, 400);
+        };
+
+        document.addEventListener("fullscreenchange", onFullscreenChange);
+        document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 
         // Restore whether the panel was left minimized last time
         let startMinimized = false;
@@ -9747,6 +9804,10 @@
             function () { return settings.carAutoBlack; },
             function (v) { settings.carAutoBlack = v; resetIdleTimer(); }, 0, 300, 5);
 
+        const artworkRow = makeBoolRow("Remote artwork URL",
+            function () { return settings.remoteArtwork; },
+            function (v) { settings.remoteArtwork = v; reassertNowPlaying(); });
+
         const countsAgeRow = makeStepperRow("Counts max age in hours",
             function () { return settings.countsMaxAge; },
             function (v) { settings.countsMaxAge = v; }, 1, 72);
@@ -9770,6 +9831,7 @@
         settingsEl.appendChild(blackSizeRow);
         settingsEl.appendChild(blackDriftRow);
         settingsEl.appendChild(blackResetRow);
+        settingsEl.appendChild(artworkRow);
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
