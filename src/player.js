@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.2j";
+    const VERSION = "1.4.2k";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -7473,7 +7473,7 @@
         updateTestButton();
 
         const seekRow = document.createElement("div");
-        seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
+        seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;height:28px";
 
         curTimeEl = document.createElement("span");
         curTimeEl.textContent = "0:00";
@@ -7605,10 +7605,10 @@
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
         const stopBtn = makeIconButton("\u23F9", "Stop", stopPlay);
 
-        controlRow.appendChild(playPauseBtn);
-        controlRow.appendChild(stopBtn);
-        controlRow.appendChild(shuffleBtn);
         controlRow.appendChild(repeatBtn);
+        controlRow.appendChild(shuffleBtn);
+        controlRow.appendChild(stopBtn);
+        controlRow.appendChild(playPauseBtn);
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(seekRow);
@@ -7636,7 +7636,7 @@
         placeholderStyle.textContent =
             "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
-            + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:20px}"
+            + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}"
             + "#mureka-seek-bar::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#555}"
             + "#mureka-seek-bar::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#48e1eb;margin-top:-5px}"
             + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
