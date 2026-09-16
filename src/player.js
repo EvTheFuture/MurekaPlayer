@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3.6";
+    const VERSION = "1.4.3.7";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -7774,34 +7774,68 @@
             location.href = SITE_ORIGIN + "/";
         });
 
-        const rowOne = document.createElement("div");
-        rowOne.style.cssText = "display:flex;gap:6px";
+        // The menu is grouped by what the buttons actually do. Syncing the
+        // library, choosing which library to look at, putting audio on the
+        // device, and controlling how the panel is displayed
+        const makeActionRow = function () {
+
+            const row = document.createElement("div");
+
+            row.style.cssText = "display:flex;gap:6px";
+
+            return row;
+        };
+
+        // Keeping the library in step with the server
+        const rowLibrary = makeActionRow();
 
         loadButton = makeActionButton(iconLoad(), "Load", "#48e1eb", "#000", run);
-        const clearButton = makeActionButton(iconClear(), "Clear", "#444", "#fff", clearCache);
-        feedButton = makeActionButton(iconFeed(), feed().label, "#444", "#fff", switchFeed);
-        feedButton.title = "Switch between published and all songs";
-
-        rowOne.appendChild(loadButton);
-        rowOne.appendChild(clearButton);
-        rowOne.appendChild(feedButton);
-
-        // A full width deep refresh, pages the whole library without clearing
-        const rowRescan = document.createElement("div");
-        rowRescan.style.cssText = "display:flex;gap:6px";
 
         const rescanButton = makeActionButton(iconLoad(), "Rescan", "#444", "#fff", rescan);
         rescanButton.title = "Full refresh, page the whole library and update publish"
             + " dates and likes in place, no need to Clear first";
 
-        rowRescan.appendChild(rescanButton);
+        const clearButton = makeActionButton(iconClear(), "Clear", "#444", "#fff", clearCache);
 
-        const rowThree = document.createElement("div");
-        rowThree.style.cssText = "display:flex;gap:6px";
+        rowLibrary.appendChild(loadButton);
+        rowLibrary.appendChild(rescanButton);
+        rowLibrary.appendChild(clearButton);
+
+        // Choosing which collection of songs the list shows
+        const rowSource = makeActionRow();
+
+        feedButton = makeActionButton(iconFeed(), feed().label, "#444", "#fff", switchFeed);
+        feedButton.title = "Switch between published and all songs";
+
+        playlistButton = makeActionButton(iconPlaylists(), "Playlists", "#444", "#fff", openPlaylists);
+        creatorButton = makeActionButton(iconCreators(), "Creators", "#444", "#fff", openCreators);
+        creatorButton.title = "Browse another creator published songs";
+
+        rowSource.appendChild(feedButton);
+        rowSource.appendChild(playlistButton);
+        rowSource.appendChild(creatorButton);
+
+        // Putting the audio on the device, for offline listening or for keeps
+        const rowStorage = makeActionRow();
 
         cacheButton = makeActionButton(iconCache(), "Cache all", "#444", "#fff", cacheAll);
         downloadButton = makeActionButton(iconDownload(), "Download list", "#444", "#fff", downloadAll);
         downloadButton.title = "Download the songs shown under the current filter";
+
+        rowStorage.appendChild(cacheButton);
+        rowStorage.appendChild(downloadButton);
+
+        // How the panel itself is shown, all three change the display and
+        // nothing else, which is why they sit together
+        const rowDisplay = makeActionRow();
+
+        // The gate only appears before fullscreen is entered, so this is the
+        // way back in after leaving it, and the way in without the gate at all
+        const fullscreenButton = makeActionButton(iconFullscreen(), "Fullscreen", "#444", "#fff", function () {
+
+            closeActions();
+            enterFullscreen();
+        });
 
         const blackoutButton = makeActionButton(iconBlackout(), "Screen off", "#444", "#fff", function () {
 
@@ -7824,40 +7858,19 @@
             }
         });
 
-        // The gate only appears before fullscreen is entered, so this is the
-        // way back in after leaving it, and the way in without the gate at all
-        const fullscreenButton = makeActionButton(iconFullscreen(), "Fullscreen", "#444", "#fff", function () {
-
-            closeActions();
-            enterFullscreen();
-        });
-
-        rowThree.appendChild(fullscreenButton);
-        rowThree.appendChild(cacheButton);
-        rowThree.appendChild(downloadButton);
-        rowThree.appendChild(blackoutButton);
-        rowThree.appendChild(foldButton);
-
-        // A row for the two collection browsers, your playlists and other creators
-        const rowFour = document.createElement("div");
-        rowFour.style.cssText = "display:flex;gap:6px";
-
-        playlistButton = makeActionButton(iconPlaylists(), "Playlists", "#444", "#fff", openPlaylists);
-        creatorButton = makeActionButton(iconCreators(), "Creators", "#444", "#fff", openCreators);
-        creatorButton.title = "Browse another creator published songs";
-
-        rowFour.appendChild(playlistButton);
-        rowFour.appendChild(creatorButton);
+        rowDisplay.appendChild(fullscreenButton);
+        rowDisplay.appendChild(blackoutButton);
+        rowDisplay.appendChild(foldButton);
 
         // Floating dropdown for the action buttons, opens over the player
         // It lives on the body and is fixed positioned, so toggling it does not
         // move the player content around
         actionsWrapEl = document.createElement("div");
         actionsWrapEl.style.cssText = POPUP_CSS;
-        actionsWrapEl.appendChild(rowOne);
-        actionsWrapEl.appendChild(rowRescan);
-        actionsWrapEl.appendChild(rowThree);
-        actionsWrapEl.appendChild(rowFour);
+        actionsWrapEl.appendChild(rowLibrary);
+        actionsWrapEl.appendChild(rowSource);
+        actionsWrapEl.appendChild(rowStorage);
+        actionsWrapEl.appendChild(rowDisplay);
 
         // Keep clicks inside the dropdown from closing it
         actionsWrapEl.addEventListener("mousedown", function (ev) {
