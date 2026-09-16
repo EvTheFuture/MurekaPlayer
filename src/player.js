@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3.7";
+    const VERSION = "1.4.3.10";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -372,6 +372,10 @@
     // The actions menu entry that folds and unfolds the panel, kept so its
     // label and icon can follow the state rather than always saying Hide
     let foldButton = null;
+
+    // The menu entry that enters and leaves fullscreen, kept so its label and
+    // icon can follow the state
+    let fullscreenButton = null;
 
     // The transport row and the six buttons it can hold, keyed by the names
     // used in the controlOrder setting
@@ -4360,6 +4364,12 @@
     // which a timer can never produce, so this manufactures the one tap needed
     let gateEl = null;
 
+    // True only when fullscreen was left through the menu toggle. Switching
+    // apps or backgrounding the browser also drops fullscreen, and that is not
+    // a decision to stop using it, so the gate must still offer the way back.
+    // Pressing Exit full is a decision, so the gate stays out of the way then
+    let leftFullscreenOnPurpose = false;
+
     // The page background from before the cover went up, so it can be put back
     let priorPageBackground = null;
 
@@ -4482,6 +4492,11 @@
             return false;
         }
 
+        // The user asked to leave, so do not ask them back in
+        if (leftFullscreenOnPurpose) {
+            return false;
+        }
+
         return !(document.fullscreenElement || document.webkitFullscreenElement);
     }
 
@@ -4571,6 +4586,52 @@
         }
 
         hideGate();
+    }
+
+    // True while the page is showing fullscreen
+    function isFullscreen() {
+
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    // Leave fullscreen. No user gesture is needed to get out again
+    function exitFullscreen() {
+
+        if (!isFullscreen()) {
+            return;
+        }
+
+        if (document.exitFullscreen) {
+
+            const left = document.exitFullscreen();
+
+            if (left && typeof left.catch === "function") {
+
+                left.catch(function () {
+                });
+            }
+
+        } else if (document.webkitExitFullscreen) {
+
+            try {
+                document.webkitExitFullscreen();
+            } catch (e) {
+            }
+        }
+    }
+
+    // Keep the menu entry showing the action it would actually perform
+    function updateFullscreenButton() {
+
+        if (!fullscreenButton) {
+            return;
+        }
+
+        const on = isFullscreen();
+
+        fullscreenButton.labelEl.textContent = on ? "Exit full" : "Fullscreen";
+        fullscreenButton.iconEl.textContent = "";
+        fullscreenButton.iconEl.appendChild(on ? iconExitFullscreen() : iconFullscreen());
     }
 
     // Ask for fullscreen on the page. Only a real user gesture is granted it,
@@ -7831,9 +7892,17 @@
 
         // The gate only appears before fullscreen is entered, so this is the
         // way back in after leaving it, and the way in without the gate at all
-        const fullscreenButton = makeActionButton(iconFullscreen(), "Fullscreen", "#444", "#fff", function () {
+        fullscreenButton = makeActionButton(iconFullscreen(), "Fullscreen", "#444", "#fff", function () {
 
             closeActions();
+
+            if (isFullscreen()) {
+
+                leftFullscreenOnPurpose = true;
+                exitFullscreen();
+                return;
+            }
+
             enterFullscreen();
         });
 
@@ -8513,7 +8582,13 @@
         // because the new size is not final on the first frame
         const onFullscreenChange = function () {
 
+            // Back in fullscreen, so a later incidental exit offers the gate again
+            if (isFullscreen()) {
+                leftFullscreenOnPurpose = false;
+            }
+
             refreshGate();
+            updateFullscreenButton();
             fitMobile();
 
             requestAnimationFrame(function () {
@@ -9368,6 +9443,17 @@
             ["polyline", { points: "15 3 21 3 21 9" }],
             ["polyline", { points: "9 21 3 21 3 15" }],
             ["line", { x1: "21", y1: "3", x2: "14", y2: "10" }],
+            ["line", { x1: "3", y1: "21", x2: "10", y2: "14" }]
+        ]);
+    }
+
+    // Four corners pointing in, for leaving fullscreen
+    function iconExitFullscreen() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "4 14 10 14 10 20" }],
+            ["polyline", { points: "20 10 14 10 14 4" }],
+            ["line", { x1: "14", y1: "10", x2: "21", y2: "3" }],
             ["line", { x1: "3", y1: "21", x2: "10", y2: "14" }]
         ]);
     }
