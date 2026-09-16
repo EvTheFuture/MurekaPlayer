@@ -58,30 +58,29 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.4";
+    const VERSION = "1.4.4.1";
 
     // The two feeds this player can load
     // published returns only your published songs
     // all returns every song you made, including drafts and unpublished ones
-    const FEEDS = {
-        published: {
-            label: "Published",
-            queryType: "publishedmysong",
-            endpoint: "/api/pgc/feed/list/search",
-            t: "3",
-            cacheKey: "mureka_autoload_publishedmysong"
-        },
-        all: {
-            label: "All",
-            queryType: "mysong",
-            endpoint: "/api/pgc/feed/list",
-            t: "1",
-            cacheKey: "mureka_autoload_mysong"
-        }
+    // One library for your own songs. The mysong feed returns everything,
+    // drafts and published alike, each carrying its publish state, so published
+    // is a filter over the single cache rather than a second feed with its own
+    // cache and its own cursor that goes stale while the other is refreshed
+    const OWN_FEED = {
+        label: "Mine",
+        queryType: "mysong",
+        endpoint: "/api/pgc/feed/list",
+        t: "1",
+        cacheKey: "mureka_autoload_mysong"
     };
 
+    // The cache the old separate Published feed used, merged in once on upgrade
+    const LEGACY_PUBLISHED_KEY = "mureka_autoload_publishedmysong";
+
     // Which feed is active, published by default
-    let feedMode = "published";
+    // Which songs of your own library the list shows, all or published only
+    let publishFilter = "published";
 
     // Shortcut to the active feed config
     // While a creator is selected this returns a creator config instead, so the
@@ -99,7 +98,7 @@
             };
         }
 
-        return FEEDS[feedMode];
+        return OWN_FEED;
     }
 
     // Songs requested per page
@@ -215,7 +214,7 @@
 
     // Honor the remembered feed, or the chosen start feed, before its cache loads
     // A remembered creator is applied after the UI is built, see applyStartupSource
-    feedMode = (startupSource && startupSource.kind === "feed")
+    publishFilter = (startupSource && startupSource.kind === "feed")
         ? startupSource.feed
         : settings.startFeed;
 
@@ -594,12 +593,69 @@
                     parsed.lastCursor = null;
                 }
 
+                mergeLegacyPublished(parsed);
+
                 return parsed;
             }
         } catch (e) {
         }
 
-        return { songs: [], updated: 0, complete: false, lastCursor: null };
+        const empty = { songs: [], updated: 0, complete: false, lastCursor: null };
+
+        mergeLegacyPublished(empty);
+
+        return empty;
+    }
+
+    // Published used to be a separate feed with its own cache, which may hold
+    // songs this one has not paged back to yet. Fold those in once so nothing
+    // disappears on upgrade, then drop the old key. Only your own library has a
+    // legacy cache, a creator feed never did
+    function mergeLegacyPublished(target) {
+
+        if (creatorSource) {
+            return;
+        }
+
+        try {
+
+            const raw = localStorage.getItem(LEGACY_PUBLISHED_KEY);
+
+            if (!raw) {
+                return;
+            }
+
+            const old = JSON.parse(raw);
+            const songs = Array.isArray(old && old.songs) ? old.songs : [];
+
+            const known = new Set(target.songs.map(function (s) {
+                return s.song_id;
+            }));
+
+            let added = 0;
+
+            for (const s of songs) {
+
+                if (!s || s.song_id === undefined || s.song_id === null || known.has(s.song_id)) {
+                    continue;
+                }
+
+                known.add(s.song_id);
+                target.songs.push(trim(s));
+                added += 1;
+            }
+
+            // Merged songs came from the published feed, so the combined list is
+            // no longer a complete page run and should be scanned again
+            if (added > 0) {
+
+                target.complete = false;
+                target.lastCursor = null;
+            }
+
+            localStorage.removeItem(LEGACY_PUBLISHED_KEY);
+        } catch (e) {
+        }
     }
 
     // Remove every other creator cache, freeing space for the active one
@@ -654,7 +710,8 @@
 
         const defaults = {
             startFeed: "published",
-            refreshOnStart: { published: false, all: false },
+            refreshOnStart: false,
+            absoluteNumbers: false,
             autoPlay: false,
             shuffle: false,
             repeat: "all",
@@ -692,7 +749,12 @@
             if (raw) {
 
                 const parsed = JSON.parse(raw);
-                const ros = parsed.refreshOnStart || {};
+                // Used to be one flag per feed. With a single library either
+                // of them meaning yes still means yes
+                const ros = parsed.refreshOnStart;
+                const refreshOnStart = (ros === true)
+                    || (ros !== null && typeof ros === "object"
+                        && (ros.published === true || ros.all === true));
                 const repeat = (parsed.repeat === "one" || parsed.repeat === "none")
                     ? parsed.repeat
                     : "all";
@@ -719,10 +781,8 @@
 
                 return {
                     startFeed: parsed.startFeed === "all" ? "all" : "published",
-                    refreshOnStart: {
-                        published: ros.published === true,
-                        all: ros.all === true
-                    },
+                    refreshOnStart: refreshOnStart,
+                    absoluteNumbers: parsed.absoluteNumbers === true,
                     autoPlay: parsed.autoPlay === true,
                     shuffle: parsed.shuffle === true,
                     repeat: repeat,
@@ -932,7 +992,7 @@
         }
     }
 
-    // Resolve the logged in user id on demand by probing your published feed
+    // Resolve the logged in user id on demand by probing your own feed
     // This lets the picker map your own profile to your library before a Load
     async function ensureSelfUserId() {
 
@@ -944,12 +1004,12 @@
             const params = new URLSearchParams();
 
             params.set("time", String(Date.now()));
-            params.set("t", FEEDS.published.t);
+            params.set("t", OWN_FEED.t);
             params.set("size", "20");
-            params.set("query_type", FEEDS.published.queryType);
-            params.set("listRenderType", FEEDS.published.queryType);
+            params.set("query_type", OWN_FEED.queryType);
+            params.set("listRenderType", OWN_FEED.queryType);
 
-            const url = FEEDS.published.endpoint + "?" + params.toString();
+            const url = OWN_FEED.endpoint + "?" + params.toString();
             const res = await timedFetch(url, { credentials: "include" });
 
             if (res.ok) {
@@ -970,7 +1030,7 @@
 
         if (!startupSource || startupSource.kind !== "creator") {
 
-            // Own feed, feedMode and cache were already set at init, nothing to do
+            // Own feed, the filter and cache were already set at init
             return;
         }
 
@@ -1028,7 +1088,7 @@
 
             } else {
 
-                data = { kind: "feed", feed: feedMode };
+                data = { kind: "feed", feed: publishFilter };
             }
 
             localStorage.setItem(SOURCE_KEY, JSON.stringify(data));
@@ -1195,7 +1255,7 @@
     // This only checks the top for new songs, it never re-pages the library
     function maybeAutoRefresh() {
 
-        if (settings.refreshOnStart[feedMode]) {
+        if (settings.refreshOnStart) {
             run(true);
         }
     }
@@ -1334,9 +1394,26 @@
     }
 
     // Whether a song passes every active filter, vocals and playlist together
+    // True when the song passes the published filter. Creator libraries are
+    // published by definition, so the filter only applies to your own songs
+    function passesPublishFilter(song) {
+
+        if (creatorSource || publishFilter !== "published") {
+            return true;
+        }
+
+        return song.publish_state === 1;
+    }
+
     function passesFilters(song) {
 
-        return passesVocalFilter(song) && passesPlaylist(song);
+        return passesVocalFilter(song) && passesPlaylist(song) && passesPublishFilter(song);
+    }
+
+    // How many songs the list is currently showing, filters applied
+    function shownSongCount() {
+
+        return cache.songs.filter(passesFilters).length;
     }
 
     // Remove duplicate songs by song_id, keeping the first occurrence
@@ -1980,33 +2057,33 @@
         // Invalidate the active load token even if the flag was already cleared
         loadToken += 1;
 
-        // The wave scan cursor belongs to the previous feed, start over
-        waveScanCursor = null;
-        waveScanDone = false;
-
         if (creatorSource) {
 
-            // Leave creator mode without toggling, returning to your own feed
+            // Leaving a creator returns to your own library, whose cache and
+            // wave scan differ, so those are reset here and not on a filter flip
+            waveScanCursor = null;
+            waveScanDone = false;
             creatorSource = null;
             updateCreatorButton();
+            cache = loadCache();
+            cachedIds = new Set();
+            refreshCachedIds();
 
         } else {
 
-            feedMode = feedMode === "published" ? "all" : "published";
+            // One library, so this only changes which part of it is shown. No
+            // reload, no second cursor, and nothing to go stale
+            publishFilter = publishFilter === "published" ? "all" : "published";
         }
 
         updateFeedButton();
-
-        cache = loadCache();
-        cachedIds = new Set();
         renderList();
-        refreshCachedIds();
 
-        const n = cache.songs.length;
+        const n = shownSongCount();
 
-        setStatus(feed().label + " feed, " + n + " cached song"
+        setStatus(feed().label + ", " + n + " song"
             + (n === 1 ? "" : "s")
-            + (n === 0 ? ", press Load" : ""));
+            + (cache.songs.length === 0 ? ", press Load" : ""));
 
         saveSource();
 
@@ -2033,7 +2110,9 @@
         if (creatorSource) {
             sourceEl.textContent = creatorSource.stage_name || "Creator";
         } else {
-            sourceEl.textContent = FEEDS[feedMode].label + " feed";
+            sourceEl.textContent = publishFilter === "published"
+                ? "Published"
+                : "All songs";
         }
 
         sourceEl.style.display = "inline";
@@ -2043,7 +2122,9 @@
     function updateFeedButton() {
 
         if (feedButton) {
-            feedButton.labelEl.textContent = FEEDS[feedMode].label;
+            feedButton.labelEl.textContent = publishFilter === "published"
+                ? "Published"
+                : "All";
         }
 
         updateSourceLabel();
@@ -3633,7 +3714,7 @@
     // creation order the API returns
     function orderedSongs() {
 
-        if (!creatorSource && feedMode === "published" && cache.complete) {
+        if (!creatorSource && publishFilter === "published" && cache.complete) {
 
             return cache.songs.slice().sort(function (a, b) {
                 return (b.publish_at || 0) - (a.publish_at || 0);
@@ -9812,9 +9893,10 @@
             item.appendChild(dur);
         }
 
-        // In your own All feed, mark each song as published or still a draft
-        // Drafts have no publish_state at all, so test for the published value
-        if (!creatorSource && feedMode === "all") {
+        // Mark each song as published or still a draft, but only when the list
+        // is showing both. Under the published filter every row would carry the
+        // same badge, which tells the reader nothing
+        if (!creatorSource && publishFilter === "all") {
 
             const published = song.publish_state === 1;
 
@@ -9923,7 +10005,13 @@
         // and the newest is the highest, and a song keeps that number across the
         // Queue and A-Z views. For the Published feed the order is by publish
         // date, so the number tracks the publish sorted list shown here
-        const ordered = orderedSongs();
+        // Absolute numbering ranks every song in the library, so a song keeps
+        // the same number whichever filter is on. Otherwise the rank is taken
+        // over the songs actually shown, so the column runs 1 to n with no gaps
+        const ordered = settings.absoluteNumbers
+            ? orderedSongs()
+            : orderedSongs().filter(passesFilters);
+
         const numberById = new Map();
         const total = ordered.length;
 
@@ -10400,18 +10488,18 @@
         startRow.appendChild(startPublishedBtn);
         startRow.appendChild(startAllBtn);
 
-        // Refresh on open section, one independent flag per feed
+        // Refresh on open, one library so one flag
         const refreshLabel = document.createElement("div");
-        refreshLabel.textContent = "Refresh on open";
+        refreshLabel.textContent = "Library";
         refreshLabel.style.cssText = "color:#bbb";
 
-        const pubRow = makeBoolRow("Published",
-            function () { return settings.refreshOnStart.published; },
-            function (v) { settings.refreshOnStart.published = v; });
+        const pubRow = makeBoolRow("Refresh on open",
+            function () { return settings.refreshOnStart; },
+            function (v) { settings.refreshOnStart = v; });
 
-        const allRow = makeBoolRow("All",
-            function () { return settings.refreshOnStart.all; },
-            function (v) { settings.refreshOnStart.all = v; });
+        const allRow = makeBoolRow("Number across the whole library",
+            function () { return settings.absoluteNumbers; },
+            function (v) { settings.absoluteNumbers = v; renderList(); });
 
         // Playback section, autoplay on open
         const playbackLabel = document.createElement("div");
@@ -11343,7 +11431,7 @@
         loadToken += 1;
 
         creatorSource = null;
-        feedMode = "published";
+        publishFilter = "published";
 
         cache = loadCache();
         cachedIds = new Set();
