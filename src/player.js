@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3.1";
+    const VERSION = "1.4.3.6";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -373,6 +373,11 @@
     // label and icon can follow the state rather than always saying Hide
     let foldButton = null;
 
+    // The transport row and the six buttons it can hold, keyed by the names
+    // used in the controlOrder setting
+    let controlRowEl = null;
+    let controlButtons = {};
+
     // Timestamp of the last header click, so minimize needs a double click
     let lastHeaderClickT = 0;
     let minimized = false;
@@ -658,6 +663,7 @@
             directAudio: true,
             remoteArtwork: false,
             artOnResume: false,
+            controlOrder: "repeat,shuffle,stop,play",
             carBlackout: false,
             carGate: false,
             carAutoBlack: 20,
@@ -727,6 +733,9 @@
                     directAudio: parsed.directAudio !== false,
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
+                    controlOrder: typeof parsed.controlOrder === "string" && parsed.controlOrder
+                        ? parsed.controlOrder
+                        : "repeat,shuffle,stop,play",
                     carBlackout: parsed.carBlackout === true,
                     carGate: parsed.carGate === true,
                     carAutoBlack: (typeof parsed.carAutoBlack === "number"
@@ -4979,6 +4988,482 @@
         }, 5000);
     }
 
+    // Abandons a transport chip drag, set once the editor has been built
+    let endControlDrag = function () {
+    };
+
+    // Every transport button that can be placed, in a fixed reference order
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat"];
+
+    // A fresh icon for the editor, the real buttons keep their own nodes
+    function controlChipIcon(name) {
+
+        if (name === "shuffle") {
+            return makeShuffleIcon();
+        }
+
+        if (name === "repeat") {
+            return makeRepeatIcon(false);
+        }
+
+        const glyphs = {
+            prev: "\u23EE",
+            play: "\u25B6",
+            stop: "\u23F9",
+            next: "\u23ED"
+        };
+
+        const span = document.createElement("span");
+
+        span.textContent = glyphs[name] || "?";
+        span.style.cssText = "font-size:18px;line-height:1";
+
+        return span;
+    }
+
+    // Build the drag and drop editor for the transport row. Two lists of names
+    // are the single source of truth, the upper row being the bar as it appears
+    // in the player and the lower one the buttons that are not shown. The DOM
+    // is only ever a rendering of those lists, which is what keeps a chip from
+    // ending up in both rows at once
+    function buildControlEditor() {
+
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
+
+        let activeNames = [];
+        let disabledNames = [];
+
+        // One chip element per name, reused across renders so it keeps its
+        // identity, which the movement animation depends on
+        const chips = {};
+
+        // The name being dragged, null when nothing is
+        let dragName = null;
+        let holdTimer = null;
+        let startX = 0;
+        let startY = 0;
+
+        // A floating copy of the chip that follows the pointer. The chip itself
+        // stays in the row as the gap, so the copy is what stays visible when
+        // the pointer wanders outside both rows
+        let dragGhost = null;
+        let ghostDX = 0;
+        let ghostDY = 0;
+
+        const makeLabel = function (text) {
+
+            const el = document.createElement("div");
+
+            el.textContent = text;
+            el.style.cssText = "color:#888;font-size:11px";
+
+            return el;
+        };
+
+        const makeRow = function () {
+
+            const row = document.createElement("div");
+
+            row.style.cssText = [
+                "display:flex",
+                "flex-wrap:wrap",
+                "gap:6px",
+                "min-height:46px",
+                "padding:6px",
+                "border:1px dashed #3a3a42",
+                "border-radius:8px",
+                "background:#26262c"
+            ].join(";");
+
+            return row;
+        };
+
+        const activeRow = makeRow();
+        const disabledRow = makeRow();
+
+        // Read the lists out of the setting, dropping anything unknown and any
+        // repeat, then put whatever is left over into the disabled row
+        const loadNames = function () {
+
+            const seen = {};
+
+            activeNames = String(settings.controlOrder || "")
+                .split(",")
+                .map(function (name) {
+                    return name.trim().toLowerCase();
+                })
+                .filter(function (name) {
+
+                    if (CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                        return false;
+                    }
+
+                    seen[name] = true;
+
+                    return true;
+                });
+
+            disabledNames = CONTROL_NAMES.filter(function (name) {
+                return !seen[name];
+            });
+        };
+
+        // Save the bar and redraw the real transport row
+        const commit = function () {
+
+            // An empty bar would leave nothing to press, so keep play
+            if (activeNames.length === 0) {
+
+                activeNames = ["play"];
+                disabledNames = CONTROL_NAMES.filter(function (name) {
+                    return name !== "play";
+                });
+            }
+
+            settings.controlOrder = activeNames.join(",");
+            saveSettings();
+            applyControlOrder();
+        };
+
+        // Put the chips where the lists say they go. Every chip that has moved
+        // is animated from where it used to be, so the others visibly slide
+        // aside and open the gap the dragged one drops into
+        const render = function (animate) {
+
+            const before = {};
+
+            if (animate) {
+
+                for (const name of CONTROL_NAMES) {
+
+                    if (chips[name] && chips[name].isConnected) {
+                        before[name] = chips[name].getBoundingClientRect();
+                    }
+                }
+            }
+
+            for (const name of activeNames) {
+                activeRow.appendChild(chips[name]);
+            }
+
+            for (const name of disabledNames) {
+                disabledRow.appendChild(chips[name]);
+            }
+
+            if (!animate) {
+                return;
+            }
+
+            for (const name of CONTROL_NAMES) {
+
+                const old = before[name];
+
+                if (!old || name === dragName || !chips[name].animate) {
+                    continue;
+                }
+
+                const now = chips[name].getBoundingClientRect();
+                const dx = old.left - now.left;
+                const dy = old.top - now.top;
+
+                if (dx === 0 && dy === 0) {
+                    continue;
+                }
+
+                chips[name].animate([
+                    { transform: "translate(" + dx + "px, " + dy + "px)" },
+                    { transform: "translate(0, 0)" }
+                ], { duration: 220, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+            }
+        };
+
+        // Which row the pointer is over, or null when it is over neither
+        const rowAt = function (x, y) {
+
+            for (const row of [activeRow, disabledRow]) {
+
+                const r = row.getBoundingClientRect();
+
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                    return row;
+                }
+            }
+
+            return null;
+        };
+
+        // Move the dragged name into the row under the pointer, at the position
+        // the pointer is closest to. The index is worked out from the chips
+        // that are not being dragged, so it can be used directly
+        const dragTo = function (x, y) {
+
+            const row = rowAt(x, y);
+
+            if (!row) {
+                return;
+            }
+
+            const toList = row === activeRow ? activeNames : disabledNames;
+            const fromList = activeNames.indexOf(dragName) !== -1 ? activeNames : disabledNames;
+
+            const others = (row === activeRow ? activeNames : disabledNames).filter(function (name) {
+                return name !== dragName;
+            });
+
+            let index = others.length;
+
+            for (let i = 0; i < others.length; i += 1) {
+
+                const r = chips[others[i]].getBoundingClientRect();
+
+                if (y < r.bottom && x < r.left + r.width / 2) {
+
+                    index = i;
+                    break;
+                }
+            }
+
+            const from = fromList.indexOf(dragName);
+
+            // Nothing to do when it would land exactly where it already is
+            if (fromList === toList && from === index) {
+                return;
+            }
+
+            fromList.splice(from, 1);
+            toList.splice(index, 0, dragName);
+            render(true);
+        };
+
+        // Declared here so the handlers can remove themselves again
+        let onDocMove = null;
+        let onDocUp = null;
+
+        const detach = function () {
+
+            if (!onDocMove) {
+                return;
+            }
+
+            document.removeEventListener("pointermove", onDocMove, true);
+            document.removeEventListener("pointerup", onDocUp, true);
+            document.removeEventListener("pointercancel", onDocUp, true);
+            onDocMove = null;
+            onDocUp = null;
+        };
+
+        const endDrag = function () {
+
+            detach();
+
+            if (holdTimer) {
+
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+
+            if (!dragName) {
+                return;
+            }
+
+            const chip = chips[dragName];
+
+            if (dragGhost) {
+
+                dragGhost.remove();
+                dragGhost = null;
+            }
+
+            chip.style.opacity = "1";
+            chip.style.transform = "none";
+            chip.style.boxShadow = "none";
+            dragName = null;
+            commit();
+        };
+
+        const makeChip = function (name) {
+
+            const chip = document.createElement("div");
+
+            chip.dataset.control = name;
+            chip.title = "Long press to move";
+            chip.style.cssText = [
+                "display:flex",
+                "flex-direction:column",
+                "align-items:center",
+                "justify-content:center",
+                "gap:3px",
+                "min-width:52px",
+                "padding:6px 8px",
+                "border-radius:8px",
+                "background:#333",
+                "color:#fff",
+                "font:600 10px/1 sans-serif",
+                "cursor:grab",
+                "touch-action:none",
+                "user-select:none",
+                "-moz-user-select:none"
+            ].join(";");
+
+            const icon = document.createElement("span");
+            icon.style.cssText = "display:flex;align-items:center;justify-content:center;height:20px";
+            icon.appendChild(controlChipIcon(name));
+
+            const label = document.createElement("span");
+            label.textContent = name;
+
+            chip.appendChild(icon);
+            chip.appendChild(label);
+
+            chip.addEventListener("pointerdown", function (ev) {
+
+                startX = ev.clientX;
+                startY = ev.clientY;
+
+                // Listen on the document rather than capturing on the chip.
+                // Re-parenting an element releases its pointer capture, and the
+                // chips are re-parented on every reorder, which would cut the
+                // drag off after the first move and strand the floating copy
+                detach();
+
+                onDocMove = function (e) {
+
+                    // A press that turns into a swipe before the hold completes
+                    // was meant as a scroll, so it never becomes a drag
+                    if (holdTimer) {
+
+                        if (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) {
+
+                            clearTimeout(holdTimer);
+                            holdTimer = null;
+                        }
+
+                        return;
+                    }
+
+                    if (!dragName) {
+                        return;
+                    }
+
+                    e.preventDefault();
+
+                    if (dragGhost) {
+
+                        dragGhost.style.left = (e.clientX - ghostDX) + "px";
+                        dragGhost.style.top = (e.clientY - ghostDY) + "px";
+                    }
+
+                    dragTo(e.clientX, e.clientY);
+                };
+
+                onDocUp = function () {
+                    endDrag();
+                };
+
+                document.addEventListener("pointermove", onDocMove, true);
+                document.addEventListener("pointerup", onDocUp, true);
+                document.addEventListener("pointercancel", onDocUp, true);
+
+                holdTimer = setTimeout(function () {
+
+                    holdTimer = null;
+                    dragName = name;
+
+                    const r = chip.getBoundingClientRect();
+
+                    // Where inside the chip the finger is, so the copy keeps
+                    // the same grip point instead of jumping to a corner
+                    ghostDX = startX - r.left;
+                    ghostDY = startY - r.top;
+
+                    dragGhost = chip.cloneNode(true);
+                    dragGhost.style.position = "fixed";
+                    dragGhost.style.left = r.left + "px";
+                    dragGhost.style.top = r.top + "px";
+                    dragGhost.style.width = r.width + "px";
+                    dragGhost.style.height = r.height + "px";
+                    dragGhost.style.margin = "0";
+                    dragGhost.style.pointerEvents = "none";
+                    dragGhost.style.zIndex = "2147483647";
+                    dragGhost.style.transform = "scale(1.1)";
+                    dragGhost.style.boxShadow = "0 6px 16px rgba(0,0,0,0.55)";
+                    dragGhost.style.opacity = "0.95";
+
+                    document.body.appendChild(dragGhost);
+
+                    // The chip left behind marks the gap it would drop into
+                    chip.style.opacity = "0.25";
+                }, 350);
+            });
+
+            return chip;
+        };
+
+        for (const name of CONTROL_NAMES) {
+            chips[name] = makeChip(name);
+        }
+
+        // Redraw from the stored setting whenever the panel is opened
+        const reload = function () {
+
+            loadNames();
+            render(false);
+        };
+
+        reload();
+        settingsRefreshers.push(reload);
+
+        // Let the panel abandon a drag that is somehow still open when it closes
+        endControlDrag = endDrag;
+
+        wrap.appendChild(makeLabel("Transport bar, long press a button to move it"));
+        wrap.appendChild(activeRow);
+        wrap.appendChild(makeLabel("Not shown"));
+        wrap.appendChild(disabledRow);
+
+        return wrap;
+    }
+
+    // Lay out the transport row from the controlOrder setting. Unknown names
+    // are skipped, and an order that names nothing usable falls back to the
+    // default rather than leaving the row empty
+    function applyControlOrder() {
+
+        if (!controlRowEl) {
+            return;
+        }
+
+        const wanted = String(settings.controlOrder || "")
+            .split(",")
+            .map(function (name) {
+                return name.trim().toLowerCase();
+            })
+            .filter(function (name) {
+                return controlButtons[name];
+            });
+
+        const order = wanted.length > 0
+            ? wanted
+            : ["repeat", "shuffle", "stop", "play"];
+
+        controlRowEl.textContent = "";
+
+        // A name used twice would move the same element, not copy it, so each
+        // button is placed at most once
+        const placed = {};
+
+        for (const name of order) {
+
+            if (placed[name]) {
+                continue;
+            }
+
+            placed[name] = true;
+            controlRowEl.appendChild(controlButtons[name]);
+        }
+    }
+
     // Toggle between play and pause for the current song
     function togglePlayPause() {
 
@@ -7339,6 +7824,15 @@
             }
         });
 
+        // The gate only appears before fullscreen is entered, so this is the
+        // way back in after leaving it, and the way in without the gate at all
+        const fullscreenButton = makeActionButton(iconFullscreen(), "Fullscreen", "#444", "#fff", function () {
+
+            closeActions();
+            enterFullscreen();
+        });
+
+        rowThree.appendChild(fullscreenButton);
         rowThree.appendChild(cacheButton);
         rowThree.appendChild(downloadButton);
         rowThree.appendChild(blackoutButton);
@@ -7698,19 +8192,26 @@
         // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
         const controlRow = document.createElement("div");
         controlRow.style.cssText = "display:flex;gap:8px";
+        controlRowEl = controlRow;
 
-        // Previous and next live on the album art as a swipe, so the row keeps
-        // only four buttons and each one gets a much larger target, which
-        // matters when the panel is used in a car
+        // All six are built, the controlOrder setting decides which of them go
+        // into the row and in which order. Previous and next are off by
+        // default because the album art swipe already does that job, and fewer
+        // buttons means a much larger target for each, which matters in a car
         playPauseBtn = makeIconButton("\u25B6", "Play / Pause", togglePlayPause);
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
-        const stopBtn = makeIconButton("\u23F9", "Stop", stopPlay);
 
-        controlRow.appendChild(repeatBtn);
-        controlRow.appendChild(shuffleBtn);
-        controlRow.appendChild(stopBtn);
-        controlRow.appendChild(playPauseBtn);
+        controlButtons = {
+            prev: makeIconButton("\u23EE", "Previous", playPrev),
+            play: playPauseBtn,
+            stop: makeIconButton("\u23F9", "Stop", stopPlay),
+            next: makeIconButton("\u23ED", "Next", playNext),
+            shuffle: shuffleBtn,
+            repeat: repeatBtn
+        };
+
+        applyControlOrder();
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(seekRow);
@@ -8847,6 +9348,17 @@
     }
 
     // Crescent moon, for putting the screen to sleep
+    // Four corners pointing out, for entering fullscreen
+    function iconFullscreen() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "15 3 21 3 21 9" }],
+            ["polyline", { points: "9 21 3 21 3 15" }],
+            ["line", { x1: "21", y1: "3", x2: "14", y2: "10" }],
+            ["line", { x1: "3", y1: "21", x2: "10", y2: "14" }]
+        ]);
+    }
+
     // Chevron up, for folding the player away to its header
     function iconFold() {
 
@@ -9965,6 +10477,8 @@
             function () { return settings.remoteArtwork; },
             function (v) { settings.remoteArtwork = v; reassertNowPlaying(); });
 
+        const controlOrderRow = buildControlEditor();
+
         const artResumeRow = makeBoolRow("Resend art on resume",
             function () { return settings.artOnResume; },
             function (v) { settings.artOnResume = v; });
@@ -9993,6 +10507,7 @@
         settingsEl.appendChild(blackDriftRow);
         settingsEl.appendChild(blackResetRow);
         settingsEl.appendChild(artworkRow);
+        settingsEl.appendChild(controlOrderRow);
         settingsEl.appendChild(artResumeRow);
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
@@ -10045,6 +10560,7 @@
 
         if (settingsEl) {
             settingsOpen = false;
+            endControlDrag();
             settingsEl.style.display = "none";
         }
     }
