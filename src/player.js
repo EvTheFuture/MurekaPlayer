@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3d";
+    const VERSION = "1.4.3.1";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -368,6 +368,10 @@
     let sourceEl = null;
     let bodyEl = null;
     let minimizeBtn = null;
+
+    // The actions menu entry that folds and unfolds the panel, kept so its
+    // label and icon can follow the state rather than always saying Hide
+    let foldButton = null;
 
     // Timestamp of the last header click, so minimize needs a double click
     let lastHeaderClickT = 0;
@@ -4463,6 +4467,12 @@
             return false;
         }
 
+        // A folded panel is out of the way on purpose, so it must not put a
+        // full size button back in front of the page
+        if (minimized) {
+            return false;
+        }
+
         return !(document.fullscreenElement || document.webkitFullscreenElement);
     }
 
@@ -7315,9 +7325,24 @@
             showBlackout();
         });
 
+        // Folding away matters most on a phone, where the panel fills the
+        // screen. Without it a user who is not signed in cannot reach the
+        // Mureka login form underneath. The header stays, so tapping it brings
+        // the player back
+        foldButton = makeActionButton(iconFold(), "Hide player", "#444", "#fff", function () {
+
+            closeActions();
+            toggleMinimize();
+
+            if (minimized) {
+                setStatus("Tap the header or use the menu to open it again");
+            }
+        });
+
         rowThree.appendChild(cacheButton);
         rowThree.appendChild(downloadButton);
         rowThree.appendChild(blackoutButton);
+        rowThree.appendChild(foldButton);
 
         // A row for the two collection browsers, your playlists and other creators
         const rowFour = document.createElement("div");
@@ -8445,6 +8470,11 @@
         panelEl.style.setProperty("right", "auto", "important");
         panelEl.style.setProperty("width", width + "px", "important");
 
+        // The dock logic sets bottom when it anchors to the lower edge, and a
+        // box with both top and bottom set stretches between them whatever its
+        // height says. That would undo the collapse, so clear it here
+        panelEl.style.setProperty("bottom", "auto", "important");
+
         // Collapsed it must shrink to its header, otherwise it keeps covering
         // the whole page and there is no way to reach the site underneath
         if (minimized) {
@@ -8505,8 +8535,15 @@
                 savePosition();
             } else {
 
-                // A single click on the header is far too easy to hit by
-                // accident, so only a double click collapses the panel
+                // Collapsing by accident is annoying, expanding by accident is
+                // not, so opening takes one tap while closing takes two
+                if (minimized) {
+
+                    lastHeaderClickT = 0;
+                    toggleMinimize();
+                    return;
+                }
+
                 const now = Date.now();
 
                 if (now - lastHeaderClickT < 400) {
@@ -8544,13 +8581,34 @@
         minimized = value;
 
         if (bodyEl) {
-            bodyEl.style.display = minimized ? "none" : "block";
+
+            // The phone layout sets display flex with important on this element,
+            // so a plain inline display would lose to it and the body would
+            // never hide. Removing the inline value on expand hands the element
+            // back to that rule, and to the plain block default on desktop
+            if (minimized) {
+                bodyEl.style.setProperty("display", "none", "important");
+            } else {
+                bodyEl.style.removeProperty("display");
+            }
         }
 
         if (minimizeBtn) {
 
             // Up triangle to expand, down triangle to collapse
             minimizeBtn.textContent = minimized ? "\u25B4" : "\u25BE";
+        }
+
+        // The gate belongs to an open panel only
+        refreshGate();
+
+        // The hamburger menu stays reachable while folded, so the same entry
+        // offers the way back rather than only ever offering to hide
+        if (foldButton) {
+
+            foldButton.labelEl.textContent = minimized ? "Show player" : "Hide player";
+            foldButton.iconEl.textContent = "";
+            foldButton.iconEl.appendChild(minimized ? iconUnfold() : iconFold());
         }
 
         fitMobile();
@@ -8789,6 +8847,22 @@
     }
 
     // Crescent moon, for putting the screen to sleep
+    // Chevron up, for folding the player away to its header
+    function iconFold() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "18 15 12 9 6 15" }]
+        ]);
+    }
+
+    // Chevron down, for bringing a folded player back
+    function iconUnfold() {
+
+        return makeSvgIcon([
+            ["polyline", { points: "6 9 12 15 18 9" }]
+        ]);
+    }
+
     function iconBlackout() {
 
         return makeSvgIcon([
