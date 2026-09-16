@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3.10";
+    const VERSION = "1.4.3.11";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5348,7 +5348,7 @@
             const chip = document.createElement("div");
 
             chip.dataset.control = name;
-            chip.title = "Long press to move";
+            chip.title = "Drag to move, on a touch screen press and hold first";
             chip.style.cssText = [
                 "display:flex",
                 "flex-direction:column",
@@ -5376,6 +5376,37 @@
 
             chip.appendChild(icon);
             chip.appendChild(label);
+
+            // Pick the chip up, whatever decided the press counts as a grab
+            const lift = function () {
+
+                dragName = name;
+
+                const r = chip.getBoundingClientRect();
+
+                // Where inside the chip the pointer is, so the copy keeps the
+                // same grip point instead of jumping to a corner
+                ghostDX = startX - r.left;
+                ghostDY = startY - r.top;
+
+                dragGhost = chip.cloneNode(true);
+                dragGhost.style.position = "fixed";
+                dragGhost.style.left = r.left + "px";
+                dragGhost.style.top = r.top + "px";
+                dragGhost.style.width = r.width + "px";
+                dragGhost.style.height = r.height + "px";
+                dragGhost.style.margin = "0";
+                dragGhost.style.pointerEvents = "none";
+                dragGhost.style.zIndex = "2147483647";
+                dragGhost.style.transform = "scale(1.1)";
+                dragGhost.style.boxShadow = "0 6px 16px rgba(0,0,0,0.55)";
+                dragGhost.style.opacity = "0.95";
+
+                document.body.appendChild(dragGhost);
+
+                // The chip left behind marks the gap it would drop into
+                chip.style.opacity = "0.25";
+            };
 
             chip.addEventListener("pointerdown", function (ev) {
 
@@ -5426,35 +5457,19 @@
                 document.addEventListener("pointerup", onDocUp, true);
                 document.addEventListener("pointercancel", onDocUp, true);
 
+                // A mouse press is already a deliberate grab, so it picks the
+                // chip up at once. A finger has to be held, because the same
+                // press would otherwise be a scroll of the settings panel
+                if (ev.pointerType === "mouse") {
+
+                    lift();
+                    return;
+                }
+
                 holdTimer = setTimeout(function () {
 
                     holdTimer = null;
-                    dragName = name;
-
-                    const r = chip.getBoundingClientRect();
-
-                    // Where inside the chip the finger is, so the copy keeps
-                    // the same grip point instead of jumping to a corner
-                    ghostDX = startX - r.left;
-                    ghostDY = startY - r.top;
-
-                    dragGhost = chip.cloneNode(true);
-                    dragGhost.style.position = "fixed";
-                    dragGhost.style.left = r.left + "px";
-                    dragGhost.style.top = r.top + "px";
-                    dragGhost.style.width = r.width + "px";
-                    dragGhost.style.height = r.height + "px";
-                    dragGhost.style.margin = "0";
-                    dragGhost.style.pointerEvents = "none";
-                    dragGhost.style.zIndex = "2147483647";
-                    dragGhost.style.transform = "scale(1.1)";
-                    dragGhost.style.boxShadow = "0 6px 16px rgba(0,0,0,0.55)";
-                    dragGhost.style.opacity = "0.95";
-
-                    document.body.appendChild(dragGhost);
-
-                    // The chip left behind marks the gap it would drop into
-                    chip.style.opacity = "0.25";
+                    lift();
                 }, 350);
             });
 
