@@ -1,0 +1,54 @@
+# Publish the repository to GitHub Pages
+#
+# The whole repository is published, so the privacy policy at privacy.html and
+# the player at src/player.js are both served from the Pages site. The player
+# URL is what the in development bookmarklet loads, so it has to keep working.
+#
+# Set Settings, Pages, Source to GitHub Actions for this workflow to take effect.
+
+name: Deploy to GitHub Pages
+
+on:
+    # Publish whenever master changes
+    push:
+        branches:
+            - master
+
+    # And allow a deploy to be started by hand
+    workflow_dispatch:
+
+# Permissions the deploy action needs
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+# Never let two deploys run at once, and let a newer push win
+concurrency:
+    group: pages
+    cancel-in-progress: true
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+
+        steps:
+            - name: Check out the repository
+              uses: actions/checkout@v4
+
+            - name: Configure Pages
+              uses: actions/configure-pages@v5
+
+            # The repository root is the site, so every committed file is served
+            - name: Upload the repository as the site
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: .
+
+            - name: Deploy to Pages
+              id: deployment
+              uses: actions/deploy-pages@v4
