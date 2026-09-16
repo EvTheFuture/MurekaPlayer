@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3b";
+    const VERSION = "1.4.3d";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -653,6 +653,7 @@
             artOverlayMode: "all",
             directAudio: true,
             remoteArtwork: false,
+            artOnResume: false,
             carBlackout: false,
             carGate: false,
             carAutoBlack: 20,
@@ -721,6 +722,7 @@
                         : (parsed.lyricsOn === false ? "info" : "all"),
                     directAudio: parsed.directAudio !== false,
                     remoteArtwork: parsed.remoteArtwork === true,
+                    artOnResume: parsed.artOnResume === true,
                     carBlackout: parsed.carBlackout === true,
                     carGate: parsed.carGate === true,
                     carAutoBlack: (typeof parsed.carAutoBlack === "number"
@@ -2655,6 +2657,7 @@
 
             // Re-claim the controls, iOS hands them to whatever played last
             setupMediaSession();
+            resendArtOnResume();
             updatePlayPause();
 
             if ("mediaSession" in navigator) {
@@ -2722,7 +2725,7 @@
             // list makes iOS show the page logo and spends a cover send
             setupMediaSession();
 
-            if (npCoverSent) {
+            if (npCoverSent || settings.artOnResume) {
                 sendNowPlaying();
             }
 
@@ -4347,6 +4350,10 @@
     // The page background from before the cover went up, so it can be put back
     let priorPageBackground = null;
 
+    // The fade out currently running, so showing again can cancel it before its
+    // completion handler hides a cover that is meant to be visible
+    let blackoutHideAnim = null;
+
     // When the cover went up. The tap that raises it also produces a pointer
     // event afterwards, which would land on the cover and dismiss it at once,
     // so events within a short grace period after showing are ignored
@@ -4398,6 +4405,14 @@
         }
 
         const wasUp = blackoutEl.style.display === "block";
+
+        // Stop a fade out that is still running, otherwise its finish handler
+        // hides the cover a moment after it has been shown again
+        if (blackoutHideAnim) {
+
+            blackoutHideAnim.cancel();
+            blackoutHideAnim = null;
+        }
 
         blackoutEl.style.display = "block";
         blackoutShownAt = Date.now();
@@ -4600,6 +4615,22 @@
                 return;
             }
 
+            // Only a real finger or mouse dismisses the cover. A script on the
+            // page dispatching pointer events would otherwise wake the screen
+            // on its own, which looks like the cover flickering
+            if (ev.isTrusted === false) {
+
+                if (isDebug()) {
+                    setStatus("Ignored a synthetic tap on the cover");
+                }
+
+                return;
+            }
+
+            if (isDebug()) {
+                setStatus("Cover dismissed by " + (ev.pointerType || "pointer"));
+            }
+
             hideBlackout();
         });
 
@@ -4704,7 +4735,16 @@
                     { opacity: 0 }
                 ], { duration: 350, easing: "ease-in" });
 
+                blackoutHideAnim = out;
+
                 out.onfinish = function () {
+
+                    // A newer show has taken over, leave the cover alone
+                    if (blackoutHideAnim !== out) {
+                        return;
+                    }
+
+                    blackoutHideAnim = null;
                     blackoutEl.style.display = "none";
                 };
 
@@ -4826,6 +4866,7 @@
         if (audio.paused) {
 
             setupMediaSession();
+            resendArtOnResume();
             startAudioPlayback();
             return;
         }
@@ -6932,6 +6973,19 @@
         // re-register whenever the now playing metadata is pushed
         setupMediaSession();
         setMediaMetadata(currentSong, artworkFor(currentSong));
+    }
+
+    // Push the metadata again on a resume. iOS counts distinct cover updates
+    // per song and grey boxes the artwork once too many go out, which is why
+    // this is off by default. Chromium has no such limit, so on Android it can
+    // be left on and the art is refreshed every time playback picks up again
+    function resendArtOnResume() {
+
+        if (!settings.artOnResume || !currentSong) {
+            return;
+        }
+
+        sendNowPlaying();
     }
 
     // Send the first cover for the current song once it has decoded and playback
@@ -9837,6 +9891,10 @@
             function () { return settings.remoteArtwork; },
             function (v) { settings.remoteArtwork = v; reassertNowPlaying(); });
 
+        const artResumeRow = makeBoolRow("Resend art on resume",
+            function () { return settings.artOnResume; },
+            function (v) { settings.artOnResume = v; });
+
         const countsAgeRow = makeStepperRow("Counts max age in hours",
             function () { return settings.countsMaxAge; },
             function (v) { settings.countsMaxAge = v; }, 1, 72);
@@ -9861,6 +9919,7 @@
         settingsEl.appendChild(blackDriftRow);
         settingsEl.appendChild(blackResetRow);
         settingsEl.appendChild(artworkRow);
+        settingsEl.appendChild(artResumeRow);
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
