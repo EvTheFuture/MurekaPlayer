@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.3.11";
+    const VERSION = "1.4.4";
 
     // The two feeds this player can load
     // published returns only your published songs
