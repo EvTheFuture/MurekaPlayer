@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.6";
+    const VERSION = "1.4.5.7";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -3187,13 +3187,17 @@
             return;
         }
 
-        // Clicking the song that is already playing just restarts it, the queue
-        // is left untouched so shuffle order is not regenerated
+        // Tapping the song that is already loaded never restarts it. Playing,
+        // it is left alone, paused, it carries on from where it was. Losing
+        // your place in a track you are part way through is the worst possible
+        // answer to a mistaken tap. The queue is untouched either way, so a
+        // shuffle order is not regenerated
         // With no audio loaded yet, as just after a restored queue, fall through
         if (currentSong && currentSong.song_id === songId && audio && audio.src) {
 
-            audio.currentTime = 0;
-            startAudioPlayback();
+            if (audio.paused) {
+                startAudioPlayback();
+            }
 
             return;
         }
