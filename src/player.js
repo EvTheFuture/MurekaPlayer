@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.4";
+    const VERSION = "1.4.5.6";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -401,6 +401,20 @@
 
     // The published or all toggle when placed in the transport row
     let publishedCtrlBtn = null;
+
+    // Long press state for rearranging the transport row in the player itself.
+    // A short press must still work the button, so nothing moves until the
+    // press has been held, and the click that follows a drag is swallowed
+    let ctrlDragName = null;
+    let ctrlHoldTimer = null;
+    let ctrlGhost = null;
+    let ctrlGhostDX = 0;
+    let ctrlGhostDY = 0;
+    let ctrlStartX = 0;
+    let ctrlStartY = 0;
+    let ctrlSuppressClick = false;
+    let ctrlDocMove = null;
+    let ctrlDocUp = null;
 
     // Timestamp of the last header click, so minimize needs a double click
     let lastHeaderClickT = 0;
@@ -5729,6 +5743,240 @@
         }
     }
 
+    // The transport row as a list of names, in the order it is laid out
+    function currentControlNames() {
+
+        return String(settings.controlOrder || "")
+            .split(",")
+            .map(function (name) {
+                return name.trim().toLowerCase();
+            })
+            .filter(function (name) {
+                return controlButtons[name];
+            });
+    }
+
+    // Re-lay the row and slide every button that moved, so a rearrangement in
+    // the player reads the same way as one in the settings editor
+    function applyControlOrderAnimated() {
+
+        const before = new Map();
+
+        for (const name of Object.keys(controlButtons)) {
+
+            const el = controlButtons[name];
+
+            if (el && el.isConnected) {
+                before.set(name, el.getBoundingClientRect());
+            }
+        }
+
+        applyControlOrder();
+
+        for (const name of Object.keys(controlButtons)) {
+
+            const el = controlButtons[name];
+            const old = before.get(name);
+
+            if (!old || !el.isConnected || name === ctrlDragName || !el.animate) {
+                continue;
+            }
+
+            const now = el.getBoundingClientRect();
+            const dx = old.left - now.left;
+
+            if (dx === 0) {
+                continue;
+            }
+
+            el.animate([
+                { transform: "translateX(" + dx + "px)" },
+                { transform: "translateX(0)" }
+            ], { duration: 200, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+        }
+    }
+
+    // Finish a transport drag, saving the new order
+    function endControlRowDrag() {
+
+        if (ctrlDocMove) {
+
+            document.removeEventListener("pointermove", ctrlDocMove, true);
+            document.removeEventListener("pointerup", ctrlDocUp, true);
+            document.removeEventListener("pointercancel", ctrlDocUp, true);
+            ctrlDocMove = null;
+            ctrlDocUp = null;
+        }
+
+        if (ctrlHoldTimer) {
+
+            clearTimeout(ctrlHoldTimer);
+            ctrlHoldTimer = null;
+        }
+
+        if (!ctrlDragName) {
+            return;
+        }
+
+        if (ctrlGhost) {
+
+            ctrlGhost.remove();
+            ctrlGhost = null;
+        }
+
+        const el = controlButtons[ctrlDragName];
+
+        if (el) {
+            el.style.opacity = "1";
+        }
+
+        ctrlDragName = null;
+        saveSettings();
+        setStatus("Transport row rearranged");
+    }
+
+    // Move the held button to wherever the pointer is along the row
+    function dragControlTo(x) {
+
+        if (!ctrlDragName || !controlRowEl) {
+            return;
+        }
+
+        const names = currentControlNames();
+
+        const others = names.filter(function (name) {
+            return name !== ctrlDragName;
+        });
+
+        let index = others.length;
+
+        for (let i = 0; i < others.length; i += 1) {
+
+            const r = controlButtons[others[i]].getBoundingClientRect();
+
+            if (x < r.left + r.width / 2) {
+
+                index = i;
+                break;
+            }
+        }
+
+        others.splice(index, 0, ctrlDragName);
+
+        const next = others.join(",");
+
+        if (next === settings.controlOrder) {
+            return;
+        }
+
+        settings.controlOrder = next;
+        applyControlOrderAnimated();
+    }
+
+    // Long press any transport button to rearrange the row in place. A normal
+    // press still works the button, only a held one picks it up
+    function enableControlRowDragging() {
+
+        for (const name of Object.keys(controlButtons)) {
+
+            const btn = controlButtons[name];
+
+            if (!btn || btn.dataset.dragArmed === "1") {
+                continue;
+            }
+
+            btn.dataset.dragArmed = "1";
+
+            // A drag ends with a click on the button underneath, which would
+            // otherwise start playback or flip a mode, so it is swallowed once
+            btn.addEventListener("click", function (ev) {
+
+                if (!ctrlSuppressClick) {
+                    return;
+                }
+
+                ctrlSuppressClick = false;
+                ev.preventDefault();
+                ev.stopPropagation();
+            }, true);
+
+            btn.addEventListener("pointerdown", function (ev) {
+
+                ctrlStartX = ev.clientX;
+                ctrlStartY = ev.clientY;
+
+                ctrlDocMove = function (e) {
+
+                    if (ctrlHoldTimer) {
+
+                        // Moved before the hold completed, so it was a swipe
+                        if (Math.abs(e.clientX - ctrlStartX) > 8
+                            || Math.abs(e.clientY - ctrlStartY) > 8) {
+
+                            clearTimeout(ctrlHoldTimer);
+                            ctrlHoldTimer = null;
+                        }
+
+                        return;
+                    }
+
+                    if (!ctrlDragName) {
+                        return;
+                    }
+
+                    e.preventDefault();
+
+                    if (ctrlGhost) {
+
+                        ctrlGhost.style.left = (e.clientX - ctrlGhostDX) + "px";
+                        ctrlGhost.style.top = (e.clientY - ctrlGhostDY) + "px";
+                    }
+
+                    dragControlTo(e.clientX);
+                };
+
+                ctrlDocUp = function () {
+                    endControlRowDrag();
+                };
+
+                document.addEventListener("pointermove", ctrlDocMove, true);
+                document.addEventListener("pointerup", ctrlDocUp, true);
+                document.addEventListener("pointercancel", ctrlDocUp, true);
+
+                // Held long enough to mean rearrange rather than press. Longer
+                // than the settings editor, because these are live controls and
+                // picking one up by accident would be worse than a missed drag
+                ctrlHoldTimer = setTimeout(function () {
+
+                    ctrlHoldTimer = null;
+                    ctrlDragName = name;
+                    ctrlSuppressClick = true;
+
+                    const r = btn.getBoundingClientRect();
+
+                    ctrlGhostDX = ctrlStartX - r.left;
+                    ctrlGhostDY = ctrlStartY - r.top;
+
+                    ctrlGhost = btn.cloneNode(true);
+                    ctrlGhost.style.position = "fixed";
+                    ctrlGhost.style.left = r.left + "px";
+                    ctrlGhost.style.top = r.top + "px";
+                    ctrlGhost.style.width = r.width + "px";
+                    ctrlGhost.style.height = r.height + "px";
+                    ctrlGhost.style.margin = "0";
+                    ctrlGhost.style.pointerEvents = "none";
+                    ctrlGhost.style.zIndex = "2147483647";
+                    ctrlGhost.style.transform = "scale(1.08)";
+                    ctrlGhost.style.boxShadow = "0 6px 16px rgba(0,0,0,0.55)";
+
+                    document.body.appendChild(ctrlGhost);
+
+                    btn.style.opacity = "0.3";
+                }, 550);
+            });
+        }
+    }
+
     // Toggle between play and pause for the current song
     function togglePlayPause() {
 
@@ -8513,6 +8761,7 @@
         updateFeedButton();
 
         applyControlOrder();
+        enableControlRowDragging();
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(seekRow);
@@ -10047,9 +10296,11 @@
 
             const published = song.publish_state === 1;
 
+            // Fixed width, so the badge column lines up and the title beside it
+            // keeps the same room whichever word the badge happens to carry
             const badge = document.createElement("span");
-            badge.textContent = published ? "published" : "draft";
-            badge.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;font-size:11px;line-height:16px;"
+            badge.textContent = published ? "public" : "draft";
+            badge.style.cssText = "flex:0 0 auto;width:46px;margin-left:6px;padding:0;border-radius:4px;font-size:11px;line-height:16px;text-align:center;"
                 + (published
                     ? "background:#1f3a2a;color:#7fd6a0"
                     : "background:#3a3a42;color:#bbb");
