@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.10";
+    const VERSION = "1.4.5.11";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5316,17 +5316,20 @@
             return iconAll();
         }
 
-        const glyphs = {
-            prev: "\u23EE",
-            play: "\u25B6",
-            stop: "\u23F9",
-            next: "\u23ED",
-            published: "\u2713"
+        const drawn = {
+            prev: iconPrev,
+            play: iconPlay,
+            stop: iconStop,
+            next: iconNext
         };
+
+        if (drawn[name]) {
+            return drawn[name]();
+        }
 
         const span = document.createElement("span");
 
-        span.textContent = glyphs[name] || "?";
+        span.textContent = name === "published" ? "\u2713" : "?";
         span.style.cssText = "font-size:18px;line-height:1";
 
         return span;
@@ -6055,7 +6058,8 @@
         const playing = audio && !audio.paused && audio.src;
 
         // Pause glyph while playing, play glyph while paused
-        playPauseBtn.textContent = playing ? "\u23F8" : "\u25B6";
+        playPauseBtn.textContent = "";
+        playPauseBtn.appendChild(playing ? iconPause() : iconPlay());
 
         if ("mediaSession" in navigator) {
 
@@ -8779,7 +8783,7 @@
         // into the row and in which order. Previous and next are off by
         // default because the album art swipe already does that job, and fewer
         // buttons means a much larger target for each, which matters in a car
-        playPauseBtn = makeIconButton("\u25B6", "Play / Pause", togglePlayPause);
+        playPauseBtn = makeIconButton(iconPlay(), "Play / Pause", togglePlayPause);
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
 
@@ -8806,10 +8810,10 @@
         });
 
         controlButtons = {
-            prev: makeIconButton("\u23EE", "Previous", playPrev),
+            prev: makeIconButton(iconPrev(), "Previous", playPrev),
             play: playPauseBtn,
-            stop: makeIconButton("\u23F9", "Stop", stopPlay),
-            next: makeIconButton("\u23ED", "Next", playNext),
+            stop: makeIconButton(iconStop(), "Stop", stopPlay),
+            next: makeIconButton(iconNext(), "Next", playNext),
             shuffle: shuffleBtn,
             repeat: repeatBtn,
             published: publishedCtrlBtn,
@@ -9948,6 +9952,76 @@
         });
 
         return svg;
+    }
+
+    // Transport icons, drawn as solid shapes rather than taken from the font.
+    // The Unicode media characters are emoji on most phones, so they arrive in
+    // the vendor colours and at the vendor weight, which is why the row looked
+    // different on every device. These are filled with currentColor instead, so
+    // they follow the button like every other icon here
+    function makeFilledIcon(shapes, size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        const s = size || 20;
+
+        svg.setAttribute("width", String(s));
+        svg.setAttribute("height", String(s));
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "currentColor");
+        svg.setAttribute("stroke", "none");
+
+        shapes.forEach(function (shape) {
+
+            const el = document.createElementNS(ns, shape[0]);
+            const attrs = shape[1];
+
+            Object.keys(attrs).forEach(function (key) {
+                el.setAttribute(key, attrs[key]);
+            });
+
+            svg.appendChild(el);
+        });
+
+        return svg;
+    }
+
+    function iconPlay() {
+
+        return makeFilledIcon([
+            ["path", { d: "M8 5.2v13.6a1 1 0 0 0 1.53.85l10.7-6.8a1 1 0 0 0 0-1.7L9.53 4.35A1 1 0 0 0 8 5.2z" }]
+        ]);
+    }
+
+    function iconPause() {
+
+        return makeFilledIcon([
+            ["rect", { x: "7", y: "5", width: "3.6", height: "14", rx: "1.1" }],
+            ["rect", { x: "13.4", y: "5", width: "3.6", height: "14", rx: "1.1" }]
+        ]);
+    }
+
+    function iconStop() {
+
+        return makeFilledIcon([
+            ["rect", { x: "6.5", y: "6.5", width: "11", height: "11", rx: "1.6" }]
+        ]);
+    }
+
+    function iconPrev() {
+
+        return makeFilledIcon([
+            ["rect", { x: "5", y: "5.5", width: "2.6", height: "13", rx: "1.1" }],
+            ["path", { d: "M19 6.6v10.8a1 1 0 0 1-1.54.84l-8.2-5.4a1 1 0 0 1 0-1.68l8.2-5.4A1 1 0 0 1 19 6.6z" }]
+        ]);
+    }
+
+    function iconNext() {
+
+        return makeFilledIcon([
+            ["path", { d: "M5 6.6v10.8a1 1 0 0 0 1.54.84l8.2-5.4a1 1 0 0 0 0-1.68l-8.2-5.4A1 1 0 0 0 5 6.6z" }],
+            ["rect", { x: "16.4", y: "5.5", width: "2.6", height: "13", rx: "1.1" }]
+        ]);
     }
 
     // Named action icons, one builder each so a fresh node is returned per call
