@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.31";
+    const VERSION = "1.4.5.32";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -289,6 +289,12 @@
 
     // Object URL of the blob currently feeding the audio element, for cleanup
     let currentObjectUrl = null;
+
+    // A playable URL prepared for the song coming up next, resolved from the
+    // cache while the current song is still playing. Starting the next song in
+    // the background only works if play is called without waiting on anything
+    // first, and this is what makes that possible even with no signal
+    let nextReady = null;
 
     // Incremented on each play, lets a slow blob fetch know it is now stale
     let playToken = 0;
@@ -3057,6 +3063,66 @@
         return direct;
     }
 
+    // Throw away a prepared next URL, releasing its blob
+    function dropNextReady() {
+
+        if (nextReady && nextReady.url && nextReady.url.indexOf("blob:") === 0) {
+            URL.revokeObjectURL(nextReady.url);
+        }
+
+        nextReady = null;
+    }
+
+    // Prepare a URL for the song that plays next, from the cache when it is
+    // there. Done ahead of time so the moment the current song ends the next
+    // can be started synchronously, which the background requires
+    async function prepareNextReady() {
+
+        const pos = queuePos + 1;
+
+        if (pos >= queue.length || !queue[pos]) {
+
+            dropNextReady();
+            return;
+        }
+
+        const song = queue[pos];
+
+        if (nextReady && nextReady.song_id === song.song_id) {
+            return;
+        }
+
+        dropNextReady();
+
+        const direct = songUrl(song);
+
+        if (!direct) {
+            return;
+        }
+
+        try {
+            const store = await caches.open(AUDIO_CACHE);
+            const resp = await store.match(direct);
+
+            if (!resp) {
+                return;
+            }
+
+            const blob = await resp.blob();
+
+            // The queue may have moved on while the blob was being read
+            if (queuePos + 1 < queue.length && queue[queuePos + 1]
+                && queue[queuePos + 1].song_id === song.song_id) {
+
+                nextReady = { song_id: song.song_id, url: URL.createObjectURL(blob) };
+
+            } else {
+                URL.revokeObjectURL(URL.createObjectURL(blob));
+            }
+        } catch (e) {
+        }
+    }
+
     // Ensure a song mp3 is stored in the cache, returns true on success
     async function fetchToCache(song) {
 
@@ -3829,6 +3895,10 @@
     // Sequential keeps the Mureka order, shuffle randomizes it
     function buildQueue(startId) {
 
+        // The song after this one is about to change, so anything prepared
+        // for the old next is no longer wanted
+        dropNextReady();
+
         let songs = orderedSongs().filter(passesFilters);
 
         // If the chosen start song is hidden by the filter, fall back to the full
@@ -4091,6 +4161,8 @@
     // Applies the vocals filter and shuffle mode, then refreshes caching and art
     // Does nothing when nothing is playing, the next play picks up the changes
     function rebuildUpcoming() {
+
+        dropNextReady();
 
         if (queuePos < 0 || queuePos >= queue.length) {
             return;
@@ -4719,11 +4791,26 @@
 
         // Offline the direct stream cannot work, so fall through to the cache
         // path below, which serves the stored copy and keeps playback going
-        if (settings.directAudio && navigator.onLine !== false) {
+        // A URL prepared while the previous song played needs no waiting at
+        // all, so it is the first choice, and it works with no signal since it
+        // came out of the cache
+        if (nextReady && nextReady.song_id === song.song_id) {
+
+            const ready = nextReady.url;
+
+            nextReady = null;
+            setCurrentSrc(ready);
+            startAudioPlayback();
+
+        } else if (settings.directAudio && (navigator.onLine !== false || document.hidden)) {
 
             // songUrl is synchronous, so the source is set and play is called
             // with the user activation still valid. iOS drops that token across
-            // an await, which silently rejects the play and blocks a resume
+            // an await, which silently rejects the play and blocks a resume.
+            // Hidden, this is tried even when the browser claims to be offline:
+            // that flag flickers on a drive, and a direct attempt that fails is
+            // still better than an awaited path that is refused for certain
+
             const direct = songUrl(song);
 
             if (!direct) {
@@ -5007,6 +5094,10 @@
     // Cache the next songs in the queue so playback does not wait on the network
     async function prefetchNext() {
 
+        // Needs no network, only the cache, so it happens before the online
+        // check and even when there is no signal
+        await prepareNextReady();
+
         // Nothing to gain from queueing requests that cannot succeed
         if (navigator.onLine === false) {
             return;
@@ -5040,8 +5131,14 @@
             const ok = await fetchToCache(song);
 
             if (ok) {
+
                 cachedIds.add(song.song_id);
                 renderList();
+
+                // The immediate next song just became available from the cache
+                if (i === 1) {
+                    await prepareNextReady();
+                }
             }
         }
     }
@@ -5111,6 +5208,8 @@
 
     // Stop playback and clear the queue
     function stopPlay() {
+
+        dropNextReady();
 
         // This pause is deliberate, so the pause listener must not take the
         // interruption path and re-send now playing for a song being stopped
