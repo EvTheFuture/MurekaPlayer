@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.2";
+    const VERSION = "1.4.5.4";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -343,6 +343,24 @@
     let pullEl = null;
     let toTopBtn = null;
 
+    // Rows are built lazily as the list is scrolled. These hold what the list
+    // would show, how many rows of it exist as elements, and the per render
+    // facts each row needs. A library of thousands of songs must not become
+    // thousands of live elements on every redraw, which is what was running
+    // the phone out of memory
+    let lazyRows = [];
+    let lazyRendered = 0;
+    let lazyKeep = 0;
+    let lazyKey = "";
+    let lazyState = null;
+
+    // How many rows go in at a time
+    const RENDER_CHUNK = 120;
+
+    // A jump to either end scrolls smoothly for a while, and none of that
+    // scrolling is the user, so the edge button must not react to it
+    let edgeJumpUntil = 0;
+
     // Direction aware scroll button state
     let toTopDir = "up";
     let toTopTimer = 0;
@@ -376,10 +394,13 @@
     // icon can follow the state
     let fullscreenButton = null;
 
-    // The transport row and the six buttons it can hold, keyed by the names
-    // used in the controlOrder setting
+    // The transport row and the buttons it can hold, keyed by the names used
+    // in the controlOrder setting
     let controlRowEl = null;
     let controlButtons = {};
+
+    // The published or all toggle when placed in the transport row
+    let publishedCtrlBtn = null;
 
     // Timestamp of the last header click, so minimize needs a double click
     let lastHeaderClickT = 0;
@@ -636,7 +657,7 @@
 
             for (const s of songs) {
 
-                if (!s || s.song_id === undefined || s.song_id === null || known.has(s.song_id)) {
+                if (!isUsableSong(s) || known.has(s.song_id)) {
                     continue;
                 }
 
@@ -1268,6 +1289,18 @@
         }
     }
 
+    // A song still being generated comes back with no length yet. It has no
+    // audio to play and its details are not final, so it is skipped on the way
+    // into the library and picked up by a later load once it has finished
+    function isUsableSong(s) {
+
+        if (!s || s.song_id === undefined || s.song_id === null) {
+            return false;
+        }
+
+        return typeof s.duration_milliseconds === "number" && s.duration_milliseconds > 0;
+    }
+
     // Keep only the fields we actually need, to save space
     // description is not used anywhere, so it is dropped
     function trim(s) {
@@ -1808,6 +1841,12 @@
 
             for (const s of songs) {
 
+                // Still generating, so it has no audio to play and its details
+                // are not final. A later load picks it up once it is finished
+                if (!isUsableSong(s)) {
+                    continue;
+                }
+
                 const existing = known.get(s.song_id);
 
                 if (!existing) {
@@ -1885,6 +1924,12 @@
         const baseSongs = cache.songs.slice();
 
         const fresh = [];
+
+        // Every song id the server returned, including ones still generating
+        // that are not added to the list. A rescan prunes what it did not see,
+        // and an unfinished song is very much still there
+        const seen = new Set();
+
         let cursor = null;
         let knownStreak = 0;
         let newCount = 0;
@@ -1921,6 +1966,14 @@
             }
 
             for (const s of songs) {
+
+                // Still generating, so leave it out of the list. It is added to
+                // seen anyway, otherwise a rescan would treat it as deleted
+                if (!isUsableSong(s)) {
+
+                    seen.add(s.song_id);
+                    continue;
+                }
 
                 if (known.has(s.song_id)) {
                     knownStreak += 1;
@@ -1995,9 +2048,11 @@
 
             // Everything the server still has was just seen, so anything left
             // in the cache was deleted upstream. Drop it and its stored data
-            const live = new Set(fresh.map(function (s) {
-                return s.song_id;
-            }));
+            const live = new Set(seen);
+
+            for (const s of fresh) {
+                live.add(s.song_id);
+            }
 
             const gone = cache.songs.filter(function (s) {
                 return !live.has(s.song_id);
@@ -2125,6 +2180,20 @@
             feedButton.labelEl.textContent = publishFilter === "published"
                 ? "Published"
                 : "All";
+        }
+
+        if (publishedCtrlBtn) {
+
+            const onlyPublished = publishFilter === "published";
+
+            // A tick for published only, an open circle for everything
+            publishedCtrlBtn.textContent = onlyPublished ? "\u2713" : "\u25CB";
+            publishedCtrlBtn.title = onlyPublished ? "Showing published, tap for all" : "Showing all, tap for published";
+
+            // Greyed and inert while browsing a creator
+            publishedCtrlBtn.style.opacity = creatorSource ? "0.35" : "1";
+            publishedCtrlBtn.style.cursor = creatorSource ? "default" : "pointer";
+            publishedCtrlBtn.disabled = !!creatorSource;
         }
 
         updateSourceLabel();
@@ -3493,7 +3562,17 @@
             return;
         }
 
+        // The end of the list only exists once every row has been built
+        if (toTopDir === "down") {
+            renderMoreRows(Infinity);
+        }
+
         const target = toTopDir === "down" ? listEl.scrollHeight : 0;
+
+        // The button has done its job, and the smooth scroll that follows is
+        // not the user, so it must not bring the button straight back
+        fadeToTopBtn();
+        edgeJumpUntil = Date.now() + 2500;
 
         listEl.scrollTo({ top: target, behavior: "smooth" });
     }
@@ -4038,7 +4117,15 @@
             applyDetail(song, stored);
         }
 
-        if (detailIsFresh(stored)) {
+        // A stored entry with no lyrics for a song that sings is suspect. The
+        // detail may have been fetched while the song was still being made,
+        // before its lyrics existed, and it would then sit in the store for
+        // hours looking fresh. Ask again rather than trust it
+        const lyricsMissing = stored
+            && (!Array.isArray(stored.lyrics) || stored.lyrics.length === 0)
+            && !isInstrumental(song);
+
+        if (detailIsFresh(stored) && !lyricsMissing) {
             return;
         }
 
@@ -5155,7 +5242,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published"];
 
     // A fresh icon for the editor, the real buttons keep their own nodes
     function controlChipIcon(name) {
@@ -5172,7 +5259,8 @@
             prev: "\u23EE",
             play: "\u25B6",
             stop: "\u23F9",
-            next: "\u23ED"
+            next: "\u23ED",
+            published: "\u2713"
         };
 
         const span = document.createElement("span");
@@ -8400,14 +8488,29 @@
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
 
+        // Flips between published only and every song. Greyed out while a
+        // creator is being browsed, since another creator only ever exposes
+        // published songs, so the toggle would have nothing to switch
+        publishedCtrlBtn = makeIconButton("\u2713", "Published / All", function () {
+
+            if (creatorSource) {
+                return;
+            }
+
+            switchFeed();
+        });
+
         controlButtons = {
             prev: makeIconButton("\u23EE", "Previous", playPrev),
             play: playPauseBtn,
             stop: makeIconButton("\u23F9", "Stop", stopPlay),
             next: makeIconButton("\u23ED", "Next", playNext),
             shuffle: shuffleBtn,
-            repeat: repeatBtn
+            repeat: repeatBtn,
+            published: publishedCtrlBtn
         };
+
+        updateFeedButton();
 
         applyControlOrder();
 
@@ -8621,13 +8724,30 @@
             const delta = top - lastListScroll;
             lastListScroll = top;
 
+            // Build more rows once the scroll gets near what has been built
+            if (top + listEl.clientHeight > listEl.scrollHeight - 800) {
+                renderMoreRows(RENDER_CHUNK);
+            }
+
             // Ignore programmatic scrolls, view switches and song changes
-            if (Date.now() - programmaticScrollAt < 400) {
+            if (Date.now() - programmaticScrollAt < 400 || Date.now() < edgeJumpUntil) {
                 return;
             }
 
             // Ignore jitter and lists too short to be worth jumping around
             if (Math.abs(delta) < 3 || listEl.scrollHeight - listEl.clientHeight < 40) {
+                return;
+            }
+
+            // Nothing to jump to once the list is already at the edge the arrow
+            // would point at, so the button goes rather than lingers
+            const atTop = top <= 4;
+            const atBottom = top + listEl.clientHeight >= listEl.scrollHeight - 4
+                && lazyRendered >= lazyRows.length;
+
+            if ((delta > 0 && atBottom) || (delta < 0 && atTop)) {
+
+                fadeToTopBtn();
                 return;
             }
 
@@ -10018,6 +10138,58 @@
     }
 
     // Render any list of songs, the number shown is always the Mureka position
+    // Build the next rows of the list as elements. Called for the first chunk
+    // on every redraw and again whenever the scroll gets near the bottom
+    function renderMoreRows(count) {
+
+        if (!listEl || !lazyState) {
+            return;
+        }
+
+        const end = Math.min(lazyRows.length, lazyRendered + count);
+
+        if (end <= lazyRendered) {
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+
+        for (let k = lazyRendered; k < end; k += 1) {
+
+            const entry = lazyRows[k];
+            const song = entry.song;
+
+            let isPlaying;
+            let dimmed;
+
+            if (lazyState.byQueueIndex) {
+
+                isPlaying = entry.index === queuePos;
+
+                // Grey out already played songs, and in repeat one the upcoming
+                // ones too, since playback stays on the current track
+                dimmed = entry.index < queuePos || (entry.index > queuePos && repeatMode === "one");
+
+            } else {
+
+                isPlaying = song.song_id === lazyState.playingId;
+                dimmed = false;
+            }
+
+            const item = buildSongRow(song, lazyState.numberById.get(song.song_id), isPlaying, dimmed);
+
+            if (isPlaying) {
+                playingItemEl = item;
+            }
+
+            frag.appendChild(item);
+        }
+
+        listEl.appendChild(frag);
+        lazyRendered = end;
+        lazyKeep = Math.max(lazyKeep, end);
+    }
+
     function renderSongs(songs, fromQueue) {
 
         if (!listEl) {
@@ -10064,13 +10236,16 @@
         playingItemEl = null;
 
         const query = searchQuery;
-        let shown = 0;
 
         // The queue can hold the same song more than once, played earlier and
         // queued again, so the queue view decides played, current and upcoming
         // by the row position in the queue rather than by song id, which would
         // otherwise grey out a replayed song that is actually still upcoming
         const byQueueIndex = fromQueue === true;
+
+        // Decide what the list shows without touching the DOM. Rows are built
+        // afterwards, only as far down as is needed
+        const visible = [];
 
         songs.forEach(function (song, i) {
 
@@ -10087,33 +10262,43 @@
                 return;
             }
 
-            shown += 1;
-
-            let isPlaying;
-            let dimmed;
-
-            if (byQueueIndex) {
-
-                isPlaying = i === queuePos;
-
-                // Grey out already played songs, and in repeat one the upcoming
-                // ones too, since playback stays on the current track
-                dimmed = i < queuePos || (i > queuePos && repeatMode === "one");
-
-            } else {
-
-                isPlaying = song.song_id === playingId;
-                dimmed = false;
-            }
-
-            const item = buildSongRow(song, numberById.get(song.song_id), isPlaying, dimmed);
-
-            if (isPlaying) {
-                playingItemEl = item;
-            }
-
-            listEl.appendChild(item);
+            visible.push({ song: song, index: i });
         });
+
+        const shown = visible.length;
+
+        // A different view, filter or search starts from the top again. The
+        // same one keeps as many rows as had been built, so a redraw does not
+        // pull the list up from under someone who had scrolled down
+        const key = [listView, query, publishFilter, settings.vocalFilter,
+            activePlaylist ? activePlaylist.name : "", creatorSource ? creatorSource.user_id : ""].join("|");
+
+        if (key !== lazyKey) {
+
+            lazyKey = key;
+            lazyKeep = 0;
+        }
+
+        lazyRows = visible;
+        lazyRendered = 0;
+        lazyState = { byQueueIndex: byQueueIndex, playingId: playingId, numberById: numberById };
+
+        // Always build far enough to include the playing song, so it can be
+        // scrolled into view, and at least one chunk
+        let target = Math.max(RENDER_CHUNK, lazyKeep);
+
+        const playingAt = visible.findIndex(function (entry) {
+
+            return byQueueIndex
+                ? entry.index === queuePos
+                : entry.song.song_id === playingId;
+        });
+
+        if (playingAt >= 0) {
+            target = Math.max(target, playingAt + Math.floor(RENDER_CHUNK / 2));
+        }
+
+        renderMoreRows(target);
 
         // Update the counts line, shown rows against the library total and queue
         // An active creator and playlist lead the line so the scope stays clear
@@ -11398,6 +11583,9 @@
 
         creatorButton.style.background = active ? "#48e1eb" : "#444";
         creatorButton.style.color = active ? "#000" : "#fff";
+
+        // The published toggle greys out while a creator is being browsed
+        updateFeedButton();
     }
 
     // Browse another creator published songs, each creator keeps its own cache
