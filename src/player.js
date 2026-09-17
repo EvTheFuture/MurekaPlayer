@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.30";
+    const VERSION = "1.4.5.31";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -803,7 +803,7 @@
             bpmEnabled: false,
             bpmMin: 0,
             bpmMax: 0,
-            bpmHideUnknown: false,
+            bpmUnknown: "any",
             carBlackout: false,
             carGate: false,
             carAutoBlack: 20,
@@ -885,7 +885,9 @@
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
                     bpmMax: typeof parsed.bpmMax === "number" ? parsed.bpmMax : 0,
-                    bpmHideUnknown: parsed.bpmHideUnknown === true,
+                    bpmUnknown: (parsed.bpmUnknown === "hide" || parsed.bpmUnknown === "only")
+                        ? parsed.bpmUnknown
+                        : (parsed.bpmHideUnknown === true ? "hide" : "any"),
                     controlOrder: typeof parsed.controlOrder === "string" && parsed.controlOrder
                         ? parsed.controlOrder
                         : "repeat,shuffle,stop,play",
@@ -1869,9 +1871,29 @@
             function () { return settings.bpmMax; },
             function (v) { settings.bpmMax = v; applySmartFilters(); }, 0, 300, 5);
 
-        const bpmUnknownRow = makeBoolRow("Hide songs with no BPM",
-            function () { return settings.bpmHideUnknown; },
-            function (v) { settings.bpmHideUnknown = v; applySmartFilters(); });
+        const bpmUnknownLabel = document.createElement("div");
+        bpmUnknownLabel.textContent = "Songs with no BPM";
+        bpmUnknownLabel.style.cssText = "color:#bbb";
+
+        const bpmUnknownRow = document.createElement("div");
+        bpmUnknownRow.style.cssText = "display:flex;gap:6px";
+
+        const unknownBtns = {};
+
+        const makeUnknownBtn = function (mode, label) {
+
+            const btn = makeButton(label, "#333", "#fff", function () {
+                settings.bpmUnknown = mode;
+                applySmartFilters();
+            });
+
+            unknownBtns[mode] = btn;
+            bpmUnknownRow.appendChild(btn);
+        };
+
+        makeUnknownBtn("any", "Include");
+        makeUnknownBtn("hide", "Hide");
+        makeUnknownBtn("only", "Only these");
 
         const genreList = buildTagList("genres", function () {
             return settings.tagGenres;
@@ -1890,7 +1912,7 @@
             settings.tagMoods = [];
             settings.bpmMin = 0;
             settings.bpmMax = 0;
-            settings.bpmHideUnknown = false;
+            settings.bpmUnknown = "any";
             settings.bpmEnabled = false;
             applySmartFilters();
         }));
@@ -1916,9 +1938,23 @@
             // The tempo controls are only meaningful once tempo filtering is on
             const showBpm = settings.bpmEnabled ? "flex" : "none";
 
-            bpmMinRow.style.display = showBpm;
-            bpmMaxRow.style.display = showBpm;
+            bpmUnknownLabel.style.display = settings.bpmEnabled ? "" : "none";
             bpmUnknownRow.style.display = showBpm;
+
+            // A range is meaningless while only the songs without a tempo are
+            // wanted, so those two rows step aside
+            const showRange = settings.bpmEnabled && settings.bpmUnknown !== "only";
+
+            bpmMinRow.style.display = showRange ? "flex" : "none";
+            bpmMaxRow.style.display = showRange ? "flex" : "none";
+
+            for (const mode of Object.keys(unknownBtns)) {
+
+                const on = settings.bpmUnknown === mode;
+
+                unknownBtns[mode].style.background = on ? "#48e1eb" : "#333";
+                unknownBtns[mode].style.color = on ? "#000" : "#fff";
+            }
 
             const sortByCount = settings.tagSort !== "alpha";
 
@@ -1963,6 +1999,7 @@
         tagSheetEl.appendChild(bpmEnableRow);
         tagSheetEl.appendChild(bpmMinRow);
         tagSheetEl.appendChild(bpmMaxRow);
+        tagSheetEl.appendChild(bpmUnknownLabel);
         tagSheetEl.appendChild(bpmUnknownRow);
         tagSheetEl.appendChild(countEl);
         tagSheetEl.appendChild(countHintEl);
@@ -2066,7 +2103,7 @@
             return false;
         }
 
-        return settings.bpmHideUnknown || settings.bpmMin > 0 || settings.bpmMax > 0;
+        return settings.bpmUnknown !== "any" || settings.bpmMin > 0 || settings.bpmMax > 0;
     }
 
     // Whether the song carries the ticked tags. Match all needs every ticked
@@ -2122,8 +2159,14 @@
         const bpm = effectiveBpm(song);
         const known = bpm > 0;
 
+        // Only, for finding the songs still missing a tempo so it can be
+        // supplied by hand. Hide, for keeping them out of a tempo selection
         if (!known) {
-            return !settings.bpmHideUnknown;
+            return settings.bpmUnknown !== "hide";
+        }
+
+        if (settings.bpmUnknown === "only") {
+            return false;
         }
 
         if (settings.bpmMin > 0 && bpm < settings.bpmMin) {
