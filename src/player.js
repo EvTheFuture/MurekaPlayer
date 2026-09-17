@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.15";
+    const VERSION = "1.4.5.23";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -401,6 +401,9 @@
 
     // The published or all toggle when placed in the transport row
     let publishedCtrlBtn = null;
+
+    // The opener for the smart filter sheet, lit while a filter is on
+    let smartFilterBtn = null;
 
     // The vocals, instrumental or all cycle when placed in the transport row
     let vocalsCtrlBtn = null;
@@ -764,6 +767,15 @@
             artOnResume: false,
             controlOrder: "repeat,shuffle,stop,play",
             controlLabels: false,
+            tagGenres: [],
+            tagMoods: [],
+            tagMode: "and",
+            tagSort: "count",
+            smartEnabled: true,
+            bpmEnabled: false,
+            bpmMin: 0,
+            bpmMax: 0,
+            bpmHideUnknown: false,
             carBlackout: false,
             carGate: false,
             carAutoBlack: 20,
@@ -837,6 +849,15 @@
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
                     controlLabels: parsed.controlLabels === true,
+                    tagGenres: Array.isArray(parsed.tagGenres) ? parsed.tagGenres : [],
+                    tagMoods: Array.isArray(parsed.tagMoods) ? parsed.tagMoods : [],
+                    tagMode: parsed.tagMode === "or" ? "or" : "and",
+                    tagSort: parsed.tagSort === "alpha" ? "alpha" : "count",
+                    smartEnabled: parsed.smartEnabled !== false,
+                    bpmEnabled: parsed.bpmEnabled === true,
+                    bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
+                    bpmMax: typeof parsed.bpmMax === "number" ? parsed.bpmMax : 0,
+                    bpmHideUnknown: parsed.bpmHideUnknown === true,
                     controlOrder: typeof parsed.controlOrder === "string" && parsed.controlOrder
                         ? parsed.controlOrder
                         : "repeat,shuffle,stop,play",
@@ -1457,9 +1478,515 @@
         return song.publish_state === 1;
     }
 
+    // The smart filter sheet, built the first time it is opened
+    let tagSheetEl = null;
+    let tagSheetOpen = false;
+    let tagSheetRefresh = null;
+
+    // How many of each list are shown as top used before the rest
+    const TAG_TOP_COUNT = 10;
+
+    // Everything a tag or bpm change has to touch, in one place
+    function applySmartFilters() {
+
+        saveSettings();
+        updateFilterButtons();
+        updateSmartFilterButton();
+        updateViewMenuBar();
+        renderList();
+        rebuildUpcoming();
+
+        if (tagSheetRefresh) {
+            tagSheetRefresh();
+        }
+    }
+
+    function openTagSheet() {
+
+        if (!tagSheetEl) {
+            buildTagSheet();
+        }
+
+        closeViewMenu();
+        tagSheetOpen = true;
+        tagSheetEl.style.display = "flex";
+
+        if (tagSheetRefresh) {
+            tagSheetRefresh();
+        }
+    }
+
+    function closeTagSheet() {
+
+        tagSheetOpen = false;
+
+        if (tagSheetEl) {
+            tagSheetEl.style.display = "none";
+        }
+    }
+
+    // A tag list. Rows are drawn rather than using a native checkbox, which
+    // styles differently on every platform and was awkward to hit, and the
+    // whole row is the target
+    function buildTagList(kind, getSelected) {
+
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
+
+        const heading = document.createElement("div");
+        heading.textContent = kind === "genres" ? "Genres" : "Moods";
+        heading.style.cssText = "color:#bbb";
+
+        const box = document.createElement("div");
+        box.style.cssText = "max-height:220px;overflow:auto;display:flex;flex-direction:column;border:1px solid #3a3a42;border-radius:6px;padding:4px;background:#26262c";
+
+        const makeRow = function (name, total) {
+
+            const on = getSelected().indexOf(name) !== -1;
+
+            const row = document.createElement("div");
+            row.style.cssText = "display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:6px;cursor:pointer;"
+                + (on ? "background:#2f3a3c" : "background:transparent");
+
+            const tick = document.createElement("span");
+            tick.textContent = on ? "\u2713" : "";
+            tick.style.cssText = "flex:0 0 auto;width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;font:700 13px/1 sans-serif;"
+                + (on
+                    ? "background:#48e1eb;color:#000;border:1px solid #48e1eb"
+                    : "background:transparent;color:transparent;border:1px solid #4a4a54");
+
+            const text = document.createElement("span");
+            text.textContent = name;
+            text.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                + (on ? "color:#48e1eb" : "color:#fff");
+
+            const num = document.createElement("span");
+            num.textContent = String(total);
+            num.style.cssText = "flex:0 0 auto;color:#888;font-variant-numeric:tabular-nums";
+
+            row.appendChild(tick);
+            row.appendChild(text);
+            row.appendChild(num);
+
+            row.addEventListener("click", function () {
+
+                const list = getSelected();
+                const at = list.indexOf(name);
+
+                if (at === -1) {
+                    list.push(name);
+                } else {
+                    list.splice(at, 1);
+                }
+
+                applySmartFilters();
+            });
+
+            return row;
+        };
+
+        const render = function () {
+
+            const map = tagIndex()[kind];
+            const all = Array.from(map.entries());
+
+            // One flat list. There are few enough tags that splitting them into
+            // most used and the rest only made them harder to find
+            if (settings.tagSort === "alpha") {
+
+                all.sort(function (a, b) {
+                    return a[0].localeCompare(b[0]);
+                });
+
+            } else {
+
+                all.sort(function (a, b) {
+                    return b[1] - a[1] || a[0].localeCompare(b[0]);
+                });
+            }
+
+            box.textContent = "";
+
+            if (all.length === 0) {
+
+                const empty = document.createElement("div");
+                empty.textContent = "No tags";
+                empty.style.cssText = "color:#888;padding:6px 4px";
+                box.appendChild(empty);
+
+                return;
+            }
+
+            for (const entry of all) {
+                box.appendChild(makeRow(entry[0], entry[1]));
+            }
+        };
+
+        wrap.appendChild(heading);
+        wrap.appendChild(box);
+
+        return { el: wrap, render: render };
+    }
+
+    function buildTagSheet() {
+
+        tagSheetEl = document.createElement("div");
+        tagSheetEl.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:#1d1d22",
+            "border-radius:10px",
+            "padding:12px",
+            "box-sizing:border-box",
+            "overflow:auto",
+            "display:none",
+            "flex-direction:column",
+            "gap:12px",
+            "z-index:8"
+        ].join(";");
+
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+        const heading = document.createElement("div");
+        heading.textContent = "Filters";
+        heading.style.cssText = "font-weight:600";
+
+        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeTagSheet);
+        doneBtn.style.flex = "0 0 auto";
+        doneBtn.style.padding = "6px 14px";
+
+        head.appendChild(heading);
+        head.appendChild(doneBtn);
+
+        // How many songs survive the current settings. Every change redraws
+        // this, so an over restrictive Match all is obvious while the sheet is
+        // still open rather than after closing it onto an empty list
+        const countEl = document.createElement("div");
+        countEl.style.cssText = "font-weight:600;font-size:15px";
+
+        const countHintEl = document.createElement("div");
+        countHintEl.style.cssText = "color:#888;font-size:12px;margin-top:-6px";
+
+        // Park the whole thing without losing what is ticked
+        const enableRow = makeBoolRow("Filters enabled",
+            function () { return settings.smartEnabled; },
+            function (v) { settings.smartEnabled = v; applySmartFilters(); });
+
+        // Match all or match any, across both lists
+        const modeRow = document.createElement("div");
+        modeRow.style.cssText = "display:flex;gap:6px";
+
+        const andBtn = makeButton("Match all", "#333", "#fff", function () {
+            settings.tagMode = "and";
+            applySmartFilters();
+        });
+
+        const orBtn = makeButton("Match any", "#333", "#fff", function () {
+            settings.tagMode = "or";
+            applySmartFilters();
+        });
+
+        modeRow.appendChild(andBtn);
+        modeRow.appendChild(orBtn);
+
+        // How the tag lists are ordered
+        const sortRow = document.createElement("div");
+        sortRow.style.cssText = "display:flex;gap:6px";
+
+        const countSortBtn = makeButton("Popularity", "#333", "#fff", function () {
+            settings.tagSort = "count";
+            applySmartFilters();
+        });
+
+        const alphaSortBtn = makeButton("A to Z", "#333", "#fff", function () {
+            settings.tagSort = "alpha";
+            applySmartFilters();
+        });
+
+        sortRow.appendChild(countSortBtn);
+        sortRow.appendChild(alphaSortBtn);
+
+        const bpmLabel = document.createElement("div");
+        bpmLabel.textContent = "Tempo";
+        bpmLabel.style.cssText = "color:#bbb";
+
+        const bpmEnableRow = makeBoolRow("Filter by tempo",
+            function () { return settings.bpmEnabled; },
+            function (v) { settings.bpmEnabled = v; applySmartFilters(); });
+
+        const bpmMinRow = makeStepperRow("Lowest BPM, 0 for no limit",
+            function () { return settings.bpmMin; },
+            function (v) { settings.bpmMin = v; applySmartFilters(); }, 0, 300, 5);
+
+        const bpmMaxRow = makeStepperRow("Highest BPM, 0 for no limit",
+            function () { return settings.bpmMax; },
+            function (v) { settings.bpmMax = v; applySmartFilters(); }, 0, 300, 5);
+
+        const bpmUnknownRow = makeBoolRow("Hide songs with no BPM",
+            function () { return settings.bpmHideUnknown; },
+            function (v) { settings.bpmHideUnknown = v; applySmartFilters(); });
+
+        const genreList = buildTagList("genres", function () {
+            return settings.tagGenres;
+        });
+
+        const moodList = buildTagList("moods", function () {
+            return settings.tagMoods;
+        });
+
+        const clearRow = document.createElement("div");
+        clearRow.style.cssText = "display:flex;gap:6px";
+
+        clearRow.appendChild(makeButton("Clear all filters", "#444", "#fff", function () {
+
+            settings.tagGenres = [];
+            settings.tagMoods = [];
+            settings.bpmMin = 0;
+            settings.bpmMax = 0;
+            settings.bpmHideUnknown = false;
+            settings.bpmEnabled = false;
+            applySmartFilters();
+        }));
+
+        // Changes already take effect as they are made, so this is the way out
+        // from the foot of the sheet without scrolling back up to Done
+        clearRow.appendChild(makeButton("Apply filters", "#48e1eb", "#000", function () {
+
+            applySmartFilters();
+            closeTagSheet();
+        }));
+
+        tagSheetRefresh = function () {
+
+            // The tempo controls are only meaningful once tempo filtering is on
+            const showBpm = settings.bpmEnabled ? "" : "none";
+
+            bpmMinRow.style.display = showBpm;
+            bpmMaxRow.style.display = showBpm;
+            bpmUnknownRow.style.display = showBpm;
+
+            const sortByCount = settings.tagSort !== "alpha";
+
+            countSortBtn.style.background = sortByCount ? "#48e1eb" : "#333";
+            countSortBtn.style.color = sortByCount ? "#000" : "#fff";
+            alphaSortBtn.style.background = sortByCount ? "#333" : "#48e1eb";
+            alphaSortBtn.style.color = sortByCount ? "#fff" : "#000";
+
+            // Measured over the songs that actually match, so the span
+            // describes the current selection rather than the whole library
+            const matching = cache.songs.filter(passesFilters);
+            const bounds = bpmBounds(matching);
+            const matches = matching.length;
+
+            countEl.textContent = matches === 0
+                ? "No songs match"
+                : matches + (matches === 1 ? " song matches" : " songs match");
+
+            countEl.style.color = matches === 0 ? "#ff8a8a" : "#48e1eb";
+
+            countHintEl.textContent = "of " + cache.songs.length + " in the library"
+                + (bounds.high > 0
+                    ? ", these span " + bounds.low + " to " + bounds.high + " BPM"
+                    : "");
+
+            const isAnd = settings.tagMode !== "or";
+
+            andBtn.style.background = isAnd ? "#48e1eb" : "#333";
+            andBtn.style.color = isAnd ? "#000" : "#fff";
+            orBtn.style.background = isAnd ? "#333" : "#48e1eb";
+            orBtn.style.color = isAnd ? "#fff" : "#000";
+
+            genreList.render();
+            moodList.render();
+        };
+
+        tagSheetEl.appendChild(head);
+        tagSheetEl.appendChild(enableRow);
+        tagSheetEl.appendChild(modeRow);
+        tagSheetEl.appendChild(sortRow);
+        tagSheetEl.appendChild(bpmLabel);
+        tagSheetEl.appendChild(bpmEnableRow);
+        tagSheetEl.appendChild(bpmMinRow);
+        tagSheetEl.appendChild(bpmMaxRow);
+        tagSheetEl.appendChild(bpmUnknownRow);
+        tagSheetEl.appendChild(countEl);
+        tagSheetEl.appendChild(countHintEl);
+        tagSheetEl.appendChild(genreList.el);
+        tagSheetEl.appendChild(moodList.el);
+        tagSheetEl.appendChild(clearRow);
+
+        panelEl.appendChild(tagSheetEl);
+    }
+
+    // The tag vocabulary, built from the library and rebuilt only when it
+    // changes. Counting every tag of every song on each render would be wasted
+    // work on a library of thousands
+    let tagIndexCache = null;
+    let tagIndexStamp = "";
+
+    function tagIndex() {
+
+        const stamp = cache.songs.length + ":" + cache.updated;
+
+        if (tagIndexCache && tagIndexStamp === stamp) {
+            return tagIndexCache;
+        }
+
+        const genres = new Map();
+        const moods = new Map();
+
+        const count = function (map, list) {
+
+            if (!Array.isArray(list)) {
+                return;
+            }
+
+            for (const raw of list) {
+
+                const name = String(raw || "").trim();
+
+                if (!name) {
+                    continue;
+                }
+
+                map.set(name, (map.get(name) || 0) + 1);
+            }
+        };
+
+        for (const song of cache.songs) {
+
+            count(genres, song.genres);
+            count(moods, song.moods);
+        }
+
+        tagIndexCache = { genres: genres, moods: moods };
+        tagIndexStamp = stamp;
+
+        return tagIndexCache;
+    }
+
+    // The lowest and highest bpm the library actually holds, so the range
+    // control covers the real spread instead of a guessed one
+    function bpmBounds(songs) {
+
+        const list = songs || cache.songs;
+
+        let low = 0;
+        let high = 0;
+
+        for (const song of list) {
+
+            const bpm = Number(song.bpm);
+
+            if (!isFinite(bpm) || bpm <= 0) {
+                continue;
+            }
+
+            if (low === 0 || bpm < low) {
+                low = bpm;
+            }
+
+            if (bpm > high) {
+                high = bpm;
+            }
+        }
+
+        return { low: Math.floor(low), high: Math.ceil(high) };
+    }
+
+    // True when any tag filter is set at all
+    function tagFilterActive() {
+
+        if (!settings.smartEnabled) {
+            return false;
+        }
+
+        return settings.tagGenres.length > 0 || settings.tagMoods.length > 0;
+    }
+
+    // True when the bpm range has been narrowed from the full spread
+    function bpmFilterActive() {
+
+        if (!settings.smartEnabled || !settings.bpmEnabled) {
+            return false;
+        }
+
+        return settings.bpmHideUnknown || settings.bpmMin > 0 || settings.bpmMax > 0;
+    }
+
+    // Whether the song carries the ticked tags. Match all needs every ticked
+    // tag present, match any needs one of them
+    function passesTagFilter(song) {
+
+        if (!tagFilterActive()) {
+            return true;
+        }
+
+        const has = function (list, name) {
+
+            if (!Array.isArray(list)) {
+                return false;
+            }
+
+            return list.some(function (raw) {
+                return String(raw || "").trim() === name;
+            });
+        };
+
+        const wanted = [];
+
+        for (const name of settings.tagGenres) {
+            wanted.push(has(song.genres, name));
+        }
+
+        for (const name of settings.tagMoods) {
+            wanted.push(has(song.moods, name));
+        }
+
+        if (settings.tagMode === "or") {
+
+            return wanted.some(function (hit) {
+                return hit;
+            });
+        }
+
+        return wanted.every(function (hit) {
+            return hit;
+        });
+    }
+
+    // Whether the song sits inside the chosen tempo range. A song with no bpm
+    // is kept unless it is explicitly hidden, so narrowing the range does not
+    // quietly drop everything the server never tagged
+    function passesBpmFilter(song) {
+
+        if (!bpmFilterActive()) {
+            return true;
+        }
+
+        const bpm = Number(song.bpm);
+        const known = isFinite(bpm) && bpm > 0;
+
+        if (!known) {
+            return !settings.bpmHideUnknown;
+        }
+
+        if (settings.bpmMin > 0 && bpm < settings.bpmMin) {
+            return false;
+        }
+
+        if (settings.bpmMax > 0 && bpm > settings.bpmMax) {
+            return false;
+        }
+
+        return true;
+    }
+
     function passesFilters(song) {
 
-        return passesVocalFilter(song) && passesPlaylist(song) && passesPublishFilter(song);
+        return passesVocalFilter(song) && passesPlaylist(song) && passesPublishFilter(song)
+            && passesTagFilter(song) && passesBpmFilter(song);
     }
 
     // How many songs the list is currently showing, filters applied
@@ -3807,6 +4334,44 @@
         vocalsCtrlBtn.style.color = on ? "#000" : "#fff";
     }
 
+    // A filter left on from last time must be visible, otherwise a short list
+    // looks like lost songs rather than a filter doing its job
+    function updateSmartFilterButton() {
+
+        if (!smartFilterBtn) {
+            return;
+        }
+
+        const on = tagFilterActive() || bpmFilterActive();
+
+        smartFilterBtn.style.background = on ? "#48e1eb" : "#333";
+        smartFilterBtn.style.color = on ? "#000" : "#fff";
+
+        const bits = [];
+
+        for (const name of settings.tagGenres) {
+            bits.push(name);
+        }
+
+        for (const name of settings.tagMoods) {
+            bits.push(name);
+        }
+
+        if (settings.bpmMin > 0 || settings.bpmMax > 0) {
+            bits.push((settings.bpmMin || "0") + " to " + (settings.bpmMax || "any") + " BPM");
+        }
+
+        const parked = !settings.smartEnabled
+            && (settings.tagGenres.length > 0 || settings.tagMoods.length > 0 || settings.bpmEnabled);
+
+        smartFilterBtn.labelEl.textContent = on
+            ? "Filters on"
+            : (parked ? "Filters off" : "Filters");
+        smartFilterBtn.title = on
+            ? "Filtering by " + bits.join(", ")
+            : "Filter by genre, mood and tempo";
+    }
+
     function updateFilterButtons() {
 
         Object.keys(filterButtons).forEach(function (value) {
@@ -3839,7 +4404,46 @@
             ? "Vocals"
             : (settings.vocalFilter === "instrumental" ? "Instrumental" : "All");
 
-        viewMenuBar.textContent = v + "  \u00B7  " + f + "  \u25BE";
+        // Name the smart filters on the bar itself. A short list with no reason
+        // on screen reads as lost songs, and this is the line the eye lands on
+        const parts = [v, f];
+
+        for (const name of settings.tagGenres) {
+            parts.push(name);
+        }
+
+        for (const name of settings.tagMoods) {
+            parts.push(name);
+        }
+
+        if (bpmFilterActive() && (settings.bpmMin > 0 || settings.bpmMax > 0)) {
+
+            parts.push((settings.bpmMin || 0) + " to "
+                + (settings.bpmMax > 0 ? settings.bpmMax : "any") + " BPM");
+        }
+
+        const filtering = tagFilterActive() || bpmFilterActive();
+
+        viewMenuBar.textContent = "";
+
+        // A funnel in front of the text while a smart filter is on, so an
+        // active filter is visible without reading the whole line
+        if (filtering) {
+
+            const mark = iconFilter();
+
+            mark.setAttribute("width", "13");
+            mark.setAttribute("height", "13");
+            mark.style.cssText = "flex:0 0 auto;color:#48e1eb";
+
+            viewMenuBar.appendChild(mark);
+        }
+
+        const label = document.createElement("span");
+
+        label.textContent = parts.join("  \u00B7  ") + "  \u25BE";
+
+        viewMenuBar.appendChild(label);
     }
 
     // The songs to show for the current view
@@ -8961,10 +9565,20 @@
 
         // Floating dropdown that holds the view and filter rows, opens over the
         // list without moving the content, just like the action dropdown
+        // Opens the smart filter sheet, tags and tempo
+        const smartRow = document.createElement("div");
+        smartRow.style.cssText = "display:flex;gap:6px";
+
+        smartFilterBtn = makeActionButton(iconFilter(), "Filters", "#333", "#fff", openTagSheet);
+        smartFilterBtn.title = "Filter by genre, mood and tempo";
+
+        smartRow.appendChild(smartFilterBtn);
+
         viewMenuEl = document.createElement("div");
         viewMenuEl.style.cssText = POPUP_CSS;
         viewMenuEl.appendChild(viewRow);
         viewMenuEl.appendChild(filterRow);
+        viewMenuEl.appendChild(smartRow);
 
         viewMenuEl.addEventListener("mousedown", function (ev) {
             ev.stopPropagation();
@@ -8982,6 +9596,13 @@
         viewMenuBar.style.flex = "none";
         viewMenuBar.style.width = "100%";
         viewMenuBar.style.marginTop = "6px";
+
+        // The funnel sits beside the text rather than in it, so the bar lays
+        // its contents out in a row
+        viewMenuBar.style.display = "flex";
+        viewMenuBar.style.alignItems = "center";
+        viewMenuBar.style.justifyContent = "center";
+        viewMenuBar.style.gap = "6px";
         viewMenuBar.style.textAlign = "center";
         viewMenuBar.title = "Choose the list view and filter";
 
@@ -9103,6 +9724,7 @@
         updateShuffleButton();
         updateViewButtons();
         updateFilterButtons();
+        updateSmartFilterButton();
         updateViewMenuBar();
 
         // A click outside a dropdown closes it, the dropdowns stop their own
@@ -10179,6 +10801,14 @@
         ]);
     }
 
+    // Funnel, for the smart filter sheet
+    function iconFilter() {
+
+        return makeSvgIcon([
+            ["polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" }]
+        ]);
+    }
+
     // Chevron up, for folding the player away to its header
     function iconFold() {
 
@@ -10702,12 +11332,15 @@
 
         } else {
 
-            // Rank over the songs actually shown, so the column runs 1 to n
-            // with no gaps, counting down from the top of the list
-            const shown = orderedSongs().filter(passesFilters);
-            const total = shown.length;
+            // Rank over the library, or over the published part of it when
+            // that is what is being shown. Deliberately not over the filtered
+            // list: a song must keep its number while tags, tempo, vocals, a
+            // playlist or a search narrow what is visible, otherwise the same
+            // song is numbered differently depending on what else is ticked
+            const scope = orderedSongs().filter(passesPublishFilter);
+            const total = scope.length;
 
-            shown.forEach(function (s, i) {
+            scope.forEach(function (s, i) {
                 numberById.set(s.song_id, total - i);
             });
         }
@@ -10784,7 +11417,16 @@
         // An active creator and playlist lead the line so the scope stays clear
         if (countsEl) {
 
-            let text = "Shown " + shown + " of " + cache.songs.length
+            // How many songs there are in total and how many of them are
+            // public, since the two answer different questions and the total
+            // alone says nothing about how much of the library is published
+            const publicTotal = cache.songs.filter(function (s) {
+                return s.publish_state === 1;
+            }).length;
+
+            let text = "Shown " + shown
+                + "  \u00B7  Total " + cache.songs.length
+                + "  \u00B7  Public " + publicTotal
                 + "  \u00B7  Queue " + queue.length;
 
             const scope = [];
