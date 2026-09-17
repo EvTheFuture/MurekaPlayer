@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.28";
+    const VERSION = "1.4.5.30";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1477,7 +1477,24 @@
             return;
         }
 
-        const value = Number(String(answer).trim());
+        const typed = String(answer).trim();
+
+        // Emptying the field is how a hand entered tempo is taken away again
+        if (typed === "") {
+
+            if (!hasManualBpm(song)) {
+                return;
+            }
+
+            manualBpm.delete(String(song.song_id));
+            saveManualBpm();
+            refreshAfterBpmChange(song);
+            setStatus("BPM cleared for " + (song.title || "Untitled"));
+
+            return;
+        }
+
+        const value = Number(typed);
 
         if (!isFinite(value) || value <= 0) {
 
@@ -1487,16 +1504,19 @@
 
         manualBpm.set(String(song.song_id), Math.round(value));
         saveManualBpm();
-        applySmartFilters();
+        refreshAfterBpmChange(song);
         setStatus("BPM set to " + Math.round(value) + " for " + (song.title || "Untitled"));
     }
 
-    function clearManualBpm(song) {
+    // A tempo change moves the song in and out of the tempo filter, and shows
+    // up in the meta line and the info panel, so all of those are redrawn
+    function refreshAfterBpmChange(song) {
 
-        manualBpm.delete(String(song.song_id));
-        saveManualBpm();
         applySmartFilters();
-        setStatus("Manual BPM removed from " + (song.title || "Untitled"));
+
+        if (currentSong && currentSong.song_id === song.song_id) {
+            updatePlayerInfo(currentSong);
+        }
     }
 
     function loadManualInstrumental() {
@@ -7329,8 +7349,8 @@
         // holding a steady readable speed in between
         const frames = [
             { transform: "translateX(0)", offset: 0, easing: "ease-in" },
-            { transform: "translateX(" + (-distance * 0.1) + "px)", offset: 0.18, easing: "linear" },
-            { transform: "translateX(" + (-distance * 0.9) + "px)", offset: 0.82, easing: "ease-out" },
+            { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
+            { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
             { transform: "translateX(" + (-distance) + "px)", offset: 1 }
         ];
 
@@ -8390,7 +8410,7 @@
             title: song.title || "",
             genre: genre,
             mood: mood,
-            bpm: song.bpm ? String(song.bpm) : "",
+            bpm: effectiveBpm(song) > 0 ? String(effectiveBpm(song)) : "",
             model: song.model || "",
             artist: artist,
             duration: duration,
@@ -13796,6 +13816,13 @@
                 });
         }
 
+        if (hasManualBpm(song) || !(Number(song.bpm) > 0)) {
+
+            addMenuRow("Set BPM", "#fff", function () {
+                promptManualBpm(song);
+            });
+        }
+
         if (cached) {
 
             addMenuRow("Remove from cache", "#ff8a8a", function () {
@@ -13812,23 +13839,6 @@
         // Supplying a tempo by hand, for songs the server left without one, and
         // taking it away again. Only offered where it would do something, a
         // song that already has a real bpm is left alone
-        if (hasManualBpm(song)) {
-
-            addMenuRow("Change BPM by hand", "#fff", function () {
-                promptManualBpm(song);
-            });
-
-            addMenuRow("Clear manual BPM", "#ff8a8a", function () {
-                clearManualBpm(song);
-            });
-
-        } else if (!(Number(song.bpm) > 0)) {
-
-            addMenuRow("Set BPM by hand", "#fff", function () {
-                promptManualBpm(song);
-            });
-        }
-
         addMenuRow("Delete from list", "#ff8a8a", function () {
             deleteOne(song);
         });
