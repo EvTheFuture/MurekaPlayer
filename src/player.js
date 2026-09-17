@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.11";
+    const VERSION = "1.4.5.12";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -763,6 +763,7 @@
             remoteArtwork: false,
             artOnResume: false,
             controlOrder: "repeat,shuffle,stop,play",
+            controlLabels: false,
             carBlackout: false,
             carGate: false,
             carAutoBlack: 20,
@@ -835,6 +836,7 @@
                     directAudio: parsed.directAudio !== false,
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
+                    controlLabels: parsed.controlLabels === true,
                     controlOrder: typeof parsed.controlOrder === "string" && parsed.controlOrder
                         ? parsed.controlOrder
                         : "repeat,shuffle,stop,play",
@@ -2209,7 +2211,7 @@
             const onlyPublished = publishFilter === "published";
 
             // A tick for published only, an open circle for everything
-            publishedCtrlBtn.textContent = onlyPublished ? "\u2713" : "\u25CB";
+            setButtonIcon(publishedCtrlBtn, onlyPublished ? "\u2713" : "\u25CB");
             publishedCtrlBtn.title = onlyPublished ? "Showing published, tap for all" : "Showing all, tap for published";
 
             // Greyed and inert while browsing a creator
@@ -3480,8 +3482,7 @@
         }
 
         // Replace the icon, repeat one shows a 1 inside the loop
-        repeatBtn.textContent = "";
-        repeatBtn.appendChild(makeRepeatIcon(repeatMode === "one"));
+        setButtonIcon(repeatBtn, makeRepeatIcon(repeatMode === "one"));
 
         const on = repeatMode !== "none";
         repeatBtn.style.background = on ? "#48e1eb" : "#333";
@@ -3791,8 +3792,7 @@
             ? iconVocals()
             : (mode === "instrumental" ? iconInstrumental() : iconAll());
 
-        vocalsCtrlBtn.textContent = "";
-        vocalsCtrlBtn.appendChild(icon);
+        setButtonIcon(vocalsCtrlBtn, icon);
 
         vocalsCtrlBtn.title = mode === "vocal"
             ? "Vocals only, tap for instrumental"
@@ -5776,6 +5776,7 @@
             ? wanted
             : ["repeat", "shuffle", "stop", "play"];
 
+        updateControlLabels();
         controlRowEl.textContent = "";
 
         // A name used twice would move the same element, not copy it, so each
@@ -6058,8 +6059,7 @@
         const playing = audio && !audio.paused && audio.src;
 
         // Pause glyph while playing, play glyph while paused
-        playPauseBtn.textContent = "";
-        playPauseBtn.appendChild(playing ? iconPause() : iconPlay());
+        setButtonIcon(playPauseBtn, playing ? iconPause() : iconPlay());
 
         if ("mediaSession" in navigator) {
 
@@ -9797,18 +9797,25 @@
 
         const b = document.createElement("button");
 
-        if (content instanceof Node) {
-            b.appendChild(content);
-        } else {
-            b.textContent = content;
-        }
+        // The icon gets its own wrapper. Several of these buttons swap their
+        // icon as state changes, and clearing the button itself would take an
+        // optional label with it
+        const iconWrap = document.createElement("span");
+        iconWrap.style.cssText = "display:flex;align-items:center;justify-content:center;line-height:1";
+
+        b.appendChild(iconWrap);
+        b.iconWrap = iconWrap;
+
+        setButtonIcon(b, content);
 
         b.title = title;
         b.style.cssText = [
             "flex:1",
             "display:flex",
+            "flex-direction:column",
             "align-items:center",
             "justify-content:center",
+            "gap:4px",
             "padding:14px 0",
             "border:none",
             "border-radius:8px",
@@ -9822,6 +9829,55 @@
         b.addEventListener("click", handler);
 
         return b;
+    }
+
+    // Put an icon, or a character, into a button built by makeIconButton
+    function setButtonIcon(b, content) {
+
+        const target = b.iconWrap || b;
+
+        target.textContent = "";
+
+        if (content instanceof Node) {
+            target.appendChild(content);
+        } else {
+            target.textContent = content;
+        }
+    }
+
+    // Show or hide the name under each transport button
+    function updateControlLabels() {
+
+        const show = settings.controlLabels === true;
+
+        for (const name of Object.keys(controlButtons)) {
+
+            const btn = controlButtons[name];
+
+            if (!btn) {
+                continue;
+            }
+
+            if (!show) {
+
+                if (btn.labelSpan) {
+
+                    btn.labelSpan.remove();
+                    btn.labelSpan = null;
+                }
+
+                continue;
+            }
+
+            if (!btn.labelSpan) {
+
+                btn.labelSpan = document.createElement("span");
+                btn.labelSpan.style.cssText = "font:600 10px/1 sans-serif";
+                btn.appendChild(btn.labelSpan);
+            }
+
+            btn.labelSpan.textContent = name;
+        }
     }
 
     // Build the shuffle icon as real SVG nodes, matching the text glyph color
@@ -11289,6 +11345,10 @@
             function () { return settings.remoteArtwork; },
             function (v) { settings.remoteArtwork = v; reassertNowPlaying(); });
 
+        const controlLabelRow = makeBoolRow("Names under the buttons",
+            function () { return settings.controlLabels; },
+            function (v) { settings.controlLabels = v; updateControlLabels(); });
+
         const controlOrderRow = buildControlEditor();
 
         const artResumeRow = makeBoolRow("Resend art on resume",
@@ -11319,6 +11379,7 @@
         settingsEl.appendChild(blackDriftRow);
         settingsEl.appendChild(blackResetRow);
         settingsEl.appendChild(artworkRow);
+        settingsEl.appendChild(controlLabelRow);
         settingsEl.appendChild(controlOrderRow);
         settingsEl.appendChild(artResumeRow);
         settingsEl.appendChild(countsAgeRow);
