@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.8";
+    const VERSION = "1.4.5.10";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -401,6 +401,9 @@
 
     // The published or all toggle when placed in the transport row
     let publishedCtrlBtn = null;
+
+    // The vocals, instrumental or all cycle when placed in the transport row
+    let vocalsCtrlBtn = null;
 
     // Long press state for rearranging the transport row in the player itself.
     // A short press must still work the button, so nothing moves until the
@@ -3762,6 +3765,7 @@
         settings.vocalFilter = value;
         saveSettings();
         updateFilterButtons();
+        updateVocalsCtrlButton();
         updateViewMenuBar();
         closeViewMenu();
 
@@ -3772,6 +3776,35 @@
     }
 
     // Highlight the active vocals filter button
+    // Show which way the vocals filter is set on the transport button
+    function updateVocalsCtrlButton() {
+
+        if (!vocalsCtrlBtn) {
+            return;
+        }
+
+        const mode = settings.vocalFilter;
+
+        // The same icons the filter rows under the search box use, so the two
+        // ways of setting this look like the one thing they are
+        const icon = mode === "vocal"
+            ? iconVocals()
+            : (mode === "instrumental" ? iconInstrumental() : iconAll());
+
+        vocalsCtrlBtn.textContent = "";
+        vocalsCtrlBtn.appendChild(icon);
+
+        vocalsCtrlBtn.title = mode === "vocal"
+            ? "Vocals only, tap for instrumental"
+            : (mode === "instrumental" ? "Instrumental only, tap for all" : "All songs, tap for vocals");
+
+        // Highlighted whenever it is actually filtering something out
+        const on = mode !== "all";
+
+        vocalsCtrlBtn.style.background = on ? "#48e1eb" : "#333";
+        vocalsCtrlBtn.style.color = on ? "#000" : "#fff";
+    }
+
     function updateFilterButtons() {
 
         Object.keys(filterButtons).forEach(function (value) {
@@ -5265,7 +5298,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals"];
 
     // A fresh icon for the editor, the real buttons keep their own nodes
     function controlChipIcon(name) {
@@ -5276,6 +5309,11 @@
 
         if (name === "repeat") {
             return makeRepeatIcon(false);
+        }
+
+        // The editor chip carries the same icon the button shows at rest
+        if (name === "vocals") {
+            return iconAll();
         }
 
         const glyphs = {
@@ -8757,6 +8795,16 @@
             switchFeed();
         });
 
+        // Cycles the same vocals filter the view menu offers, so the two stay
+        // in step whichever one is used
+        vocalsCtrlBtn = makeIconButton(iconAll(), "Vocals / Instrumental / All", function () {
+
+            const order = ["all", "vocal", "instrumental"];
+            const at = order.indexOf(settings.vocalFilter);
+
+            setVocalFilter(order[(at + 1) % order.length]);
+        });
+
         controlButtons = {
             prev: makeIconButton("\u23EE", "Previous", playPrev),
             play: playPauseBtn,
@@ -8764,13 +8812,15 @@
             next: makeIconButton("\u23ED", "Next", playNext),
             shuffle: shuffleBtn,
             repeat: repeatBtn,
-            published: publishedCtrlBtn
+            published: publishedCtrlBtn,
+            vocals: vocalsCtrlBtn
         };
 
         updateFeedButton();
 
         applyControlOrder();
         enableControlRowDragging();
+        updateVocalsCtrlButton();
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(seekRow);
