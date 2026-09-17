@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5";
+    const VERSION = "1.4.5.2";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5056,6 +5056,19 @@
     // Decide whether playback is genuinely stuck and recover it if so
     function checkStalled(before) {
 
+        // Never touch playback while nobody is watching. Pausing releases the
+        // audio session, and the play that follows can be refused, which ends
+        // playback for good rather than recovering it. A check scheduled while
+        // visible can still fire after the screen has gone off, so the state is
+        // tested here and not only by the caller.
+        //
+        // The cover counts as not watching. It is only a black div over a live
+        // page, and the wake lock keeps the screen on, so the page stays
+        // visible and document.hidden stays false while it is up
+        if (document.hidden || isBlackedOut()) {
+            return;
+        }
+
         if (!audio || audio.paused || !currentSong || userPaused) {
             return;
         }
@@ -5081,6 +5094,12 @@
         // everything looks fine. So confirm the clock actually moved, and fall
         // back to loading the source again when it did not
         setTimeout(function () {
+
+            // Reloading the source unseen is the surest way to lose playback
+            // altogether, so the escalation waits for someone to be looking
+            if (document.hidden || isBlackedOut()) {
+                return;
+            }
 
             if (!audio || !currentSong || userPaused) {
                 return;
@@ -5114,7 +5133,8 @@
 
         watchdogTimer = setInterval(function () {
 
-            if (document.hidden || !audio || audio.paused || !currentSong || userPaused) {
+            if (document.hidden || isBlackedOut() || !audio || audio.paused
+                || !currentSong || userPaused) {
 
                 watchdogLast = -1;
                 return;
@@ -8774,6 +8794,13 @@
 
             if (document.hidden) {
 
+                // A stall check armed a moment ago must not fire once hidden
+                if (resyncTimer) {
+
+                    clearTimeout(resyncTimer);
+                    resyncTimer = null;
+                }
+
                 saveQueue();
                 return;
             }
@@ -10005,19 +10032,33 @@
         // and the newest is the highest, and a song keeps that number across the
         // Queue and A-Z views. For the Published feed the order is by publish
         // date, so the number tracks the publish sorted list shown here
-        // Absolute numbering ranks every song in the library, so a song keeps
-        // the same number whichever filter is on. Otherwise the rank is taken
-        // over the songs actually shown, so the column runs 1 to n with no gaps
-        const ordered = settings.absoluteNumbers
-            ? orderedSongs()
-            : orderedSongs().filter(passesFilters);
-
         const numberById = new Map();
-        const total = ordered.length;
 
-        ordered.forEach(function (s, i) {
-            numberById.set(s.song_id, total - i);
-        });
+        if (settings.absoluteNumbers) {
+
+            // Rank by when the song was actually made, so number one is the
+            // first song ever created and a song keeps that number whatever is
+            // filtered or sorted. Position in the cache cannot be used for
+            // this, it only reflects the order pages happened to be fetched in
+            const byAge = cache.songs.slice().sort(function (a, b) {
+                return (a.generate_at || 0) - (b.generate_at || 0);
+            });
+
+            byAge.forEach(function (s, i) {
+                numberById.set(s.song_id, i + 1);
+            });
+
+        } else {
+
+            // Rank over the songs actually shown, so the column runs 1 to n
+            // with no gaps, counting down from the top of the list
+            const shown = orderedSongs().filter(passesFilters);
+            const total = shown.length;
+
+            shown.forEach(function (s, i) {
+                numberById.set(s.song_id, total - i);
+            });
+        }
 
         listEl.textContent = "";
         playingItemEl = null;
