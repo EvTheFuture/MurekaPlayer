@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.23";
+    const VERSION = "1.4.5.28";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -127,6 +127,11 @@
     // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
     // track can carry lyrics text while still being an instrumental
     const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
+
+    // localStorage key for tempos entered by hand. Mureka leaves bpm unset on
+    // some songs, and without it they can only ever be excluded from a tempo
+    // filter, so a value can be supplied and is then used like a real one
+    const MANUAL_BPM_KEY = "mureka_manual_bpm_v1";
 
     // Cache API bucket for the per song detail payload, the play and like
     // counts plus the timed lyrics. Counts change over time, so every entry
@@ -493,6 +498,29 @@
     let artPlaceholderEl = null;
     let playerTitle = null;
     let playerMetaEl = null;
+
+    // The inner span that actually slides, the animation driving it, and the
+    // timer waiting to start it. The meta line is often longer than the panel
+    // and an ellipsis hides the tempo and the moods, which are the useful part
+    let playerMetaTextEl = null;
+    let metaScrollAnim = null;
+    let metaScrollTimer = null;
+
+    // How long the text rests at the left before it starts, and again each time
+    // it comes back around
+    const META_SCROLL_DELAY = 3000;
+
+    // Pixels per second, slow enough to read
+    const META_SCROLL_SPEED = 40;
+
+    // The clear space that follows the text before the next copy of it, about
+    // twenty spaces at this size
+    const META_SCROLL_GAP = 72;
+
+    // The second copy of the line, which follows the first so the text is never
+    // completely off screen, and the track that carries both of them
+    let playerMetaCopyEl = null;
+    let playerMetaTrackEl = null;
     let playerCountsEl = null;
 
     // Synced lyric display, five stacked rows rolled on advance, rows are
@@ -1373,6 +1401,104 @@
     // Song ids the user marked as instrumental by hand, loaded once on startup
     let manualInstrumental = loadManualInstrumental();
 
+    // song_id to bpm, for tempos filled in by hand
+    let manualBpm = loadManualBpm();
+
+    function loadManualBpm() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(MANUAL_BPM_KEY));
+
+            if (raw && typeof raw === "object") {
+
+                const map = new Map();
+
+                for (const key of Object.keys(raw)) {
+
+                    const value = Number(raw[key]);
+
+                    if (isFinite(value) && value > 0) {
+                        map.set(String(key), value);
+                    }
+                }
+
+                return map;
+            }
+        } catch (e) {
+        }
+
+        return new Map();
+    }
+
+    function saveManualBpm() {
+
+        try {
+
+            const out = {};
+
+            manualBpm.forEach(function (value, key) {
+                out[key] = value;
+            });
+
+            localStorage.setItem(MANUAL_BPM_KEY, JSON.stringify(out));
+        } catch (e) {
+        }
+    }
+
+    // The tempo to use for a song, the hand entered one when there is one
+    function effectiveBpm(song) {
+
+        const manual = manualBpm.get(String(song.song_id));
+
+        if (isFinite(manual) && manual > 0) {
+            return manual;
+        }
+
+        const bpm = Number(song.bpm);
+
+        return isFinite(bpm) && bpm > 0 ? bpm : 0;
+    }
+
+    // Whether this song's tempo was supplied by hand
+    function hasManualBpm(song) {
+
+        return manualBpm.has(String(song.song_id));
+    }
+
+    // Ask for a tempo and keep it, or clear one that was set before
+    function promptManualBpm(song) {
+
+        const current = effectiveBpm(song);
+        const answer = window.prompt("BPM for " + (song.title || "Untitled"),
+            current > 0 ? String(current) : "");
+
+        if (answer === null) {
+            return;
+        }
+
+        const value = Number(String(answer).trim());
+
+        if (!isFinite(value) || value <= 0) {
+
+            setStatus("Not a tempo, nothing changed");
+            return;
+        }
+
+        manualBpm.set(String(song.song_id), Math.round(value));
+        saveManualBpm();
+        applySmartFilters();
+        setStatus("BPM set to " + Math.round(value) + " for " + (song.title || "Untitled"));
+    }
+
+    function clearManualBpm(song) {
+
+        manualBpm.delete(String(song.song_id));
+        saveManualBpm();
+        applySmartFilters();
+        setStatus("Manual BPM removed from " + (song.title || "Untitled"));
+    }
+
     function loadManualInstrumental() {
 
         try {
@@ -1759,8 +1885,16 @@
 
         tagSheetRefresh = function () {
 
+            // Every toggle and number in this sheet was registered as a
+            // settings row, and those are only redrawn when the settings panel
+            // opens. Without this a change made elsewhere, Clear all filters in
+            // particular, leaves a toggle showing the opposite of the truth
+            settingsRefreshers.forEach(function (fn) {
+                fn();
+            });
+
             // The tempo controls are only meaningful once tempo filtering is on
-            const showBpm = settings.bpmEnabled ? "" : "none";
+            const showBpm = settings.bpmEnabled ? "flex" : "none";
 
             bpmMinRow.style.display = showBpm;
             bpmMaxRow.style.display = showBpm;
@@ -1877,9 +2011,9 @@
 
         for (const song of list) {
 
-            const bpm = Number(song.bpm);
+            const bpm = effectiveBpm(song);
 
-            if (!isFinite(bpm) || bpm <= 0) {
+            if (bpm <= 0) {
                 continue;
             }
 
@@ -1965,8 +2099,8 @@
             return true;
         }
 
-        const bpm = Number(song.bpm);
-        const known = isFinite(bpm) && bpm > 0;
+        const bpm = effectiveBpm(song);
+        const known = bpm > 0;
 
         if (!known) {
             return !settings.bpmHideUnknown;
@@ -7122,9 +7256,98 @@
                 || (song.title || "Untitled");
         }
 
-        if (playerMetaEl) {
-            playerMetaEl.textContent = formatMeta(settings.metaSubtitle, song);
+        setMetaText(formatMeta(settings.metaSubtitle, song));
+    }
+
+    // Put the meta line up and, when it does not fit, walk it across. It waits,
+    // slides the text plus a gap fully out to the left, then comes straight back
+    // in from the right and waits again, so the beginning is always readable
+    function setMetaText(text) {
+
+        if (!playerMetaEl || !playerMetaTextEl) {
+            return;
         }
+
+        if (metaScrollTimer) {
+
+            clearTimeout(metaScrollTimer);
+            metaScrollTimer = null;
+        }
+
+        if (metaScrollAnim) {
+
+            metaScrollAnim.cancel();
+            metaScrollAnim = null;
+        }
+
+        playerMetaTrackEl.style.transform = "none";
+        playerMetaTextEl.style.marginRight = "0px";
+        playerMetaTextEl.textContent = text || "";
+
+        // The trailing copy is only needed while scrolling
+        playerMetaCopyEl.style.display = "none";
+        playerMetaCopyEl.textContent = text || "";
+
+        if (!text) {
+            return;
+        }
+
+        // Measured after the text is in place, and only worth doing when the
+        // line is actually too long for the panel
+        metaScrollTimer = setTimeout(function () {
+
+            metaScrollTimer = null;
+            startMetaScroll();
+        }, META_SCROLL_DELAY);
+    }
+
+    function startMetaScroll() {
+
+        if (!playerMetaEl || !playerMetaTrackEl || !playerMetaTrackEl.animate) {
+            return;
+        }
+
+        // Measured from the box, which is accurate for a fractional width
+        const textWidth = Math.ceil(playerMetaTextEl.getBoundingClientRect().width);
+        const overflow = textWidth - playerMetaEl.clientWidth;
+
+        if (overflow <= 2) {
+            return;
+        }
+
+        // Show the trailing copy and space it off the first
+        playerMetaTextEl.style.marginRight = META_SCROLL_GAP + "px";
+        playerMetaCopyEl.style.display = "inline-block";
+
+        // Travel exactly one line plus the gap. At the end the second copy sits
+        // where the first began, so resetting to zero is invisible and the line
+        // is on screen throughout
+        const distance = textWidth + META_SCROLL_GAP;
+        const duration = (distance / META_SCROLL_SPEED) * 1000;
+
+        // Ease away from the rest position and ease back into the next one,
+        // holding a steady readable speed in between
+        const frames = [
+            { transform: "translateX(0)", offset: 0, easing: "ease-in" },
+            { transform: "translateX(" + (-distance * 0.1) + "px)", offset: 0.18, easing: "linear" },
+            { transform: "translateX(" + (-distance * 0.9) + "px)", offset: 0.82, easing: "ease-out" },
+            { transform: "translateX(" + (-distance) + "px)", offset: 1 }
+        ];
+
+        metaScrollAnim = playerMetaTrackEl.animate(frames, { duration: duration });
+
+        metaScrollAnim.onfinish = function () {
+
+            metaScrollAnim = null;
+            playerMetaTrackEl.style.transform = "none";
+
+            // Back at the left edge, so rest here exactly as it did at the start
+            metaScrollTimer = setTimeout(function () {
+
+                metaScrollTimer = null;
+                startMetaScroll();
+            }, META_SCROLL_DELAY);
+        };
     }
 
     // Build the plays and likes line for the current song, empty until known
@@ -7191,9 +7414,7 @@
             updateLyricLine(true);
             updateSeekMode();
 
-            if (playerMetaEl) {
-                playerMetaEl.textContent = "";
-            }
+            setMetaText("");
 
             if (playerCountsEl) {
                 playerCountsEl.textContent = "";
@@ -9184,7 +9405,27 @@
 
         // Small meta line under the title, genre, mood, bpm and model
         playerMetaEl = document.createElement("div");
-        playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+        playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
+
+        // The text lives in a span so it can be moved without moving the box.
+        // A second copy trails the first, so as the end of the line leaves on
+        // the left the beginning is already arriving on the right
+        // One track holds both copies and is the thing that moves, so the two
+        // can never drift apart
+        playerMetaTrackEl = document.createElement("span");
+        playerMetaTrackEl.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
+
+        // Both are inline-block, a plain inline span reports no width at all
+        // and the overflow test would never fire
+        playerMetaTextEl = document.createElement("span");
+        playerMetaTextEl.style.cssText = "display:inline-block;white-space:nowrap";
+
+        playerMetaCopyEl = document.createElement("span");
+        playerMetaCopyEl.style.cssText = "display:none;white-space:nowrap";
+
+        playerMetaTrackEl.appendChild(playerMetaTextEl);
+        playerMetaTrackEl.appendChild(playerMetaCopyEl);
+        playerMetaEl.appendChild(playerMetaTrackEl);
 
         // Plays and likes for the current song, shown at the top of the art
         playerCountsEl = document.createElement("div");
@@ -11616,6 +11857,10 @@
         const name = document.createElement("span");
         name.textContent = label;
 
+        // Claim the space between, so a long label cannot leave the toggle
+        // sitting next to the text instead of at the edge
+        name.style.cssText = "flex:1;min-width:0";
+
         const btn = makeButton("Off", "#333", "#fff", function () {
             const next = !get();
 
@@ -12408,7 +12653,11 @@
         // Metadata available straight from the cached song
         addInfoRow("Genre", (song.genres || []).join(", ") || "-");
         addInfoRow("Mood", (song.moods || []).join(", ") || "-");
-        addInfoRow("BPM", song.bpm ? String(song.bpm) : "-");
+        const shownBpm = effectiveBpm(song);
+
+        addInfoRow("BPM", shownBpm > 0
+            ? String(shownBpm) + (hasManualBpm(song) ? " (by hand)" : "")
+            : "-");
         addInfoRow("Model", song.model || "-");
         addInfoRow("Duration", formatTime((song.duration_milliseconds || 0) / 1000));
 
@@ -13557,6 +13806,26 @@
 
             addMenuRow("Cache", "#48e1eb", function () {
                 cacheOne(song);
+            });
+        }
+
+        // Supplying a tempo by hand, for songs the server left without one, and
+        // taking it away again. Only offered where it would do something, a
+        // song that already has a real bpm is left alone
+        if (hasManualBpm(song)) {
+
+            addMenuRow("Change BPM by hand", "#fff", function () {
+                promptManualBpm(song);
+            });
+
+            addMenuRow("Clear manual BPM", "#ff8a8a", function () {
+                clearManualBpm(song);
+            });
+
+        } else if (!(Number(song.bpm) > 0)) {
+
+            addMenuRow("Set BPM by hand", "#fff", function () {
+                promptManualBpm(song);
             });
         }
 
