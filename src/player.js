@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.7";
+    const VERSION = "1.4.5.8";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2147,6 +2147,11 @@
 
         updateFeedButton();
         renderList();
+
+        // The set of songs the filter admits just changed, so what plays next
+        // has to change with it. The current song is kept, only the upcoming
+        // part is rebuilt, exactly as the vocals filter does
+        rebuildUpcoming();
 
         const n = shownSongCount();
 
