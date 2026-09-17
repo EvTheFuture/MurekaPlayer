@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.12";
+    const VERSION = "1.4.5.15";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2211,7 +2211,8 @@
             const onlyPublished = publishFilter === "published";
 
             // A tick for published only, an open circle for everything
-            setButtonIcon(publishedCtrlBtn, onlyPublished ? "\u2713" : "\u25CB");
+            setTransportIcon(publishedCtrlBtn, onlyPublished ? "\u2713" : "\u25CB");
+            updateControlLabels();
             publishedCtrlBtn.title = onlyPublished ? "Showing published, tap for all" : "Showing all, tap for published";
 
             // Greyed and inert while browsing a creator
@@ -3482,7 +3483,7 @@
         }
 
         // Replace the icon, repeat one shows a 1 inside the loop
-        setButtonIcon(repeatBtn, makeRepeatIcon(repeatMode === "one"));
+        setTransportIcon(repeatBtn, makeRepeatIcon(repeatMode === "one"));
 
         const on = repeatMode !== "none";
         repeatBtn.style.background = on ? "#48e1eb" : "#333";
@@ -3792,7 +3793,8 @@
             ? iconVocals()
             : (mode === "instrumental" ? iconInstrumental() : iconAll());
 
-        setButtonIcon(vocalsCtrlBtn, icon);
+        setTransportIcon(vocalsCtrlBtn, icon);
+        updateControlLabels();
 
         vocalsCtrlBtn.title = mode === "vocal"
             ? "Vocals only, tap for instrumental"
@@ -6059,7 +6061,8 @@
         const playing = audio && !audio.paused && audio.src;
 
         // Pause glyph while playing, play glyph while paused
-        setButtonIcon(playPauseBtn, playing ? iconPause() : iconPlay());
+        setTransportIcon(playPauseBtn, playing ? iconPause() : iconPlay());
+        updateControlLabels();
 
         if ("mediaSession" in navigator) {
 
@@ -9797,26 +9800,25 @@
 
         const b = document.createElement("button");
 
-        // The icon gets its own wrapper. Several of these buttons swap their
-        // icon as state changes, and clearing the button itself would take an
-        // optional label with it
-        const iconWrap = document.createElement("span");
-        iconWrap.style.cssText = "display:flex;align-items:center;justify-content:center;line-height:1";
-
-        b.appendChild(iconWrap);
-        b.iconWrap = iconWrap;
-
-        setButtonIcon(b, content);
+        // The icon stays a direct child of the button, which is how these were
+        // built before labels existed. Wrapping it in a span left the buttons
+        // blank on Chromium for Android, so the label is the thing that gets
+        // added alongside instead
+        setTransportIcon(b, content);
 
         b.title = title;
+        // A fixed height rather than padding, so turning the names on lets the
+        // icon and the label share the room the button already has instead of
+        // making every button taller
         b.style.cssText = [
             "flex:1",
             "display:flex",
-            "flex-direction:column",
             "align-items:center",
             "justify-content:center",
-            "gap:4px",
-            "padding:14px 0",
+            "gap:3px",
+            "height:48px",
+            "box-sizing:border-box",
+            "padding:0",
             "border:none",
             "border-radius:8px",
             "background:#333",
@@ -9831,18 +9833,51 @@
         return b;
     }
 
-    // Put an icon, or a character, into a button built by makeIconButton
-    function setButtonIcon(b, content) {
+    // Put an icon, or a character, into a button built by makeIconButton.
+    // Deliberately not called setButtonIcon, that name belongs to the action
+    // tile version further down, and two declarations would collide
+    function setTransportIcon(b, content) {
 
-        const target = b.iconWrap || b;
+        // The label, when there is one, has to survive the swap, so it is taken
+        // out first and put back after the new icon
+        const label = b.labelSpan || null;
 
-        target.textContent = "";
+        b.textContent = "";
 
         if (content instanceof Node) {
-            target.appendChild(content);
+            b.appendChild(content);
         } else {
-            target.textContent = content;
+            b.textContent = content;
         }
+
+        if (label) {
+            b.appendChild(label);
+        }
+    }
+
+    // What the name under a button should say right now. The three buttons
+    // that change their icon with state change their word with it, so the two
+    // never disagree. Instrumental is shortened, the full word does not fit
+    function controlLabelText(name) {
+
+        if (name === "play") {
+            return (audio && !audio.paused && audio.src) ? "pause" : "play";
+        }
+
+        if (name === "published") {
+            return publishFilter === "published" ? "public" : "all";
+        }
+
+        if (name === "vocals") {
+
+            const mode = settings.vocalFilter;
+
+            return mode === "vocal"
+                ? "vocals"
+                : (mode === "instrumental" ? "instr" : "all");
+        }
+
+        return name;
     }
 
     // Show or hide the name under each transport button
@@ -9866,6 +9901,9 @@
                     btn.labelSpan = null;
                 }
 
+                // Back to a single centred icon
+                btn.style.flexDirection = "row";
+
                 continue;
             }
 
@@ -9876,7 +9914,9 @@
                 btn.appendChild(btn.labelSpan);
             }
 
-            btn.labelSpan.textContent = name;
+            // Icon above, name beneath
+            btn.style.flexDirection = "column";
+            btn.labelSpan.textContent = controlLabelText(name);
         }
     }
 
