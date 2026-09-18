@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.34";
+    const VERSION = "1.4.5.35";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -413,8 +413,9 @@
     // The published or all toggle when placed in the transport row
     let publishedCtrlBtn = null;
 
-    // The opener for the smart filter sheet, lit while a filter is on
+    // The opener for the smart filter sheet, and the on off switch beside it
     let smartFilterBtn = null;
+    let smartToggleBtn = null;
 
     // The vocals, instrumental or all cycle when placed in the transport row
     let vocalsCtrlBtn = null;
@@ -504,6 +505,10 @@
     let artPlaceholderEl = null;
     let playerTitle = null;
     let playerMetaEl = null;
+
+    // The art and transport block, hidden while the on screen keyboard is up
+    let playerBlockEl = null;
+    let keyboardWasUp = false;
 
     // The inner span that actually slides, the animation driving it, and the
     // timer waiting to start it. The meta line is often longer than the panel
@@ -4630,15 +4635,24 @@
             bits.push((settings.bpmMin || "0") + " to " + (settings.bpmMax || "any") + " BPM");
         }
 
-        const parked = !settings.smartEnabled
-            && (settings.tagGenres.length > 0 || settings.tagMoods.length > 0 || settings.bpmEnabled);
-
-        smartFilterBtn.labelEl.textContent = on
-            ? "Filters on"
-            : (parked ? "Filters off" : "Filters");
+        smartFilterBtn.labelEl.textContent = "Edit filters";
         smartFilterBtn.title = on
             ? "Filtering by " + bits.join(", ")
             : "Filter by genre, mood and tempo";
+
+        if (smartToggleBtn) {
+
+            const hasAny = settings.tagGenres.length > 0 || settings.tagMoods.length > 0
+                || settings.bpmEnabled;
+
+            smartToggleBtn.labelEl.textContent = settings.smartEnabled ? "Filters on" : "Filters off";
+            smartToggleBtn.style.background = on ? "#48e1eb" : "#333";
+            smartToggleBtn.style.color = on ? "#000" : "#fff";
+
+            // Nothing to switch when nothing is set up
+            smartToggleBtn.style.opacity = hasAny ? "1" : "0.4";
+            smartToggleBtn.disabled = !hasAny;
+        }
     }
 
     function updateFilterButtons() {
@@ -5708,15 +5722,24 @@
     }
 
     // Keep the gate in step with the fullscreen state
+    // Take the gate down whenever it no longer applies. It is never put up
+    // here, only offerGate does that, at the two moments that count
     function refreshGate() {
 
-        if (gateWanted()) {
-
-            showGate();
-            return;
+        if (!gateWanted()) {
+            hideGate();
         }
+    }
 
-        hideGate();
+    // Put the gate up if it applies. Called at startup and when the page comes
+    // back from another app, and nowhere else. Fullscreen changes, iOS showing
+    // its own bars, or switching the setting on must not raise it, otherwise
+    // it keeps reappearing over the player during ordinary use
+    function offerGate() {
+
+        if (gateWanted()) {
+            showGate();
+        }
     }
 
     // Whether this browser will put an ordinary element fullscreen at all.
@@ -10019,24 +10042,12 @@
             ev.stopPropagation();
         });
 
-        // On a phone the keyboard covers the lower panel, so while the search
-        // field has focus hide the tall player block to lift the field and the
-        // list up where they stay visible
-        searchInput.addEventListener("focus", function () {
-
-            if (window.innerWidth <= 640) {
-                playerEl.style.display = "none";
-            }
-        });
-
-        searchInput.addEventListener("blur", function () {
-
-            playerEl.style.display = "block";
-
-            if (!swipeActive) {
-                positionArt(0);
-            }
-        });
+        // On a phone the keyboard covers the lower panel, so while it is up the
+        // tall player block is hidden to lift the field and the list into the
+        // space that is left. Judged by the viewport shrinking rather than by
+        // focus: dismissing the keyboard with its own button on iOS leaves the
+        // field focused and never fires blur, which used to leave the art gone
+        playerBlockEl = playerEl;
 
         // Search box on its own row
         const searchRow = document.createElement("div");
@@ -10095,10 +10106,19 @@
         const smartRow = document.createElement("div");
         smartRow.style.cssText = "display:flex;gap:6px";
 
-        smartFilterBtn = makeActionButton(iconFilter(), "Filters", "#333", "#fff", openTagSheet);
+        smartFilterBtn = makeActionButton(iconFilter(), "Edit filters", "#333", "#fff", openTagSheet);
         smartFilterBtn.title = "Filter by genre, mood and tempo";
 
+        // One tap to park or restore the whole filter, without opening the
+        // sheet and without losing what is ticked
+        smartToggleBtn = makeActionButton(iconFilter(), "Filters off", "#333", "#fff", function () {
+
+            settings.smartEnabled = !settings.smartEnabled;
+            applySmartFilters();
+        });
+
         smartRow.appendChild(smartFilterBtn);
+        smartRow.appendChild(smartToggleBtn);
 
         viewMenuEl = document.createElement("div");
         viewMenuEl.style.cssText = POPUP_CSS;
@@ -10273,7 +10293,7 @@
         resetIdleTimer();
 
         // Stand the gate in front of the player until fullscreen is entered
-        refreshGate();
+        offerGate();
 
         // Entering or leaving fullscreen changes the visible viewport, since
         // the address and status bars come and go. The panel is sized from
@@ -10341,7 +10361,18 @@
         window.addEventListener("resize", fitMobile);
 
         if (window.visualViewport) {
-            window.visualViewport.addEventListener("resize", fitMobile);
+
+            // The viewport reports its new size while the keyboard or the
+            // browser bars are still animating, so the first fit lands short
+            // and leaves a gap at the bottom. Fit again once it has settled
+            const refit = function () {
+
+                fitMobile();
+
+                setTimeout(fitMobile, 350);
+            };
+
+            window.visualViewport.addEventListener("resize", refit);
             window.visualViewport.addEventListener("scroll", fitMobile);
         }
 
@@ -10391,6 +10422,10 @@
             // Back in the foreground, so make sure playback really is running
             resyncPlayback();
             resetIdleTimer();
+
+            // Returning from another app is one of the two moments the gate
+            // is offered, fullscreen having been lost in between
+            offerGate();
 
             // The system drops the wake lock whenever the page is hidden, so
             // claim it again if the cover is still meant to be holding it
@@ -10758,6 +10793,30 @@
         const left = vv ? vv.offsetLeft : 0;
         const width = vv ? vv.width : window.innerWidth;
         const height = vv ? vv.height : window.innerHeight;
+
+        // The keyboard is up when the visible viewport is much shorter than
+        // the window. Hide the player block for as long as that holds and put
+        // it back the moment it stops, whatever focus is doing
+        const keyboardUp = !!vv && (window.innerHeight - vv.height) > 150;
+
+        if (playerBlockEl && keyboardUp !== keyboardWasUp) {
+
+            keyboardWasUp = keyboardUp;
+            playerBlockEl.style.display = keyboardUp ? "none" : "block";
+
+            if (!keyboardUp && !swipeActive) {
+                positionArt(0);
+            }
+        }
+
+        // In fullscreen on an iPhone the top edge belongs to the system. Taps
+        // there pull the status bar and its overlay down instead of reaching
+        // the panel, so the content starts below that zone
+        const topInset = (isFullscreen() && isIosLike())
+            ? "max(env(safe-area-inset-top, 0px), 28px)"
+            : "12px";
+
+        panelEl.style.setProperty("padding-top", topInset, "important");
 
         // Inline important beats the media query so the exact pixels win
         panelEl.style.setProperty("top", top + "px", "important");
