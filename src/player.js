@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.32";
+    const VERSION = "1.4.5.33";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5605,6 +5605,11 @@
     // Whether the gate should stand in front of the player right now
     function gateWanted() {
 
+        // Nothing to gate when the browser will not go fullscreen anyway
+        if (!fullscreenSupported()) {
+            return false;
+        }
+
         // Independent of the screen off cover. Fullscreen is worth having on
         // its own, since it gives the player the whole screen with no address
         // bar, and it can only ever be entered from a real tap
@@ -5714,6 +5719,20 @@
         hideGate();
     }
 
+    // Whether this browser will put an ordinary element fullscreen at all.
+    // Safari on iPhone allows it for video only, and reports false here, so
+    // everything fullscreen is hidden there rather than offered and refused.
+    // Tested by feature, an iPad or a future iPhone that gains support will
+    // simply get the controls
+    function fullscreenSupported() {
+
+        if (document.fullscreenEnabled === true || document.webkitFullscreenEnabled === true) {
+            return true;
+        }
+
+        return false;
+    }
+
     // True while the page is showing fullscreen
     function isFullscreen() {
 
@@ -5763,6 +5782,10 @@
     // Ask for fullscreen on the page. Only a real user gesture is granted it,
     // so a refusal from the idle timer is expected and simply ignored
     function enterFullscreen() {
+
+        if (!fullscreenSupported()) {
+            return;
+        }
 
         if (document.fullscreenElement || document.webkitFullscreenElement) {
             return;
@@ -9420,7 +9443,9 @@
             }
         });
 
-        rowDisplay.appendChild(fullscreenButton);
+        if (fullscreenSupported()) {
+            rowDisplay.appendChild(fullscreenButton);
+        }
         rowDisplay.appendChild(blackoutButton);
         rowDisplay.appendChild(foldButton);
 
@@ -12395,6 +12420,12 @@
         const carGateRow = makeBoolRow("Start in fullscreen",
             function () { return settings.carGate; },
             function (v) { settings.carGate = v; refreshGate(); });
+
+        // Hidden where fullscreen is not on offer, a switch that cannot do
+        // anything is worse than no switch
+        if (!fullscreenSupported()) {
+            carGateRow.style.display = "none";
+        }
 
         const blackResetRow = document.createElement("div");
         blackResetRow.style.cssText = "display:flex";
