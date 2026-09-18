@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.33";
+    const VERSION = "1.4.5.34";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5733,6 +5733,98 @@
         return false;
     }
 
+    // Safari on iPhone ships element fullscreen behind a switch the user has to
+    // turn on. There is no way to feature test for the switch existing, only
+    // for the result, so the platform is identified to decide between offering
+    // instructions and hiding the controls altogether
+    function isIosLike() {
+
+        const ua = navigator.userAgent || "";
+
+        if (/iPhone|iPad|iPod/.test(ua)) {
+            return true;
+        }
+
+        // iPadOS reports itself as a Mac, with a touch screen
+        return ua.indexOf("Macintosh") !== -1 && navigator.maxTouchPoints > 1;
+    }
+
+    // Whether fullscreen is worth putting in front of the user at all. Where it
+    // can be switched on it is, with an explanation, rather than hidden
+    function fullscreenOffered() {
+
+        return fullscreenSupported() || isIosLike();
+    }
+
+    // A plain message box inside the panel, with one way out
+    function showNotice(title, body) {
+
+        if (!panelEl) {
+            return;
+        }
+
+        const back = document.createElement("div");
+        back.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:rgba(0,0,0,0.6)",
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
+            "padding:16px",
+            "box-sizing:border-box",
+            "z-index:10"
+        ].join(";");
+
+        const card = document.createElement("div");
+        card.style.cssText = [
+            "background:#26262c",
+            "border:1px solid #3a3a42",
+            "border-radius:10px",
+            "padding:14px",
+            "max-width:320px",
+            "display:flex",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        const head = document.createElement("div");
+        head.textContent = title;
+        head.style.cssText = "font-weight:600";
+
+        const text = document.createElement("div");
+        text.textContent = body;
+        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+
+        const okBtn = makeButton("Got it", "#48e1eb", "#000", function () {
+            back.remove();
+        });
+
+        card.appendChild(head);
+        card.appendChild(text);
+        card.appendChild(okBtn);
+        back.appendChild(card);
+
+        // A tap outside the card closes it too
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                back.remove();
+            }
+        });
+
+        panelEl.appendChild(back);
+    }
+
+    // Tell the user where the switch is, once they have asked for fullscreen
+    function showFullscreenHelp() {
+
+        showNotice("Fullscreen is switched off in Safari",
+            "Open Settings, then Safari, Advanced, Feature Flags, and turn on"
+            + " Fullscreen API. Reload this page afterwards and the fullscreen"
+            + " controls will start working.");
+    }
+
     // True while the page is showing fullscreen
     function isFullscreen() {
 
@@ -9412,6 +9504,12 @@
 
             closeActions();
 
+            if (!fullscreenSupported()) {
+
+                showFullscreenHelp();
+                return;
+            }
+
             if (isFullscreen()) {
 
                 leftFullscreenOnPurpose = true;
@@ -9443,7 +9541,7 @@
             }
         });
 
-        if (fullscreenSupported()) {
+        if (fullscreenOffered()) {
             rowDisplay.appendChild(fullscreenButton);
         }
         rowDisplay.appendChild(blackoutButton);
@@ -12419,11 +12517,20 @@
 
         const carGateRow = makeBoolRow("Start in fullscreen",
             function () { return settings.carGate; },
-            function (v) { settings.carGate = v; refreshGate(); });
+            function (v) {
 
-        // Hidden where fullscreen is not on offer, a switch that cannot do
-        // anything is worse than no switch
-        if (!fullscreenSupported()) {
+                settings.carGate = v;
+                refreshGate();
+
+                // Turning it on where fullscreen is switched off in the browser
+                // would do nothing at all, so say why
+                if (v && !fullscreenSupported()) {
+                    showFullscreenHelp();
+                }
+            });
+
+        // Hidden only where there is no way to switch fullscreen on at all
+        if (!fullscreenOffered()) {
             carGateRow.style.display = "none";
         }
 
