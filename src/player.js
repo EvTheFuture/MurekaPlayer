@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.38";
+    const VERSION = "1.4.5.55";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -368,6 +368,98 @@
     // How many rows go in at a time
     const RENDER_CHUNK = 120;
 
+    // The panel colour, used by the panel, the backdrop behind it and the page
+    // backgrounds it takes over, so the three can never drift apart
+    const PANEL_BACKGROUND = "#1d1d22";
+
+    // The padding the phone layout gives the panel
+    const PANEL_PAD_MOBILE = "8px";
+
+    // What the page looked like before the panel took its colours over, so it
+    // can be handed back untouched the moment the panel folds away
+    let savedRootBackground = null;
+    let savedThemeColors = null;
+    let addedThemeMeta = null;
+
+    // Safari paints the strip around the page, and tints its own toolbars,
+    // from the page rather than from anything drawn on top of it. No element
+    // can reach those areas, which is why a sheet behind the panel leaves them
+    // black. The page itself is asked for the panel colour instead, through
+    // the root background for the strip and through theme-color for the bars,
+    // and both are put back exactly as they were when the panel folds away
+    function paintPageBehind(active) {
+
+        const root = document.documentElement;
+
+        if (active && savedRootBackground === null) {
+            savedRootBackground = root.style.backgroundColor;
+        }
+
+        if (active) {
+            root.style.backgroundColor = PANEL_BACKGROUND;
+        } else if (savedRootBackground !== null) {
+
+            root.style.backgroundColor = savedRootBackground;
+            savedRootBackground = null;
+        }
+
+        // A site may ship several of these, one per colour scheme, and the one
+        // that applies is whichever matches, so they all have to be handled
+        let metas = Array.prototype.slice.call(
+            document.querySelectorAll('meta[name="theme-color"]'));
+
+        if (active && !metas.length && !addedThemeMeta) {
+
+            addedThemeMeta = document.createElement("meta");
+            addedThemeMeta.setAttribute("name", "theme-color");
+            document.head.appendChild(addedThemeMeta);
+        }
+
+        if (addedThemeMeta) {
+            metas = metas.concat([addedThemeMeta]);
+        }
+
+        if (active) {
+
+            if (savedThemeColors === null) {
+
+                savedThemeColors = metas.map(function (m) {
+                    return m.getAttribute("content");
+                });
+            }
+
+            metas.forEach(function (m) {
+                m.setAttribute("content", PANEL_BACKGROUND);
+            });
+
+        } else if (savedThemeColors !== null) {
+
+            metas.forEach(function (m, i) {
+
+                const was = savedThemeColors[i];
+
+                if (was === null || was === undefined) {
+                    m.removeAttribute("content");
+                } else {
+                    m.setAttribute("content", was);
+                }
+            });
+
+            savedThemeColors = null;
+        }
+    }
+
+    // True while the on screen keyboard is covering part of the panel. Set by
+    // the search field handling, read by the sizing, which must not hand the
+    // panel the tall viewport while the keyboard is over the lower half of it
+    let keyboardUp = false;
+
+    // iOS Safari zooms the whole page when a focused field has a font smaller
+    // than this, and never zooms back out. Every field the user can type into
+    // is set to it, which is the only way to refuse that behaviour without
+    // disabling pinch zoom for the whole site
+    const INPUT_FONT = "16px/1.3 sans-serif";
+
     // A jump to either end scrolls smoothly for a while, and none of that
     // scrolling is the user, so the edge button must not react to it
     let edgeJumpUntil = 0;
@@ -381,6 +473,9 @@
     let feedButton = null;
     let cacheButton = null;
     let downloadButton = null;
+
+    // The sheet painted behind the panel on phones, see where it is built
+    let backdropEl = null;
 
     // The panel, its header, its collapsible body and the minimize indicator
     let panelEl = null;
@@ -506,12 +601,33 @@
     let playerTitle = null;
     let playerMetaEl = null;
 
-    // The art and transport block, hidden while the on screen keyboard is up
-    let playerBlockEl = null;
-    let keyboardWasUp = false;
+    // The art and transport block. It lives at this scope because the keyboard
+    // handling below runs outside the builder that creates it
+    let playerEl = null;
 
-    // Whether the page behind is currently held still
-    let pageScrollLocked = null;
+    // Bring the art and transport block back after the keyboard has gone
+    function showPlayerBlock() {
+
+        if (!playerEl || playerEl.style.display !== "none") {
+            return;
+        }
+
+        playerEl.style.display = "block";
+
+        if (!swipeActive) {
+            positionArt(0);
+        }
+    }
+
+    // Take it away while the keyboard covers the lower half of the panel
+    function hidePlayerBlock() {
+
+        if (!playerEl || playerEl.style.display === "none") {
+            return;
+        }
+
+        playerEl.style.display = "none";
+    }
 
     // The inner span that actually slides, the animation driving it, and the
     // timer waiting to start it. The meta line is often longer than the panel
@@ -4489,13 +4605,175 @@
         resetPull();
     }
 
+    // Fullscreen on an iPhone is dismissed by a downward swipe, and WebKit runs
+    // that gesture from anywhere in the list, not only at its ends, so a drag
+    // meant to move a little further up the list drops out of fullscreen
+    // instead. A gesture the browser owns cannot be turned off and no CSS
+    // reaches it. The one thing that does is taking the touch: while fullscreen
+    // is on, the move events are consumed and the list is scrolled by hand, so
+    // that gesture never sees a swipe to act on
+    //
+    // Nothing is lost by it. The pull to refresh runs from the same handler,
+    // and the flick keeps gliding after the finger leaves, both driven here
+    // rather than by the browser
+    function handScrollActive() {
+
+        return isFullscreen() && isIosLike();
+    }
+
+    // What the page had before fullscreen locked it, so it gets it back
+    let savedRootOverflow = null;
+    let savedBodyOverflow = null;
+
+    // Fullscreen here is asked for on the page itself, which is what lets the
+    // menu and the overlays stay visible, since they are not inside the panel.
+    // The cost is that a drag which reaches the page is read by WebKit as the
+    // swipe that leaves fullscreen, and no amount of handling inside an element
+    // changes that, because the gesture belongs to the page and not to the
+    // element. Taking the page scroll away leaves that gesture nothing to act
+    // on. The list is scrolled by hand while this is on, so nothing is lost
+    //
+    // touch-action tells the browser not to treat these touches as a gesture of
+    // its own in the first place, which is the part preventDefault cannot do,
+    // since by the time a move event is delivered the browser has often already
+    // decided what the touch is
+    function updateFullscreenScrollLock() {
+
+        const active = handScrollActive();
+        const root = document.documentElement;
+        const body = document.body;
+
+        if (listEl) {
+            listEl.classList.toggle("mureka-hand-scroll", active);
+        }
+
+        if (active) {
+
+            if (savedRootOverflow === null) {
+
+                savedRootOverflow = root.style.overflow;
+                savedBodyOverflow = body ? body.style.overflow : "";
+            }
+
+            root.style.overflow = "hidden";
+
+            if (body) {
+                body.style.overflow = "hidden";
+            }
+
+            return;
+        }
+
+        if (savedRootOverflow !== null) {
+
+            root.style.overflow = savedRootOverflow;
+
+            if (body) {
+                body.style.overflow = savedBodyOverflow;
+            }
+
+            savedRootOverflow = null;
+            savedBodyOverflow = null;
+        }
+    }
+
+    // Live drag state for the hand driven scroll
+    let dragging = false;
+    let dragMoved = false;
+    let dragStartY = 0;
+    let dragLastY = 0;
+    let dragLastT = 0;
+
+    // Pixels per millisecond, carried into the glide when the finger lifts
+    let dragVelocity = 0;
+    let glideFrame = 0;
+
+    // Where the current pull began, which is not where the touch began, since
+    // the list may have been scrolled up to its top first
+    let pullFromY = 0;
+
+    // Below this a touch is a tap, above it a drag, so a tap still reaches the
+    // row under it and still opens a song
+    const DRAG_SLOP = 4;
+
+    // How much of its speed the glide keeps each frame, and the speed below
+    // which it has arrived. Both are per frame rather than per pixel, so they
+    // feel the same on any screen
+    const GLIDE_FRICTION = 0.94;
+    const GLIDE_STOP = 0.02;
+
+    function nowMs() {
+
+        return window.performance && performance.now
+            ? performance.now()
+            : Date.now();
+    }
+
+    function stopGlide() {
+
+        if (glideFrame) {
+
+            cancelAnimationFrame(glideFrame);
+            glideFrame = 0;
+        }
+    }
+
+    // Keep the list moving after the finger leaves, slowing to a stop
+    function startGlide() {
+
+        let velocity = dragVelocity;
+
+        const step = function () {
+
+            glideFrame = 0;
+
+            if (Math.abs(velocity) < GLIDE_STOP || !listEl) {
+                return;
+            }
+
+            const before = listEl.scrollTop;
+
+            // One frame worth of travel at the current speed
+            listEl.scrollTop += velocity * 16;
+
+            // Ran into an end, so there is nowhere left to glide
+            if (listEl.scrollTop === before) {
+                return;
+            }
+
+            velocity *= GLIDE_FRICTION;
+            glideFrame = requestAnimationFrame(step);
+        };
+
+        stopGlide();
+        glideFrame = requestAnimationFrame(step);
+    }
+
     // Begin a possible pull only when the list is already at the very top
     function onListTouchStart(ev) {
 
         if (refreshing || ev.touches.length !== 1) {
             pullArmed = false;
+            dragging = false;
             return;
         }
+
+        if (handScrollActive()) {
+
+            stopGlide();
+
+            dragging = true;
+            dragMoved = false;
+            dragStartY = ev.touches[0].clientY;
+            dragLastY = dragStartY;
+            dragLastT = nowMs();
+            dragVelocity = 0;
+            pulling = false;
+            pullArmed = false;
+            return;
+        }
+
+        dragging = false;
 
         if (listEl.scrollTop <= 0) {
             pullArmed = true;
@@ -4508,6 +4786,11 @@
 
     // Track the drag, taking over only while pulling down from the top
     function onListTouchMove(ev) {
+
+        if (dragging) {
+            onHandScrollMove(ev);
+            return;
+        }
 
         if (!pullArmed || refreshing) {
             return;
@@ -4532,8 +4815,90 @@
         }
     }
 
+    // Move the list with the finger, and pull it open at the top
+    function onHandScrollMove(ev) {
+
+        if (refreshing || !listEl || ev.touches.length !== 1) {
+            return;
+        }
+
+        const y = ev.touches[0].clientY;
+
+        if (!dragMoved && Math.abs(y - dragStartY) > DRAG_SLOP) {
+            dragMoved = true;
+        }
+
+        if (!dragMoved) {
+            dragLastY = y;
+            return;
+        }
+
+        // From here the touch belongs to the list, which is what keeps the
+        // dismiss gesture from ever seeing it
+        ev.preventDefault();
+
+        const moment = nowMs();
+        const dy = y - dragLastY;
+        const dt = Math.max(1, moment - dragLastT);
+
+        dragLastY = y;
+        dragLastT = moment;
+
+        // Already at the top and still heading down, so this is the refresh
+        // gesture rather than a scroll
+        if (!pulling && dy > 0 && listEl.scrollTop <= 0) {
+
+            pulling = true;
+            pullFromY = y;
+        }
+
+        if (pulling) {
+
+            const pulled = y - pullFromY;
+
+            // Pushed back up past where it started, so it is a scroll again
+            if (pulled <= 0) {
+
+                resetPull();
+                pulling = false;
+
+            } else {
+
+                pullDist = dampPull(pulled);
+                listEl.style.transform = "translateY(" + pullDist + "px)";
+                updatePullIndicator(pullDist);
+                return;
+            }
+        }
+
+        listEl.scrollTop -= dy;
+        dragVelocity = -dy / dt;
+    }
+
     // On release, refresh if pulled far enough, otherwise spring back
     function onListTouchEnd() {
+
+        if (dragging) {
+
+            dragging = false;
+
+            if (pulling) {
+
+                if (pullDist >= PULL_TRIGGER) {
+                    triggerPullRefresh();
+                } else {
+                    resetPull();
+                }
+
+                return;
+            }
+
+            if (dragMoved) {
+                startGlide();
+            }
+
+            return;
+        }
 
         if (!pulling) {
             pullArmed = false;
@@ -9595,7 +9960,8 @@
         document.body.appendChild(actionsWrapEl);
 
         // Player block, album art on top, then title, seek bar and play control
-        const playerEl = document.createElement("div");
+        // Assigned to the shared reference so the keyboard handling can reach it
+        playerEl = document.createElement("div");
         playerEl.style.marginBottom = "8px";
 
         // A box that holds the masked strip, plus optional side nav buttons that
@@ -9971,7 +10337,7 @@
         controlButtons = {
             prev: makeIconButton(iconPrev(), "Previous", playPrev),
             play: playPauseBtn,
-            stop: makeIconButton(iconStop(), "Stop", stopPlay),
+            stop: makeIconButton(iconStopTransport(), "Stop", stopPlay),
             next: makeIconButton(iconNext(), "Next", playNext),
             shuffle: shuffleBtn,
             repeat: repeatBtn,
@@ -10002,14 +10368,23 @@
             "border-radius:6px",
             "background:#26262c",
             "color:#fff",
-            "font:13px/1.4 sans-serif"
+            "font:" + INPUT_FONT
         ].join(";");
 
         // Inline styles cannot target the placeholder, so inject a rule for it
         // important is needed to beat the site own placeholder styling
         const placeholderStyle = document.createElement("style");
         placeholderStyle.textContent =
-            "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
+
+            // Everything around a fullscreen element is painted by the browser
+            // with the backdrop pseudo element, which defaults to black. That
+            // is the bar above and below in fullscreen, and styling it is the
+            // only thing that reaches it. The fullscreen element itself gets
+            // the same colour, for the same reason
+            "::backdrop{background:" + PANEL_BACKGROUND + "}"
+            + ":fullscreen{background:" + PANEL_BACKGROUND + "}"
+            + ":-webkit-full-screen{background:" + PANEL_BACKGROUND + "}"
+            + "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}"
             + "#mureka-seek-bar::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#555}"
@@ -10017,6 +10392,16 @@
             + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
             + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
             + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:#48e1eb}"
+            // Room for the strip the system owns at the top of an iPhone in
+            // fullscreen. A class rather than an inline property, because
+            // clearing an inline longhand also breaks apart the padding
+            // shorthand the panel is built with and drops its top padding
+            // everywhere else
+            + "#mureka-player-panel.mureka-top-inset{padding-top:calc(env(safe-area-inset-top, 0px) + 12px) !important}"
+
+            // See updateFullscreenScrollLock for why the list refuses the
+            // browser own gestures while fullscreen is on
+            + "#mureka-player-list.mureka-hand-scroll{touch-action:none !important;-webkit-overflow-scrolling:auto !important}"
             + ".mureka-resize-handle{background:transparent;transition:background 0.12s ease}"
             + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
@@ -10024,12 +10409,15 @@
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
-            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:8px !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important}"
+            // overscroll-behavior keeps a drag that runs past the end of the
+            // list from handing the rest of the movement to the page, which is
+            // what starts the bounce that drags the panel off its own edges
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:" + PANEL_PAD_MOBILE + " !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important;overscroll-behavior:none !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
             + ".mureka-resize-handle{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
-            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important}"
+            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important;overscroll-behavior:contain !important}"
             + "#mureka-player-list > div{font-size:15px !important;padding:9px 2px !important}"
             + "}";
         document.head.appendChild(placeholderStyle);
@@ -10045,12 +10433,94 @@
             ev.stopPropagation();
         });
 
-        // On a phone the keyboard covers the lower panel, so while it is up the
-        // tall player block is hidden to lift the field and the list into the
-        // space that is left. Judged by the viewport shrinking rather than by
-        // focus: dismissing the keyboard with its own button on iOS leaves the
-        // field focused and never fires blur, which used to leave the art gone
-        playerBlockEl = playerEl;
+        // On a phone the keyboard covers the lower half of the panel, so while
+        // it is up the tall player block steps aside and lifts the field and
+        // the list into what is left. Whether the keyboard is up is read from
+        // the viewport rather than from focus, because dismissing it with its
+        // own button leaves the field focused and fires no blur, which used to
+        // leave the art gone until the browser was hidden and reopened
+        //
+        // The comparison is against the tallest viewport seen in this
+        // orientation and is a share of it, never a pixel count, so it holds on
+        // any screen. A keyboard takes a large part of the screen, the browser
+        // toolbar sliding away takes a small one, and only the former counts
+        const KEYBOARD_SHARE = 0.8;
+
+        let tallestViewport = 0;
+        let lastLayoutWidth = window.innerWidth;
+        let keyboardWasUp = false;
+
+        function viewportHeight() {
+
+            return window.visualViewport
+                ? window.visualViewport.height
+                : window.innerHeight;
+        }
+
+        function updateKeyboardLayout() {
+
+            // Rotating gives a different tallest height, so start that over
+            if (window.innerWidth !== lastLayoutWidth) {
+
+                lastLayoutWidth = window.innerWidth;
+                tallestViewport = 0;
+            }
+
+            const height = viewportHeight();
+
+            if (height > tallestViewport) {
+                tallestViewport = height;
+            }
+
+            // Only phones are tight enough for this to be worth doing
+            if (window.innerWidth > 640) {
+
+                keyboardUp = false;
+                showPlayerBlock();
+                return;
+            }
+
+            keyboardUp = height < tallestViewport * KEYBOARD_SHARE
+                && document.activeElement === searchInput;
+
+            if (keyboardUp) {
+                hidePlayerBlock();
+            } else {
+                showPlayerBlock();
+            }
+
+            // The height the viewport reports while the keyboard is on its way
+            // out is not the height it settles at, and the panel is sized from
+            // that number. Measure once more on the next frame, but only on the
+            // change itself, so this cannot turn into a running second pass
+            if (keyboardUp !== keyboardWasUp) {
+
+                keyboardWasUp = keyboardUp;
+
+                fitMobile();
+
+                requestAnimationFrame(function () {
+                    fitMobile();
+                });
+            }
+        }
+
+        searchInput.addEventListener("focus", updateKeyboardLayout);
+        searchInput.addEventListener("blur", updateKeyboardLayout);
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", updateKeyboardLayout);
+        } else {
+            window.addEventListener("resize", updateKeyboardLayout);
+        }
+
+        // Coming back from another app is the other moment it has to be right
+        document.addEventListener("visibilitychange", function () {
+
+            if (!document.hidden) {
+                updateKeyboardLayout();
+            }
+        });
 
         // Search box on its own row
         const searchRow = document.createElement("div");
@@ -10256,6 +10726,27 @@
         panel.appendChild(header);
         panel.appendChild(bodyEl);
         buildResizeHandles(panel);
+
+        // A sheet in the panel colour directly behind the panel, for phones
+        // On iOS the whole page rubber bands when a drag runs past its end,
+        // and fixed elements travel with it, so for a moment the panel slides
+        // and whatever the site paints shows through at the edge it leaves.
+        // Reaching a full viewport past both edges means the bounce can never
+        // run far enough to expose anything, whatever the screen size
+        backdropEl = document.createElement("div");
+        backdropEl.id = "mureka-player-backdrop";
+        backdropEl.style.cssText = [
+            "position:fixed",
+            "left:0",
+            "right:0",
+            "top:-100%",
+            "bottom:-100%",
+            "z-index:999998",
+            "background:" + PANEL_BACKGROUND,
+            "display:none"
+        ].join(";");
+
+        document.body.appendChild(backdropEl);
         document.body.appendChild(panel);
 
         restoreSize();
@@ -10309,6 +10800,11 @@
                 leftFullscreenOnPurpose = false;
             }
 
+            // A glide belongs to the mode it started in
+            stopGlide();
+
+            updateFullscreenScrollLock();
+
             refreshGate();
             updateFullscreenButton();
             fitMobile();
@@ -10361,6 +10857,7 @@
         // Size the panel to the real visible area and keep it in sync as iOS
         // Safari shows or hides its toolbar
         fitMobile();
+
         window.addEventListener("resize", fitMobile);
 
         if (window.visualViewport) {
@@ -10759,44 +11256,6 @@
     // height when it shows or hides its toolbar, and CSS viewport units lag
     // behind that. Size the panel to the actual visible rectangle instead, so
     // the top controls and the list never spill off screen
-    // Hold the page behind still, or give it back. Only ever used on a phone,
-    // where the panel covers the whole viewport, and undone the moment it does
-    // not, so the site is never left unusable
-    function lockPageScroll(on) {
-
-        if (pageScrollLocked === on) {
-            return;
-        }
-
-        pageScrollLocked = on;
-
-        const html = document.documentElement;
-        const body = document.body;
-
-        if (!on) {
-
-            html.style.removeProperty("overflow");
-            html.style.removeProperty("overscroll-behavior");
-
-            if (body) {
-
-                body.style.removeProperty("overflow");
-                body.style.removeProperty("overscroll-behavior");
-            }
-
-            return;
-        }
-
-        html.style.setProperty("overflow", "hidden", "important");
-        html.style.setProperty("overscroll-behavior", "none", "important");
-
-        if (body) {
-
-            body.style.setProperty("overflow", "hidden", "important");
-            body.style.setProperty("overscroll-behavior", "none", "important");
-        }
-    }
-
     function fitMobile() {
 
         if (!panelEl) {
@@ -10805,7 +11264,17 @@
 
         const mobile = window.innerWidth <= 640;
 
+        // The sheet behind the panel belongs to the phone layout, and only
+        // while the panel is open, since a folded panel must leave the site
+        // reachable
+        if (backdropEl) {
+            backdropEl.style.display = (mobile && !minimized) ? "block" : "none";
+        }
+
         if (!mobile) {
+
+            // A window that grew past the phone layout gets its page back
+            paintPageBehind(false);
 
             // Hand sizing back to the draggable desktop dock. The fixed width
             // is only the fallback, restoreSize puts back what the user set
@@ -10814,7 +11283,6 @@
             panelEl.style.removeProperty("right");
             panelEl.style.removeProperty("left");
             panelEl.style.setProperty("width", "300px");
-            lockPageScroll(false);
             restoreSize();
             restorePosition();
             return;
@@ -10822,50 +11290,35 @@
 
         // Pin the panel to the real visible viewport rather than relying on
         // 100vw, which on iOS can be wider than what is actually on screen and
-        // pushes the panel and its content off both edges
+        // pushes the panel and its content off both edges. These four values
+        // are all the panel needs, and nothing here touches the page itself
         const vv = window.visualViewport;
 
-        // The keyboard is up when the visible viewport is much shorter than
-        // the window. Hide the player block for as long as that holds and put
-        // it back the moment it stops, whatever focus is doing
-        const keyboardUp = !!vv && (window.innerHeight - vv.height) > 150;
+        let top = vv ? vv.offsetTop : 0;
+        let height = vv ? vv.height : window.innerHeight;
 
-        // A fixed element is already anchored to the viewport, so zero is the
-        // right offset. The visual viewport offsets were used here to undo the
-        // drift iOS causes when the page behind is rubber band scrolled, but
-        // they stay non zero for a while after the keyboard closes, which left
-        // the panel pushed down by that amount. The drift is prevented at the
-        // source instead, by stopping the page behind from scrolling at all
-        const top = 0;
-        const left = 0;
-        const width = window.innerWidth;
+        const left = vv ? vv.offsetLeft : 0;
+        const width = vv ? vv.width : window.innerWidth;
 
-        // The full window, except while the keyboard is up, when the panel has
-        // to end above it. Rounded up so no hairline of page shows through
-        const height = Math.ceil(keyboardUp && vv ? vv.height : window.innerHeight);
+        // iOS 26 leaves the visible viewport a little short, and its offset a
+        // little off zero, once the keyboard has gone, and never corrects
+        // either. A panel sized from those numbers stops short of the bottom
+        // and can be dragged around, which is exactly what was seen after a
+        // search. With the keyboard down and no pinch zoom in play the panel
+        // owns the whole screen, so the larger of the two heights is the
+        // honest one and the offset is zero. Nothing is assumed about how big
+        // the discrepancy is, only which of the two numbers to believe
+        if (vv && isIosLike() && !keyboardUp && vv.scale === 1) {
 
-        if (playerBlockEl && keyboardUp !== keyboardWasUp) {
-
-            keyboardWasUp = keyboardUp;
-            playerBlockEl.style.display = keyboardUp ? "none" : "block";
-
-            if (!keyboardUp && !swipeActive) {
-                positionArt(0);
-            }
+            height = Math.max(height, window.innerHeight);
+            top = 0;
         }
 
-        // In fullscreen on an iPhone the top edge belongs to the system. Taps
-        // there pull the status bar and its overlay down instead of reaching
-        // the panel, so the content starts below that zone
-        const topInset = (isFullscreen() && isIosLike())
-            ? "max(env(safe-area-inset-top, 0px), 28px)"
-            : "12px";
-
-        panelEl.style.setProperty("padding-top", topInset, "important");
-
-        // With the panel covering the screen there is nothing to scroll to
-        // behind it, and letting it scroll is what made the panel drift
-        lockPageScroll(!minimized);
+        // Extra room at the top only in fullscreen on an iPhone, where the
+        // system owns that strip. Carried by a class so that switching it off
+        // leaves the panel own padding exactly as its style declared it
+        panelEl.classList.toggle("mureka-top-inset",
+            isFullscreen() && isIosLike());
 
         // Inline important beats the media query so the exact pixels win
         panelEl.style.setProperty("top", top + "px", "important");
@@ -10886,6 +11339,11 @@
             panelEl.style.setProperty("height", height + "px", "important");
         }
 
+        // Everything the browser paints outside the panel comes from the page,
+        // never from anything drawn inside it, so that is where it has to be
+        // asked for
+        paintPageBehind(!minimized);
+
         // The art height may have changed, re-seat the coverflow strip
         if (!swipeActive) {
             positionArt(0);
@@ -10894,12 +11352,6 @@
 
     // Drag the panel by its header, a click without movement toggles minimize
     function startDrag(ev) {
-
-        // Pinned to the viewport on a phone, so there is nothing to drag and
-        // moving it would only reveal the site behind
-        if (window.innerWidth <= 640) {
-            return;
-        }
 
         if (ev.button !== 0) {
             return;
@@ -11359,7 +11811,10 @@
         ]);
     }
 
-    function iconStop() {
+    // The transport stop, drawn solid to match the rest of the play controls
+    // The action tiles have a stop of their own further down, and a second
+    // declaration under the same name would quietly win over this one
+    function iconStopTransport() {
 
         return makeFilledIcon([
             ["rect", { x: "6.5", y: "6.5", width: "11", height: "11", rx: "1.6" }]
@@ -12186,6 +12641,7 @@
 
         const input = document.createElement("input");
         input.type = "text";
+        input.style.font = INPUT_FONT;
         input.value = get();
         input.style.cssText = [
             "width:100%",
@@ -12341,6 +12797,7 @@
         const value = document.createElement("input");
 
         value.type = "number";
+        value.style.font = INPUT_FONT;
         value.min = String(min);
         value.max = String(max);
         value.step = String(st);
@@ -13557,6 +14014,7 @@
 
         creatorsInputEl = document.createElement("input");
         creatorsInputEl.type = "text";
+        creatorsInputEl.style.font = INPUT_FONT;
         creatorsInputEl.placeholder = "Search creators, or paste an id / link";
         creatorsInputEl.style.cssText = [
             "flex:1",
