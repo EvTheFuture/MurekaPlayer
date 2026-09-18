@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.35";
+    const VERSION = "1.4.5.38";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -509,6 +509,9 @@
     // The art and transport block, hidden while the on screen keyboard is up
     let playerBlockEl = null;
     let keyboardWasUp = false;
+
+    // Whether the page behind is currently held still
+    let pageScrollLocked = null;
 
     // The inner span that actually slides, the animation driving it, and the
     // timer waiting to start it. The meta line is often longer than the panel
@@ -10362,17 +10365,10 @@
 
         if (window.visualViewport) {
 
-            // The viewport reports its new size while the keyboard or the
-            // browser bars are still animating, so the first fit lands short
-            // and leaves a gap at the bottom. Fit again once it has settled
-            const refit = function () {
-
-                fitMobile();
-
-                setTimeout(fitMobile, 350);
-            };
-
-            window.visualViewport.addEventListener("resize", refit);
+            // Fit as the viewport reports itself. A delayed second pass was
+            // tried here and made things worse, it re-applied values that had
+            // gone stale rather than correcting them
+            window.visualViewport.addEventListener("resize", fitMobile);
             window.visualViewport.addEventListener("scroll", fitMobile);
         }
 
@@ -10763,6 +10759,44 @@
     // height when it shows or hides its toolbar, and CSS viewport units lag
     // behind that. Size the panel to the actual visible rectangle instead, so
     // the top controls and the list never spill off screen
+    // Hold the page behind still, or give it back. Only ever used on a phone,
+    // where the panel covers the whole viewport, and undone the moment it does
+    // not, so the site is never left unusable
+    function lockPageScroll(on) {
+
+        if (pageScrollLocked === on) {
+            return;
+        }
+
+        pageScrollLocked = on;
+
+        const html = document.documentElement;
+        const body = document.body;
+
+        if (!on) {
+
+            html.style.removeProperty("overflow");
+            html.style.removeProperty("overscroll-behavior");
+
+            if (body) {
+
+                body.style.removeProperty("overflow");
+                body.style.removeProperty("overscroll-behavior");
+            }
+
+            return;
+        }
+
+        html.style.setProperty("overflow", "hidden", "important");
+        html.style.setProperty("overscroll-behavior", "none", "important");
+
+        if (body) {
+
+            body.style.setProperty("overflow", "hidden", "important");
+            body.style.setProperty("overscroll-behavior", "none", "important");
+        }
+    }
+
     function fitMobile() {
 
         if (!panelEl) {
@@ -10780,6 +10814,7 @@
             panelEl.style.removeProperty("right");
             panelEl.style.removeProperty("left");
             panelEl.style.setProperty("width", "300px");
+            lockPageScroll(false);
             restoreSize();
             restorePosition();
             return;
@@ -10789,15 +10824,25 @@
         // 100vw, which on iOS can be wider than what is actually on screen and
         // pushes the panel and its content off both edges
         const vv = window.visualViewport;
-        const top = vv ? vv.offsetTop : 0;
-        const left = vv ? vv.offsetLeft : 0;
-        const width = vv ? vv.width : window.innerWidth;
-        const height = vv ? vv.height : window.innerHeight;
 
         // The keyboard is up when the visible viewport is much shorter than
         // the window. Hide the player block for as long as that holds and put
         // it back the moment it stops, whatever focus is doing
         const keyboardUp = !!vv && (window.innerHeight - vv.height) > 150;
+
+        // A fixed element is already anchored to the viewport, so zero is the
+        // right offset. The visual viewport offsets were used here to undo the
+        // drift iOS causes when the page behind is rubber band scrolled, but
+        // they stay non zero for a while after the keyboard closes, which left
+        // the panel pushed down by that amount. The drift is prevented at the
+        // source instead, by stopping the page behind from scrolling at all
+        const top = 0;
+        const left = 0;
+        const width = window.innerWidth;
+
+        // The full window, except while the keyboard is up, when the panel has
+        // to end above it. Rounded up so no hairline of page shows through
+        const height = Math.ceil(keyboardUp && vv ? vv.height : window.innerHeight);
 
         if (playerBlockEl && keyboardUp !== keyboardWasUp) {
 
@@ -10817,6 +10862,10 @@
             : "12px";
 
         panelEl.style.setProperty("padding-top", topInset, "important");
+
+        // With the panel covering the screen there is nothing to scroll to
+        // behind it, and letting it scroll is what made the panel drift
+        lockPageScroll(!minimized);
 
         // Inline important beats the media query so the exact pixels win
         panelEl.style.setProperty("top", top + "px", "important");
@@ -10845,6 +10894,12 @@
 
     // Drag the panel by its header, a click without movement toggles minimize
     function startDrag(ev) {
+
+        // Pinned to the viewport on a phone, so there is nothing to drag and
+        // moving it would only reveal the site behind
+        if (window.innerWidth <= 640) {
+            return;
+        }
 
         if (ev.button !== 0) {
             return;
