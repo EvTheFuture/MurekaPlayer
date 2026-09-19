@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.6";
+    const VERSION = "1.5.0.8";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5694,6 +5694,84 @@
                 fitMobile("tint");
             }, 150);
         }, typeof delay === "number" ? delay : 400);
+    }
+
+    // An invisible element that makes the page taller than the screen while
+    // the panel is open, and how far past the screen it reaches
+    let pageExtenderEl = null;
+    let pageExtenderPx = 0;
+
+    // iOS only draws the page under its bottom toolbar when the page actually
+    // reaches down there. A page that ends where the toolbar begins leaves
+    // that strip to Safari, which fills it with the colour it took from the
+    // site at load, black. Seen on an iPhone: the strip went grey only while
+    // the page was taller than the screen. So while the panel covers the
+    // site, the page is extended past the bottom of the screen, where the
+    // page background is already the panel colour. Its size is not touched
+    // while the keyboard is up, so the keyboard handling sees the same page
+    function updatePageExtender() {
+
+        const wanted = !!panelEl && !minimized && window.innerWidth <= 640
+            && isIosLike() && !isFullscreen();
+
+        if (!wanted) {
+
+            if (pageExtenderEl) {
+
+                pageExtenderEl.remove();
+                pageExtenderEl = null;
+                pageExtenderPx = 0;
+            }
+
+            return;
+        }
+
+        if (keyboardUp && pageExtenderEl) {
+            return;
+        }
+
+        // Everything between the bottom of the page area and the bottom of
+        // the screen, the toolbar included. Measured against the screen side
+        // that is vertical right now
+        let reach = 120;
+
+        if (window.screen && window.innerHeight > 0) {
+
+            const longSide = Math.max(screen.width, screen.height);
+            const shortSide = Math.min(screen.width, screen.height);
+            const screenTall = window.innerWidth < window.innerHeight ? longSide : shortSide;
+
+            reach = Math.max(reach, Math.round(screenTall - window.innerHeight));
+        }
+
+        if (!pageExtenderEl) {
+
+            // Placed against the page itself rather than the body, so a body
+            // that clips its overflow cannot hold the page short. It is a
+            // painted sheet in the panel colour, not an invisible one. What
+            // the toolbar shows is whatever is drawn under it, and the site
+            // draws black there, so the sheet has to cover the site. It sits
+            // above the site and below the backdrop and the panel, and never
+            // takes a tap
+            pageExtenderEl = document.createElement("div");
+            pageExtenderEl.id = "mureka-page-extender";
+            pageExtenderEl.style.cssText = [
+                "position:absolute",
+                "left:0",
+                "right:0",
+                "top:0",
+                "z-index:999997",
+                "background:" + PANEL_BACKGROUND,
+                "pointer-events:none"
+            ].join(";");
+            document.documentElement.appendChild(pageExtenderEl);
+        }
+
+        if (reach !== pageExtenderPx) {
+
+            pageExtenderPx = reach;
+            pageExtenderEl.style.height = "calc(100% + " + reach + "px)";
+        }
     }
 
     // Bring the layout in line when the real fullscreen state has moved on
@@ -12819,6 +12897,7 @@
 
             // A window that grew past the phone layout gets its page back
             paintPageBehind(false);
+            updatePageExtender();
 
             // Hand sizing back to the draggable desktop dock. The fixed width
             // is only the fallback, restoreSize puts back what the user set
@@ -12939,6 +13018,9 @@
         // never from anything drawn inside it, so that is where it has to be
         // asked for
         paintPageBehind(!minimized);
+
+        // Reach under the toolbar while open, give the page back when folded
+        updatePageExtender();
 
         // The art height may have changed, re-seat the coverflow strip
         if (!swipeActive) {
