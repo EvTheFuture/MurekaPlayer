@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.4";
+    const VERSION = "1.5.0.26";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -127,6 +127,12 @@
     // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
     // track can carry lyrics text while still being an instrumental
     const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
+
+    // localStorage key for song tweaks the user took away again, a rating,
+    // a hand entered tempo or an instrumental mark, with when it happened.
+    // Exported with the song tweaks, so an import can tell a value that was
+    // removed on purpose from one that was never set
+    const CLEARED_KEY = "mureka_cleared_v1";
 
     // localStorage key for tempos entered by hand. Mureka leaves bpm unset on
     // some songs, and without it they can only ever be excluded from a tempo
@@ -380,6 +386,53 @@
     // The panel colour, used by the panel, the backdrop behind it and the page
     // backgrounds it takes over, so the three can never drift apart
     const PANEL_BACKGROUND = "#1d1d22";
+
+    // A thin strip in the panel colour pinned to the bottom edge while the
+    // panel is open on a phone, see updateEdgeStrip
+    let edgeStripEl = null;
+
+    // Safari 26 on iOS ignores theme-color. It takes the colour of its bottom
+    // toolbar from the first fixed or sticky element it finds 8 pixels inside
+    // the bottom edge, and uses that element's plain background colour. It
+    // skips elements 10 pixels tall or less, nearly transparent ones and
+    // hidden ones, and without a match it falls back to the page background,
+    // which mureka.ai sets to black. The panel alone did not qualify, so this
+    // strip gives Safari a fixed element with a plain colour at the edge.
+    // Confirmed on an iPhone with a blue strip before it was made grey.
+    // It sits above the panel so it is the one found, is 11 pixels tall so
+    // it is not skipped, covers only the panel's own bottom padding, and
+    // never takes a tap. Folded, the site shows its own bar, so it goes
+    function updateEdgeStrip(show) {
+
+        if (!show) {
+
+            if (edgeStripEl) {
+                edgeStripEl.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!edgeStripEl) {
+
+            edgeStripEl = document.createElement("div");
+            edgeStripEl.id = "mureka-player-edge-strip";
+            edgeStripEl.style.cssText = [
+                "position:fixed",
+                "left:0",
+                "right:0",
+                "bottom:0",
+                "height:11px",
+                "z-index:2147483000",
+                "pointer-events:none",
+                "background-color:" + PANEL_BACKGROUND
+            ].join(";");
+
+            (document.body || document.documentElement).appendChild(edgeStripEl);
+        }
+
+        edgeStripEl.style.display = "block";
+    }
 
     // The padding the phone layout gives the panel
     const PANEL_PAD_MOBILE = "8px";
@@ -1580,6 +1633,63 @@
     // Song ids the user marked as instrumental by hand, loaded once on startup
     let manualInstrumental = loadManualInstrumental();
 
+    // Per kind, rating, bpm and instr, song id to the time it was removed
+    let clearedMarks = loadClearedMarks();
+
+    function loadClearedMarks() {
+
+        const out = { rating: {}, bpm: {}, instr: {} };
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(CLEARED_KEY));
+
+            if (raw && typeof raw === "object") {
+
+                for (const kind of Object.keys(out)) {
+
+                    if (raw[kind] && typeof raw[kind] === "object") {
+                        out[kind] = raw[kind];
+                    }
+                }
+            }
+        } catch (e) {
+        }
+
+        return out;
+    }
+
+    function saveClearedMarks() {
+
+        try {
+            localStorage.setItem(CLEARED_KEY, JSON.stringify(clearedMarks));
+        } catch (e) {
+        }
+    }
+
+    // Remember that a value was removed on purpose
+    function markCleared(kind, id) {
+
+        clearedMarks[kind][String(id)] = Date.now();
+        saveClearedMarks();
+    }
+
+    // A value was set again, so it is no longer a removed one
+    function unmarkCleared(kind, id) {
+
+        const key = String(id);
+
+        if (Object.prototype.hasOwnProperty.call(clearedMarks[kind], key)) {
+
+            delete clearedMarks[kind][key];
+            saveClearedMarks();
+        }
+    }
+
+    function isCleared(kind, id) {
+        return Object.prototype.hasOwnProperty.call(clearedMarks[kind], String(id));
+    }
+
     // song_id to bpm, for tempos filled in by hand
     let manualBpm = loadManualBpm();
 
@@ -1666,6 +1776,7 @@
             }
 
             manualBpm.delete(String(song.song_id));
+            markCleared("bpm", song.song_id);
             saveManualBpm();
             refreshAfterBpmChange(song);
             setStatus("BPM cleared for " + (song.title || "Untitled"));
@@ -1682,6 +1793,7 @@
         }
 
         manualBpm.set(String(song.song_id), Math.round(value));
+        unmarkCleared("bpm", song.song_id);
         saveManualBpm();
         refreshAfterBpmChange(song);
         setStatus("BPM set to " + Math.round(value) + " for " + (song.title || "Untitled"));
@@ -1757,9 +1869,14 @@
         const id = String(song.song_id);
 
         if (value === null) {
-            ratings.delete(id);
+
+            if (ratings.delete(id)) {
+                markCleared("rating", id);
+            }
         } else {
+
             ratings.set(id, Math.max(0, Math.min(5, Math.round(value))));
+            unmarkCleared("rating", id);
         }
 
         saveRatings();
@@ -2092,11 +2209,13 @@
         if (manualInstrumental.has(id)) {
 
             manualInstrumental.delete(id);
+            markCleared("instr", id);
             setStatus("No longer marked instrumental: " + (song.title || "Untitled"));
 
         } else {
 
             manualInstrumental.add(id);
+            unmarkCleared("instr", id);
             setStatus("Marked as instrumental: " + (song.title || "Untitled"));
         }
 
@@ -12738,6 +12857,7 @@
 
             // A window that grew past the phone layout gets its page back
             paintPageBehind(false);
+            updateEdgeStrip(false);
 
             // Hand sizing back to the draggable desktop dock. The fixed width
             // is only the fallback, restoreSize puts back what the user set
@@ -12858,6 +12978,9 @@
         // never from anything drawn inside it, so that is where it has to be
         // asked for
         paintPageBehind(!minimized);
+
+        // Safari's bottom toolbar follows the panel colour while it is open
+        updateEdgeStrip(!minimized);
 
         // The art height may have changed, re-seat the coverflow strip
         if (!swipeActive) {
@@ -14769,6 +14892,95 @@
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(artStarsRow);
+        // Your own data, song tweaks and settings kept apart, since the
+        // settings usually differ between a phone and a desktop while the
+        // song tweaks are worth having everywhere
+        const dataLabel = document.createElement("div");
+        dataLabel.textContent = "Your data";
+        dataLabel.style.cssText = "color:#bbb";
+
+        const dataHint = document.createElement("div");
+        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks and saved creators."
+            + " Share saves to the Google Drive or Files app, Import can pick the file"
+            + " from there. Import sees what a file holds. Song tweaks are merged, and"
+            + " when a song has a different value here and in the file you are asked"
+            + " which to keep.";
+        dataHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+
+        const exportRow = document.createElement("div");
+        exportRow.style.cssText = "display:flex;gap:6px";
+
+        exportRow.appendChild(makeButton("Export song tweaks", "#333", "#fff", function () {
+            chooseExport("songs");
+        }));
+        exportRow.appendChild(makeButton("Export settings", "#333", "#fff", function () {
+            chooseExport("settings");
+        }));
+
+        const importRow = document.createElement("div");
+        importRow.style.cssText = "display:flex;gap:6px";
+
+        importRow.appendChild(makeButton("Import", "#333", "#fff", chooseImport));
+
+        // Where an export goes or an import comes from, asked in place
+        dataChoiceEl = document.createElement("div");
+        dataChoiceEl.style.cssText = "display:none;flex-direction:column;gap:6px;padding:8px;border-radius:8px;background:#222";
+
+        const driveInfoRow = document.createElement("div");
+        driveInfoRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:#888";
+
+        // Drive sign in only exists when the player has a Google client id
+        if (!GOOGLE_CLIENT_ID) {
+            driveInfoRow.style.display = "none";
+        }
+
+        driveStatusEl = document.createElement("span");
+
+        // Connect when signed out, Disconnect when signed in
+        driveLinkEl = document.createElement("span");
+        driveLinkEl.style.cssText = "color:#48e1eb;cursor:pointer;text-decoration:underline;flex:0 0 auto";
+        driveLinkEl.addEventListener("click", function () {
+
+            if (storedDriveToken()) {
+                disconnectDrive();
+            } else {
+                connectDrive();
+            }
+        });
+
+        driveInfoRow.appendChild(driveStatusEl);
+        driveInfoRow.appendChild(driveLinkEl);
+
+        // What the last export, import or Drive action did. The status line
+        // on the cover sits behind the settings, so it is shown here as well
+        dataMsgEl = document.createElement("div");
+        dataMsgEl.style.cssText = "font-size:12px;color:#48e1eb;line-height:1.4";
+
+        // The status is redrawn each time the settings open, and the sign in
+        // library is fetched then, so a Drive tap can open its popup at once
+        settingsRefreshers.push(function () {
+
+            dataMsgEl.textContent = "";
+            hideDataChoice();
+            updateDriveStatus();
+
+            if (GOOGLE_CLIENT_ID) {
+
+                loadGis().catch(function () {
+                });
+            }
+        });
+
+        updateDriveStatus();
+
+        settingsEl.appendChild(dataLabel);
+        settingsEl.appendChild(dataHint);
+        settingsEl.appendChild(exportRow);
+        settingsEl.appendChild(importRow);
+        settingsEl.appendChild(dataChoiceEl);
+        settingsEl.appendChild(driveInfoRow);
+        settingsEl.appendChild(dataMsgEl);
+
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
         settingsEl.appendChild(debugLineRow);
@@ -14778,6 +14990,1350 @@
         panelEl.appendChild(settingsEl);
 
         updateStartButtons();
+    }
+
+    // Google OAuth client id for Drive, from a Google Cloud project with the
+    // Drive API enabled and https://www.mureka.ai listed as an authorized
+    // JavaScript origin. It is public by design, a client id is no secret.
+    // Empty leaves the Drive buttons explaining that Drive is not set up
+    const GOOGLE_CLIENT_ID = "";
+
+    // Only files this player created itself can be seen, nothing else in the
+    // Drive, and the file is an ordinary visible one that can be downloaded
+    const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+    const DRIVE_FILE_NAMES = {
+        songs: "mureka-player-songs.json",
+        settings: "mureka-player-settings.json"
+    };
+
+    // localStorage key for the Drive access token and when it runs out. A
+    // browser only ever gets a short lived token, about an hour
+    const DRIVE_TOKEN_KEY = "mureka_gdrive_token";
+
+    // The hidden file picker used for importing, built the first time
+    let importInputEl = null;
+
+    // Google's sign in library, loaded once, and the token client built on it
+    let gisLoading = null;
+    let gisTokenClient = null;
+
+    // The promise waiting for the sign in popup to answer
+    let driveTokenWaiter = null;
+
+    // The Drive status line in the settings panel, its Connect or
+    // Disconnect link and the line reporting the last data action
+    let driveStatusEl = null;
+    let driveLinkEl = null;
+    let dataMsgEl = null;
+
+    // The in place choice of where data goes or comes from
+    let dataChoiceEl = null;
+
+    // Report a data action both on the cover status line and inside the
+    // settings, where the cover cannot be seen
+    function dataStatus(text) {
+
+        setStatus(text);
+
+        if (dataMsgEl) {
+            dataMsgEl.textContent = text;
+        }
+    }
+
+    // A readable count of what a set of user data holds, zeros left out
+    function userDataSummary(nRatings, nBpm, nInstr, nCreators) {
+
+        const parts = [];
+
+        const add = function (n, one, many) {
+
+            if (n > 0) {
+                parts.push(n + " " + (n === 1 ? one : many));
+            }
+        };
+
+        add(nRatings, "rating", "ratings");
+        add(nBpm, "tempo", "tempos");
+        add(nInstr, "instrumental mark", "instrumental marks");
+        add(nCreators, "creator", "creators");
+
+        return parts.length ? parts.join(", ") : "no song data";
+    }
+
+    // The words used for each kind of export
+    function dataKindName(kind) {
+        return kind === "settings" ? "settings" : "song tweaks";
+    }
+
+    // One kind of data entered by hand, gathered into one object, either
+    // the song tweaks or the settings. Downloads, the queue and the caches
+    // belong to this device and are left out
+    function collectUserData(kind) {
+
+        const base = {
+            app: "mureka-player",
+            kind: kind === "settings" ? "settings" : "song-data",
+            format: 1,
+            version: VERSION,
+            exported: new Date().toISOString()
+        };
+
+        if (kind === "settings") {
+
+            base.settings = JSON.parse(JSON.stringify(settings));
+            return base;
+        }
+
+        const data = Object.assign(base, {
+            ratings: {},
+            manualBpm: {},
+            manualInstrumental: Array.from(manualInstrumental),
+            creators: savedCreators.slice(),
+            cleared: {
+                rating: Object.keys(clearedMarks.rating),
+                bpm: Object.keys(clearedMarks.bpm),
+                instr: Object.keys(clearedMarks.instr)
+            }
+        });
+
+        ratings.forEach(function (value, key) {
+            data.ratings[key] = value;
+        });
+
+        manualBpm.forEach(function (value, key) {
+            data.manualBpm[key] = value;
+        });
+
+        return data;
+    }
+
+    // Check a set of user data and keep only its well formed entries.
+    // Song tweaks, settings and the combined files of 1.5.0.20 are all
+    // understood. Returns null when it is not a Mureka Player export at all
+    function parseUserData(data) {
+
+        const kinds = ["song-data", "settings", "user-data"];
+
+        if (!data || data.app !== "mureka-player" || kinds.indexOf(data.kind) < 0) {
+            return null;
+        }
+
+        const out = {
+            kind: data.kind,
+            exported: typeof data.exported === "string" ? data.exported : "",
+            ratings: [],
+            bpm: [],
+            instr: [],
+            creators: [],
+            cleared: { rating: [], bpm: [], instr: [] },
+            settings: (data.settings && typeof data.settings === "object") ? data.settings : null
+        };
+
+        if (data.ratings && typeof data.ratings === "object") {
+
+            for (const key of Object.keys(data.ratings)) {
+
+                const v = Number(data.ratings[key]);
+
+                if (isFinite(v) && v >= 0 && v <= 5) {
+                    out.ratings.push([String(key), Math.round(v)]);
+                }
+            }
+        }
+
+        if (data.manualBpm && typeof data.manualBpm === "object") {
+
+            for (const key of Object.keys(data.manualBpm)) {
+
+                const v = Number(data.manualBpm[key]);
+
+                if (isFinite(v) && v > 0) {
+                    out.bpm.push([String(key), v]);
+                }
+            }
+        }
+
+        if (Array.isArray(data.manualInstrumental)) {
+
+            for (const id of data.manualInstrumental) {
+
+                if (id !== null && id !== undefined && id !== "") {
+                    out.instr.push(String(id));
+                }
+            }
+        }
+
+        // Values removed on purpose where the file was made, files from
+        // before 1.5.0.26 have none
+        if (data.cleared && typeof data.cleared === "object") {
+
+            for (const kind of Object.keys(out.cleared)) {
+
+                if (Array.isArray(data.cleared[kind])) {
+
+                    out.cleared[kind] = data.cleared[kind].filter(function (id) {
+                        return id !== null && id !== undefined && id !== "";
+                    }).map(String);
+                }
+            }
+        }
+
+        // A song with both a value and a removal in the file keeps the value
+        const withValue = {
+            rating: new Set(out.ratings.map(function (e) {
+                return e[0];
+            })),
+            bpm: new Set(out.bpm.map(function (e) {
+                return e[0];
+            })),
+            instr: new Set(out.instr)
+        };
+
+        for (const kind of Object.keys(out.cleared)) {
+
+            out.cleared[kind] = out.cleared[kind].filter(function (id) {
+                return !withValue[kind].has(id);
+            });
+        }
+
+        if (Array.isArray(data.creators)) {
+
+            for (const c of data.creators) {
+
+                if (c && c.user_id) {
+                    out.creators.push({ user_id: String(c.user_id), stage_name: c.stage_name || "" });
+                }
+            }
+        }
+
+        return out;
+    }
+
+    function parsedSummary(p) {
+
+        if (p.kind === "settings") {
+            return "settings";
+        }
+
+        return userDataSummary(p.ratings.length, p.bpm.length, p.instr.length, p.creators.length);
+    }
+
+    // Put imported settings into effect without a reload, as far as the
+    // panel allows. The stored copy goes through the normal loader, so
+    // anything missing or malformed falls back to its default
+    function applyImportedSettings(raw) {
+
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(raw));
+        } catch (e) {
+            return false;
+        }
+
+        settings = loadSettings();
+
+        settingsRefreshers.forEach(function (fn) {
+            fn();
+        });
+
+        metaPreviewUpdaters.forEach(function (fn) {
+            fn();
+        });
+
+        applyControlOrder();
+        updateControlLabels();
+        applyLyricLayout();
+        updateDebugLine();
+        updateVocalsCtrlButton();
+        updateTestButton();
+        setView(settings.view);
+        resetIdleTimer();
+
+        return true;
+    }
+
+    // The title of a song for a question, from the loaded list when it is
+    // there, otherwise its id
+    function songTitleById(id) {
+
+        const song = cache.songs.find(function (s) {
+            return String(s.song_id) === id;
+        });
+
+        return song ? (song.title || "Untitled") : "Song " + id;
+    }
+
+    // Compare a parsed set of song tweaks with what is held here. Songs
+    // without a value here simply get the one from the set, equal values
+    // are left alone, and a different value on both sides is a conflict
+    function planSongMerge(p) {
+
+        const plan = { ratings: [], bpm: [], instr: [], creators: [], clears: [], same: 0, conflicts: [] };
+
+        // A value in the file for a song where it was removed here on
+        // purpose is a conflict too, not something new
+        for (const entry of p.ratings) {
+
+            if (!ratings.has(entry[0]) && isCleared("rating", entry[0])) {
+                plan.conflicts.push({ type: "rating", id: entry[0], mine: null, theirs: entry[1] });
+            } else if (!ratings.has(entry[0])) {
+                plan.ratings.push(entry);
+            } else if (ratings.get(entry[0]) === entry[1]) {
+                plan.same++;
+            } else {
+                plan.conflicts.push({ type: "rating", id: entry[0], mine: ratings.get(entry[0]), theirs: entry[1] });
+            }
+        }
+
+        for (const entry of p.bpm) {
+
+            if (!manualBpm.has(entry[0]) && isCleared("bpm", entry[0])) {
+                plan.conflicts.push({ type: "bpm", id: entry[0], mine: null, theirs: entry[1] });
+            } else if (!manualBpm.has(entry[0])) {
+                plan.bpm.push(entry);
+            } else if (Math.abs(manualBpm.get(entry[0]) - entry[1]) < 0.01) {
+                plan.same++;
+            } else {
+                plan.conflicts.push({ type: "bpm", id: entry[0], mine: manualBpm.get(entry[0]), theirs: entry[1] });
+            }
+        }
+
+        for (const id of p.instr) {
+
+            if (manualInstrumental.has(id)) {
+                plan.same++;
+            } else if (isCleared("instr", id)) {
+                plan.conflicts.push({ type: "instr", id: id, mine: false, theirs: true });
+            } else {
+                plan.instr.push(id);
+            }
+        }
+
+        // Values removed where the file was made. Held here is a conflict,
+        // not held here is only remembered as removed, so it travels on
+        const held = {
+            rating: function (id) {
+                return ratings.has(id) ? ratings.get(id) : null;
+            },
+            bpm: function (id) {
+                return manualBpm.has(id) ? manualBpm.get(id) : null;
+            },
+            instr: function (id) {
+                return manualInstrumental.has(id) ? true : null;
+            }
+        };
+
+        for (const kind of Object.keys(held)) {
+
+            for (const id of p.cleared[kind]) {
+
+                const mine = held[kind](id);
+
+                if (mine !== null) {
+                    plan.conflicts.push({ type: kind, id: id, mine: mine, theirs: kind === "instr" ? false : null });
+                } else if (!isCleared(kind, id)) {
+                    plan.clears.push([kind, id]);
+                }
+            }
+        }
+
+        for (const c of p.creators) {
+
+            const known = savedCreators.some(function (x) {
+                return String(x.user_id) === c.user_id;
+            });
+
+            if (!known) {
+                plan.creators.push(c);
+            }
+        }
+
+        return plan;
+    }
+
+    // One side of a conflict in words
+    function conflictValue(c, v) {
+
+        if (c.type === "instr") {
+            return v ? "marked instrumental" : "mark removed";
+        }
+
+        if (v === null) {
+            return "removed";
+        }
+
+        if (c.type === "rating") {
+            return v + (v === 1 ? " star" : " stars");
+        }
+
+        return Math.round(v * 10) / 10 + " BPM";
+    }
+
+    // Ask about each conflict in turn, in the data section, and hand the
+    // answers to done, true meaning the file's value. Cancel hands null and
+    // nothing is changed at all
+    function resolveConflicts(conflicts, done) {
+
+        const answers = [];
+
+        function ask(i) {
+
+            if (i >= conflicts.length) {
+
+                done(answers);
+                return;
+            }
+
+            const c = conflicts[i];
+            const left = conflicts.length - i;
+            const what = { rating: "Rating", bpm: "Tempo", instr: "Instrumental" }[c.type];
+
+            const answer = function (useFile, all) {
+
+                return function () {
+
+                    const upTo = all ? conflicts.length : i + 1;
+
+                    for (let k = i; k < upTo; k++) {
+                        answers[k] = useFile;
+                    }
+
+                    ask(upTo);
+                };
+            };
+
+            const options = [
+                { label: "Keep mine", fn: answer(false, false) },
+                { label: "Use file", fn: answer(true, false) }
+            ];
+
+            if (left > 1) {
+
+                options.push({ label: "Keep mine for all " + left, fn: answer(false, true) });
+                options.push({ label: "Use file for all " + left, fn: answer(true, true) });
+            }
+
+            showDataChoice("Conflict " + (i + 1) + " of " + conflicts.length + ": "
+                + songTitleById(c.id) + "\n" + what + " here " + conflictValue(c, c.mine)
+                + ", in the file " + conflictValue(c, c.theirs), options, function () {
+                    done(null);
+                });
+        }
+
+        ask(0);
+    }
+
+    // Put a merge plan and the conflict answers into effect
+    function applySongMerge(plan, answers) {
+
+        for (const entry of plan.ratings) {
+            ratings.set(entry[0], entry[1]);
+        }
+
+        for (const entry of plan.bpm) {
+            manualBpm.set(entry[0], entry[1]);
+        }
+
+        for (const id of plan.instr) {
+            manualInstrumental.add(id);
+        }
+
+        for (const c of plan.creators) {
+            addSavedCreator(c.user_id, c.stage_name);
+        }
+
+        for (const entry of plan.clears) {
+            clearedMarks[entry[0]][entry[1]] = Date.now();
+        }
+
+        plan.conflicts.forEach(function (c, i) {
+
+            if (!answers[i]) {
+                return;
+            }
+
+            // The file's side wins, a value or its removal
+            const store = { rating: ratings, bpm: manualBpm }[c.type];
+
+            if (c.type === "instr" && c.theirs) {
+
+                manualInstrumental.add(c.id);
+                delete clearedMarks.instr[c.id];
+            } else if (c.type === "instr") {
+
+                manualInstrumental.delete(c.id);
+                clearedMarks.instr[c.id] = Date.now();
+            } else if (c.theirs === null) {
+
+                store.delete(c.id);
+                clearedMarks[c.type][c.id] = Date.now();
+            } else {
+
+                store.set(c.id, c.theirs);
+                delete clearedMarks[c.type][c.id];
+            }
+        });
+
+        saveClearedMarks();
+        saveRatings();
+        saveManualBpm();
+        saveManualInstrumental();
+        refreshSongDataViews();
+    }
+
+    // Everything that shows song tweaks is brought up to date
+    function refreshSongDataViews() {
+
+        applySmartFilters();
+        refreshNowStars();
+        updateRateButton();
+
+        if (currentSong) {
+            updatePlayerInfo(currentSong);
+        }
+    }
+
+    // The result of a merge in words
+    function mergeSummary(plan, answers) {
+
+        const added = plan.ratings.length + plan.bpm.length + plan.instr.length;
+        const taken = answers.filter(Boolean).length;
+        const parts = [];
+
+        if (added > 0) {
+            parts.push(added + " new " + (added === 1 ? "value" : "values"));
+        }
+
+        if (plan.creators.length > 0) {
+            parts.push(plan.creators.length + " new " + (plan.creators.length === 1 ? "creator" : "creators"));
+        }
+
+        if (plan.conflicts.length > 0) {
+            parts.push(taken + " of " + plan.conflicts.length + " conflicts took the file's value");
+        }
+
+        if (plan.same > 0) {
+            parts.push(plan.same + " already the same");
+        }
+
+        return parts.length ? parts.join(", ") : "nothing new";
+    }
+
+    // Import a parsed set. Settings replace the current ones after a
+    // question. Song tweaks merge, nothing held here is overwritten
+    // without asking, so importing never loses data
+    function importParsed(p, sourceName, donePrefix) {
+
+        if (p.kind === "settings") {
+
+            if (!confirmImport(p, sourceName)) {
+
+                dataStatus("Import cancelled");
+                return;
+            }
+
+            dataStatus(applyImportedSettings(p.settings)
+                ? donePrefix + " settings"
+                : "Could not store the imported settings");
+            return;
+        }
+
+        const plan = planSongMerge(p);
+
+        resolveConflicts(plan.conflicts, function (answers) {
+
+            if (!answers) {
+
+                dataStatus("Import cancelled, nothing changed");
+                return;
+            }
+
+            applySongMerge(plan, answers);
+
+            let settingsDone = false;
+
+            // An older combined file also holds settings, asked about apart
+            if (p.settings && window.confirm("The " + sourceName
+                + " also holds settings. Replace your current settings with them?")) {
+
+                settingsDone = applyImportedSettings(p.settings);
+            }
+
+            dataStatus(donePrefix + " song tweaks, " + mergeSummary(plan, answers)
+                + (settingsDone ? ", settings replaced" : ""));
+        });
+    }
+
+    // Ask before replacing the settings, naming when they were saved
+    function confirmImport(p, sourceName) {
+
+        const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
+
+        return window.confirm("Import the settings from the " + sourceName + " saved "
+            + when + "?\n\nYour current settings are replaced.");
+    }
+
+    // What an export holds, for the result line
+    function exportedText(data) {
+
+        if (data.kind === "settings") {
+            return "settings";
+        }
+
+        return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
+            Object.keys(data.manualBpm).length, data.manualInstrumental.length,
+            data.creators.length);
+    }
+
+    // The file name of an export, without its extension
+    function exportBaseName(data) {
+
+        if (data.kind === "settings") {
+            return "mureka-player-settings-" + platformTag() + "-" + data.exported.slice(0, 10);
+        }
+
+        return "mureka-player-songs-" + data.exported.slice(0, 10);
+    }
+
+    // Where the player runs, for settings file names, since settings differ
+    // between hosts. The plugin or the bookmarklet, then the system
+    function platformTag() {
+
+        const ua = navigator.userAgent || "";
+        const host = isExtensionHost() ? "plugin" : "bookmarklet";
+        let os = "other";
+
+        if (isIosLike()) {
+            os = "ios";
+        } else if (/Android/.test(ua)) {
+            os = "android";
+        } else if (/Windows/.test(ua)) {
+            os = "windows";
+        } else if (/Macintosh/.test(ua)) {
+            os = "mac";
+        } else if (/Linux|X11/.test(ua)) {
+            os = "linux";
+        }
+
+        return host + "-" + os;
+    }
+
+    // Save one kind of data as a JSON file. A plain download works on every
+    // host, on an iPhone it lands in Files
+    function downloadUserData(kind) {
+
+        const data = collectUserData(kind);
+        const text = JSON.stringify(data, null, 2);
+        const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+        const a = document.createElement("a");
+
+        a.href = url;
+        a.download = exportBaseName(data) + ".json";
+
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        // Safari still needs the link a moment after the click
+        setTimeout(function () {
+            URL.revokeObjectURL(url);
+        }, 10000);
+
+        dataStatus("Downloaded " + exportedText(data));
+    }
+
+    // A file the share sheet accepts. Chromium only shares a short list of
+    // file types and JSON is not on it, so plain text is the fallback. The
+    // contents are the same, Import reads either
+    function shareableFile(text, baseName) {
+
+        if (!navigator.share || !navigator.canShare) {
+            return null;
+        }
+
+        const candidates = [
+            function () {
+                return new File([text], baseName + ".json", { type: "application/json" });
+            },
+            function () {
+                return new File([text], baseName + ".txt", { type: "text/plain" });
+            }
+        ];
+
+        for (const make of candidates) {
+
+            try {
+
+                const f = make();
+
+                if (navigator.canShare({ files: [f] })) {
+                    return f;
+                }
+            } catch (e) {
+            }
+        }
+
+        return null;
+    }
+
+    function canShareFiles() {
+        return shareableFile("{}", "mureka-player-test") !== null;
+    }
+
+    // Hand one kind of data to the system share sheet, where the Google
+    // Drive app, Files or any other app can take it. Needs no sign in here
+    function shareUserData(kind) {
+
+        const data = collectUserData(kind);
+        const file = shareableFile(JSON.stringify(data, null, 2), exportBaseName(data));
+
+        if (!file) {
+
+            downloadUserData(kind);
+            return;
+        }
+
+        // Only the file is shared. A title or text makes iOS hand over a
+        // second item, which Save to Files and Drive store as an extra file
+        navigator.share({ files: [file] }).then(function () {
+            dataStatus("Shared " + exportedText(data));
+        }).catch(function (e) {
+
+            if (e && e.name === "AbortError") {
+                dataStatus("Export cancelled");
+                return;
+            }
+
+            dataStatus("Could not share the file (" + ((e && e.message) || "error")
+                + "), try Download file");
+        });
+    }
+
+    // Show a choice in place, under the data buttons. Each option runs
+    // straight from its tap, so a share sheet, file picker or sign in
+    // window is still allowed to open
+    function showDataChoice(title, options, onCancel) {
+
+        if (!dataChoiceEl) {
+            return;
+        }
+
+        while (dataChoiceEl.firstChild) {
+            dataChoiceEl.removeChild(dataChoiceEl.firstChild);
+        }
+
+        const caption = document.createElement("div");
+        caption.textContent = title;
+        caption.style.cssText = "font-size:12px;color:#bbb;white-space:pre-line;line-height:1.4";
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+
+        for (const opt of options) {
+
+            row.appendChild(makeButton(opt.label, "#48e1eb", "#000", function () {
+
+                hideDataChoice();
+                opt.fn();
+            }));
+        }
+
+        row.appendChild(makeButton("Cancel", "#444", "#fff", function () {
+
+            hideDataChoice();
+
+            if (onCancel) {
+                onCancel();
+            }
+        }));
+
+        dataChoiceEl.appendChild(caption);
+        dataChoiceEl.appendChild(row);
+        dataChoiceEl.style.display = "flex";
+    }
+
+    function hideDataChoice() {
+
+        if (dataChoiceEl) {
+            dataChoiceEl.style.display = "none";
+        }
+    }
+
+    // Ask where an export goes. With a single way it is used at once
+    function chooseExport(kind) {
+
+        const options = [];
+
+        if (canShareFiles()) {
+            options.push({ label: "Share (Drive, Files)", fn: function () {
+                shareUserData(kind);
+            } });
+        }
+
+        options.push({ label: "Download file", fn: function () {
+            downloadUserData(kind);
+        } });
+
+        if (GOOGLE_CLIENT_ID) {
+            options.push({ label: "Google Drive", fn: function () {
+                saveToDrive(kind);
+            } });
+        }
+
+        if (options.length === 1) {
+
+            options[0].fn();
+            return;
+        }
+
+        showDataChoice("Export " + dataKindName(kind) + " to", options);
+    }
+
+    // Ask where an import comes from. A file can be picked from the Google
+    // Drive and Files apps too, so without Drive sign in it opens at once
+    function chooseImport() {
+
+        if (!GOOGLE_CLIENT_ID) {
+
+            chooseImportFile();
+            return;
+        }
+
+        showDataChoice("Import from", [
+            { label: "File", fn: chooseImportFile },
+            { label: "Google Drive", fn: function () {
+
+                showDataChoice("Load from Google Drive", [
+                    { label: "Song tweaks", fn: function () {
+                        loadFromDrive("songs");
+                    } },
+                    { label: "Settings", fn: function () {
+                        loadFromDrive("settings");
+                    } }
+                ]);
+            } }
+        ]);
+    }
+
+    // Open the file picker for an import
+    function chooseImportFile() {
+
+        if (!importInputEl) {
+
+            // No accept filter, iOS greys out JSON files under some filters,
+            // the contents are checked after reading instead
+            importInputEl = document.createElement("input");
+            importInputEl.type = "file";
+            importInputEl.style.display = "none";
+
+            importInputEl.addEventListener("change", function () {
+
+                const file = importInputEl.files && importInputEl.files[0];
+
+                // Cleared so picking the same file again still fires change
+                importInputEl.value = "";
+
+                if (file) {
+                    importUserDataFile(file);
+                }
+            });
+
+            document.body.appendChild(importInputEl);
+        }
+
+        importInputEl.click();
+    }
+
+    // Read a file export and merge it in
+    async function importUserDataFile(file) {
+
+        let data = null;
+
+        try {
+            data = JSON.parse(await file.text());
+        } catch (e) {
+        }
+
+        const p = parseUserData(data);
+
+        if (!p) {
+
+            dataStatus("That file is not a Mureka Player export");
+            return;
+        }
+
+        importParsed(p, "file", "Imported");
+    }
+
+    // Load Google's sign in library into the page, once. It is fetched when
+    // the settings open, so it is ready by the time a Drive button is tapped
+    function loadGis() {
+
+        if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+            return Promise.resolve();
+        }
+
+        if (!gisLoading) {
+
+            gisLoading = new Promise(function (resolve, reject) {
+
+                const s = document.createElement("script");
+
+                s.src = "https://accounts.google.com/gsi/client";
+                s.async = true;
+                s.onload = function () {
+                    resolve();
+                };
+                s.onerror = function () {
+
+                    gisLoading = null;
+                    reject(new Error("gis"));
+                };
+
+                document.head.appendChild(s);
+            });
+        }
+
+        return gisLoading;
+    }
+
+    // The stored token, when it still has a minute left
+    function storedDriveToken() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(DRIVE_TOKEN_KEY));
+
+            if (raw && raw.token && raw.expiresAt - 60000 > Date.now()) {
+                return raw;
+            }
+        } catch (e) {
+        }
+
+        return null;
+    }
+
+    function forgetDriveToken() {
+
+        try {
+            localStorage.removeItem(DRIVE_TOKEN_KEY);
+        } catch (e) {
+        }
+
+        updateDriveStatus();
+    }
+
+    // Get a Drive token. Has to be called straight from a tap, with nothing
+    // awaited first, or Safari blocks the sign in popup
+    function requestDriveToken() {
+
+        const stored = storedDriveToken();
+
+        if (stored) {
+            return Promise.resolve(stored.token);
+        }
+
+        if (!GOOGLE_CLIENT_ID) {
+            return Promise.reject(new Error("noclient"));
+        }
+
+        const oauth = window.google && window.google.accounts && window.google.accounts.oauth2;
+
+        if (!oauth) {
+
+            // Not loaded yet, start it so the next tap works
+            loadGis().catch(function () {
+            });
+
+            return Promise.reject(new Error("notready"));
+        }
+
+        if (!gisTokenClient) {
+
+            gisTokenClient = oauth.initTokenClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: DRIVE_SCOPE,
+                callback: function (resp) {
+
+                    const waiter = driveTokenWaiter;
+
+                    driveTokenWaiter = null;
+
+                    if (!waiter) {
+                        return;
+                    }
+
+                    if (!resp || resp.error || !resp.access_token) {
+
+                        waiter.reject(new Error((resp && resp.error) || "denied"));
+                        return;
+                    }
+
+                    const expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+
+                    try {
+                        localStorage.setItem(DRIVE_TOKEN_KEY, JSON.stringify({
+                            token: resp.access_token,
+                            expiresAt: expiresAt
+                        }));
+                    } catch (e) {
+                    }
+
+                    updateDriveStatus();
+                    waiter.resolve(resp.access_token);
+                },
+                error_callback: function (err) {
+
+                    const waiter = driveTokenWaiter;
+
+                    driveTokenWaiter = null;
+
+                    if (waiter) {
+                        waiter.reject(new Error((err && err.type) || "popup"));
+                    }
+                }
+            });
+        }
+
+        return new Promise(function (resolve, reject) {
+
+            driveTokenWaiter = { resolve: resolve, reject: reject };
+            gisTokenClient.requestAccessToken({ prompt: "" });
+        });
+    }
+
+    // Explain why a Drive token could not be had
+    function driveTokenProblem(err) {
+
+        const code = err && err.message;
+
+        if (code === "noclient") {
+            return "Google Drive is not available in this version of the player,"
+                + " it needs a Google client id built in";
+        }
+
+        if (code === "notready") {
+            return "Connecting to Google, tap again in a moment";
+        }
+
+        if (code === "popup_failed_to_open") {
+            return "The Google sign in window was blocked, allow popups and tap again";
+        }
+
+        if (code === "popup_closed" || code === "access_denied") {
+            return "Google sign in was cancelled";
+        }
+
+        return "Could not sign in to Google (" + (code || "unknown") + ")";
+    }
+
+    // One Drive request with the token. A 401 means the token ran out early,
+    // so it is dropped and the next tap signs in again
+    async function driveFetch(token, url, options) {
+
+        const opts = Object.assign({}, options || {});
+
+        opts.headers = Object.assign({}, opts.headers || {}, {
+            Authorization: "Bearer " + token
+        });
+
+        const res = await timedFetch(url, opts, 30000);
+
+        if (res.status === 401) {
+
+            forgetDriveToken();
+            throw new Error("expired");
+        }
+
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
+
+        return res;
+    }
+
+    // The id of a data file in Drive, the newest when there are several
+    async function driveFindFile(token, name) {
+
+        const q = "name = '" + name + "' and trashed = false";
+        const url = "https://www.googleapis.com/drive/v3/files?spaces=drive"
+            + "&orderBy=modifiedTime%20desc&pageSize=1&fields=files(id,modifiedTime)"
+            + "&q=" + encodeURIComponent(q);
+
+        const res = await driveFetch(token, url);
+        const json = await res.json();
+
+        return (json.files && json.files[0]) ? json.files[0].id : null;
+    }
+
+    async function driveDownload(token, id) {
+
+        const res = await driveFetch(token, "https://www.googleapis.com/drive/v3/files/"
+            + encodeURIComponent(id) + "?alt=media");
+
+        return res.json();
+    }
+
+    // Write the data file, replacing its contents, or create it the first time
+    async function driveUpload(token, id, name, data) {
+
+        const body = JSON.stringify(data, null, 2);
+
+        if (id) {
+
+            await driveFetch(token, "https://www.googleapis.com/upload/drive/v3/files/"
+                + encodeURIComponent(id) + "?uploadType=media", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: body
+            });
+
+            return;
+        }
+
+        const boundary = "mureka" + Date.now();
+        const meta = JSON.stringify({ name: name, mimeType: "application/json" });
+        const multipart = "--" + boundary + "\r\n"
+            + "Content-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n"
+            + "--" + boundary + "\r\n"
+            + "Content-Type: application/json\r\n\r\n" + body + "\r\n"
+            + "--" + boundary + "--";
+
+        await driveFetch(token, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+            method: "POST",
+            headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+            body: multipart
+        });
+    }
+
+    // What goes up to Drive. Whatever another device saved there is kept,
+    // and this device's values win for the songs both hold, so saving from
+    // one phone does not wipe what the other one added
+    function mergeForUpload(remote) {
+
+        const local = collectUserData("songs");
+        const p = parseUserData(remote);
+
+        if (!p || p.kind === "settings") {
+            return local;
+        }
+
+        const ratingsOut = {};
+        const bpmOut = {};
+
+        for (const entry of p.ratings) {
+            ratingsOut[entry[0]] = entry[1];
+        }
+
+        for (const entry of p.bpm) {
+            bpmOut[entry[0]] = entry[1];
+        }
+
+        local.ratings = Object.assign(ratingsOut, local.ratings);
+        local.manualBpm = Object.assign(bpmOut, local.manualBpm);
+        local.manualInstrumental = Array.from(new Set(p.instr.concat(local.manualInstrumental)));
+
+        // Removals follow the same rule, this device wins. Removed here takes
+        // the value out of the upload, held here drops the other removal
+        const kept = {
+            rating: function (id) {
+                return ratings.has(id);
+            },
+            bpm: function (id) {
+                return manualBpm.has(id);
+            },
+            instr: function (id) {
+                return manualInstrumental.has(id);
+            }
+        };
+
+        for (const kind of Object.keys(kept)) {
+
+            const removed = new Set(local.cleared[kind]);
+
+            for (const id of p.cleared[kind]) {
+
+                if (!kept[kind](id)) {
+                    removed.add(id);
+                }
+            }
+
+            local.cleared[kind] = Array.from(removed);
+        }
+
+        for (const id of local.cleared.rating) {
+            delete local.ratings[id];
+        }
+
+        for (const id of local.cleared.bpm) {
+            delete local.manualBpm[id];
+        }
+
+        local.manualInstrumental = local.manualInstrumental.filter(function (id) {
+            return local.cleared.instr.indexOf(id) < 0;
+        });
+
+        const seen = new Set(local.creators.map(function (c) {
+            return String(c.user_id);
+        }));
+
+        for (const c of p.creators) {
+
+            if (!seen.has(c.user_id)) {
+
+                seen.add(c.user_id);
+                local.creators.push(c);
+            }
+        }
+
+        return local;
+    }
+
+    // Save one kind of data to Drive. The token is asked for first,
+    // straight from the tap. Song tweaks merge with what is there already,
+    // settings replace it
+    async function saveToDrive(kind) {
+
+        const name = DRIVE_FILE_NAMES[kind === "settings" ? "settings" : "songs"];
+        let token = null;
+
+        try {
+            token = await requestDriveToken();
+        } catch (e) {
+
+            dataStatus(driveTokenProblem(e));
+            return;
+        }
+
+        dataStatus("Saving " + dataKindName(kind) + " to Google Drive...");
+
+        try {
+
+            const id = await driveFindFile(token, name);
+            let data = null;
+
+            if (kind === "settings") {
+                data = collectUserData("settings");
+            } else {
+                data = mergeForUpload(id ? await driveDownload(token, id) : null);
+            }
+
+            await driveUpload(token, id, name, data);
+
+            dataStatus("Saved to Google Drive, " + exportedText(data));
+        } catch (e) {
+
+            dataStatus(e && e.message === "expired"
+                ? "The Google sign in ran out, tap Export again"
+                : "Could not save to Google Drive (" + ((e && e.message) || "error") + ")");
+        }
+    }
+
+    // Load one kind of data from Drive and merge it in, the same way as a
+    // file import
+    async function loadFromDrive(kind) {
+
+        const name = DRIVE_FILE_NAMES[kind === "settings" ? "settings" : "songs"];
+        let token = null;
+
+        try {
+            token = await requestDriveToken();
+        } catch (e) {
+
+            dataStatus(driveTokenProblem(e));
+            return;
+        }
+
+        dataStatus("Reading " + dataKindName(kind) + " from Google Drive...");
+
+        try {
+
+            const id = await driveFindFile(token, name);
+
+            if (!id) {
+
+                dataStatus("No " + dataKindName(kind) + " in your Google Drive yet, export first");
+                return;
+            }
+
+            const p = parseUserData(await driveDownload(token, id));
+
+            if (!p) {
+
+                dataStatus("The Drive file is not a Mureka Player export");
+                return;
+            }
+
+            importParsed(p, "Google Drive data", "Loaded from Google Drive:");
+        } catch (e) {
+
+            dataStatus(e && e.message === "expired"
+                ? "The Google sign in ran out, tap Import again"
+                : "Could not read from Google Drive (" + ((e && e.message) || "error") + ")");
+        }
+    }
+
+    // Sign in to Drive without saving or loading anything. The token is
+    // asked for straight from the tap, Google opens its own sign in window
+    async function connectDrive() {
+
+        try {
+
+            await requestDriveToken();
+            dataStatus("Google Drive connected");
+        } catch (e) {
+            dataStatus(driveTokenProblem(e));
+        }
+    }
+
+    // Sign out of Drive on this device, and tell Google to drop the grant
+    function disconnectDrive() {
+
+        const stored = storedDriveToken();
+        const oauth = window.google && window.google.accounts && window.google.accounts.oauth2;
+
+        if (stored && oauth && oauth.revoke) {
+
+            try {
+                oauth.revoke(stored.token, function () {
+                });
+            } catch (e) {
+            }
+        }
+
+        forgetDriveToken();
+        dataStatus("Google Drive disconnected on this device");
+    }
+
+    // Keep the Drive line in the settings panel honest
+    function updateDriveStatus() {
+
+        if (!driveStatusEl) {
+            return;
+        }
+
+        if (!GOOGLE_CLIENT_ID) {
+
+            driveStatusEl.textContent = "Google Drive: not available in this version of the player";
+            driveLinkEl.style.display = "none";
+            return;
+        }
+
+        const stored = storedDriveToken();
+
+        driveLinkEl.style.display = "";
+        driveLinkEl.textContent = stored ? "Disconnect" : "Connect";
+
+        if (!stored) {
+
+            driveStatusEl.textContent = "Google Drive: not connected";
+            return;
+        }
+
+        const until = new Date(stored.expiresAt);
+        const hh = String(until.getHours()).padStart(2, "0");
+        const mm = String(until.getMinutes()).padStart(2, "0");
+
+        driveStatusEl.textContent = "Google Drive: connected until " + hh + ":" + mm;
     }
 
     // Show the settings overlay, expanding the panel first if it is minimized
