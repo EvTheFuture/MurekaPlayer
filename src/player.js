@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.55";
+    const VERSION = "1.4.5.59";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -470,9 +470,16 @@
     let lastListScroll = 0;
     let programmaticScrollAt = 0;
     let loadButton = null;
+    let rescanButton = null;
     let feedButton = null;
     let cacheButton = null;
     let downloadButton = null;
+
+    // Which button started the run that is going on, "load" or "rescan", so
+    // the one that was actually pressed is the one that turns into Stop. Both
+    // call into the same loader, and labelling Load as Stop during a rescan
+    // pointed at a button the user never touched
+    let runOwner = null;
 
     // The sheet painted behind the panel on phones, see where it is built
     let backdropEl = null;
@@ -629,12 +636,15 @@
         playerEl.style.display = "none";
     }
 
-    // The inner span that actually slides, the animation driving it, and the
-    // timer waiting to start it. The meta line is often longer than the panel
-    // and an ellipsis hides the tempo and the moods, which are the useful part
-    let playerMetaTextEl = null;
-    let metaScrollAnim = null;
-    let metaScrollTimer = null;
+    // The walking text controller for the meta line. It is often longer than
+    // the panel, and an ellipsis hides the tempo and the moods, which are the
+    // useful part. The status line above the art uses one of its own
+    let metaMarquee = null;
+    let statusMarquee = null;
+
+    // The last status text, kept so the line can be put back after its
+    // marquee is built, which happens after the first status is set
+    let statusText = "";
 
     // How long the text rests at the left before it starts, and again each time
     // it comes back around
@@ -647,10 +657,6 @@
     // twenty spaces at this size
     const META_SCROLL_GAP = 72;
 
-    // The second copy of the line, which follows the first so the text is never
-    // completely off screen, and the track that carries both of them
-    let playerMetaCopyEl = null;
-    let playerMetaTrackEl = null;
     let playerCountsEl = null;
 
     // Synced lyric display, five stacked rows rolled on advance, rows are
@@ -2573,12 +2579,14 @@
 
             // A second press stops the load, invalidate the active run
             running = false;
+            runOwner = null;
             loadToken += 1;
             updateButton();
             return;
         }
 
         running = true;
+        runOwner = "load";
         const myToken = ++loadToken;
 
         // Confirm login state for your own feed and warn if logged out
@@ -2622,6 +2630,7 @@
             // Only clear the running state if a newer run has not taken over
             if (myToken === loadToken) {
                 running = false;
+                runOwner = null;
                 updateButton();
             }
 
@@ -2639,12 +2648,14 @@
         if (running) {
 
             running = false;
+            runOwner = null;
             loadToken += 1;
             updateButton();
             return;
         }
 
         running = true;
+        runOwner = "rescan";
         const myToken = ++loadToken;
 
         if (!creatorSource) {
@@ -2661,6 +2672,7 @@
 
             if (myToken === loadToken) {
                 running = false;
+                runOwner = null;
                 updateButton();
             }
 
@@ -2890,8 +2902,16 @@
 
             const newCursor = getCursor(page, songs);
 
-            if (newCursor === null || newCursor === cursor) {
+            if (newCursor === null) {
                 reachedEnd = true;
+                break;
+            }
+
+            // The cursor stopped moving, so the endpoint is not paginating.
+            // That is a stalled scan and not the end of the library, and
+            // treating it as the end would let the prune below throw away
+            // every song past the first page
+            if (newCursor === cursor) {
                 break;
             }
 
@@ -2905,6 +2925,45 @@
             return;
         }
 
+        // A song that was published and is now a draft, or the other way
+        // round, is easy to miss in a total that only moved by a few. Count
+        // the crossings in both directions against the copies held before the
+        // scan, while those copies still carry the old publish state
+        const wasById = new Map(baseSongs.map(function (s) {
+            return [s.song_id, s];
+        }));
+
+        const counted = new Set();
+
+        let nowPublished = 0;
+        let nowDraft = 0;
+
+        for (const s of fresh) {
+
+            const before = wasById.get(s.song_id);
+
+            // Shifting pagination can hand the same song back twice, and a
+            // song with no cached copy is simply new, not a change
+            if (!before || counted.has(s.song_id)) {
+                continue;
+            }
+
+            counted.add(s.song_id);
+
+            const wasPublished = before.publish_state === 1;
+            const isPublished = s.publish_state === 1;
+
+            if (wasPublished === isPublished) {
+                continue;
+            }
+
+            if (isPublished) {
+                nowPublished += 1;
+            } else {
+                nowDraft += 1;
+            }
+        }
+
         // New and republished songs move to the front, duplicates are dropped
         // A deep rescan rebuilds the whole list, so the fresh fields, publish
         // date, like flag and publish state, replace the older cached copies
@@ -2914,31 +2973,71 @@
         // A deep rescan that ran to the end has now seen the entire library
         let removed = 0;
 
+        // True when the deleted song sweep was held back because the feed
+        // could not be trusted to list everything
+        let pruneSkipped = false;
+
         if (deep && reachedEnd) {
 
             cache.complete = true;
             cache.lastCursor = null;
 
-            // Everything the server still has was just seen, so anything left
-            // in the cache was deleted upstream. Drop it and its stored data
-            const live = new Set(seen);
+            // Logged out, your own feed returns nothing at all, or the
+            // published songs only. Every draft would then look deleted and
+            // be thrown away along with its audio, cover and waveform, so the
+            // login is confirmed before anything is removed. A creator
+            // library is public by definition and needs no such check
+            let mayPrune = true;
 
-            for (const s of fresh) {
-                live.add(s.song_id);
+            if (!creatorSource) {
+
+                mayPrune = (await checkAuth()) === true;
+
+                // The feed was switched while the login was being confirmed,
+                // so this run no longer owns the cache it was writing into
+                if (myToken !== loadToken) {
+                    return;
+                }
             }
 
-            const gone = cache.songs.filter(function (s) {
-                return !live.has(s.song_id);
-            });
-
-            for (const s of gone) {
-
-                await forgetSong(s);
-                removed += 1;
+            // A scan that ran to the end without returning a single song is
+            // not an empty library, it is a feed that answered with nothing.
+            // Pruning on that would wipe everything
+            if (mayPrune && fresh.length === 0 && seen.size === 0) {
+                mayPrune = false;
             }
 
-            if (removed > 0) {
-                saveManualInstrumental();
+            if (mayPrune) {
+
+                // Everything the server still has was just seen, so anything
+                // left in the cache was deleted upstream. Drop it and its
+                // stored data
+                const live = new Set(seen);
+
+                for (const s of fresh) {
+                    live.add(s.song_id);
+                }
+
+                const gone = cache.songs.filter(function (s) {
+                    return !live.has(s.song_id);
+                });
+
+                for (const s of gone) {
+
+                    await forgetSong(s);
+                    removed += 1;
+                }
+
+                if (removed > 0) {
+                    saveManualInstrumental();
+                }
+
+            } else {
+
+                // Nothing was removed, so the library is not known to be in
+                // step with the server and must not be marked complete
+                cache.complete = false;
+                pruneSkipped = true;
             }
         }
 
@@ -2947,9 +3046,38 @@
         // Grow the active queue with any songs the refresh brought in
         extendQueueWithNew();
 
-        setStatus((deep ? "Rescan complete, total: " : "Up to date, total: ")
-            + cache.songs.length + ", new: " + newCount
-            + (removed > 0 ? ", removed: " + removed : ""));
+        // Only the counts that are not zero, so an ordinary refresh stays
+        // short and a rescan that actually changed something says what
+        const total = cache.songs.length;
+        const shown = shownSongCount();
+        const parts = ["total: " + total];
+
+        if (shown !== total) {
+            parts.push("shown here: " + shown);
+        }
+
+        parts.push("new: " + newCount);
+
+        if (nowPublished > 0) {
+            parts.push("newly published: " + nowPublished);
+        }
+
+        if (nowDraft > 0) {
+            parts.push("back to draft: " + nowDraft);
+        }
+
+        if (removed > 0) {
+            parts.push("removed: " + removed);
+        }
+
+        if (pruneSkipped) {
+            parts.push("nothing removed, sign in to Mureka so drafts are not"
+                + " mistaken for deleted songs");
+        }
+
+        setStatus((deep
+            ? (pruneSkipped ? "Rescanned, " : "Rescan complete, ")
+            : "Up to date, ") + parts.join(", "));
     }
 
     // Wipe the cache and reset the view
@@ -4625,6 +4753,26 @@
     let savedRootOverflow = null;
     let savedBodyOverflow = null;
 
+    // The fullscreen state the layout was last brought in line with, and the
+    // routine that does it, set once the panel is built. Safari drops
+    // fullscreen by itself when the app is switched or the page goes to the
+    // background, and the change event for that is either never delivered or
+    // handled while the page is hidden, where the measurements are wrong. The
+    // page then kept the fullscreen height and the page scroll lock, which
+    // pushed the bottom of the panel, and of the filter sheet filling it, off
+    // the screen until fullscreen was entered and left again by hand
+    let appliedFullscreen = null;
+    let fullscreenRefresh = null;
+
+    // Bring the layout in line when the real fullscreen state has moved on
+    // without the change being handled
+    function syncFullscreenState() {
+
+        if (fullscreenRefresh && appliedFullscreen !== isFullscreen()) {
+            fullscreenRefresh();
+        }
+    }
+
     // Fullscreen here is asked for on the page itself, which is what lets the
     // menu and the overlays stay visible, since they are not inside the panel.
     // The cost is that a drag which reaches the page is read by WebKit as the
@@ -4986,8 +5134,11 @@
 
         const on = tagFilterActive() || bpmFilterActive();
 
-        smartFilterBtn.style.background = on ? "#48e1eb" : "#333";
-        smartFilterBtn.style.color = on ? "#000" : "#fff";
+        // Only the on off switch beside it shows whether filtering is live.
+        // This one just opens the sheet, and lighting both made two buttons
+        // claim the same state
+        smartFilterBtn.style.background = "#333";
+        smartFilterBtn.style.color = "#fff";
 
         const bits = [];
 
@@ -7927,95 +8078,140 @@
         setMetaText(formatMeta(settings.metaSubtitle, song));
     }
 
-    // Put the meta line up and, when it does not fit, walk it across. It waits,
-    // slides the text plus a gap fully out to the left, then comes straight back
-    // in from the right and waits again, so the beginning is always readable
+    // Put the meta line up, walking it across when it does not fit
     function setMetaText(text) {
 
-        if (!playerMetaEl || !playerMetaTextEl) {
+        if (!metaMarquee) {
             return;
         }
 
-        if (metaScrollTimer) {
-
-            clearTimeout(metaScrollTimer);
-            metaScrollTimer = null;
-        }
-
-        if (metaScrollAnim) {
-
-            metaScrollAnim.cancel();
-            metaScrollAnim = null;
-        }
-
-        playerMetaTrackEl.style.transform = "none";
-        playerMetaTextEl.style.marginRight = "0px";
-        playerMetaTextEl.textContent = text || "";
-
-        // The trailing copy is only needed while scrolling
-        playerMetaCopyEl.style.display = "none";
-        playerMetaCopyEl.textContent = text || "";
-
-        if (!text) {
-            return;
-        }
-
-        // Measured after the text is in place, and only worth doing when the
-        // line is actually too long for the panel
-        metaScrollTimer = setTimeout(function () {
-
-            metaScrollTimer = null;
-            startMetaScroll();
-        }, META_SCROLL_DELAY);
+        metaMarquee.setText(text);
     }
 
-    function startMetaScroll() {
+    // Turn a one line box into a marquee. The text waits at the left, slides
+    // itself plus a gap fully out to the left, then comes straight back in
+    // from the right and waits again, so the beginning is always readable.
+    // The box keeps its own styling, only its contents are taken over
+    function makeMarquee(box) {
 
-        if (!playerMetaEl || !playerMetaTrackEl || !playerMetaTrackEl.animate) {
-            return;
-        }
+        // One track holds both copies and is the thing that moves, so the two
+        // can never drift apart
+        const track = document.createElement("span");
+        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
 
-        // Measured from the box, which is accurate for a fractional width
-        const textWidth = Math.ceil(playerMetaTextEl.getBoundingClientRect().width);
-        const overflow = textWidth - playerMetaEl.clientWidth;
+        // Both are inline-block, a plain inline span reports no width at all
+        // and the overflow test would never fire
+        const first = document.createElement("span");
+        first.style.cssText = "display:inline-block;white-space:nowrap";
 
-        if (overflow <= 2) {
-            return;
-        }
+        // A second copy trails the first, so as the end of the line leaves on
+        // the left the beginning is already arriving on the right
+        const second = document.createElement("span");
+        second.style.cssText = "display:none;white-space:nowrap";
 
-        // Show the trailing copy and space it off the first
-        playerMetaTextEl.style.marginRight = META_SCROLL_GAP + "px";
-        playerMetaCopyEl.style.display = "inline-block";
+        track.appendChild(first);
+        track.appendChild(second);
 
-        // Travel exactly one line plus the gap. At the end the second copy sits
-        // where the first began, so resetting to zero is invisible and the line
-        // is on screen throughout
-        const distance = textWidth + META_SCROLL_GAP;
-        const duration = (distance / META_SCROLL_SPEED) * 1000;
+        box.textContent = "";
+        box.appendChild(track);
 
-        // Ease away from the rest position and ease back into the next one,
-        // holding a steady readable speed in between
-        const frames = [
-            { transform: "translateX(0)", offset: 0, easing: "ease-in" },
-            { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
-            { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
-            { transform: "translateX(" + (-distance) + "px)", offset: 1 }
-        ];
+        let anim = null;
+        let timer = null;
 
-        metaScrollAnim = playerMetaTrackEl.animate(frames, { duration: duration });
+        const start = function () {
 
-        metaScrollAnim.onfinish = function () {
+            if (!track.animate) {
+                return;
+            }
 
-            metaScrollAnim = null;
-            playerMetaTrackEl.style.transform = "none";
+            // Measured from the box, which is accurate for a fractional width
+            const textWidth = Math.ceil(first.getBoundingClientRect().width);
+            const overflow = textWidth - box.clientWidth;
 
-            // Back at the left edge, so rest here exactly as it did at the start
-            metaScrollTimer = setTimeout(function () {
+            if (overflow <= 2) {
+                return;
+            }
 
-                metaScrollTimer = null;
-                startMetaScroll();
+            // Show the trailing copy and space it off the first
+            first.style.marginRight = META_SCROLL_GAP + "px";
+            second.style.display = "inline-block";
+
+            // Travel exactly one line plus the gap. At the end the second copy
+            // sits where the first began, so resetting to zero is invisible
+            // and the line is on screen throughout
+            const distance = textWidth + META_SCROLL_GAP;
+            const duration = (distance / META_SCROLL_SPEED) * 1000;
+
+            // Ease away from the rest position and ease back into the next
+            // one, holding a steady readable speed in between
+            const frames = [
+                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
+                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
+                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
+                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
+            ];
+
+            anim = track.animate(frames, { duration: duration });
+
+            anim.onfinish = function () {
+
+                anim = null;
+                track.style.transform = "none";
+
+                // Back at the left edge, so rest here exactly as at the start
+                timer = setTimeout(function () {
+
+                    timer = null;
+                    start();
+                }, META_SCROLL_DELAY);
+            };
+        };
+
+        const setText = function (text) {
+
+            const value = text || "";
+
+            // The same line again, so let a walk already under way carry on
+            // rather than snapping it back to the left. Both the status and
+            // the meta line are rewritten far more often than they change
+            if (first.textContent === value) {
+                return;
+            }
+
+            if (timer) {
+
+                clearTimeout(timer);
+                timer = null;
+            }
+
+            if (anim) {
+
+                anim.cancel();
+                anim = null;
+            }
+
+            track.style.transform = "none";
+            first.style.marginRight = "0px";
+            first.textContent = value;
+
+            // The trailing copy is only needed while scrolling
+            second.style.display = "none";
+            second.textContent = value;
+
+            if (!value) {
+                return;
+            }
+
+            // Measured after the text is in place, and only worth doing when
+            // the line is actually too long for the box
+            timer = setTimeout(function () {
+
+                timer = null;
+                start();
             }, META_SCROLL_DELAY);
         };
+
+        return { setText: setText };
     }
 
     // Build the plays and likes line for the current song, empty until known
@@ -9851,7 +10047,7 @@
 
         loadButton = makeActionButton(iconLoad(), "Load", "#48e1eb", "#000", run);
 
-        const rescanButton = makeActionButton(iconLoad(), "Rescan", "#444", "#fff", rescan);
+        rescanButton = makeActionButton(iconLoad(), "Rescan", "#444", "#fff", rescan);
         rescanButton.title = "Full refresh, page the whole library and update publish"
             + " dates and likes in place, no need to Clear first";
 
@@ -10084,25 +10280,8 @@
         playerMetaEl = document.createElement("div");
         playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
 
-        // The text lives in a span so it can be moved without moving the box.
-        // A second copy trails the first, so as the end of the line leaves on
-        // the left the beginning is already arriving on the right
-        // One track holds both copies and is the thing that moves, so the two
-        // can never drift apart
-        playerMetaTrackEl = document.createElement("span");
-        playerMetaTrackEl.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
-
-        // Both are inline-block, a plain inline span reports no width at all
-        // and the overflow test would never fire
-        playerMetaTextEl = document.createElement("span");
-        playerMetaTextEl.style.cssText = "display:inline-block;white-space:nowrap";
-
-        playerMetaCopyEl = document.createElement("span");
-        playerMetaCopyEl.style.cssText = "display:none;white-space:nowrap";
-
-        playerMetaTrackEl.appendChild(playerMetaTextEl);
-        playerMetaTrackEl.appendChild(playerMetaCopyEl);
-        playerMetaEl.appendChild(playerMetaTrackEl);
+        // The text is moved without moving the box, see makeMarquee
+        metaMarquee = makeMarquee(playerMetaEl);
 
         // Plays and likes for the current song, shown at the top of the art
         playerCountsEl = document.createElement("div");
@@ -10126,7 +10305,13 @@
         // swipe, with the plays and likes in the upper right corner beside it
         const topWrap = document.createElement("div");
         topWrap.style.cssText = "position:absolute;left:10px;right:10px;top:7px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;pointer-events:none;z-index:4";
-        statusEl.style.cssText = "flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9);transition:opacity 0.25s ease";
+        statusEl.style.cssText = "flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;color:#eaeaec;text-shadow:0 1px 3px rgba(0,0,0,0.9);transition:opacity 0.25s ease";
+
+        // A rescan summary is longer than the panel is wide, and an ellipsis
+        // cut off the very numbers worth reading, so the line walks across
+        // like the meta line under the title does
+        statusMarquee = makeMarquee(statusEl);
+        statusMarquee.setText(statusText);
         playerCountsEl.style.cssText = "flex:0 0 auto;color:#eaeaec;font-size:12px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9);transition:opacity 0.25s ease";
         topWrap.appendChild(statusEl);
         topWrap.appendChild(playerCountsEl);
@@ -10795,6 +10980,10 @@
         // because the new size is not final on the first frame
         const onFullscreenChange = function () {
 
+            // Recorded first, so the fitMobile calls below see the state as
+            // handled and do not come back in here
+            appliedFullscreen = isFullscreen();
+
             // Back in fullscreen, so a later incidental exit offers the gate again
             if (isFullscreen()) {
                 leftFullscreenOnPurpose = false;
@@ -10831,6 +11020,11 @@
 
         document.addEventListener("fullscreenchange", onFullscreenChange);
         document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+        // Also reachable from the resize and foreground paths, which is what
+        // catches a fullscreen exit Safari made without a usable event
+        fullscreenRefresh = onFullscreenChange;
+        appliedFullscreen = isFullscreen();
 
         // Restore whether the panel was left minimized last time
         let startMinimized = false;
@@ -10916,6 +11110,14 @@
             resyncPlayback();
             resetIdleTimer();
 
+            // Safari may have dropped fullscreen while the page was away, and
+            // anything measured while hidden is not to be trusted either way.
+            // Run the whole fullscreen pass again now the page can be seen,
+            // which is what entering and leaving fullscreen by hand did
+            if (fullscreenRefresh) {
+                fullscreenRefresh();
+            }
+
             // Returning from another app is one of the two moments the gate
             // is offered, fullscreen having been lost in between
             offerGate();
@@ -10947,7 +11149,9 @@
 
         // Returning from the back forward cache can leave a dead element
         window.addEventListener("pageshow", function () {
+
             resyncPlayback();
+            syncFullscreenState();
         });
 
         // Reopen on the remembered source from cache, never a full reload here
@@ -11262,6 +11466,12 @@
             return;
         }
 
+        // Safari showing its bars again after dropping fullscreen arrives
+        // here as a resize, so a fullscreen exit nothing else noticed is
+        // caught on the way through. The pass it runs calls back in here with
+        // the state already recorded, so this does not loop
+        syncFullscreenState();
+
         const mobile = window.innerWidth <= 640;
 
         // The sheet behind the panel belongs to the phone layout, and only
@@ -11308,6 +11518,11 @@
         // owns the whole screen, so the larger of the two heights is the
         // honest one and the offset is zero. Nothing is assumed about how big
         // the discrepancy is, only which of the two numbers to believe
+        //
+        // Do not second guess innerHeight against the screen size. On iOS 26
+        // the page runs edge to edge under the translucent Safari bars, so
+        // out of fullscreen it is legitimately as tall as the screen, and
+        // rejecting it left the panel short after the keyboard went away
         if (vv && isIosLike() && !keyboardUp && vv.scale === 1) {
 
             height = Math.max(height, window.innerHeight);
@@ -11727,8 +11942,18 @@
     // Update the status line text
     function setStatus(text) {
 
+        statusText = text || "";
+
+        // Before the panel is built there is nowhere to put it, and the
+        // marquee picks the text up from statusText once it exists
+        if (statusMarquee) {
+
+            statusMarquee.setText(statusText);
+            return;
+        }
+
         if (statusEl) {
-            statusEl.textContent = text;
+            statusEl.textContent = statusText;
         }
     }
 
@@ -12087,15 +12312,32 @@
         }
     }
 
-    // Reflect the running state on the load button
+    // Reflect the running state on whichever of the two library buttons
+    // started the run. The other one keeps its own label, so it is always
+    // clear which action is in progress
     function updateButton() {
 
-        if (!loadButton) {
-            return;
-        }
+        const paint = function (btn, owner, restLabel) {
 
-        loadButton.labelEl.textContent = running ? "Stop" : "Load";
-        setButtonIcon(loadButton, running ? iconStop() : iconLoad());
+            if (!btn) {
+                return;
+            }
+
+            const active = running && runOwner === owner;
+
+            btn.labelEl.textContent = active ? "Stop" : restLabel;
+            setButtonIcon(btn, active ? iconStop() : iconLoad());
+
+            // The other button cannot start anything while a run is going on,
+            // so it is greyed rather than left looking available
+            const idle = running && !active;
+
+            btn.style.opacity = idle ? "0.4" : "1";
+            btn.disabled = idle;
+        };
+
+        paint(loadButton, "load", "Load");
+        paint(rescanButton, "rescan", "Rescan");
     }
 
     // Render the cached song list
