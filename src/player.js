@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.62";
+    const VERSION = "1.4.5.63";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -11610,6 +11610,7 @@
             + " kb" + f.kb
             + " vv" + f.vvH + "/" + f.vvTop
             + " in" + f.inH
+            + " doc" + f.docH
             + " corr" + f.corr
             + " -> " + f.set;
     }
@@ -11791,11 +11792,41 @@
         // the page runs edge to edge under the translucent Safari bars, so
         // out of fullscreen it is legitimately as tall as the screen, and
         // rejecting it left the panel short after the keyboard went away
+        //
+        // innerHeight is not always the honest one either. Measured on an
+        // iPhone after the keyboard closed, the visible viewport and
+        // innerHeight both settled 13 pixels short, and the page was left
+        // scrolled by those same 13 pixels, so the panel came out short and
+        // sat too high by as much again. The document client height is the
+        // one that held its value through the whole keyboard round trip, so
+        // it is a third candidate for the larger of the heights
         if (vv && isIosLike() && !keyboardUp && vv.scale === 1) {
 
-            height = Math.max(height, window.innerHeight);
+            const root = document.documentElement;
+            const docHeight = root ? root.clientHeight : 0;
+
+            height = Math.max(height, window.innerHeight, docHeight);
             top = 0;
             corrected = true;
+
+            // The panel is placed at the top of the page, which only lines up
+            // with the top of the screen while the page is not scrolled. The
+            // keyboard leaves it scrolled and nothing scrolls it back. Only
+            // while the panel is open, a folded panel leaves the page alone
+            const scroller = document.scrollingElement || root;
+            const pageOff = scroller ? scroller.scrollTop : 0;
+
+            if (!minimized && (pageOff > 0 || vv.offsetTop > 0)) {
+
+                try {
+                    window.scrollTo(0, 0);
+                } catch (e) {
+                }
+
+                if (scroller) {
+                    scroller.scrollTop = 0;
+                }
+            }
         }
 
         // Extra room at the top only in fullscreen on an iPhone, where the
@@ -11829,6 +11860,7 @@
             vvH: dbgNum(rawHeight),
             vvTop: dbgNum(rawTop),
             inH: String(window.innerHeight),
+            docH: String(document.documentElement ? document.documentElement.clientHeight : "-"),
             corr: dbgFlag(corrected),
             set: minimized ? "auto" : dbgNum(height) + "@" + dbgNum(top)
         });
