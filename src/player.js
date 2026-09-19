@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.4.5.59";
+    const VERSION = "1.4.5.62";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -955,7 +955,8 @@
             lyricShift: 0,
             lyricSideShift: 0,
             metaTitle: "${title}",
-            metaSubtitle: "${genre}"
+            metaSubtitle: "${genre}",
+            debugLine: false
         };
 
         try {
@@ -1061,7 +1062,8 @@
                         : "${title}",
                     metaSubtitle: typeof parsed.metaSubtitle === "string"
                         ? parsed.metaSubtitle
-                        : "${genre}"
+                        : "${genre}",
+                    debugLine: parsed.debugLine === true
                 };
             }
         } catch (e) {
@@ -7497,6 +7499,26 @@
 
             btn.dataset.dragArmed = "1";
 
+            // Chromium on Android, Vivaldi included, decides at touch start
+            // whether the browser owns the gesture. Left to itself it starts a
+            // pan as soon as the held finger moves and sends pointercancel,
+            // which ended the drag at once. preventDefault on the move cannot
+            // take it back, only touch-action can, which is also what lets the
+            // chips in the settings editor move. The row never scrolls, so
+            // nothing is lost by claiming the touch. iOS worked without this
+            btn.style.touchAction = "none";
+
+            // A long press must not select the label or raise a callout
+            btn.style.userSelect = "none";
+            btn.style.webkitUserSelect = "none";
+            btn.style.webkitTouchCallout = "none";
+
+            // Android raises a context menu on a long press, which would land
+            // right as the button is picked up
+            btn.addEventListener("contextmenu", function (ev) {
+                ev.preventDefault();
+            });
+
             // A drag ends with a click on the button underneath, which would
             // otherwise start playback or flip a mode, so it is swallowed once
             btn.addEventListener("click", function (ev) {
@@ -7511,6 +7533,15 @@
             }, true);
 
             btn.addEventListener("pointerdown", function (ev) {
+
+                // A second finger while a button is already held is ignored
+                if (ctrlDragName) {
+                    return;
+                }
+
+                // Drop any listeners a press that never saw its pointerup left
+                // behind, before attaching this press's own
+                endControlRowDrag();
 
                 ctrlStartX = ev.clientX;
                 ctrlStartY = ev.clientY;
@@ -10668,6 +10699,10 @@
             keyboardUp = height < tallestViewport * KEYBOARD_SHARE
                 && document.activeElement === searchInput;
 
+            // Mirrored for the debug line, which lives outside this builder
+            debugTallest = tallestViewport;
+            debugSearchFocused = document.activeElement === searchInput;
+
             if (keyboardUp) {
                 hidePlayerBlock();
             } else {
@@ -10682,10 +10717,13 @@
 
                 keyboardWasUp = keyboardUp;
 
-                fitMobile();
+                // Named so the debug line can tell these passes apart
+                const tag = keyboardUp ? "kbUp" : "kbDown";
+
+                fitMobile(tag);
 
                 requestAnimationFrame(function () {
-                    fitMobile();
+                    fitMobile(tag + "+raf");
                 });
             }
         }
@@ -10908,7 +10946,33 @@
         bodyEl.appendChild(countsEl);
         bodyEl.appendChild(listWrapEl);
 
+        // The debug readout sits between the header and the body, outside the
+        // player block, so it stays in view while the keyboard hides that
+        // block. Tapping it copies everything it holds
+        debugLineEl = document.createElement("div");
+        debugLineEl.style.cssText = [
+            "display:none",
+            "flex:0 0 auto",
+            "margin:2px 0 4px",
+            "padding:4px 6px",
+            "border-radius:6px",
+            "background:#101014",
+            "border:1px solid #2e2e36",
+            "color:#9fe8ee",
+            "font:10px/1.35 ui-monospace,Menlo,monospace",
+            "white-space:pre-wrap",
+            "word-break:break-all",
+            "cursor:copy"
+        ].join(";");
+        debugLineEl.title = "Tap to copy the debug line";
+        debugLineEl.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            copyDebugLine();
+        });
+
         panel.appendChild(header);
+        panel.appendChild(debugLineEl);
         panel.appendChild(bodyEl);
         buildResizeHandles(panel);
 
@@ -10978,11 +11042,15 @@
         // the address and status bars come and go. The panel is sized from
         // those dimensions, so it has to be measured again, and not only once,
         // because the new size is not final on the first frame
-        const onFullscreenChange = function () {
+        const onFullscreenChange = function (ev) {
 
             // Recorded first, so the fitMobile calls below see the state as
             // handled and do not come back in here
             appliedFullscreen = isFullscreen();
+
+            // Named for the debug line, whether the browser sent the change
+            // or the resync caught one it missed, and which way it went
+            const tag = (ev ? "fsEv" : "fsSync") + (appliedFullscreen ? "On" : "Off");
 
             // Back in fullscreen, so a later incidental exit offers the gate again
             if (isFullscreen()) {
@@ -10996,11 +11064,11 @@
 
             refreshGate();
             updateFullscreenButton();
-            fitMobile();
+            fitMobile(tag);
 
             requestAnimationFrame(function () {
 
-                fitMobile();
+                fitMobile(tag + "+raf");
 
                 if (!swipeActive) {
                     positionArt(0);
@@ -11010,7 +11078,7 @@
             // A late pass, for the browser chrome animating out of the way
             setTimeout(function () {
 
-                fitMobile();
+                fitMobile(tag + "+400");
 
                 if (!swipeActive) {
                     positionArt(0);
@@ -11048,9 +11116,13 @@
             });
         }
 
+        // Bring the debug line up first when it is switched on, so the very
+        // first sizing passes are in its history
+        updateDebugLine();
+
         // Size the panel to the real visible area and keep it in sync as iOS
         // Safari shows or hides its toolbar
-        fitMobile();
+        fitMobile("init");
 
         window.addEventListener("resize", fitMobile);
 
@@ -11456,14 +11528,205 @@
         applyPosition(left, top);
     }
 
+    // Debug line, a diagnostic readout under the header that is only there
+    // while the Debug line setting is on. It exists to see what the browser
+    // reports at the moments the panel is sized, which cannot be seen any
+    // other way on a phone
+    let debugLineEl = null;
+    let debugTimer = null;
+
+    // The most recent sizing passes, newest last. A few are shown, all of
+    // them go out with a copy
+    const DEBUG_FIT_KEEP = 12;
+    const DEBUG_FIT_SHOW = 4;
+    const debugFits = [];
+
+    // Mirrors of state that lives inside the panel builder, kept here so the
+    // readout can reach them
+    let debugTallest = 0;
+    let debugSearchFocused = false;
+
+    // Round to one decimal, and show a dash for a missing value
+    function dbgNum(v) {
+
+        if (typeof v !== "number" || !isFinite(v)) {
+            return "-";
+        }
+
+        return String(Math.round(v * 10) / 10);
+    }
+
+    function dbgFlag(v) {
+
+        return v ? "y" : "n";
+    }
+
+    // Seconds since the page loaded, enough to put the passes in order
+    function dbgTime() {
+
+        return (nowMs() / 1000).toFixed(2);
+    }
+
+    // What the browser reports right now, independent of any sizing pass
+    function debugNowLines() {
+
+        const vv = window.visualViewport;
+        const root = document.documentElement;
+        const scroller = document.scrollingElement || root;
+
+        const lines = [];
+
+        lines.push("now vv " + (vv ? dbgNum(vv.height) + " w" + dbgNum(vv.width)
+            + " top" + dbgNum(vv.offsetTop) + " x" + dbgNum(vv.scale) : "none")
+            + " | in " + window.innerHeight + "x" + window.innerWidth
+            + " | doc " + (root ? root.clientHeight : "-")
+            + " | scr " + (window.screen ? screen.width + "x" + screen.height : "-")
+            + " | sY " + dbgNum(scroller ? scroller.scrollTop : 0));
+
+        let box = null;
+
+        if (panelEl) {
+            box = panelEl.getBoundingClientRect();
+        }
+
+        lines.push("panel css " + (panelEl ? (panelEl.style.height || "-") : "-")
+            + " | box top" + (box ? dbgNum(box.top) : "-")
+            + " h" + (box ? dbgNum(box.height) : "-")
+            + " bot" + (box ? dbgNum(box.bottom) : "-")
+            + " | kb " + dbgFlag(keyboardUp)
+            + " foc " + dbgFlag(debugSearchFocused)
+            + " tall " + dbgNum(debugTallest)
+            + " | fs " + dbgFlag(isFullscreen())
+            + " min " + dbgFlag(minimized)
+            + " vis " + dbgFlag(!document.hidden));
+
+        return lines;
+    }
+
+    // One sizing pass as a line
+    function debugFitLine(f) {
+
+        return f.t + " " + f.why
+            + " kb" + f.kb
+            + " vv" + f.vvH + "/" + f.vvTop
+            + " in" + f.inH
+            + " corr" + f.corr
+            + " -> " + f.set;
+    }
+
+    // Put the readout on screen, or take it away when the setting is off
+    function renderDebugLine() {
+
+        if (!debugLineEl) {
+            return;
+        }
+
+        const show = settings.debugLine === true && !minimized;
+
+        debugLineEl.style.display = show ? "block" : "none";
+
+        if (!show) {
+            return;
+        }
+
+        const lines = debugNowLines();
+        const recent = debugFits.slice(-DEBUG_FIT_SHOW);
+
+        for (const f of recent) {
+            lines.push(debugFitLine(f));
+        }
+
+        debugLineEl.textContent = lines.join("\n");
+    }
+
+    // Log one sizing pass, only kept while the setting is on
+    function recordFit(entry) {
+
+        if (settings.debugLine !== true) {
+            return;
+        }
+
+        entry.t = dbgTime();
+        debugFits.push(entry);
+
+        while (debugFits.length > DEBUG_FIT_KEEP) {
+            debugFits.shift();
+        }
+
+        renderDebugLine();
+    }
+
+    // Start or stop the live refresh to match the setting
+    function updateDebugLine() {
+
+        if (debugTimer) {
+
+            clearInterval(debugTimer);
+            debugTimer = null;
+        }
+
+        if (settings.debugLine === true) {
+
+            // The now lines keep moving after the last sizing pass, which is
+            // exactly the part worth watching once the keyboard has gone
+            debugTimer = setInterval(renderDebugLine, 500);
+        } else {
+            debugFits.length = 0;
+        }
+
+        renderDebugLine();
+    }
+
+    // Copy everything the readout holds, the full pass history included, so
+    // it can be pasted rather than read off the screen
+    function copyDebugLine() {
+
+        const lines = debugNowLines();
+
+        for (const f of debugFits) {
+            lines.push(debugFitLine(f));
+        }
+
+        lines.push("v" + VERSION + " " + (navigator.userAgent || ""));
+
+        const text = lines.join("\n");
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+
+            navigator.clipboard.writeText(text).then(function () {
+                setStatus("Debug line copied");
+            }, function () {
+                setStatus("Could not copy the debug line");
+            });
+
+            return;
+        }
+
+        setStatus("Clipboard not available");
+    }
+
     // On phones the panel fills the screen, but iOS Safari changes the visible
     // height when it shows or hides its toolbar, and CSS viewport units lag
     // behind that. Size the panel to the actual visible rectangle instead, so
     // the top controls and the list never spill off screen
-    function fitMobile() {
+    function fitMobile(cause) {
 
         if (!panelEl) {
             return;
+        }
+
+        // What asked for this pass, for the debug line only. Listeners hand
+        // in their event, the passes that matter hand in a name, anything
+        // else is a plain call
+        let why = "call";
+
+        if (typeof cause === "string") {
+            why = cause;
+        } else if (cause && typeof cause === "object" && cause.type) {
+
+            const fromVv = window.visualViewport && cause.target === window.visualViewport;
+
+            why = (fromVv ? "vv-" : "win-") + cause.type;
         }
 
         // Safari showing its bars again after dropping fullscreen arrives
@@ -11510,6 +11773,11 @@
         const left = vv ? vv.offsetLeft : 0;
         const width = vv ? vv.width : window.innerWidth;
 
+        // The raw inputs, before the correction below picks between them
+        const rawHeight = height;
+        const rawTop = top;
+        let corrected = false;
+
         // iOS 26 leaves the visible viewport a little short, and its offset a
         // little off zero, once the keyboard has gone, and never corrects
         // either. A panel sized from those numbers stops short of the bottom
@@ -11527,6 +11795,7 @@
 
             height = Math.max(height, window.innerHeight);
             top = 0;
+            corrected = true;
         }
 
         // Extra room at the top only in fullscreen on an iPhone, where the
@@ -11553,6 +11822,16 @@
         } else {
             panelEl.style.setProperty("height", height + "px", "important");
         }
+
+        recordFit({
+            why: why,
+            kb: dbgFlag(keyboardUp),
+            vvH: dbgNum(rawHeight),
+            vvTop: dbgNum(rawTop),
+            inH: String(window.innerHeight),
+            corr: dbgFlag(corrected),
+            set: minimized ? "auto" : dbgNum(height) + "@" + dbgNum(top)
+        });
 
         // Everything the browser paints outside the panel comes from the page,
         // never from anything drawn inside it, so that is where it has to be
@@ -13242,6 +13521,12 @@
             function () { return isDebug(); },
             function (v) { setDebug(v); });
 
+        // A readout of what the browser reports while the panel is sized, for
+        // chasing layout problems on a phone
+        const debugLineRow = makeBoolRow("Debug line",
+            function () { return settings.debugLine === true; },
+            function (v) { settings.debugLine = v; updateDebugLine(); });
+
         const artTestRow = makeBoolRow("Artwork test button (blocks swipe)",
             function () { return settings.artTest; },
             function (v) { settings.artTest = v; updateTestButton(); });
@@ -13426,6 +13711,7 @@
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
+        settingsEl.appendChild(debugLineRow);
         settingsEl.appendChild(artTestRow);
         settingsEl.appendChild(copyFeedBtn);
 
