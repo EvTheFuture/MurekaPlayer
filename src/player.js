@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.9";
+    const VERSION = "1.5.0.12";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -407,7 +407,8 @@
         }
 
         if (active) {
-            root.style.backgroundColor = PANEL_BACKGROUND;
+            // Important, mureka.ai itself sets html and body to black
+            root.style.setProperty("background-color", PANEL_BACKGROUND, "important");
         } else if (savedRootBackground !== null) {
 
             root.style.backgroundColor = savedRootBackground;
@@ -466,59 +467,83 @@
     let siteBarsSaved = [];
     let siteBarsScanAt = 0;
 
-    // How often a missing or replaced bar may trigger a new search, the
-    // search reads the style of every element on the page
+    // A short description of the bars found, shown on the debug line
+    let siteBarsDesc = "";
+
+    // The site's own layout, named from its generated DOM. The whole page is
+    // one full height column, #app down to .main-nav, and the Home, Library,
+    // plus, Subscribe and Me bar is the foot of it, not a pinned bar. Each
+    // container is painted on its own, since painting everything dark inside
+    // them would reach every part of the site
+    const SITE_LAYOUT_SELECTORS = [
+        "#app",
+        ".main-page",
+        ".main-page-content-box",
+        ".main-page-inner-box",
+        ".main-page-content",
+        ".main-body",
+        ".main-nav"
+    ].join(",");
+
+    // The navigation bar itself, painted together with its dark parts. The
+    // cyan centre button is bright and keeps its colour
+    const SITE_BAR_SELECTORS = [
+        ".nav-wraper--mobile",
+        ".mobile-nav-container"
+    ].join(",");
+
+    // How often a missing or replaced bar may trigger a new search
     const SITE_BAR_RESCAN_MS = 2000;
 
-    // Safari takes the colour of its bottom toolbar from what the site has
-    // fixed along the bottom edge, and mureka.ai keeps a black navigation bar
-    // there, Home, Library, the plus button, Subscribe and Me. The panel
-    // covers it, but the toolbar still follows it, so the bar itself is given
-    // the panel colour while the panel is open
+    // mureka.ai sets html and body to black and builds the page as one full
+    // height column, with its Home, Library, plus, Subscribe and Me bar at
+    // the foot. Safari takes the colour of its bottom toolbar from there, so
+    // while the panel covers the site, those are given the panel colour.
+    // Everything is found by name, from the site's generated DOM
     function findSiteBottomBars() {
 
-        const found = [];
+        const targets = [];
+        const bars = [];
 
         if (!document.body) {
-            return found;
+            return { targets: targets, bars: bars };
         }
 
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        const all = document.body.getElementsByTagName("*");
+        // The layout column, each container on its own
+        const layout = document.body.querySelectorAll(SITE_LAYOUT_SELECTORS);
 
-        for (let i = 0; i < all.length; i += 1) {
+        for (let i = 0; i < layout.length; i += 1) {
 
-            const el = all[i];
-
-            // Anything of our own is left out, the panel, its backdrop and
-            // the popups all carry an id starting with mureka or sit inside one
-            if (el.closest('[id^="mureka"]') || el === contextMenuEl || el === blackoutEl) {
-                continue;
+            if (!layout[i].closest('[id^="mureka"]')) {
+                targets.push(layout[i]);
             }
-
-            const cs = getComputedStyle(el);
-
-            if (cs.position !== "fixed" && cs.position !== "sticky") {
-                continue;
-            }
-
-            if (cs.display === "none" || cs.visibility === "hidden") {
-                continue;
-            }
-
-            // A bar, most of the width, not a sheet over the whole page, and
-            // reaching the bottom edge
-            const r = el.getBoundingClientRect();
-
-            if (r.width < vw * 0.8 || r.height <= 0 || r.height > vh * 0.4 || r.bottom < vh - 2) {
-                continue;
-            }
-
-            found.push(el);
         }
 
-        return found;
+        // The navigation bar at the foot of it, with its dark insides
+        const named = document.body.querySelectorAll(SITE_BAR_SELECTORS);
+
+        for (let i = 0; i < named.length; i += 1) {
+
+            const el = named[i];
+
+            if (el.closest('[id^="mureka"]')) {
+                continue;
+            }
+
+            bars.push(el);
+            targets.push(el);
+
+            const inner = el.getElementsByTagName("*");
+
+            for (let j = 0; j < inner.length; j += 1) {
+
+                if (isDarkPaint(getComputedStyle(inner[j]).backgroundColor)) {
+                    targets.push(inner[j]);
+                }
+            }
+        }
+
+        return { targets: targets, bars: bars };
     }
 
     // Whether a computed colour is dark and actually painted. Bright parts,
@@ -558,6 +583,7 @@
             }
 
             siteBarsSaved = [];
+            siteBarsDesc = "";
             return;
         }
 
@@ -583,30 +609,38 @@
         // Hand back whatever is left of the last set before taking a new one
         paintSiteBottomBar(false, false);
 
-        for (const bar of findSiteBottomBars()) {
+        const found = findSiteBottomBars();
 
-            // The bar itself always, and inside it only what is painted dark
-            const targets = [bar];
-            const inner = bar.getElementsByTagName("*");
+        // The body goes too, it lies under everything the site draws
+        const targets = [document.body].concat(found.targets);
+        const seen = new Set();
 
-            for (let i = 0; i < inner.length; i += 1) {
+        for (const el of targets) {
 
-                if (isDarkPaint(getComputedStyle(inner[i]).backgroundColor)) {
-                    targets.push(inner[i]);
-                }
+            if (!el || seen.has(el)) {
+                continue;
             }
 
-            for (const el of targets) {
+            seen.add(el);
 
-                siteBarsSaved.push({
-                    el: el,
-                    value: el.style.getPropertyValue("background-color"),
-                    priority: el.style.getPropertyPriority("background-color")
-                });
+            siteBarsSaved.push({
+                el: el,
+                value: el.style.getPropertyValue("background-color"),
+                priority: el.style.getPropertyPriority("background-color")
+            });
 
-                el.style.setProperty("background-color", PANEL_BACKGROUND, "important");
-            }
+            el.style.setProperty("background-color", PANEL_BACKGROUND, "important");
         }
+
+        // What was found, for the debug line, so a miss can be reported
+        siteBarsDesc = found.bars.slice(0, 3).map(function (el) {
+
+            const cls = typeof el.className === "string" && el.className
+                ? "." + el.className.trim().split(/\s+/).slice(0, 2).join(".")
+                : "";
+
+            return el.tagName.toLowerCase() + cls;
+        }).join(" ");
     }
 
     // Look for the bar again a little later. The site renders its navigation
@@ -12759,6 +12793,9 @@
             + " | fs " + dbgFlag(isFullscreen())
             + " min " + dbgFlag(minimized)
             + " vis " + dbgFlag(!document.hidden));
+
+        lines.push("site painted " + siteBarsSaved.length
+            + " | bars " + (siteBarsDesc || "none"));
 
         return lines;
     }
