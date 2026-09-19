@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0";
+    const VERSION = "1.5.0.1";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -935,6 +935,14 @@
             tagMoods: [],
             tagMode: "and",
             tagSort: "count",
+            tagModels: [],
+            dateEnabled: false,
+            dateMode: "age",
+            dateField: "created",
+            dateAgeValue: 4,
+            dateAgeUnit: "weeks",
+            dateFrom: "",
+            dateTo: "",
             smartEnabled: true,
             bpmEnabled: false,
             bpmMin: 0,
@@ -1018,6 +1026,17 @@
                     tagMoods: Array.isArray(parsed.tagMoods) ? parsed.tagMoods : [],
                     tagMode: parsed.tagMode === "or" ? "or" : "and",
                     tagSort: parsed.tagSort === "alpha" ? "alpha" : "count",
+                    tagModels: Array.isArray(parsed.tagModels) ? parsed.tagModels : [],
+                    dateEnabled: parsed.dateEnabled === true,
+                    dateMode: parsed.dateMode === "range" ? "range" : "age",
+                    dateField: parsed.dateField === "published" ? "published" : "created",
+                    dateAgeValue: (typeof parsed.dateAgeValue === "number"
+                        && parsed.dateAgeValue >= 1 && parsed.dateAgeValue <= 999)
+                        ? parsed.dateAgeValue : 4,
+                    dateAgeUnit: (parsed.dateAgeUnit === "days" || parsed.dateAgeUnit === "months")
+                        ? parsed.dateAgeUnit : "weeks",
+                    dateFrom: isDayString(parsed.dateFrom) ? parsed.dateFrom : "",
+                    dateTo: isDayString(parsed.dateTo) ? parsed.dateTo : "",
                     smartEnabled: parsed.smartEnabled !== false,
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
@@ -1820,7 +1839,15 @@
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
 
         const heading = document.createElement("div");
-        heading.textContent = kind === "genres" ? "Genres" : "Moods";
+        // Models are single valued per song, so ticking several means any of
+        // them, whatever the match setting says for genres and moods
+        const headings = {
+            genres: "Genres",
+            moods: "Moods",
+            models: "Models, any of the ticked"
+        };
+
+        heading.textContent = headings[kind] || kind;
         heading.style.cssText = "color:#bbb";
 
         const box = document.createElement("div");
@@ -2041,6 +2068,129 @@
             return settings.tagMoods;
         });
 
+        const modelList = buildTagList("models", function () {
+            return settings.tagModels;
+        });
+
+        // Date filter, either the last so many days, weeks or months, or a
+        // span between two calendar days picked with the native date picker
+        const dateLabel = document.createElement("div");
+        dateLabel.textContent = "Date";
+        dateLabel.style.cssText = "color:#bbb";
+
+        const dateEnableRow = makeBoolRow("Filter by date",
+            function () { return settings.dateEnabled; },
+            function (v) { settings.dateEnabled = v; applySmartFilters(); });
+
+        // A row of segmented buttons, one lit, kept for the refresh to paint
+        const makeSegRow = function (options, get, set) {
+
+            const row = document.createElement("div");
+            row.style.cssText = "display:flex;gap:6px";
+
+            const btns = {};
+
+            for (const opt of options) {
+
+                const btn = makeButton(opt[1], "#333", "#fff", function () {
+                    set(opt[0]);
+                    applySmartFilters();
+                });
+
+                btns[opt[0]] = btn;
+                row.appendChild(btn);
+            }
+
+            const paint = function () {
+
+                for (const k of Object.keys(btns)) {
+
+                    const on = get() === k;
+
+                    btns[k].style.background = on ? "#48e1eb" : "#333";
+                    btns[k].style.color = on ? "#000" : "#fff";
+                }
+            };
+
+            return { el: row, paint: paint };
+        };
+
+        const dateFieldRow = makeSegRow(
+            [["created", "Created"], ["published", "Published"]],
+            function () { return settings.dateField; },
+            function (v) { settings.dateField = v; });
+
+        const dateModeRow = makeSegRow(
+            [["age", "Last"], ["range", "Between"]],
+            function () { return settings.dateMode; },
+            function (v) { settings.dateMode = v; });
+
+        const dateAgeRow = makeStepperRow("How many",
+            function () { return settings.dateAgeValue; },
+            function (v) { settings.dateAgeValue = Math.round(v); applySmartFilters(); }, 1, 999, 1);
+
+        const dateUnitRow = makeSegRow(
+            [["days", "Days"], ["weeks", "Weeks"], ["months", "Months"]],
+            function () { return settings.dateAgeUnit; },
+            function (v) { settings.dateAgeUnit = v; });
+
+        // A labelled native date field. Empty leaves that end of the span open
+        const makeDayRow = function (label, key) {
+
+            const row = document.createElement("div");
+            row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+            const name = document.createElement("span");
+            name.textContent = label;
+
+            const input = document.createElement("input");
+            input.type = "date";
+            input.style.cssText = [
+                "flex:0 1 auto",
+                "min-width:0",
+                "padding:6px 8px",
+                "border:1px solid #3a3a42",
+                "border-radius:6px",
+                "background:#26262c",
+                "color:#fff",
+                "color-scheme:dark"
+            ].join(";");
+
+            // Below this size iOS zooms the page into a focused field
+            input.style.font = INPUT_FONT;
+
+            const commit = function () {
+
+                settings[key] = isDayString(input.value) ? input.value : "";
+                applySmartFilters();
+            };
+
+            input.addEventListener("change", commit);
+
+            // Keep the site keyboard shortcuts from seeing the typing
+            input.addEventListener("keydown", function (ev) {
+                ev.stopPropagation();
+            });
+
+            row.appendChild(name);
+            row.appendChild(input);
+
+            return { el: row, input: input, key: key };
+        };
+
+        const dateFromRow = makeDayRow("From", "dateFrom");
+        const dateToRow = makeDayRow("To", "dateTo");
+
+        const dateClearRow = document.createElement("div");
+        dateClearRow.style.cssText = "display:flex;gap:6px";
+
+        dateClearRow.appendChild(makeButton("Clear dates", "#333", "#fff", function () {
+
+            settings.dateFrom = "";
+            settings.dateTo = "";
+            applySmartFilters();
+        }));
+
         const clearRow = document.createElement("div");
         clearRow.style.cssText = "display:flex;gap:6px";
 
@@ -2048,10 +2198,14 @@
 
             settings.tagGenres = [];
             settings.tagMoods = [];
+            settings.tagModels = [];
             settings.bpmMin = 0;
             settings.bpmMax = 0;
             settings.bpmUnknown = "any";
             settings.bpmEnabled = false;
+            settings.dateEnabled = false;
+            settings.dateFrom = "";
+            settings.dateTo = "";
             applySmartFilters();
         }));
 
@@ -2125,8 +2279,34 @@
             orBtn.style.background = isAnd ? "#333" : "#48e1eb";
             orBtn.style.color = isAnd ? "#fff" : "#000";
 
+            // The date controls follow the switch and the chosen mode
+            const showDate = settings.dateEnabled;
+            const isRange = settings.dateMode === "range";
+
+            dateFieldRow.el.style.display = showDate ? "flex" : "none";
+            dateModeRow.el.style.display = showDate ? "flex" : "none";
+            dateAgeRow.style.display = showDate && !isRange ? "flex" : "none";
+            dateUnitRow.el.style.display = showDate && !isRange ? "flex" : "none";
+            dateFromRow.el.style.display = showDate && isRange ? "flex" : "none";
+            dateToRow.el.style.display = showDate && isRange ? "flex" : "none";
+            dateClearRow.style.display = showDate && isRange ? "flex" : "none";
+
+            dateFieldRow.paint();
+            dateModeRow.paint();
+            dateUnitRow.paint();
+
+            // A field being edited is left alone, so the picker is not reset
+            // under the finger
+            for (const row of [dateFromRow, dateToRow]) {
+
+                if (document.activeElement !== row.input) {
+                    row.input.value = settings[row.key] || "";
+                }
+            }
+
             genreList.render();
             moodList.render();
+            modelList.render();
         };
 
         tagSheetEl.appendChild(head);
@@ -2139,10 +2319,20 @@
         tagSheetEl.appendChild(bpmMaxRow);
         tagSheetEl.appendChild(bpmUnknownLabel);
         tagSheetEl.appendChild(bpmUnknownRow);
+        tagSheetEl.appendChild(dateLabel);
+        tagSheetEl.appendChild(dateEnableRow);
+        tagSheetEl.appendChild(dateFieldRow.el);
+        tagSheetEl.appendChild(dateModeRow.el);
+        tagSheetEl.appendChild(dateAgeRow);
+        tagSheetEl.appendChild(dateUnitRow.el);
+        tagSheetEl.appendChild(dateFromRow.el);
+        tagSheetEl.appendChild(dateToRow.el);
+        tagSheetEl.appendChild(dateClearRow);
         tagSheetEl.appendChild(countEl);
         tagSheetEl.appendChild(countHintEl);
         tagSheetEl.appendChild(genreList.el);
         tagSheetEl.appendChild(moodList.el);
+        tagSheetEl.appendChild(modelList.el);
         tagSheetEl.appendChild(clearRow);
 
         panelEl.appendChild(tagSheetEl);
@@ -2164,6 +2354,7 @@
 
         const genres = new Map();
         const moods = new Map();
+        const models = new Map();
 
         const count = function (map, list) {
 
@@ -2187,9 +2378,14 @@
 
             count(genres, song.genres);
             count(moods, song.moods);
+
+            // A song carries one model, counted through the same helper
+            if (song.model) {
+                count(models, [song.model]);
+            }
         }
 
-        tagIndexCache = { genres: genres, moods: moods };
+        tagIndexCache = { genres: genres, moods: moods, models: models };
         tagIndexStamp = stamp;
 
         return tagIndexCache;
@@ -2318,10 +2514,195 @@
         return true;
     }
 
+    // True when at least one model is ticked
+    function modelFilterActive() {
+
+        if (!settings.smartEnabled) {
+            return false;
+        }
+
+        return settings.tagModels.length > 0;
+    }
+
+    // A song passes when its model is one of the ticked ones. This is its own
+    // filter, combined with the others like tempo is, since a song has only
+    // one model and match all across several would never match anything
+    function passesModelFilter(song) {
+
+        if (!modelFilterActive()) {
+            return true;
+        }
+
+        const model = String(song.model || "").trim();
+
+        return settings.tagModels.indexOf(model) !== -1;
+    }
+
+    // A calendar day as typed into a date field, YYYY-MM-DD
+    function isDayString(value) {
+
+        return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    }
+
+    // The start or the end of a calendar day in local time, as Unix seconds,
+    // or null for an empty or unreadable day
+    function daySeconds(value, endOfDay) {
+
+        if (!isDayString(value)) {
+            return null;
+        }
+
+        const parts = value.split("-").map(Number);
+        const d = endOfDay
+            ? new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999)
+            : new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+
+        if (isNaN(d.getTime())) {
+            return null;
+        }
+
+        return d.getTime() / 1000;
+    }
+
+    // The window the date filter admits, as {from, to} in Unix seconds with
+    // either end possibly null for open, or null when nothing is set. Worked
+    // out once a minute rather than once per song, the list asks per song
+    let dateWindowMemo = null;
+    let dateWindowKey = "";
+
+    function dateWindow() {
+
+        const key = [
+            settings.dateMode,
+            settings.dateAgeValue,
+            settings.dateAgeUnit,
+            settings.dateFrom,
+            settings.dateTo,
+            Math.floor(Date.now() / 60000)
+        ].join("|");
+
+        if (key === dateWindowKey) {
+            return dateWindowMemo;
+        }
+
+        let result = null;
+
+        if (settings.dateMode === "range") {
+
+            let from = daySeconds(settings.dateFrom, false);
+            let to = daySeconds(settings.dateTo, true);
+
+            // Picked the wrong way round, so take them as the span they mark
+            if (from !== null && to !== null && from > to) {
+
+                from = daySeconds(settings.dateTo, false);
+                to = daySeconds(settings.dateFrom, true);
+            }
+
+            if (from !== null || to !== null) {
+                result = { from: from, to: to };
+            }
+
+        } else {
+
+            const n = settings.dateAgeValue;
+
+            if (n > 0) {
+
+                // Counted back on the calendar, so a month is a real month and
+                // not thirty days
+                const start = new Date();
+
+                if (settings.dateAgeUnit === "days") {
+                    start.setDate(start.getDate() - n);
+                } else if (settings.dateAgeUnit === "months") {
+                    start.setMonth(start.getMonth() - n);
+                } else {
+                    start.setDate(start.getDate() - n * 7);
+                }
+
+                result = { from: start.getTime() / 1000, to: null };
+            }
+        }
+
+        dateWindowKey = key;
+        dateWindowMemo = result;
+
+        return result;
+    }
+
+    function dateFilterActive() {
+
+        if (!settings.smartEnabled || !settings.dateEnabled) {
+            return false;
+        }
+
+        return dateWindow() !== null;
+    }
+
+    // A song passes when the chosen date falls inside the window. Drafts have
+    // no publish date, so filtering on it leaves them out
+    function passesDateFilter(song) {
+
+        if (!dateFilterActive()) {
+            return true;
+        }
+
+        const stamp = settings.dateField === "published"
+            ? song.publish_at
+            : song.generate_at;
+
+        if (typeof stamp !== "number" || stamp <= 0) {
+            return false;
+        }
+
+        const w = dateWindow();
+
+        if (w.from !== null && stamp < w.from) {
+            return false;
+        }
+
+        if (w.to !== null && stamp > w.to) {
+            return false;
+        }
+
+        return true;
+    }
+
+    // A short description of the date filter for the bar and tooltips
+    function dateFilterLabel() {
+
+        if (!dateFilterActive()) {
+            return "";
+        }
+
+        const prefix = settings.dateField === "published" ? "published " : "";
+
+        if (settings.dateMode === "range") {
+
+            const from = settings.dateFrom;
+            const to = settings.dateTo;
+
+            if (from && to) {
+                return prefix + (from <= to ? from + " to " + to : to + " to " + from);
+            }
+
+            return prefix + (from ? "since " + from : "until " + to);
+        }
+
+        const n = settings.dateAgeValue;
+        const unit = settings.dateAgeUnit === "days"
+            ? "day"
+            : (settings.dateAgeUnit === "months" ? "month" : "week");
+
+        return prefix + "last " + (n === 1 ? unit : n + " " + unit + "s");
+    }
+
     function passesFilters(song) {
 
         return passesVocalFilter(song) && passesPlaylist(song) && passesPublishFilter(song)
-            && passesTagFilter(song) && passesBpmFilter(song);
+            && passesTagFilter(song) && passesBpmFilter(song)
+            && passesModelFilter(song) && passesDateFilter(song);
     }
 
     // How many songs the list is currently showing, filters applied
@@ -5134,7 +5515,8 @@
             return;
         }
 
-        const on = tagFilterActive() || bpmFilterActive();
+        const on = tagFilterActive() || bpmFilterActive()
+            || modelFilterActive() || dateFilterActive();
 
         // Only the on off switch beside it shows whether filtering is live.
         // This one just opens the sheet, and lighting both made two buttons
@@ -5156,15 +5538,24 @@
             bits.push((settings.bpmMin || "0") + " to " + (settings.bpmMax || "any") + " BPM");
         }
 
+        for (const name of settings.tagModels) {
+            bits.push(name);
+        }
+
+        if (dateFilterActive()) {
+            bits.push(dateFilterLabel());
+        }
+
         smartFilterBtn.labelEl.textContent = "Edit filters";
         smartFilterBtn.title = on
             ? "Filtering by " + bits.join(", ")
-            : "Filter by genre, mood and tempo";
+            : "Filter by genre, mood, tempo, date and model";
 
         if (smartToggleBtn) {
 
             const hasAny = settings.tagGenres.length > 0 || settings.tagMoods.length > 0
-                || settings.bpmEnabled;
+                || settings.tagModels.length > 0 || settings.bpmEnabled
+                || settings.dateEnabled;
 
             smartToggleBtn.labelEl.textContent = settings.smartEnabled ? "Filters on" : "Filters off";
             smartToggleBtn.style.background = on ? "#48e1eb" : "#333";
@@ -5226,7 +5617,19 @@
                 + (settings.bpmMax > 0 ? settings.bpmMax : "any") + " BPM");
         }
 
-        const filtering = tagFilterActive() || bpmFilterActive();
+        if (modelFilterActive()) {
+
+            for (const name of settings.tagModels) {
+                parts.push(name);
+            }
+        }
+
+        if (dateFilterActive()) {
+            parts.push(dateFilterLabel());
+        }
+
+        const filtering = tagFilterActive() || bpmFilterActive()
+            || modelFilterActive() || dateFilterActive();
 
         viewMenuBar.textContent = "";
 
