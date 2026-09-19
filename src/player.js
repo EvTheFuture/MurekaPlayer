@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.4";
+    const VERSION = "1.5.0.6";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -5621,6 +5621,80 @@
     // the screen until fullscreen was entered and left again by hand
     let appliedFullscreen = null;
     let fullscreenRefresh = null;
+
+    // While this is in the future the sizing leaves the page scroll alone, so
+    // the one pixel nudge below is not undone before Safari has seen it
+    let tintNudgeUntil = 0;
+    let tintNudgeTimer = null;
+
+    // Safari tints its toolbars from the page, but only looks again when the
+    // page scrolls. The player arrives after the site has loaded, so Safari
+    // has already taken the site's black background and keeps it, even with
+    // the page painted grey and the panel over everything. Confirmed on an
+    // iPhone: the bar turned grey only after a scroll. So once the panel is
+    // up, scroll the page one pixel and back. A page too short to scroll gets
+    // a hidden spacer for that moment. The panel is fixed, nothing it shows
+    // moves
+    function nudgeToolbarTint(delay) {
+
+        if (tintNudgeTimer) {
+            clearTimeout(tintNudgeTimer);
+        }
+
+        tintNudgeTimer = setTimeout(function () {
+
+            tintNudgeTimer = null;
+
+            // Never while the keyboard is up, the keyboard handling owns the
+            // page scroll then and this must not interfere with it
+            if (!panelEl || minimized || keyboardUp || window.innerWidth > 640
+                || !isIosLike() || isFullscreen() || document.hidden) {
+                return;
+            }
+
+            const root = document.documentElement;
+            const scroller = document.scrollingElement || root;
+
+            if (!scroller) {
+                return;
+            }
+
+            // Positioned against the page itself rather than the body, so a
+            // body that clips its overflow cannot swallow the spare pixels
+            let spacer = null;
+
+            if (scroller.scrollHeight <= window.innerHeight + 1) {
+
+                spacer = document.createElement("div");
+                spacer.style.cssText = "position:absolute;left:0;top:0;width:1px;height:calc(100% + 2px);visibility:hidden;pointer-events:none";
+                root.appendChild(spacer);
+            }
+
+            tintNudgeUntil = Date.now() + 400;
+
+            try {
+                window.scrollTo(0, scroller.scrollTop + 1);
+            } catch (e) {
+            }
+
+            // Held for a moment so the scroll is committed and seen, then put
+            // back exactly where the sizing wants the page
+            setTimeout(function () {
+
+                try {
+                    window.scrollTo(0, 0);
+                } catch (e) {
+                }
+
+                if (spacer) {
+                    spacer.remove();
+                }
+
+                tintNudgeUntil = 0;
+                fitMobile("tint");
+            }, 150);
+        }, typeof delay === "number" ? delay : 400);
+    }
 
     // Bring the layout in line when the real fullscreen state has moved on
     // without the change being handled
@@ -12128,6 +12202,10 @@
 
         window.addEventListener("load", settleLayout);
 
+        // Once the panel is painted, get Safari to take its colour for the
+        // toolbar, see nudgeToolbarTint
+        nudgeToolbarTint(600);
+
         // Persist the queue position when the tab is hidden or about to unload
         window.addEventListener("pagehide", saveQueue);
 
@@ -12145,6 +12223,9 @@
                 saveQueue();
                 return;
             }
+
+            // Safari may have gone back to the site's colour while away
+            nudgeToolbarTint(500);
 
             // Back in the foreground, so make sure playback really is running
             resyncPlayback();
@@ -12805,7 +12886,7 @@
             const scroller = document.scrollingElement || root;
             const pageOff = scroller ? scroller.scrollTop : 0;
 
-            if (!minimized && (pageOff > 0 || vv.offsetTop > 0)) {
+            if (!minimized && (pageOff > 0 || vv.offsetTop > 0) && Date.now() > tintNudgeUntil) {
 
                 try {
                     window.scrollTo(0, 0);
@@ -12988,6 +13069,11 @@
         }
 
         fitMobile();
+
+        // Unfolded over the site, so the toolbar should follow the panel again
+        if (!minimized) {
+            nudgeToolbarTint(300);
+        }
 
         // The height just changed, so re-clamp into the viewport. Collapsing
         // leaves a small panel, so it re-picks the nearer edge and snaps to it.
@@ -14769,6 +14855,29 @@
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
         settingsEl.appendChild(artStarsRow);
+        // Your own data, ratings, tempos, instrumental marks, creators and
+        // settings, saved to a file and read back, for a new device or a
+        // cleared browser
+        const dataLabel = document.createElement("div");
+        dataLabel.textContent = "Your data";
+        dataLabel.style.cssText = "color:#bbb";
+
+        const dataHint = document.createElement("div");
+        dataHint.textContent = "Ratings, tempos, instrumental marks, creators and settings,"
+            + " saved to a file and read back in. An import only replaces values"
+            + " for the songs in the file.";
+        dataHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+
+        const dataRow = document.createElement("div");
+        dataRow.style.cssText = "display:flex;gap:6px";
+
+        dataRow.appendChild(makeButton("Export data", "#333", "#fff", exportUserData));
+        dataRow.appendChild(makeButton("Import data", "#333", "#fff", chooseImportFile));
+
+        settingsEl.appendChild(dataLabel);
+        settingsEl.appendChild(dataHint);
+        settingsEl.appendChild(dataRow);
+
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
         settingsEl.appendChild(debugLineRow);
@@ -14778,6 +14887,265 @@
         panelEl.appendChild(settingsEl);
 
         updateStartButtons();
+    }
+
+    // The hidden file picker used for importing, built the first time
+    let importInputEl = null;
+
+    // A readable count of what an export holds, zero counts left out
+    function userDataSummary(nRatings, nBpm, nInstr, nCreators) {
+
+        const parts = [];
+
+        const add = function (n, one, many) {
+
+            if (n > 0) {
+                parts.push(n + " " + (n === 1 ? one : many));
+            }
+        };
+
+        add(nRatings, "rating", "ratings");
+        add(nBpm, "tempo", "tempos");
+        add(nInstr, "instrumental mark", "instrumental marks");
+        add(nCreators, "creator", "creators");
+
+        return parts.length ? parts.join(", ") : "no song data";
+    }
+
+    // Everything entered by hand, gathered into one object. Downloads, the
+    // queue and the caches belong to this device and are left out
+    function collectUserData() {
+
+        const data = {
+            app: "mureka-player",
+            kind: "user-data",
+            format: 1,
+            version: VERSION,
+            exported: new Date().toISOString(),
+            ratings: {},
+            manualBpm: {},
+            manualInstrumental: Array.from(manualInstrumental),
+            creators: savedCreators.slice(),
+            settings: JSON.parse(JSON.stringify(settings))
+        };
+
+        ratings.forEach(function (value, key) {
+            data.ratings[key] = value;
+        });
+
+        manualBpm.forEach(function (value, key) {
+            data.manualBpm[key] = value;
+        });
+
+        return data;
+    }
+
+    // Save the user data as a JSON file. A plain download works on every
+    // host, on an iPhone it lands in Files
+    function exportUserData() {
+
+        const data = collectUserData();
+        const text = JSON.stringify(data, null, 2);
+        const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+        const a = document.createElement("a");
+
+        a.href = url;
+        a.download = "mureka-player-data-" + data.exported.slice(0, 10) + ".json";
+
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        // Safari still needs the link a moment after the click
+        setTimeout(function () {
+            URL.revokeObjectURL(url);
+        }, 10000);
+
+        setStatus("Exported " + userDataSummary(ratings.size, manualBpm.size,
+            manualInstrumental.size, savedCreators.length) + " and settings");
+    }
+
+    // Open the file picker for an import
+    function chooseImportFile() {
+
+        if (!importInputEl) {
+
+            // No accept filter, iOS greys out JSON files under some filters,
+            // the contents are checked after reading instead
+            importInputEl = document.createElement("input");
+            importInputEl.type = "file";
+            importInputEl.style.display = "none";
+
+            importInputEl.addEventListener("change", function () {
+
+                const file = importInputEl.files && importInputEl.files[0];
+
+                // Cleared so picking the same file again still fires change
+                importInputEl.value = "";
+
+                if (file) {
+                    importUserDataFile(file);
+                }
+            });
+
+            document.body.appendChild(importInputEl);
+        }
+
+        importInputEl.click();
+    }
+
+    // Put imported settings into effect without a reload, as far as the
+    // panel allows. The stored copy goes through the normal loader, so
+    // anything missing or malformed falls back to its default
+    function applyImportedSettings(raw) {
+
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(raw));
+        } catch (e) {
+            return false;
+        }
+
+        settings = loadSettings();
+
+        settingsRefreshers.forEach(function (fn) {
+            fn();
+        });
+
+        metaPreviewUpdaters.forEach(function (fn) {
+            fn();
+        });
+
+        applyControlOrder();
+        updateControlLabels();
+        applyLyricLayout();
+        updateDebugLine();
+        updateVocalsCtrlButton();
+        updateTestButton();
+        setView(settings.view);
+        resetIdleTimer();
+
+        return true;
+    }
+
+    // Read an export and merge it in. Values for the same song replace the
+    // ones held here, songs the file does not mention keep theirs
+    async function importUserDataFile(file) {
+
+        let data = null;
+
+        try {
+            data = JSON.parse(await file.text());
+        } catch (e) {
+        }
+
+        if (!data || data.app !== "mureka-player" || data.kind !== "user-data") {
+
+            setStatus("That file is not a Mureka Player export");
+            return;
+        }
+
+        // Only well formed entries are taken, anything else is skipped
+        const inRatings = [];
+        const inBpm = [];
+        const inInstr = [];
+        const inCreators = [];
+
+        if (data.ratings && typeof data.ratings === "object") {
+
+            for (const key of Object.keys(data.ratings)) {
+
+                const v = Number(data.ratings[key]);
+
+                if (isFinite(v) && v >= 0 && v <= 5) {
+                    inRatings.push([String(key), Math.round(v)]);
+                }
+            }
+        }
+
+        if (data.manualBpm && typeof data.manualBpm === "object") {
+
+            for (const key of Object.keys(data.manualBpm)) {
+
+                const v = Number(data.manualBpm[key]);
+
+                if (isFinite(v) && v > 0) {
+                    inBpm.push([String(key), v]);
+                }
+            }
+        }
+
+        if (Array.isArray(data.manualInstrumental)) {
+
+            for (const id of data.manualInstrumental) {
+
+                if (id !== null && id !== undefined && id !== "") {
+                    inInstr.push(String(id));
+                }
+            }
+        }
+
+        if (Array.isArray(data.creators)) {
+
+            for (const c of data.creators) {
+
+                if (c && c.user_id) {
+                    inCreators.push(c);
+                }
+            }
+        }
+
+        const summary = userDataSummary(inRatings.length, inBpm.length,
+            inInstr.length, inCreators.length);
+        const when = typeof data.exported === "string" ? data.exported.slice(0, 10) : "an unknown date";
+
+        const go = window.confirm("Import the data exported " + when + "?\n\n" + summary
+            + ".\n\nValues for the same songs are replaced, everything else is kept.");
+
+        if (!go) {
+
+            setStatus("Import cancelled");
+            return;
+        }
+
+        for (const entry of inRatings) {
+            ratings.set(entry[0], entry[1]);
+        }
+
+        for (const entry of inBpm) {
+            manualBpm.set(entry[0], entry[1]);
+        }
+
+        for (const id of inInstr) {
+            manualInstrumental.add(id);
+        }
+
+        for (const c of inCreators) {
+            addSavedCreator(c.user_id, c.stage_name);
+        }
+
+        saveRatings();
+        saveManualBpm();
+        saveManualInstrumental();
+
+        // Settings replace rather than merge, so they are asked about apart
+        let settingsDone = false;
+
+        if (data.settings && typeof data.settings === "object"
+            && window.confirm("The file also holds settings. Replace your current settings with them?")) {
+
+            settingsDone = applyImportedSettings(data.settings);
+        }
+
+        // Everything that shows this data is brought up to date
+        applySmartFilters();
+        refreshNowStars();
+        updateRateButton();
+
+        if (currentSong) {
+            updatePlayerInfo(currentSong);
+        }
+
+        setStatus("Imported " + summary + (settingsDone ? " and settings" : ""));
     }
 
     // Show the settings overlay, expanding the panel first if it is minimized
