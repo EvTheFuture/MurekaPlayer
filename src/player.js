@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.8";
+    const VERSION = "1.5.0.9";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -398,6 +398,8 @@
     // and both are put back exactly as they were when the panel folds away
     function paintPageBehind(active) {
 
+        paintSiteBottomBar(active, false);
+
         const root = document.documentElement;
 
         if (active && savedRootBackground === null) {
@@ -456,6 +458,167 @@
 
             savedThemeColors = null;
         }
+    }
+
+    // The site's own bars fixed along the bottom edge, recoloured while the
+    // panel is open, each kept with the inline background it had before so
+    // it can be handed back exactly
+    let siteBarsSaved = [];
+    let siteBarsScanAt = 0;
+
+    // How often a missing or replaced bar may trigger a new search, the
+    // search reads the style of every element on the page
+    const SITE_BAR_RESCAN_MS = 2000;
+
+    // Safari takes the colour of its bottom toolbar from what the site has
+    // fixed along the bottom edge, and mureka.ai keeps a black navigation bar
+    // there, Home, Library, the plus button, Subscribe and Me. The panel
+    // covers it, but the toolbar still follows it, so the bar itself is given
+    // the panel colour while the panel is open
+    function findSiteBottomBars() {
+
+        const found = [];
+
+        if (!document.body) {
+            return found;
+        }
+
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const all = document.body.getElementsByTagName("*");
+
+        for (let i = 0; i < all.length; i += 1) {
+
+            const el = all[i];
+
+            // Anything of our own is left out, the panel, its backdrop and
+            // the popups all carry an id starting with mureka or sit inside one
+            if (el.closest('[id^="mureka"]') || el === contextMenuEl || el === blackoutEl) {
+                continue;
+            }
+
+            const cs = getComputedStyle(el);
+
+            if (cs.position !== "fixed" && cs.position !== "sticky") {
+                continue;
+            }
+
+            if (cs.display === "none" || cs.visibility === "hidden") {
+                continue;
+            }
+
+            // A bar, most of the width, not a sheet over the whole page, and
+            // reaching the bottom edge
+            const r = el.getBoundingClientRect();
+
+            if (r.width < vw * 0.8 || r.height <= 0 || r.height > vh * 0.4 || r.bottom < vh - 2) {
+                continue;
+            }
+
+            found.push(el);
+        }
+
+        return found;
+    }
+
+    // Whether a computed colour is dark and actually painted. Bright parts,
+    // the cyan plus button among them, keep their own colour
+    function isDarkPaint(color) {
+
+        const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/.exec(color || "");
+
+        if (!m) {
+            return false;
+        }
+
+        const alpha = m[4] === undefined ? 1 : Number(m[4]);
+
+        if (alpha === 0) {
+            return false;
+        }
+
+        const lum = (0.2126 * Number(m[1]) + 0.7152 * Number(m[2]) + 0.0722 * Number(m[3])) / 255;
+
+        return lum < 0.25;
+    }
+
+    // Recolour the site's bottom bars, or hand them back. force skips the
+    // wait between searches, for the retries after the site has rendered
+    function paintSiteBottomBar(active, force) {
+
+        if (!active) {
+
+            for (const saved of siteBarsSaved) {
+
+                if (saved.value) {
+                    saved.el.style.setProperty("background-color", saved.value, saved.priority);
+                } else {
+                    saved.el.style.removeProperty("background-color");
+                }
+            }
+
+            siteBarsSaved = [];
+            return;
+        }
+
+        // Still in place and still painted, nothing to do. A site that swapped
+        // its bar for a new element gets searched again
+        const intact = siteBarsSaved.length > 0 && siteBarsSaved.every(function (saved) {
+            return saved.el.isConnected
+                && saved.el.style.getPropertyValue("background-color") !== "";
+        });
+
+        if (intact) {
+            return;
+        }
+
+        const now = Date.now();
+
+        if (!force && now - siteBarsScanAt < SITE_BAR_RESCAN_MS) {
+            return;
+        }
+
+        siteBarsScanAt = now;
+
+        // Hand back whatever is left of the last set before taking a new one
+        paintSiteBottomBar(false, false);
+
+        for (const bar of findSiteBottomBars()) {
+
+            // The bar itself always, and inside it only what is painted dark
+            const targets = [bar];
+            const inner = bar.getElementsByTagName("*");
+
+            for (let i = 0; i < inner.length; i += 1) {
+
+                if (isDarkPaint(getComputedStyle(inner[i]).backgroundColor)) {
+                    targets.push(inner[i]);
+                }
+            }
+
+            for (const el of targets) {
+
+                siteBarsSaved.push({
+                    el: el,
+                    value: el.style.getPropertyValue("background-color"),
+                    priority: el.style.getPropertyPriority("background-color")
+                });
+
+                el.style.setProperty("background-color", PANEL_BACKGROUND, "important");
+            }
+        }
+    }
+
+    // Look for the bar again a little later. The site renders its navigation
+    // after load, and a route change can replace it
+    function retrySiteBottomBar(delay) {
+
+        setTimeout(function () {
+
+            const active = !!panelEl && !minimized && window.innerWidth <= 640;
+
+            paintSiteBottomBar(active, true);
+        }, delay);
     }
 
     // True while the on screen keyboard is covering part of the panel. Set by
@@ -5621,158 +5784,6 @@
     // the screen until fullscreen was entered and left again by hand
     let appliedFullscreen = null;
     let fullscreenRefresh = null;
-
-    // While this is in the future the sizing leaves the page scroll alone, so
-    // the one pixel nudge below is not undone before Safari has seen it
-    let tintNudgeUntil = 0;
-    let tintNudgeTimer = null;
-
-    // Safari tints its toolbars from the page, but only looks again when the
-    // page scrolls. The player arrives after the site has loaded, so Safari
-    // has already taken the site's black background and keeps it, even with
-    // the page painted grey and the panel over everything. Confirmed on an
-    // iPhone: the bar turned grey only after a scroll. So once the panel is
-    // up, scroll the page one pixel and back. A page too short to scroll gets
-    // a hidden spacer for that moment. The panel is fixed, nothing it shows
-    // moves
-    function nudgeToolbarTint(delay) {
-
-        if (tintNudgeTimer) {
-            clearTimeout(tintNudgeTimer);
-        }
-
-        tintNudgeTimer = setTimeout(function () {
-
-            tintNudgeTimer = null;
-
-            // Never while the keyboard is up, the keyboard handling owns the
-            // page scroll then and this must not interfere with it
-            if (!panelEl || minimized || keyboardUp || window.innerWidth > 640
-                || !isIosLike() || isFullscreen() || document.hidden) {
-                return;
-            }
-
-            const root = document.documentElement;
-            const scroller = document.scrollingElement || root;
-
-            if (!scroller) {
-                return;
-            }
-
-            // Positioned against the page itself rather than the body, so a
-            // body that clips its overflow cannot swallow the spare pixels
-            let spacer = null;
-
-            if (scroller.scrollHeight <= window.innerHeight + 1) {
-
-                spacer = document.createElement("div");
-                spacer.style.cssText = "position:absolute;left:0;top:0;width:1px;height:calc(100% + 2px);visibility:hidden;pointer-events:none";
-                root.appendChild(spacer);
-            }
-
-            tintNudgeUntil = Date.now() + 400;
-
-            try {
-                window.scrollTo(0, scroller.scrollTop + 1);
-            } catch (e) {
-            }
-
-            // Held for a moment so the scroll is committed and seen, then put
-            // back exactly where the sizing wants the page
-            setTimeout(function () {
-
-                try {
-                    window.scrollTo(0, 0);
-                } catch (e) {
-                }
-
-                if (spacer) {
-                    spacer.remove();
-                }
-
-                tintNudgeUntil = 0;
-                fitMobile("tint");
-            }, 150);
-        }, typeof delay === "number" ? delay : 400);
-    }
-
-    // An invisible element that makes the page taller than the screen while
-    // the panel is open, and how far past the screen it reaches
-    let pageExtenderEl = null;
-    let pageExtenderPx = 0;
-
-    // iOS only draws the page under its bottom toolbar when the page actually
-    // reaches down there. A page that ends where the toolbar begins leaves
-    // that strip to Safari, which fills it with the colour it took from the
-    // site at load, black. Seen on an iPhone: the strip went grey only while
-    // the page was taller than the screen. So while the panel covers the
-    // site, the page is extended past the bottom of the screen, where the
-    // page background is already the panel colour. Its size is not touched
-    // while the keyboard is up, so the keyboard handling sees the same page
-    function updatePageExtender() {
-
-        const wanted = !!panelEl && !minimized && window.innerWidth <= 640
-            && isIosLike() && !isFullscreen();
-
-        if (!wanted) {
-
-            if (pageExtenderEl) {
-
-                pageExtenderEl.remove();
-                pageExtenderEl = null;
-                pageExtenderPx = 0;
-            }
-
-            return;
-        }
-
-        if (keyboardUp && pageExtenderEl) {
-            return;
-        }
-
-        // Everything between the bottom of the page area and the bottom of
-        // the screen, the toolbar included. Measured against the screen side
-        // that is vertical right now
-        let reach = 120;
-
-        if (window.screen && window.innerHeight > 0) {
-
-            const longSide = Math.max(screen.width, screen.height);
-            const shortSide = Math.min(screen.width, screen.height);
-            const screenTall = window.innerWidth < window.innerHeight ? longSide : shortSide;
-
-            reach = Math.max(reach, Math.round(screenTall - window.innerHeight));
-        }
-
-        if (!pageExtenderEl) {
-
-            // Placed against the page itself rather than the body, so a body
-            // that clips its overflow cannot hold the page short. It is a
-            // painted sheet in the panel colour, not an invisible one. What
-            // the toolbar shows is whatever is drawn under it, and the site
-            // draws black there, so the sheet has to cover the site. It sits
-            // above the site and below the backdrop and the panel, and never
-            // takes a tap
-            pageExtenderEl = document.createElement("div");
-            pageExtenderEl.id = "mureka-page-extender";
-            pageExtenderEl.style.cssText = [
-                "position:absolute",
-                "left:0",
-                "right:0",
-                "top:0",
-                "z-index:999997",
-                "background:" + PANEL_BACKGROUND,
-                "pointer-events:none"
-            ].join(";");
-            document.documentElement.appendChild(pageExtenderEl);
-        }
-
-        if (reach !== pageExtenderPx) {
-
-            pageExtenderPx = reach;
-            pageExtenderEl.style.height = "calc(100% + " + reach + "px)";
-        }
-    }
 
     // Bring the layout in line when the real fullscreen state has moved on
     // without the change being handled
@@ -12280,9 +12291,10 @@
 
         window.addEventListener("load", settleLayout);
 
-        // Once the panel is painted, get Safari to take its colour for the
-        // toolbar, see nudgeToolbarTint
-        nudgeToolbarTint(600);
+        // The site draws its bottom navigation after it has loaded, so look
+        // for it again once it has had time to appear
+        retrySiteBottomBar(1000);
+        retrySiteBottomBar(3000);
 
         // Persist the queue position when the tab is hidden or about to unload
         window.addEventListener("pagehide", saveQueue);
@@ -12302,8 +12314,8 @@
                 return;
             }
 
-            // Safari may have gone back to the site's colour while away
-            nudgeToolbarTint(500);
+            // The site may have redrawn its bottom bar while away
+            retrySiteBottomBar(500);
 
             // Back in the foreground, so make sure playback really is running
             resyncPlayback();
@@ -12897,7 +12909,6 @@
 
             // A window that grew past the phone layout gets its page back
             paintPageBehind(false);
-            updatePageExtender();
 
             // Hand sizing back to the draggable desktop dock. The fixed width
             // is only the fallback, restoreSize puts back what the user set
@@ -12965,7 +12976,7 @@
             const scroller = document.scrollingElement || root;
             const pageOff = scroller ? scroller.scrollTop : 0;
 
-            if (!minimized && (pageOff > 0 || vv.offsetTop > 0) && Date.now() > tintNudgeUntil) {
+            if (!minimized && (pageOff > 0 || vv.offsetTop > 0)) {
 
                 try {
                     window.scrollTo(0, 0);
@@ -13018,9 +13029,6 @@
         // never from anything drawn inside it, so that is where it has to be
         // asked for
         paintPageBehind(!minimized);
-
-        // Reach under the toolbar while open, give the page back when folded
-        updatePageExtender();
 
         // The art height may have changed, re-seat the coverflow strip
         if (!swipeActive) {
@@ -13152,9 +13160,9 @@
 
         fitMobile();
 
-        // Unfolded over the site, so the toolbar should follow the panel again
+        // Opened over a site that may have changed page while folded
         if (!minimized) {
-            nudgeToolbarTint(300);
+            retrySiteBottomBar(300);
         }
 
         // The height just changed, so re-clamp into the viewport. Collapsing
