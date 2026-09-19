@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.1";
+    const VERSION = "1.5.0.2";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -132,6 +132,15 @@
     // some songs, and without it they can only ever be excluded from a tempo
     // filter, so a value can be supplied and is then used like a real one
     const MANUAL_BPM_KEY = "mureka_manual_bpm_v1";
+
+    // localStorage key for star ratings, song_id to 0 to 5. A song missing
+    // from it has never been rated, which is kept apart from zero stars
+    const RATING_KEY = "mureka_rating_v1";
+
+    // Star colours, lit and unlit. An unrated song shows grey outlines, a
+    // rated one gold outlines, so zero stars and not rated look different
+    const STAR_GOLD = "#f5c518";
+    const STAR_EMPTY = "#6a6a74";
 
     // Cache API bucket for the per song detail payload, the play and like
     // counts plus the timed lyrics. Counts change over time, so every entry
@@ -943,6 +952,10 @@
             dateAgeUnit: "weeks",
             dateFrom: "",
             dateTo: "",
+            ratingEnabled: false,
+            ratingMin: 1,
+            ratingUnrated: "hide",
+            artStars: true,
             smartEnabled: true,
             bpmEnabled: false,
             bpmMin: 0,
@@ -1037,6 +1050,13 @@
                         ? parsed.dateAgeUnit : "weeks",
                     dateFrom: isDayString(parsed.dateFrom) ? parsed.dateFrom : "",
                     dateTo: isDayString(parsed.dateTo) ? parsed.dateTo : "",
+                    ratingEnabled: parsed.ratingEnabled === true,
+                    ratingMin: (typeof parsed.ratingMin === "number"
+                        && parsed.ratingMin >= 0 && parsed.ratingMin <= 5)
+                        ? parsed.ratingMin : 1,
+                    ratingUnrated: (parsed.ratingUnrated === "any" || parsed.ratingUnrated === "only")
+                        ? parsed.ratingUnrated : "hide",
+                    artStars: parsed.artStars !== false,
                     smartEnabled: parsed.smartEnabled !== false,
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
@@ -1678,6 +1698,362 @@
         }
     }
 
+    // song_id to a whole number of stars, loaded once on startup
+    let ratings = loadRatings();
+
+    function loadRatings() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(RATING_KEY));
+
+            if (raw && typeof raw === "object") {
+
+                const map = new Map();
+
+                for (const key of Object.keys(raw)) {
+
+                    const value = Number(raw[key]);
+
+                    if (isFinite(value) && value >= 0 && value <= 5) {
+                        map.set(String(key), Math.round(value));
+                    }
+                }
+
+                return map;
+            }
+        } catch (e) {
+        }
+
+        return new Map();
+    }
+
+    function saveRatings() {
+
+        try {
+
+            const out = {};
+
+            ratings.forEach(function (value, key) {
+                out[key] = value;
+            });
+
+            localStorage.setItem(RATING_KEY, JSON.stringify(out));
+        } catch (e) {
+        }
+    }
+
+    // A song's rating, 0 to 5, or null when it has never been rated
+    function getRating(song) {
+
+        const r = ratings.get(String(song.song_id));
+
+        return typeof r === "number" ? r : null;
+    }
+
+    // Set a rating, or pass null to take the song back to not rated
+    function setRating(song, value) {
+
+        const id = String(song.song_id);
+
+        if (value === null) {
+            ratings.delete(id);
+        } else {
+            ratings.set(id, Math.max(0, Math.min(5, Math.round(value))));
+        }
+
+        saveRatings();
+        afterRatingChange(song);
+    }
+
+    // The rating in words, for captions and the info panel
+    function ratingText(r) {
+
+        if (r === null) {
+            return "Not rated";
+        }
+
+        if (r === 0) {
+            return "Rated, no stars";
+        }
+
+        return r + (r === 1 ? " star" : " stars");
+    }
+
+    // Everything that shows a rating is brought up to date. The queue is left
+    // alone on purpose, rating the playing song must not reshuffle what is
+    // coming up, the filter applies again the next time the queue is built
+    function afterRatingChange(song) {
+
+        renderList();
+
+        if (tagSheetOpen && tagSheetRefresh) {
+            tagSheetRefresh();
+        }
+
+        refreshNowStars();
+        updateRateButton();
+
+        if (currentSong && currentSong.song_id === song.song_id) {
+
+            applyCoverText(currentSong);
+
+            // The lock screen and Bluetooth only need the update when the
+            // templates actually show the stars
+            if (/\$\{stars\}/.test((settings.metaTitle || "") + (settings.metaSubtitle || ""))) {
+                reassertNowPlaying();
+            }
+        }
+    }
+
+    // One star as an SVG, painted later by paintStar
+    function makeStarSvg(size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+
+        svg.setAttribute("width", String(size));
+        svg.setAttribute("height", String(size));
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.style.display = "block";
+
+        const path = document.createElementNS(ns, "path");
+
+        path.setAttribute("d", "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
+            + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z");
+        path.setAttribute("stroke-width", "1.6");
+        path.setAttribute("stroke-linejoin", "round");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "currentColor");
+
+        svg.appendChild(path);
+        svg.starPath = path;
+
+        return svg;
+    }
+
+    // Lit stars are filled gold. Unlit ones are outlined, gold once the song
+    // has been rated at all and grey while it has not
+    function paintStar(svg, lit, rated) {
+
+        svg.starPath.setAttribute("fill", lit ? STAR_GOLD : "none");
+        svg.starPath.setAttribute("stroke", (lit || rated) ? STAR_GOLD : STAR_EMPTY);
+    }
+
+    // A row of five tappable stars for whichever song getSong returns. A tap
+    // lights that star and every one before it. Tapping the top lit star again
+    // sets zero stars, and the caption offers the way back to not rated.
+    // opts.size is the star size, opts.pad the extra tap area around each,
+    // opts.caption adds the state line underneath
+    function makeStarBar(getSong, opts) {
+
+        const size = opts.size || 24;
+        const pad = typeof opts.pad === "number" ? opts.pad : 6;
+
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px";
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;justify-content:center";
+
+        const stars = [];
+
+        let caption = null;
+        let captionText = null;
+        let clearBtn = null;
+
+        const paint = function () {
+
+            const song = getSong();
+            const r = song ? getRating(song) : null;
+
+            for (let i = 0; i < stars.length; i += 1) {
+                paintStar(stars[i], r !== null && i < r, r !== null);
+            }
+
+            if (caption) {
+
+                captionText.textContent = song ? ratingText(r) : "";
+                clearBtn.style.display = r === null ? "none" : "inline";
+            }
+        };
+
+        for (let n = 1; n <= 5; n += 1) {
+
+            const btn = document.createElement("button");
+
+            btn.type = "button";
+            btn.setAttribute("aria-label", n + (n === 1 ? " star" : " stars"));
+            btn.style.cssText = [
+                "background:transparent",
+                "border:none",
+                "margin:0",
+                "padding:" + pad + "px",
+                "line-height:0",
+                "cursor:pointer",
+                "touch-action:manipulation",
+                "-webkit-tap-highlight-color:transparent"
+            ].join(";");
+
+            const svg = makeStarSvg(size);
+
+            btn.appendChild(svg);
+            stars.push(svg);
+
+            btn.addEventListener("click", function (ev) {
+
+                // Keep the menu open and the art from treating it as a tap
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                const song = getSong();
+
+                if (!song) {
+                    return;
+                }
+
+                const current = getRating(song);
+
+                setRating(song, current === n ? 0 : n);
+                paint();
+            });
+
+            row.appendChild(btn);
+        }
+
+        wrap.appendChild(row);
+
+        if (opts.caption) {
+
+            caption = document.createElement("div");
+            caption.style.cssText = "display:flex;align-items:center;gap:10px;font-size:12px;color:#aaa";
+
+            captionText = document.createElement("span");
+
+            clearBtn = document.createElement("span");
+            clearBtn.textContent = "Remove rating";
+            clearBtn.style.cssText = "color:#48e1eb;cursor:pointer;text-decoration:underline";
+
+            clearBtn.addEventListener("click", function (ev) {
+
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                const song = getSong();
+
+                if (song) {
+
+                    setRating(song, null);
+                    paint();
+                }
+            });
+
+            caption.appendChild(captionText);
+            caption.appendChild(clearBtn);
+            wrap.appendChild(caption);
+        }
+
+        // Taps between the stars must not close a menu around the bar either
+        wrap.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+
+        paint();
+
+        return { el: wrap, paint: paint };
+    }
+
+    // The star row over the cover for the playing song, and the transport
+    // button that opens the large rating popup, both built with the panel
+    let nowStarsBar = null;
+    let rateCtrlBtn = null;
+    let rateIconSvg = null;
+
+    // Show the cover stars for the playing song, or hide them
+    function refreshNowStars() {
+
+        if (!nowStarsBar) {
+            return;
+        }
+
+        const show = settings.artStars === true && !!currentSong;
+
+        nowStarsBar.el.style.display = show ? "flex" : "none";
+
+        if (show) {
+            nowStarsBar.paint();
+        }
+    }
+
+    // The rate button icon follows the playing song's rating
+    function updateRateButton() {
+
+        if (!rateIconSvg) {
+            return;
+        }
+
+        const r = currentSong ? getRating(currentSong) : null;
+
+        if (r === null) {
+
+            rateIconSvg.starPath.setAttribute("fill", "none");
+            rateIconSvg.starPath.setAttribute("stroke", "currentColor");
+
+        } else {
+            paintStar(rateIconSvg, r > 0, true);
+        }
+
+        updateControlLabels();
+    }
+
+    // A popup holding only the large star bar, opened from the rate button
+    // for the playing song. It reuses the options popup and closes the same
+    // way, with a tap anywhere else
+    function showRatingPopup(anchor, song) {
+
+        if (!contextMenuEl || !song) {
+            return;
+        }
+
+        contextMenuEl.textContent = "";
+
+        const title = document.createElement("div");
+        title.textContent = song.title || "Untitled";
+        title.style.cssText = "padding:6px 8px 0;font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+
+        const bar = makeStarBar(function () {
+            return song;
+        }, { size: 36, pad: 7, caption: true });
+
+        bar.el.style.padding = "6px 4px 8px";
+
+        contextMenuEl.appendChild(title);
+        contextMenuEl.appendChild(bar.el);
+
+        // Measure the width only after the title has room to be read
+        title.style.maxWidth = Math.min(320, window.innerWidth - 32) + "px";
+
+        contextMenuEl.style.display = "block";
+
+        const r = anchor.getBoundingClientRect();
+        const w = contextMenuEl.offsetWidth;
+        const h = contextMenuEl.offsetHeight;
+
+        let left = r.left + r.width / 2 - w / 2;
+
+        left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+
+        // Above the button, or below it when there is no room above
+        let top = r.top - h - 8;
+
+        if (top < 8) {
+            top = Math.min(r.bottom + 8, window.innerHeight - h - 8);
+        }
+
+        contextMenuEl.style.left = left + "px";
+        contextMenuEl.style.top = Math.max(8, top) + "px";
+    }
+
     function loadManualInstrumental() {
 
         try {
@@ -2191,6 +2567,29 @@
             applySmartFilters();
         }));
 
+        // Rating filter, a minimum number of stars, with songs never rated
+        // handled separately from songs rated zero stars
+        const ratingLabel = document.createElement("div");
+        ratingLabel.textContent = "Rating";
+        ratingLabel.style.cssText = "color:#bbb";
+
+        const ratingEnableRow = makeBoolRow("Filter by rating",
+            function () { return settings.ratingEnabled; },
+            function (v) { settings.ratingEnabled = v; applySmartFilters(); });
+
+        const ratingMinRow = makeStepperRow("Minimum stars",
+            function () { return settings.ratingMin; },
+            function (v) { settings.ratingMin = Math.round(v); applySmartFilters(); }, 0, 5, 1);
+
+        const ratingUnratedLabel = document.createElement("div");
+        ratingUnratedLabel.textContent = "Songs not yet rated";
+        ratingUnratedLabel.style.cssText = "color:#bbb";
+
+        const ratingUnratedRow = makeSegRow(
+            [["any", "Include"], ["hide", "Hide"], ["only", "Only these"]],
+            function () { return settings.ratingUnrated; },
+            function (v) { settings.ratingUnrated = v; });
+
         const clearRow = document.createElement("div");
         clearRow.style.cssText = "display:flex;gap:6px";
 
@@ -2206,6 +2605,7 @@
             settings.dateEnabled = false;
             settings.dateFrom = "";
             settings.dateTo = "";
+            settings.ratingEnabled = false;
             applySmartFilters();
         }));
 
@@ -2295,6 +2695,16 @@
             dateModeRow.paint();
             dateUnitRow.paint();
 
+            // The rating controls follow their switch, and a minimum means
+            // nothing while only the unrated songs are wanted
+            const showRating = settings.ratingEnabled;
+
+            ratingMinRow.style.display = showRating && settings.ratingUnrated !== "only"
+                ? "flex" : "none";
+            ratingUnratedLabel.style.display = showRating ? "" : "none";
+            ratingUnratedRow.el.style.display = showRating ? "flex" : "none";
+            ratingUnratedRow.paint();
+
             // A field being edited is left alone, so the picker is not reset
             // under the finger
             for (const row of [dateFromRow, dateToRow]) {
@@ -2328,6 +2738,11 @@
         tagSheetEl.appendChild(dateFromRow.el);
         tagSheetEl.appendChild(dateToRow.el);
         tagSheetEl.appendChild(dateClearRow);
+        tagSheetEl.appendChild(ratingLabel);
+        tagSheetEl.appendChild(ratingEnableRow);
+        tagSheetEl.appendChild(ratingMinRow);
+        tagSheetEl.appendChild(ratingUnratedLabel);
+        tagSheetEl.appendChild(ratingUnratedRow.el);
         tagSheetEl.appendChild(countEl);
         tagSheetEl.appendChild(countHintEl);
         tagSheetEl.appendChild(genreList.el);
@@ -2698,11 +3113,67 @@
         return prefix + "last " + (n === 1 ? unit : n + " " + unit + "s");
     }
 
+    // True when the rating filter would leave anything out
+    function ratingFilterActive() {
+
+        if (!settings.smartEnabled || !settings.ratingEnabled) {
+            return false;
+        }
+
+        return settings.ratingMin > 0 || settings.ratingUnrated !== "any";
+    }
+
+    // Rated songs pass from the minimum up. Songs never rated are handled on
+    // their own, kept, hidden, or the only ones shown, which is the way to
+    // find what still needs rating
+    function passesRatingFilter(song) {
+
+        if (!ratingFilterActive()) {
+            return true;
+        }
+
+        const r = getRating(song);
+
+        if (r === null) {
+            return settings.ratingUnrated !== "hide";
+        }
+
+        if (settings.ratingUnrated === "only") {
+            return false;
+        }
+
+        return r >= settings.ratingMin;
+    }
+
+    // A short description of the rating filter for the bar and tooltips
+    function ratingFilterLabel() {
+
+        if (!ratingFilterActive()) {
+            return "";
+        }
+
+        if (settings.ratingUnrated === "only") {
+            return "not rated";
+        }
+
+        const min = settings.ratingMin;
+        let text = min > 0
+            ? (min === 5 ? "5 stars" : min + "+ stars")
+            : "rated";
+
+        if (settings.ratingUnrated === "any") {
+            text += " or not rated";
+        }
+
+        return text;
+    }
+
     function passesFilters(song) {
 
         return passesVocalFilter(song) && passesPlaylist(song) && passesPublishFilter(song)
             && passesTagFilter(song) && passesBpmFilter(song)
-            && passesModelFilter(song) && passesDateFilter(song);
+            && passesModelFilter(song) && passesDateFilter(song)
+            && passesRatingFilter(song);
     }
 
     // How many songs the list is currently showing, filters applied
@@ -4037,6 +4508,10 @@
         }
 
         manualInstrumental.delete(String(song.song_id));
+
+        if (ratings.delete(String(song.song_id))) {
+            saveRatings();
+        }
         await purgeSongData(song);
     }
 
@@ -5516,7 +5991,7 @@
         }
 
         const on = tagFilterActive() || bpmFilterActive()
-            || modelFilterActive() || dateFilterActive();
+            || modelFilterActive() || dateFilterActive() || ratingFilterActive();
 
         // Only the on off switch beside it shows whether filtering is live.
         // This one just opens the sheet, and lighting both made two buttons
@@ -5546,16 +6021,20 @@
             bits.push(dateFilterLabel());
         }
 
+        if (ratingFilterActive()) {
+            bits.push(ratingFilterLabel());
+        }
+
         smartFilterBtn.labelEl.textContent = "Edit filters";
         smartFilterBtn.title = on
             ? "Filtering by " + bits.join(", ")
-            : "Filter by genre, mood, tempo, date and model";
+            : "Filter by genre, mood, tempo, date, model and rating";
 
         if (smartToggleBtn) {
 
             const hasAny = settings.tagGenres.length > 0 || settings.tagMoods.length > 0
                 || settings.tagModels.length > 0 || settings.bpmEnabled
-                || settings.dateEnabled;
+                || settings.dateEnabled || settings.ratingEnabled;
 
             smartToggleBtn.labelEl.textContent = settings.smartEnabled ? "Filters on" : "Filters off";
             smartToggleBtn.style.background = on ? "#48e1eb" : "#333";
@@ -5628,8 +6107,12 @@
             parts.push(dateFilterLabel());
         }
 
+        if (ratingFilterActive()) {
+            parts.push(ratingFilterLabel());
+        }
+
         const filtering = tagFilterActive() || bpmFilterActive()
-            || modelFilterActive() || dateFilterActive();
+            || modelFilterActive() || dateFilterActive() || ratingFilterActive();
 
         viewMenuBar.textContent = "";
 
@@ -7262,7 +7745,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate"];
 
     // A fresh icon for the editor, the real buttons keep their own nodes
     function controlChipIcon(name) {
@@ -7278,6 +7761,10 @@
         // The editor chip carries the same icon the button shows at rest
         if (name === "vocals") {
             return iconAll();
+        }
+
+        if (name === "rate") {
+            return makeStarSvg(20);
         }
 
         const drawn = {
@@ -8696,6 +9183,9 @@
 
         updateMediaMetadata(song);
 
+        refreshNowStars();
+        updateRateButton();
+
         if (!playerTitle) {
             return;
         }
@@ -8903,6 +9393,11 @@
 
         const mode = settings.artOverlayMode;
 
+        // Invisible stars must not take taps meant for the cover underneath
+        if (nowStarsBar) {
+            nowStarsBar.el.style.pointerEvents = mode === "none" ? "none" : "auto";
+        }
+
         if (mode === "none") {
 
             bottomScrimEl.style.opacity = "0";
@@ -8921,7 +9416,10 @@
 
         // Tall shading only while lyrics actually show. Info alone needs just
         // enough to back the title and meta, so the art above stays untinted
-        bottomScrimEl.style.height = lyricActive ? "88%" : "20%";
+        // A little taller when the star row sits under the meta line
+        const starsShown = nowStarsBar && nowStarsBar.el.style.display !== "none";
+
+        bottomScrimEl.style.height = lyricActive ? "88%" : (starsShown ? "28%" : "20%");
         bottomScrimEl.style.opacity = "1";
         bottomWrapEl.style.opacity = "1";
 
@@ -9697,13 +10195,27 @@
             ctime: song.generate_at ? fmtDate(song.generate_at) : "",
             ptime: song.publish_at ? fmtDate(song.publish_at) : "",
             mode: modeStatusText(),
-            instrumental: isInstrumental(song) ? "Instrumental" : ""
+            instrumental: isInstrumental(song) ? "Instrumental" : "",
+            stars: starsText(song)
         };
     }
 
     // Expand a now playing template. ${tag} inserts a value. Text inside [ ] is
     // kept only when every tag inside it has a value, so labels and separators
     // disappear cleanly when a field is missing
+    // Five star characters for the templates, lit ones filled. Empty while
+    // the song is not rated, so a bracket section around it drops away
+    function starsText(song) {
+
+        const r = getRating(song);
+
+        if (r === null) {
+            return "";
+        }
+
+        return "\u2605".repeat(r) + "\u2606".repeat(5 - r);
+    }
+
     function formatMeta(template, song) {
 
         if (!template) {
@@ -10781,6 +11293,23 @@
         bottomWrap.appendChild(playerTitle);
         bottomWrap.appendChild(playerMetaEl);
 
+        // Stars for the playing song, tappable straight on the cover. The
+        // overlay around them ignores the pointer, these take it back. The
+        // negative margin lines the first star up with the text, the padding
+        // around each star is only there to make it easier to hit
+        nowStarsBar = makeStarBar(function () {
+            return currentSong;
+        }, { size: 20, pad: 5, caption: false });
+
+        nowStarsBar.el.style.alignItems = "flex-start";
+        nowStarsBar.el.style.margin = "0 0 -5px -5px";
+        nowStarsBar.el.style.pointerEvents = "auto";
+        nowStarsBar.el.style.width = "max-content";
+        nowStarsBar.el.style.filter = "drop-shadow(0 1px 2px rgba(0,0,0,0.9))";
+
+        bottomWrap.appendChild(nowStarsBar.el);
+        refreshNowStars();
+
         // Layer the overlays over the coverflow, the tiles stay swipeable below
         artBox.appendChild(artPlaceholderEl);
         artBox.appendChild(topScrim);
@@ -10953,6 +11482,25 @@
             setVocalFilter(order[(at + 1) % order.length]);
         });
 
+        // Opens the large star popup for the playing song, a bigger target
+        // than the stars on the cover, which matters in a car
+        rateIconSvg = makeStarSvg(22);
+        rateCtrlBtn = makeIconButton(rateIconSvg, "Rate the playing song", function (ev) {
+
+            // The tap that opens the popup must not also close it again
+            if (ev) {
+                ev.stopPropagation();
+            }
+
+            if (!currentSong) {
+
+                setStatus("Nothing playing to rate");
+                return;
+            }
+
+            showRatingPopup(rateCtrlBtn, currentSong);
+        });
+
         controlButtons = {
             prev: makeIconButton(iconPrev(), "Previous", playPrev),
             play: playPauseBtn,
@@ -10961,7 +11509,8 @@
             shuffle: shuffleBtn,
             repeat: repeatBtn,
             published: publishedCtrlBtn,
-            vocals: vocalsCtrlBtn
+            vocals: vocalsCtrlBtn,
+            rate: rateCtrlBtn
         };
 
         updateFeedButton();
@@ -10969,6 +11518,7 @@
         applyControlOrder();
         enableControlRowDragging();
         updateVocalsCtrlButton();
+        updateRateButton();
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(seekRow);
@@ -12511,6 +13061,14 @@
             return publishFilter === "published" ? "public" : "all";
         }
 
+        // The playing song's rating, or the action while it has none
+        if (name === "rate") {
+
+            const r = currentSong ? getRating(currentSong) : null;
+
+            return r === null ? "rate" : r + "\u2605";
+        }
+
         if (name === "vocals") {
 
             const mode = settings.vocalFilter;
@@ -13189,6 +13747,21 @@
         item.appendChild(dot);
         item.appendChild(numEl);
         item.appendChild(titleEl);
+
+        // The rating, but only once any song has one, so a library nobody has
+        // rated keeps the full width for titles. A fixed column keeps the
+        // durations lined up, zero stars shows grey, not rated shows nothing
+        if (ratings.size > 0) {
+
+            const r = getRating(song);
+            const rateEl = document.createElement("span");
+
+            rateEl.textContent = r === null ? "" : "\u2605" + r;
+            rateEl.style.cssText = "flex:0 0 auto;width:28px;margin-left:6px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:"
+                + (r ? STAR_GOLD : "#777");
+
+            item.appendChild(rateEl);
+        }
 
         // Song length, right aligned next to the title
         if (song.duration_milliseconds) {
@@ -13943,7 +14516,7 @@
         const tplHint = document.createElement("div");
         tplHint.textContent = "Tags: ${title} ${genre} ${mood} ${bpm} ${model}"
             + " ${artist} ${duration} ${plays} ${likes} ${ctime} ${ptime} ${mode}"
-            + " ${instrumental}."
+            + " ${instrumental} ${stars}."
             + " Text in [ ] is dropped when a tag inside it is empty.";
         tplHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
 
@@ -14119,6 +14692,15 @@
             function () { return settings.countsMaxAge; },
             function (v) { settings.countsMaxAge = v; }, 1, 72);
 
+        const artStarsRow = makeBoolRow("Rating stars on the cover",
+            function () { return settings.artStars; },
+            function (v) {
+
+                settings.artStars = v;
+                refreshNowStars();
+                updateLyricLine(true);
+            });
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
@@ -14144,6 +14726,7 @@
         settingsEl.appendChild(artResumeRow);
         settingsEl.appendChild(countsAgeRow);
         settingsEl.appendChild(waveRow);
+        settingsEl.appendChild(artStarsRow);
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);
         settingsEl.appendChild(debugLineRow);
@@ -14493,6 +15076,7 @@
             ? String(shownBpm) + (hasManualBpm(song) ? " (by hand)" : "")
             : "-");
         addInfoRow("Model", song.model || "-");
+        addInfoRow("Rating", ratingText(getRating(song)));
         addInfoRow("Duration", formatTime((song.duration_milliseconds || 0) / 1000));
 
         // Counts arrive with the detail fetch, start as a placeholder
@@ -15666,6 +16250,19 @@
                 copyJson(song);
             });
         }
+
+        // Star rating along the foot of the menu, wider than the rows above so
+        // every star is a comfortable target
+        const rateBar = makeStarBar(function () {
+            return song;
+        }, { size: 30, pad: 6, caption: true });
+
+        rateBar.el.style.borderTop = "1px solid #3a3a42";
+        rateBar.el.style.marginTop = "4px";
+        rateBar.el.style.padding = "8px 4px 6px";
+        rateBar.el.style.minWidth = Math.min(260, window.innerWidth - 24) + "px";
+
+        contextMenuEl.appendChild(rateBar.el);
 
         // Show first so the size is measurable, then clamp inside the viewport
         contextMenuEl.style.display = "block";
