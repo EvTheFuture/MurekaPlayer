@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.2";
+    const VERSION = "1.5.0.4";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -10991,7 +10991,7 @@
         // Keeping the library in step with the server
         const rowLibrary = makeActionRow();
 
-        loadButton = makeActionButton(iconLoad(), "Load", "#48e1eb", "#000", run);
+        loadButton = makeActionButton(iconLoad(), "Load", "#444", "#fff", run);
 
         rescanButton = makeActionButton(iconLoad(), "Rescan", "#444", "#fff", rescan);
         rescanButton.title = "Full refresh, page the whole library and update publish"
@@ -11649,12 +11649,18 @@
                 return;
             }
 
-            keyboardUp = height < tallestViewport * KEYBOARD_SHARE
-                && document.activeElement === searchInput;
+            // Any field that brings up the keyboard counts, not only the
+            // search box. The number fields in the filter sheet used to open
+            // the keyboard unnoticed, and the sizing then treated it as gone,
+            // stretching the panel and scrolling the page back to the top
+            // underneath the keyboard, which left the page offset afterwards
+            const typing = isTypingField(document.activeElement);
+
+            keyboardUp = height < tallestViewport * KEYBOARD_SHARE && typing;
 
             // Mirrored for the debug line, which lives outside this builder
             debugTallest = tallestViewport;
-            debugSearchFocused = document.activeElement === searchInput;
+            debugSearchFocused = typing;
 
             if (keyboardUp) {
                 hidePlayerBlock();
@@ -11683,6 +11689,15 @@
 
         searchInput.addEventListener("focus", updateKeyboardLayout);
         searchInput.addEventListener("blur", updateKeyboardLayout);
+
+        // Every other field too, the filter sheet and settings have number
+        // and text fields that bring the keyboard up just the same
+        document.addEventListener("focusin", updateKeyboardLayout);
+        document.addEventListener("focusout", function () {
+
+            // Focus has not moved on yet when this fires, so look afterwards
+            setTimeout(updateKeyboardLayout, 0);
+        });
 
         if (window.visualViewport) {
             window.visualViewport.addEventListener("resize", updateKeyboardLayout);
@@ -12498,6 +12513,27 @@
     // readout can reach them
     let debugTallest = 0;
     let debugSearchFocused = false;
+
+    // Whether an element is one that brings up the on screen keyboard. A
+    // date field opens a picker rather than the keyboard, so it is left out
+    function isTypingField(el) {
+
+        if (!el) {
+            return false;
+        }
+
+        if (el.isContentEditable || el.tagName === "TEXTAREA") {
+            return true;
+        }
+
+        if (el.tagName !== "INPUT") {
+            return false;
+        }
+
+        const type = String(el.type || "text").toLowerCase();
+
+        return ["text", "search", "number", "email", "url", "tel", "password"].indexOf(type) !== -1;
+    }
 
     // Round to one decimal, and show a dash for a missing value
     function dbgNum(v) {
@@ -13599,6 +13635,12 @@
 
             btn.labelEl.textContent = active ? "Stop" : restLabel;
             setButtonIcon(btn, active ? iconStop() : iconLoad());
+
+            // Cyan marks the run in progress, like every other lit control.
+            // Load used to be cyan at rest, which during a rescan made it
+            // look like the active one while Rescan was the one saying Stop
+            btn.style.background = active ? "#48e1eb" : "#444";
+            btn.style.color = active ? "#000" : "#fff";
 
             // The other button cannot start anything while a run is going on,
             // so it is greyed rather than left looking available
