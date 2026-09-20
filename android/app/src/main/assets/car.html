@@ -1,0 +1,746 @@
+<!doctype html>
+<!--
+  Mureka Player - load and play all your Mureka songs
+  Car page, served by the Android app to the car's browser over the hotspot
+
+  Copyright (C) 2026 EvTheFuture
+  https://github.com/EvTheFuture/MurekaPlayer
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program. If not, see <https://www.gnu.org/licenses/>.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d1d22">
+<title>Mureka Player</title>
+<style>
+    :root {
+        --bg: #1d1d22;
+        --card: #26262c;
+        --line: #3a3a42;
+        --text: #eaeaec;
+        --muted: #9a9aa4;
+        --accent: #48e1eb;
+        --gold: #f5c518;
+        --dim: #7d6516;
+        --empty: #6a6a74;
+        --heart: #ff6b8a;
+    }
+
+    * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    html,
+    body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font: 18px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+        overflow: hidden;
+    }
+
+    #app {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        padding: 3vh 3vw;
+        gap: 2.5vh;
+    }
+
+    #main {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        gap: 4vw;
+        align-items: center;
+    }
+
+    #cover {
+        height: 100%;
+        max-height: 62vh;
+        aspect-ratio: 1 / 1;
+        border-radius: 14px;
+        background: var(--card) center / cover no-repeat;
+        flex: 0 0 auto;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    #info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2vh;
+    }
+
+    #title {
+        font-size: clamp(28px, 4.2vw, 64px);
+        font-weight: 700;
+        line-height: 1.1;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+
+    #subtitle {
+        font-size: clamp(18px, 2vw, 30px);
+        color: var(--muted);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    #rateRow {
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+    }
+
+    #stars {
+        display: flex;
+    }
+
+    .star {
+        background: none;
+        border: none;
+        padding: 8px;
+        cursor: pointer;
+        line-height: 0;
+    }
+
+    .star svg {
+        width: clamp(40px, 4.4vw, 68px);
+        height: clamp(40px, 4.4vw, 68px);
+        display: block;
+    }
+
+    #like {
+        background: none;
+        border: none;
+        font-size: clamp(40px, 4.4vw, 68px);
+        line-height: 1;
+        color: var(--empty);
+        cursor: pointer;
+        padding: 8px;
+    }
+
+    #seek {
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+        font-variant-numeric: tabular-nums;
+        font-size: clamp(18px, 1.8vw, 26px);
+        color: var(--muted);
+    }
+
+    #bar {
+        flex: 1;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        touch-action: none;
+    }
+
+    #track {
+        position: relative;
+        width: 100%;
+        height: 10px;
+        border-radius: 5px;
+        background: #555;
+    }
+
+    #fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        border-radius: 5px;
+        background: var(--accent);
+    }
+
+    #knob {
+        position: absolute;
+        top: 50%;
+        width: 26px;
+        height: 26px;
+        margin: -13px 0 0 -13px;
+        border-radius: 50%;
+        background: var(--accent);
+        left: 0;
+    }
+
+    #controls {
+        display: flex;
+        gap: 1.5vw;
+    }
+
+    .ctl {
+        flex: 1;
+        height: clamp(72px, 12vh, 120px);
+        border: none;
+        border-radius: 16px;
+        background: #333;
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .ctl svg {
+        width: 44%;
+        max-width: 56px;
+        height: 56%;
+    }
+
+    .ctl.on {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .ctl.big {
+        flex: 1.6;
+        background: var(--accent);
+        color: #000;
+    }
+
+    #bottom {
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+        font-size: clamp(16px, 1.6vw, 22px);
+    }
+
+    #sound {
+        display: flex;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+    }
+
+    #sound button {
+        border: none;
+        background: var(--card);
+        color: var(--text);
+        font: inherit;
+        padding: 14px 22px;
+        cursor: pointer;
+    }
+
+    #sound button.on {
+        background: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    #status {
+        flex: 1;
+        min-width: 0;
+        color: var(--muted);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        text-align: right;
+    }
+
+    #overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 3vh;
+        font-size: clamp(22px, 2.4vw, 34px);
+        text-align: center;
+        padding: 5vw;
+    }
+
+    #overlay button {
+        border: none;
+        border-radius: 16px;
+        padding: 24px 40px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    #resume {
+        background: var(--accent);
+        color: #000;
+    }
+
+    #toPhone {
+        background: #333;
+        color: #fff;
+    }
+
+    @media (max-aspect-ratio: 1/1) {
+
+        #main {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        #cover {
+            height: auto;
+            width: 100%;
+            max-height: none;
+            max-width: 50vh;
+            align-self: center;
+        }
+    }
+</style>
+</head>
+<body>
+<div id="app">
+    <div id="main">
+        <div id="cover"></div>
+        <div id="info">
+            <div id="title">Connecting to the phone</div>
+            <div id="subtitle"></div>
+            <div id="rateRow">
+                <div id="stars"></div>
+                <button id="like" type="button" aria-label="Like">&#9825;</button>
+            </div>
+        </div>
+    </div>
+    <div id="seek">
+        <span id="cur">0:00</span>
+        <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div></div>
+        <span id="left">-0:00</span>
+    </div>
+    <div id="controls">
+        <button class="ctl" id="shuffle" type="button" aria-label="Shuffle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+        </button>
+        <button class="ctl" id="prev" type="button" aria-label="Previous">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+        </button>
+        <button class="ctl big" id="play" type="button" aria-label="Play or pause">
+            <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>
+            <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+        </button>
+        <button class="ctl" id="next" type="button" aria-label="Next">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+        </button>
+        <button class="ctl" id="repeat" type="button" aria-label="Repeat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><text id="repeatOne" x="12" y="15" font-size="8" text-anchor="middle" fill="currentColor" stroke="none" style="display:none">1</text></svg>
+        </button>
+    </div>
+    <div id="bottom">
+        <span>Sound</span>
+        <div id="sound">
+            <button id="soundPhone" type="button" class="on">Phone / Bluetooth</button>
+            <button id="soundCar" type="button">This browser</button>
+        </div>
+        <div id="status"></div>
+    </div>
+</div>
+<div id="overlay">
+    <div>The sound is set to play in this browser. Tap to start it here.</div>
+    <button id="resume" type="button">Play the sound here</button>
+    <button id="toPhone" type="button">Use the phone instead</button>
+</div>
+<audio id="audio" preload="auto"></audio>
+<script>
+(function () {
+    "use strict";
+
+    const $ = function (id) {
+        return document.getElementById(id);
+    };
+
+    const NS = "http://www.w3.org/2000/svg";
+    const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
+        + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
+
+    // The last state from the phone and when it arrived here. The position
+    // moves on between polls, worked out from the local clock, since the car
+    // and the phone clocks need not agree
+    let state = null;
+    let stateAt = 0;
+    let online = false;
+
+    // The sound element. It only plays once a tap in this page has allowed it
+    const audio = $("audio");
+    let unlocked = false;
+
+    // While the finger is on the seek bar, the bar follows the finger
+    let dragging = false;
+    let dragFrac = 0;
+
+    function fmt(sec) {
+
+        sec = Math.max(0, Math.floor(sec || 0));
+
+        return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
+    }
+
+    // Where the song is now, as far as this page can tell
+    function position() {
+
+        if (!state) {
+            return 0;
+        }
+
+        let p = state.position || 0;
+
+        if (state.playing) {
+            p += (Date.now() - stateAt) / 1000;
+        }
+
+        return state.duration ? Math.min(p, state.duration) : p;
+    }
+
+    function send(cmd, arg) {
+
+        return fetch("/cmd", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cmd: cmd, arg: arg === undefined ? null : arg })
+        }).catch(function () {
+        }).then(function () {
+            poll();
+        });
+    }
+
+    // Five stars, each with a gold half under a clip, like the player
+    const stars = [];
+
+    for (let n = 1; n <= 5; n++) {
+
+        const btn = document.createElement("button");
+        const svg = document.createElementNS(NS, "svg");
+        const defs = document.createElementNS(NS, "defs");
+        const clip = document.createElementNS(NS, "clipPath");
+        const rect = document.createElementNS(NS, "rect");
+        const outline = document.createElementNS(NS, "path");
+        const half = document.createElementNS(NS, "path");
+
+        btn.className = "star";
+        btn.type = "button";
+        btn.setAttribute("aria-label", n + (n === 1 ? " star" : " stars"));
+
+        svg.setAttribute("viewBox", "0 0 24 24");
+        clip.setAttribute("id", "half" + n);
+        rect.setAttribute("x", "-2");
+        rect.setAttribute("y", "-2");
+        rect.setAttribute("width", "14");
+        rect.setAttribute("height", "28");
+        clip.appendChild(rect);
+        defs.appendChild(clip);
+
+        outline.setAttribute("d", STAR_D);
+        outline.setAttribute("stroke-width", "1.6");
+        outline.setAttribute("stroke-linejoin", "round");
+
+        half.setAttribute("d", STAR_D);
+        // Colours go through style, attributes do not understand var()
+        half.style.fill = "var(--gold)";
+        half.style.stroke = "var(--gold)";
+        half.setAttribute("stroke-width", "1.6");
+        half.setAttribute("stroke-linejoin", "round");
+        half.setAttribute("clip-path", "url(#half" + n + ")");
+
+        svg.appendChild(defs);
+        svg.appendChild(outline);
+        svg.appendChild(half);
+        btn.appendChild(svg);
+
+        btn.addEventListener("click", function () {
+            send("rate", n);
+        });
+
+        $("stars").appendChild(btn);
+        stars.push({ outline: outline, half: half });
+    }
+
+    function paintStars(r) {
+
+        stars.forEach(function (s, i) {
+
+            const n = i + 1;
+            let level = 0;
+
+            if (r !== null && r !== undefined && r > n - 1) {
+                level = r >= n ? 1 : 0.5;
+            }
+
+            const rated = r !== null && r !== undefined;
+
+            s.outline.style.fill = level === 1 ? "var(--gold)" : "none";
+            s.outline.style.stroke = level === 1 ? "var(--gold)" : (rated ? "var(--dim)" : "var(--empty)");
+            s.half.style.display = level === 0.5 ? "" : "none";
+        });
+    }
+
+    // Everything that follows the state, drawn when a new one arrives
+    let shownCover = "";
+
+    function render() {
+
+        const s = state;
+
+        if (!s || !s.id) {
+
+            $("title").textContent = online ? "Nothing playing" : "Connecting to the phone";
+            $("subtitle").textContent = online ? "Start a song on the phone or tap play" : "";
+            paintStars(null);
+            $("like").style.color = "var(--empty)";
+        } else {
+
+            $("title").textContent = s.title;
+            $("subtitle").textContent = s.subtitle || "";
+            paintStars(s.rating);
+            $("like").textContent = s.liked ? "♥" : "♡";
+            $("like").style.color = s.liked ? "var(--heart)" : "var(--empty)";
+        }
+
+        const cover = s && s.cover ? s.cover : "";
+
+        if (cover !== shownCover) {
+
+            shownCover = cover;
+            $("cover").style.backgroundImage = cover ? "url(\"" + cover.replace(/"/g, "%22") + "\")" : "none";
+        }
+
+        const playing = !!(s && s.playing);
+
+        $("playIcon").style.display = playing ? "none" : "";
+        $("pauseIcon").style.display = playing ? "" : "none";
+        $("shuffle").classList.toggle("on", !!(s && s.shuffle));
+        $("repeat").classList.toggle("on", !!(s && s.repeat && s.repeat !== "none"));
+        $("repeatOne").style.display = s && s.repeat === "one" ? "" : "none";
+
+        const carAudio = !!(s && s.carAudio);
+
+        $("soundPhone").classList.toggle("on", !carAudio);
+        $("soundCar").classList.toggle("on", carAudio);
+        $("status").textContent = online ? (s && s.status ? s.status : "") : "Not connected to the phone";
+
+        // The phone asks for the sound here but this page has not been
+        // allowed to play since it loaded, so a tap is needed first
+        $("overlay").style.display = online && carAudio && !unlocked ? "flex" : "none";
+
+        syncAudio();
+    }
+
+    // The seek bar and the times move smoothly between the polls
+    function tick() {
+
+        const dur = state && state.duration ? state.duration : 0;
+        const pos = dragging ? dragFrac * dur : position();
+        const frac = dur > 0 ? Math.min(1, pos / dur) : 0;
+
+        $("fill").style.width = (frac * 100) + "%";
+        $("knob").style.left = (frac * 100) + "%";
+        $("cur").textContent = fmt(pos);
+        $("left").textContent = "-" + fmt(dur - pos);
+
+        requestAnimationFrame(tick);
+    }
+
+    // With the sound here, this element follows the phone, which stays in
+    // charge of the queue and plays along muted
+    function syncAudio() {
+
+        const s = state;
+
+        if (!s || !s.carAudio || !unlocked) {
+
+            if (!audio.paused) {
+                audio.pause();
+            }
+
+            return;
+        }
+
+        if (s.src && audio.dataset.src !== s.src) {
+
+            audio.dataset.src = s.src;
+            audio.src = s.src;
+        }
+
+        const want = position();
+
+        if (audio.readyState > 0 && Math.abs(audio.currentTime - want) > 1.2) {
+
+            try {
+                audio.currentTime = want;
+            } catch (e) {
+            }
+        }
+
+        if (s.playing && audio.paused) {
+
+            audio.play().catch(function () {
+            });
+        } else if (!s.playing && !audio.paused) {
+            audio.pause();
+        }
+    }
+
+    audio.addEventListener("loadedmetadata", function () {
+
+        try {
+            audio.currentTime = position();
+        } catch (e) {
+        }
+    });
+
+    // Called straight from a tap, the only moment the browser allows play
+    function unlockAudio() {
+
+        unlocked = true;
+
+        if (state && state.src) {
+
+            audio.dataset.src = state.src;
+            audio.src = state.src;
+        }
+
+        audio.play().catch(function () {
+        });
+    }
+
+    function poll() {
+
+        return fetch("/state", { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (s) {
+
+            state = s;
+            stateAt = Date.now();
+            online = true;
+            render();
+        }).catch(function () {
+
+            online = false;
+            render();
+        });
+    }
+
+    $("play").addEventListener("click", function () {
+        send("toggle");
+    });
+
+    $("prev").addEventListener("click", function () {
+        send("prev");
+    });
+
+    $("next").addEventListener("click", function () {
+        send("next");
+    });
+
+    $("shuffle").addEventListener("click", function () {
+        send("shuffle");
+    });
+
+    $("repeat").addEventListener("click", function () {
+        send("repeat");
+    });
+
+    $("like").addEventListener("click", function () {
+        send("like");
+    });
+
+    $("soundCar").addEventListener("click", function () {
+
+        unlockAudio();
+        send("carAudio", true);
+    });
+
+    $("soundPhone").addEventListener("click", function () {
+
+        audio.pause();
+        send("carAudio", false);
+    });
+
+    $("resume").addEventListener("click", function () {
+
+        unlockAudio();
+        render();
+    });
+
+    $("toPhone").addEventListener("click", function () {
+        send("carAudio", false);
+    });
+
+    // Seeking, the bar follows the finger and the phone jumps on release
+    const bar = $("bar");
+
+    function barFrac(ev) {
+
+        const r = $("track").getBoundingClientRect();
+
+        return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+    }
+
+    bar.addEventListener("pointerdown", function (ev) {
+
+        if (!state || !state.duration) {
+            return;
+        }
+
+        dragging = true;
+        dragFrac = barFrac(ev);
+        bar.setPointerCapture(ev.pointerId);
+    });
+
+    bar.addEventListener("pointermove", function (ev) {
+
+        if (dragging) {
+            dragFrac = barFrac(ev);
+        }
+    });
+
+    bar.addEventListener("pointerup", function (ev) {
+
+        if (!dragging) {
+            return;
+        }
+
+        dragging = false;
+        dragFrac = barFrac(ev);
+
+        const target = dragFrac * state.duration;
+
+        // Shown at once, the next poll confirms it
+        state.position = target;
+        stateAt = Date.now();
+        send("seek", target);
+    });
+
+    bar.addEventListener("pointercancel", function () {
+        dragging = false;
+    });
+
+    poll();
+    setInterval(poll, 1000);
+    requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

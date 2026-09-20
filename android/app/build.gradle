@@ -1,0 +1,73 @@
+plugins {
+    id "com.android.application"
+}
+
+// The version string in the shared player, for example 1.6.0.1
+def playerVersion() {
+
+    def file = rootProject.file("../src/player.js")
+
+    if (!file.exists()) {
+        return "0.0.0"
+    }
+
+    def found = (file.getText("UTF-8") =~ /const VERSION = "([^"]+)"/)
+
+    return found ? found[0][1] : "0.0.0"
+}
+
+// The same version as one increasing number, two digits per part, so
+// 1.6.0.1 becomes 1060001. Anything but digits and dots is ignored
+def playerVersionCode() {
+
+    def parts = playerVersion().replaceAll(/[^0-9.]/, "").tokenize(".")
+    def code = 0
+
+    for (int i = 0; i < 4; i++) {
+        code = code * 100 + (i < parts.size() ? (parts[i] as int) : 0)
+    }
+
+    return code
+}
+
+android {
+    namespace "dev.evthefuture.murekaplayer"
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "dev.evthefuture.murekaplayer"
+        minSdk 29
+        targetSdk 36
+
+        // Taken from VERSION in src/player.js, so the app, the extension
+        // and the bookmarklet always report the same version
+        versionName playerVersion()
+        versionCode playerVersionCode()
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+
+            // Signed with the debug key until a release key is set up, which
+            // is enough for sideloading
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// The player is the same file the extension and the bookmarklet use. It is
+// copied in from the repository at build time, so there is only one copy
+def copyPlayer = tasks.register("copyPlayer", Copy) {
+    from(rootProject.file("../src/player.js"))
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+
+tasks.named("preBuild") {
+    dependsOn(copyPlayer)
+}

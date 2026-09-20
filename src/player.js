@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0";
+    const VERSION = "1.6.0.1";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1916,6 +1916,7 @@
     // coming up, the filter applies again the next time the queue is built
     function afterRatingChange(song) {
 
+        publishHostSoon();
         renderList();
 
         if (tagSheetOpen && tagSheetRefresh) {
@@ -7248,8 +7249,9 @@
     // Whether the gate should stand in front of the player right now
     function gateWanted() {
 
-        // Nothing to gate when the browser will not go fullscreen anyway
-        if (!fullscreenSupported()) {
+        // Nothing to gate when the browser will not go fullscreen anyway,
+        // nor in the Android app, which has no browser bars to hide
+        if (!fullscreenSupported() || isApkHost()) {
             return false;
         }
 
@@ -11654,6 +11656,160 @@
         }
     }
 
+    // The Android app runs the player in its own WebView. It tags the page
+    // with data-mureka-host="apk" and adds window.MurekaHost, which takes the
+    // now playing state for the phone's media controls and for the car page
+    // the app serves on the local network. Commands come back through
+    // window.__murekaHostCommand
+    function isApkHost() {
+
+        return document.documentElement.getAttribute("data-mureka-host") === "apk"
+            && typeof window.MurekaHost === "object" && window.MurekaHost !== null;
+    }
+
+    // While the car browser plays the sound, the phone keeps playing muted
+    // and stays in charge of the queue, the car follows its position
+    let hostCarAudio = false;
+
+    // The state handed to the app, everything the car page shows
+    function hostState() {
+
+        const song = currentSong;
+        const hasAudio = !!(audio && audio.src);
+        const duration = hasAudio && isFinite(audio.duration) ? audio.duration : 0;
+
+        return {
+            version: VERSION,
+            at: Date.now(),
+            id: song ? String(song.song_id) : "",
+            title: song ? (song.title || "Untitled") : "",
+            subtitle: song ? formatMeta(settings.metaSubtitle, song) : "",
+            cover: song ? coverUrl(song) : "",
+            src: song ? (songUrl(song) || "") : "",
+            playing: hasAudio && !audio.paused,
+            position: hasAudio && isFinite(audio.currentTime) ? audio.currentTime : 0,
+            duration: duration,
+            rating: song ? getRating(song) : null,
+            liked: song ? song.is_liked === true : false,
+            shuffle: shuffleMode,
+            repeat: repeatMode,
+            carAudio: hostCarAudio,
+            status: statusText || ""
+        };
+    }
+
+    let hostPublishTimer = null;
+
+    function publishHostState() {
+
+        if (!isApkHost()) {
+            return;
+        }
+
+        try {
+            window.MurekaHost.publish(JSON.stringify(hostState()));
+        } catch (e) {
+        }
+    }
+
+    // Coalesce a burst of events into one publish
+    function publishHostSoon() {
+
+        if (hostPublishTimer) {
+            return;
+        }
+
+        hostPublishTimer = setTimeout(function () {
+
+            hostPublishTimer = null;
+            publishHostState();
+        }, 60);
+    }
+
+    // Run one command from the app, from the phone's media buttons or the car
+    function hostCommand(cmd, arg) {
+
+        if (cmd === "toggle") {
+            togglePlayPause();
+        } else if (cmd === "play") {
+
+            if (!audio || !audio.src || audio.paused) {
+                togglePlayPause();
+            }
+        } else if (cmd === "pause") {
+
+            if (audio && audio.src && !audio.paused) {
+                togglePlayPause();
+            }
+        } else if (cmd === "next") {
+            playNext();
+        } else if (cmd === "prev") {
+            playPrev();
+        } else if (cmd === "seek") {
+
+            if (audio && audio.src && isFinite(audio.duration)) {
+                audio.currentTime = Math.max(0, Math.min(audio.duration - 0.5, Number(arg) || 0));
+            }
+        } else if (cmd === "seekBy") {
+            seekByKey(Number(arg) || 0);
+        } else if (cmd === "rate") {
+
+            // A tap on star n, the same cycle as the stars in the player
+            if (currentSong) {
+
+                const n = Math.max(1, Math.min(5, Math.round(Number(arg) || 0)));
+
+                setRating(currentSong, nextRating(getRating(currentSong), n));
+            }
+        } else if (cmd === "like") {
+
+            if (currentSong) {
+
+                // The list row is redrawn afterwards, a loose heart takes the
+                // optimistic paint meanwhile
+                toggleLike(currentSong, document.createElement("span")).then(function () {
+
+                    renderList();
+                    publishHostSoon();
+                });
+            }
+        } else if (cmd === "shuffle") {
+            toggleShuffle();
+        } else if (cmd === "repeat") {
+            cycleRepeat();
+        } else if (cmd === "carAudio") {
+
+            hostCarAudio = arg === true || arg === "true" || arg === 1;
+
+            if (audio) {
+                audio.muted = hostCarAudio;
+            }
+
+            setStatus(hostCarAudio ? "Sound plays in the car browser" : "Sound plays on the phone");
+        }
+
+        publishHostSoon();
+    }
+
+    // Hook the player up to the app. Media events do not bubble, so they are
+    // caught on the way down instead, whichever element plays
+    function installHostBridge() {
+
+        if (!isApkHost()) {
+            return;
+        }
+
+        window.__murekaHostCommand = hostCommand;
+
+        ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
+            document.addEventListener(type, publishHostSoon, true);
+        });
+
+        // The position moves on its own, once a second is plenty
+        setInterval(publishHostState, 1000);
+        publishHostState();
+    }
+
     // Build the floating control panel
     function buildPanel() {
 
@@ -13035,6 +13191,7 @@
         }, true);
 
         installShortcuts();
+        installHostBridge();
 
         // A mouse moving or a wheel turning is use too on a desktop. Checked
         // at most once a second, a moving mouse sends a stream of these
