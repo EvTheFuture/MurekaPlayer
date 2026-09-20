@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.26";
+    const VERSION = "1.5.0.33";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -147,6 +147,10 @@
     // rated one gold outlines, so zero stars and not rated look different
     const STAR_GOLD = "#f5c518";
     const STAR_EMPTY = "#6a6a74";
+
+    // The outline of unlit stars on a rated song and of a half star, a dark
+    // gold so the lit ones stand out
+    const STAR_DIM = "#7d6516";
 
     // Cache API bucket for the per song detail payload, the play and like
     // counts plus the timed lyrics. Counts change over time, so every entry
@@ -1106,7 +1110,7 @@
                     ratingEnabled: parsed.ratingEnabled === true,
                     ratingMin: (typeof parsed.ratingMin === "number"
                         && parsed.ratingMin >= 0 && parsed.ratingMin <= 5)
-                        ? parsed.ratingMin : 1,
+                        ? Math.round(parsed.ratingMin * 2) / 2 : 1,
                     ratingUnrated: (parsed.ratingUnrated === "any" || parsed.ratingUnrated === "only")
                         ? parsed.ratingUnrated : "hide",
                     artStars: parsed.artStars !== false,
@@ -1810,8 +1814,18 @@
         }
     }
 
-    // song_id to a whole number of stars, loaded once on startup
+    // song_id to a number of stars in half steps, loaded once on startup
     let ratings = loadRatings();
+
+    // A rating kept to 0 to 5 in steps of a half
+    function snapRating(v) {
+        return Math.max(0, Math.min(5, Math.round(Number(v) * 2) / 2));
+    }
+
+    // A rating as a number for text, 3 or 3.5
+    function ratingNumber(r) {
+        return String(r);
+    }
 
     function loadRatings() {
 
@@ -1828,7 +1842,7 @@
                     const value = Number(raw[key]);
 
                     if (isFinite(value) && value >= 0 && value <= 5) {
-                        map.set(String(key), Math.round(value));
+                        map.set(String(key), snapRating(value));
                     }
                 }
 
@@ -1855,7 +1869,7 @@
         }
     }
 
-    // A song's rating, 0 to 5, or null when it has never been rated
+    // A song's rating, 0 to 5 in half steps, or null when never rated
     function getRating(song) {
 
         const r = ratings.get(String(song.song_id));
@@ -1875,7 +1889,7 @@
             }
         } else {
 
-            ratings.set(id, Math.max(0, Math.min(5, Math.round(value))));
+            ratings.set(id, snapRating(value));
             unmarkCleared("rating", id);
         }
 
@@ -1894,7 +1908,7 @@
             return "Rated, no stars";
         }
 
-        return r + (r === 1 ? " star" : " stars");
+        return ratingNumber(r) + (r === 1 ? " star" : " stars");
     }
 
     // Everything that shows a rating is brought up to date. The queue is left
@@ -1923,7 +1937,15 @@
         }
     }
 
-    // One star as an SVG, painted later by paintStar
+    // Each star needs its own clip id for the half fill
+    let starClipCount = 0;
+
+    const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
+        + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
+
+    // One star as an SVG, painted later by paintStar. Over the outline
+    // sits a gold copy, fill and stroke, clipped to its left half. It covers
+    // the dark outline there, so a half star shows that only on its right
     function makeStarSvg(size) {
 
         const ns = "http://www.w3.org/2000/svg";
@@ -1934,32 +1956,103 @@
         svg.setAttribute("viewBox", "0 0 24 24");
         svg.style.display = "block";
 
+        starClipCount += 1;
+
+        const clipId = "mureka-star-half-" + starClipCount;
+        const defs = document.createElementNS(ns, "defs");
+        const clip = document.createElementNS(ns, "clipPath");
+        const rect = document.createElementNS(ns, "rect");
+
+        clip.setAttribute("id", clipId);
+        rect.setAttribute("x", "-2");
+        rect.setAttribute("y", "-2");
+        rect.setAttribute("width", "14");
+        rect.setAttribute("height", "28");
+
+        clip.appendChild(rect);
+        defs.appendChild(clip);
+
+        const half = document.createElementNS(ns, "path");
+
+        half.setAttribute("d", STAR_D);
+        half.setAttribute("fill", STAR_GOLD);
+        half.setAttribute("stroke", STAR_GOLD);
+        half.setAttribute("stroke-width", "1.6");
+        half.setAttribute("stroke-linejoin", "round");
+        half.setAttribute("clip-path", "url(#" + clipId + ")");
+        half.style.display = "none";
+
         const path = document.createElementNS(ns, "path");
 
-        path.setAttribute("d", "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
-            + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z");
+        path.setAttribute("d", STAR_D);
         path.setAttribute("stroke-width", "1.6");
         path.setAttribute("stroke-linejoin", "round");
         path.setAttribute("fill", "none");
         path.setAttribute("stroke", "currentColor");
 
+        svg.appendChild(defs);
         svg.appendChild(path);
+        svg.appendChild(half);
         svg.starPath = path;
+        svg.starHalf = half;
 
         return svg;
     }
 
-    // Lit stars are filled gold. Unlit ones are outlined, gold once the song
-    // has been rated at all and grey while it has not
+    // How much of a star is lit, 1 full, 0.5 its left half, 0 none. Full
+    // stars are filled and outlined gold. A half star and the unlit stars of
+    // a rated song get a dark gold outline, the stars of a song never rated
+    // a grey one
     function paintStar(svg, lit, rated) {
 
-        svg.starPath.setAttribute("fill", lit ? STAR_GOLD : "none");
-        svg.starPath.setAttribute("stroke", (lit || rated) ? STAR_GOLD : STAR_EMPTY);
+        const level = lit === true ? 1 : (lit === false ? 0 : lit);
+
+        svg.starPath.setAttribute("fill", level >= 1 ? STAR_GOLD : "none");
+        svg.starHalf.style.display = level === 0.5 ? "" : "none";
+
+        if (level >= 1) {
+            svg.starPath.setAttribute("stroke", STAR_GOLD);
+        } else if (rated || level === 0.5) {
+            svg.starPath.setAttribute("stroke", STAR_DIM);
+        } else {
+            svg.starPath.setAttribute("stroke", STAR_EMPTY);
+        }
+    }
+
+    // How much of star n, counted from 1, a rating lights
+    function starLevel(r, n) {
+
+        if (r === null || r <= n - 1) {
+            return 0;
+        }
+
+        return r >= n ? 1 : 0.5;
+    }
+
+    // What a tap on star n makes of the current rating. A new star sets n,
+    // the same star again takes a half off, and a third tap goes back to n.
+    // The first star runs 1, 0.5, 0 and round again, so zero stays reachable
+    function nextRating(current, n) {
+
+        if (n === 1) {
+
+            if (current === 1) {
+                return 0.5;
+            }
+
+            if (current === 0.5) {
+                return 0;
+            }
+
+            return 1;
+        }
+
+        return current === n ? n - 0.5 : n;
     }
 
     // A row of five tappable stars for whichever song getSong returns. A tap
-    // lights that star and every one before it. Tapping the top lit star again
-    // sets zero stars, and the caption offers the way back to not rated.
+    // lights that star and every one before it, tapping it again makes it a
+    // half star, see nextRating. The caption offers the way back to not rated.
     // opts.size is the star size, opts.pad the extra tap area around each,
     // opts.caption adds the state line underneath
     function makeStarBar(getSong, opts) {
@@ -1985,7 +2078,7 @@
             const r = song ? getRating(song) : null;
 
             for (let i = 0; i < stars.length; i += 1) {
-                paintStar(stars[i], r !== null && i < r, r !== null);
+                paintStar(stars[i], starLevel(r, i + 1), r !== null);
             }
 
             if (caption) {
@@ -2031,7 +2124,7 @@
 
                 const current = getRating(song);
 
-                setRating(song, current === n ? 0 : n);
+                setRating(song, nextRating(current, n));
                 paint();
             });
 
@@ -2097,6 +2190,12 @@
 
         nowStarsBar.el.style.display = show ? "flex" : "none";
 
+        // The block sits 8px above the cover's lower edge, 12px lower while
+        // the stars show
+        if (bottomWrapEl) {
+            bottomWrapEl.style.bottom = show ? "-4px" : "8px";
+        }
+
         if (show) {
             nowStarsBar.paint();
         }
@@ -2115,9 +2214,10 @@
 
             rateIconSvg.starPath.setAttribute("fill", "none");
             rateIconSvg.starPath.setAttribute("stroke", "currentColor");
+            rateIconSvg.starHalf.style.display = "none";
 
         } else {
-            paintStar(rateIconSvg, r > 0, true);
+            paintStar(rateIconSvg, r >= 1 ? 1 : (r > 0 ? 0.5 : 0), true);
         }
 
         updateControlLabels();
@@ -2698,7 +2798,7 @@
 
         const ratingMinRow = makeStepperRow("Minimum stars",
             function () { return settings.ratingMin; },
-            function (v) { settings.ratingMin = Math.round(v); applySmartFilters(); }, 0, 5, 1);
+            function (v) { settings.ratingMin = snapRating(v); applySmartFilters(); }, 0, 5, 0.5);
 
         const ratingUnratedLabel = document.createElement("div");
         ratingUnratedLabel.textContent = "Songs not yet rated";
@@ -10322,8 +10422,9 @@
     // Expand a now playing template. ${tag} inserts a value. Text inside [ ] is
     // kept only when every tag inside it has a value, so labels and separators
     // disappear cleanly when a field is missing
-    // Five star characters for the templates, lit ones filled. Empty while
-    // the song is not rated, so a bracket section around it drops away
+    // The rating for the templates, a star and the number, like 3.5. Lock
+    // screens and car displays have no half star glyph. Empty while the song
+    // is not rated, so a bracket section around it drops away
     function starsText(song) {
 
         const r = getRating(song);
@@ -10332,7 +10433,7 @@
             return "";
         }
 
-        return "\u2605".repeat(r) + "\u2606".repeat(5 - r);
+        return "\u2605" + ratingNumber(r);
     }
 
     function formatMeta(template, song) {
@@ -11223,7 +11324,10 @@
         // Player block, album art on top, then title, seek bar and play control
         // Assigned to the shared reference so the keyboard handling can reach it
         playerEl = document.createElement("div");
-        playerEl.style.marginBottom = "8px";
+
+        // Kept small, so the search field sits about as close to the buttons
+        // above as to the view menu below, and the list gets the difference
+        playerEl.style.marginBottom = "4px";
 
         // A box that holds the masked strip, plus optional side nav buttons that
         // must sit outside the mask so they are not faded at the edges
@@ -11415,7 +11519,10 @@
         // Stars for the playing song, tappable straight on the cover. The
         // overlay around them ignores the pointer, these take it back. The
         // negative margin lines the first star up with the text, the padding
-        // around each star is only there to make it easier to hit
+        // around each star is only there to make it easier to hit. While the
+        // stars show, refreshNowStars lowers the whole block, lyrics, title,
+        // meta and stars, so the stars float out past the cover's lower edge
+        // just above the seek bar and the text keeps its place above them
         nowStarsBar = makeStarBar(function () {
             return currentSong;
         }, { size: 20, pad: 5, caption: false });
@@ -11650,7 +11757,7 @@
         searchInput.style.cssText = [
             "width:100%",
             "box-sizing:border-box",
-            "margin-top:4px",
+            "margin-top:0",
             "padding:6px 8px",
             "border:1px solid #3a3a42",
             "border-radius:6px",
@@ -13225,7 +13332,7 @@
 
             const r = currentSong ? getRating(currentSong) : null;
 
-            return r === null ? "rate" : r + "\u2605";
+            return r === null ? "rate" : ratingNumber(r) + "\u2605";
         }
 
         if (name === "vocals") {
@@ -13921,8 +14028,10 @@
             const r = getRating(song);
             const rateEl = document.createElement("span");
 
-            rateEl.textContent = r === null ? "" : "\u2605" + r;
-            rateEl.style.cssText = "flex:0 0 auto;width:28px;margin-left:6px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:"
+            // The number before the star, right aligned, so the stars line
+            // up down the list whether the rating is 3 or 4.5
+            rateEl.textContent = r === null ? "" : ratingNumber(r) + "\u2605";
+            rateEl.style.cssText = "flex:0 0 auto;width:30px;margin-left:6px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;color:"
                 + (r ? STAR_GOLD : "#777");
 
             item.appendChild(rateEl);
@@ -15073,7 +15182,8 @@
         const base = {
             app: "mureka-player",
             kind: kind === "settings" ? "settings" : "song-data",
-            format: 1,
+            // 2 since ratings come in half steps
+            format: 2,
             version: VERSION,
             exported: new Date().toISOString()
         };
@@ -15136,7 +15246,7 @@
                 const v = Number(data.ratings[key]);
 
                 if (isFinite(v) && v >= 0 && v <= 5) {
-                    out.ratings.push([String(key), Math.round(v)]);
+                    out.ratings.push([String(key), snapRating(v)]);
                 }
             }
         }
