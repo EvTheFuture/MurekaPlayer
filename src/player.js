@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.34";
+    const VERSION = "1.5.0.43";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -7472,7 +7472,7 @@
             "border:1px solid #3a3a42",
             "border-radius:10px",
             "padding:14px",
-            "max-width:320px",
+            "max-width:" + (Array.isArray(body) ? "420px" : "320px"),
             "display:flex",
             "flex-direction:column",
             "gap:10px"
@@ -7483,8 +7483,29 @@
         head.style.cssText = "font-weight:600";
 
         const text = document.createElement("div");
-        text.textContent = body;
-        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
+
+        // Rows of two, a key and what it does, are laid out as two columns
+        if (Array.isArray(body)) {
+
+            text.style.cssText = "display:grid;grid-template-columns:auto 1fr;gap:4px 14px;"
+                + "color:#ccc;font-size:13px;line-height:1.4;max-height:60vh;overflow-y:auto";
+
+            for (const pair of body) {
+
+                const k = document.createElement("span");
+                k.textContent = pair[0];
+                k.style.cssText = "color:#48e1eb;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums";
+
+                const d = document.createElement("span");
+                d.textContent = pair[1];
+
+                text.appendChild(k);
+                text.appendChild(d);
+            }
+        } else {
+            text.textContent = body;
+        }
 
         const okBtn = makeButton("Got it", "#48e1eb", "#000", function () {
             back.remove();
@@ -7502,6 +7523,9 @@
                 back.remove();
             }
         });
+
+        // Marked, so Escape can close it like the button does
+        back.setAttribute("data-mureka-notice", "1");
 
         panelEl.appendChild(back);
     }
@@ -7594,6 +7618,513 @@
         }
     }
 
+    // Keyboard shortcuts, for a desktop. They listen on the window in the
+    // capture phase, ahead of the site's own shortcuts, and only act while
+    // the panel is open, never while it is folded or the screen is covered.
+    // Keys typed into a field are left alone, apart from Escape
+    const SHORTCUT_HELP = [
+        ["/", "Search"],
+        ["Esc", "Close a dialog, like Done, or leave a field"],
+        ["f", "Filters dialog, open or close"],
+        ["F", "Filters on or off"],
+        ["Space", "Play or pause"],
+        ["n / p", "Next or previous song"],
+        ["\u2190 / \u2192", "Back or ahead 10 seconds"],
+        ["s", "Shuffle on or off"],
+        ["l", "Repeat, all, one or off"],
+        ["0 to 5", "Rate the playing song, the same digit again takes a half off"],
+        ["i", "Information about the playing song"],
+        ["c", "Copy the link to the playing song"],
+        ["d", "Download the playing song"],
+        ["r", "Refresh, the same as Load"],
+        ["R", "Rescan"],
+        ["z", "Whole window, then full height, then your own size"],
+        ["m", "Fold to the header or unfold, also while folded"],
+        [",", "Settings"],
+        ["?", "This list"]
+    ];
+
+    function isShown(el) {
+        return !!el && el.style.display !== "none" && el.style.display !== "";
+    }
+
+    // Close the top most thing over the player. True when something closed
+    function closeTopDialog() {
+
+        const notices = panelEl ? panelEl.querySelectorAll("[data-mureka-notice]") : [];
+
+        if (notices.length > 0) {
+
+            notices[notices.length - 1].remove();
+            return true;
+        }
+
+        if (contextMenuEl && contextMenuEl.style.display === "block") {
+
+            hideContextMenu();
+            return true;
+        }
+
+        if (tagSheetOpen) {
+
+            closeTagSheet();
+            return true;
+        }
+
+        if (isShown(infoEl)) {
+
+            closeInfo();
+            return true;
+        }
+
+        if (isShown(playlistsEl)) {
+
+            closePlaylists();
+            return true;
+        }
+
+        if (isShown(creatorsEl)) {
+
+            closeCreators();
+            return true;
+        }
+
+        if (settingsOpen) {
+
+            closeSettings();
+            return true;
+        }
+
+        if (actionsOpen || viewMenuOpen) {
+
+            closeDropdowns();
+            return true;
+        }
+
+        return false;
+    }
+
+    // Whether anything covers the main player right now
+    function dialogOpen() {
+
+        return settingsOpen || tagSheetOpen || isShown(infoEl) || isShown(playlistsEl)
+            || isShown(creatorsEl) || (!!panelEl && !!panelEl.querySelector("[data-mureka-notice]"));
+    }
+
+    // The size and place before the panel was made to fill the window, null
+    // while it is not filling it. Not saved, so a reload brings back the
+    // normal size
+    let fillRestore = null;
+
+    // Cap the cover area, or with null let it follow the panel width again.
+    // The whole block, covers and the text over them, keeps its normal shape
+    // and is narrowed and centred instead, so the side covers still overlap
+    // the middle one the way they always do
+    function setArtCap(px) {
+
+        const box = artWrapEl ? artWrapEl.parentElement : null;
+
+        if (!box) {
+            return;
+        }
+
+        if (px === null) {
+
+            box.style.maxWidth = "";
+            box.style.marginLeft = "";
+            box.style.marginRight = "";
+        } else {
+
+            box.style.maxWidth = Math.round(px / ART_CENTER_FRACTION) + "px";
+            box.style.marginLeft = "auto";
+            box.style.marginRight = "auto";
+        }
+
+        positionArt(0);
+    }
+
+    // Which fill stage z has reached, 0 the user's own size, 1 the whole
+    // window, 2 full height and only as wide as the covers
+    let fillStage = 0;
+
+    // Step z through the whole window, then full height at the width of the
+    // covers, then back to the size and place the user had chosen. Desktop
+    // layout only, the phone layout fills the screen anyway
+    function toggleFillWindow() {
+
+        if (!panelEl || !listEl || minimized || window.innerWidth <= 640) {
+            return;
+        }
+
+        // The cover normally grows with the width, which on a wide window
+        // would make it taller than the window, so its height is capped to a
+        // share of the window height. The list takes whatever is left over
+        const extraW = panelEl.offsetWidth - (parseFloat(panelEl.style.width) || panelEl.offsetWidth);
+        const fullW = window.innerWidth - extraW;
+        const cap = Math.round(Math.min(fullW * ART_CENTER_FRACTION, window.innerHeight * 0.4));
+        const minList = 120;
+
+        // The width of the covers at that size. When they already take the
+        // full width, or all but a sliver of it, the second step would look
+        // the same as the first, so it is skipped and z only has two steps
+        const coverW = Math.max(280, Math.round(cap / ART_CENTER_FRACTION));
+        const twoSteps = coverW >= fullW * 0.95;
+
+        // Back to the user's own size
+        if (fillRestore && (fillStage === 2 || (fillStage === 1 && twoSteps))) {
+
+            const r = fillRestore;
+
+            fillRestore = null;
+            fillStage = 0;
+            setArtCap(null);
+            applySize(r.w, r.listH);
+            anchorLeft = r.left;
+            anchorSide = r.side;
+            anchorOffset = r.offset;
+            panelEl.style.left = r.left + "px";
+
+            if (r.side === "top") {
+
+                panelEl.style.top = r.offset + "px";
+                panelEl.style.bottom = "auto";
+            } else {
+
+                panelEl.style.top = "auto";
+                panelEl.style.bottom = r.offset + "px";
+            }
+
+            setStatus("Back to your own size");
+            return;
+        }
+
+        if (!fillRestore) {
+
+            fillRestore = {
+                w: parseFloat(panelEl.style.width) || panelEl.offsetWidth,
+                listH: parseFloat(listEl.style.height) || listEl.offsetHeight,
+                outerW: panelEl.offsetWidth,
+                left: anchorLeft,
+                side: anchorSide,
+                offset: anchorOffset
+            };
+
+            fillStage = 0;
+        }
+
+        let w = fullW;
+
+        if (fillStage === 0) {
+
+            // The whole window, the covers centred at their capped size
+            fillStage = 1;
+            setArtCap(cap);
+            setStatus(twoSteps
+                ? "Whole window, z again for your own size"
+                : "Whole window, z again for full height at the width of the covers");
+        } else {
+
+            // Full height, only as wide as the covers at that same size
+            fillStage = 2;
+            w = coverW;
+            setArtCap(null);
+            setStatus("Full height, z again for your own size");
+        }
+
+        applySize(w, minList);
+        applySize(w, minList + window.innerHeight - panelEl.offsetHeight);
+
+        // The whole window starts at the left edge. The narrower step keeps
+        // to the side the panel was on before the first z, so it only grows
+        // one way, and is centred only when the panel sat in the middle
+        const spare = Math.max(0, window.innerWidth - panelEl.offsetWidth);
+        let left = 0;
+
+        if (fillStage === 2) {
+
+            const centre = fillRestore.left + fillRestore.outerW / 2;
+            const middle = window.innerWidth / 2;
+
+            if (Math.abs(centre - middle) < window.innerWidth * 0.1) {
+                left = Math.round(spare / 2);
+            } else {
+                left = centre < middle ? 0 : spare;
+            }
+        }
+
+        applyPosition(left, 0, false);
+    }
+
+    // Rate the playing song from a digit, the same way the stars do
+    function rateFromKey(n) {
+
+        if (!currentSong) {
+            return;
+        }
+
+        const current = getRating(currentSong);
+        const value = n === 0 ? 0 : nextRating(current, n);
+
+        setRating(currentSong, value);
+        setStatus("Rated " + ratingText(value).toLowerCase() + ": " + (currentSong.title || "Untitled"));
+    }
+
+    function seekByKey(seconds) {
+
+        if (!audio || !audio.src || !isFinite(audio.duration)) {
+            return;
+        }
+
+        audio.currentTime = Math.max(0, Math.min(audio.duration - 0.5, audio.currentTime + seconds));
+    }
+
+    // With Debug mode on, say why a key was passed over
+    function shortcutTrace(ev, why) {
+
+        if (isDebug()) {
+            setStatus("Key " + JSON.stringify(ev.key) + ": " + why);
+        }
+    }
+
+    function isField(el) {
+
+        return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"
+            || el.tagName === "SELECT" || el.isContentEditable);
+    }
+
+    function installShortcuts() {
+
+        // A click on the player, outside its own fields, takes the focus off
+        // whatever field of the site had it. Otherwise the site's search box
+        // or prompt keeps the focus behind the panel, every key counts as
+        // typing there, and no shortcut ever fires
+        document.addEventListener("pointerdown", function (ev) {
+
+            if (!panelEl || !panelEl.contains(ev.target) || isField(ev.target)) {
+                return;
+            }
+
+            const active = document.activeElement;
+
+            if (isField(active) && !panelEl.contains(active)) {
+                active.blur();
+            }
+        }, true);
+
+        window.addEventListener("keydown", function (ev) {
+
+            if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.isComposing) {
+
+                shortcutTrace(ev, "with a modifier, left to the browser");
+                return;
+            }
+
+            // Folding and unfolding also works on a folded panel
+            const foldKey = ev.key === "m" && !isField(document.activeElement);
+
+            if (!panelEl || (minimized && !foldKey) || isBlackedOut() || panelEl.style.display === "none") {
+
+                shortcutTrace(ev, "the panel is folded, hidden or covered");
+                return;
+            }
+
+            // The focused element, which is also the target, unless the key
+            // came from inside a shadow root or a frame
+            const target = document.activeElement || ev.target;
+            const typing = isField(target);
+
+            // Keys the player handled are kept from the site and the browser
+            const handled = function () {
+
+                ev.preventDefault();
+                ev.stopImmediatePropagation();
+            };
+
+            if (ev.key === "Escape") {
+
+                // Out of a field first, then the dialog around it if any
+                if (typing && panelEl.contains(target)) {
+                    target.blur();
+                }
+
+                closeTopDialog();
+                handled();
+                return;
+            }
+
+            // Everything else is ordinary typing inside a field
+            if (typing) {
+
+                shortcutTrace(ev, "typing in " + (panelEl.contains(target) ? "a player field" : "a field of the site"));
+                return;
+            }
+
+            const key = ev.key;
+
+            // Only these work while a dialog is open
+            if (dialogOpen() && key !== "f" && key !== "?" && key !== "m" && key !== "z") {
+
+                shortcutTrace(ev, "a dialog is open");
+                return;
+            }
+
+            if (key === "/") {
+
+                const search = document.getElementById("mureka-search-input");
+
+                if (search) {
+
+                    closeDropdowns();
+                    search.focus();
+                    search.select();
+                }
+
+                handled();
+                return;
+            }
+
+            if (key === "f") {
+
+                if (tagSheetOpen) {
+                    closeTagSheet();
+                } else if (!dialogOpen()) {
+
+                    closeDropdowns();
+                    openTagSheet();
+                }
+
+                handled();
+                return;
+            }
+
+            if (key === "F") {
+
+                settings.smartEnabled = !settings.smartEnabled;
+                applySmartFilters();
+                setStatus(settings.smartEnabled ? "Filters on" : "Filters off");
+                handled();
+                return;
+            }
+
+            if (key === "?") {
+
+                if (!panelEl.querySelector("[data-mureka-notice]")) {
+                    showNotice("Keyboard shortcuts", SHORTCUT_HELP);
+                }
+
+                handled();
+                return;
+            }
+
+            if (key === " ") {
+
+                togglePlayPause();
+                handled();
+                return;
+            }
+
+            if (key === "n") {
+
+                playNext();
+                handled();
+                return;
+            }
+
+            if (key === "p") {
+
+                playPrev();
+                handled();
+                return;
+            }
+
+            if (key === "ArrowRight" || key === "ArrowLeft") {
+
+                seekByKey(key === "ArrowRight" ? 10 : -10);
+                handled();
+                return;
+            }
+
+            if (key === "s") {
+
+                toggleShuffle();
+                handled();
+                return;
+            }
+
+            if (key === "l") {
+
+                cycleRepeat();
+                handled();
+                return;
+            }
+
+            if (key === "r") {
+
+                run();
+                handled();
+                return;
+            }
+
+            if (key === "R") {
+
+                rescan();
+                handled();
+                return;
+            }
+
+            if (key === "c" || key === "d") {
+
+                if (!currentSong) {
+                    setStatus("Nothing is playing");
+                } else if (key === "c") {
+                    copyLink(currentSong);
+                } else {
+                    downloadOne(currentSong);
+                }
+
+                handled();
+                return;
+            }
+
+            if (key === "z") {
+
+                toggleFillWindow();
+                handled();
+                return;
+            }
+
+            if (key === "m") {
+
+                toggleMinimize();
+                handled();
+                return;
+            }
+
+            if (/^[0-5]$/.test(key)) {
+
+                rateFromKey(Number(key));
+                handled();
+                return;
+            }
+
+            if (key === "i") {
+
+                if (currentSong) {
+                    openInfo(currentSong);
+                }
+
+                handled();
+                return;
+            }
+
+            if (key === ",") {
+
+                openSettings();
+                handled();
+            }
+        }, true);
+    }
+
     // Build the cover once and keep it for later
     function buildBlackout() {
 
@@ -7644,6 +8175,55 @@
 
             hideBlackout();
         });
+
+        // On a desktop the mouse wakes the screen as well, moved over the
+        // cover or brought in from outside the window. Touch is left to the
+        // tap above. The first position seen is only a reference, because
+        // browsers report a move when the cover appears under a still cursor,
+        // so it takes a real move of a few pixels from there
+        let mouseFrom = null;
+
+        const mouseWake = function (ev) {
+
+            if (ev.pointerType !== "mouse" || ev.isTrusted === false) {
+                return;
+            }
+
+            if (Date.now() - blackoutShownAt < 600) {
+
+                mouseFrom = null;
+                return;
+            }
+
+            // Came in from outside the window
+            if (ev.type === "pointerover" && ev.relatedTarget === null) {
+
+                mouseFrom = null;
+                hideBlackout();
+                return;
+            }
+
+            if (!mouseFrom) {
+
+                mouseFrom = { x: ev.clientX, y: ev.clientY };
+                return;
+            }
+
+            if (Math.abs(ev.clientX - mouseFrom.x) + Math.abs(ev.clientY - mouseFrom.y) < 8) {
+                return;
+            }
+
+            mouseFrom = null;
+
+            if (isDebug()) {
+                setStatus("Cover dismissed by mouse movement");
+            }
+
+            hideBlackout();
+        };
+
+        blackoutEl.addEventListener("pointermove", mouseWake);
+        blackoutEl.addEventListener("pointerover", mouseWake);
 
         document.body.appendChild(blackoutEl);
     }
@@ -12454,6 +13034,29 @@
             }
         }, true);
 
+        installShortcuts();
+
+        // A mouse moving or a wheel turning is use too on a desktop. Checked
+        // at most once a second, a moving mouse sends a stream of these
+        let lastMouseActivity = 0;
+
+        const mouseActivity = function (ev) {
+
+            if (ev.type === "pointermove" && ev.pointerType !== "mouse") {
+                return;
+            }
+
+            if (isBlackedOut() || Date.now() - lastMouseActivity < 1000) {
+                return;
+            }
+
+            lastMouseActivity = Date.now();
+            resetIdleTimer();
+        };
+
+        document.addEventListener("pointermove", mouseActivity, { capture: true, passive: true });
+        document.addEventListener("wheel", mouseActivity, { capture: true, passive: true });
+
         // Returning from the back forward cache can leave a dead element
         window.addEventListener("pageshow", function () {
 
@@ -12621,6 +13224,15 @@
     // Drag one handle. The edge under the pointer is the one that moves, the
     // opposite edge is pinned, so the panel never runs away from the cursor
     function startResize(ev, spec, el) {
+
+        // A size chosen by hand replaces the one z would go back to, and the
+        // cover follows the width again
+        if (fillRestore) {
+
+            fillRestore = null;
+            fillStage = 0;
+            setArtCap(null);
+        }
 
         const rect = panelEl.getBoundingClientRect();
         const startX = ev.clientX;
@@ -13175,6 +13787,11 @@
             document.removeEventListener("mouseup", onUp);
 
             if (moved) {
+
+                // A place chosen by hand replaces the one z would go back to
+                fillRestore = null;
+                fillStage = 0;
+                setArtCap(null);
 
                 // Re-anchor to the nearer edge so later growth goes the right way
                 const rect = panelEl.getBoundingClientRect();
