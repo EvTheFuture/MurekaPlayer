@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.5.0.33";
+    const VERSION = "1.5.0.34";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -2409,6 +2409,7 @@
 
         closeViewMenu();
         tagSheetOpen = true;
+        gateMenuOpened();
         tagSheetEl.style.display = "flex";
 
         if (tagSheetRefresh) {
@@ -2423,6 +2424,8 @@
         if (tagSheetEl) {
             tagSheetEl.style.display = "none";
         }
+
+        gateMenuClosed();
     }
 
     // A tag list. Rows are drawn rather than using a native checkbox, which
@@ -7271,6 +7274,36 @@
         return !(document.fullscreenElement || document.webkitFullscreenElement);
     }
 
+    // The gate belongs to the main player only. While the settings or the
+    // filters are open it stays away, and whether it is owed is remembered,
+    // so closing them puts it back up
+    let gateDeferred = false;
+
+    function menuOverPlayer() {
+        return settingsOpen || tagSheetOpen;
+    }
+
+    // A menu over the player opened, so the gate steps aside
+    function gateMenuOpened() {
+
+        if (gateEl && gateEl.style.display !== "none") {
+            gateDeferred = true;
+        }
+
+        hideGate();
+    }
+
+    // The last menu over the player closed, so an owed gate comes back
+    function gateMenuClosed() {
+
+        if (menuOverPlayer() || !gateDeferred) {
+            return;
+        }
+
+        gateDeferred = false;
+        offerGate();
+    }
+
     // Put the gate up, building it the first time it is needed
     function showGate() {
 
@@ -7363,9 +7396,17 @@
     // it keeps reappearing over the player during ordinary use
     function offerGate() {
 
-        if (gateWanted()) {
-            showGate();
+        if (!gateWanted()) {
+            return;
         }
+
+        if (menuOverPlayer()) {
+
+            gateDeferred = true;
+            return;
+        }
+
+        showGate();
     }
 
     // Whether this browser will put an ordinary element fullscreen at all.
@@ -16460,6 +16501,7 @@
 
         if (settingsEl) {
             settingsOpen = true;
+            gateMenuOpened();
 
             // Re-read from storage first. Another copy of the player in the
             // same browser writes the same keys, and the rows were drawn when
@@ -16487,6 +16529,7 @@
             settingsOpen = false;
             endControlDrag();
             settingsEl.style.display = "none";
+            gateMenuClosed();
         }
     }
 
