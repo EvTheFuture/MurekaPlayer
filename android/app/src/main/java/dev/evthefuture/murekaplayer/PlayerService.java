@@ -34,6 +34,7 @@ import android.graphics.drawable.Icon;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
+import android.net.VpnService;
 import android.net.wifi.WifiManager;
 import android.os.Handler;
 import android.os.IBinder;
@@ -58,18 +59,30 @@ public class PlayerService extends Service implements Hub.Listener {
     static final int PORT = 8080;
 
     private static final String CHANNEL = "playback";
+    private static final String CHANNEL_SIGNIN = "signin";
     private static final int NOTIFICATION_ID = 1;
+    private static final int SIGNIN_ID = 2;
+
+    // Started by BootReceiver, the phone just started or the app was updated
+    static final String ACTION_BOOT = "boot";
 
     private static final String ACTION_TOGGLE = "toggle";
     private static final String ACTION_NEXT = "next";
     private static final String ACTION_PREV = "prev";
     private static final String ACTION_QUIT = "quit";
 
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    // The running service, for the settings panel and the VPN to reach
+    private static PlayerService instance;
+
+    private final Handler main = MAIN;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
     private MediaSession session;
     private CarServer server;
+    private MdnsResponder mdns;
+    private WifiManager.MulticastLock multicastLock;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
 
@@ -85,6 +98,12 @@ public class PlayerService extends Service implements Hub.Listener {
     // The cover of the playing song, fetched once per song
     private String artUrl = "";
     private Bitmap art;
+
+    // Whether the foreground state has been claimed, and with which types
+    private int foregroundTypes = 0;
+
+    // Whether the sign in notification is showing
+    private boolean signinShown = false;
 
     // The car page addresses, looked up again now and then since the hotspot
     // may be switched on after the app started
@@ -102,6 +121,12 @@ public class PlayerService extends Service implements Hub.Listener {
 
         channel.setShowBadge(false);
         nm.createNotificationChannel(channel);
+
+        // Asking to sign in is worth a sound and a heads up, playback is not
+        NotificationChannel signin = new NotificationChannel(CHANNEL_SIGNIN, "Sign in",
+            NotificationManager.IMPORTANCE_HIGH);
+
+        nm.createNotificationChannel(signin);
 
         session = new MediaSession(this, "MurekaPlayer");
         session.setCallback(new MediaSession.Callback() {
@@ -147,19 +172,154 @@ public class PlayerService extends Service implements Hub.Listener {
         wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "MurekaPlayer:stream");
         wifiLock.setReferenceCounted(false);
 
-        startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        // Multicast has to be allowed through before the name can be
+        // answered on Wi-Fi, a hotspot does not need it but it does no harm
+        multicastLock = wm.createMulticastLock("MurekaPlayer:mdns");
+        multicastLock.setReferenceCounted(false);
+
+        try {
+            multicastLock.acquire();
+        } catch (RuntimeException e) {
+            // Without it the name only works on the hotspot
+        }
 
         server = new CarServer(this, PORT);
         server.start();
 
+        instance = this;
+
+        // The local name for other devices and the car's fixed address
+        applySettings();
+
         Hub.addListener(this);
-        onState(Hub.state());
+    }
+
+    // A car page setting changed in the player's settings panel
+    static void settingsChanged() {
+
+        MAIN.post(() -> {
+
+            if (instance != null) {
+                instance.applySettings();
+            }
+        });
+    }
+
+    // The VPN came up, went down or changed, show it in the notification
+    static void carChanged() {
+
+        MAIN.post(() -> {
+
+            if (instance != null) {
+                instance.updateNotification();
+            }
+        });
+    }
+
+    static String mdnsStatus() {
+
+        PlayerService s = instance;
+
+        return s != null && s.mdns != null ? s.mdns.status() : "off";
+    }
+
+    // Bring the name and the VPN in line with the settings. Only what
+    // changed is restarted
+    private void applySettings() {
+
+        String name = CarSettings.mdnsName(this);
+
+        if (mdns == null || !mdns.name().equals(name)) {
+
+            if (mdns != null) {
+                mdns.stop();
+            }
+
+            mdns = new MdnsResponder(name);
+            mdns.start();
+        }
+
+        if (CarSettings.vpnEnabled(this)) {
+
+            // Without the permission the settings panel asks for it, a
+            // service cannot show the question itself
+            if (VpnService.prepare(this) == null) {
+                startCarVpn(CarVpn.ACTION_START);
+            } else if (CarVpn.activeAddress() == null) {
+                CarVpn.setStatus("needs permission, switch it off and on in the settings");
+            }
+        } else if (CarVpn.activeAddress() != null) {
+            startCarVpn(CarVpn.ACTION_STOP);
+        } else if (!"off".equals(CarVpn.status())) {
+            CarVpn.setStatus("off");
+        }
+
+        updateNotification();
+    }
+
+    private void startCarVpn(String action) {
+
+        try {
+            startService(new Intent(this, CarVpn.class).setAction(action));
+        } catch (RuntimeException e) {
+            CarVpn.setStatus("could not start: " + e.getMessage());
+        }
+    }
+
+    // The player's WebView. Built after the service is safely in the
+    // foreground, and never allowed to take the service down with it, since
+    // the car page has to work even if the page itself will not start
+    private void ensurePlayer() {
+
+        if (PlayerWeb.exists()) {
+            return;
+        }
+
+        try {
+            PlayerWeb.get(this);
+        } catch (Throwable t) {
+
+            main.postDelayed(this::ensurePlayer, 5000);
+        }
+    }
+
+    // Claim the foreground state, or widen it. Android 15 does not let a boot
+    // start claim media playback, so a boot start is a special use service
+    // until the app is opened, which then adds media playback. The music
+    // plays either way, the type only tells Android what the service is for
+    private void goForeground(boolean fromBoot) {
+
+        int types = fromBoot
+            ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            : ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK | ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+
+        // A boot start after the app already claimed more keeps what it has
+        if (foregroundTypes != 0 && (foregroundTypes | types) == foregroundTypes) {
+            return;
+        }
+
+        foregroundTypes |= types;
+
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(), foregroundTypes);
+        } catch (RuntimeException e) {
+
+            // Refused, most likely media playback from the background. Fall
+            // back to what is always allowed rather than crashing
+            foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+            startForeground(NOTIFICATION_ID, buildNotification(), foregroundTypes);
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
 
         String action = intent != null ? intent.getAction() : null;
+
+        // Every start must reach startForeground in time, the notification
+        // buttons included, so this comes first
+        goForeground(ACTION_BOOT.equals(action));
+        ensurePlayer();
 
         if (ACTION_TOGGLE.equals(action)) {
             Hub.command("toggle", null);
@@ -174,18 +334,33 @@ public class PlayerService extends Service implements Hub.Listener {
             stopSelf();
         }
 
-        return START_NOT_STICKY;
+        // Brought back by Android if it ever has to stop the service
+        return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
 
         Hub.removeListener(this);
+        instance = null;
+
+        if (CarVpn.activeAddress() != null) {
+            startCarVpn(CarVpn.ACTION_STOP);
+        }
 
         if (server != null) {
             server.stop();
         }
 
+        if (mdns != null) {
+            mdns.stop();
+        }
+
+        if (multicastLock != null && multicastLock.isHeld()) {
+            multicastLock.release();
+        }
+
+        getSystemService(NotificationManager.class).cancel(SIGNIN_ID);
         session.setActive(false);
         session.release();
         wakeLock.release();
@@ -244,6 +419,33 @@ public class PlayerService extends Service implements Hub.Listener {
 
         updateMetadata();
         updateNotification();
+        updateSignin("no".equals(s.optString("signedIn", "unknown")),
+            "yes".equals(s.optString("signedIn", "unknown")));
+    }
+
+    // Mureka turned the session down. An app in the background may not open
+    // its own screen, so a notification asks, and a tap opens the app on the
+    // sign in page. It goes away by itself once the player is signed in
+    private void updateSignin(boolean signedOut, boolean signedIn) {
+
+        NotificationManager nm = getSystemService(NotificationManager.class);
+
+        if (signedOut && !signinShown) {
+
+            signinShown = true;
+            nm.notify(SIGNIN_ID, new Notification.Builder(this, CHANNEL_SIGNIN)
+                .setSmallIcon(R.drawable.ic_note)
+                .setContentTitle("Sign in to Mureka")
+                .setContentText("The player is not signed in. Tap to open it and sign in.")
+                .setContentIntent(openAppIntent())
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_REMINDER)
+                .build());
+        } else if (signedIn && signinShown) {
+
+            signinShown = false;
+            nm.cancel(SIGNIN_ID);
+        }
     }
 
     private void updateMetadata() {
@@ -274,7 +476,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
         String key = title + "|" + subtitle + "|" + playing + "|" + (art != null) + "|" + carText();
 
-        if (key.equals(shownKey)) {
+        if (key.equals(shownKey) || foregroundTypes == 0) {
             return;
         }
 
@@ -282,7 +484,8 @@ public class PlayerService extends Service implements Hub.Listener {
         getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, buildNotification());
     }
 
-    // Where the car browser finds the player, one line for each network
+    // Where the car browser finds the player: the fixed car address when the
+    // VPN is up, then the name and the addresses for other devices
     private String carText() {
 
         long now = System.currentTimeMillis();
@@ -293,11 +496,27 @@ public class PlayerService extends Service implements Hub.Listener {
             addressesAt = now;
         }
 
-        if (addresses.isEmpty()) {
+        if (server != null && !server.listening()) {
+            return "Car page not running: " + server.status();
+        }
+
+        if (addresses.isEmpty() && CarVpn.activeAddress() == null) {
             return "Car page: switch on the hotspot or Wi-Fi";
         }
 
-        return "Car page: " + String.join("  ", addresses);
+        String car = CarVpn.activeAddress();
+        String name = "http://" + CarSettings.mdnsName(this) + ":" + PORT;
+        String local = name + (addresses.isEmpty() ? "" : "  or  " + String.join("  ", addresses));
+
+        if (car != null) {
+            return "Car: http://" + car + ":" + PORT + "  Local: " + local;
+        }
+
+        if (CarSettings.vpnEnabled(this)) {
+            return "Car address " + CarVpn.status() + "  Local: " + local;
+        }
+
+        return "Car page: " + local;
     }
 
     private Notification buildNotification() {

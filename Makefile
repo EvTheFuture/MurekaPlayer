@@ -27,7 +27,7 @@ APK_RELEASE := android/app/build/outputs/apk/release/app-release.apk
 help:
 	@echo "Mureka Player $(VERSION)"
 	@echo
-	@echo "  make all        checks, extension packages and the debug APK"
+	@echo "  make all        bump, checks, extension packages and the debug APK"
 	@echo "  make ext        mureka-player-firefox.zip and -chromium.zip"
 	@echo "  make android    the debug APK, same as make apk"
 	@echo "  make release    the release APK, signed with the debug key"
@@ -40,7 +40,9 @@ help:
 	@echo "  JAVA_HOME    $(JAVA_HOME)"
 	@echo "  ANDROID_HOME $(ANDROID_HOME)"
 
-all: check ext apk
+# The manifest is brought to the player's version first, so a build never
+# stops on a version mismatch it could have fixed itself
+all: version check ext apk
 	@echo "Built everything at version $(VERSION)"
 
 # The extension packages, including the version check build.sh does itself

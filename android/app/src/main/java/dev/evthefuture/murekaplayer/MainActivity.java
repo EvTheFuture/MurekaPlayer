@@ -1,6 +1,6 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * Android host, the WebView that runs mureka.ai with the shared player
+ * Android host, the screen that shows the player's WebView
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -35,24 +35,20 @@ import android.os.Message;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
-import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+// Only a window onto the player. The WebView belongs to PlayerWeb and keeps
+// running when this screen closes, so leaving the app never stops the music
+// or the car page. Quit in the notification ends everything
+public class MainActivity extends Activity implements PlayerWeb.Host {
 
-public class MainActivity extends Activity {
-
-    private static final String HOME = "https://www.mureka.ai/";
     private static final int PICK_FILE = 7;
+    private static final int ASK_VPN = 8;
 
     private FrameLayout root;
     private WebView web;
@@ -60,18 +56,17 @@ public class MainActivity extends Activity {
     // A window the page opened, the Google sign in for one, shown on top
     private WebView popup;
 
-    // The shared player, read from the assets once
-    private String playerJs;
-
     // The page waiting for the file picker to answer
     private ValueCallback<Uri[]> fileCallback;
+
+    // What the page shows fullscreen, and how to tell it fullscreen ended
+    private android.view.View fullView;
+    private WebChromeClient.CustomViewCallback fullCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
-
-        playerJs = readAsset("player.js");
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.parseColor("#1d1d22"));
@@ -81,48 +76,31 @@ public class MainActivity extends Activity {
         // chrome://inspect on the desktop can debug the page on the phone
         WebView.setWebContentsDebuggingEnabled(true);
 
-        web = makeWebView();
-        web.setWebViewClient(new MainClient());
-        web.setWebChromeClient(new MainChrome());
-        web.addJavascriptInterface(new Bridge(), "MurekaHost");
-        root.addView(web, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        CookieManager cookies = CookieManager.getInstance();
-        cookies.setAcceptCookie(true);
-        cookies.setAcceptThirdPartyCookies(web, true);
-
-        Hub.attach(web, this::quitApp);
-
+        // The service owns the player. Started here as well, so the music and
+        // the car page keep going once this screen is closed
         startForegroundService(new Intent(this, PlayerService.class));
         askForNotifications();
 
-        if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) {
-            web.loadUrl(HOME);
+        web = PlayerWeb.get(this);
+        PlayerWeb.attachHost(this, this);
+
+        if (web.getParent() instanceof ViewGroup) {
+            ((ViewGroup) web.getParent()).removeView(web);
         }
+
+        root.addView(web, 0, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-
-        super.onSaveInstanceState(outState);
-        web.saveState(outState);
-    }
-
-    // The WebView is deliberately never paused. Pausing it would stop the
-    // music as soon as the screen goes off or another app comes forward
+    // The WebView is deliberately never paused or destroyed here. It is only
+    // handed back, and the player keeps running without a screen
     @Override
     protected void onDestroy() {
 
-        Hub.detach();
-        stopService(new Intent(this, PlayerService.class));
+        leaveFullscreen();
         closePopup();
-
-        if (web != null) {
-
-            web.destroy();
-            web = null;
-        }
+        PlayerWeb.detachHost(this);
+        web = null;
 
         super.onDestroy();
     }
@@ -132,6 +110,12 @@ public class MainActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+
+        if (fullView != null) {
+
+            leaveFullscreen();
+            return;
+        }
 
         if (popup != null) {
 
@@ -159,11 +143,166 @@ public class MainActivity extends Activity {
             return;
         }
 
+        if (requestCode == ASK_VPN) {
+
+            vpnAnswered(resultCode == RESULT_OK);
+            return;
+        }
+
         super.onActivityResult(requestCode, resultCode, data);
     }
 
-    private void quitApp() {
+    // Android asks once whether the app may run a VPN. A no switches the car
+    // address off again, so the setting never claims more than is running
+    @Override
+    @SuppressWarnings("deprecation")
+    public void askVpnPermission(Intent intent) {
+
+        try {
+            startActivityForResult(intent, ASK_VPN);
+        } catch (ActivityNotFoundException e) {
+            vpnAnswered(false);
+        }
+    }
+
+    private void vpnAnswered(boolean yes) {
+
+        if (!yes) {
+
+            CarSettings.store(this, CarSettings.VPN, "0");
+            CarVpn.setStatus("permission refused");
+        }
+
+        PlayerService.settingsChanged();
+    }
+
+    @Override
+    public void finishApp() {
         finishAndRemoveTask();
+    }
+
+    // The page went fullscreen: its view covers everything and the status
+    // and navigation bars step aside, a swipe brings them back for a moment
+    @Override
+    public void showFullscreen(android.view.View view, WebChromeClient.CustomViewCallback callback) {
+
+        if (fullView != null) {
+            hideFullscreen();
+        }
+
+        fullView = view;
+        fullCallback = callback;
+        root.addView(view, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.setPadding(0, 0, 0, 0);
+
+        if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
+
+            getWindow().getInsetsController().setSystemBarsBehavior(
+                android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
+        }
+    }
+
+    @Override
+    public void hideFullscreen() {
+
+        if (fullView == null) {
+            return;
+        }
+
+        root.removeView(fullView);
+        fullView = null;
+        fullCallback = null;
+
+        if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
+            getWindow().getInsetsController().show(WindowInsets.Type.systemBars());
+        }
+
+        root.requestApplyInsets();
+    }
+
+    // Leaving from our side, the back button, tells the page as well
+    private void leaveFullscreen() {
+
+        WebChromeClient.CustomViewCallback cb = fullCallback;
+
+        hideFullscreen();
+
+        if (cb != null) {
+            cb.onCustomViewHidden();
+        }
+    }
+
+    // A page asking for a new window gets one on top of the player, and it
+    // goes away again when the page closes it
+    @Override
+    public boolean openPopup(Message resultMsg) {
+
+        closePopup();
+
+        WebView child = PlayerWeb.make(this);
+
+        child.setWebViewClient(new WebViewClient() {
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                return PlayerWeb.openOutside(request);
+            }
+        });
+
+        child.setWebChromeClient(new WebChromeClient() {
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                closePopup();
+            }
+        });
+
+        CookieManager.getInstance().setAcceptThirdPartyCookies(child, true);
+        root.addView(child, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        popup = child;
+
+        WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+
+        transport.setWebView(child);
+        resultMsg.sendToTarget();
+
+        return true;
+    }
+
+    @Override
+    public void closePopup() {
+
+        if (popup == null) {
+            return;
+        }
+
+        root.removeView(popup);
+        popup.destroy();
+        popup = null;
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean showFileChooser(ValueCallback<Uri[]> callback, WebChromeClient.FileChooserParams params) {
+
+        if (fileCallback != null) {
+            fileCallback.onReceiveValue(null);
+        }
+
+        fileCallback = callback;
+
+        try {
+            startActivityForResult(params.createIntent(), PICK_FILE);
+        } catch (ActivityNotFoundException e) {
+
+            fileCallback = null;
+            return false;
+        }
+
+        return true;
     }
 
     // Android 15 draws apps under the status and navigation bars, so the
@@ -172,6 +311,13 @@ public class MainActivity extends Activity {
     private void applyInsets() {
 
         root.setOnApplyWindowInsetsListener((v, insets) -> {
+
+            // Fullscreen uses every pixel, bars and cutout included
+            if (fullView != null) {
+
+                v.setPadding(0, 0, 0, 0);
+                return insets;
+            }
 
             if (Build.VERSION.SDK_INT >= 30) {
 
@@ -194,199 +340,6 @@ public class MainActivity extends Activity {
             && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
 
             requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1);
-        }
-    }
-
-    // A WebView set up like a real phone browser. Google refuses to sign in
-    // inside anything that calls itself a WebView, so the markers that give
-    // it away are taken out of the user agent
-    @SuppressWarnings("deprecation")
-    private WebView makeWebView() {
-
-        WebView w = new WebView(this);
-        WebSettings s = w.getSettings();
-
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setDatabaseEnabled(true);
-        s.setMediaPlaybackRequiresUserGesture(false);
-        s.setSupportMultipleWindows(true);
-        s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setLoadWithOverviewMode(true);
-        s.setUseWideViewPort(true);
-
-        String ua = s.getUserAgentString()
-            .replace("; wv)", ")")
-            .replaceAll("Version/\\d+(\\.\\d+)* ", "");
-
-        s.setUserAgentString(ua);
-        w.setBackgroundColor(Color.parseColor("#1d1d22"));
-
-        return w;
-    }
-
-    private static boolean isMureka(String url) {
-
-        if (url == null) {
-            return false;
-        }
-
-        String host = Uri.parse(url).getHost();
-
-        return host != null && (host.equals("mureka.ai") || host.endsWith(".mureka.ai"));
-    }
-
-    // Tag the page as the app and run the player. The player guards itself
-    // against a second run on the same page
-    private void injectPlayer(WebView view) {
-
-        if (playerJs == null) {
-            return;
-        }
-
-        view.evaluateJavascript("document.documentElement.setAttribute('data-mureka-host','apk');", null);
-        view.evaluateJavascript(playerJs, null);
-    }
-
-    private void closePopup() {
-
-        if (popup == null) {
-            return;
-        }
-
-        root.removeView(popup);
-        popup.destroy();
-        popup = null;
-    }
-
-    private String readAsset(String name) {
-
-        try (InputStream in = getAssets().open(name)) {
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[65536];
-            int n;
-
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-
-            return out.toString(StandardCharsets.UTF_8.name());
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    // Web pages stay in the app, anything else, mail or a store link, goes
-    // to whichever app handles it
-    private boolean openOutside(WebResourceRequest request) {
-
-        Uri uri = request.getUrl();
-        String scheme = uri.getScheme();
-
-        if ("http".equals(scheme) || "https".equals(scheme)) {
-            return false;
-        }
-
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, uri));
-        } catch (ActivityNotFoundException e) {
-            // Nothing handles it, the tap simply does nothing
-        }
-
-        return true;
-    }
-
-    // The player's way out to the app
-    private static final class Bridge {
-
-        @JavascriptInterface
-        public void publish(String json) {
-            Hub.publish(json);
-        }
-    }
-
-    private final class MainClient extends WebViewClient {
-
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            return openOutside(request);
-        }
-
-        @Override
-        public void onPageFinished(WebView view, String url) {
-
-            if (isMureka(url)) {
-                injectPlayer(view);
-            }
-        }
-    }
-
-    private final class MainChrome extends WebChromeClient {
-
-        // A page asking for a new window gets one on top of the player, and
-        // it goes away again when the page closes it
-        @Override
-        public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
-
-            closePopup();
-
-            WebView child = makeWebView();
-
-            child.setWebViewClient(new WebViewClient() {
-
-                @Override
-                public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
-                    return openOutside(request);
-                }
-            });
-
-            child.setWebChromeClient(new WebChromeClient() {
-
-                @Override
-                public void onCloseWindow(WebView window) {
-                    closePopup();
-                }
-            });
-
-            CookieManager.getInstance().setAcceptThirdPartyCookies(child, true);
-            root.addView(child, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            popup = child;
-
-            WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
-
-            transport.setWebView(child);
-            resultMsg.sendToTarget();
-
-            return true;
-        }
-
-        @Override
-        public void onCloseWindow(WebView window) {
-            closePopup();
-        }
-
-        // Import from file in the player's settings
-        @Override
-        @SuppressWarnings("deprecation")
-        public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
-
-            if (fileCallback != null) {
-                fileCallback.onReceiveValue(null);
-            }
-
-            fileCallback = callback;
-
-            try {
-                startActivityForResult(params.createIntent(), PICK_FILE);
-            } catch (ActivityNotFoundException e) {
-
-                fileCallback = null;
-                return false;
-            }
-
-            return true;
         }
     }
 }

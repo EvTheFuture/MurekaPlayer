@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.1";
+    const VERSION = "1.6.0.10";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -3587,6 +3587,10 @@
         if (authWarnEl) {
             authWarnEl.style.display = show ? "block" : "none";
         }
+
+        // The Android app asks the user to sign in when this turns to no
+        authState = show ? "no" : "yes";
+        publishHostSoon();
     }
 
     // Ask Mureka for your own profile to confirm you are logged in
@@ -7249,9 +7253,10 @@
     // Whether the gate should stand in front of the player right now
     function gateWanted() {
 
-        // Nothing to gate when the browser will not go fullscreen anyway,
-        // nor in the Android app, which has no browser bars to hide
-        if (!fullscreenSupported() || isApkHost()) {
+        // Nothing to gate when the browser will not go fullscreen anyway. The
+        // Android app does fullscreen too, it hides the status and
+        // navigation bars
+        if (!fullscreenSupported()) {
             return false;
         }
 
@@ -11667,9 +11672,28 @@
             && typeof window.MurekaHost === "object" && window.MurekaHost !== null;
     }
 
-    // While the car browser plays the sound, the phone keeps playing muted
-    // and stays in charge of the queue, the car follows its position
+    // Whether Mureka accepted the session, unknown until the first check
+    let authState = "unknown";
+
+    // While the car browser plays the sound, the phone keeps playing and
+    // stays in charge of the queue, the car follows its position
     let hostCarAudio = false;
+
+    // The phone's own level while the car plays the sound. Not muted and not
+    // zero: Android suspends media that is silent in a page nobody can see,
+    // which with the app closed paused the phone and stopped the car with it.
+    // At this level nothing can be heard, from the phone or over Bluetooth
+    const CAR_SHADOW_VOLUME = 0.001;
+
+    function applyCarAudioVolume() {
+
+        if (!audio) {
+            return;
+        }
+
+        audio.muted = false;
+        audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
+    }
 
     // The state handed to the app, everything the car page shows
     function hostState() {
@@ -11694,8 +11718,352 @@
             shuffle: shuffleMode,
             repeat: repeatMode,
             carAudio: hostCarAudio,
+            signedIn: authState,
             status: statusText || ""
         };
+    }
+
+    // The smart filters in words, for the car page. Empty when none is on
+    function hostSmartText() {
+
+        const parts = [];
+
+        for (const name of settings.tagGenres) {
+            parts.push(name);
+        }
+
+        for (const name of settings.tagMoods) {
+            parts.push(name);
+        }
+
+        if (bpmFilterActive() && (settings.bpmMin > 0 || settings.bpmMax > 0)) {
+
+            parts.push((settings.bpmMin || 0) + " to "
+                + (settings.bpmMax > 0 ? settings.bpmMax : "any") + " BPM");
+        }
+
+        if (modelFilterActive()) {
+
+            for (const name of settings.tagModels) {
+                parts.push(name);
+            }
+        }
+
+        if (dateFilterActive()) {
+            parts.push(dateFilterLabel());
+        }
+
+        if (ratingFilterActive()) {
+            parts.push(ratingFilterLabel());
+        }
+
+        return parts.join(", ");
+    }
+
+    // What the car page needs to draw its filter row
+    function hostFilters() {
+
+        return {
+            vocals: settings.vocalFilter || "all",
+            published: publishFilter,
+            smart: settings.smartEnabled === true,
+            smartText: hostSmartText(),
+            creator: creatorSource
+                ? { id: String(creatorSource.user_id), name: creatorSource.stage_name }
+                : null,
+            creators: savedCreators.map(function (c) {
+                return { id: String(c.user_id), name: c.stage_name };
+            }),
+            loaded: cache.songs.length
+        };
+    }
+
+    // One page of the song list the car asked for, the player's own filters
+    // applied, then the car's search text on top
+    function hostList(req) {
+
+        const q = String(req && req.q ? req.q : "").trim().toLowerCase();
+        const offset = Math.max(0, Number(req && req.offset) || 0);
+        const limit = Math.max(1, Math.min(200, Number(req && req.limit) || 60));
+        const playingId = currentSong ? String(currentSong.song_id) : "";
+        const songs = [];
+
+        let total = 0;
+
+        for (const song of orderedSongs()) {
+
+            if (!passesFilters(song)) {
+                continue;
+            }
+
+            const title = (song.title || "").trim() || "Untitled";
+
+            if (q && title.toLowerCase().indexOf(q) === -1) {
+                continue;
+            }
+
+            total += 1;
+
+            if (total - 1 < offset || songs.length >= limit) {
+                continue;
+            }
+
+            songs.push({
+                id: String(song.song_id),
+                title: title,
+                cover: coverUrl(song),
+                rating: getRating(song),
+                liked: song.is_liked === true,
+                duration: (song.duration_milliseconds || 0) / 1000,
+                playing: String(song.song_id) === playingId
+            });
+        }
+
+        return {
+            token: req && req.token ? String(req.token) : "",
+            total: total,
+            offset: offset,
+            songs: songs,
+            filters: hostFilters()
+        };
+    }
+
+    // The queue for the car, what already played, the current song and
+    // what comes next, with the index each has in the queue
+    function hostQueue() {
+
+        const items = [];
+        const start = Math.max(0, queuePos - 20);
+        const end = Math.min(queue.length, queuePos + 200);
+
+        for (let i = start; i < end; i++) {
+
+            const song = queue[i];
+
+            items.push({
+                index: i,
+                id: String(song.song_id),
+                title: (song.title || "").trim() || "Untitled",
+                rating: getRating(song),
+                liked: song.is_liked === true,
+                duration: (song.duration_milliseconds || 0) / 1000
+            });
+        }
+
+        return { pos: queuePos, total: queue.length, items: items };
+    }
+
+    // A readable copy of one of the player's panels, the settings, the
+    // filters or the creators, for the car to draw with its own large
+    // controls. It is read from the panel itself, so everything the phone
+    // shows is there without a second list to keep in step, and every change
+    // goes back through the same buttons and fields the phone uses
+    //
+    // A control is named by its place in the panel, the panel name and the
+    // child positions down to it. Panels such as the creators are drawn
+    // again whenever they are read, so a name stored on the element itself
+    // would be gone by the time the car taps it
+    function hostId(el, path) {
+        return path;
+    }
+
+    function hostOn(el) {
+
+        const bg = String(el.style.background || el.style.backgroundColor || "").toLowerCase();
+
+        return bg.indexOf("#48e1eb") >= 0 || bg.indexOf("72, 225, 235") >= 0;
+    }
+
+    function hostText(el) {
+        return String(el.textContent || "").replace(/\s+/g, " ").trim();
+    }
+
+    function hostWalk(el, out, path) {
+
+        if (!el || el.nodeType !== 1 || el.style.display === "none" || el.dataset.hostSkip) {
+            return;
+        }
+
+        const tag = el.tagName;
+
+        if (tag === "SCRIPT" || tag === "STYLE" || tag === "CANVAS") {
+            return;
+        }
+
+        if (tag === "BUTTON") {
+
+            out.push({
+                t: "button",
+                id: hostId(el, path),
+                s: hostText(el) || el.title || el.getAttribute("aria-label") || "",
+                on: hostOn(el),
+                off: el.disabled === true
+            });
+            return;
+        }
+
+        if (tag === "INPUT" || tag === "TEXTAREA") {
+
+            if (el.type === "hidden" || el.type === "file") {
+                return;
+            }
+
+            out.push({
+                t: "input",
+                id: hostId(el, path),
+                type: tag === "TEXTAREA" ? "text" : el.type,
+                value: el.type === "checkbox" ? el.checked : el.value,
+                min: el.min || "",
+                max: el.max || "",
+                step: el.step || "",
+                placeholder: el.placeholder || ""
+            });
+            return;
+        }
+
+        if (tag === "SELECT") {
+
+            out.push({
+                t: "select",
+                id: hostId(el, path),
+                value: el.value,
+                options: Array.from(el.options).map(function (o) {
+                    return [o.value, o.textContent];
+                })
+            });
+            return;
+        }
+
+        // Each child keeps its real position, hidden ones included, so the
+        // path still leads to it
+        const kids = [];
+
+        Array.from(el.children).forEach(function (c, i) {
+
+            if (c.style.display !== "none") {
+                kids.push({ el: c, path: path + "." + i });
+            }
+        });
+
+        // A row drawn as a tappable block, the tag lists and the creators
+        if (el.style.cursor === "pointer" && !el.querySelector("button,input,select,textarea")) {
+
+            out.push({ t: "click", id: hostId(el, path), s: hostText(el) || el.title || "", on: hostOn(el) });
+            return;
+        }
+
+        if (kids.length === 0) {
+
+            const text = hostText(el);
+
+            if (text) {
+                out.push({ t: "text", s: text, small: parseFloat(el.style.fontSize || "13") <= 12 });
+            }
+
+            return;
+        }
+
+        // Things laid out side by side on the phone stay together
+        if (el.style.display === "flex" && el.style.flexDirection !== "column") {
+
+            const row = [];
+
+            kids.forEach(function (k) {
+                hostWalk(k.el, row, k.path);
+            });
+
+            if (row.length === 1) {
+                out.push(row[0]);
+            } else if (row.length > 1) {
+                out.push({ t: "row", c: row });
+            }
+
+            return;
+        }
+
+        kids.forEach(function (k) {
+            hostWalk(k.el, out, k.path);
+        });
+    }
+
+    function hostRoot(name) {
+
+        if (name === "settings") {
+            return settingsEl;
+        }
+
+        if (name === "filters") {
+            return tagSheetEl;
+        }
+
+        if (name === "creators") {
+            return creatorsEl;
+        }
+
+        return null;
+    }
+
+    function hostPanel(name) {
+
+        let root = null;
+
+        if (name === "settings") {
+
+            root = settingsEl;
+
+            settingsRefreshers.forEach(function (fn) {
+                fn();
+            });
+        } else if (name === "filters") {
+
+            if (!tagSheetEl) {
+                buildTagSheet();
+            }
+
+            if (tagSheetRefresh) {
+                tagSheetRefresh();
+            }
+
+            root = tagSheetEl;
+        } else if (name === "creators") {
+
+            root = creatorsEl;
+            renderCreators();
+
+            if (followedCreators.length === 0 && !creatorsLoading) {
+                loadCreators();
+            }
+        }
+
+        const items = [];
+
+        if (root) {
+
+            Array.from(root.children).forEach(function (k, i) {
+                hostWalk(k, items, name + ":" + i);
+            });
+        }
+
+        return { name: name, items: items };
+    }
+
+    // Find a control the car picked from a panel copy
+    function hostElement(id) {
+
+        const m = /^([a-z]+):([0-9.]+)$/.exec(String(id));
+        let el = m ? hostRoot(m[1]) : null;
+
+        if (!el) {
+            return null;
+        }
+
+        const steps = m[2].split(".");
+
+        for (let i = 0; i < steps.length && el; i++) {
+            el = el.children[Number(steps[i])] || null;
+        }
+
+        return el;
     }
 
     let hostPublishTimer = null;
@@ -11777,13 +12145,98 @@
             toggleShuffle();
         } else if (cmd === "repeat") {
             cycleRepeat();
+        } else if (cmd === "playId") {
+
+            const wanted = String(arg);
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === wanted;
+            });
+
+            if (song) {
+                playFrom(song.song_id);
+            }
+        } else if (cmd === "playNext") {
+
+            const wanted = String(arg);
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === wanted;
+            });
+
+            if (song) {
+                addNext(song);
+            }
+        } else if (cmd === "queueJump") {
+
+            const i = Number(arg);
+
+            if (i >= 0 && i < queue.length) {
+
+                queuePos = i;
+                playCurrent();
+            }
+        } else if (cmd === "queueRemove") {
+
+            const i = Number(arg);
+
+            // Only what is still to come, the current song stays
+            if (i > queuePos && i < queue.length) {
+
+                queue.splice(i, 1);
+                renderList();
+                setArtSources();
+            }
+        } else if (cmd === "hclick") {
+
+            const el = hostElement(arg);
+
+            if (el) {
+                el.click();
+            }
+        } else if (cmd === "hset") {
+
+            const el = arg ? hostElement(arg.id) : null;
+
+            if (el) {
+
+                if (el.type === "checkbox") {
+                    el.checked = arg.value === true;
+                } else {
+                    el.value = arg.value === null || arg.value === undefined ? "" : String(arg.value);
+                }
+
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+        } else if (cmd === "vocals") {
+
+            const value = arg === "vocal" || arg === "instrumental" ? arg : "all";
+
+            setVocalFilter(value);
+        } else if (cmd === "feed") {
+            switchFeed();
+        } else if (cmd === "smart") {
+
+            settings.smartEnabled = !settings.smartEnabled;
+            applySmartFilters();
+        } else if (cmd === "creator") {
+
+            // An empty id means your own library
+            const id = arg === null || arg === undefined ? "" : String(arg);
+
+            if (!id) {
+                selectOwnLibrary();
+            } else {
+
+                const known = savedCreators.find(function (c) {
+                    return String(c.user_id) === id;
+                });
+
+                selectCreator(id, known ? known.stage_name : "");
+            }
         } else if (cmd === "carAudio") {
 
             hostCarAudio = arg === true || arg === "true" || arg === 1;
-
-            if (audio) {
-                audio.muted = hostCarAudio;
-            }
+            applyCarAudioVolume();
 
             setStatus(hostCarAudio ? "Sound plays in the car browser" : "Sound plays on the phone");
         }
@@ -11800,10 +12253,21 @@
         }
 
         window.__murekaHostCommand = hostCommand;
+        window.__murekaHostList = hostList;
+        window.__murekaHostQueue = hostQueue;
+        window.__murekaHostPanel = hostPanel;
 
         ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
             document.addEventListener(type, publishHostSoon, true);
         });
+
+        // A new song must not come in at full volume while the car plays
+        document.addEventListener("play", function () {
+
+            if (hostCarAudio && audio && audio.volume !== CAR_SHADOW_VOLUME) {
+                applyCarAudioVolume();
+            }
+        }, true);
 
         // The position moves on its own, once a second is plenty
         setInterval(publishHostState, 1000);
@@ -15358,6 +15822,72 @@
         return row;
     }
 
+    // A text setting stored by the Android app. It is saved when the field
+    // is left or Enter is pressed, not on every key, since each save
+    // restarts the name or the VPN. The app checks the value and keeps the
+    // last good one, so the field shows what is really in use afterwards
+    function makeCarTextRow(label, key, fallback) {
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;flex-direction:column;gap:4px";
+
+        const name = document.createElement("div");
+        name.textContent = label;
+        name.style.cssText = "font-size:12px;color:#ccc";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.autocomplete = "off";
+        input.spellcheck = false;
+        input.value = window.MurekaHost.getPref(key, fallback);
+        input.style.cssText = [
+            "width:100%",
+            "box-sizing:border-box",
+            "padding:6px 8px",
+            "border:1px solid #3a3a42",
+            "border-radius:6px",
+            "background:#26262c",
+            "color:#fff",
+            "font:13px/1.4 monospace"
+        ].join(";");
+
+        const note = document.createElement("div");
+        note.style.cssText = "font-size:11px;color:#e57373;min-height:0";
+
+        input.addEventListener("change", function () {
+
+            const typed = input.value.trim();
+            const ok = window.MurekaHost.setPref(key, typed);
+
+            input.value = window.MurekaHost.getPref(key, fallback);
+            note.textContent = ok === false ? "Not usable, kept " + input.value : "";
+        });
+
+        // Stop the site keyboard shortcuts from firing while typing, and let
+        // Enter save
+        input.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter") {
+                input.blur();
+            }
+        });
+
+        settingsRefreshers.push(function () {
+
+            if (document.activeElement !== input) {
+                input.value = window.MurekaHost.getPref(key, fallback);
+            }
+        });
+
+        row.appendChild(name);
+        row.appendChild(input);
+        row.appendChild(note);
+
+        return row;
+    }
+
     // Build a row of mutually exclusive choice buttons backed by getter / setter
     function makeChoiceRow(choices, get, set) {
 
@@ -15904,6 +16434,117 @@
         settingsEl.appendChild(dataChoiceEl);
         settingsEl.appendChild(driveInfoRow);
         settingsEl.appendChild(dataMsgEl);
+
+        // Which networks may open the car page, only in the Android app. Kept
+        // out of the car's copy of the settings, so the car cannot lock
+        // itself out
+        if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
+
+            const carLabel = document.createElement("div");
+            carLabel.textContent = "Car page";
+            carLabel.style.cssText = "color:#bbb";
+            carLabel.dataset.hostSkip = "1";
+
+            const pref = function (key) {
+                return window.MurekaHost.getPref(key, "1") === "1";
+            };
+
+            const setPref = function (key, v) {
+                window.MurekaHost.setPref(key, v ? "1" : "0");
+            };
+
+            const hotspotRow = makeBoolRow("Allow from the phone's hotspot",
+                function () { return pref("allowHotspot"); },
+                function (v) { setPref("allowHotspot", v); });
+
+            const wifiRow = makeBoolRow("Allow from Wi-Fi networks",
+                function () { return pref("allowWifi"); },
+                function (v) { setPref("allowWifi", v); });
+
+            // Tesla's browser refuses private addresses, and the hotspot only
+            // hands out private ones. The app can run a VPN that carries no
+            // traffic and only gives the phone this one extra address, which
+            // the car accepts and which never changes
+            const vpnGet = function () {
+                return window.MurekaHost.getPref("carVpn", "0") === "1";
+            };
+
+            const vpnRow = makeBoolRow("Fixed car address (VPN)", vpnGet,
+                function (v) { setPref("carVpn", v); });
+
+            const addressRow = makeCarTextRow("Car address, not a private one", "vpnAddress", "3.3.3.3");
+            const nameRow = makeCarTextRow("Local name for other devices, .local is added", "mdnsName", "murekaplayer");
+
+            const carStatusEl = document.createElement("div");
+            carStatusEl.style.cssText = "font-size:12px;color:#48e1eb;line-height:1.5;white-space:pre-line";
+
+            const carHint = document.createElement("div");
+            carHint.textContent = "The mobile network is never allowed. Android asks once before"
+                + " the VPN starts, and it cannot run next to another VPN app.";
+            carHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+
+            // What the page is reachable at, as the app sees it right now
+            const renderCarStatus = function () {
+
+                let st = {};
+
+                try {
+                    st = JSON.parse(window.MurekaHost.carStatus ? window.MurekaHost.carStatus() : "{}");
+                } catch (e) {
+                    st = {};
+                }
+
+                const lines = [];
+
+                if (st.carUrl) {
+                    lines.push("Car: " + st.carUrl);
+                } else if (st.vpnEnabled) {
+                    lines.push("Car address: " + (st.vpn || "starting"));
+                } else {
+                    lines.push("Car address is off, the car cannot open private addresses");
+                }
+
+                if (st.localUrl) {
+                    lines.push("Other devices: " + st.localUrl);
+                }
+
+                if (st.mdns) {
+                    lines.push("Local name: " + st.mdns);
+                }
+
+                if (st.addresses && st.addresses.length) {
+                    lines.push("Or: " + st.addresses.join("  "));
+                }
+
+                carStatusEl.textContent = lines.join("\n");
+                updateToggleButton(vpnRow.querySelector("button"), vpnGet());
+            };
+
+            renderCarStatus();
+            settingsRefreshers.push(renderCarStatus);
+
+            // The VPN comes up, or the permission question is answered, a
+            // moment after the switch, so the lines follow while shown
+            setInterval(function () {
+
+                if (settingsEl && settingsEl.offsetParent !== null) {
+                    renderCarStatus();
+                }
+            }, 2000);
+
+            [hotspotRow, wifiRow, vpnRow, addressRow, nameRow, carStatusEl, carHint].forEach(function (el) {
+                el.dataset.hostSkip = "1";
+            });
+
+            settingsEl.appendChild(carLabel);
+            settingsEl.appendChild(hotspotRow);
+            settingsEl.appendChild(wifiRow);
+            settingsEl.appendChild(vpnRow);
+            settingsEl.appendChild(addressRow);
+            settingsEl.appendChild(nameRow);
+            settingsEl.appendChild(carStatusEl);
+            settingsEl.appendChild(carHint);
+        }
 
         settingsEl.appendChild(devLabel);
         settingsEl.appendChild(debugRow);

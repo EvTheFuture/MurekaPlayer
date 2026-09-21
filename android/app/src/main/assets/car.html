@@ -37,6 +37,9 @@
         --dim: #7d6516;
         --empty: #6a6a74;
         --heart: #ff6b8a;
+
+        /* One height for everything in the song list's top rows */
+        --ctl-h: clamp(52px, 7vh, 68px);
     }
 
     * {
@@ -263,6 +266,293 @@
         text-align: right;
     }
 
+    #browse {
+        position: fixed;
+        inset: 0;
+        background: var(--bg);
+        display: none;
+        flex-direction: column;
+        padding: 2vh 3vw;
+        gap: 1.4vh;
+    }
+
+    #browseTop {
+        display: flex;
+        gap: 1.5vw;
+        align-items: center;
+    }
+
+    #search {
+        flex: 1;
+        min-width: 0;
+        height: var(--ctl-h);
+        font: inherit;
+        font-size: clamp(20px, 2vw, 30px);
+        padding: 0 18px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+    }
+
+    .chipRow {
+        display: flex;
+        gap: 1vw;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .chip {
+        height: var(--ctl-h);
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--card);
+        color: var(--text);
+        font: inherit;
+        font-size: clamp(15px, 1.5vw, 22px);
+        padding: 0 20px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .chip.on {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    #creators {
+        height: var(--ctl-h);
+        font: inherit;
+        font-size: clamp(15px, 1.5vw, 22px);
+        padding: 0 16px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+    }
+
+    #counts {
+        color: var(--muted);
+        font-size: clamp(14px, 1.4vw, 20px);
+    }
+
+    #rows {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .row {
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+        width: 100%;
+        text-align: left;
+        border: none;
+        border-bottom: 1px solid var(--line);
+        background: none;
+        color: var(--text);
+        font: inherit;
+        font-size: clamp(18px, 1.9vw, 28px);
+        padding: 18px 8px;
+        cursor: pointer;
+    }
+
+    .row.playing {
+        color: var(--accent);
+        font-weight: 600;
+    }
+
+    .rowTitle {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .rowRate {
+        flex: 0 0 auto;
+        color: var(--gold);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.8em;
+    }
+
+    .rowTime {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.85em;
+    }
+
+    .rowHeart {
+        flex: 0 0 auto;
+        color: var(--heart);
+    }
+
+    .rowNext {
+        flex: 0 0 auto;
+        width: var(--ctl-h);
+        height: var(--ctl-h);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        color: var(--text);
+        font: inherit;
+        font-size: 1.2em;
+        cursor: pointer;
+    }
+
+    .row.past {
+        color: var(--muted);
+    }
+
+    .rowNum {
+        flex: 0 0 auto;
+        min-width: 2.4em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.8em;
+    }
+
+    #bottom .chip {
+        height: auto;
+        padding: 14px 22px;
+        border-radius: 12px;
+    }
+
+    .sheet {
+        position: fixed;
+        inset: 0;
+        background: var(--bg);
+        display: none;
+        flex-direction: column;
+        padding: 2vh 3vw;
+        gap: 1.4vh;
+    }
+
+    .sheetTop {
+        display: flex;
+        gap: 1.5vw;
+        align-items: center;
+    }
+
+    .sheetTitle {
+        flex: 1;
+        min-width: 0;
+        font-size: clamp(22px, 2.4vw, 34px);
+        font-weight: 700;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .sheetBody {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        font-size: clamp(17px, 1.8vw, 26px);
+    }
+
+    .pText {
+        padding: 12px 4px 4px;
+        color: var(--text);
+    }
+
+    .pText.small {
+        padding-top: 2px;
+        color: var(--muted);
+        font-size: 0.8em;
+    }
+
+    .pRow {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1vw;
+        padding: 6px 0;
+    }
+
+    .pRow > .pText {
+        flex: 1 1 auto;
+        padding: 0 4px;
+    }
+
+    .pBtn,
+    .pClick {
+        min-height: var(--ctl-h);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        color: var(--text);
+        font: inherit;
+        padding: 8px 20px;
+        cursor: pointer;
+        margin: 4px 0;
+    }
+
+    .pClick {
+        display: block;
+        width: 100%;
+        text-align: left;
+    }
+
+    .pBtn.on,
+    .pClick.on {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    .pBtn:disabled {
+        opacity: 0.4;
+    }
+
+    .pField,
+    .pSelect {
+        min-height: var(--ctl-h);
+        font: inherit;
+        padding: 0 16px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+        margin: 4px 0;
+        max-width: 100%;
+    }
+
+    .pField {
+        flex: 1 1 12em;
+    }
+
+    .pStep {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .pStep span {
+        min-width: 3.5em;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+    }
+
+    #signin {
+        display: none;
+        background: #5a1f2b;
+        color: #fff;
+        border-radius: 12px;
+        padding: 14px 20px;
+        font-size: clamp(18px, 1.9vw, 26px);
+    }
+
     #overlay {
         position: fixed;
         inset: 0;
@@ -315,6 +605,7 @@
 </head>
 <body>
 <div id="app">
+    <div id="signin">Mureka Player on the phone is not signed in to Mureka. Open the app on the phone and sign in.</div>
     <div id="main">
         <div id="cover"></div>
         <div id="info">
@@ -345,6 +636,9 @@
         <button class="ctl" id="next" type="button" aria-label="Next">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
         </button>
+        <button class="ctl" id="browseBtn" type="button" aria-label="Songs">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
+        </button>
         <button class="ctl" id="repeat" type="button" aria-label="Repeat">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><text id="repeatOne" x="12" y="15" font-size="8" text-anchor="middle" fill="currentColor" stroke="none" style="display:none">1</text></svg>
         </button>
@@ -356,7 +650,43 @@
             <button id="soundCar" type="button">This browser</button>
         </div>
         <div id="status"></div>
+        <button class="chip" id="queueBtn" type="button">Queue</button>
+        <button class="chip" id="settingsBtn" type="button">Settings</button>
     </div>
+</div>
+<div id="browse">
+    <div id="browseTop">
+        <input id="search" type="search" placeholder="Search songs" autocomplete="off">
+        <button class="chip" id="clearSearch" type="button">Clear</button>
+        <button class="chip" id="closeBrowse" type="button">Close</button>
+    </div>
+    <div class="chipRow">
+        <button class="chip" id="vocalsAll" type="button">All</button>
+        <button class="chip" id="vocalsVocal" type="button">Vocals</button>
+        <button class="chip" id="vocalsInstr" type="button">Instrumental</button>
+        <button class="chip" id="feed" type="button">Published</button>
+        <button class="chip" id="smart" type="button">Filters</button>
+        <select id="creators"></select>
+        <button class="chip" id="allFilters" type="button">All filters</button>
+        <button class="chip" id="artists" type="button">Artists</button>
+    </div>
+    <div id="counts"></div>
+    <div id="rows"></div>
+</div>
+<div class="sheet" id="queue">
+    <div class="sheetTop">
+        <div class="sheetTitle" id="queueTitle">Queue</div>
+        <button class="chip" id="queueNow" type="button">Now playing</button>
+        <button class="chip" id="closeQueue" type="button">Close</button>
+    </div>
+    <div class="sheetBody" id="queueRows"></div>
+</div>
+<div class="sheet" id="panel">
+    <div class="sheetTop">
+        <div class="sheetTitle" id="panelTitle"></div>
+        <button class="chip" id="closePanel" type="button">Close</button>
+    </div>
+    <div class="sheetBody" id="panelBody"></div>
 </div>
 <div id="overlay">
     <div>The sound is set to play in this browser. Tap to start it here.</div>
@@ -421,8 +751,6 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ cmd: cmd, arg: arg === undefined ? null : arg })
         }).catch(function () {
-        }).then(function () {
-            poll();
         });
     }
 
@@ -539,6 +867,7 @@
         $("soundPhone").classList.toggle("on", !carAudio);
         $("soundCar").classList.toggle("on", carAudio);
         $("status").textContent = online ? (s && s.status ? s.status : "") : "Not connected to the phone";
+        $("signin").style.display = online && s && s.signedIn === "no" ? "block" : "none";
 
         // The phone asks for the sound here but this page has not been
         // allowed to play since it loaded, so a tap is needed first
@@ -563,7 +892,7 @@
     }
 
     // With the sound here, this element follows the phone, which stays in
-    // charge of the queue and plays along muted
+    // charge of the queue and plays along nearly silent
     function syncAudio() {
 
         const s = state;
@@ -625,24 +954,724 @@
         });
     }
 
+    // The song list, fetched a page at a time from the phone
+    const PAGE = 60;
+
+    let listTotal = 0;
+    let listLoaded = 0;
+    let listBusy = false;
+    let listQuery = "";
+    let searchTimer = null;
+
+    function esc(text) {
+        return encodeURIComponent(text);
+    }
+
+    function loadList(reset) {
+
+        if (listBusy) {
+            return;
+        }
+
+        if (reset) {
+
+            listLoaded = 0;
+            $("rows").textContent = "";
+        }
+
+        listBusy = true;
+
+        fetch("/list?q=" + esc(listQuery) + "&offset=" + listLoaded + "&limit=" + PAGE,
+            { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            listBusy = false;
+
+            if (!data || !data.songs) {
+                return;
+            }
+
+            listTotal = data.total;
+            listLoaded += data.songs.length;
+
+            for (const song of data.songs) {
+                $("rows").appendChild(makeRow(song));
+            }
+
+            paintFilters(data.filters);
+            $("counts").textContent = listTotal + " song" + (listTotal === 1 ? "" : "s")
+                + (listQuery ? " matching " + listQuery : "")
+                + (listLoaded < listTotal ? ", showing " + listLoaded : "");
+        }).catch(function () {
+            listBusy = false;
+        });
+    }
+
+    // One song line, shared by the song list and the queue
+    function songLine(song, row) {
+
+        const title = document.createElement("span");
+        const rate = document.createElement("span");
+        const time = document.createElement("span");
+        const heart = document.createElement("span");
+
+        title.className = "rowTitle";
+        title.textContent = song.title;
+
+        rate.className = "rowRate";
+        rate.textContent = song.rating === null || song.rating === undefined
+            ? "" : song.rating + "\u2605";
+
+        time.className = "rowTime";
+        time.textContent = fmt(song.duration);
+
+        heart.className = "rowHeart";
+        heart.textContent = song.liked ? "\u2665" : "";
+
+        row.appendChild(title);
+        row.appendChild(rate);
+        row.appendChild(heart);
+        row.appendChild(time);
+    }
+
+    // A small button at the end of a line, which must not also tap the line
+    function lineButton(label, text, action) {
+
+        const btn = document.createElement("button");
+
+        btn.type = "button";
+        btn.className = "rowNext";
+        btn.setAttribute("aria-label", label);
+        btn.textContent = text;
+
+        btn.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            action(btn);
+        });
+
+        return btn;
+    }
+
+    function makeRow(song) {
+
+        // A div, since a button inside a button is not allowed
+        const row = document.createElement("div");
+
+        row.setAttribute("role", "button");
+        row.className = "row" + (song.playing ? " playing" : "");
+        songLine(song, row);
+
+        row.appendChild(lineButton("Play next", "+", function (btn) {
+
+            send("playNext", song.id);
+            btn.textContent = "\u2713";
+        }));
+
+        row.addEventListener("click", function () {
+
+            send("playId", song.id);
+
+            // Mark it at once, the next list refresh confirms it
+            const before = document.querySelector(".row.playing");
+
+            if (before) {
+                before.classList.remove("playing");
+            }
+
+            row.classList.add("playing");
+        });
+
+        return row;
+    }
+
+    // The filter row follows whatever the player has set, wherever it was set
+    function paintFilters(f) {
+
+        if (!f) {
+            return;
+        }
+
+        $("vocalsAll").classList.toggle("on", f.vocals !== "vocal" && f.vocals !== "instrumental");
+        $("vocalsVocal").classList.toggle("on", f.vocals === "vocal");
+        $("vocalsInstr").classList.toggle("on", f.vocals === "instrumental");
+
+        $("feed").textContent = f.published === "published" ? "Published" : "All songs";
+        $("feed").classList.toggle("on", f.published === "published");
+
+        $("smart").textContent = f.smartText ? "Filters: " + f.smartText : "Filters";
+        $("smart").classList.toggle("on", f.smart && !!f.smartText);
+
+        // The creator list only changes when one is added on the phone
+        const wanted = (f.creator ? f.creator.id : "") + "|"
+            + f.creators.map(function (c) {
+                return c.id;
+            }).join(",");
+
+        if ($("creators").dataset.key !== wanted) {
+
+            $("creators").dataset.key = wanted;
+            $("creators").textContent = "";
+
+            const mine = document.createElement("option");
+
+            mine.value = "";
+            mine.textContent = "My songs";
+            $("creators").appendChild(mine);
+
+            for (const c of f.creators) {
+
+                const opt = document.createElement("option");
+
+                opt.value = c.id;
+                opt.textContent = c.name;
+                $("creators").appendChild(opt);
+            }
+
+            $("creators").value = f.creator ? f.creator.id : "";
+        }
+    }
+
+    // A filter command needs a moment before the list is asked again
+    function filterCommand(cmd, arg) {
+
+        send(cmd, arg).then(function () {
+
+            setTimeout(function () {
+                loadList(true);
+            }, 250);
+        });
+    }
+
+    // The queue, what has played and what comes next, as on the phone
+    let queueData = null;
+
+    function loadQueue(toCurrent) {
+
+        return fetch("/queue", { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            queueData = data;
+            renderQueue(toCurrent);
+        }).catch(function () {
+        });
+    }
+
+    function renderQueue(toCurrent) {
+
+        const box = $("queueRows");
+        const keep = box.scrollTop;
+        const data = queueData;
+
+        box.textContent = "";
+
+        if (!data || !data.items) {
+
+            $("queueTitle").textContent = "Queue";
+            return;
+        }
+
+        $("queueTitle").textContent = "Queue, " + (data.pos + 1) + " of " + data.total;
+
+        let current = null;
+
+        for (const item of data.items) {
+
+            const row = document.createElement("div");
+            const num = document.createElement("span");
+
+            row.setAttribute("role", "button");
+            row.className = "row" + (item.index === data.pos ? " playing" : "")
+                + (item.index < data.pos ? " past" : "");
+
+            num.className = "rowNum";
+            num.textContent = String(item.index + 1);
+            row.appendChild(num);
+            songLine(item, row);
+
+            // Only what is still to come can be taken out
+            if (item.index > data.pos) {
+
+                row.appendChild(lineButton("Remove from the queue", "\u2715", function () {
+                    send("queueRemove", item.index).then(function () {
+                        loadQueue(false);
+                    });
+                }));
+            }
+
+            row.addEventListener("click", function () {
+                send("queueJump", item.index).then(function () {
+                    loadQueue(false);
+                });
+            });
+
+            if (item.index === data.pos) {
+                current = row;
+            }
+
+            box.appendChild(row);
+        }
+
+        if (toCurrent && current) {
+            box.scrollTop = Math.max(0, current.offsetTop - box.offsetTop - box.clientHeight / 3);
+        } else {
+            box.scrollTop = keep;
+        }
+    }
+
+    $("queueBtn").addEventListener("click", function () {
+
+        $("queue").style.display = "flex";
+        loadQueue(true);
+    });
+
+    $("queueNow").addEventListener("click", function () {
+        renderQueue(true);
+    });
+
+    $("closeQueue").addEventListener("click", function () {
+        $("queue").style.display = "none";
+    });
+
+    // A copy of one of the phone's own panels, the settings, all the filters
+    // or the artists, drawn with large controls. Every tap goes back to the
+    // same button or field on the phone, then the copy is read again
+    const PANEL_TITLES = { settings: "Settings", filters: "All filters", creators: "Artists" };
+
+    let panelName = "";
+    let panelTimer = null;
+    let panelBusy = false;
+
+    function panelOpen() {
+        return $("panel").style.display === "flex";
+    }
+
+    function loadPanel() {
+
+        if (!panelName || panelBusy) {
+            return Promise.resolve();
+        }
+
+        panelBusy = true;
+
+        return fetch("/panel?name=" + esc(panelName), { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            panelBusy = false;
+
+            // Never redrawn under a finger typing in one of its fields
+            const typing = document.activeElement && document.activeElement.classList.contains("pField");
+
+            if (data && data.items && panelOpen() && !typing) {
+                renderPanel(data.items);
+            }
+        }).catch(function () {
+            panelBusy = false;
+        });
+    }
+
+    // After a change the phone needs a moment before it shows the result
+    function panelAction(cmd, arg) {
+
+        send(cmd, arg).then(function () {
+            setTimeout(loadPanel, 250);
+        });
+    }
+
+    function renderPanel(items) {
+
+        const box = $("panelBody");
+        const keep = box.scrollTop;
+
+        box.textContent = "";
+
+        for (const node of panelClean(items)) {
+            box.appendChild(panelNode(node, false));
+        }
+
+        box.scrollTop = keep;
+    }
+
+    // The phone's own Done buttons close its panel, here Close does that, so
+    // they are left out. A row left with one thing is just that thing
+    function panelClean(items) {
+
+        const out = [];
+
+        for (const node of items) {
+
+            if (node.t === "button" && node.s === "Done") {
+                continue;
+            }
+
+            if (node.t === "row") {
+
+                const kids = panelClean(node.c);
+
+                if (kids.length === 1) {
+                    out.push(kids[0]);
+                } else if (kids.length > 1) {
+                    out.push({ t: "row", c: kids });
+                }
+
+                continue;
+            }
+
+            out.push(node);
+        }
+
+        return out;
+    }
+
+    function panelNode(node, hasButtons) {
+
+        if (node.t === "row") {
+
+            const row = document.createElement("div");
+
+            // A number with the phone's own minus and plus beside it only
+            // needs showing, the buttons already change it
+            const buttons = node.c.some(function (child) {
+                return child.t === "button";
+            });
+
+            row.className = "pRow";
+
+            for (const child of node.c) {
+                row.appendChild(panelNode(child, buttons));
+            }
+
+            return row;
+        }
+
+        if (node.t === "input" && hasButtons && (node.type === "number" || node.type === "range")) {
+
+            const shown = document.createElement("div");
+
+            shown.className = "pText";
+            shown.style.flex = "0 0 auto";
+            shown.textContent = node.value === "" ? "-" : String(node.value);
+
+            return shown;
+        }
+
+        if (node.t === "button" || node.t === "click") {
+
+            const btn = document.createElement("button");
+
+            btn.type = "button";
+            btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "");
+            btn.textContent = node.s || "?";
+            btn.disabled = node.off === true;
+
+            btn.addEventListener("click", function () {
+                panelAction("hclick", node.id);
+            });
+
+            return btn;
+        }
+
+        if (node.t === "select") {
+
+            const sel = document.createElement("select");
+
+            sel.className = "pSelect";
+
+            for (const pair of node.options) {
+
+                const opt = document.createElement("option");
+
+                opt.value = pair[0];
+                opt.textContent = pair[1];
+                sel.appendChild(opt);
+            }
+
+            sel.value = node.value;
+
+            sel.addEventListener("change", function () {
+                panelAction("hset", { id: node.id, value: sel.value });
+            });
+
+            return sel;
+        }
+
+        if (node.t === "input") {
+            return panelInput(node);
+        }
+
+        const text = document.createElement("div");
+
+        text.className = "pText" + (node.small ? " small" : "");
+        text.textContent = node.s || "";
+
+        return text;
+    }
+
+    function panelInput(node) {
+
+        if (node.type === "checkbox") {
+
+            const btn = document.createElement("button");
+
+            btn.type = "button";
+            btn.className = "pBtn" + (node.value ? " on" : "");
+            btn.textContent = node.value ? "On" : "Off";
+
+            btn.addEventListener("click", function () {
+                panelAction("hset", { id: node.id, value: !node.value });
+            });
+
+            return btn;
+        }
+
+        // Numbers and sliders become a stepper, easier to hit while parked
+        if (node.type === "number" || node.type === "range") {
+
+            const box = document.createElement("span");
+            const minus = document.createElement("button");
+            const plus = document.createElement("button");
+            const shown = document.createElement("span");
+            const step = parseFloat(node.step) || 1;
+            const min = node.min === "" ? -Infinity : parseFloat(node.min);
+            const max = node.max === "" ? Infinity : parseFloat(node.max);
+
+            box.className = "pStep";
+            minus.type = "button";
+            plus.type = "button";
+            minus.className = "pBtn";
+            plus.className = "pBtn";
+            minus.textContent = "-";
+            plus.textContent = "+";
+            shown.textContent = node.value === "" ? "-" : node.value;
+
+            const nudge = function (dir) {
+
+                const now = parseFloat(node.value);
+                let next = isNaN(now) ? (min > -Infinity ? min : 0) : now + dir * step;
+
+                next = Math.max(min, Math.min(max, next));
+                next = Math.round(next / step) * step;
+                node.value = String(Number(next.toFixed(4)));
+                shown.textContent = node.value;
+                panelAction("hset", { id: node.id, value: node.value });
+            };
+
+            minus.addEventListener("click", function () {
+                nudge(-1);
+            });
+
+            plus.addEventListener("click", function () {
+                nudge(1);
+            });
+
+            box.appendChild(minus);
+            box.appendChild(shown);
+            box.appendChild(plus);
+
+            return box;
+        }
+
+        const field = document.createElement("input");
+        let timer = null;
+
+        field.className = "pField";
+        field.type = node.type === "search" ? "search" : "text";
+        field.value = node.value || "";
+        field.placeholder = node.placeholder || "";
+        field.autocomplete = "off";
+
+        field.addEventListener("input", function () {
+
+            clearTimeout(timer);
+
+            timer = setTimeout(function () {
+                panelAction("hset", { id: node.id, value: field.value });
+            }, 400);
+        });
+
+        return field;
+    }
+
+    function showPanel(name) {
+
+        panelName = name;
+        $("panelTitle").textContent = PANEL_TITLES[name] || name;
+        $("panelBody").textContent = "";
+        $("panel").style.display = "flex";
+        loadPanel();
+
+        // Some of it arrives later on the phone, the artist list for one
+        clearInterval(panelTimer);
+        panelTimer = setInterval(loadPanel, 2000);
+    }
+
+    $("closePanel").addEventListener("click", function () {
+
+        $("panel").style.display = "none";
+        clearInterval(panelTimer);
+        panelTimer = null;
+        panelName = "";
+
+        // Filters or an artist may have changed what the list shows
+        if ($("browse").style.display === "flex") {
+            loadList(true);
+        }
+    });
+
+    $("settingsBtn").addEventListener("click", function () {
+        showPanel("settings");
+    });
+
+    $("allFilters").addEventListener("click", function () {
+        showPanel("filters");
+    });
+
+    $("artists").addEventListener("click", function () {
+        showPanel("creators");
+    });
+
+    $("browseBtn").addEventListener("click", function () {
+
+        $("browse").style.display = "flex";
+        loadList(true);
+    });
+
+    $("closeBrowse").addEventListener("click", function () {
+        $("browse").style.display = "none";
+    });
+
+    $("clearSearch").addEventListener("click", function () {
+
+        $("search").value = "";
+        listQuery = "";
+        loadList(true);
+    });
+
+    $("search").addEventListener("input", function () {
+
+        clearTimeout(searchTimer);
+
+        searchTimer = setTimeout(function () {
+
+            listQuery = $("search").value.trim();
+            loadList(true);
+        }, 350);
+    });
+
+    $("rows").addEventListener("scroll", function () {
+
+        const el = $("rows");
+
+        if (listLoaded < listTotal && el.scrollTop + el.clientHeight > el.scrollHeight - 400) {
+            loadList(false);
+        }
+    });
+
+    $("vocalsAll").addEventListener("click", function () {
+        filterCommand("vocals", "all");
+    });
+
+    $("vocalsVocal").addEventListener("click", function () {
+        filterCommand("vocals", "vocal");
+    });
+
+    $("vocalsInstr").addEventListener("click", function () {
+        filterCommand("vocals", "instrumental");
+    });
+
+    $("feed").addEventListener("click", function () {
+        filterCommand("feed", null);
+    });
+
+    $("smart").addEventListener("click", function () {
+        filterCommand("smart", null);
+    });
+
+    $("creators").addEventListener("change", function () {
+        filterCommand("creator", $("creators").value);
+    });
+
+    // The phone answers /state as soon as the player has something new,
+    // at the latest after a second since the position moves on, so the page
+    // follows a tap on play without waiting for the next round
+    let seq = -1;
+
+    // A play or pause shown before the phone confirms it. Until then an
+    // older state still on its way is not allowed to flip the button back
+    let pending = null;
+
+    function accept(s) {
+
+        const before = state ? state.id : null;
+
+        if (pending && Date.now() < pending.until && s.playing !== pending.playing) {
+
+            s.playing = pending.playing;
+            s.position = position();
+        } else {
+            pending = null;
+        }
+
+        state = s;
+        stateAt = Date.now();
+        online = true;
+        render();
+
+        // Keep the open list and queue in step when the song changes on its
+        // own
+        if (before !== s.id && $("browse").style.display === "flex") {
+            loadList(true);
+        }
+
+        if (before !== s.id && $("queue").style.display === "flex") {
+            loadQueue(true);
+        }
+    }
+
     function poll() {
 
-        return fetch("/state", { cache: "no-store" }).then(function (res) {
+        // A request the network swallowed is given up, and the next asked
+        const abort = window.AbortController ? new AbortController() : null;
+        const timer = setTimeout(function () {
+
+            if (abort) {
+                abort.abort();
+            }
+        }, 10000);
+
+        fetch("/state?since=" + seq, { cache: "no-store", signal: abort ? abort.signal : undefined }).then(function (res) {
             return res.json();
         }).then(function (s) {
 
-            state = s;
-            stateAt = Date.now();
-            online = true;
-            render();
+            clearTimeout(timer);
+            seq = typeof s.seq === "number" ? s.seq : -1;
+            accept(s);
+            setTimeout(poll, 0);
         }).catch(function () {
 
+            clearTimeout(timer);
+            seq = -1;
             online = false;
             render();
+            setTimeout(poll, 1000);
         });
     }
 
     $("play").addEventListener("click", function () {
+
+        // Shown at once, the phone confirms it a moment later
+        if (state && state.id) {
+
+            state.position = position();
+            stateAt = Date.now();
+            state.playing = !state.playing;
+            pending = { playing: state.playing, until: Date.now() + 2000 };
+            render();
+        }
+
         send("toggle");
     });
 
@@ -738,7 +1767,6 @@
     });
 
     poll();
-    setInterval(poll, 1000);
     requestAnimationFrame(tick);
 })();
 </script>

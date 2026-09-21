@@ -26,10 +26,14 @@ import android.os.Looper;
 import android.webkit.WebView;
 
 import java.lang.ref.WeakReference;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 // The player in the WebView publishes its now playing state here, and the
 // media session, the notification and the car page read it from here. Their
@@ -47,6 +51,11 @@ final class Hub {
     // The last state as the player sent it, and parsed
     private static volatile String stateJson = "{}";
     private static volatile JSONObject state = new JSONObject();
+
+    // Counts the states published, so the car page can wait for the next
+    // one instead of asking again and again. Guarded by LOCK
+    private static final Object LOCK = new Object();
+    private static long seq = 0;
 
     // The WebView the player runs in, while the activity is alive
     private static WeakReference<WebView> webRef = new WeakReference<>(null);
@@ -85,6 +94,39 @@ final class Hub {
         return state;
     }
 
+    // The state with its number, as soon as there is one newer than the one
+    // the car page already has, or after the timeout with what there is. A
+    // number from before the app restarted is answered at once
+    static String awaitState(long since, long timeoutMs) {
+
+        synchronized (LOCK) {
+
+            long end = System.currentTimeMillis() + timeoutMs;
+
+            while (seq == since) {
+
+                long left = end - System.currentTimeMillis();
+
+                if (left <= 0) {
+                    break;
+                }
+
+                try {
+                    LOCK.wait(left);
+                } catch (InterruptedException e) {
+
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            String json = stateJson.trim();
+            String rest = json.startsWith("{") ? json.substring(1).trim() : "}";
+
+            return "{\"seq\":" + seq + (rest.equals("}") ? "" : ",") + rest;
+        }
+    }
+
     // Called from the JavaScript bridge thread, handed over to the main one
     static void publish(String json) {
 
@@ -96,8 +138,13 @@ final class Hub {
             return;
         }
 
-        stateJson = json;
-        state = parsed;
+        synchronized (LOCK) {
+
+            stateJson = json;
+            state = parsed;
+            seq += 1;
+            LOCK.notifyAll();
+        }
 
         MAIN.post(() -> {
 
@@ -123,6 +170,64 @@ final class Hub {
         });
     }
 
+    // Ask the player for a page of its song list
+    static String requestList(String argJson, long timeoutMs) {
+        return request("__murekaHostList", argJson, timeoutMs);
+    }
+
+    // Call one of the player's host functions and wait for what it returns,
+    // as JSON. Called from a car server thread, which waits here, and gives
+    // up rather than holding the connection open if the player does not
+    // come back. The function name is fixed by the caller, never by the car
+    static String request(String function, String argJson, long timeoutMs) {
+
+        final BlockingQueue<String> answer = new ArrayBlockingQueue<>(1);
+        final String js = "JSON.stringify(window." + function + " ? window." + function + "("
+            + argJson + ") : null)";
+
+        MAIN.post(() -> {
+
+            WebView web = webRef.get();
+
+            if (web == null) {
+
+                answer.offer("");
+                return;
+            }
+
+            web.evaluateJavascript(js, value -> {
+
+                // evaluateJavascript hands back a JSON encoded value, so the
+                // string the player built is still quoted at this point
+                String json = "";
+
+                try {
+
+                    Object parsed = new JSONTokener(value == null ? "" : value).nextValue();
+
+                    if (parsed instanceof String) {
+                        json = (String) parsed;
+                    }
+                } catch (JSONException e) {
+                    json = "";
+                }
+
+                answer.offer(json);
+            });
+        });
+
+        try {
+
+            String json = answer.poll(timeoutMs, TimeUnit.MILLISECONDS);
+
+            return json == null ? "" : json;
+        } catch (InterruptedException e) {
+
+            Thread.currentThread().interrupt();
+            return "";
+        }
+    }
+
     static void quit() {
 
         MAIN.post(() -> {
@@ -144,6 +249,11 @@ final class Hub {
 
         if (arg instanceof String) {
             return JSONObject.quote((String) arg);
+        }
+
+        // Objects and lists from the car are already valid JavaScript
+        if (arg instanceof JSONObject || arg instanceof org.json.JSONArray) {
+            return arg.toString();
         }
 
         return "null";
