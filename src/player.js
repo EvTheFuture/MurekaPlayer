@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.10";
+    const VERSION = "1.6.0.12";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1027,6 +1027,8 @@
             blackoutDrift: 25,
             countsMaxAge: 4,
             waveSeek: true,
+            webUpNext: true,
+            webWave: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
             lyricLineMul: 1.5,
@@ -1143,6 +1145,8 @@
                         && parsed.countsMaxAge >= 1 && parsed.countsMaxAge <= 72)
                         ? parsed.countsMaxAge : 4,
                     waveSeek: parsed.waveSeek !== false,
+                    webUpNext: parsed.webUpNext !== false,
+                    webWave: parsed.webWave !== false,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
                     lyricSideMul: (typeof parsed.lyricSideMul === "number" && parsed.lyricSideMul >= 0.5 && parsed.lyricSideMul <= 1)
@@ -11719,8 +11723,85 @@
             repeat: repeatMode,
             carAudio: hostCarAudio,
             signedIn: authState,
-            status: statusText || ""
+            status: statusText || "",
+            upNext: settings.webUpNext ? hostUpNext() : null,
+            wave: settings.webWave ? hostWave() : null
         };
+    }
+
+    // The song after the current one, as the queue stands, for the car page
+    function hostUpNext() {
+
+        if (!currentSong || queue.length === 0) {
+            return null;
+        }
+
+        let pos = queuePos + 1;
+
+        if (repeatMode === "one") {
+            pos = queuePos;
+        } else if (pos >= queue.length) {
+
+            if (repeatMode !== "all") {
+                return null;
+            }
+
+            pos = 0;
+        }
+
+        const song = queue[pos];
+
+        if (!song) {
+            return null;
+        }
+
+        return {
+            id: String(song.song_id),
+            title: (song.title || "").trim() || "Untitled",
+            cover: coverUrl(song)
+        };
+    }
+
+    // The current song's waveform shrunk to a few hundred peaks, small enough
+    // to go along with every state
+    const HOST_WAVE_POINTS = 240;
+
+    let hostWaveFrom = null;
+    let hostWaveCache = null;
+
+    function hostWave() {
+
+        if (!waveData || waveData.length === 0) {
+            return null;
+        }
+
+        if (hostWaveFrom === waveData) {
+            return hostWaveCache;
+        }
+
+        const out = [];
+        const n = Math.min(HOST_WAVE_POINTS, waveData.length);
+
+        for (let i = 0; i < n; i++) {
+
+            const a = Math.floor(i * waveData.length / n);
+            const b = Math.max(a + 1, Math.floor((i + 1) * waveData.length / n));
+            let peak = 0;
+
+            for (let j = a; j < b; j++) {
+
+                if (waveData[j] > peak) {
+                    peak = waveData[j];
+                }
+            }
+
+            out.push(Math.round(peak * 100) / 100);
+        }
+
+        hostWaveFrom = waveData;
+        hostWaveCache = out;
+
+        return out;
     }
 
     // The smart filters in words, for the car page. Empty when none is on
@@ -11768,6 +11849,9 @@
             published: publishFilter,
             smart: settings.smartEnabled === true,
             smartText: hostSmartText(),
+            smartAny: settings.tagGenres.length > 0 || settings.tagMoods.length > 0
+                || settings.tagModels.length > 0 || settings.bpmEnabled
+                || settings.dateEnabled || settings.ratingEnabled,
             creator: creatorSource
                 ? { id: String(creatorSource.user_id), name: creatorSource.stage_name }
                 : null,
@@ -11790,7 +11874,18 @@
 
         let total = 0;
 
-        for (const song of orderedSongs()) {
+        // The car keeps its own view, Mureka order or A to Z, whatever the
+        // phone shows
+        let source = orderedSongs();
+
+        if (req && req.view === "alpha") {
+
+            source = cache.songs.slice().sort(function (a, b) {
+                return (a.title || "").trim().localeCompare((b.title || "").trim());
+            });
+        }
+
+        for (const song of source) {
 
             if (!passesFilters(song)) {
                 continue;
@@ -11828,22 +11923,28 @@
         };
     }
 
-    // The queue for the car, what already played, the current song and
-    // what comes next, with the index each has in the queue
-    function hostQueue() {
+    // The queue for the car, all of it as on the phone: what already played,
+    // the current song and what comes next, with the index each has in the
+    // queue. The car's search text narrows it down
+    function hostQueue(req) {
 
+        const q = String(req && req.q ? req.q : "").trim().toLowerCase();
         const items = [];
-        const start = Math.max(0, queuePos - 20);
-        const end = Math.min(queue.length, queuePos + 200);
 
-        for (let i = start; i < end; i++) {
+        for (let i = 0; i < queue.length; i++) {
 
             const song = queue[i];
+            const title = (song.title || "").trim() || "Untitled";
+
+            if (q && title.toLowerCase().indexOf(q) === -1) {
+                continue;
+            }
 
             items.push({
                 index: i,
                 id: String(song.song_id),
-                title: (song.title || "").trim() || "Untitled",
+                title: title,
+                cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
                 duration: (song.duration_milliseconds || 0) / 1000
@@ -11945,10 +12046,36 @@
             }
         });
 
-        // A row drawn as a tappable block, the tag lists and the creators
+        // A row drawn as a tappable block, the tag lists and the creators.
+        // Its pieces are kept apart, so a tag and its count do not run
+        // together, and a tick in front of it means it is selected
         if (el.style.cursor === "pointer" && !el.querySelector("button,input,select,textarea")) {
 
-            out.push({ t: "click", id: hostId(el, path), s: hostText(el) || el.title || "", on: hostOn(el) });
+            const parts = [];
+            let on = hostOn(el);
+
+            Array.from(el.children).forEach(function (c) {
+
+                const text = hostText(c);
+
+                if (text) {
+                    parts.push(text);
+                }
+            });
+
+            if (parts.length > 0 && parts[0] === "\u2713") {
+
+                on = true;
+                parts.shift();
+            }
+
+            out.push({
+                t: "click",
+                id: hostId(el, path),
+                s: hostText(el) || el.title || "",
+                parts: parts.length > 1 ? parts : null,
+                on: on
+            });
             return;
         }
 
@@ -12136,6 +12263,24 @@
                 // The list row is redrawn afterwards, a loose heart takes the
                 // optimistic paint meanwhile
                 toggleLike(currentSong, document.createElement("span")).then(function () {
+
+                    renderList();
+                    publishHostSoon();
+                });
+            }
+        } else if (cmd === "likeId") {
+
+            // A heart tapped in the car's song list or queue
+            const wanted = String(arg);
+            const song = cache.songs.find(function (x) {
+                return String(x.song_id) === wanted;
+            }) || queue.find(function (x) {
+                return String(x.song_id) === wanted;
+            });
+
+            if (song) {
+
+                toggleLike(song, document.createElement("span")).then(function () {
 
                     renderList();
                     publishHostSoon();
@@ -16535,6 +16680,24 @@
             [hotspotRow, wifiRow, vpnRow, addressRow, nameRow, carStatusEl, carHint].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
+
+            // How the car page looks. Shown on the car page too, unlike the
+            // network rows above
+            const webLabel = document.createElement("div");
+            webLabel.textContent = "Car page display";
+            webLabel.style.cssText = "color:#bbb";
+
+            const webUpNextRow = makeBoolRow("Show up next",
+                function () { return settings.webUpNext; },
+                function (v) { settings.webUpNext = v; publishHostSoon(); });
+
+            const webWaveRow = makeBoolRow("Waveform seek bar",
+                function () { return settings.webWave; },
+                function (v) { settings.webWave = v; publishHostSoon(); });
+
+            settingsEl.appendChild(webLabel);
+            settingsEl.appendChild(webUpNextRow);
+            settingsEl.appendChild(webWaveRow);
 
             settingsEl.appendChild(carLabel);
             settingsEl.appendChild(hotspotRow);

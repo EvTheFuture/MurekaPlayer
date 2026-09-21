@@ -37,7 +37,7 @@ next, and the player's own settings, all the filters and the artists.
   busy, and the notification says so when it is not listening. `GET /` is the
   car page, `GET /state?since=` the now
   playing state, answered as soon as there is a newer one than `since`, `GET /list?q=&offset=&limit=` a page of the song
-  list, `GET /queue` the queue around the current song,
+  list, `GET /queue?q=` the whole queue,
   `GET /panel?name=settings|filters|creators` a copy of one of the player's
   panels, and `POST /cmd` runs a command in the player.
 - **Hub** passes the player's state out and the commands back in.
@@ -47,10 +47,17 @@ least once since it was installed, so open it once after installing.
 
 ## Queue, settings, filters and artists
 
-- **Queue** on the main screen lists what has played and what comes next.
-  Tap a song to jump to it, the cross takes an upcoming song out.
-- **+** at the end of a song in the list plays it next.
-- **Settings** on the main screen, and **All filters** and **Artists** in the
+- The song list button opens the songs with the same views as the phone:
+  **Mureka**, **Queue** and **A-Z**. The queue shows all of it, played songs
+  dimmed. Tap a song to jump to it, the cross takes an upcoming song out.
+  **Now playing** scrolls to the current song, the round button jumps to the
+  top or the end, and covers load as the rows scroll into sight.
+- The button at the end of a song in the list plays it next, and the heart
+  in each row likes or unlikes the song, as on the phone.
+- **Up next** and a **waveform seek bar** on the main screen, both can be
+  switched off under Car page display in the settings.
+- **Fullscreen** on the main screen, where the car's browser offers it.
+- **Settings** on the main screen, and **Edit filters** and **Artists** in the
   song list, show the phone's own panels with large controls. They are read
   from the player itself, so everything the phone has is there, and every
   tap goes back through the same control on the phone. Filters need Apply

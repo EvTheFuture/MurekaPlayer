@@ -138,11 +138,53 @@
     #like {
         background: none;
         border: none;
-        font-size: clamp(40px, 4.4vw, 68px);
-        line-height: 1;
+        line-height: 0;
         color: var(--empty);
         cursor: pointer;
         padding: 8px;
+    }
+
+    #like .ico {
+        width: clamp(40px, 4.4vw, 68px);
+        height: clamp(40px, 4.4vw, 68px);
+    }
+
+    #like.liked,
+    .rowHeart.liked {
+        color: var(--heart);
+    }
+
+    #like.liked .ico,
+    .rowHeart.liked .ico {
+        fill: currentColor;
+    }
+
+    .ico {
+        width: 1.25em;
+        height: 1.25em;
+        flex: 0 0 auto;
+        display: block;
+    }
+
+    .chip {
+        gap: 0.5em;
+    }
+
+    .chip.iconOnly {
+        padding: 0 16px;
+        justify-content: center;
+    }
+
+    .chip.iconOnly .ico,
+    #sound .ico,
+    .soundIco .ico {
+        width: 1.6em;
+        height: 1.6em;
+    }
+
+    .soundIco {
+        color: var(--muted);
+        line-height: 0;
     }
 
     #seek {
@@ -246,8 +288,9 @@
         background: var(--card);
         color: var(--text);
         font: inherit;
-        padding: 14px 22px;
+        padding: 12px 22px;
         cursor: pointer;
+        line-height: 0;
     }
 
     #sound button.on {
@@ -392,7 +435,32 @@
 
     .rowHeart {
         flex: 0 0 auto;
-        color: var(--heart);
+        background: none;
+        border: none;
+        padding: 8px;
+        line-height: 0;
+        color: var(--empty);
+        cursor: pointer;
+    }
+
+    .rowNext .ico {
+        margin: 0 auto;
+    }
+
+    .rowHeart .ico {
+        width: 1.4em;
+        height: 1.4em;
+    }
+
+    #edgeBtn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #edgeBtn .ico {
+        width: 1.2em;
+        height: 1.2em;
     }
 
     .rowNext {
@@ -544,6 +612,110 @@
         font-variant-numeric: tabular-nums;
     }
 
+    #upNext {
+        display: none;
+        align-items: center;
+        gap: 1.5vw;
+        min-width: 0;
+        font-size: clamp(16px, 1.7vw, 24px);
+        color: var(--muted);
+    }
+
+    #upNext .upLabel {
+        flex: 0 0 auto;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.75em;
+        color: var(--accent);
+    }
+
+    #upTitle {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        color: var(--text);
+    }
+
+    #bar {
+        position: relative;
+    }
+
+    #wave {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        display: none;
+    }
+
+    .thumb {
+        flex: 0 0 auto;
+        width: calc(var(--ctl-h) * 0.85);
+        height: calc(var(--ctl-h) * 0.85);
+        border-radius: 8px;
+        background: var(--card) center / cover no-repeat;
+    }
+
+    #rowsWrap {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #edgeBtn {
+        position: absolute;
+        right: 2vw;
+        bottom: 2vh;
+        width: calc(var(--ctl-h) * 1.2);
+        height: calc(var(--ctl-h) * 1.2);
+        border-radius: 50%;
+        border: none;
+        background: var(--accent);
+        color: #000;
+        font: inherit;
+        font-size: 1.6em;
+        font-weight: 700;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s;
+    }
+
+    .chip:disabled {
+        opacity: 0.4;
+    }
+
+    .pClick.split {
+        display: flex;
+        align-items: center;
+        gap: 1vw;
+    }
+
+    .pClick .pLabel {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .pClick .pCount {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .pClick.on .pCount {
+        color: #000;
+    }
+
     #signin {
         display: none;
         background: #5a1f2b;
@@ -613,13 +785,14 @@
             <div id="subtitle"></div>
             <div id="rateRow">
                 <div id="stars"></div>
-                <button id="like" type="button" aria-label="Like">&#9825;</button>
+                <button id="like" type="button" aria-label="Like" title="Like" data-icon="heart"></button>
             </div>
         </div>
     </div>
+    <div id="upNext"><span class="upLabel">Up next</span><span id="upTitle"></span></div>
     <div id="seek">
         <span id="cur">0:00</span>
-        <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div></div>
+        <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div><canvas id="wave"></canvas></div>
         <span id="left">-0:00</span>
     </div>
     <div id="controls">
@@ -644,47 +817,48 @@
         </button>
     </div>
     <div id="bottom">
-        <span>Sound</span>
+        <span class="soundIco" data-icon="speaker" title="Sound"></span>
         <div id="sound">
-            <button id="soundPhone" type="button" class="on">Phone / Bluetooth</button>
-            <button id="soundCar" type="button">This browser</button>
+            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" aria-label="Sound on the phone or Bluetooth" title="Sound on the phone or Bluetooth"></button>
+            <button id="soundCar" type="button" data-icon="browser" aria-label="Sound in this browser" title="Sound in this browser"></button>
         </div>
         <div id="status"></div>
-        <button class="chip" id="queueBtn" type="button">Queue</button>
-        <button class="chip" id="settingsBtn" type="button">Settings</button>
+        <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
+        <button class="chip iconOnly" id="settingsBtn" type="button" data-icon="settings" aria-label="Settings" title="Settings"></button>
     </div>
 </div>
 <div id="browse">
     <div id="browseTop">
         <input id="search" type="search" placeholder="Search songs" autocomplete="off">
-        <button class="chip" id="clearSearch" type="button">Clear</button>
-        <button class="chip" id="closeBrowse" type="button">Close</button>
+        <button class="chip iconOnly" id="clearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
+        <button class="chip iconOnly" id="closeBrowse" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
     <div class="chipRow">
-        <button class="chip" id="vocalsAll" type="button">All</button>
-        <button class="chip" id="vocalsVocal" type="button">Vocals</button>
-        <button class="chip" id="vocalsInstr" type="button">Instrumental</button>
-        <button class="chip" id="feed" type="button">Published</button>
-        <button class="chip" id="smart" type="button">Filters</button>
+        <button class="chip" id="viewMureka" type="button" data-icon="mureka"><span class="lbl">Mureka</span></button>
+        <button class="chip" id="viewQueue" type="button" data-icon="queue"><span class="lbl">Queue</span></button>
+        <button class="chip" id="viewAlpha" type="button" data-icon="alpha"><span class="lbl">A-Z</span></button>
+        <button class="chip" id="toCurrent" type="button" data-icon="target"><span class="lbl">Now playing</span></button>
+    </div>
+    <div class="chipRow" id="filterRow">
+        <button class="chip" id="vocalsAll" type="button" data-icon="all"><span class="lbl">All</span></button>
+        <button class="chip" id="vocalsVocal" type="button" data-icon="vocals"><span class="lbl">Vocals</span></button>
+        <button class="chip" id="vocalsInstr" type="button" data-icon="instrumental"><span class="lbl">Instrumental</span></button>
+        <button class="chip" id="feed" type="button" data-icon="feed"><span class="lbl">Published</span></button>
+        <button class="chip" id="smart" type="button" data-icon="filter"><span class="lbl">Filters off</span></button>
+        <button class="chip" id="allFilters" type="button" data-icon="sliders"><span class="lbl">Edit filters</span></button>
+        <button class="chip" id="artists" type="button" data-icon="person"><span class="lbl">Artists</span></button>
         <select id="creators"></select>
-        <button class="chip" id="allFilters" type="button">All filters</button>
-        <button class="chip" id="artists" type="button">Artists</button>
     </div>
     <div id="counts"></div>
-    <div id="rows"></div>
-</div>
-<div class="sheet" id="queue">
-    <div class="sheetTop">
-        <div class="sheetTitle" id="queueTitle">Queue</div>
-        <button class="chip" id="queueNow" type="button">Now playing</button>
-        <button class="chip" id="closeQueue" type="button">Close</button>
+    <div id="rowsWrap">
+        <div id="rows"></div>
+        <button id="edgeBtn" type="button" aria-label="Scroll to top" data-icon="arrowUp"></button>
     </div>
-    <div class="sheetBody" id="queueRows"></div>
 </div>
 <div class="sheet" id="panel">
     <div class="sheetTop">
         <div class="sheetTitle" id="panelTitle"></div>
-        <button class="chip" id="closePanel" type="button">Close</button>
+        <button class="chip iconOnly" id="closePanel" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
     <div class="sheetBody" id="panelBody"></div>
 </div>
@@ -703,6 +877,184 @@
     };
 
     const NS = "http://www.w3.org/2000/svg";
+
+    // The icons, drawn like the phone player's, 24 units square with round
+    // strokes in the button's own colour. Each is a list of shapes
+    const ICONS = {
+        settings: [
+            ["circle", { cx: "12", cy: "12", r: "3" }],
+            ["path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }]
+        ],
+        speaker: [
+            ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }],
+            ["path", { d: "M15.54 8.46a5 5 0 0 1 0 7.07" }],
+            ["path", { d: "M19.07 4.93a10 10 0 0 1 0 14.14" }]
+        ],
+        bluetooth: [
+            ["polyline", { points: "6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5" }]
+        ],
+        browser: [
+            ["rect", { x: "2", y: "3", width: "20", height: "14", rx: "2" }],
+            ["line", { x1: "8", y1: "21", x2: "16", y2: "21" }],
+            ["line", { x1: "12", y1: "17", x2: "12", y2: "21" }]
+        ],
+        fullscreen: [
+            ["polyline", { points: "15 3 21 3 21 9" }],
+            ["polyline", { points: "9 21 3 21 3 15" }],
+            ["line", { x1: "21", y1: "3", x2: "14", y2: "10" }],
+            ["line", { x1: "3", y1: "21", x2: "10", y2: "14" }]
+        ],
+        exitFullscreen: [
+            ["polyline", { points: "4 14 10 14 10 20" }],
+            ["polyline", { points: "20 10 14 10 14 4" }],
+            ["line", { x1: "14", y1: "10", x2: "21", y2: "3" }],
+            ["line", { x1: "3", y1: "21", x2: "10", y2: "14" }]
+        ],
+        close: [
+            ["line", { x1: "18", y1: "6", x2: "6", y2: "18" }],
+            ["line", { x1: "6", y1: "6", x2: "18", y2: "18" }]
+        ],
+        clearSearch: [
+            ["circle", { cx: "12", cy: "12", r: "10" }],
+            ["line", { x1: "15", y1: "9", x2: "9", y2: "15" }],
+            ["line", { x1: "9", y1: "9", x2: "15", y2: "15" }]
+        ],
+        heart: [
+            ["path", { d: "M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" }]
+        ],
+        listPlus: [
+            ["line", { x1: "3", y1: "6", x2: "15", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "15", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "11", y2: "18" }],
+            ["line", { x1: "18", y1: "13", x2: "18", y2: "21" }],
+            ["line", { x1: "14", y1: "17", x2: "22", y2: "17" }]
+        ],
+        check: [
+            ["polyline", { points: "20 6 9 17 4 12" }]
+        ],
+        arrowUp: [
+            ["line", { x1: "12", y1: "19", x2: "12", y2: "5" }],
+            ["polyline", { points: "5 12 12 5 19 12" }]
+        ],
+        arrowDown: [
+            ["line", { x1: "12", y1: "5", x2: "12", y2: "19" }],
+            ["polyline", { points: "19 12 12 19 5 12" }]
+        ],
+        target: [
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["circle", { cx: "12", cy: "12", r: "3", fill: "currentColor" }]
+        ],
+        mureka: [
+            ["line", { x1: "4", y1: "9", x2: "20", y2: "9" }],
+            ["line", { x1: "4", y1: "15", x2: "20", y2: "15" }],
+            ["line", { x1: "10", y1: "3", x2: "8", y2: "21" }],
+            ["line", { x1: "16", y1: "3", x2: "14", y2: "21" }]
+        ],
+        queue: [
+            ["polygon", { points: "2 6 2 14 8 10", fill: "currentColor", stroke: "none" }],
+            ["line", { x1: "12", y1: "7", x2: "21", y2: "7" }],
+            ["line", { x1: "12", y1: "12", x2: "21", y2: "12" }],
+            ["line", { x1: "12", y1: "17", x2: "21", y2: "17" }]
+        ],
+        alpha: [
+            ["line", { x1: "3", y1: "6", x2: "17", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "13", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "9", y2: "18" }]
+        ],
+        all: [
+            ["rect", { x: "3", y: "3", width: "7", height: "7" }],
+            ["rect", { x: "14", y: "3", width: "7", height: "7" }],
+            ["rect", { x: "14", y: "14", width: "7", height: "7" }],
+            ["rect", { x: "3", y: "14", width: "7", height: "7" }]
+        ],
+        vocals: [
+            ["path", { d: "M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" }],
+            ["path", { d: "M19 10v2a7 7 0 0 1-14 0v-2" }],
+            ["line", { x1: "12", y1: "19", x2: "12", y2: "23" }],
+            ["line", { x1: "8", y1: "23", x2: "16", y2: "23" }]
+        ],
+        instrumental: [
+            ["path", { d: "M9 18V5l12-2v13" }],
+            ["circle", { cx: "6", cy: "18", r: "3" }],
+            ["circle", { cx: "18", cy: "16", r: "3" }]
+        ],
+        feed: [
+            ["polygon", { points: "12 2 2 7 12 12 22 7 12 2" }],
+            ["polyline", { points: "2 17 12 22 22 17" }],
+            ["polyline", { points: "2 12 12 17 22 12" }]
+        ],
+        filter: [
+            ["polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" }]
+        ],
+        sliders: [
+            ["line", { x1: "4", y1: "21", x2: "4", y2: "14" }],
+            ["line", { x1: "4", y1: "10", x2: "4", y2: "3" }],
+            ["line", { x1: "12", y1: "21", x2: "12", y2: "12" }],
+            ["line", { x1: "12", y1: "8", x2: "12", y2: "3" }],
+            ["line", { x1: "20", y1: "21", x2: "20", y2: "16" }],
+            ["line", { x1: "20", y1: "12", x2: "20", y2: "3" }],
+            ["line", { x1: "1", y1: "14", x2: "7", y2: "14" }],
+            ["line", { x1: "9", y1: "8", x2: "15", y2: "8" }],
+            ["line", { x1: "17", y1: "16", x2: "23", y2: "16" }]
+        ],
+        person: [
+            ["path", { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }],
+            ["circle", { cx: "12", cy: "7", r: "4" }]
+        ]
+    };
+
+    function icon(name) {
+
+        const svg = document.createElementNS(NS, "svg");
+
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("aria-hidden", "true");
+        svg.classList.add("ico");
+
+        for (const shape of ICONS[name] || []) {
+
+            const el = document.createElementNS(NS, shape[0]);
+
+            for (const key of Object.keys(shape[1])) {
+                el.setAttribute(key, shape[1][key]);
+            }
+
+            svg.appendChild(el);
+        }
+
+        return svg;
+    }
+
+    // Swap the icon of a button, keeping its label
+    function setIcon(el, name) {
+
+        const old = el.querySelector(".ico");
+        const fresh = icon(name);
+
+        if (old) {
+            el.replaceChild(fresh, old);
+        } else {
+            el.insertBefore(fresh, el.firstChild);
+        }
+    }
+
+    function setLabel(el, text) {
+
+        const lbl = el.querySelector(".lbl");
+
+        if (lbl) {
+            lbl.textContent = text;
+        }
+    }
+
+    for (const el of document.querySelectorAll("[data-icon]")) {
+        setIcon(el, el.dataset.icon);
+    }
     const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
         + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
 
@@ -836,14 +1188,13 @@
             $("title").textContent = online ? "Nothing playing" : "Connecting to the phone";
             $("subtitle").textContent = online ? "Start a song on the phone or tap play" : "";
             paintStars(null);
-            $("like").style.color = "var(--empty)";
+            $("like").classList.remove("liked");
         } else {
 
             $("title").textContent = s.title;
             $("subtitle").textContent = s.subtitle || "";
             paintStars(s.rating);
-            $("like").textContent = s.liked ? "♥" : "♡";
-            $("like").style.color = s.liked ? "var(--heart)" : "var(--empty)";
+            $("like").classList.toggle("liked", !!s.liked);
         }
 
         const cover = s && s.cover ? s.cover : "";
@@ -853,6 +1204,19 @@
             shownCover = cover;
             $("cover").style.backgroundImage = cover ? "url(\"" + cover.replace(/"/g, "%22") + "\")" : "none";
         }
+
+        // What plays after this one, when the phone's settings ask for it
+        const next = s && s.upNext ? s.upNext : null;
+
+        $("upNext").style.display = next ? "flex" : "none";
+        $("upTitle").textContent = next ? next.title : "";
+
+        // The waveform replaces the plain bar when the phone sends one
+        const wave = s && s.wave && s.wave.length ? s.wave : null;
+
+        $("wave").style.display = wave ? "block" : "none";
+        $("track").style.visibility = wave ? "hidden" : "visible";
+        waveShown = -1;
 
         const playing = !!(s && s.playing);
 
@@ -876,6 +1240,64 @@
         syncAudio();
     }
 
+    // The waveform bars, played part in the accent colour, redrawn only
+    // when the played part or the size moved on
+    let waveShown = -1;
+
+    function drawWave(frac) {
+
+        const canvas = $("wave");
+        const data = state && state.wave ? state.wave : null;
+
+        if (!data || canvas.style.display === "none") {
+            return;
+        }
+
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.round(canvas.clientWidth * dpr);
+        const h = Math.round(canvas.clientHeight * dpr);
+        const barW = 3 * dpr;
+        const gap = 2 * dpr;
+        const count = Math.max(1, Math.floor(w / (barW + gap)));
+        const played = Math.round(frac * count);
+        const key = played * 100000 + w;
+
+        if (w === 0 || h === 0 || key === waveShown) {
+            return;
+        }
+
+        waveShown = key;
+
+        if (canvas.width !== w || canvas.height !== h) {
+
+            canvas.width = w;
+            canvas.height = h;
+        }
+
+        const ctx = canvas.getContext("2d");
+
+        ctx.clearRect(0, 0, w, h);
+
+        for (let i = 0; i < count; i++) {
+
+            const a = Math.floor(i * data.length / count);
+            const b = Math.max(a + 1, Math.floor((i + 1) * data.length / count));
+            let peak = 0;
+
+            for (let j = a; j < b; j++) {
+
+                if (data[j] > peak) {
+                    peak = data[j];
+                }
+            }
+
+            const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
+
+            ctx.fillStyle = i < played ? "#48e1eb" : "#555";
+            ctx.fillRect(i * (barW + gap), (h - bh) / 2, barW, bh);
+        }
+    }
+
     // The seek bar and the times move smoothly between the polls
     function tick() {
 
@@ -885,6 +1307,7 @@
 
         $("fill").style.width = (frac * 100) + "%";
         $("knob").style.left = (frac * 100) + "%";
+        drawWave(frac);
         $("cur").textContent = fmt(pos);
         $("left").textContent = "-" + fmt(dur - pos);
 
@@ -954,37 +1377,122 @@
         });
     }
 
-    // The song list, fetched a page at a time from the phone
+    // The song list: Mureka order or A to Z a page at a time, or the whole
+    // queue. The view is this browser's own, the phone keeps its own view
     const PAGE = 60;
 
+    let listView = "mureka";
     let listTotal = 0;
     let listLoaded = 0;
     let listBusy = false;
     let listQuery = "";
+    let listToken = 0;
     let searchTimer = null;
+    let queuePos = -1;
+
+    try {
+
+        const saved = localStorage.getItem("murekaCarView");
+
+        if (saved === "queue" || saved === "alpha") {
+            listView = saved;
+        }
+    } catch (e) {
+        // No storage, Mureka order then
+    }
 
     function esc(text) {
         return encodeURIComponent(text);
     }
 
-    function loadList(reset) {
+    // Covers are only fetched for rows about to scroll into sight, a list
+    // of a thousand songs must not pull a thousand images at once
+    const thumbObserver = window.IntersectionObserver
+        ? new IntersectionObserver(function (entries) {
 
-        if (listBusy) {
+            for (const entry of entries) {
+
+                if (entry.isIntersecting) {
+
+                    loadThumb(entry.target);
+                    thumbObserver.unobserve(entry.target);
+                }
+            }
+        }, { root: $("rows"), rootMargin: "600px 0px" })
+        : null;
+
+    function loadThumb(el) {
+
+        const url = el.dataset.src || "";
+
+        if (url) {
+            el.style.backgroundImage = "url(\"" + url.replace(/"/g, "%22") + "\")";
+        }
+    }
+
+    function makeThumb(url) {
+
+        const el = document.createElement("div");
+
+        el.className = "thumb";
+
+        if (url) {
+
+            el.dataset.src = url;
+
+            if (thumbObserver) {
+                thumbObserver.observe(el);
+            } else {
+                loadThumb(el);
+            }
+        }
+
+        return el;
+    }
+
+    function clearRows() {
+
+        if (thumbObserver) {
+            thumbObserver.disconnect();
+        }
+
+        $("rows").textContent = "";
+    }
+
+    function loadList(reset, done) {
+
+        if (listView === "queue") {
+
+            loadQueue(reset);
             return;
         }
 
         if (reset) {
 
+            listToken += 1;
             listLoaded = 0;
-            $("rows").textContent = "";
+            listBusy = false;
+            clearRows();
+            quietScroll();
+            $("rows").scrollTop = 0;
         }
+
+        if (listBusy) {
+            return;
+        }
+
+        const token = listToken;
 
         listBusy = true;
 
-        fetch("/list?q=" + esc(listQuery) + "&offset=" + listLoaded + "&limit=" + PAGE,
-            { cache: "no-store" }).then(function (res) {
+        fetch("/list?q=" + esc(listQuery) + "&view=" + listView + "&offset=" + listLoaded
+            + "&limit=" + (done ? 200 : PAGE), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (data) {
+
+            if (token !== listToken) {
+                return;
+            }
 
             listBusy = false;
 
@@ -1003,10 +1511,208 @@
             $("counts").textContent = listTotal + " song" + (listTotal === 1 ? "" : "s")
                 + (listQuery ? " matching " + listQuery : "")
                 + (listLoaded < listTotal ? ", showing " + listLoaded : "");
+
+            if (done) {
+                done();
+            }
         }).catch(function () {
-            listBusy = false;
+
+            if (token === listToken) {
+                listBusy = false;
+            }
         });
     }
+
+    // Everything still missing, a large page at a time, then the callback.
+    // Used by the jump to the end of the list
+    function loadRest(then) {
+
+        if (listView === "queue" || listLoaded >= listTotal) {
+
+            then();
+            return;
+        }
+
+        const before = listLoaded;
+
+        loadList(false, function () {
+
+            if (listLoaded > before) {
+                loadRest(then);
+            } else {
+                then();
+            }
+        });
+    }
+
+    // The queue, all of it as on the phone. Played songs are dimmed, a tap
+    // plays that song, the cross takes an upcoming one out
+    function loadQueue(reset) {
+
+        listToken += 1;
+
+        const token = listToken;
+        const box = $("rows");
+        const keep = box.scrollTop;
+
+        fetch("/queue?q=" + esc(listQuery), { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            if (token !== listToken || !data || !data.items) {
+                return;
+            }
+
+            queuePos = data.pos;
+            clearRows();
+
+            let current = null;
+
+            for (const item of data.items) {
+
+                const row = queueRow(item, data.pos);
+
+                if (item.index === data.pos) {
+                    current = row;
+                }
+
+                box.appendChild(row);
+            }
+
+            $("counts").textContent = "Queue, " + (data.pos + 1) + " of " + data.total
+                + (listQuery ? ", " + data.items.length + " matching " + listQuery : "");
+
+            quietScroll();
+
+            if (reset && current) {
+                box.scrollTop = Math.max(0, current.offsetTop - box.clientHeight / 3);
+            } else {
+                box.scrollTop = keep;
+            }
+        }).catch(function () {
+        });
+    }
+
+    function queueRow(item, pos) {
+
+        const row = document.createElement("div");
+        const num = document.createElement("span");
+
+        row.setAttribute("role", "button");
+        row.className = "row" + (item.index === pos ? " playing" : "")
+            + (item.index < pos ? " past" : "");
+
+        num.className = "rowNum";
+        num.textContent = String(item.index + 1);
+        row.appendChild(num);
+        songLine(item, row);
+
+        if (item.index > pos) {
+
+            row.appendChild(lineButton("Remove from the queue", "close", function () {
+                send("queueRemove", item.index).then(function () {
+                    setTimeout(function () {
+                        loadQueue(false);
+                    }, 150);
+                });
+            }));
+        }
+
+        row.addEventListener("click", function () {
+            send("queueJump", item.index).then(function () {
+                setTimeout(function () {
+                    loadQueue(false);
+                }, 250);
+            });
+        });
+
+        return row;
+    }
+
+    // The row a song plays from, centred in the list
+    function scrollToCurrent() {
+
+        const box = $("rows");
+        const row = box.querySelector(".row.playing");
+
+        if (row) {
+
+            quietScroll();
+            box.scrollTop = Math.max(0, row.offsetTop - box.clientHeight / 3);
+        }
+    }
+
+    function paintViews() {
+
+        $("viewMureka").classList.toggle("on", listView === "mureka");
+        $("viewQueue").classList.toggle("on", listView === "queue");
+        $("viewAlpha").classList.toggle("on", listView === "alpha");
+    }
+
+    function setView(view) {
+
+        listView = view;
+
+        try {
+            localStorage.setItem("murekaCarView", view);
+        } catch (e) {
+            // Not kept then, only for this visit
+        }
+
+        paintViews();
+        loadList(true);
+    }
+
+    // The jump button, like the phone's: scrolling down offers the end of
+    // the list, scrolling up the top. It fades after a while without
+    // scrolling, and the page's own scrolling does not wake it
+    let lastScrollTop = 0;
+    let edgeDir = "up";
+    let edgeTimer = 0;
+    let quietUntil = 0;
+
+    function quietScroll() {
+        quietUntil = Date.now() + 400;
+    }
+
+    function hideEdge() {
+
+        clearTimeout(edgeTimer);
+        $("edgeBtn").style.opacity = "0";
+        $("edgeBtn").style.pointerEvents = "none";
+    }
+
+    function showEdge(dir) {
+
+        edgeDir = dir;
+        setIcon($("edgeBtn"), dir === "down" ? "arrowDown" : "arrowUp");
+        $("edgeBtn").setAttribute("aria-label", dir === "down" ? "Scroll to end" : "Scroll to top");
+        $("edgeBtn").style.opacity = "1";
+        $("edgeBtn").style.pointerEvents = "auto";
+
+        clearTimeout(edgeTimer);
+        edgeTimer = setTimeout(hideEdge, 5000);
+    }
+
+    $("edgeBtn").addEventListener("click", function () {
+
+        const box = $("rows");
+
+        hideEdge();
+
+        if (edgeDir === "down") {
+
+            loadRest(function () {
+
+                quietScroll();
+                box.scrollTop = box.scrollHeight;
+            });
+        } else {
+
+            quietScroll();
+            box.scrollTop = 0;
+        }
+    });
 
     // One song line, shared by the song list and the queue
     function songLine(song, row) {
@@ -1014,7 +1720,9 @@
         const title = document.createElement("span");
         const rate = document.createElement("span");
         const time = document.createElement("span");
-        const heart = document.createElement("span");
+        const heart = document.createElement("button");
+
+        row.appendChild(makeThumb(song.cover));
 
         title.className = "rowTitle";
         title.textContent = song.title;
@@ -1026,8 +1734,21 @@
         time.className = "rowTime";
         time.textContent = fmt(song.duration);
 
-        heart.className = "rowHeart";
-        heart.textContent = song.liked ? "\u2665" : "";
+        // A heart to like or unlike, like the phone's list. Flipped at once,
+        // the phone sends the truth back with the next list
+        heart.type = "button";
+        heart.className = "rowHeart" + (song.liked ? " liked" : "");
+        heart.setAttribute("aria-label", song.liked ? "Unlike" : "Like");
+        heart.appendChild(icon("heart"));
+
+        heart.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            song.liked = !song.liked;
+            heart.classList.toggle("liked", song.liked);
+            heart.setAttribute("aria-label", song.liked ? "Unlike" : "Like");
+            send("likeId", song.id);
+        });
 
         row.appendChild(title);
         row.appendChild(rate);
@@ -1036,14 +1757,15 @@
     }
 
     // A small button at the end of a line, which must not also tap the line
-    function lineButton(label, text, action) {
+    function lineButton(label, iconName, action) {
 
         const btn = document.createElement("button");
 
         btn.type = "button";
         btn.className = "rowNext";
         btn.setAttribute("aria-label", label);
-        btn.textContent = text;
+        btn.title = label;
+        btn.appendChild(icon(iconName));
 
         btn.addEventListener("click", function (ev) {
 
@@ -1061,12 +1783,13 @@
 
         row.setAttribute("role", "button");
         row.className = "row" + (song.playing ? " playing" : "");
+        row.dataset.id = song.id;
         songLine(song, row);
 
-        row.appendChild(lineButton("Play next", "+", function (btn) {
+        row.appendChild(lineButton("Play next", "listPlus", function (btn) {
 
             send("playNext", song.id);
-            btn.textContent = "\u2713";
+            setIcon(btn, "check");
         }));
 
         row.addEventListener("click", function () {
@@ -1097,11 +1820,15 @@
         $("vocalsVocal").classList.toggle("on", f.vocals === "vocal");
         $("vocalsInstr").classList.toggle("on", f.vocals === "instrumental");
 
-        $("feed").textContent = f.published === "published" ? "Published" : "All songs";
+        setLabel($("feed"), f.published === "published" ? "Published" : "All songs");
         $("feed").classList.toggle("on", f.published === "published");
 
-        $("smart").textContent = f.smartText ? "Filters: " + f.smartText : "Filters";
-        $("smart").classList.toggle("on", f.smart && !!f.smartText);
+        // Like the phone's Filters on and off, parked or restored without
+        // losing what is ticked, and nothing to switch when nothing is set
+        setLabel($("smart"), (f.smart ? "Filters on" : "Filters off")
+            + (f.smart && f.smartText ? ": " + f.smartText : ""));
+        $("smart").classList.toggle("on", !!(f.smart && f.smartAny));
+        $("smart").disabled = !f.smartAny;
 
         // The creator list only changes when one is added on the phone
         const wanted = (f.creator ? f.creator.id : "") + "|"
@@ -1143,97 +1870,6 @@
             }, 250);
         });
     }
-
-    // The queue, what has played and what comes next, as on the phone
-    let queueData = null;
-
-    function loadQueue(toCurrent) {
-
-        return fetch("/queue", { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
-
-            queueData = data;
-            renderQueue(toCurrent);
-        }).catch(function () {
-        });
-    }
-
-    function renderQueue(toCurrent) {
-
-        const box = $("queueRows");
-        const keep = box.scrollTop;
-        const data = queueData;
-
-        box.textContent = "";
-
-        if (!data || !data.items) {
-
-            $("queueTitle").textContent = "Queue";
-            return;
-        }
-
-        $("queueTitle").textContent = "Queue, " + (data.pos + 1) + " of " + data.total;
-
-        let current = null;
-
-        for (const item of data.items) {
-
-            const row = document.createElement("div");
-            const num = document.createElement("span");
-
-            row.setAttribute("role", "button");
-            row.className = "row" + (item.index === data.pos ? " playing" : "")
-                + (item.index < data.pos ? " past" : "");
-
-            num.className = "rowNum";
-            num.textContent = String(item.index + 1);
-            row.appendChild(num);
-            songLine(item, row);
-
-            // Only what is still to come can be taken out
-            if (item.index > data.pos) {
-
-                row.appendChild(lineButton("Remove from the queue", "\u2715", function () {
-                    send("queueRemove", item.index).then(function () {
-                        loadQueue(false);
-                    });
-                }));
-            }
-
-            row.addEventListener("click", function () {
-                send("queueJump", item.index).then(function () {
-                    loadQueue(false);
-                });
-            });
-
-            if (item.index === data.pos) {
-                current = row;
-            }
-
-            box.appendChild(row);
-        }
-
-        if (toCurrent && current) {
-            box.scrollTop = Math.max(0, current.offsetTop - box.offsetTop - box.clientHeight / 3);
-        } else {
-            box.scrollTop = keep;
-        }
-    }
-
-    $("queueBtn").addEventListener("click", function () {
-
-        $("queue").style.display = "flex";
-        loadQueue(true);
-    });
-
-    $("queueNow").addEventListener("click", function () {
-        renderQueue(true);
-    });
-
-    $("closeQueue").addEventListener("click", function () {
-        $("queue").style.display = "none";
-    });
 
     // A copy of one of the phone's own panels, the settings, all the filters
     // or the artists, drawn with large controls. Every tap goes back to the
@@ -1364,8 +2000,24 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "");
-            btn.textContent = node.s || "?";
             btn.disabled = node.off === true;
+
+            // A tag and its count, the count kept to the right
+            if (node.parts && node.parts.length > 1) {
+
+                const label = document.createElement("span");
+                const count = document.createElement("span");
+
+                btn.classList.add("split");
+                label.className = "pLabel";
+                label.textContent = node.parts[0];
+                count.className = "pCount";
+                count.textContent = node.parts.slice(1).join(" ");
+                btn.appendChild(label);
+                btn.appendChild(count);
+            } else {
+                btn.textContent = node.s || "?";
+            }
 
             btn.addEventListener("click", function () {
                 panelAction("hclick", node.id);
@@ -1521,6 +2173,46 @@
         }
     });
 
+    // Fullscreen for the car browser, where it offers it
+    function fullscreenOn() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    function paintFullscreen() {
+        const on = fullscreenOn();
+
+        setIcon($("fullBtn"), on ? "exitFullscreen" : "fullscreen");
+        $("fullBtn").setAttribute("aria-label", on ? "Leave fullscreen" : "Fullscreen");
+        $("fullBtn").title = on ? "Leave fullscreen" : "Fullscreen";
+    }
+
+    if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
+        $("fullBtn").style.display = "none";
+    }
+
+    $("fullBtn").addEventListener("click", function () {
+
+        const root = document.documentElement;
+
+        if (fullscreenOn()) {
+
+            if (document.exitFullscreen) {
+                document.exitFullscreen().catch(function () {
+                });
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+        } else if (root.requestFullscreen) {
+            root.requestFullscreen().catch(function () {
+            });
+        } else if (root.webkitRequestFullscreen) {
+            root.webkitRequestFullscreen();
+        }
+    });
+
+    document.addEventListener("fullscreenchange", paintFullscreen);
+    document.addEventListener("webkitfullscreenchange", paintFullscreen);
+
     $("settingsBtn").addEventListener("click", function () {
         showPanel("settings");
     });
@@ -1536,7 +2228,32 @@
     $("browseBtn").addEventListener("click", function () {
 
         $("browse").style.display = "flex";
+        paintViews();
         loadList(true);
+    });
+
+    $("viewMureka").addEventListener("click", function () {
+        setView("mureka");
+    });
+
+    $("viewQueue").addEventListener("click", function () {
+        setView("queue");
+    });
+
+    $("viewAlpha").addEventListener("click", function () {
+        setView("alpha");
+    });
+
+    // The playing song may be further down than what is loaded so far
+    $("toCurrent").addEventListener("click", function () {
+
+        if (listView === "queue" || $("rows").querySelector(".row.playing")) {
+
+            scrollToCurrent();
+            return;
+        }
+
+        loadRest(scrollToCurrent);
     });
 
     $("closeBrowse").addEventListener("click", function () {
@@ -1564,10 +2281,17 @@
     $("rows").addEventListener("scroll", function () {
 
         const el = $("rows");
+        const top = el.scrollTop;
 
-        if (listLoaded < listTotal && el.scrollTop + el.clientHeight > el.scrollHeight - 400) {
+        if (listView !== "queue" && listLoaded < listTotal && top + el.clientHeight > el.scrollHeight - 400) {
             loadList(false);
         }
+
+        if (Date.now() > quietUntil && Math.abs(top - lastScrollTop) > 2) {
+            showEdge(top > lastScrollTop ? "down" : "up");
+        }
+
+        lastScrollTop = top;
     });
 
     $("vocalsAll").addEventListener("click", function () {
@@ -1620,14 +2344,18 @@
         online = true;
         render();
 
-        // Keep the open list and queue in step when the song changes on its
-        // own
+        // Keep the open list in step when the song changes on its own,
+        // without losing the place in it
         if (before !== s.id && $("browse").style.display === "flex") {
-            loadList(true);
-        }
 
-        if (before !== s.id && $("queue").style.display === "flex") {
-            loadQueue(true);
+            if (listView === "queue") {
+                loadQueue(false);
+            } else {
+
+                for (const row of $("rows").querySelectorAll(".row")) {
+                    row.classList.toggle("playing", row.dataset.id === s.id);
+                }
+            }
         }
     }
 

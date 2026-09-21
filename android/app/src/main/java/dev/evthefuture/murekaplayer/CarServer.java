@@ -287,7 +287,17 @@ final class CarServer {
             } else if ("GET".equals(method) && "/list".equals(path)) {
                 sendList(out, query);
             } else if ("GET".equals(method) && "/queue".equals(path)) {
-                sendCall(out, "__murekaHostQueue", "null");
+
+                // The search text goes in as data, quoted, never as code
+                JSONObject req = new JSONObject();
+
+                try {
+                    req.put("q", param(query, "q"));
+                } catch (JSONException e) {
+                    // An empty search then
+                }
+
+                sendCall(out, "__murekaHostQueue", req.toString());
             } else if ("GET".equals(method) && "/panel".equals(path)) {
 
                 String name = param(query, "name");
@@ -320,6 +330,7 @@ final class CarServer {
         try {
 
             req.put("q", param(query, "q"));
+            req.put("view", "alpha".equals(param(query, "view")) ? "alpha" : "mureka");
             req.put("offset", number(param(query, "offset"), 0));
             req.put("limit", number(param(query, "limit"), 60));
         } catch (JSONException e) {
