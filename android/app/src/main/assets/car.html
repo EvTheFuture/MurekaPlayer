@@ -75,82 +75,115 @@
         align-items: center;
     }
 
-    /* The cover with the covers before and after peeking in at the sides,
-       like the phone's strip. The wrap is wider than the cover and clips
-       the neighbours, the strip slides under the finger */
-    #coverWrap {
+    /* The covers, drawn like the phone's cover flow. The stage lies behind
+       the whole main area, so the next cover can peek out from behind the
+       current one underneath the title and stars, fading into the dark */
+    /* Its own stacking layer, so the title and stars lifted over the
+       covers never end up over the settings and the other panels */
+    #main {
         position: relative;
-        height: 100%;
-        max-height: 62vh;
-        aspect-ratio: 1.5 / 1;
-        flex: 0 0 auto;
+        isolation: isolate;
+    }
+
+    /* The stage reaches out over the page margin to the screen edges, and
+       the covers fade out there instead of being cut off in a straight
+       line level with the buttons. The script sets the reach and the fade */
+    #artStage {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
         overflow: hidden;
-        touch-action: pan-y;
+        z-index: 0;
+        touch-action: none;
         user-select: none;
         -webkit-user-select: none;
     }
 
-    #coverStrip {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 50%;
-        display: flex;
-        align-items: center;
-        gap: 3%;
-        transform: translateX(-50%);
+    #coverSpace {
+        flex: 0 0 auto;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    #info {
+        position: relative;
+        z-index: 1;
+        pointer-events: none;
+    }
+
+    #info button,
+    #info .star {
+        pointer-events: auto;
+    }
+
+    #title,
+    #subtitle,
+    #upNext {
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
     }
 
     .tile {
-        height: 100%;
-        aspect-ratio: 1 / 1;
+        position: absolute;
+        top: 50%;
+        left: 0;
         border-radius: 14px;
         background: var(--card) center / cover no-repeat;
-        flex: 0 0 auto;
+        transform-origin: 0 50%;
         box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+        will-change: transform;
     }
 
-    .tile.side {
-        height: 78%;
-        opacity: 0.45;
-        cursor: pointer;
-    }
-
-    .tile.side.empty {
+    .tile.empty {
         visibility: hidden;
     }
 
     #cover {
-        position: relative;
         overflow: hidden;
     }
 
+    /* Where the title and stars reach over the playing cover, its right
+       side darkens towards the edge so the text stays readable */
+    #coverShade {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(to right, rgba(29, 29, 34, 0) 45%, rgba(29, 29, 34, 0.55) 72%, rgba(29, 29, 34, 0.9) 100%);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* The lyrics roll like the phone's: five rows, the line being sung in
+       the middle, the ones before and after smaller and dimmer, and a half
+       line at each end that has faded away. The rows are placed by script.
+       On the cover they sit at the bottom over the phone's dark scrim */
     #lyricsOver {
         position: absolute;
         left: 0;
         right: 0;
         bottom: 0;
-        padding: 12% 4% 4%;
-        background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
+        padding: 30% 5% 5%;
+        background: linear-gradient(to top, rgba(29, 29, 34, 0.95) 0%, rgba(29, 29, 34, 0.75) 40%, rgba(29, 29, 34, 0.35) 70%, rgba(29, 29, 34, 0) 100%);
         display: none;
-        flex-direction: column;
-        gap: 0.2em;
-        font-size: clamp(16px, 1.7vw, 26px);
-        color: var(--muted);
-        text-align: center;
+        pointer-events: none;
     }
 
-    #lyricsOver .cur {
-        color: #fff;
-        font-weight: 700;
-        font-size: 1.15em;
+    .lyricRoll {
+        position: relative;
+        overflow: visible;
     }
 
-    #lyricsOver div {
-        min-height: 1.3em;
+    .lyricRoll div {
+        position: absolute;
+        left: 0;
+        right: 0;
+        opacity: 0;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+        transform-origin: left center;
+        will-change: transform, opacity;
     }
 
     #info {
@@ -164,19 +197,23 @@
     #title {
         font-size: clamp(28px, 4.2vw, 64px);
         font-weight: 700;
-        line-height: 1.1;
-        overflow: hidden;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+        line-height: 1.2;
     }
 
     #subtitle {
         font-size: clamp(18px, 2vw, 30px);
         color: var(--muted);
+    }
+
+    /* One line that walks across when it does not fit, like the phone's
+       meta line. The padding leaves room for the text shadow, the negative
+       margin keeps the spacing as it was */
+    .marquee {
         overflow: hidden;
         white-space: nowrap;
-        text-overflow: ellipsis;
+        min-width: 0;
+        padding: 6px 0;
+        margin: -6px 0;
     }
 
     #rateRow {
@@ -308,7 +345,8 @@
     }
 
     .ctl {
-        flex: 1;
+        flex: 1 1 0;
+        min-width: 0;
         height: clamp(72px, 12vh, 120px);
         border: none;
         border-radius: 16px;
@@ -339,7 +377,6 @@
     }
 
     .ctl.big {
-        flex: 1.6;
         background: var(--accent);
         color: #000;
     }
@@ -378,9 +415,6 @@
         flex: 1;
         min-width: 0;
         color: var(--muted);
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
         text-align: right;
     }
 
@@ -435,11 +469,12 @@
         white-space: nowrap;
     }
 
+    /* Same weight on and off, a bolder label would widen the chip and push
+       the ones after it along */
     .chip.on {
         background: var(--accent);
         border-color: var(--accent);
         color: #000;
-        font-weight: 600;
     }
 
     #filterText {
@@ -520,9 +555,41 @@
         cursor: pointer;
     }
 
-    .row.playing {
+    .row.playing,
+    .row.playing .rowNum {
         color: var(--accent);
         font-weight: 600;
+    }
+
+    /* Stands in for the remove button on rows that have none, so every
+       row's columns line up */
+    .rowNext.spacer {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    /* The loading glyph, a turning arc like the phone's refresh icon */
+    .spin {
+        display: inline-block;
+        width: 1.1em;
+        height: 1.1em;
+        vertical-align: -0.2em;
+        animation: spinTurn 0.8s linear infinite;
+    }
+
+    @keyframes spinTurn {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .loadRow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6em;
+        padding: 3vh 0;
+        color: var(--muted);
     }
 
     .rowTitle {
@@ -540,8 +607,11 @@
         font-size: 0.8em;
     }
 
+    /* Never bold, a bolder length on the playing row would push the
+       heart out of line with the rows around it */
     .rowTime {
         flex: 0 0 auto;
+        font-weight: 400;
         color: var(--muted);
         font-variant-numeric: tabular-nums;
         font-size: 0.85em;
@@ -635,7 +705,20 @@
         background: var(--bg);
         border: 1px solid var(--line);
         border-radius: 18px;
-        padding: 2vh 2.5vw;
+        padding: 2vh 0 2vh 2.5vw;
+    }
+
+    /* The settings scroll in a box that reaches the right edge of the
+       background, and the content keeps its distance inside it, so the
+       scrollbar, also one drawn over the page, runs along the edge and
+       never across the buttons */
+    .sheetInner .sheetTop,
+    #panelBody {
+        padding-right: 2.5vw;
+    }
+
+    #panelScroll {
+        border-radius: 0 0 18px 0;
     }
 
     .row {
@@ -797,7 +880,7 @@
     .sheetTop {
         display: flex;
         gap: 1.5vw;
-        align-items: center;
+        align-items: flex-start;
     }
 
     .sheetTitle {
@@ -877,6 +960,13 @@
         font-size: 0.8em;
     }
 
+    /* An explanation keeps to the label column and wraps before the
+       switches and steppers on the right. The script measures how wide
+       their column is */
+    #panelBody > .pText.small {
+        padding-right: calc(var(--ctl-col, 0px) + 1vw);
+    }
+
     .pRow {
         display: flex;
         flex-wrap: wrap;
@@ -953,7 +1043,8 @@
     #upNext {
         display: none;
         align-items: center;
-        gap: 1.5vw;
+        gap: 1vw;
+        margin-top: 1vh;
         min-width: 0;
         font-size: clamp(16px, 1.7vw, 24px);
         color: var(--muted);
@@ -970,9 +1061,6 @@
     #upTitle {
         flex: 1;
         min-width: 0;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
         color: var(--text);
     }
 
@@ -1155,23 +1243,6 @@
 
     #lyrics {
         display: none;
-        flex-direction: column;
-        gap: 0.4em;
-        font-size: clamp(18px, 2vw, 30px);
-        color: var(--muted);
-    }
-
-    #lyrics .cur {
-        color: var(--text);
-        font-weight: 700;
-        font-size: 1.15em;
-    }
-
-    #lyrics div {
-        min-height: 1.3em;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
     }
 
     #actionsPop {
@@ -1318,11 +1389,9 @@
             align-items: stretch;
         }
 
-        #coverWrap {
-            height: auto;
+        #coverSpace {
+            height: 45vh;
             width: 100%;
-            max-height: 45vh;
-            align-self: center;
         }
     }
 </style>
@@ -1331,24 +1400,25 @@
 <div id="app">
     <div id="signin">Mureka Player on the phone is not signed in to Mureka. Open the app on the phone and sign in.</div>
     <div id="main">
-        <div id="coverWrap">
-            <div id="coverStrip">
-                <div class="tile side empty" id="tilePrev"></div>
-                <div class="tile" id="cover"><div id="lyricsOver"><div id="loPrev"></div><div id="loCur" class="cur"></div><div id="loNext"></div></div></div>
-                <div class="tile side empty" id="tileNext"></div>
-            </div>
+        <div id="artStage">
+            <div class="tile empty" id="tilePrev2"></div>
+            <div class="tile empty" id="tilePrev"></div>
+            <div class="tile empty" id="tileNext"></div>
+            <div class="tile empty" id="tileNext2"></div>
+            <div class="tile" id="cover"><div id="coverShade"></div><div id="lyricsOver"><div class="lyricRoll"></div></div></div>
         </div>
+        <div id="coverSpace"></div>
         <div id="info">
-            <div id="title">Connecting to the phone</div>
-            <div id="subtitle"></div>
+            <div id="title" class="marquee">Connecting to the phone</div>
+            <div id="subtitle" class="marquee"></div>
             <div id="rateRow">
                 <div id="stars"></div>
                 <button id="like" type="button" aria-label="Like" title="Like" data-icon="heart"></button>
             </div>
-            <div id="lyrics"><div id="lyPrev"></div><div id="lyCur" class="cur"></div><div id="lyNext"></div></div>
+            <div id="upNext"><span class="upLabel">Up next</span><span id="upTitle" class="marquee"></span></div>
+            <div id="lyrics"><div class="lyricRoll"></div></div>
         </div>
     </div>
-    <div id="upNext"><span class="upLabel">Up next</span><span id="upTitle"></span></div>
     <div id="seek">
         <span id="cur">0:00</span>
         <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div><canvas id="wave"></canvas></div>
@@ -1385,7 +1455,7 @@
             <button id="soundPhone" type="button" class="on" data-icon="bluetooth" aria-label="Sound on the phone or Bluetooth" title="Sound on the phone or Bluetooth"></button>
             <button id="soundCar" type="button" data-icon="browser" aria-label="Sound in this browser" title="Sound in this browser"></button>
         </div>
-        <div id="status"></div>
+        <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
         <button class="chip iconOnly" id="actionsBtn" type="button" data-icon="menu" aria-label="Actions" title="Actions"></button>
         <button class="chip iconOnly" id="settingsBtn" type="button" data-icon="settings" aria-label="Settings" title="Settings"></button>
@@ -1407,7 +1477,7 @@
         <button class="chip" id="vocalsAll" type="button" data-icon="all"><span class="lbl">All</span></button>
         <button class="chip" id="vocalsVocal" type="button" data-icon="vocals"><span class="lbl">Vocals</span></button>
         <button class="chip" id="vocalsInstr" type="button" data-icon="instrumental"><span class="lbl">Instrumental</span></button>
-        <button class="chip" id="feed" type="button" data-icon="feed"><span class="lbl">Published</span></button>
+        <button class="chip" id="feed" type="button" data-icon="check"><span class="lbl">Published</span></button>
         <button class="chip" id="smart" type="button" data-icon="filter"><span class="lbl">Filters off</span></button>
         <button class="chip" id="allFilters" type="button" data-icon="sliders"><span class="lbl">Edit filters</span></button>
         <button class="chip" id="artists" type="button" data-icon="person"><span class="lbl">Artists</span></button>
@@ -1415,6 +1485,7 @@
     </div>
     <div id="filterText"></div>
     <div id="counts"></div>
+    <div id="libLoad"></div>
     <div id="rowsWrap">
         <div id="rows"></div>
         <button id="edgeBtn" type="button" aria-label="Scroll to top" data-icon="arrowUp"></button>
@@ -1426,7 +1497,7 @@
             <div class="sheetTitle" id="panelTitle"></div>
             <button class="chip iconOnly" id="closePanel" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
-        <div class="sheetBody" id="panelBody"></div>
+        <div class="sheetBody" id="panelScroll"><div id="panelBody"></div></div>
     </div>
 </div>
 <div id="songMenu">
@@ -1541,6 +1612,12 @@
         ],
         check: [
             ["polyline", { points: "20 6 9 17 4 12" }]
+        ],
+        circle: [
+            ["circle", { cx: "12", cy: "12", r: "8" }]
+        ],
+        spin: [
+            ["path", { d: "M21 12a9 9 0 1 1-6.22-8.56" }]
         ],
         arrowUp: [
             ["line", { x1: "12", y1: "19", x2: "12", y2: "5" }],
@@ -1765,8 +1842,18 @@
         setIcon(el, el.dataset.icon);
     }
 
-    // The names under the transport buttons, shown when the phone's car
-    // page settings ask for them
+    // The name under one transport button
+    function setCtlLabel(id, text) {
+
+        const lbl = $(id).querySelector(".ctlLbl");
+
+        if (lbl && lbl.textContent !== text) {
+            lbl.textContent = text;
+        }
+    }
+
+    // The names under the transport buttons, shown when the phone's web
+    // view settings ask for them
     for (const el of document.querySelectorAll("#controls [data-label]")) {
 
         const lbl = document.createElement("span");
@@ -1919,7 +2006,158 @@
     }
 
     // Everything that follows the state, drawn when a new one arrives
-    let shownCover = "";
+
+    // Turn a one line box into a marquee, the phone's makeMarquee. The text
+    // waits at the start, eases into a steady walk to the left until it and
+    // a gap have passed, a second copy following on, eases to a stop exactly
+    // where it began and waits again, so the beginning is always readable.
+    // A line that fits just sits still
+    const MARQUEE_DELAY = 3000;
+    const MARQUEE_SPEED = 60;
+    const MARQUEE_GAP = 90;
+    const marquees = [];
+
+    function makeMarquee(box) {
+
+        const track = document.createElement("span");
+        const first = document.createElement("span");
+        const second = document.createElement("span");
+        const align = getComputedStyle(box).textAlign;
+
+        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
+        first.style.cssText = "display:inline-block;white-space:nowrap";
+        second.style.cssText = "display:none;white-space:nowrap";
+        first.textContent = box.textContent;
+        track.appendChild(first);
+        track.appendChild(second);
+        box.textContent = "";
+        box.appendChild(track);
+
+        let anim = null;
+        let timer = null;
+        let width = 0;
+
+        const stop = function () {
+
+            if (timer) {
+
+                clearTimeout(timer);
+                timer = null;
+            }
+
+            if (anim) {
+
+                anim.cancel();
+                anim = null;
+            }
+
+            track.style.transform = "none";
+            first.style.marginRight = "0px";
+            second.style.display = "none";
+            box.style.textAlign = align;
+        };
+
+        const start = function () {
+
+            if (!track.animate || !first.textContent) {
+                return;
+            }
+
+            const textWidth = Math.ceil(first.getBoundingClientRect().width);
+
+            width = box.clientWidth;
+
+            if (textWidth - width <= 2) {
+                return;
+            }
+
+            // A right aligned line walks from its start like any other
+            box.style.textAlign = "left";
+            first.style.marginRight = MARQUEE_GAP + "px";
+            second.style.display = "inline-block";
+
+            const distance = textWidth + MARQUEE_GAP;
+
+            anim = track.animate([
+                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
+                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
+                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
+                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
+            ], { duration: distance / MARQUEE_SPEED * 1000 });
+
+            anim.onfinish = function () {
+
+                anim = null;
+                track.style.transform = "none";
+                timer = setTimeout(function () {
+
+                    timer = null;
+                    start();
+                }, MARQUEE_DELAY);
+            };
+        };
+
+        // Measure again later, the text or the box changed
+        const restart = function (wait) {
+
+            stop();
+            timer = setTimeout(function () {
+
+                timer = null;
+                start();
+            }, wait);
+        };
+
+        const m = {
+            setText: function (text) {
+
+                const value = text || "";
+
+                // The same line again lets a walk under way carry on
+                if (first.textContent === value) {
+                    return;
+                }
+
+                first.textContent = value;
+                second.textContent = value;
+                restart(MARQUEE_DELAY);
+            },
+
+            // After a resize, a line that now fits stops and one that no
+            // longer fits starts walking
+            check: function () {
+
+                if (box.clientWidth !== width && box.offsetParent) {
+
+                    width = box.clientWidth;
+                    restart(600);
+                }
+            }
+        };
+
+        marquees.push(m);
+
+        return m;
+    }
+
+    const titleLine = makeMarquee($("title"));
+    const subtitleLine = makeMarquee($("subtitle"));
+    const upLine = makeMarquee($("upTitle"));
+    const statusLine = makeMarquee($("status"));
+
+    window.addEventListener("resize", function () {
+
+        for (const m of marquees) {
+            m.check();
+        }
+    });
+
+    setInterval(function () {
+
+        for (const m of marquees) {
+            m.check();
+        }
+    }, 1000);
 
     function render() {
 
@@ -1927,32 +2165,26 @@
 
         if (!s || !s.id) {
 
-            $("title").textContent = online ? "Nothing playing" : "Connecting to the phone";
-            $("subtitle").textContent = online ? "Start a song on the phone or tap play" : "";
+            titleLine.setText(online ? "Nothing playing" : "Connecting to the phone");
+            subtitleLine.setText(online ? "Start a song on the phone or tap play" : "");
             paintStars(null);
             $("like").classList.remove("liked");
         } else {
 
-            $("title").textContent = s.title;
-            $("subtitle").textContent = s.subtitle || "";
+            titleLine.setText(s.title);
+            subtitleLine.setText(s.subtitle || "");
             paintStars(s.rating);
             $("like").classList.toggle("liked", !!s.liked);
         }
 
-        const cover = s && s.cover ? s.cover : "";
+        setFlowSongs(s);
 
-        if (cover !== shownCover) {
+        // A new song's lyrics are put in place, not rolled from the old
+        if ((s && s.id ? s.id : "") !== lyricSong) {
 
-            shownCover = cover;
-            $("cover").style.backgroundImage = cover ? "url(\"" + cover.replace(/"/g, "%22") + "\")" : "none";
-        }
-
-        setTile($("tilePrev"), s && s.prevSong ? s.prevSong : null);
-        setTile($("tileNext"), s && s.upNext ? s.upNext : null);
-
-        // A swipe that asked for another song is done once that song is here
-        if (stripPending && (!s || s.id !== stripPending)) {
-            resetStrip();
+            lyricSong = s && s.id ? s.id : "";
+            lyricBoxes.info.idx = -2;
+            lyricBoxes.cover.idx = -2;
         }
 
         $("controls").classList.toggle("names", !!(s && s.names));
@@ -1962,7 +2194,7 @@
         const next = s && s.upNext && s.showUpNext !== false ? s.upNext : null;
 
         $("upNext").style.display = next ? "flex" : "none";
-        $("upTitle").textContent = next ? next.title : "";
+        upLine.setText(next ? next.title : "");
 
         // The waveform replaces the plain bar when the phone sends one
         const wave = s && s.wave && s.wave.length ? s.wave : null;
@@ -1997,6 +2229,44 @@
         $("pubBtn").disabled = !!(s && s.browsing);
         $("rateBtn").classList.toggle("on", !!(s && s.rating !== null && s.rating !== undefined));
 
+        // Like the phone: a tick for published only, an open circle for all
+        // songs, on the button and on the list's chip alike, and the names
+        // under the buttons follow what the buttons show
+        const onlyPublished = !s || s.published !== "all";
+        const pubIcon = onlyPublished ? "check" : "circle";
+
+        if ($("pubBtn").dataset.shows !== pubIcon) {
+
+            $("pubBtn").dataset.shows = pubIcon;
+            setIcon($("pubBtn"), pubIcon);
+            setIcon($("feed"), pubIcon);
+        }
+
+        setLabel($("feed"), onlyPublished ? "Published" : "All songs");
+        $("feed").classList.toggle("on", onlyPublished);
+        $("vocalsAll").classList.toggle("on", vocals !== "vocal" && vocals !== "instrumental");
+        $("vocalsVocal").classList.toggle("on", vocals === "vocal");
+        $("vocalsInstr").classList.toggle("on", vocals === "instrumental");
+
+        const rated = s && s.rating !== null && s.rating !== undefined;
+
+        // The phone is loading songs from Mureka, shown above the list
+        const libLoading = !!(s && s.loading);
+
+        if (libLoading !== ($("libLoad").childElementCount > 0)) {
+
+            $("libLoad").textContent = "";
+
+            if (libLoading) {
+                $("libLoad").appendChild(loadingNode("Loading songs from Mureka"));
+            }
+        }
+
+        setCtlLabel("play", playing ? "pause" : "play");
+        setCtlLabel("pubBtn", onlyPublished ? "public" : "all");
+        setCtlLabel("vocBtn", vocals === "vocal" ? "vocals" : (vocals === "instrumental" ? "instr" : "all"));
+        setCtlLabel("rateBtn", rated ? s.rating + "\u2605" : "rate");
+
         if ($("ratePop").style.display === "flex") {
             $("rateTitle").textContent = s && s.title ? s.title : "";
         }
@@ -2005,7 +2275,7 @@
 
         $("soundPhone").classList.toggle("on", !carAudio);
         $("soundCar").classList.toggle("on", carAudio);
-        $("status").textContent = online ? (s && s.status ? s.status : "") : "Not connected to the phone";
+        statusLine.setText(online ? (s && s.status ? s.status : "") : "Not connected to the phone");
         $("signin").style.display = online && s && s.signedIn === "no" ? "block" : "none";
 
         // The phone asks for the sound here but this page has not been
@@ -2073,9 +2343,167 @@
         }
     }
 
-    // The synced lyrics, the line being sung between the one before and the
-    // one after, like the phone's cover
-    let lyricShown = -2;
+    // The synced lyrics, rolling exactly like the phone's. Five rows, each
+    // with its own place, size, colour and opacity: half a line above that
+    // has faded out, the line before, the line being sung, the line after,
+    // and half a line below faded out. All rows share one line height, so
+    // the gaps stay even whatever the sizes. When the song moves on a line,
+    // every row takes the text of the row below and animates from that
+    // row's place, size, colour and opacity into its own, so a line grows
+    // and brightens as it reaches the middle and shrinks and fades as it
+    // leaves over the top, like text on a turning cylinder. A jump, a seek
+    // or a new song just puts the rows in place. The sizes come from the
+    // phone: the car's lyric size, and the mobile player's side line
+    // percent, line spacing and side offset unless the car sets its own
+    function makeLyricRoll(roll) {
+
+        const slots = [];
+
+        for (let i = 0; i < 5; i++) {
+
+            const el = document.createElement("div");
+
+            roll.appendChild(el);
+            slots.push(el);
+        }
+
+        return { roll: roll, slots: slots, geo: null, key: "", idx: -2 };
+    }
+
+    // Where the five rows rest, the phone's computeLyricSlots
+    function lyricGeometry(box, layout) {
+
+        const base = Math.max(10, layout.size);
+        const side = Math.round(base * layout.side);
+        const edge = Math.round(side * 0.7);
+        const lineH = Math.round(base * layout.line);
+        const half = Math.round(lineH * 0.5);
+        const sx = layout.sideShift;
+        const prevY = half;
+        const curY = prevY + lineH;
+        const nextY = curY + lineH;
+        const dim = "#dddddd";
+        const white = "#ffffff";
+
+        box.geo = [
+            { y: prevY - half, x: sx, size: edge, color: dim, op: 0, z: 0, w: 400 },
+            { y: prevY, x: sx, size: side, color: dim, op: 0.75, z: 2, w: 400 },
+            { y: curY, x: 0, size: base, color: white, op: 1, z: 3, w: 600 },
+            { y: nextY, x: sx, size: side, color: dim, op: 0.75, z: 2, w: 400 },
+            { y: nextY + half, x: sx, size: edge, color: dim, op: 0, z: 0, w: 400 }
+        ];
+        box.roll.style.height = (nextY + half + lineH) + "px";
+
+        for (let i = 0; i < 5; i++) {
+
+            const g = box.geo[i];
+            const el = box.slots[i];
+
+            el.style.top = g.y + "px";
+            el.style.left = g.x + "px";
+            el.style.fontSize = g.size + "px";
+            el.style.lineHeight = lineH + "px";
+            el.style.height = lineH + "px";
+            el.style.color = g.color;
+            el.style.zIndex = String(g.z);
+            el.style.fontWeight = String(g.w);
+        }
+    }
+
+    // Put the rows in place at once
+    function setLyricRows(box, texts) {
+
+        for (let i = 0; i < 5; i++) {
+
+            const g = box.geo[i];
+            const el = box.slots[i];
+
+            cancelAnimations(el);
+            el.textContent = texts[i];
+            el.style.transform = "translate(0px, 0px) scale(1)";
+            el.style.color = g.color;
+            el.style.zIndex = String(g.z);
+            el.style.opacity = texts[i] ? String(g.op) : "0";
+        }
+    }
+
+    // Roll the rows up one line, each from the place of the row below,
+    // the phone's rollLyricRows. The weight goes along too, so the line
+    // reaching the middle turns bold half way instead of at the start
+    function rollLyricRows(box, texts) {
+
+        for (let i = 0; i < 5; i++) {
+
+            const dest = box.geo[i];
+            const from = box.geo[i + 1] || dest;
+            const el = box.slots[i];
+
+            cancelAnimations(el);
+            el.textContent = texts[i];
+            el.style.transform = "translate(0px, 0px) scale(1)";
+            el.style.color = dest.color;
+            el.style.zIndex = String(dest.z);
+            el.style.opacity = texts[i] ? String(dest.op) : "0";
+
+            if (!el.animate) {
+                continue;
+            }
+
+            el.animate([
+                {
+                    transform: "translate(" + (from.x - dest.x) + "px, " + (from.y - dest.y) + "px) scale(" + (from.size / dest.size) + ")",
+                    opacity: texts[i] ? from.op : 0,
+                    color: from.color,
+                    fontWeight: String(from.w)
+                },
+                {
+                    transform: "translate(0px, 0px) scale(1)",
+                    opacity: texts[i] ? dest.op : 0,
+                    color: dest.color,
+                    fontWeight: String(dest.w)
+                }
+            ], {
+                duration: 340,
+                easing: "ease-out"
+            });
+        }
+    }
+
+    function cancelAnimations(el) {
+
+        if (!el.getAnimations) {
+            return;
+        }
+
+        try {
+
+            for (const a of el.getAnimations()) {
+                a.cancel();
+            }
+        } catch (e) {
+            // Nothing running
+        }
+    }
+
+    let lyricSong = "";
+
+    const lyricBoxes = {
+        info: makeLyricRoll($("lyrics").querySelector(".lyricRoll")),
+        cover: makeLyricRoll($("lyricsOver").querySelector(".lyricRoll"))
+    };
+
+    // The layout the phone sends, with the phone's defaults
+    function lyricLayout() {
+
+        const l = state && state.lyricLayout ? state.lyricLayout : {};
+
+        return {
+            size: typeof l.size === "number" ? l.size : 26,
+            side: typeof l.side === "number" ? l.side : 0.8,
+            line: typeof l.line === "number" ? l.line : 1.5,
+            sideShift: typeof l.sideShift === "number" ? l.sideShift : 0
+        };
+    }
 
     function showLyrics(pos) {
 
@@ -2083,11 +2511,35 @@
 
         if (!rows) {
 
-            if (lyricShown !== -2) {
+            for (const key of Object.keys(lyricBoxes)) {
+                lyricBoxes[key].idx = -2;
+            }
 
-                lyricShown = -2;
+            $("lyricsOver").style.display = "none";
+
+            // Beside the cover the lyric area keeps its height for a song
+            // without lyrics too, so the title and stars never move
+            if ($("lyrics").dataset.where === "info") {
+
+                const box = lyricBoxes.info;
+                const layout = lyricLayout();
+                const key = [layout.size, layout.side, layout.line, layout.sideShift].join(",");
+
+                if (!box.geo || key !== box.key) {
+
+                    box.key = key;
+                    lyricGeometry(box, layout);
+                }
+
+                if ($("lyrics").style.visibility !== "hidden") {
+
+                    setLyricRows(box, ["", "", "", "", ""]);
+                    $("lyrics").style.visibility = "hidden";
+                }
+
+                $("lyrics").style.display = "block";
+            } else {
                 $("lyrics").style.display = "none";
-                $("lyricsOver").style.display = "none";
             }
 
             return;
@@ -2106,19 +2558,53 @@
         }
 
         const onCover = $("lyrics").dataset.where === "cover";
-        const box = onCover ? $("lyricsOver") : $("lyrics");
+        const el = onCover ? $("lyricsOver") : $("lyrics");
         const other = onCover ? $("lyrics") : $("lyricsOver");
+        const box = onCover ? lyricBoxes.cover : lyricBoxes.info;
+        const shown = el.style.display === "block" && el.style.visibility !== "hidden";
 
-        if (idx === lyricShown && box.style.display === "flex") {
+        // A changed size or spacing on the phone lays the rows out again.
+        // On the cover the size follows the cover, the phone's own lyric
+        // size is for a cover about 360 pixels wide
+        const layout = lyricLayout();
+
+        if (onCover) {
+            layout.size = Math.round(layout.size * Math.max(0.6, Math.min(1.4, $("cover").offsetWidth / 520)));
+        }
+
+        const key = [layout.size, layout.side, layout.line, layout.sideShift].join(",");
+
+        other.style.display = "none";
+        el.style.display = "block";
+        el.style.visibility = "visible";
+
+        if (!box.geo || key !== box.key) {
+
+            box.key = key;
+            lyricGeometry(box, layout);
+            box.idx = -2;
+        }
+
+        if (idx === box.idx && shown) {
             return;
         }
 
-        lyricShown = idx;
-        other.style.display = "none";
-        box.style.display = "flex";
-        $(onCover ? "loPrev" : "lyPrev").textContent = idx - 1 >= 0 ? rows[idx - 1].text : "";
-        $(onCover ? "loCur" : "lyCur").textContent = idx >= 0 ? rows[idx].text : "";
-        $(onCover ? "loNext" : "lyNext").textContent = idx + 1 < rows.length ? rows[idx + 1].text : "";
+        const step = idx - box.idx;
+        const at = function (off) {
+
+            const r = idx + off;
+
+            return r >= 0 && r < rows.length ? rows[r].text : "";
+        };
+        const texts = [at(-2), at(-1), at(0), at(1), at(2)];
+
+        box.idx = idx;
+
+        if (step === 1 && shown) {
+            rollLyricRows(box, texts);
+        } else {
+            setLyricRows(box, texts);
+        }
     }
 
     // The seek bar and the times move smoothly between the polls
@@ -2201,11 +2687,13 @@
         });
     }
 
-    // The song list: Mureka order or A to Z a page at a time, or the whole
-    // queue. The view is this browser's own, the phone keeps its own view
+    // The song list: Mureka's songs a page at a time, or the whole queue,
+    // either one in its own order or A to Z. The view is this browser's own,
+    // the phone keeps its own view
     const PAGE = 60;
 
     let listView = "mureka";
+    let listAlpha = false;
     let listTotal = 0;
     let listLoaded = 0;
     let listBusy = false;
@@ -2218,8 +2706,15 @@
 
         const saved = localStorage.getItem("murekaCarView");
 
-        if (saved === "queue" || saved === "alpha") {
-            listView = saved;
+        // A to Z used to be a view of its own, it is Mureka sorted now
+        if (saved === "queue") {
+            listView = "queue";
+        } else if (saved === "alpha") {
+            listAlpha = true;
+        }
+
+        if (localStorage.getItem("murekaCarAlpha") === "1") {
+            listAlpha = true;
         }
     } catch (e) {
         // No storage, Mureka order then
@@ -2283,6 +2778,35 @@
         $("rows").textContent = "";
     }
 
+    // The turning glyph with a word beside it, for anything still loading
+    function loadingNode(text) {
+
+        const box = document.createElement("div");
+        const glyph = icon("spin");
+        const word = document.createElement("span");
+
+        box.className = "loadRow";
+        glyph.classList.add("spin");
+        word.textContent = text;
+        box.appendChild(glyph);
+        box.appendChild(word);
+
+        return box;
+    }
+
+    // One loading line at the end of the list while a page is on its way
+    function showListLoading(on) {
+
+        const box = $("rows");
+        const old = box.querySelector(":scope > .loadRow");
+
+        if (on && !old) {
+            box.appendChild(loadingNode("Loading songs"));
+        } else if (!on && old) {
+            old.remove();
+        }
+    }
+
     function loadList(reset, done) {
 
         if (listView === "queue") {
@@ -2308,8 +2832,9 @@
         const token = listToken;
 
         listBusy = true;
+        showListLoading(true);
 
-        fetch("/list?q=" + esc(listQuery) + "&view=" + listView + "&offset=" + listLoaded
+        fetch("/list?q=" + esc(listQuery) + "&view=" + (listAlpha ? "alpha" : "mureka") + "&offset=" + listLoaded
             + "&limit=" + (done ? 200 : PAGE), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (data) {
@@ -2319,6 +2844,7 @@
             }
 
             listBusy = false;
+            showListLoading(false);
 
             if (!data || !data.songs) {
                 return;
@@ -2326,6 +2852,7 @@
 
             listTotal = data.total;
             listLoaded += data.songs.length;
+            listPlayingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
             rowMeta = data.meta || rowMeta;
 
             for (const song of data.songs) {
@@ -2339,11 +2866,51 @@
 
             if (done) {
                 done();
+            } else if (reset) {
+
+                // Opened or changed: down to the playing song and show it,
+                // like the phone's list
+                ensureLoaded(listPlayingAt, scrollToCurrent);
             }
         }).catch(function () {
 
             if (token === listToken) {
+
                 listBusy = false;
+                showListLoading(false);
+            }
+        });
+    }
+
+    // Where the playing song is in the whole list, as the phone last said
+    let listPlayingAt = -1;
+
+    // Load pages until the row at this place is in the list, then go on.
+    // A page still on its way is waited for rather than skipped
+    function ensureLoaded(index, then) {
+
+        if (listView === "queue" || index < 0 || index < listLoaded || listLoaded >= listTotal) {
+
+            then();
+            return;
+        }
+
+        if (listBusy) {
+
+            setTimeout(function () {
+                ensureLoaded(index, then);
+            }, 150);
+            return;
+        }
+
+        const before = listLoaded;
+
+        loadList(false, function () {
+
+            if (listLoaded > before) {
+                ensureLoaded(index, then);
+            } else {
+                then();
             }
         });
     }
@@ -2380,6 +2947,12 @@
         const box = $("rows");
         const keep = box.scrollTop;
 
+        if (reset) {
+
+            clearRows();
+            box.appendChild(loadingNode("Loading the queue"));
+        }
+
         fetch("/queue?q=" + esc(listQuery), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (data) {
@@ -2391,10 +2964,18 @@
             queuePos = data.pos;
             rowMeta = data.meta || rowMeta;
             clearRows();
+            paintFilters(data.filters);
+
+            // A to Z only sorts, the rows stay the queue's, played and next
+            const items = listAlpha
+                ? data.items.slice().sort(function (a, b) {
+                    return a.title.localeCompare(b.title);
+                })
+                : data.items;
 
             let current = null;
 
-            for (const item of data.items) {
+            for (const item of items) {
 
                 const row = queueRow(item, data.pos);
 
@@ -2440,6 +3021,14 @@
                     }, 150);
                 });
             }));
+        } else {
+
+            // An empty place where the button would be, so this row lines up
+            // with the ones that can be taken out
+            const spacer = document.createElement("span");
+
+            spacer.className = "rowNext spacer";
+            row.appendChild(spacer);
         }
 
         row.addEventListener("click", function () {
@@ -2470,7 +3059,7 @@
 
         $("viewMureka").classList.toggle("on", listView === "mureka");
         $("viewQueue").classList.toggle("on", listView === "queue");
-        $("viewAlpha").classList.toggle("on", listView === "alpha");
+        $("viewAlpha").classList.toggle("on", listAlpha);
     }
 
     function setView(view) {
@@ -2750,6 +3339,7 @@
         $("vocalsInstr").classList.toggle("on", f.vocals === "instrumental");
 
         setLabel($("feed"), f.published === "published" ? "Published" : "All songs");
+        setIcon($("feed"), f.published === "published" ? "check" : "circle");
         $("feed").classList.toggle("on", f.published === "published");
 
         // Like the phone's Filters on and off, parked or restored without
@@ -2830,10 +3420,52 @@
         });
     }
 
+    // How wide the column of switches and steppers is, from the widest one
+    // beside a label, so the explanations wrap before it
+    function measureControlColumn() {
+
+        const box = $("panelBody");
+        let widest = 0;
+
+        for (const row of box.querySelectorAll(":scope > .pRow")) {
+
+            const first = row.firstElementChild;
+            const control = first ? first.nextElementSibling : null;
+
+            if (!control || !first.classList.contains("pText")) {
+                continue;
+            }
+
+            const r = row.getBoundingClientRect();
+            const c = control.getBoundingClientRect();
+
+            // A control that wrapped below its label is not beside it
+            if (c.top >= first.getBoundingClientRect().bottom) {
+                continue;
+            }
+
+            widest = Math.max(widest, r.right - c.left);
+        }
+
+        const want = Math.round(widest) + "px";
+
+        if (box.style.getPropertyValue("--ctl-col") !== want) {
+            box.style.setProperty("--ctl-col", want);
+        }
+    }
+
+    window.addEventListener("resize", function () {
+
+        if ($("panel").style.display === "flex") {
+            measureControlColumn();
+        }
+    });
+
     function renderPanel(items) {
 
         const box = $("panelBody");
-        const keep = box.scrollTop;
+        const scroller = $("panelScroll");
+        const keep = scroller.scrollTop;
 
         box.textContent = "";
 
@@ -2841,7 +3473,8 @@
             box.appendChild(panelNode(node, false, true));
         }
 
-        box.scrollTop = keep;
+        measureControlColumn();
+        scroller.scrollTop = keep;
     }
 
     // The phone's own Done buttons close its panel, here Close does that, so
@@ -2981,6 +3614,11 @@
         }
 
         const text = document.createElement("div");
+
+        // Something the phone is still loading gets the turning glyph
+        if (/^Loading\b/i.test(node.s || "")) {
+            return loadingNode(String(node.s).replace(/\.+$|\u2026$/, ""));
+        }
 
         // A line of its own that is not a hint is a section heading
         text.className = "pText" + (node.small ? " small" : "") + (top && !node.small ? " head" : "");
@@ -3428,6 +4066,7 @@
         panelName = name;
         $("panelTitle").textContent = PANEL_TITLES[name] || name;
         $("panelBody").textContent = "";
+        $("panelBody").appendChild(loadingNode("Loading"));
         $("panel").style.display = "flex";
         loadPanel();
 
@@ -3527,8 +4166,20 @@
         setView("queue");
     });
 
+    // A to Z sorts the view shown, Mureka's songs or the queue, and a second
+    // press puts it back in its own order. The view stays the same
     $("viewAlpha").addEventListener("click", function () {
-        setView("alpha");
+
+        listAlpha = !listAlpha;
+
+        try {
+            localStorage.setItem("murekaCarAlpha", listAlpha ? "1" : "0");
+        } catch (e) {
+            // Not kept then, only for this visit
+        }
+
+        paintViews();
+        loadList(true);
     });
 
     // The playing song may be further down than what is loaded so far
@@ -3540,7 +4191,7 @@
             return;
         }
 
-        loadRest(scrollToCurrent);
+        ensureLoaded(listPlayingAt, scrollToCurrent);
     });
 
     $("closeBrowse").addEventListener("click", function () {
@@ -4147,7 +4798,7 @@
 
             const ok = m.link ? copyText(m.link) : false;
 
-            $("status").textContent = ok ? "Copied link: " + m.title : "Could not copy the link";
+            statusLine.setText(ok ? "Copied link: " + m.title : "Could not copy the link");
             closeSongMenu();
         }, "", !m.link));
 
@@ -4279,17 +4930,56 @@
         }
     });
 
-    // The covers before and after, and the strip that slides under the
-    // finger. Past the threshold it slides on to the neighbour, asks the
-    // phone for that song, and snaps back into place once the song is here
-    let stripPending = null;
-    let stripDrag = null;
+    // The cover flow, like the phone's. Five tiles: two before, the playing
+    // one and two after. At rest the playing cover is at full size, the one
+    // before and the one after are smaller, dimmed and blurred at the sides,
+    // and the outer two wait hidden behind them, a little smaller still and
+    // fully transparent. In landscape the playing cover sits to the left and
+    // the next one peeks out from behind it underneath the title and stars.
+    // Every tile has a place from -2 to 2, and a swipe moves all of them
+    // along together: the one coming in grows to the middle with the phone's
+    // cross fade, the playing one drops back to the side, the hidden one
+    // behind the incoming side grows a little and fades in to take its
+    // place, and the one on the far side fades out. The song changes once a
+    // swipe has landed, and when the new song arrives the tiles only swap
+    // roles, so nothing jumps or loads. A song change from anywhere else,
+    // a button, Bluetooth, the end of a song, plays the same movement
+    const SIDE_SCALE = 0.8;
+    const SIDE_DIM = 0.55;
+    const SIDE_BLUR = 2;
+    const HIDE_SCALE = 0.85;
+    const FLOW_GLIDE = 220;
+    const FLOW_AUTO = 300;
+    const TILE_NAMES = ["tilePrev2", "tilePrev", "cover", "tileNext", "tileNext2"];
+
+    // The tiles in order of their places, -2 to 2
+    let tiles = TILE_NAMES.map(function (name) {
+        return $(name);
+    });
+
+    // A swipe that asked the phone for another song, until it is playing
+    let flowPending = null;
+
+    // A song change that came from elsewhere, while its movement plays
+    let flowAuto = null;
+    let flowDrag = null;
+    let flowGeo = null;
+    let flowOffset = 0;
+    let glideToken = 0;
 
     function setTile(tile, song) {
 
         const url = song && song.cover ? song.cover : "";
+        const id = song && song.id ? String(song.id) : "";
 
         tile.classList.toggle("empty", !song);
+
+        // A song whose cover has not come yet keeps the one shown for it
+        if (!url && id && tile.dataset.id === id) {
+            return;
+        }
+
+        tile.dataset.id = id;
 
         if (tile.dataset.src !== url) {
 
@@ -4298,142 +4988,462 @@
         }
     }
 
-    function stripOffset(px, animate) {
+    // Move the tiles along by shift places, 1 when the next song became the
+    // playing one. The ids, the shade and the lyrics follow the roles
+    function rotateTiles(shift) {
 
-        const strip = $("coverStrip");
+        const n = tiles.length;
+        const k = ((shift % n) + n) % n;
 
-        strip.style.transition = animate ? "transform 0.28s cubic-bezier(0.4, 0, 0.2, 1)" : "none";
-        strip.style.transform = "translateX(calc(-50% + " + px + "px))";
-    }
-
-    function resetStrip() {
-
-        stripPending = null;
-        stripOffset(0, false);
-    }
-
-    // How far the strip moves for one song: the cover plus the gap
-    function stripStep() {
-
-        const cover = $("cover").getBoundingClientRect();
-        const side = $("tileNext").getBoundingClientRect();
-
-        return side.left > 0 ? (side.left + side.width / 2) - (cover.left + cover.width / 2) : cover.width;
-    }
-
-    $("coverWrap").addEventListener("pointerdown", function (ev) {
-
-        if (stripPending || (ev.button !== undefined && ev.button !== 0)) {
+        if (k === 0) {
             return;
         }
 
-        stripDrag = { x: ev.clientX, y: ev.clientY, t: Date.now(), moved: false, target: ev.target };
+        tiles = tiles.slice(k).concat(tiles.slice(0, k));
 
-        try {
-            $("coverWrap").setPointerCapture(ev.pointerId);
-        } catch (e) {
-            // Still followed while the pointer stays over the strip
+        for (let i = 0; i < n; i++) {
+            tiles[i].id = TILE_NAMES[i];
         }
+
+        tiles[2].appendChild($("coverShade"));
+        tiles[2].appendChild($("lyricsOver"));
+    }
+
+    // Fill the five tiles from a state, at rest
+    function applyFlowSongs(s) {
+
+        setTile(tiles[2], s && s.id ? { id: s.id, cover: s.cover } : null);
+        setTile(tiles[1], s && s.prevSong ? s.prevSong : null);
+        setTile(tiles[3], s && s.upNext ? s.upNext : null);
+        setTile(tiles[0], s && s.prevSong2 ? s.prevSong2 : null);
+        setTile(tiles[4], s && s.upNext2 ? s.upNext2 : null);
+        placeFlow(flowOffset);
+    }
+
+    // The song change from elsewhere has played its movement, the tiles
+    // swap roles and take the newest state
+    function finishAuto() {
+
+        const a = flowAuto;
+
+        if (!a) {
+            return;
+        }
+
+        flowAuto = null;
+        glideToken += 1;
+        rotateTiles(a.dir < 0 ? 1 : -1);
+        flowOffset = 0;
+        applyFlowSongs(a.state);
+    }
+
+    // The covers for a state from the phone
+    function setFlowSongs(s) {
+
+        const id = s && s.id ? String(s.id) : "";
+
+        // A landed swipe is over once the song it asked for is playing, the
+        // tile that came in stays where it is as the playing cover
+        if (flowPending) {
+
+            if (!id || id === flowPending.id) {
+                return;
+            }
+
+            const at = flowPending.dir < 0 ? 3 : 1;
+
+            if (tiles[at].dataset.id === id) {
+                rotateTiles(at - 2);
+            }
+
+            flowPending = null;
+            glideToken += 1;
+            flowOffset = 0;
+            applyFlowSongs(s);
+
+            return;
+        }
+
+        // A movement under way finishes first, with the newest state
+        if (flowAuto) {
+
+            flowAuto.state = s;
+            return;
+        }
+
+        // The song changed elsewhere to one of the neighbours: play the
+        // swipe's movement on its own before the tiles swap roles
+        const shown = tiles[2].dataset.id || "";
+
+        if (id && shown && id !== shown && !flowDrag && flowGeo) {
+
+            const dir = tiles[3].dataset.id === id ? -1 : (tiles[1].dataset.id === id ? 1 : 0);
+
+            if (dir !== 0) {
+
+                flowAuto = { state: s, dir: dir };
+                glideFlow(flowOffset, dir * flowTravel(dir), finishAuto, FLOW_AUTO);
+
+                return;
+            }
+        }
+
+        applyFlowSongs(s);
+    }
+
+    // Where the slots are, from the size of the main area. The places are
+    // in the main area's own coordinates
+    function flowGeometry() {
+
+        const main = $("main");
+        const w = main.clientWidth;
+        const h = main.clientHeight;
+        const portrait = window.matchMedia("(max-aspect-ratio: 1/1)").matches;
+
+        if (portrait) {
+
+            // Like the phone: the cover in the middle, the sides anchored to
+            // the edges behind it
+            const size = Math.min($("coverSpace").clientHeight || h * 0.5, w * 0.62);
+
+            return {
+                size: size,
+                top: size / 2,
+                xC: (w - size) / 2,
+                xL: 0,
+                xR: w - size * SIDE_SCALE,
+                space: size,
+                shade: 0
+            };
+        }
+
+        // Landscape: a sliver of the previous cover at the left edge, the
+        // playing cover, and the next one reaching in under the text
+        const size = Math.min(h, w * 0.5);
+        const xC = size * 0.12;
+        const full = xC + size + size * 0.06;
+
+        // The text needs room to be read. When the page is too narrow to give
+        // it that beside the cover, the text moves in over the cover's right
+        // side, at most a little under half of it
+        const gap = parseFloat(getComputedStyle(main).columnGap) || 0;
+        const room = Math.max(460, w * 0.55);
+        const reach = size * 0.42;
+        const space = Math.max(xC + size - reach - gap, Math.min(full, w - room - gap));
+        const over = xC + size - space - gap;
+
+        return {
+            size: size,
+            top: h / 2,
+            xC: xC,
+            xL: xC + size * 0.38 - size * SIDE_SCALE,
+            xR: xC + size * 0.72,
+            space: space,
+            shade: over > 2 ? Math.min(1, 0.6 + 0.4 * over / reach) : 0
+        };
+    }
+
+    // The mask that fades a resting side cover towards its outer edge, k
+    // from 0 (none) to 1 (fully at rest). Only part of the way, the stage's
+    // own fade at the screen edge does the rest
+    function restMask(side, k) {
+
+        if (k <= 0.01) {
+            return "none";
+        }
+
+        const dir = side === "left" ? "to left" : "to right";
+        const a0 = (1 - 0.03 * k).toFixed(3);
+        const a1 = (1 - 0.35 * k).toFixed(3);
+        const a2 = (1 - 0.8 * k).toFixed(3);
+
+        return "linear-gradient(" + dir + ", rgba(0,0,0," + a0 + ") 0%, rgba(0,0,0," + a1 + ") 50%, rgba(0,0,0," + a2 + ") 100%)";
+    }
+
+    // The phone's cross fade: the cover on top goes half transparent on the
+    // side where it overlaps the one it swaps with, around the middle of
+    // the swipe, and is solid again at the ends
+    function crossMask(a, fadeRight) {
+
+        const cross = (0.5 + 0.5 * Math.min(1, Math.abs(a - 0.5) / 0.25)).toFixed(3);
+
+        return fadeRight
+            ? "linear-gradient(to right, #000 40%, rgba(0,0,0," + cross + ") 70%)"
+            : "linear-gradient(to right, rgba(0,0,0," + cross + ") 30%, #000 60%)";
+    }
+
+    // Lay one tile out for its place, -2 to 2, fractions on the way
+    function placeTile(tile, pos) {
+
+        const g = flowGeo;
+        const range = 1 - SIDE_SCALE;
+        const side = pos < 0 ? "left" : "right";
+        const a = Math.abs(pos);
+
+        let x;
+        let scale;
+        let z;
+        let opacity = 1;
+        let mask = "none";
+
+        if (a <= 1) {
+
+            // Between the middle and a side. Past half way it drops behind
+            // the one it swaps with, until then it is on top and blends
+            x = g.xC + ((pos < 0 ? g.xL : g.xR) - g.xC) * a;
+            scale = 1 - range * a;
+            z = a < 0.5 ? 4 : 3;
+
+            if (a > 0.01) {
+                mask = a < 0.5 ? crossMask(a, side === "left") : restMask(side, (a - 0.5) * 2);
+            }
+        } else {
+
+            // Between a side and hidden behind it: a little smaller, a
+            // little further out, and fading
+            const b = Math.min(1, a - 1);
+            const out = g.size * SIDE_SCALE * 0.12 * b;
+
+            x = pos < 0 ? g.xL - out : g.xR + out * 0.6;
+            scale = SIDE_SCALE * (1 - (1 - HIDE_SCALE) * b);
+            z = b < 0.5 ? 2 : 1;
+            opacity = 1 - b;
+            mask = restMask(side, 1);
+        }
+
+        // Dim and blur follow how far the tile is from full size
+        const k = Math.max(0, Math.min(1, (1 - scale) / range));
+
+        tile.style.width = g.size + "px";
+        tile.style.height = g.size + "px";
+        tile.style.transform = "translate(" + (x + g.off).toFixed(1) + "px, -50%) scale(" + scale.toFixed(4) + ")";
+        tile.style.top = g.top + "px";
+        tile.style.zIndex = String(z);
+        tile.style.opacity = opacity.toFixed(3);
+        tile.style.filter = k > 0.01
+            ? "brightness(" + (1 - (1 - SIDE_DIM) * Math.min(1, k)).toFixed(3) + ") blur(" + (SIDE_BLUR * Math.min(1, k)).toFixed(2) + "px)"
+            : "none";
+        tile.style.webkitMaskImage = mask;
+        tile.style.maskImage = mask;
+    }
+
+    // Reach the stage out over the page margin to the screen edges and fade
+    // the covers out across that margin, from the line the buttons end on
+    function placeStage() {
+
+        const main = $("main").getBoundingClientRect();
+        const stage = $("artStage");
+        const left = Math.max(0, Math.round(main.left));
+        const right = Math.max(0, Math.round(window.innerWidth - main.right));
+        const mask = "linear-gradient(to right, rgba(0,0,0,0) 0px, #000 " + left + "px, #000 calc(100% - " + right + "px), rgba(0,0,0,0) 100%)";
+
+        stage.style.left = (-left) + "px";
+        stage.style.right = (-right) + "px";
+
+        if (stage.dataset.mask !== mask) {
+
+            stage.dataset.mask = mask;
+            stage.style.webkitMaskImage = mask;
+            stage.style.maskImage = mask;
+        }
+
+        return left;
+    }
+
+    // Lay the covers out for a swipe of drag pixels, 0 at rest
+    function placeFlow(drag) {
+
+        flowGeo = flowGeometry();
+        flowGeo.off = placeStage();
+
+        const g = flowGeo;
+        const portrait = window.matchMedia("(max-aspect-ratio: 1/1)").matches;
+
+        $("coverSpace").style.width = portrait ? "100%" : g.space + "px";
+
+        const travel = drag < 0 ? g.xC - g.xL : g.xR - g.xC;
+        const p = travel > 0 ? Math.max(-1, Math.min(1, drag / travel)) : 0;
+
+        for (let i = 0; i < tiles.length; i++) {
+
+            const pos = i - 2 + p;
+
+            if (Math.abs(pos) >= 2) {
+
+                tiles[i].style.opacity = "0";
+                tiles[i].style.zIndex = "0";
+                continue;
+            }
+
+            placeTile(tiles[i], pos);
+        }
+
+        // The shade over the playing cover fades out as it leaves the text
+        $("coverShade").style.opacity = String((g.shade * (1 - Math.min(1, Math.abs(p) * 2))).toFixed(3));
+    }
+
+    window.addEventListener("resize", function () {
+        placeFlow(flowOffset);
     });
 
-    $("coverWrap").addEventListener("pointermove", function (ev) {
+    function flowTravel(dir) {
+        return dir < 0 ? flowGeo.xC - flowGeo.xL : flowGeo.xR - flowGeo.xC;
+    }
 
-        if (!stripDrag) {
+    // Glide the swipe offset from one value to another, laying the covers
+    // out every frame so the scale and the cross fade move smoothly, like
+    // the phone. A new gesture cancels a glide in flight
+    function glideFlow(from, to, done, duration) {
+
+        const token = ++glideToken;
+        const start = performance.now();
+        const length = duration || FLOW_GLIDE;
+
+        const frame = function (now) {
+
+            if (token !== glideToken) {
+                return;
+            }
+
+            const k = Math.min(1, (now - start) / length);
+            const eased = 1 - Math.pow(1 - k, 3);
+
+            flowOffset = from + (to - from) * eased;
+            placeFlow(flowOffset);
+
+            if (k < 1) {
+                requestAnimationFrame(frame);
+            } else if (done) {
+                done();
+            }
+        };
+
+        requestAnimationFrame(frame);
+    }
+
+    // Finish a swipe: the covers glide the rest of the way, then the phone
+    // is asked for the song on the cover that came in. The covers stay where
+    // they landed until it plays, and go back if it never does
+    function flowTo(dir, from) {
+
+        const to = dir * flowTravel(dir);
+
+        flowPending = { id: state && state.id ? String(state.id) : "", dir: dir };
+
+        glideFlow(from, to, function () {
+
+            const mine = flowPending;
+
+            send("coverStep", { step: dir > 0 ? -1 : 1 });
+
+            setTimeout(function () {
+
+                if (flowPending === mine) {
+
+                    flowPending = null;
+                    glideFlow(flowOffset, 0);
+                }
+            }, 6000);
+        });
+    }
+
+    function flowEnd(ev) {
+
+        if (!flowDrag) {
             return;
         }
 
-        const dx = ev.clientX - stripDrag.x;
-        const dy = ev.clientY - stripDrag.y;
+        const d = flowDrag;
 
-        if (!stripDrag.moved && Math.abs(dx) < 8) {
-            return;
-        }
+        flowDrag = null;
 
-        // Mostly up or down is the page's own scroll, not a swipe
-        if (!stripDrag.moved && Math.abs(dy) > Math.abs(dx)) {
-
-            stripDrag = null;
-            return;
-        }
-
-        stripDrag.moved = true;
-        ev.preventDefault();
-
-        // No neighbour on that side, so the strip only gives a little
-        const noPrev = $("tilePrev").classList.contains("empty");
-        const noNext = $("tileNext").classList.contains("empty");
-        let shown = dx;
-
-        if ((dx > 0 && noPrev) || (dx < 0 && noNext)) {
-            shown = dx / 4;
-        }
-
-        stripOffset(shown, false);
-    });
-
-    function endStripDrag(ev) {
-
-        if (!stripDrag) {
-            return;
-        }
-
-        const d = stripDrag;
-
-        stripDrag = null;
-
-        const dx = ev.clientX - d.x;
-        const step = stripStep();
-        const quick = Date.now() - d.t < 500 && Math.abs(dx) > 40;
+        // A cancelled pointer carries no place, the last move does
+        const dx = (ev.type === "pointercancel" ? d.lastX : ev.clientX) - d.x;
 
         if (!d.moved) {
 
-            // A tap on a neighbour goes to that song, a tap on the cover
-            // itself does nothing
-            if (d.target === $("tilePrev") && !$("tilePrev").classList.contains("empty")) {
-                slideTo(1, step);
-            } else if (d.target === $("tileNext") && !$("tileNext").classList.contains("empty")) {
-                slideTo(-1, step);
+            // A tap on a side cover goes to that song
+            if (d.target === tiles[1] && !tiles[1].classList.contains("empty")) {
+                flowTo(1, 0);
+            } else if (d.target === tiles[3] && !tiles[3].classList.contains("empty")) {
+                flowTo(-1, 0);
             }
 
             return;
         }
 
-        const noPrev = $("tilePrev").classList.contains("empty");
-        const noNext = $("tileNext").classList.contains("empty");
+        const dir = dx > 0 ? 1 : -1;
+        const quick = Date.now() - d.t < 450 && Math.abs(dx) > 40;
+        const far = Math.abs(dx) > Math.max(40, flowTravel(dir) * 0.3);
+        const blocked = (dir > 0 && tiles[1].classList.contains("empty"))
+            || (dir < 0 && tiles[3].classList.contains("empty"));
 
-        if ((Math.abs(dx) > step * 0.3 || quick) && dx > 0 && !noPrev) {
-            slideTo(1, step);
-        } else if ((Math.abs(dx) > step * 0.3 || quick) && dx < 0 && !noNext) {
-            slideTo(-1, step);
+        if ((far || quick) && !blocked) {
+            flowTo(dir, flowOffset);
         } else {
-            stripOffset(0, true);
+            glideFlow(flowOffset, 0);
         }
     }
 
-    // Slide one song to the side, then ask the phone for it. The strip is
-    // put back the moment the new song arrives, with the covers moved on
-    function slideTo(dir, step) {
+    $("artStage").addEventListener("pointerdown", function (ev) {
 
-        stripPending = state && state.id ? state.id : "none";
-        stripOffset(dir * step, true);
-        send(dir > 0 ? "prev" : "next");
+        if (flowPending || (ev.button !== undefined && ev.button !== 0)) {
+            return;
+        }
 
-        // If the phone never changes song, do not stay stuck to the side
-        setTimeout(function () {
+        // A movement from elsewhere still playing lands at once, so the
+        // new gesture starts from the covers at rest
+        finishAuto();
 
-            if (stripPending) {
-                resetStrip();
-            }
-        }, 2500);
-    }
+        glideToken += 1;
+        flowDrag = { x: ev.clientX, y: ev.clientY, t: Date.now(), moved: false, target: ev.target, lastX: ev.clientX };
 
-    $("coverWrap").addEventListener("pointerup", endStripDrag);
-    $("coverWrap").addEventListener("pointercancel", function () {
-
-        stripDrag = null;
-        stripOffset(0, true);
+        try {
+            $("artStage").setPointerCapture(ev.pointerId);
+        } catch (e) {
+            // Still followed while the pointer stays over the covers
+        }
     });
 
+    $("artStage").addEventListener("pointermove", function (ev) {
+
+        if (!flowDrag) {
+            return;
+        }
+
+        const dx = ev.clientX - flowDrag.x;
+        const dy = ev.clientY - flowDrag.y;
+
+        if (!flowDrag.moved && Math.abs(dx) < 8) {
+            return;
+        }
+
+        // Mostly up or down is not a swipe
+        if (!flowDrag.moved && Math.abs(dy) > Math.abs(dx)) {
+
+            flowDrag = null;
+            return;
+        }
+
+        flowDrag.moved = true;
+        flowDrag.lastX = ev.clientX;
+        ev.preventDefault();
+
+        // With no cover on that side the covers only give a little
+        const blocked = (dx > 0 && tiles[1].classList.contains("empty"))
+            || (dx < 0 && tiles[3].classList.contains("empty"));
+
+        flowOffset = blocked ? dx / 4 : dx;
+        placeFlow(flowOffset);
+    });
+
+    $("artStage").addEventListener("pointerup", flowEnd);
+
+    // The browser taking the pointer away half way still lands the swipe
+    // when it went far enough, so the song change is never lost
+    $("artStage").addEventListener("pointercancel", flowEnd);
+
+    placeFlow(0);
     // The phone's keyboard shortcuts, for a laptop or a keyboard in the car
     const SHORTCUT_HELP = [
         ["/", "Search"],
@@ -4640,7 +5650,7 @@
 
                 const ok = m.link ? copyText(m.link) : false;
 
-                $("status").textContent = ok ? "Copied link: " + m.title : "Could not copy the link";
+                statusLine.setText(ok ? "Copied link: " + m.title : "Could not copy the link");
             });
         } else if (key === "d") {
 
@@ -4820,7 +5830,7 @@
     // from both edges. Browsers with overlay bars have nothing to push
     function fixGutters() {
 
-        for (const id of ["panelBody", "rows", "menuBox", "actionsBox", "helpBox"]) {
+        for (const id of ["rows", "menuBox", "actionsBox", "helpBox"]) {
 
             const el = $(id);
 

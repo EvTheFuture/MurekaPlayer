@@ -54,7 +54,7 @@ least once since it was installed, so open it once after installing.
   top or the end, and covers load as the rows scroll into sight.
 - The button at the end of a song in the list plays it next, and the heart
   in each row likes or unlikes the song, as on the phone.
-- The transport row has its own order, set under Settings, Car page, with
+- The transport row has its own order, set under Settings, Web view, with
   the same buttons the phone offers: stop, published, vocals and rate. Press and hold a button to move it, or use the
   transport bar editor in Settings to move, add and take out buttons.
 - Press and hold a song, or right click it, for the phone's song menu: play,
@@ -64,17 +64,45 @@ least once since it was installed, so open it once after installing.
 - The phone's keyboard shortcuts work here too, `?` lists them.
 - The menu button next to Settings has load, rescan, clear, cache all,
   playlists, creators, screen off and fullscreen.
-- Synced lyrics show under the stars when the phone shows them on the cover,
-  and a swipe on the cover goes to the next or previous song.
+- Synced lyrics roll like the phone's, five rows that grow, brighten and
+  fade as they turn past, beside the cover or on it. Size, side lines,
+  spacing and side offset are under Settings, Web view, and start out as
+  the mobile player has them. A swipe on the cover plays the song on the
+  cover that came in, also when paused.
+- On a narrow page the title and stars move in over the right third of the
+  playing cover, which darkens there so the text stays readable. The title,
+  the second line, up next and the status line walk across with the phone's
+  easing when they do not fit, instead of being cut off.
+- Most settings have a short explanation under them, on the phone and on
+  the car page. The car's settings scroll in a box that reaches the right
+  edge, so the scrollbar never lies over the buttons.
+- **Remove ; from lyrics** in the settings takes the semicolons out of the
+  lyrics everywhere they show.
 - Song rows look like the phone's list: the cache dot, the number, the cover, the title,
   the rating once any song is rated, the heart, the length, and public or
   draft when both are listed.
-- The covers before and after peek in beside the current one. Swipe the
-  strip, or tap a neighbour, for that song.
+- The covers slide like the phone's, blurred and blended at the sides. The
+  next cover peeks out behind the title and stars, with up next under the
+  title. Five covers take part, so while one moves in the next one behind
+  it grows and fades in to take its place, and the one on the far side
+  fades out. The covers reach out over the page margin and fade out towards
+  the screen edge. Swipe the strip, or tap a neighbour, for that song. A
+  song change from a button, Bluetooth or the end of a song slides the
+  covers the same way in 300 ms, on the car page and on the phone.
+- Previous always goes to the previous song, also a few seconds into one.
+- **A-Z** sorts the view shown, Mureka's songs or the queue, and a second
+  press puts it back in its own order. The list opens at the playing song,
+  highlighted like on the phone, and Now playing loads down to it. Played
+  rows in the queue line up with the ones that can be taken out.
+- Anything still loading shows a turning glyph, the list, the queue, the
+  panels and the library while the phone loads it from Mureka.
+- The title and stars keep their place whether a song has lyrics or not.
+- **Start with** in the settings can also be **As last time**, the list and
+  artist the player was showing when it was last used.
 - **Up next**, the **waveform seek bar**, where the lyrics go, the names
   under the buttons and the car's own transport bar are set on the phone
-  under Settings, Car page. The settings have three pages: what applies
-  everywhere, Mobile player and Car page.
+  under Settings, Web view. The settings have three pages: what applies
+  everywhere, Mobile player and Web view.
 - **Fullscreen** on the main screen, where the car's browser offers it.
 - **Settings** on the main screen, and **Edit filters** and **Artists** in the
   song list, show the phone's own panels with large controls. They are read
@@ -89,7 +117,7 @@ Only the local network, never the mobile network:
 - The sender has to be on the hotspot or a Wi-Fi the phone is on, and ask
   for one of the phone's addresses on that network or for the car address.
 - Requests arriving on a cellular interface are refused, IPv6 included.
-- In the app's settings, under Car page, "Allow from the phone's hotspot"
+- In the app's settings, under Web view, "Allow from the phone's hotspot"
   and "Allow from Wi-Fi networks" pick which of the two are allowed. Both
   are on from the start. These two rows are not shown on the car page, so
   the car cannot lock itself out.

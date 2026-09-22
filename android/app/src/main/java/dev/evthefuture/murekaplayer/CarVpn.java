@@ -102,7 +102,7 @@ public class CarVpn extends VpnService {
 
             Builder b = new Builder();
 
-            b.setSession("Mureka car page");
+            b.setSession("Mureka web view");
 
             // Android 14 and later drops packets for a VPN's address that
             // arrive on any other interface, the hotspot included. A ping

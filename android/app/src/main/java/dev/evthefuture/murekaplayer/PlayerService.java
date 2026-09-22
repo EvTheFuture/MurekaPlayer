@@ -497,11 +497,11 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         if (server != null && !server.listening()) {
-            return "Car page not running: " + server.status();
+            return "Web view not running: " + server.status();
         }
 
         if (addresses.isEmpty() && CarVpn.activeAddress() == null) {
-            return "Car page: switch on the hotspot or Wi-Fi";
+            return "Web view: switch on the hotspot or Wi-Fi";
         }
 
         String car = CarVpn.activeAddress();
@@ -509,14 +509,14 @@ public class PlayerService extends Service implements Hub.Listener {
         String local = name + (addresses.isEmpty() ? "" : "  or  " + String.join("  ", addresses));
 
         if (car != null) {
-            return "Car: http://" + car + ":" + PORT + "  Local: " + local;
+            return "Web view: http://" + car + ":" + PORT + "  Local: " + local;
         }
 
         if (CarSettings.vpnEnabled(this)) {
-            return "Car address " + CarVpn.status() + "  Local: " + local;
+            return "Public address " + CarVpn.status() + "  Local: " + local;
         }
 
-        return "Car page: " + local;
+        return "Web view: " + local;
     }
 
     private Notification buildNotification() {
