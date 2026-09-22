@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.12";
+    const VERSION = "1.6.0.16";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1774,7 +1774,14 @@
             return;
         }
 
-        const typed = String(answer).trim();
+        setManualBpmText(song, String(answer));
+    }
+
+    // Keep a typed tempo, or clear the hand entered one when the text is
+    // empty. Shared by the prompt and the car page
+    function setManualBpmText(song, text) {
+
+        const typed = String(text).trim();
 
         // Emptying the field is how a hand entered tempo is taken away again
         if (typed === "") {
@@ -8646,6 +8653,7 @@
 
         const wrap = document.createElement("div");
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        wrap.dataset.hostControls = "1";
 
         let activeNames = [];
         let disabledNames = [];
@@ -11725,7 +11733,149 @@
             signedIn: authState,
             status: statusText || "",
             upNext: settings.webUpNext ? hostUpNext() : null,
-            wave: settings.webWave ? hostWave() : null
+            wave: settings.webWave ? hostWave() : null,
+            controls: hostControls(),
+            lyrics: hostLyrics(),
+            loading: running === true,
+            caching: cacheRunning === true,
+            vocals: settings.vocalFilter || "all",
+            published: publishFilter,
+            browsing: !!creatorSource
+        };
+    }
+
+    // The synced lyrics of the playing song, when the phone shows them on
+    // the cover. The car works out the current line from its own clock
+    function hostLyrics() {
+
+        const active = settings.artOverlayMode === "all"
+            && lyricRows.length > 0
+            && !(currentSong && isManualInstrumental(currentSong));
+
+        if (!active) {
+            return null;
+        }
+
+        return lyricRows.map(function (row) {
+            return { t: row.t, text: row.text };
+        });
+    }
+
+    // The transport row as the phone lays it out, for the car to copy
+    function hostControls() {
+
+        const seen = {};
+        const names = String(settings.controlOrder || "")
+            .split(",")
+            .map(function (name) {
+                return name.trim().toLowerCase();
+            })
+            .filter(function (name) {
+
+                if (CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                    return false;
+                }
+
+                seen[name] = true;
+
+                return true;
+            });
+
+        return names.length > 0 ? names : ["repeat", "shuffle", "stop", "play"];
+    }
+
+    // Everything the song menu needs for one song, the same choices the
+    // phone's long press menu offers
+    function hostSongMenu(id) {
+
+        const wanted = String(id);
+        const song = hostFindSong(wanted);
+
+        if (!song) {
+            return null;
+        }
+
+        return {
+            id: wanted,
+            title: (song.title || "").trim() || "Untitled",
+            rating: getRating(song),
+            cached: cachedIds.has(song.song_id),
+            serverInstrumental: song.generation_method === 7,
+            manualInstrumental: isManualInstrumental(song),
+            bpm: effectiveBpm(song) || 0,
+            canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
+            link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
+            src: songUrl(song) || ""
+        };
+    }
+
+    // The cache dot the phone shows in front of a song
+    function hostCacheState(song) {
+
+        if (cachingIds.has(song.song_id)) {
+            return "caching";
+        }
+
+        const a = cachedIds.has(song.song_id);
+        const c = artCachedIds.has(String(song.song_id));
+
+        if (a && c) {
+            return "both";
+        }
+
+        if (a) {
+            return "audio";
+        }
+
+        return c ? "art" : "";
+    }
+
+    function hostFindSong(id) {
+
+        const wanted = String(id);
+
+        return cache.songs.find(function (x) {
+            return String(x.song_id) === wanted;
+        }) || queue.find(function (x) {
+            return String(x.song_id) === wanted;
+        }) || null;
+    }
+
+    // The number each song carries in the phone's list, the same rule the
+    // list uses, so the car shows the same numbers
+    function hostNumbers() {
+
+        const numberById = new Map();
+
+        if (settings.absoluteNumbers) {
+
+            const byAge = cache.songs.slice().sort(function (a, b) {
+                return (a.generate_at || 0) - (b.generate_at || 0);
+            });
+
+            byAge.forEach(function (x, i) {
+                numberById.set(x.song_id, i + 1);
+            });
+        } else {
+
+            const scope = orderedSongs().filter(passesPublishFilter);
+            const total = scope.length;
+
+            scope.forEach(function (x, i) {
+                numberById.set(x.song_id, total - i);
+            });
+        }
+
+        return numberById;
+    }
+
+    // What the phone's list shows beside each title: the number, the rating
+    // column once any song is rated, and public or draft when both are listed
+    function hostRowMeta() {
+
+        return {
+            anyRated: ratings.size > 0,
+            badges: !creatorSource && publishFilter === "all"
         };
     }
 
@@ -11769,9 +11919,21 @@
     let hostWaveFrom = null;
     let hostWaveCache = null;
 
+    // The song whose stored waveform was last asked for on the car's behalf
+    let hostWaveAsked = null;
+
     function hostWave() {
 
         if (!waveData || waveData.length === 0) {
+
+            // A song restored at start is shown before it plays, and its wave
+            // is only read once playback starts, so read it now instead
+            if (currentSong && hostWaveAsked !== currentSong.song_id) {
+
+                hostWaveAsked = currentSong.song_id;
+                loadWaveForSong(currentSong);
+            }
+
             return null;
         }
 
@@ -11876,6 +12038,8 @@
 
         // The car keeps its own view, Mureka order or A to Z, whatever the
         // phone shows
+        const numbers = hostNumbers();
+
         let source = orderedSongs();
 
         if (req && req.view === "alpha") {
@@ -11906,6 +12070,9 @@
             songs.push({
                 id: String(song.song_id),
                 title: title,
+                number: numbers.get(song.song_id) || null,
+                published: song.publish_state === 1,
+                cached: hostCacheState(song),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -11919,6 +12086,7 @@
             total: total,
             offset: offset,
             songs: songs,
+            meta: hostRowMeta(),
             filters: hostFilters()
         };
     }
@@ -11930,6 +12098,7 @@
 
         const q = String(req && req.q ? req.q : "").trim().toLowerCase();
         const items = [];
+        const numbers = hostNumbers();
 
         for (let i = 0; i < queue.length; i++) {
 
@@ -11944,6 +12113,9 @@
                 index: i,
                 id: String(song.song_id),
                 title: title,
+                number: numbers.get(song.song_id) || null,
+                published: song.publish_state === 1,
+                cached: hostCacheState(song),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -11951,7 +12123,7 @@
             });
         }
 
-        return { pos: queuePos, total: queue.length, items: items };
+        return { pos: queuePos, total: queue.length, items: items, meta: hostRowMeta() };
     }
 
     // A readable copy of one of the player's panels, the settings, the
@@ -11988,6 +12160,14 @@
         const tag = el.tagName;
 
         if (tag === "SCRIPT" || tag === "STYLE" || tag === "CANVAS") {
+            return;
+        }
+
+        // The transport bar editor is dragged about, which a plain copy of
+        // its chips cannot do, so the car gets the lists and draws its own
+        if (el.dataset.hostControls) {
+
+            out.push({ t: "controls", active: hostControls(), all: CONTROL_NAMES.slice() });
             return;
         }
 
@@ -12127,6 +12307,14 @@
             return creatorsEl;
         }
 
+        if (name === "info") {
+            return infoEl;
+        }
+
+        if (name === "playlists") {
+            return playlistsEl;
+        }
+
         return null;
     }
 
@@ -12152,6 +12340,15 @@
             }
 
             root = tagSheetEl;
+        } else if (name === "info") {
+            root = infoEl;
+        } else if (name === "playlists") {
+
+            root = playlistsEl;
+
+            if (playlists.length === 0 && !playlistsLoading) {
+                loadPlaylists();
+            }
         } else if (name === "creators") {
 
             root = creatorsEl;
@@ -12221,6 +12418,62 @@
         }, 60);
     }
 
+    // One choice from the car's song menu, the same things the phone's long
+    // press menu does, plus adding to the end of the queue
+    function hostSongAction(a) {
+
+        const song = hostFindSong(a.id);
+
+        if (!song) {
+            return;
+        }
+
+        const act = String(a.action || "");
+
+        if (act === "play") {
+            playFrom(song.song_id);
+        } else if (act === "playNext") {
+            addNext(song);
+        } else if (act === "addQueue") {
+
+            // At the end of the queue, or playing it when nothing plays yet
+            if (queuePos < 0 || queuePos >= queue.length) {
+
+                playFrom(song.song_id);
+                return;
+            }
+
+            queue.push(song);
+            renderList();
+            setArtSources();
+            setStatus("Added to the queue: " + (song.title || "Untitled"));
+        } else if (act === "refresh") {
+            refreshOne(song);
+        } else if (act === "info") {
+            openInfo(song);
+        } else if (act === "instrumental") {
+
+            if (song.generation_method !== 7) {
+                toggleManualInstrumental(song);
+            }
+        } else if (act === "bpm") {
+            setManualBpmText(song, a.value === null || a.value === undefined ? "" : String(a.value));
+        } else if (act === "cache") {
+            cacheOne(song);
+        } else if (act === "uncache") {
+            removeOne(song);
+        } else if (act === "delete") {
+            deleteOne(song);
+        } else if (act === "rate") {
+
+            const n = Math.max(1, Math.min(5, Math.round(Number(a.value) || 0)));
+
+            setRating(song, nextRating(getRating(song), n));
+        }
+
+        publishHostSoon();
+    }
+
     // Run one command from the app, from the phone's media buttons or the car
     function hostCommand(cmd, arg) {
 
@@ -12268,6 +12521,54 @@
                     publishHostSoon();
                 });
             }
+        } else if (cmd === "stop") {
+            stopPlay();
+        } else if (cmd === "songAction") {
+            hostSongAction(arg || {});
+        } else if (cmd === "rateKey") {
+            rateFromKey(Math.max(0, Math.min(5, Math.round(Number(arg) || 0))));
+        } else if (cmd === "seekBy") {
+            seekByKey(Number(arg) || 0);
+        } else if (cmd === "refresh") {
+            run();
+        } else if (cmd === "clearCache") {
+            clearCache();
+        } else if (cmd === "cacheAll") {
+            cacheAll();
+        } else if (cmd === "rescan") {
+            rescan();
+        } else if (cmd === "closeInfo") {
+            closeInfo();
+        } else if (cmd === "openPlaylists") {
+            openPlaylists();
+        } else if (cmd === "closePlaylists") {
+            closePlaylists();
+        } else if (cmd === "setControls") {
+
+            // The transport row rearranged on the car, the same setting the
+            // phone's own editor writes
+            const seen = {};
+            const names = (Array.isArray(arg) ? arg : []).map(function (name) {
+                return String(name).trim().toLowerCase();
+            }).filter(function (name) {
+
+                if (CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                    return false;
+                }
+
+                seen[name] = true;
+
+                return true;
+            });
+
+            settings.controlOrder = (names.length > 0 ? names : ["play"]).join(",");
+            saveSettings();
+            applyControlOrder();
+            publishHostSoon();
+
+            settingsRefreshers.forEach(function (fn) {
+                fn();
+            });
         } else if (cmd === "likeId") {
 
             // A heart tapped in the car's song list or queue
@@ -12401,6 +12702,7 @@
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
+        window.__murekaHostSongMenu = hostSongMenu;
 
         ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
             document.addEventListener(type, publishHostSoon, true);

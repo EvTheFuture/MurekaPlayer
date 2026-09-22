@@ -304,11 +304,17 @@ final class CarServer {
 
                 // Only the panels the player offers, never a name from the
                 // car put straight into the page
-                if (!"settings".equals(name) && !"filters".equals(name) && !"creators".equals(name)) {
+                if (!"settings".equals(name) && !"filters".equals(name) && !"creators".equals(name)
+                    && !"info".equals(name) && !"playlists".equals(name)) {
                     name = "settings";
                 }
 
                 sendCall(out, "__murekaHostPanel", JSONObject.quote(name));
+            } else if ("GET".equals(method) && "/menu".equals(path)) {
+
+                // What the long press menu offers for one song, the id goes
+                // in quoted, as data
+                sendCall(out, "__murekaHostSongMenu", JSONObject.quote(param(query, "id")));
             } else if ("POST".equals(method) && "/cmd".equals(path)) {
                 runCommand(out, body);
             } else {

@@ -54,6 +54,21 @@ least once since it was installed, so open it once after installing.
   top or the end, and covers load as the rows scroll into sight.
 - The button at the end of a song in the list plays it next, and the heart
   in each row likes or unlikes the song, as on the phone.
+- The transport row follows the phone's order and buttons, including stop,
+  published, vocals and rate. Press and hold a button to move it, or use the
+  transport bar editor in Settings to move, add and take out buttons.
+- Press and hold a song, or right click it, for the phone's song menu: play,
+  play next, add to queue, refresh, download, copy link, information,
+  instrumental, set BPM, cache or remove from cache, delete from the list and
+  the stars.
+- The phone's keyboard shortcuts work here too, `?` lists them.
+- The menu button next to Settings has load, rescan, clear, cache all,
+  playlists, creators, screen off and fullscreen.
+- Synced lyrics show under the stars when the phone shows them on the cover,
+  and a swipe on the cover goes to the next or previous song.
+- Song rows look like the phone's list: the cache dot, the number, the cover, the title,
+  the rating once any song is rated, the heart, the length, and public or
+  draft when both are listed.
 - **Up next** and a **waveform seek bar** on the main screen, both can be
   switched off under Car page display in the settings.
 - **Fullscreen** on the main screen, where the car's browser offers it.
