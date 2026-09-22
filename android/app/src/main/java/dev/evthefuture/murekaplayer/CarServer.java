@@ -210,6 +210,9 @@ final class CarServer {
 
             c.setSoTimeout(10000);
 
+            // A request from a web view keeps the phone awake a while
+            PlayerService.webViewActive();
+
             InputStream in = c.getInputStream();
             OutputStream out = c.getOutputStream();
 

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.23";
+    const VERSION = "1.6.0.33";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -808,6 +808,12 @@
     // artTiles is the row of cover images, the middle one is the current song
     let artTiles = [];
 
+    // Counts every change to what the list holds, and the web view's sorted
+    // copy of it made for that count. Declared early, the list renders
+    // during startup
+    let hostListStamp = 0;
+    let hostListMemo = null;
+
     // Set as a swipe lands, so the song change it causes does not slide
     // the covers a second time
     let artSwipeLanded = false;
@@ -1111,7 +1117,7 @@
                     : "all";
 
                 // Remembered list view, one of mureka, queue or alpha
-                const view = (parsed.view === "queue" || parsed.view === "alpha")
+                const view = (parsed.view === "queue" || parsed.view === "alpha" || parsed.view === "stars")
                     ? parsed.view
                     : "mureka";
 
@@ -1205,7 +1211,7 @@
                     lyricSideShift: (typeof parsed.lyricSideShift === "number" && parsed.lyricSideShift >= -20 && parsed.lyricSideShift <= 20)
                         ? parsed.lyricSideShift : 0,
                     lyricNoSemicolon: parsed.lyricNoSemicolon === true,
-                    webLyricSize: (typeof parsed.webLyricSize === "number" && parsed.webLyricSize >= 14 && parsed.webLyricSize <= 60)
+                    webLyricSize: (typeof parsed.webLyricSize === "number" && parsed.webLyricSize >= 10 && parsed.webLyricSize <= 60)
                         ? parsed.webLyricSize : 26,
 
                     // Zero or null follows the mobile player's own value
@@ -1627,6 +1633,23 @@
             updateShuffleButton();
         }
 
+        // The queue was saved under the filters of that time. When they have
+        // changed since, vocals only then and all now for one, what comes
+        // after the saved song is built again from what the filters admit
+        // now, so it never keeps playing only the songs of the old filter
+        const queued = new Set(queue.map(function (s) {
+            return s.song_id;
+        }));
+        const stale = queue.some(function (s, i) {
+            return i > queuePos && !passesFilters(s);
+        }) || orderedSongs().some(function (s) {
+            return passesFilters(s) && !queued.has(s.song_id);
+        });
+
+        if (stale) {
+            rebuildUpcoming();
+        }
+
         // Show the song as loaded and paused, Play resumes it at the saved time
         currentSong = queue[queuePos];
         resumeState = { queue: queue, queuePos: queuePos, time: saved.time || 0 };
@@ -1963,6 +1986,7 @@
         }
 
         saveRatings();
+        hostListStamp += 1;
         afterRatingChange(song);
     }
 
@@ -2675,7 +2699,7 @@
         const sortRow = document.createElement("div");
         sortRow.style.cssText = "display:flex;gap:6px";
 
-        const countSortBtn = makeButton("Popularity", "#333", "#fff", function () {
+        const countSortBtn = makeButton("Most songs", "#333", "#fff", function () {
             settings.tagSort = "count";
             applySmartFilters();
         });
@@ -3014,6 +3038,14 @@
         tagSheetEl.appendChild(head);
         tagSheetEl.appendChild(enableRow);
         tagSheetEl.appendChild(modeRow);
+
+        // The two sort buttons only order the lists of genres, moods and
+        // models below, they do not filter anything
+        const sortHint = document.createElement("div");
+
+        sortHint.textContent = "Order of the genre, mood and model lists: the ones on the most songs first, or A to Z.";
+        sortHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        tagSheetEl.appendChild(sortHint);
         tagSheetEl.appendChild(sortRow);
         tagSheetEl.appendChild(bpmLabel);
         tagSheetEl.appendChild(bpmEnableRow);
@@ -5305,6 +5337,9 @@
         // for the old next is no longer wanted
         dropNextReady();
 
+        // A new queue has no songs put in to play next
+        playNextMarks.clear();
+
         let songs = orderedSongs().filter(passesFilters);
 
         // If the chosen start song is hidden by the filter, fall back to the full
@@ -5426,15 +5461,22 @@
             return;
         }
 
-        // Drop any later copy so the song does not also play again further on
+        // Drop any later copy so the song does not also play again further on.
+        // Where the first one was is kept, so taking the song out of play
+        // next again can put it back there
+        let oldOffset = -1;
+
         for (let i = queue.length - 1; i > queuePos; i -= 1) {
 
             if (queue[i].song_id === song.song_id) {
+
+                oldOffset = i - queuePos;
                 queue.splice(i, 1);
             }
         }
 
         queue.splice(queuePos + 1, 0, song);
+        playNextMarks.set(String(song.song_id), oldOffset);
         renderList();
 
         // The next cover changed, so refresh the coverflow neighbors
@@ -5446,6 +5488,67 @@
         prefetchNext();
 
         setStatus("Playing next: " + (song.title || "Untitled"));
+    }
+
+    // Songs put in to play next, with how far after the playing song each
+    // one was before, -1 when it was not in the queue at all
+    const playNextMarks = new Map();
+
+    // Whether a song was put in to play next and has not played yet
+    function isPlayNext(id) {
+
+        const key = String(id);
+
+        if (!playNextMarks.has(key)) {
+            return false;
+        }
+
+        for (let i = queuePos + 1; i < queue.length; i += 1) {
+
+            if (String(queue[i].song_id) === key) {
+                return true;
+            }
+        }
+
+        playNextMarks.delete(key);
+
+        return false;
+    }
+
+    // Take a song out of play next again. It goes back where it was in the
+    // queue before, or leaves the queue when it was not in it
+    function undoPlayNext(id) {
+
+        const key = String(id);
+
+        if (!isPlayNext(key)) {
+            return;
+        }
+
+        const oldOffset = playNextMarks.get(key);
+        let song = null;
+
+        playNextMarks.delete(key);
+
+        for (let i = queuePos + 1; i < queue.length; i += 1) {
+
+            if (String(queue[i].song_id) === key) {
+
+                song = queue.splice(i, 1)[0];
+                break;
+            }
+        }
+
+        if (song && oldOffset > 0) {
+            queue.splice(Math.min(queue.length, queuePos + oldOffset), 0, song);
+        }
+
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        setStatus("Removed from play next: " + (song ? song.title || "Untitled" : ""));
     }
 
     // Advance to the next song in the queue
@@ -6364,7 +6467,7 @@
 
         const v = listView === "queue"
             ? "Queue"
-            : (listView === "alpha" ? "A-Z" : "Mureka");
+            : (listView === "alpha" ? "A-Z" : (listView === "stars" ? "Stars" : "Mureka"));
 
         const f = settings.vocalFilter === "vocal"
             ? "Vocals"
@@ -6447,7 +6550,53 @@
         return cache.songs;
     }
 
+    // Most stars first, a half star counts, unrated songs last, and songs
+    // with the same rating in title order
+    function sortByStars(list, lowFirst) {
+
+        return list.slice().sort(function (a, b) {
+
+            const ra = getRating(a);
+            const rb = getRating(b);
+
+            // Not rated goes last either way
+            if ((ra === null) !== (rb === null)) {
+                return ra === null ? 1 : -1;
+            }
+
+            if (ra !== rb) {
+                return lowFirst ? ra - rb : rb - ra;
+            }
+
+            return (a.title || "").trim().localeCompare((b.title || "").trim());
+        });
+    }
+
+    // Most or fewest plays first, songs with no count known last, then titles
+    function sortByPlays(list, lowFirst) {
+
+        return list.slice().sort(function (a, b) {
+
+            const pa = songPlays(a);
+            const pb = songPlays(b);
+
+            if ((pa === null) !== (pb === null)) {
+                return pa === null ? 1 : -1;
+            }
+
+            if (pa !== pb) {
+                return lowFirst ? pa - pb : pb - pa;
+            }
+
+            return (a.title || "").trim().localeCompare((b.title || "").trim());
+        });
+    }
+
     function displaySongs() {
+
+        if (listView === "stars") {
+            return sortByStars(cache.songs);
+        }
 
         if (listView === "alpha") {
 
@@ -6632,8 +6781,59 @@
         }
     }
 
+    // How many times each song has been played on Mureka, as far as known:
+    // from the song itself when the library carries it, otherwise from the
+    // stored details of songs that have been played or prepared. Songs never
+    // looked at are not known and sort last
+    const playCounts = new Map();
+
+    function songPlays(song) {
+
+        if (typeof song.play_count === "number") {
+            return song.play_count;
+        }
+
+        const n = playCounts.get(String(song.song_id));
+
+        return typeof n === "number" ? n : null;
+    }
+
+    // Read the plays of every stored detail once, in the background
+    async function loadPlayCounts() {
+
+        try {
+
+            const store = await caches.open(DETAIL_STORE);
+            const keys = await store.keys();
+            const prefix = "https://mureka-detail-cache/";
+
+            for (const req of keys) {
+
+                const url = String(req.url || "");
+
+                if (url.indexOf(prefix) !== 0) {
+                    continue;
+                }
+
+                const res = await store.match(req);
+                const entry = res ? await res.json() : null;
+
+                if (entry && typeof entry.play_count === "number") {
+                    playCounts.set(decodeURIComponent(url.slice(prefix.length)), entry.play_count);
+                }
+            }
+
+            hostListStamp += 1;
+        } catch (e) {
+        }
+    }
+
     // Persist a song's detail entry, replacing any older copy
     async function saveDetailToStore(id, entry) {
+
+        if (entry && typeof entry.play_count === "number") {
+            playCounts.set(String(id), entry.play_count);
+        }
 
         try {
 
@@ -8997,7 +9197,7 @@
             icon.appendChild(controlChipIcon(name));
 
             const label = document.createElement("span");
-            label.textContent = name;
+            label.textContent = controlName(name);
 
             chip.appendChild(icon);
             chip.appendChild(label);
@@ -10194,7 +10394,9 @@
             return;
         }
 
-        const step = landed || swipeActive ? 0 : artNeighborStep(song);
+        // Off screen the browser runs no animation frames, a slide started
+        // then would never finish, so the covers are just set in place
+        const step = landed || swipeActive || document.visibilityState !== "visible" ? 0 : artNeighborStep(song);
 
         if (step !== 0) {
 
@@ -11866,6 +12068,11 @@
             duration: duration,
             rating: song ? getRating(song) : null,
             liked: song ? song.is_liked === true : false,
+            likes: song && nowPlayingCounts && nowPlayingCounts.song_id === song.song_id
+                && typeof nowPlayingCounts.fav_count === "number" ? nowPlayingCounts.fav_count : null,
+            plays: song && nowPlayingCounts && nowPlayingCounts.song_id === song.song_id
+                && typeof nowPlayingCounts.play_count === "number" ? nowPlayingCounts.play_count : null,
+            playFrom: hostPlayFrom(),
             shuffle: shuffleMode,
             repeat: repeatMode,
             carAudio: hostCarAudio,
@@ -12155,6 +12362,24 @@
         return parts.join(", ");
     }
 
+    // Where the queue comes from, for the web view's line under up next: your
+    // library, published or all, or an artist, a playlist, the vocals choice
+    // and the filters, the same things the phone's view bar names
+    function hostPlayFrom() {
+
+        return {
+            published: publishFilter,
+            creator: creatorSource ? creatorSource.stage_name || "Artist" : "",
+            playlist: activePlaylist ? activePlaylist.name || "Playlist" : "",
+            vocals: settings.vocalFilter || "all",
+            smart: settings.smartEnabled === true,
+            smartText: settings.smartEnabled === true ? hostSmartText() : "",
+            smartAny: settings.tagGenres.length > 0 || settings.tagMoods.length > 0
+                || settings.tagModels.length > 0 || settings.bpmEnabled
+                || settings.dateEnabled || settings.ratingEnabled
+        };
+    }
+
     // What the car page needs to draw its filter row
     function hostFilters() {
 
@@ -12176,6 +12401,44 @@
         };
     }
 
+    // The web view's filtered and sorted list, made again only when the list
+    // changed or another sorting is asked for
+    function hostPrepared(view) {
+
+        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size;
+
+        if (hostListMemo && hostListMemo.key === key) {
+            return hostListMemo;
+        }
+
+        let source = orderedSongs();
+
+        if (view === "alpha" || view === "alphaDesc") {
+
+            const dir = view === "alpha" ? 1 : -1;
+
+            source = cache.songs.slice().sort(function (a, b) {
+                return dir * (a.title || "").trim().localeCompare((b.title || "").trim());
+            });
+        } else if (view === "starsUp") {
+            source = sortByStars(cache.songs, true);
+        } else if (view === "starsDown" || view === "stars") {
+            source = sortByStars(cache.songs, false);
+        } else if (view === "playsUp") {
+            source = sortByPlays(cache.songs, true);
+        } else if (view === "playsDown") {
+            source = sortByPlays(cache.songs, false);
+        }
+
+        hostListMemo = {
+            key: key,
+            songs: source.filter(passesFilters),
+            numbers: hostNumbers()
+        };
+
+        return hostListMemo;
+    }
+
     // One page of the song list the car asked for, the player's own filters
     // applied, then the car's search text on top
     function hostList(req) {
@@ -12192,24 +12455,16 @@
         // down to it and show it
         let playingAt = -1;
 
-        // The car keeps its own view, Mureka order or A to Z, whatever the
-        // phone shows
-        const numbers = hostNumbers();
+        // The web view keeps its own sorting, Mureka order, A to Z or most
+        // stars first, whatever the phone shows. The filtered and sorted list
+        // is made once and kept until something changes, so paging through
+        // it, or asking again after a tap, does not sort the library again
+        const views = ["alpha", "alphaDesc", "starsUp", "starsDown", "stars", "playsUp", "playsDown"];
+        const view = req && views.indexOf(req.view) !== -1 ? req.view : "mureka";
+        const prepared = hostPrepared(view);
+        const numbers = prepared.numbers;
 
-        let source = orderedSongs();
-
-        if (req && req.view === "alpha") {
-
-            source = cache.songs.slice().sort(function (a, b) {
-                return (a.title || "").trim().localeCompare((b.title || "").trim());
-            });
-        }
-
-        for (const song of source) {
-
-            if (!passesFilters(song)) {
-                continue;
-            }
+        for (const song of prepared.songs) {
 
             const title = (song.title || "").trim() || "Untitled";
 
@@ -12237,7 +12492,9 @@
                 rating: getRating(song),
                 liked: song.is_liked === true,
                 duration: (song.duration_milliseconds || 0) / 1000,
-                playing: String(song.song_id) === playingId
+                playing: String(song.song_id) === playingId,
+                playNext: isPlayNext(song.song_id),
+                plays: songPlays(song)
             });
         }
 
@@ -12280,7 +12537,8 @@
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
-                duration: (song.duration_milliseconds || 0) / 1000
+                duration: (song.duration_milliseconds || 0) / 1000,
+                plays: songPlays(song)
             });
         }
 
@@ -12393,6 +12651,23 @@
             }
         });
 
+        // A setting's name with its explanation under it, kept as one column
+        // so the car draws them together beside the switch
+        if (el.dataset.hostCol) {
+
+            const col = [];
+
+            kids.forEach(function (k) {
+                hostWalk(k.el, col, k.path);
+            });
+
+            if (col.length > 0) {
+                out.push({ t: "col", c: col });
+            }
+
+            return;
+        }
+
         // A row drawn as a tappable block, the tag lists and the creators.
         // Its pieces are kept apart, so a tag and its count do not run
         // together, and a tick in front of it means it is selected
@@ -12427,6 +12702,16 @@
         }
 
         if (kids.length === 0) {
+
+            // Text laid out in lines of its own, the lyrics and the style
+            // prompt, goes as it is, capitals and line breaks kept
+            const ws = String(el.style.whiteSpace || "");
+
+            if ((ws === "pre-wrap" || ws === "pre-line" || ws === "pre") && el.textContent.trim()) {
+
+                out.push({ t: "text", s: el.textContent, pre: true });
+                return;
+            }
 
             const text = hostText(el);
 
@@ -12577,18 +12862,23 @@
         }
     }
 
-    // Coalesce a burst of events into one publish
+    // Coalesce a burst of events into one publish. A microtask, not a timer:
+    // with the player off screen, the phone asleep or the app in the
+    // background, the browser holds timers back for up to a minute, and the
+    // web view would not hear of a song change until then
     function publishHostSoon() {
 
         if (hostPublishTimer) {
             return;
         }
 
-        hostPublishTimer = setTimeout(function () {
+        hostPublishTimer = true;
+
+        Promise.resolve().then(function () {
 
             hostPublishTimer = null;
             publishHostState();
-        }, 60);
+        });
     }
 
     // One choice from the car's song menu, the same things the phone's long
@@ -12804,6 +13094,8 @@
             if (song) {
                 addNext(song);
             }
+        } else if (cmd === "unplayNext") {
+            undoPlayNext(arg);
         } else if (cmd === "queueJump") {
 
             const i = Number(arg);
@@ -12877,7 +13169,7 @@
             hostCarAudio = arg === true || arg === "true" || arg === 1;
             applyCarAudioVolume();
 
-            setStatus(hostCarAudio ? "Sound plays in the car browser" : "Sound plays on the phone");
+            setStatus(hostCarAudio ? "Music plays in the browser" : "Music plays on the phone");
         }
 
         publishHostSoon();
@@ -12912,6 +13204,9 @@
         // The position moves on its own, once a second is plenty
         setInterval(publishHostState, 1000);
         publishHostState();
+
+        // The plays known for each song, for sorting the list by them
+        loadPlayCounts();
     }
 
     // Build the floating control panel
@@ -13844,9 +14139,15 @@
         });
         viewButtons.alpha.title = "Alphabetical by title";
 
+        viewButtons.stars = makeActionButton(makeStarSvg(16), "Stars", "#333", "#fff", function () {
+            setView("stars");
+        });
+        viewButtons.stars.title = "Most stars first";
+
         viewRow.appendChild(viewButtons.mureka);
         viewRow.appendChild(viewButtons.queue);
         viewRow.appendChild(viewButtons.alpha);
+        viewRow.appendChild(viewButtons.stars);
 
         // Vocals filter row
         const filterRow = document.createElement("div");
@@ -15239,11 +15540,11 @@
     function controlLabelText(name) {
 
         if (name === "play") {
-            return (audio && !audio.paused && audio.src) ? "pause" : "play";
+            return (audio && !audio.paused && audio.src) ? "Pause" : "Play";
         }
 
         if (name === "published") {
-            return publishFilter === "published" ? "public" : "all";
+            return publishFilter === "published" ? "Public" : "All";
         }
 
         // The playing song's rating, or the action while it has none
@@ -15251,7 +15552,7 @@
 
             const r = currentSong ? getRating(currentSong) : null;
 
-            return r === null ? "rate" : ratingNumber(r) + "\u2605";
+            return r === null ? "Rate" : ratingNumber(r) + "\u2605";
         }
 
         if (name === "vocals") {
@@ -15259,11 +15560,16 @@
             const mode = settings.vocalFilter;
 
             return mode === "vocal"
-                ? "vocals"
-                : (mode === "instrumental" ? "instr" : "all");
+                ? "Vocals"
+                : (mode === "instrumental" ? "Instr" : "All");
         }
 
-        return name;
+        return controlName(name);
+    }
+
+    // A control's name as shown, starting with a capital letter
+    function controlName(name) {
+        return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
     }
 
     // Show or hide the name under each transport button
@@ -15806,6 +16112,9 @@
     // Render the cached song list
     function renderList() {
 
+        // Anything that changes what the list holds comes through here, so
+        // the web view's sorted copy is made again on its next request
+        hostListStamp += 1;
         renderSongs(displaySongs(), listView === "queue");
     }
 
@@ -16740,18 +17049,39 @@
             return el;
         };
 
-        // A short explanation under a setting or a group of settings, in
-        // the same small grey as the other hints
+        // A short explanation under a group of settings, in the same small
+        // grey as the other hints
         const makeHint = function (text) {
 
             const el = document.createElement("div");
 
             el.textContent = text;
-            // It keeps to the label column and wraps before the switches
-            // and steppers on the right, which are at most this wide
-            el.style.cssText = "font-size:11px;color:#888;line-height:1.4;margin-top:-2px;margin-right:min(132px, 38%)";
+            el.style.cssText = "font-size:11px;color:#888;line-height:1.4;margin-top:-2px";
 
             return el;
+        };
+
+        // Put an explanation under one setting's name. The name and the
+        // explanation become one column on the left, the switch or stepper
+        // stays on the right, and the two line up at the top. The row is
+        // handed back, so it can be appended where it was
+        const withHint = function (row, text) {
+
+            const label = row.firstElementChild;
+            const col = document.createElement("div");
+            const hint = makeHint(text);
+
+            col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:3px";
+            col.dataset.hostCol = "1";
+            hint.style.marginTop = "0";
+            row.insertBefore(col, label);
+            col.appendChild(label);
+            col.appendChild(hint);
+
+            label.style.flex = "none";
+            row.style.alignItems = "flex-start";
+
+            return row;
         };
 
         // A row that opens one of the other pages, and the row at the top
@@ -16897,17 +17227,12 @@
         mainPage.appendChild(startRow);
         mainPage.appendChild(makeHint("Which list the player opens on: only your published songs, all of them including drafts, or the same list as when it was last used, an artist included."));
         mainPage.appendChild(refreshLabel);
-        mainPage.appendChild(pubRow);
-        mainPage.appendChild(makeHint("Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
-        mainPage.appendChild(allRow);
-        mainPage.appendChild(makeHint("Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
+        mainPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
+        mainPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         mainPage.appendChild(playbackLabel);
-        mainPage.appendChild(autoplayRow);
-        mainPage.appendChild(makeHint("Starts playing as soon as the player has opened and has songs."));
-        mainPage.appendChild(reportRow);
-        mainPage.appendChild(makeHint("Counts each play on Mureka, as Mureka's own player does. Off keeps your listening out of the play counts."));
-        mainPage.appendChild(cacheRow);
-        mainPage.appendChild(makeHint("How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
+        mainPage.appendChild(withHint(autoplayRow, "Starts playing as soon as the player has opened and has songs."));
+        mainPage.appendChild(withHint(reportRow, "Counts each play on Mureka, as Mureka's own player does. Off keeps your listening out of the play counts."));
+        mainPage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
         mainPage.appendChild(nowPlayingLabel);
         mainPage.appendChild(makeHint("The two lines shown on the lock screen, in the notification and on screens connected over Bluetooth."));
         mainPage.appendChild(titleTplRow);
@@ -16925,8 +17250,7 @@
             });
 
         mainPage.appendChild(makeLabel("Lyrics"));
-        mainPage.appendChild(semicolonRow);
-        mainPage.appendChild(makeHint("Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
+        mainPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
         // Three way art overlay mode, also cycled by double tapping the art
         const overlayLabels = { none: "None", info: "Info", all: "Info + lyrics" };
@@ -17078,29 +17402,22 @@
             function (v) { settings.waveSeek = v; updateSeekMode(); });
 
         // Common: the rest of playback, the artwork and the library counts
-        mainPage.appendChild(directRow);
-        mainPage.appendChild(makeHint("On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
+        mainPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
         mainPage.appendChild(makeLabel("Artwork"));
         mainPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
-        mainPage.appendChild(artworkRow);
-        mainPage.appendChild(makeHint("Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
-        mainPage.appendChild(artResumeRow);
-        mainPage.appendChild(makeHint("Sends the cover again each time playback resumes, for Bluetooth screens that drop it. An iPhone greys the cover out when it is sent too often, so keep it off there."));
+        mainPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
+        mainPage.appendChild(withHint(artResumeRow, "Sends the cover again each time playback resumes, for Bluetooth screens that drop it. An iPhone greys the cover out when it is sent too often, so keep it off there."));
         mainPage.appendChild(makeLabel("Counts"));
-        mainPage.appendChild(countsAgeRow);
-        mainPage.appendChild(makeHint("How long the plays and likes shown for a song are kept before they are fetched from Mureka again."));
+        mainPage.appendChild(withHint(countsAgeRow, "How long the plays and likes shown for a song are kept before they are fetched from Mureka again."));
 
         // Mobile: what is drawn on this screen
         mobilePage.appendChild(makeBackRow("Mobile player"));
         mobilePage.appendChild(makeHint("How the player looks on this screen. The web view has its own page of settings."));
         mobilePage.appendChild(makeLabel("Main page"));
-        mobilePage.appendChild(waveRow);
-        mobilePage.appendChild(makeHint("The seek bar shows the song's waveform instead of a plain line."));
-        mobilePage.appendChild(artStarsRow);
-        mobilePage.appendChild(makeHint("The playing song's stars on the cover, tap one to rate."));
+        mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
+        mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars on the cover, tap one to rate."));
         mobilePage.appendChild(makeLabel("Cover and lyrics"));
-        mobilePage.appendChild(overlayRow);
-        mobilePage.appendChild(makeHint("What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
+        mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(lyricSizeRow);
         mobilePage.appendChild(lyricSideRow);
         mobilePage.appendChild(lyricSpaceRow);
@@ -17108,16 +17425,12 @@
         mobilePage.appendChild(lyricSideShiftRow);
         mobilePage.appendChild(makeHint("Lyric size is the line being sung, in pixels. Side lines are the lines before and after it, in percent of that size. Line spacing is the distance between lines. Lyric position moves the whole block up or down, and side line offset moves the side lines in from the left."));
         mobilePage.appendChild(makeLabel("Control buttons"));
-        mobilePage.appendChild(controlLabelRow);
-        mobilePage.appendChild(makeHint("A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
+        mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
         mobilePage.appendChild(makeLabel("Screen off and fullscreen"));
-        mobilePage.appendChild(carGateRow);
-        mobilePage.appendChild(makeHint("The browser only allows fullscreen after a tap, so the first tap on the player switches to fullscreen."));
-        mobilePage.appendChild(carBlackoutRow);
-        mobilePage.appendChild(makeHint("Turns the screen black while a song plays and nothing is touched, to save the battery and not dazzle at night. A tap brings the player back."));
-        mobilePage.appendChild(carBlackRow);
-        mobilePage.appendChild(makeHint("How long without a touch before the screen goes black. 0 never does."));
+        mobilePage.appendChild(withHint(carGateRow, "The browser only allows fullscreen after a tap, so the first tap on the player switches to fullscreen."));
+        mobilePage.appendChild(withHint(carBlackoutRow, "Turns the screen black while a song plays and nothing is touched, to save the battery and not dazzle at night. A tap brings the player back."));
+        mobilePage.appendChild(withHint(carBlackRow, "How long without a touch before the screen goes black. 0 never does."));
         mobilePage.appendChild(blackTextRow);
         mobilePage.appendChild(blackColorRow);
         mobilePage.appendChild(blackSizeRow);
@@ -17253,6 +17566,40 @@
             const addressRow = makeCarTextRow("Public address, not a private one", "vpnAddress", "3.3.3.3");
             const nameRow = makeCarTextRow("Local name for other devices, .local is added", "mdnsName", "murekaplayer");
 
+            // Android's battery saving can freeze the app after the phone has
+            // lain still a while, the web view then gets no music until the
+            // app is opened. Left out of it, the app keeps working
+            const batteryRow = document.createElement("div");
+            const batteryName = document.createElement("span");
+            const batteryBtn = makeButton("Allow", "#333", "#fff", function () {
+
+                if (typeof window.MurekaHost.askBatteryFree === "function") {
+                    window.MurekaHost.askBatteryFree();
+                }
+            });
+
+            batteryRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            batteryName.textContent = "Run freely in the background";
+            batteryName.style.cssText = "flex:1;min-width:0";
+            batteryBtn.style.flex = "0 0 auto";
+            batteryBtn.style.minWidth = "56px";
+            batteryBtn.style.padding = "6px 12px";
+            batteryRow.appendChild(batteryName);
+            batteryRow.appendChild(batteryBtn);
+
+            const paintBattery = function () {
+
+                const free = typeof window.MurekaHost.batteryFree === "function"
+                    && window.MurekaHost.batteryFree() === "1";
+
+                batteryBtn.textContent = free ? "Allowed" : "Allow";
+                batteryBtn.disabled = free;
+                batteryBtn.style.background = free ? "#48e1eb" : "#333";
+                batteryBtn.style.color = free ? "#000" : "#fff";
+            };
+
+            paintBattery();
+
             const carStatusEl = document.createElement("div");
             carStatusEl.style.cssText = "font-size:12px;color:#48e1eb;line-height:1.5;white-space:pre-line";
 
@@ -17298,6 +17645,7 @@
                 }
 
                 carStatusEl.textContent = lines.join("\n");
+                paintBattery();
                 updateToggleButton(vpnRow.querySelector("button"), vpnGet());
             };
 
@@ -17313,7 +17661,7 @@
                 }
             }, 2000);
 
-            [hotspotRow, wifiRow, vpnRow, addressRow, nameRow, carStatusEl, carHint, netHint, vpnHint].forEach(function (el) {
+            [hotspotRow, wifiRow, vpnRow, addressRow, nameRow, carStatusEl, carHint, netHint, vpnHint, batteryRow].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
 
@@ -17372,7 +17720,7 @@
             // lines and spacing start out as the mobile player has them
             const webLyricSizeRow = makeStepperRow("Lyric size",
                 function () { return settings.webLyricSize; },
-                function (v) { settings.webLyricSize = v; publishHostSoon(); }, 14, 60, 2);
+                function (v) { settings.webLyricSize = v; publishHostSoon(); }, 10, 60, 1);
 
             const webLyricSideRow = makeStepperRow("Side line percent",
                 function () { return Math.round((settings.webLyricSideMul || settings.lyricSideMul) * 100); },
@@ -17389,28 +17737,24 @@
             webPage.appendChild(makeBackRow("Web view"));
             webPage.appendChild(makeHint("How the web view looks in a desktop or tablet browser, apart from the mobile player."));
             webPage.appendChild(makeLabel("Main page"));
-            webPage.appendChild(webUpNextRow);
-            webPage.appendChild(makeHint("The title of the next song under the stars."));
-            webPage.appendChild(webWaveRow);
-            webPage.appendChild(makeHint("The seek bar shows the song's waveform instead of a plain line."));
-            webPage.appendChild(webLyricRow);
-            webPage.appendChild(makeHint("Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
+            webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
+            webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
+            webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
             webPage.appendChild(webLyricSizeRow);
             webPage.appendChild(webLyricSideRow);
             webPage.appendChild(webLyricSpaceRow);
             webPage.appendChild(webLyricSideShiftRow);
-            webPage.appendChild(makeHint("Lyric size is the line being sung, in pixels. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
+            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
             webPage.appendChild(makeLabel("Control buttons"));
-            webPage.appendChild(webNamesRow);
-            webPage.appendChild(makeHint("A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
+            webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
             webPage.appendChild(webControlRow);
 
             webPage.appendChild(carLabel);
             webPage.appendChild(netHint);
             webPage.appendChild(hotspotRow);
             webPage.appendChild(wifiRow);
-            webPage.appendChild(vpnRow);
-            webPage.appendChild(vpnHint);
+            webPage.appendChild(withHint(vpnRow, vpnHint.textContent));
+            webPage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
             webPage.appendChild(addressRow);
             webPage.appendChild(nameRow);
             webPage.appendChild(carStatusEl);
@@ -17420,19 +17764,20 @@
         }
 
         // The other two pages, the car one only exists in the Android app
-        mainPage.appendChild(makeLabel("Display"));
-        mainPage.appendChild(makeHint("Settings for one place only. Everything above applies everywhere."));
-        mainPage.appendChild(makePageButton("Mobile player", "mobile"));
+        // The pages for one place only come first, before what applies
+        // everywhere
+        mainPage.insertBefore(makeLabel("Display"), startLabel);
+        mainPage.insertBefore(makeHint("Settings for one place only. Everything below applies everywhere."), startLabel);
+        mainPage.insertBefore(makePageButton("Mobile player", "mobile"), startLabel);
 
         if (webPageBtn) {
-            mainPage.appendChild(webPageBtn);
+            mainPage.insertBefore(webPageBtn, startLabel);
         }
 
         mainPage.appendChild(devLabel);
         mainPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         mainPage.appendChild(debugRow);
-        mainPage.appendChild(debugLineRow);
-        mainPage.appendChild(makeHint("A line of layout numbers from the browser, tap it to copy."));
+        mainPage.appendChild(withHint(debugLineRow, "A line of layout numbers from the browser, tap it to copy."));
         mainPage.appendChild(artTestRow);
         mainPage.appendChild(copyFeedBtn);
 
@@ -18941,7 +19286,7 @@
                 seg.rows.forEach(function (r) {
 
                     if (r && typeof r.text === "string") {
-                        lines.push(lyricShown(r.text));
+                        lines.push(r.text);
                     }
                 });
             }

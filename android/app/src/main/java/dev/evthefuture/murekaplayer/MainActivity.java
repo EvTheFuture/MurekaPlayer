@@ -181,6 +181,21 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         finishAndRemoveTask();
     }
 
+    // The page's process died and the player came back in a new WebView,
+    // which takes the old one's place on screen
+    @Override
+    public void replaceWeb(WebView fresh) {
+
+        web = fresh;
+
+        if (fresh.getParent() instanceof ViewGroup) {
+            ((ViewGroup) fresh.getParent()).removeView(fresh);
+        }
+
+        root.addView(fresh, 0, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
     // The page went fullscreen: its view covers everything and the status
     // and navigation bars step aside, a swipe brings them back for a moment
     @Override

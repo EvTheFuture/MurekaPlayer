@@ -76,6 +76,11 @@ public class PlayerService extends Service implements Hub.Listener {
     // The running service, for the settings panel and the VPN to reach
     private static PlayerService instance;
 
+    // Held for a while after each request from a web view, so a phone left
+    // in the car and gone to sleep wakes up for the web view and stays up
+    // while it is in use, even with the music paused
+    private PowerManager.WakeLock clientLock;
+
     private final Handler main = MAIN;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
@@ -167,6 +172,8 @@ public class PlayerService extends Service implements Hub.Listener {
         PowerManager pm = getSystemService(PowerManager.class);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MurekaPlayer:playback");
         wakeLock.setReferenceCounted(false);
+        clientLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MurekaPlayer:webview");
+        clientLock.setReferenceCounted(false);
 
         WifiManager wm = getApplicationContext().getSystemService(WifiManager.class);
         wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "MurekaPlayer:stream");
@@ -214,6 +221,18 @@ public class PlayerService extends Service implements Hub.Listener {
                 instance.updateNotification();
             }
         });
+    }
+
+    // A web view asked for something. The CPU stays awake for a minute and
+    // a half after the last request, the web view asks at least every half
+    // minute while it is open, so it is awake exactly while one is in use
+    static void webViewActive() {
+
+        PlayerService s = instance;
+
+        if (s != null && s.clientLock != null) {
+            s.clientLock.acquire(90 * 1000L);
+        }
     }
 
     static String mdnsStatus() {
@@ -365,6 +384,11 @@ public class PlayerService extends Service implements Hub.Listener {
         session.release();
         wakeLock.release();
         wifiLock.release();
+
+        if (clientLock != null) {
+            clientLock.release();
+        }
+
         io.shutdownNow();
         stopForeground(STOP_FOREGROUND_REMOVE);
 

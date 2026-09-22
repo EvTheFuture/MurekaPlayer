@@ -52,8 +52,10 @@ least once since it was installed, so open it once after installing.
   dimmed. Tap a song to jump to it, the cross takes an upcoming song out.
   **Now playing** scrolls to the current song, the round button jumps to the
   top or the end, and covers load as the rows scroll into sight.
-- The button at the end of a song in the list plays it next, and the heart
-  in each row likes or unlikes the song, as on the phone.
+- The button at the end of a song in the list plays it next, a tick shows
+  it is, and a second press takes it out of play next again, back where it
+  was in the queue. The heart in each row likes or unlikes the song, as on
+  the phone.
 - The transport row has its own order, set under Settings, Web view, with
   the same buttons the phone offers: stop, published, vocals and rate. Press and hold a button to move it, or use the
   transport bar editor in Settings to move, add and take out buttons.
@@ -63,7 +65,9 @@ least once since it was installed, so open it once after installing.
   the stars.
 - The phone's keyboard shortcuts work here too, `?` lists them.
 - The menu button next to Settings has load, rescan, clear, cache all,
-  playlists, creators, screen off and fullscreen.
+  playlists, creators, screen off and fullscreen, and under the playing
+  song's title the long press choices for it: refresh, download, copy link,
+  information, mark instrumental, set BPM, rate, cache and delete.
 - Synced lyrics roll like the phone's, five rows that grow, brighten and
   fade as they turn past, beside the cover or on it. Size, side lines,
   spacing and side offset are under Settings, Web view, and start out as
@@ -90,6 +94,8 @@ least once since it was installed, so open it once after installing.
   song change from a button, Bluetooth or the end of a song slides the
   covers the same way in 300 ms, on the car page and on the phone.
 - Previous always goes to the previous song, also a few seconds into one.
+- A queue saved under other filters, vocals only then and all now for one,
+  is built again from what the filters admit now when the player starts.
 - **A-Z** sorts the view shown, Mureka's songs or the queue, and a second
   press puts it back in its own order. The list opens at the playing song,
   highlighted like on the phone, and Now playing loads down to it. Played
@@ -97,6 +103,32 @@ least once since it was installed, so open it once after installing.
 - Anything still loading shows a turning glyph, the list, the queue, the
   panels and the library while the phone loads it from Mureka.
 - The title and stars keep their place whether a song has lyrics or not.
+- **Playing from**, a line under up next, names where the queue comes from:
+  published or all songs, an artist, a playlist, vocals or instrumental and
+  the filters. A tap opens the choices for all of them, applied at once,
+  with Edit filters, Artists, Playlists and the song list one tap further.
+  The actions menu has it too.
+- Filter buttons react at once, the phone catches up after. The number of
+  hearts the song has on Mureka shows beside the heart.
+- **A-Z** and **Stars** sort the song list step by step: A to Z, Z to A,
+  own order, and stars 1 to 5, 5 to 1, own order. Not rated songs come
+  last. The phone's list has Stars as a view too. The list's top row is
+  grouped: List, Sort and Now playing. Scrolling to the top, the end or the
+  playing song eases in and out.
+- Up next sits in the lower left corner of the playing cover, Playing from
+  right under the stars, and the song's plays and hearts beside the heart.
+- **Plays** sorts the song list by how often songs were played, fewest or
+  most first, like Stars. The count is known for songs whose details the
+  phone has fetched, the others come last. An arrow on the chip shows the
+  direction. The filter row is grouped too: Songs, one button for all,
+  vocals or instrumental, Library and Filters.
+- The song information keeps the lyrics' lines and capitals, and its names
+  and values line up in two columns.
+- Lyric size in the web view follows the page, so it looks the same in the
+  car browser and on a large screen.
+- The web view hears of song changes at once, also with the phone's screen
+  off or the app in the background. In fullscreen, Escape closes the page's
+  own dialogs where the browser allows it, holding it leaves fullscreen.
 - **Start with** in the settings can also be **As last time**, the list and
   artist the player was showing when it was last used.
 - **Up next**, the **waveform seek bar**, where the lyrics go, the names
@@ -214,3 +246,32 @@ settings, `.local` is added.
 - Anyone on the same network can open the car page and control the player.
   On the phone's own hotspot that is only the car. Turn off "Allow from
   Wi-Fi networks" to keep it to the hotspot.
+
+## A phone left lying a while
+
+The page the player runs in has a process of its own. Off screen Android
+counted it as unimportant and froze it once the phone had lain still a
+while, and the web view then got no music until the app was opened. The app
+now keeps that process important, keeps the phone awake for a minute and a
+half after each request from a web view, so exactly while one is in use,
+and loads the player again by itself should Android end the process anyway.
+**Run freely in the background**, under Settings, Web view, asks Android to
+leave the app out of battery saving, which some phones need on top.
+
+## Media keys and MPRIS
+
+The web view hands the browser a media session: the song, the second line,
+the cover, play and pause, next and previous, stop and seeking, all sent on
+to the phone. On Linux the browser shows it over MPRIS, so playerctl, media
+keys and the desktop's media controls work, elsewhere in the system's own
+media controls. A browser shows it while the web view plays the music
+itself, Music in this browser.
+
+## Web view on a computer, its own audio stream
+
+Firefox plays every tab as one application, "Firefox", so the web view's
+music cannot be routed apart. `tools/mureka-web-view.sh` opens the web view
+in a Firefox of its own, with its own profile, and names its audio stream
+**MurekaPlayer**. pavucontrol then remembers where that stream goes, and
+`tools/51-mureka-web-view.conf`, copied to
+`~/.config/pipewire/pipewire-pulse.conf.d/`, always sends it to one output.

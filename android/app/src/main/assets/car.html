@@ -24,6 +24,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1d1d22">
+<meta name="color-scheme" content="dark">
 <title>Mureka Player</title>
 <style>
     :root {
@@ -471,6 +472,60 @@
 
     /* Same weight on and off, a bolder label would widen the chip and push
        the ones after it along */
+    /* The song list's top row in three groups: which list, how it is sorted,
+       and the jump to the playing song */
+    .chipGroup {
+        align-self: center;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.7em;
+        padding: 0 0.2em 0 0.4em;
+    }
+
+    .chipSep {
+        align-self: stretch;
+        width: 1px;
+        margin: 10px 0.6vw;
+        background: var(--line);
+    }
+
+    /* The chips that change their word have a set width, wide enough for
+       the longest word they show. The script measures the exact width, this
+       is the floor before and under it */
+    #vocalsCycle {
+        min-width: 10.5em;
+    }
+
+    #feed,
+    #smart {
+        min-width: 9em;
+    }
+
+    #viewAlpha {
+        min-width: 6em;
+    }
+
+    #viewStars,
+    #viewPlays {
+        min-width: 7.5em;
+    }
+
+    #vocalsCycle,
+    #feed,
+    #smart,
+    #viewAlpha,
+    #viewStars,
+    #viewPlays,
+    .fromFixed {
+        flex: 0 0 auto;
+        justify-content: center;
+    }
+
+    .fromFixed {
+        min-width: 9em;
+    }
+
     .chip.on {
         background: var(--accent);
         border-color: var(--accent);
@@ -516,6 +571,7 @@
 
     .pBtn.wide {
         display: flex;
+        align-items: center;
         width: 100%;
         flex: 1;
         text-align: left;
@@ -784,6 +840,24 @@
     }
 
     #menuTitle,
+    /* The playing song's title over its own choices in the actions menu */
+    .actionsSong {
+        grid-column: 1 / -1;
+        margin-top: 1.5vh;
+        padding: 10px 6px 4px;
+        border-top: 1px solid var(--line);
+        color: var(--accent);
+        font-weight: 600;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .actionsSong .loadRow {
+        justify-content: flex-start;
+        padding: 0;
+    }
+
     #actionsTitle,
     #helpTitle {
         font-size: clamp(20px, 2.2vw, 30px);
@@ -980,6 +1054,66 @@
         padding: 0 4px;
     }
 
+    /* A setting's name and its explanation in one column, the switch or
+       stepper beside it, both starting at the same top */
+    .pRow.top {
+        align-items: flex-start;
+    }
+
+    .pRow.top > .pBtn,
+    .pRow.top > .pField,
+    .pRow.top > .pText {
+        margin-top: 0;
+    }
+
+    .pText.pNum {
+        min-width: 3.2em;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .pRow.kv {
+        flex-wrap: nowrap;
+        align-items: baseline;
+        padding: 3px 0;
+    }
+
+    .pRow.kv > .pText:first-child {
+        flex: 0 0 9em;
+        font-size: 0.85em;
+    }
+
+    .pRow.kv > .pText:last-child {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .pText.pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        line-height: 1.5;
+        padding: 8px 12px;
+        background: var(--card);
+        border-radius: 10px;
+    }
+
+    .pCol {
+        flex: 1 1 12em;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .pCol > .pText {
+        padding: 0 4px;
+    }
+
+    .pCol > .pText.small {
+        padding-top: 0;
+    }
+
     .pBtn,
     .pClick {
         min-height: var(--ctl-h);
@@ -1040,14 +1174,156 @@
         font-variant-numeric: tabular-nums;
     }
 
+    /* What plays next, in the lower left corner of the playing cover, on a
+       dark pill so it reads on any picture. It moves with the cover and
+       fades while the covers slide */
     #upNext {
+        position: absolute;
+        left: 4%;
+        bottom: 4%;
+        max-width: 92%;
+        z-index: 3;
         display: none;
         align-items: center;
-        gap: 1vw;
-        margin-top: 1vh;
+        gap: 0.6em;
         min-width: 0;
-        font-size: clamp(16px, 1.7vw, 24px);
+        padding: 0.35em 0.9em;
+        border-radius: 999px;
+        background: rgba(20, 20, 24, 0.62);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        font-size: clamp(13px, 1.4vw, 20px);
         color: var(--muted);
+        pointer-events: none;
+    }
+
+    /* Lyrics on the cover make room for it */
+    #lyricsOver.hasUp {
+        padding-bottom: calc(5% + 2.6em);
+    }
+
+    /* The number of hearts the song has on Mureka, small beside the heart */
+    #likeCount {
+        margin-left: calc(-2vw - 6px);
+        font-size: clamp(14px, 1.5vw, 22px);
+        font-weight: 600;
+        color: var(--heart);
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+    }
+
+    #playCount {
+        margin-left: 1vw;
+        font-size: clamp(14px, 1.5vw, 22px);
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+    }
+
+    /* Where the queue comes from, a line like up next that opens the list
+       and filter choices. A full height button, easy to hit */
+    #fromLine {
+        display: flex;
+        align-items: center;
+        gap: 1vw;
+        min-width: 0;
+        min-height: 44px;
+        margin-top: 0.5vh;
+        padding: 4px 0;
+        border: none;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: clamp(16px, 1.7vw, 24px);
+        text-align: left;
+        cursor: pointer;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
+    }
+
+    /* No box around it after a tap, a keyboard still sees where it is */
+    #fromLine:focus {
+        outline: none;
+    }
+
+    #fromLine:focus-visible #fromText {
+        text-decoration: underline;
+    }
+
+    #fromLine .upLabel {
+        flex: 0 0 auto;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.75em;
+        color: var(--accent);
+    }
+
+    #fromText {
+        flex: 0 1 auto;
+        min-width: 0;
+        color: var(--text);
+    }
+
+    #fromMore {
+        flex: 0 0 auto;
+        display: flex;
+        color: var(--accent);
+    }
+
+    #fromPop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #fromBox {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 2vh 2vw;
+        width: min(900px, 94vw);
+        max-height: 88vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.4vh;
+    }
+
+    #fromTop {
+        display: flex;
+        align-items: flex-start;
+        gap: 1.5vw;
+        margin-bottom: 0.6vh;
+    }
+
+    #fromTitle {
+        flex: 1;
+        font-size: clamp(20px, 2.2vw, 30px);
+        font-weight: 700;
+        padding: 4px 6px 0;
+    }
+
+    .fromHead {
+        padding: 1.6vh 6px 0.6vh;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.8em;
+    }
+
+    .fromRow {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1vw;
+    }
+
+    .fromNote {
+        padding: 0 6px;
+        color: var(--muted);
+        font-size: 0.85em;
     }
 
     #upNext .upLabel {
@@ -1405,7 +1681,7 @@
             <div class="tile empty" id="tilePrev"></div>
             <div class="tile empty" id="tileNext"></div>
             <div class="tile empty" id="tileNext2"></div>
-            <div class="tile" id="cover"><div id="coverShade"></div><div id="lyricsOver"><div class="lyricRoll"></div></div></div>
+            <div class="tile" id="cover"><div id="coverShade"></div><div id="upNext"><span class="upLabel">Up next</span><span id="upTitle" class="marquee"></span></div><div id="lyricsOver"><div class="lyricRoll"></div></div></div>
         </div>
         <div id="coverSpace"></div>
         <div id="info">
@@ -1414,8 +1690,10 @@
             <div id="rateRow">
                 <div id="stars"></div>
                 <button id="like" type="button" aria-label="Like" title="Like" data-icon="heart"></button>
+                <span id="likeCount"></span>
+                <span id="playCount"></span>
             </div>
-            <div id="upNext"><span class="upLabel">Up next</span><span id="upTitle" class="marquee"></span></div>
+            <button id="fromLine" type="button" aria-label="Playing from, change the list and the filters"><span class="upLabel">Playing from</span><span id="fromText" class="marquee"></span><span id="fromMore" data-icon="chevronDown"></span></button>
             <div id="lyrics"><div class="lyricRoll"></div></div>
         </div>
     </div>
@@ -1450,10 +1728,10 @@
         </button>
     </div>
     <div id="bottom">
-        <span class="soundIco" data-icon="speaker" title="Sound"></span>
+        <span class="soundIco" data-icon="speaker" title="Music"></span>
         <div id="sound">
-            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" aria-label="Sound on the phone or Bluetooth" title="Sound on the phone or Bluetooth"></button>
-            <button id="soundCar" type="button" data-icon="browser" aria-label="Sound in this browser" title="Sound in this browser"></button>
+            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" aria-label="Music on the phone or Bluetooth" title="Music on the phone or Bluetooth"></button>
+            <button id="soundCar" type="button" data-icon="browser" aria-label="Music in this browser" title="Music in this browser"></button>
         </div>
         <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
@@ -1468,20 +1746,29 @@
         <button class="chip iconOnly" id="closeBrowse" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
     <div class="chipRow">
+        <span class="chipGroup">List</span>
         <button class="chip" id="viewMureka" type="button" data-icon="mureka"><span class="lbl">Mureka</span></button>
         <button class="chip" id="viewQueue" type="button" data-icon="queue"><span class="lbl">Queue</span></button>
+        <span class="chipSep"></span>
+        <span class="chipGroup">Sort</span>
         <button class="chip" id="viewAlpha" type="button" data-icon="alpha"><span class="lbl">A-Z</span></button>
+        <button class="chip" id="viewStars" type="button" data-icon="star"><span class="lbl">Stars</span></button>
+        <button class="chip" id="viewPlays" type="button" data-icon="play"><span class="lbl">Plays</span></button>
+        <span class="chipSep"></span>
         <button class="chip" id="toCurrent" type="button" data-icon="target"><span class="lbl">Now playing</span></button>
     </div>
     <div class="chipRow" id="filterRow">
-        <button class="chip" id="vocalsAll" type="button" data-icon="all"><span class="lbl">All</span></button>
-        <button class="chip" id="vocalsVocal" type="button" data-icon="vocals"><span class="lbl">Vocals</span></button>
-        <button class="chip" id="vocalsInstr" type="button" data-icon="instrumental"><span class="lbl">Instrumental</span></button>
+        <span class="chipGroup">Songs</span>
+        <button class="chip" id="vocalsCycle" type="button" data-icon="all"><span class="lbl">All</span></button>
+        <span class="chipSep"></span>
+        <span class="chipGroup">Library</span>
         <button class="chip" id="feed" type="button" data-icon="check"><span class="lbl">Published</span></button>
-        <button class="chip" id="smart" type="button" data-icon="filter"><span class="lbl">Filters off</span></button>
-        <button class="chip" id="allFilters" type="button" data-icon="sliders"><span class="lbl">Edit filters</span></button>
         <button class="chip" id="artists" type="button" data-icon="person"><span class="lbl">Artists</span></button>
         <button class="chip" id="playlistsBtn" type="button" data-icon="playlists"><span class="lbl">Playlists</span></button>
+        <span class="chipSep"></span>
+        <span class="chipGroup">Filters</span>
+        <button class="chip" id="smart" type="button" data-icon="filter"><span class="lbl">Filters off</span></button>
+        <button class="chip" id="allFilters" type="button" data-icon="sliders"><span class="lbl">Edit filters</span></button>
     </div>
     <div id="filterText"></div>
     <div id="counts"></div>
@@ -1514,6 +1801,15 @@
         <div id="menuCaption" class="ceLabel" style="text-align:center"></div>
     </div>
 </div>
+<div id="fromPop">
+    <div id="fromBox">
+        <div id="fromTop">
+            <div id="fromTitle">Playing from</div>
+            <button class="chip iconOnly" id="closeFrom" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="fromBody"></div>
+    </div>
+</div>
 <div id="actionsPop">
     <div id="actionsBox">
         <div id="actionsTitle">Actions</div>
@@ -1544,8 +1840,8 @@
     </div>
 </div>
 <div id="overlay">
-    <div>The sound is set to play in this browser. Tap to start it here.</div>
-    <button id="resume" type="button">Play the sound here</button>
+    <div>The music is set to play in this browser. Tap to start it here.</div>
+    <button id="resume" type="button">Play the music here</button>
     <button id="toPhone" type="button">Use the phone instead</button>
 </div>
 <audio id="audio" preload="auto"></audio>
@@ -1615,6 +1911,12 @@
         ],
         circle: [
             ["circle", { cx: "12", cy: "12", r: "8" }]
+        ],
+        chevronDown: [
+            ["polyline", { points: "6 9 12 15 18 9" }]
+        ],
+        chevronRight: [
+            ["polyline", { points: "9 6 15 12 9 18" }]
         ],
         spin: [
             ["path", { d: "M21 12a9 9 0 1 1-6.22-8.56" }]
@@ -1777,15 +2079,15 @@
     // The names the phone uses for the transport buttons, what each is called
     // in the editor, its icon there, and the button on this page
     const CONTROLS = {
-        prev: { label: "prev", icon: "prev", el: "prev" },
-        play: { label: "play", icon: "play", el: "play" },
-        stop: { label: "stop", icon: "stop", el: "stopBtn" },
-        next: { label: "next", icon: "next", el: "next" },
-        shuffle: { label: "shuffle", icon: "shuffle", el: "shuffle" },
-        repeat: { label: "repeat", icon: "repeat", el: "repeat" },
-        published: { label: "published", icon: "check", el: "pubBtn" },
-        vocals: { label: "vocals", icon: "all", el: "vocBtn" },
-        rate: { label: "rate", icon: "star", el: "rateBtn" }
+        prev: { label: "Prev", icon: "prev", el: "prev" },
+        play: { label: "Play", icon: "play", el: "play" },
+        stop: { label: "Stop", icon: "stop", el: "stopBtn" },
+        next: { label: "Next", icon: "next", el: "next" },
+        shuffle: { label: "Shuffle", icon: "shuffle", el: "shuffle" },
+        repeat: { label: "Repeat", icon: "repeat", el: "repeat" },
+        published: { label: "Published", icon: "check", el: "pubBtn" },
+        vocals: { label: "Vocals", icon: "all", el: "vocBtn" },
+        rate: { label: "Rate", icon: "star", el: "rateBtn" }
     };
     const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate"];
 
@@ -2144,6 +2446,7 @@
     const subtitleLine = makeMarquee($("subtitle"));
     const upLine = makeMarquee($("upTitle"));
     const statusLine = makeMarquee($("status"));
+    const fromLine = makeMarquee($("fromText"));
 
     window.addEventListener("resize", function () {
 
@@ -2194,6 +2497,7 @@
         const next = s && s.upNext && s.showUpNext !== false ? s.upNext : null;
 
         $("upNext").style.display = next ? "flex" : "none";
+        $("lyricsOver").classList.toggle("hasUp", !!next);
         upLine.setText(next ? next.title : "");
 
         // The waveform replaces the plain bar when the phone sends one
@@ -2215,8 +2519,16 @@
             layoutControls(s.controls);
         }
 
+        // The list and filters, with a tap still on its way to the phone
+        // shown as already done
+        if (s && s.playFrom) {
+            noteFilters(s.playFrom);
+        }
+
+        const eff = effFilters();
+
         // The extra buttons show what they would switch, like the phone's
-        const vocals = s && s.vocals ? s.vocals : "all";
+        const vocals = eff.vocals || "all";
 
         if ($("vocBtn").dataset.shows !== vocals) {
 
@@ -2225,28 +2537,32 @@
         }
 
         $("vocBtn").classList.toggle("on", vocals !== "all");
-        $("pubBtn").classList.toggle("on", !!(s && s.published === "published"));
         $("pubBtn").disabled = !!(s && s.browsing);
         $("rateBtn").classList.toggle("on", !!(s && s.rating !== null && s.rating !== undefined));
 
         // Like the phone: a tick for published only, an open circle for all
         // songs, on the button and on the list's chip alike, and the names
         // under the buttons follow what the buttons show
-        const onlyPublished = !s || s.published !== "all";
+        const onlyPublished = eff.published !== "all";
         const pubIcon = onlyPublished ? "check" : "circle";
 
         if ($("pubBtn").dataset.shows !== pubIcon) {
 
             $("pubBtn").dataset.shows = pubIcon;
             setIcon($("pubBtn"), pubIcon);
-            setIcon($("feed"), pubIcon);
         }
 
-        setLabel($("feed"), onlyPublished ? "Published" : "All songs");
-        $("feed").classList.toggle("on", onlyPublished);
-        $("vocalsAll").classList.toggle("on", vocals !== "vocal" && vocals !== "instrumental");
-        $("vocalsVocal").classList.toggle("on", vocals === "vocal");
-        $("vocalsInstr").classList.toggle("on", vocals === "instrumental");
+        $("pubBtn").classList.toggle("on", onlyPublished);
+
+        // How many hearts the song has on Mureka, once the phone knows
+        const likes = s && typeof s.likes === "number" ? s.likes : null;
+
+        $("likeCount").textContent = likes === null ? "" : String(likes);
+
+        // And how many times it has been played
+        const plays = s && typeof s.plays === "number" ? s.plays : null;
+
+        $("playCount").textContent = plays === null ? "" : "\u25B6 " + plays;
 
         const rated = s && s.rating !== null && s.rating !== undefined;
 
@@ -2262,10 +2578,10 @@
             }
         }
 
-        setCtlLabel("play", playing ? "pause" : "play");
-        setCtlLabel("pubBtn", onlyPublished ? "public" : "all");
-        setCtlLabel("vocBtn", vocals === "vocal" ? "vocals" : (vocals === "instrumental" ? "instr" : "all"));
-        setCtlLabel("rateBtn", rated ? s.rating + "\u2605" : "rate");
+        setCtlLabel("play", playing ? "Pause" : "Play");
+        setCtlLabel("pubBtn", onlyPublished ? "Public" : "All");
+        setCtlLabel("vocBtn", vocals === "vocal" ? "Vocals" : (vocals === "instrumental" ? "Instr" : "All"));
+        setCtlLabel("rateBtn", rated ? s.rating + "\u2605" : "Rate");
 
         if ($("ratePop").style.display === "flex") {
             $("rateTitle").textContent = s && s.title ? s.title : "";
@@ -2283,6 +2599,7 @@
         $("overlay").style.display = online && carAudio && !unlocked ? "flex" : "none";
 
         syncAudio();
+        syncSession();
     }
 
     // The waveform bars, played part in the accent colour, redrawn only
@@ -2492,16 +2809,22 @@
         cover: makeLyricRoll($("lyricsOver").querySelector(".lyricRoll"))
     };
 
-    // The layout the phone sends, with the phone's defaults
+    // The layout the phone sends, with the phone's defaults. The size is
+    // not in pixels but against the second line under the title, 20 being
+    // as big as that line, so the lyrics grow and shrink with the page like
+    // all the other text and look the same in a small car browser and on a
+    // large screen
     function lyricLayout() {
 
         const l = state && state.lyricLayout ? state.lyricLayout : {};
+        const ref = parseFloat(getComputedStyle($("subtitle")).fontSize) || 20;
+        const scale = ref / 20;
 
         return {
-            size: typeof l.size === "number" ? l.size : 26,
+            size: Math.round((typeof l.size === "number" ? l.size : 26) * scale),
             side: typeof l.side === "number" ? l.side : 0.8,
             line: typeof l.line === "number" ? l.line : 1.5,
-            sideShift: typeof l.sideShift === "number" ? l.sideShift : 0
+            sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale)
         };
     }
 
@@ -2568,8 +2891,9 @@
         // size is for a cover about 360 pixels wide
         const layout = lyricLayout();
 
+        // On the cover a little smaller, it shares the picture
         if (onCover) {
-            layout.size = Math.round(layout.size * Math.max(0.6, Math.min(1.4, $("cover").offsetWidth / 520)));
+            layout.size = Math.round(layout.size * 0.85);
         }
 
         const key = [layout.size, layout.side, layout.line, layout.sideShift].join(",");
@@ -2672,6 +2996,115 @@
         }
     });
 
+    // The browser's media session, which Linux desktops see over MPRIS and
+    // other systems in their own media controls: the song, its cover, play
+    // and pause, next and previous and seeking, all sent on to the phone. A
+    // browser shows it while this page plays the music itself
+    const hasSession = "mediaSession" in navigator;
+    let sessionKey = "";
+
+    function sessionAction(name, fn) {
+
+        try {
+            navigator.mediaSession.setActionHandler(name, fn);
+        } catch (e) {
+            // This browser does not offer that action
+        }
+    }
+
+    if (hasSession) {
+
+        sessionAction("play", function () {
+
+            if (!state || !state.playing) {
+                $("play").click();
+            }
+        });
+
+        sessionAction("pause", function () {
+
+            if (state && state.playing) {
+                $("play").click();
+            }
+        });
+
+        sessionAction("stop", function () {
+            send("stop");
+        });
+
+        sessionAction("nexttrack", function () {
+            send("next");
+        });
+
+        sessionAction("previoustrack", function () {
+            send("prev");
+        });
+
+        sessionAction("seekto", function (d) {
+
+            if (d && typeof d.seekTime === "number") {
+                send("seek", d.seekTime);
+            }
+        });
+
+        sessionAction("seekbackward", function (d) {
+            send("seekBy", -((d && d.seekOffset) || 10));
+        });
+
+        sessionAction("seekforward", function (d) {
+            send("seekBy", (d && d.seekOffset) || 10);
+        });
+    }
+
+    function syncSession() {
+
+        if (!hasSession) {
+            return;
+        }
+
+        const s = state;
+
+        if (!s || !s.id) {
+
+            navigator.mediaSession.playbackState = "none";
+            return;
+        }
+
+        // The song and its cover only when they change
+        const key = [s.id, s.title, s.subtitle, s.cover].join("|");
+
+        if (key !== sessionKey && window.MediaMetadata) {
+
+            sessionKey = key;
+
+            try {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: s.title || "",
+                    artist: s.subtitle || "",
+                    album: "Mureka Player",
+                    artwork: s.cover ? [{ src: s.cover, sizes: "512x512" }] : []
+                });
+            } catch (e) {
+                // A cover the browser does not take leaves the song as it was
+            }
+        }
+
+        navigator.mediaSession.playbackState = s.playing ? "playing" : "paused";
+
+        if (navigator.mediaSession.setPositionState && s.duration > 0) {
+
+            try {
+                navigator.mediaSession.setPositionState({
+                    duration: s.duration,
+                    position: Math.max(0, Math.min(s.duration, position())),
+                    playbackRate: 1
+                });
+            } catch (e) {
+                // A position the browser finds out of range, left out
+            }
+        }
+    }
+
     // Called straight from a tap, the only moment the browser allows play
     function unlockAudio() {
 
@@ -2693,7 +3126,8 @@
     const PAGE = 60;
 
     let listView = "mureka";
-    let listAlpha = false;
+    // How the view shown is sorted: its own order, A to Z or most stars first
+    let listSort = "";
     let listTotal = 0;
     let listLoaded = 0;
     let listBusy = false;
@@ -2710,11 +3144,17 @@
         if (saved === "queue") {
             listView = "queue";
         } else if (saved === "alpha") {
-            listAlpha = true;
+            listSort = "alpha";
         }
 
-        if (localStorage.getItem("murekaCarAlpha") === "1") {
-            listAlpha = true;
+        const sort = localStorage.getItem("murekaCarSort");
+
+        if (["alpha", "alphaDesc", "starsUp", "starsDown", "playsUp", "playsDown"].indexOf(sort) !== -1) {
+            listSort = sort;
+        } else if (sort === "stars") {
+            listSort = "starsDown";
+        } else if (localStorage.getItem("murekaCarAlpha") === "1") {
+            listSort = "alpha";
         }
     } catch (e) {
         // No storage, Mureka order then
@@ -2778,6 +3218,67 @@
         $("rows").textContent = "";
     }
 
+    // The chips whose word and icon change keep one width, the widest of
+    // what they can show, so a tap never pushes the chips after them along.
+    // Each choice is measured on a hidden copy beside the chip
+    const CHIP_FACES = {
+        vocalsCycle: [["all", "All"], ["vocals", "Vocals"], ["instrumental", "Instrumental"]],
+        feed: [["check", "Published"], ["circle", "All songs"]],
+        smart: [["filter", "Filters on"], ["filter", "Filters off"]],
+        viewAlpha: [["alpha", "A-Z"], ["alpha", "Z-A"]],
+        viewStars: [["star", "Stars"], ["star", "Stars \u2191"], ["star", "Stars \u2193"]],
+        viewPlays: [["play", "Plays"], ["play", "Plays \u2191"], ["play", "Plays \u2193"]]
+    };
+
+    function sizeChips() {
+
+        for (const id of Object.keys(CHIP_FACES)) {
+
+            const chip = $(id);
+
+            if (!chip || !chip.offsetParent) {
+                continue;
+            }
+
+            let widest = 0;
+
+            for (const face of CHIP_FACES[id]) {
+
+                const copy = chip.cloneNode(true);
+
+                copy.removeAttribute("id");
+                copy.style.position = "absolute";
+                copy.style.visibility = "hidden";
+                copy.style.minWidth = "0";
+                setIcon(copy, face[0]);
+                setLabel(copy, face[1]);
+                chip.parentNode.appendChild(copy);
+                widest = Math.max(widest, copy.getBoundingClientRect().width);
+                copy.remove();
+            }
+
+            // Never narrower than the room the style sheet gives it, and
+            // then exactly that wide, so it neither grows nor shrinks
+            const floor = parseFloat(getComputedStyle(chip).minWidth) || 0;
+            const width = Math.ceil(Math.max(widest, floor)) + "px";
+
+            chip.style.width = width;
+            chip.style.minWidth = width;
+            chip.style.justifyContent = "center";
+        }
+    }
+
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(sizeChips);
+    }
+
+    window.addEventListener("resize", function () {
+
+        if ($("browse").style.display === "flex") {
+            sizeChips();
+        }
+    });
+
     // The turning glyph with a word beside it, for anything still loading
     function loadingNode(text) {
 
@@ -2834,7 +3335,7 @@
         listBusy = true;
         showListLoading(true);
 
-        fetch("/list?q=" + esc(listQuery) + "&view=" + (listAlpha ? "alpha" : "mureka") + "&offset=" + listLoaded
+        fetch("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=" + listLoaded
             + "&limit=" + (done ? 200 : PAGE), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (data) {
@@ -2859,7 +3360,7 @@
                 $("rows").appendChild(makeRow(song));
             }
 
-            paintFilters(data.filters);
+            noteFilters(data.filters);
             $("counts").textContent = listTotal + " song" + (listTotal === 1 ? "" : "s")
                 + (listQuery ? " matching " + listQuery : "")
                 + (listLoaded < listTotal ? ", showing " + listLoaded : "");
@@ -2964,14 +3465,10 @@
             queuePos = data.pos;
             rowMeta = data.meta || rowMeta;
             clearRows();
-            paintFilters(data.filters);
+            noteFilters(data.filters);
 
-            // A to Z only sorts, the rows stay the queue's, played and next
-            const items = listAlpha
-                ? data.items.slice().sort(function (a, b) {
-                    return a.title.localeCompare(b.title);
-                })
-                : data.items;
+            // Sorting only sorts, the rows stay the queue's, played and next
+            const items = listSort ? sortRows(data.items) : data.items;
 
             let current = null;
 
@@ -2997,6 +3494,34 @@
                 box.scrollTop = keep;
             }
         }).catch(function () {
+        });
+    }
+
+    // The queue's rows sorted A to Z or by stars, the same way the phone
+    // sorts the song list
+    function sortRows(items) {
+
+        return items.slice().sort(function (a, b) {
+
+            if (listSort === "starsUp" || listSort === "starsDown" || listSort === "playsUp" || listSort === "playsDown") {
+
+                const field = listSort.indexOf("stars") === 0 ? "rating" : "plays";
+                const ra = a[field] === null || a[field] === undefined ? null : a[field];
+                const rb = b[field] === null || b[field] === undefined ? null : b[field];
+
+                // Not rated goes last either way
+                if ((ra === null) !== (rb === null)) {
+                    return ra === null ? 1 : -1;
+                }
+
+                if (ra !== rb) {
+                    return listSort === "starsUp" || listSort === "playsUp" ? ra - rb : rb - ra;
+                }
+
+                return a.title.localeCompare(b.title);
+            }
+
+            return (listSort === "alphaDesc" ? -1 : 1) * a.title.localeCompare(b.title);
         });
     }
 
@@ -3042,16 +3567,64 @@
         return row;
     }
 
-    // The row a song plays from, centred in the list
-    function scrollToCurrent() {
+    // Scroll a box to a place with an ease in and out, like the phone's list.
+    // A finger or the wheel on the box stops it where it is
+    let easeToken = 0;
+
+    function easeScroll(box, target, duration) {
+
+        const token = ++easeToken;
+        const from = box.scrollTop;
+        const to = Math.max(0, Math.min(target, box.scrollHeight - box.clientHeight));
+        const length = duration || Math.min(900, 350 + Math.abs(to - from) / 8);
+        const start = performance.now();
+
+        quietUntil = Date.now() + length + 400;
+
+        const stop = function () {
+            easeToken += 1;
+        };
+
+        box.addEventListener("pointerdown", stop, { once: true });
+        box.addEventListener("wheel", stop, { once: true, passive: true });
+
+        const frame = function (now) {
+
+            if (token !== easeToken) {
+                return;
+            }
+
+            const k = Math.min(1, (now - start) / length);
+            const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+
+            box.scrollTop = from + (to - from) * eased;
+
+            if (k < 1) {
+                requestAnimationFrame(frame);
+            }
+        };
+
+        requestAnimationFrame(frame);
+    }
+
+    // The row a song plays from, a third down the list. Eased when asked
+    // for with Now playing, straight there when the list opens
+    function scrollToCurrent(smooth) {
 
         const box = $("rows");
         const row = box.querySelector(".row.playing");
 
         if (row) {
 
-            quietScroll();
-            box.scrollTop = Math.max(0, row.offsetTop - box.clientHeight / 3);
+            const target = Math.max(0, row.offsetTop - box.clientHeight / 3);
+
+            if (smooth === true) {
+                easeScroll(box, target);
+            } else {
+
+                quietScroll();
+                box.scrollTop = target;
+            }
         }
     }
 
@@ -3059,7 +3632,14 @@
 
         $("viewMureka").classList.toggle("on", listView === "mureka");
         $("viewQueue").classList.toggle("on", listView === "queue");
-        $("viewAlpha").classList.toggle("on", listAlpha);
+        $("viewAlpha").classList.toggle("on", listSort === "alpha" || listSort === "alphaDesc");
+        $("viewStars").classList.toggle("on", listSort === "starsUp" || listSort === "starsDown");
+        setLabel($("viewAlpha"), listSort === "alphaDesc" ? "Z-A" : "A-Z");
+        $("viewPlays").classList.toggle("on", listSort === "playsUp" || listSort === "playsDown");
+
+        // An arrow shows the direction, up for fewest first, down for most
+        setLabel($("viewStars"), "Stars" + (listSort === "starsUp" ? " \u2191" : (listSort === "starsDown" ? " \u2193" : "")));
+        setLabel($("viewPlays"), "Plays" + (listSort === "playsUp" ? " \u2191" : (listSort === "playsDown" ? " \u2193" : "")));
     }
 
     function setView(view) {
@@ -3116,14 +3696,10 @@
         if (edgeDir === "down") {
 
             loadRest(function () {
-
-                quietScroll();
-                box.scrollTop = box.scrollHeight;
+                easeScroll(box, box.scrollHeight);
             });
         } else {
-
-            quietScroll();
-            box.scrollTop = 0;
+            easeScroll(box, 0);
         }
     });
 
@@ -3304,11 +3880,18 @@
         attachLongPress(row, song.id);
         songLine(song, row);
 
-        row.appendChild(lineButton("Play next", "listPlus", function (btn) {
+        // Play next, and a second press takes it out of play next again
+        const nextBtn = lineButton(song.playNext ? "Remove from play next" : "Play next",
+            song.playNext ? "check" : "listPlus", function (btn) {
 
-            send("playNext", song.id);
-            setIcon(btn, "check");
-        }));
+                song.playNext = !song.playNext;
+                send(song.playNext ? "playNext" : "unplayNext", song.id);
+                setIcon(btn, song.playNext ? "check" : "listPlus");
+                btn.title = song.playNext ? "Remove from play next" : "Play next";
+                btn.setAttribute("aria-label", btn.title);
+            });
+
+        row.appendChild(nextBtn);
 
         row.addEventListener("click", function () {
 
@@ -3328,15 +3911,272 @@
     }
 
     // The filter row follows whatever the player has set, wherever it was set
+    // The latest list and filter choices the phone reported, and taps not
+    // yet confirmed, each with how long it may stand without an answer.
+    // A button reacts at once, even while the phone is still busy
+    let lastFilters = {};
+    let filterPending = {};
+
+    function effFilters() {
+
+        const out = Object.assign({}, lastFilters);
+        const now = Date.now();
+
+        for (const key of Object.keys(filterPending)) {
+
+            if (filterPending[key].until > now) {
+                out[key] = filterPending[key].value;
+            } else {
+                delete filterPending[key];
+            }
+        }
+
+        return out;
+    }
+
+    // What the phone says now. A tap it has caught up with needs no more
+    // standing in for, then everything that shows the filters is painted
+    function noteFilters(f) {
+
+        if (!f) {
+            return;
+        }
+
+        lastFilters = Object.assign({}, lastFilters, f);
+
+        // The song list sends the artist as a record, the state as a name
+        if (lastFilters.creator && typeof lastFilters.creator === "object") {
+            lastFilters.creator = lastFilters.creator.name || "Artist";
+        }
+
+        // A tap stands for its whole time, even once an answer agrees: an
+        // older answer still on its way would otherwise switch the button
+        // back for a moment
+        const eff = effFilters();
+
+        paintFilters(eff);
+        paintFrom(eff);
+    }
+
+    // A filter tap: shown at once, then sent to the phone
+    function filterTap(cmd, arg) {
+
+        const eff = effFilters();
+        const until = Date.now() + 3000;
+
+        if (cmd === "vocals") {
+            filterPending.vocals = { value: arg, until: until };
+        } else if (cmd === "feed") {
+            filterPending.published = { value: eff.published === "all" ? "published" : "all", until: until };
+        } else if (cmd === "smart") {
+            filterPending.smart = { value: !eff.smart, until: until };
+        }
+
+        const now = effFilters();
+
+        paintFilters(now);
+        paintFrom(now);
+        render();
+
+        if ($("browse").style.display === "flex") {
+            filterCommand(cmd, arg);
+        } else {
+            send(cmd, arg);
+        }
+    }
+
+    // The line under up next: where the queue comes from, in the same words
+    // as the phone's view bar
+    function fromSummary(f) {
+
+        const parts = [];
+
+        if (f.creator) {
+            parts.push(f.creator);
+        } else {
+            parts.push(f.published === "all" ? "All songs" : "Published");
+        }
+
+        if (f.playlist) {
+            parts.push(f.playlist);
+        }
+
+        if (f.vocals === "vocal") {
+            parts.push("Vocals");
+        } else if (f.vocals === "instrumental") {
+            parts.push("Instrumental");
+        }
+
+        if (f.smart && f.smartAny) {
+            parts.push(f.smartText || "Filters on");
+        }
+
+        return parts.join(" \u00B7 ");
+    }
+
+    function paintFrom(f) {
+
+        fromLine.setText(fromSummary(f));
+
+        if (isShown("fromPop")) {
+            drawFrom(f);
+        }
+    }
+
+    // The choices behind the line: the library, the vocals, the filters and
+    // the song list. Every tap applies at once and the sheet stays open, so
+    // several changes need one visit
+    function fromChip(iconName, label, on, action, disabled) {
+
+        const btn = document.createElement("button");
+        const text = document.createElement("span");
+
+        btn.type = "button";
+        btn.className = "chip" + (on ? " on" : "");
+        btn.disabled = disabled === true;
+        btn.appendChild(icon(iconName));
+        text.className = "lbl";
+        text.textContent = label;
+        btn.appendChild(text);
+        btn.addEventListener("click", action);
+
+        return btn;
+    }
+
+    // A chip in the sheet whose word changes, with a set width
+    function fixedChip(chip) {
+
+        chip.classList.add("fromFixed");
+
+        return chip;
+    }
+
+    function fromHead(text) {
+
+        const el = document.createElement("div");
+
+        el.className = "fromHead";
+        el.textContent = text;
+
+        return el;
+    }
+
+    function fromRow(children) {
+
+        const row = document.createElement("div");
+
+        row.className = "fromRow";
+
+        for (const child of children) {
+            row.appendChild(child);
+        }
+
+        return row;
+    }
+
+    function drawFrom(f) {
+
+        const box = $("fromBody");
+        const note = document.createElement("div");
+        const browsing = !!f.creator;
+
+        box.textContent = "";
+
+        box.appendChild(fromHead("Library"));
+        box.appendChild(fromRow([
+            fromChip("check", "Published", !browsing && f.published !== "all", function () {
+
+                if (f.published === "all") {
+                    filterTap("feed", null);
+                }
+            }, browsing),
+            fromChip("circle", "All songs", !browsing && f.published === "all", function () {
+
+                if (f.published !== "all") {
+                    filterTap("feed", null);
+                }
+            }, browsing),
+            fromChip("person", (f.creator ? f.creator : "Your library") + "  \u203A", browsing, function () {
+
+                closeFrom();
+                showPanel("creators");
+            }),
+            fromChip("playlists", (f.playlist ? f.playlist : "Playlists") + "  \u203A", !!f.playlist, function () {
+
+                closeFrom();
+                showPanel("playlists");
+            })
+        ]));
+
+        box.appendChild(fromHead("Songs"));
+        box.appendChild(fromRow([
+            fromChip("all", "All", f.vocals !== "vocal" && f.vocals !== "instrumental", function () {
+                filterTap("vocals", "all");
+            }),
+            fromChip("vocals", "Vocals", f.vocals === "vocal", function () {
+                filterTap("vocals", "vocal");
+            }),
+            fromChip("instrumental", "Instrumental", f.vocals === "instrumental", function () {
+                filterTap("vocals", "instrumental");
+            })
+        ]));
+
+        box.appendChild(fromHead("Filters"));
+        box.appendChild(fromRow([
+            fixedChip(fromChip("filter", f.smart ? "Filters on" : "Filters off", !!(f.smart && f.smartAny), function () {
+                filterTap("smart", null);
+            }, !f.smartAny)),
+            fromChip("sliders", "Edit filters  \u203A", false, function () {
+
+                closeFrom();
+                showPanel("filters");
+            })
+        ]));
+
+        note.className = "fromNote";
+        note.textContent = !f.smartAny
+            ? "No filters set yet, Edit filters sets genres, moods, tempo and more."
+            : (f.smart ? "Filtering by " + (f.smartText || "the filters set") : "Filters are set but switched off.");
+        box.appendChild(note);
+
+        box.appendChild(fromHead("Song list"));
+        box.appendChild(fromRow([
+            fromChip("queue", "Open song list  \u203A", false, function () {
+
+                closeFrom();
+                openBrowse();
+            })
+        ]));
+    }
+
+    function openFrom() {
+
+        drawFrom(effFilters());
+        $("fromPop").style.display = "flex";
+    }
+
+    function closeFrom() {
+        $("fromPop").style.display = "none";
+    }
+
     function paintFilters(f) {
 
         if (!f) {
             return;
         }
 
-        $("vocalsAll").classList.toggle("on", f.vocals !== "vocal" && f.vocals !== "instrumental");
-        $("vocalsVocal").classList.toggle("on", f.vocals === "vocal");
-        $("vocalsInstr").classList.toggle("on", f.vocals === "instrumental");
+        // One button for all, vocals or instrumental, like the one in the
+        // transport bar: it shows the choice and a tap goes to the next
+        const voc = f.vocals === "vocal" || f.vocals === "instrumental" ? f.vocals : "all";
+
+        if ($("vocalsCycle").dataset.shows !== voc) {
+
+            $("vocalsCycle").dataset.shows = voc;
+            setIcon($("vocalsCycle"), voc === "vocal" ? "vocals" : (voc === "instrumental" ? "instrumental" : "all"));
+        }
+
+        setLabel($("vocalsCycle"), voc === "vocal" ? "Vocals" : (voc === "instrumental" ? "Instrumental" : "All"));
+        $("vocalsCycle").classList.toggle("on", voc !== "all");
 
         setLabel($("feed"), f.published === "published" ? "Published" : "All songs");
         setIcon($("feed"), f.published === "published" ? "check" : "circle");
@@ -3432,7 +4272,7 @@
             const first = row.firstElementChild;
             const control = first ? first.nextElementSibling : null;
 
-            if (!control || !first.classList.contains("pText")) {
+            if (!control || !(first.classList.contains("pText") || first.classList.contains("pCol"))) {
                 continue;
             }
 
@@ -3518,6 +4358,20 @@
 
     function panelNode(node, hasButtons, top) {
 
+        // A setting's name with its explanation under it, one column
+        if (node.t === "col") {
+
+            const col = document.createElement("div");
+
+            col.className = "pCol";
+
+            for (const child of node.c) {
+                col.appendChild(panelNode(child, false));
+            }
+
+            return col;
+        }
+
         if (node.t === "row") {
 
             const row = document.createElement("div");
@@ -3530,6 +4384,20 @@
 
             row.className = "pRow";
 
+            // A grey name and its value, like the song information, line up
+            // in two columns down the panel
+            if (node.c.length === 2 && node.c[0].t === "text" && node.c[0].small
+                && node.c[1].t === "text" && !node.c[1].small) {
+                row.classList.add("kv");
+            }
+
+            // A name with an explanation lines up with its switch at the top
+            if (node.c.some(function (child) {
+                return child.t === "col";
+            })) {
+                row.classList.add("top");
+            }
+
             for (const child of node.c) {
                 row.appendChild(panelNode(child, buttons));
             }
@@ -3541,7 +4409,8 @@
 
             const shown = document.createElement("div");
 
-            shown.className = "pText";
+            // A fixed width, so the plus beside it stays put whatever the value
+            shown.className = "pText pNum";
             shown.style.flex = "0 0 auto";
             shown.textContent = node.value === "" ? "-" : String(node.value);
 
@@ -3614,6 +4483,15 @@
         }
 
         const text = document.createElement("div");
+
+        // Lyrics and the style prompt keep their lines and capitals
+        if (node.pre) {
+
+            text.className = "pText pre";
+            text.textContent = node.s || "";
+
+            return text;
+        }
 
         // Something the phone is still loading gets the turning glyph
         if (/^Loading\b/i.test(node.s || "")) {
@@ -4136,8 +5014,28 @@
         }
     });
 
+    // In fullscreen the browser takes Escape for itself and leaves
+    // fullscreen. Where it allows, the page keeps Escape for its own
+    // dialogs, and holding Escape down still leaves fullscreen
+    function lockEscape() {
+
+        const kb = navigator.keyboard;
+
+        if (!kb || !kb.lock) {
+            return;
+        }
+
+        if (fullscreenOn()) {
+            kb.lock(["Escape"]).catch(function () {
+            });
+        } else if (kb.unlock) {
+            kb.unlock();
+        }
+    }
+
     document.addEventListener("fullscreenchange", paintFullscreen);
     document.addEventListener("webkitfullscreenchange", paintFullscreen);
+    document.addEventListener("fullscreenchange", lockEscape);
 
     $("settingsBtn").addEventListener("click", function () {
         showPanel("settings");
@@ -4154,6 +5052,7 @@
     $("browseBtn").addEventListener("click", function () {
 
         $("browse").style.display = "flex";
+        sizeChips();
         paintViews();
         loadList(true);
     });
@@ -4166,20 +5065,43 @@
         setView("queue");
     });
 
-    // A to Z sorts the view shown, Mureka's songs or the queue, and a second
-    // press puts it back in its own order. The view stays the same
-    $("viewAlpha").addEventListener("click", function () {
+    // A to Z or Stars sorts the view shown, Mureka's songs or the queue.
+    // Each press goes one step on: A to Z, Z to A, back to the list's own
+    // order, and for stars fewest first, most first, own order. The view
+    // stays the same
+    function setSort(kind) {
 
-        listAlpha = !listAlpha;
+        const steps = kind === "alpha" ? ["alpha", "alphaDesc"]
+            : (kind === "plays" ? ["playsUp", "playsDown"] : ["starsUp", "starsDown"]);
+        const at = steps.indexOf(listSort);
+
+        // Not sorted this way yet, the first step. After the last, unsorted
+        if (at === -1) {
+            listSort = steps[0];
+        } else {
+            listSort = at + 1 < steps.length ? steps[at + 1] : "";
+        }
 
         try {
-            localStorage.setItem("murekaCarAlpha", listAlpha ? "1" : "0");
+            localStorage.setItem("murekaCarSort", listSort);
         } catch (e) {
             // Not kept then, only for this visit
         }
 
         paintViews();
         loadList(true);
+    }
+
+    $("viewAlpha").addEventListener("click", function () {
+        setSort("alpha");
+    });
+
+    $("viewStars").addEventListener("click", function () {
+        setSort("stars");
+    });
+
+    $("viewPlays").addEventListener("click", function () {
+        setSort("plays");
     });
 
     // The playing song may be further down than what is loaded so far
@@ -4187,11 +5109,13 @@
 
         if (listView === "queue" || $("rows").querySelector(".row.playing")) {
 
-            scrollToCurrent();
+            scrollToCurrent(true);
             return;
         }
 
-        ensureLoaded(listPlayingAt, scrollToCurrent);
+        ensureLoaded(listPlayingAt, function () {
+            scrollToCurrent(true);
+        });
     });
 
     $("closeBrowse").addEventListener("click", function () {
@@ -4232,24 +5156,20 @@
         lastScrollTop = top;
     });
 
-    $("vocalsAll").addEventListener("click", function () {
-        filterCommand("vocals", "all");
-    });
+    $("vocalsCycle").addEventListener("click", function () {
 
-    $("vocalsVocal").addEventListener("click", function () {
-        filterCommand("vocals", "vocal");
-    });
+        const order = ["all", "vocal", "instrumental"];
+        const now = effFilters().vocals || "all";
 
-    $("vocalsInstr").addEventListener("click", function () {
-        filterCommand("vocals", "instrumental");
+        filterTap("vocals", order[(order.indexOf(now) + 1) % order.length]);
     });
 
     $("feed").addEventListener("click", function () {
-        filterCommand("feed", null);
+        filterTap("feed", null);
     });
 
     $("smart").addEventListener("click", function () {
-        filterCommand("smart", null);
+        filterTap("smart", null);
     });
 
     // The phone answers /state as soon as the player has something new,
@@ -4540,15 +5460,15 @@
     });
 
     $("pubBtn").addEventListener("click", function () {
-        send("feed");
+        filterTap("feed", null);
     });
 
     $("vocBtn").addEventListener("click", function () {
 
         const order = ["all", "vocal", "instrumental"];
-        const now = state && state.vocals ? state.vocals : "all";
+        const now = effFilters().vocals || "all";
 
-        send("vocals", order[(order.indexOf(now) + 1) % order.length]);
+        filterTap("vocals", order[(order.indexOf(now) + 1) % order.length]);
     });
 
     // The large star popup for the playing song, a bigger target than the
@@ -4603,6 +5523,16 @@
 
     $("like").addEventListener("click", function () {
         send("like");
+    });
+
+    $("fromLine").addEventListener("click", openFrom);
+    $("closeFrom").addEventListener("click", closeFrom);
+
+    $("fromPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("fromPop")) {
+            closeFrom();
+        }
     });
 
     $("soundCar").addEventListener("click", function () {
@@ -4779,10 +5709,22 @@
             closeSongMenu();
         }));
 
+        songMenuItems(m, box, closeSongMenu, false);
+    }
+
+    // The choices for one song that do not start it playing, shared by the
+    // long press menu and the actions menu, where they are for the playing
+    // song. Close is how the menu they sit in closes
+    function songMenuItems(m, box, close, fromActions) {
+
+        const act = function (action, value) {
+            return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
+        };
+
         box.appendChild(menuItem("refresh", "Refresh", function () {
 
-            songAction("refresh");
-            closeSongMenu();
+            act("refresh");
+            close();
         }));
 
         box.appendChild(menuItem("download", "Download", function () {
@@ -4791,7 +5733,7 @@
                 window.open(m.src, "_blank");
             }
 
-            closeSongMenu();
+            close();
         }, "", !m.src));
 
         box.appendChild(menuItem("link", "Copy link", function () {
@@ -4799,13 +5741,13 @@
             const ok = m.link ? copyText(m.link) : false;
 
             statusLine.setText(ok ? "Copied link: " + m.title : "Could not copy the link");
-            closeSongMenu();
+            close();
         }, "", !m.link));
 
         box.appendChild(menuItem("info", "Information", function () {
 
-            songAction("info");
-            closeSongMenu();
+            act("info");
+            close();
 
             // The phone fetches the details first
             setTimeout(function () {
@@ -4817,17 +5759,33 @@
             m.serverInstrumental ? "Instrumental" : (m.manualInstrumental ? "Not instrumental" : "Mark instrumental"),
             function () {
 
-                songAction("instrumental");
-                closeSongMenu();
+                act("instrumental");
+                close();
             }, "", m.serverInstrumental));
 
         if (m.canSetBpm) {
 
             box.appendChild(menuItem("tempo", "Set BPM", function () {
 
-                $("bpmInput").value = m.bpm > 0 ? String(m.bpm) : "";
-                $("bpmRow").style.display = "flex";
-                $("bpmInput").focus();
+                // The tempo field lives in the song menu, so from the
+                // actions menu the song menu opens with it
+                if (fromActions) {
+
+                    close();
+                    openSongMenu(m.id, true);
+                    return;
+                }
+
+                showBpmField(m);
+            }));
+        }
+
+        if (fromActions) {
+
+            box.appendChild(menuItem("star", "Rate", function () {
+
+                close();
+                $("rateBtn").click();
             }));
         }
 
@@ -4835,26 +5793,24 @@
 
             box.appendChild(menuItem("trash", "Remove from cache", function () {
 
-                songAction("uncache");
-                closeSongMenu();
+                act("uncache");
+                close();
             }, "danger"));
         } else {
 
             box.appendChild(menuItem("cache", "Cache", function () {
 
-                songAction("cache");
-                closeSongMenu();
+                act("cache");
+                close();
             }, "accent"));
         }
 
         box.appendChild(menuItem("close", "Delete from list", function () {
 
-            const id = m.id;
-
-            closeSongMenu();
+            close();
             askConfirm("Delete \"" + m.title + "\" from the list on the phone?", "Delete", true, function () {
 
-                send("songAction", { id: id, action: "delete", value: null }).then(function () {
+                act("delete").then(function () {
 
                     if ($("browse").style.display === "flex") {
                         setTimeout(function () {
@@ -4864,6 +5820,13 @@
                 });
             });
         }, "danger"));
+    }
+
+    function showBpmField(m) {
+
+        $("bpmInput").value = m.bpm > 0 ? String(m.bpm) : "";
+        $("bpmRow").style.display = "flex";
+        $("bpmInput").focus();
     }
 
     function refreshMenu() {
@@ -4885,7 +5848,7 @@
         });
     }
 
-    function openSongMenu(id) {
+    function openSongMenu(id, bpm) {
 
         fetch("/menu?id=" + esc(id), { cache: "no-store" }).then(function (res) {
             return res.json();
@@ -4898,6 +5861,11 @@
             drawMenu(m);
             $("bpmRow").style.display = "none";
             $("songMenu").style.display = "flex";
+
+            // Opened for its tempo field, from the actions menu
+            if (bpm && m.canSetBpm) {
+                showBpmField(m);
+            }
         }).catch(function () {
         });
     }
@@ -4927,6 +5895,11 @@
 
         if (ev.key === "Enter") {
             $("bpmSave").click();
+        } else if (ev.key === "Escape") {
+
+            // Out of the field, the next Escape closes the menu
+            $("bpmInput").blur();
+            ev.preventDefault();
         }
     });
 
@@ -4966,6 +5939,7 @@
     let flowGeo = null;
     let flowOffset = 0;
     let glideToken = 0;
+    let placeRetry = false;
 
     function setTile(tile, song) {
 
@@ -4984,8 +5958,45 @@
         if (tile.dataset.src !== url) {
 
             tile.dataset.src = url;
-            tile.style.backgroundImage = url ? "url(\"" + url.replace(/"/g, "%22") + "\")" : "none";
+            paintTile(tile, url, 0);
         }
+    }
+
+    // Load the cover first, then show it, so a tile is never left with a
+    // picture that failed on the way. A failed one is asked for again a
+    // few times, a fresh browser's first requests can go astray
+    function paintTile(tile, url, tries) {
+
+        if (!url) {
+
+            tile.style.backgroundImage = "none";
+            return;
+        }
+
+        const src = tries > 0 ? url + (url.indexOf("?") === -1 ? "?" : "&") + "r=" + tries : url;
+        const css = "url(\"" + src.replace(/"/g, "%22") + "\")";
+        const img = new Image();
+
+        tile.style.backgroundImage = css;
+
+        img.onload = function () {
+
+            if (tile.dataset.src === url) {
+                tile.style.backgroundImage = css;
+            }
+        };
+
+        img.onerror = function () {
+
+            if (tile.dataset.src === url && tries < 3) {
+
+                setTimeout(function () {
+                    paintTile(tile, url, tries + 1);
+                }, 1500 * (tries + 1));
+            }
+        };
+
+        img.src = src;
     }
 
     // Move the tiles along by shift places, 1 when the next song became the
@@ -5006,6 +6017,7 @@
         }
 
         tiles[2].appendChild($("coverShade"));
+        tiles[2].appendChild($("upNext"));
         tiles[2].appendChild($("lyricsOver"));
     }
 
@@ -5253,7 +6265,26 @@
     // Lay the covers out for a swipe of drag pixels, 0 at rest
     function placeFlow(drag) {
 
-        flowGeo = flowGeometry();
+        const geo = flowGeometry();
+
+        // Not laid out yet, try again on the next frame rather than placing
+        // the covers at no size
+        if (!(geo.size > 0)) {
+
+            if (!placeRetry) {
+
+                placeRetry = true;
+                requestAnimationFrame(function () {
+
+                    placeRetry = false;
+                    placeFlow(flowOffset);
+                });
+            }
+
+            return;
+        }
+
+        flowGeo = geo;
         flowGeo.off = placeStage();
 
         const g = flowGeo;
@@ -5278,13 +6309,35 @@
             placeTile(tiles[i], pos);
         }
 
-        // The shade over the playing cover fades out as it leaves the text
-        $("coverShade").style.opacity = String((g.shade * (1 - Math.min(1, Math.abs(p) * 2))).toFixed(3));
+        // The shade over the playing cover and the up next pill on it fade
+        // out as the cover leaves its place
+        const stay = 1 - Math.min(1, Math.abs(p) * 2);
+
+        $("coverShade").style.opacity = String((g.shade * stay).toFixed(3));
+        $("upNext").style.opacity = stay.toFixed(3);
     }
 
-    window.addEventListener("resize", function () {
-        placeFlow(flowOffset);
-    });
+    // Lay the covers out again whenever the main area changes size. The page
+    // can be laid out after the first state arrived, a new browser still
+    // settling its window or fonts, and a cover placed at no size stays
+    // invisible until something moves it
+    function replaceFlow() {
+
+        if (!flowDrag && !flowAuto) {
+            placeFlow(flowOffset);
+        }
+    }
+
+    window.addEventListener("resize", replaceFlow);
+    window.addEventListener("load", replaceFlow);
+
+    if (window.ResizeObserver) {
+        new ResizeObserver(replaceFlow).observe($("main"));
+    }
+
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(replaceFlow);
+    }
 
     function flowTravel(dir) {
         return dir < 0 ? flowGeo.xC - flowGeo.xL : flowGeo.xR - flowGeo.xC;
@@ -5514,6 +6567,12 @@
             return true;
         }
 
+        if (isShown("fromPop")) {
+
+            closeFrom();
+            return true;
+        }
+
         if (isShown("helpPop")) {
 
             $("helpPop").style.display = "none";
@@ -5567,6 +6626,7 @@
     function openBrowse(view) {
 
         $("browse").style.display = "flex";
+        sizeChips();
 
         if (view && view !== listView) {
             setView(view);
@@ -5761,6 +6821,12 @@
             });
         }, "accent"));
 
+        box.appendChild(menuItem("filter", "Playing from", function () {
+
+            $("actionsPop").style.display = "none";
+            openFrom();
+        }));
+
         box.appendChild(menuItem("playlists", "Playlists", function () {
 
             $("actionsPop").style.display = "none";
@@ -5784,6 +6850,33 @@
             $("actionsPop").style.display = "none";
             $("fullBtn").click();
         }));
+
+        // The long press choices for the playing song, under its title
+        if (!s.id) {
+            return;
+        }
+
+        const song = document.createElement("div");
+
+        song.className = "actionsSong";
+        song.appendChild(loadingNode("Loading"));
+        box.appendChild(song);
+
+        fetch("/menu?id=" + esc(s.id), { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (m) {
+
+            if (!m || !m.id || !song.isConnected) {
+                return;
+            }
+
+            song.textContent = m.title;
+            songMenuItems(m, box, function () {
+                $("actionsPop").style.display = "none";
+            }, true);
+        }).catch(function () {
+            song.remove();
+        });
     }
 
     $("actionsBtn").addEventListener("click", function () {

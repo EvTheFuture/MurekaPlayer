@@ -32,9 +32,12 @@ import android.net.VpnService;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -81,6 +84,9 @@ final class PlayerWeb {
         void askVpnPermission(Intent intent);
 
         void finishApp();
+
+        // The page's process died and a new WebView took the old one's place
+        void replaceWeb(WebView fresh);
     }
 
     private static WebView web;
@@ -204,6 +210,12 @@ final class PlayerWeb {
 
         s.setUserAgentString(ua);
         w.setBackgroundColor(Color.parseColor("#1d1d22"));
+
+        // The page runs in a process of its own. Off screen Android counts
+        // it as unimportant and freezes it after a while, and the player then
+        // does nothing until the app is opened again. Kept important, the
+        // page keeps running with the phone asleep in a pocket or in the car
+        w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
 
         return w;
     }
@@ -337,6 +349,47 @@ final class PlayerWeb {
             return true;
         }
 
+        // Whether Android lets the app run freely in the background, "1" when
+        // it is left out of battery optimisation
+        @JavascriptInterface
+        public String batteryFree() {
+
+            if (appContext == null) {
+                return "0";
+            }
+
+            PowerManager pm = appContext.getSystemService(PowerManager.class);
+
+            return pm != null && pm.isIgnoringBatteryOptimizations(appContext.getPackageName()) ? "1" : "0";
+        }
+
+        // Ask Android to leave the app out of battery optimisation, a
+        // question Android shows itself
+        @JavascriptInterface
+        public void askBatteryFree() {
+
+            if (appContext == null) {
+                return;
+            }
+
+            Intent ask = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:" + appContext.getPackageName()))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            try {
+                appContext.startActivity(ask);
+            } catch (ActivityNotFoundException e) {
+
+                // No such question on this phone, the list of apps instead
+                try {
+                    appContext.startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (ActivityNotFoundException e2) {
+                    // Nothing to open
+                }
+            }
+        }
+
         // What the car page is reachable at right now, for the settings panel
         @JavascriptInterface
         public String carStatus() {
@@ -368,7 +421,52 @@ final class PlayerWeb {
         }
     }
 
+    // The page's process was ended by Android. The old WebView is useless
+    // then, so a new one loads the player again, and the screen shows it
+    // when the app is open
+    private static void rebuild() {
+
+        WebView old = web;
+
+        web = null;
+
+        if (old != null) {
+
+            if (old.getParent() instanceof ViewGroup) {
+                ((ViewGroup) old.getParent()).removeView(old);
+            }
+
+            old.destroy();
+        }
+
+        if (appContext == null) {
+            return;
+        }
+
+        WebView fresh = get(appContext);
+        Host host = hostRef.get();
+
+        if (host instanceof Activity && context != null) {
+            context.setBaseContext((Activity) host);
+        }
+
+        if (host != null) {
+            host.replaceWeb(fresh);
+        }
+    }
+
     private static final class MainClient extends WebViewClient {
+
+        // Without this the whole app would be ended with the page
+        @Override
+        public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+
+            if (view == web) {
+                MAIN.post(PlayerWeb::rebuild);
+            }
+
+            return true;
+        }
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
