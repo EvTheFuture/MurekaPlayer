@@ -651,11 +651,6 @@
         height: 1.2em;
     }
 
-    .rowGrip.spacer {
-        visibility: hidden;
-        cursor: default;
-    }
-
     .rowGrip.off {
         opacity: 0.3;
         cursor: not-allowed;
@@ -2241,6 +2236,14 @@
     let stateAt = 0;
     let online = false;
 
+    // Since when the phone has said it plays while its clock stands still,
+    // 0 while it moves. A phone left in the background can get stuck like
+    // that, loading a song that never starts. With the sound here, this
+    // page then goes by its own element instead of being pulled back to the
+    // phone's frozen place again and again
+    let phoneStillSince = 0;
+    let phoneKickAt = 0;
+
     // The sound element. It only plays once a tap in this page has allowed it
     const audio = $("audio");
     let unlocked = false;
@@ -2256,8 +2259,30 @@
         return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
     }
 
-    // Where the song is now, as far as this page can tell
+    // Whether the phone claims to play but has not moved for a while
+    function phoneFrozen() {
+        return phoneStillSince > 0 && Date.now() - phoneStillSince > 1500;
+    }
+
+    // Whether this page's own element is playing the phone's song
+    function hereAudible() {
+        return !!(state && state.carAudio && unlocked && !audio.paused
+            && audio.readyState >= 2 && audio.dataset.src === state.src);
+    }
+
+    // Where the song is now, as far as this page can tell. With the phone
+    // stuck and the sound here, where the sound here is
     function position() {
+
+        if (phoneFrozen() && hereAudible()) {
+            return audio.currentTime;
+        }
+
+        return phonePosition();
+    }
+
+    // Where the phone's song is now, going by its last word
+    function phonePosition() {
 
         if (!state) {
             return 0;
@@ -3051,9 +3076,19 @@
             audio.src = s.src;
         }
 
-        const want = position();
+        const want = phonePosition();
 
-        if (audio.readyState > 0 && Math.abs(audio.currentTime - want) > 1.2) {
+        // A stuck phone is not followed back to where it froze. It is given
+        // this page's place instead, now and then, which can also get its
+        // loading going again
+        if (phoneFrozen() && hereAudible()) {
+
+            if (Date.now() - phoneKickAt > 10000) {
+
+                phoneKickAt = Date.now();
+                send("seek", audio.currentTime);
+            }
+        } else if (audio.readyState > 0 && Math.abs(audio.currentTime - want) > 1.2) {
 
             try {
                 audio.currentTime = want;
@@ -3069,6 +3104,15 @@
             audio.pause();
         }
     }
+
+    // The song ran out here while the phone was still stuck in it, so the
+    // phone would never end it itself. It is asked to go on instead
+    audio.addEventListener("ended", function () {
+
+        if (phoneFrozen() && state && audio.dataset.src === state.src) {
+            send("next");
+        }
+    });
 
     audio.addEventListener("loadedmetadata", function () {
 
@@ -3618,14 +3662,13 @@
         row.dataset.qi = String(item.index);
         attachLongPress(row, item.id);
 
-        // A handle to drag a song still to come to another place. Only in
-        // the queue's own order, a sorted or searched list is not its order.
-        // Other rows keep an empty place, so everything lines up
+        // A handle to drag any song, played, playing or to come, to another
+        // place. Only in the queue's own order, a sorted or searched list is
+        // not its order
         const grip = document.createElement("span");
-        const upcoming = item.index > pos;
-        const movable = upcoming && !listSort && !listQuery;
+        const movable = !listSort && !listQuery;
 
-        grip.className = "rowGrip" + (upcoming ? (movable ? "" : " off") : " spacer");
+        grip.className = "rowGrip" + (movable ? "" : " off");
         grip.appendChild(icon("grip"));
 
         if (movable) {
@@ -3663,7 +3706,7 @@
                 document.addEventListener("pointermove", watch, true);
                 document.addEventListener("pointerup", stop, true);
             });
-        } else if (upcoming) {
+        } else {
 
             // Sorted or searched, the list is not the queue's order, so the
             // handle only says how to get the order back
@@ -3729,7 +3772,7 @@
         }, 3000);
     }
 
-    // Drag a song in the queue to another place among those still to come.
+    // Drag a song in the queue to another place, played songs included.
     // A copy follows the finger up and down, the song's own row stays as the
     // gap, and the rows it passes slide out of the way, like the buttons in
     // the transport bar. Near the top or the bottom of the list it scrolls.
@@ -3738,9 +3781,7 @@
 
     function queueRows() {
 
-        return Array.prototype.filter.call($("rows").querySelectorAll(".row"), function (r) {
-            return Number(r.dataset.qi) > queuePos;
-        });
+        return Array.prototype.slice.call($("rows").querySelectorAll(".row"));
     }
 
     function startQueueDrag(row, ev, moving) {
@@ -3816,8 +3857,7 @@
         placeQueueDrag();
     }
 
-    // Put the dragged row where the finger is, among the songs to come, the
-    // others sliding aside
+    // Put the dragged row where the finger is, the others sliding aside
     function placeQueueDrag() {
 
         const rows = queueRows();
@@ -3876,7 +3916,7 @@
             rowSwallow = false;
         }, 400);
 
-        const to = queuePos + 1 + queueRows().indexOf(d.row);
+        const to = queueRows().indexOf(d.row);
 
         if (to !== d.from) {
 
@@ -5505,6 +5545,16 @@
     function accept(s) {
 
         const before = state ? state.id : null;
+
+        // The phone's clock standing still while it says it plays
+        const still = state && s.id === state.id && s.playing && state.playing
+            && Math.abs((s.position || 0) - (state.position || 0)) < 0.05;
+
+        if (!still) {
+            phoneStillSince = 0;
+        } else if (!phoneStillSince) {
+            phoneStillSince = stateAt;
+        }
 
         if (pending && Date.now() < pending.until && s.playing !== pending.playing) {
 

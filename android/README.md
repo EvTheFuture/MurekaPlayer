@@ -52,8 +52,10 @@ least once since it was installed, so open it once after installing.
   dimmed. Tap a song to jump to it, the cross takes an upcoming song out.
   **Now playing** scrolls to the current song, the round button jumps to the
   top or the end, and covers load as the rows scroll into sight.
-- In the queue, the handle at the start of a song still to come drags it to
-  another place, the songs it passes sliding out of the way, and the list
+- In the queue, the handle at the start of any song, played, playing or still
+  to come, drags it to another place, played songs included. The playing
+  song keeps playing wherever it goes. The songs it passes slide out of the
+  way, and the list
   scrolls when the song is held near its top or bottom. With a mouse the
   whole row drags too. The queue's own order only: while it is sorted or
   searched the handles are dimmed and a tap on one says why.
@@ -274,3 +276,13 @@ to the phone. On Linux the browser shows it over MPRIS, so playerctl, media
 keys and the desktop's media controls work, elsewhere in the system's own
 media controls. A browser shows it while the web view plays the music
 itself, Music in this browser.
+
+## A stuck phone
+
+With Music in this browser, the phone plays along nearly silent and the web
+view follows its place. A phone left in the background can get stuck
+loading a song while it still says it plays, its clock standing still. The
+web view then no longer pulls its own sound back to that frozen place,
+which used to loop the first seconds of the song. It keeps playing, hands
+the phone its place every ten seconds, which can also get the phone going
+again, and asks for the next song when the song ends here.

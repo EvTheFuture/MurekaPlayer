@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.37";
+    const VERSION = "1.6.0.39";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -13127,19 +13127,32 @@
             }
         } else if (cmd === "queueMove") {
 
-            // A song dragged to another place among the ones still to come
+            // A song dragged to another place anywhere in the queue, played,
+            // playing or still to come. The playing song stays the playing
+            // one, only its place may change
             const from = Number(arg && arg.from);
             const to = Number(arg && arg.to);
+            const valid = Number.isInteger(from) && Number.isInteger(to);
 
-            if (from > queuePos && from < queue.length && to > queuePos && to < queue.length && from !== to) {
+            if (valid && from >= 0 && from < queue.length && to >= 0 && to < queue.length && from !== to) {
 
+                const oldNext = queue[queuePos + 1] || null;
                 const moved = queue.splice(from, 1)[0];
 
                 queue.splice(to, 0, moved);
 
+                // Follow the playing song to where it is now
+                if (from === queuePos) {
+                    queuePos = to;
+                } else if (from < queuePos && to >= queuePos) {
+                    queuePos -= 1;
+                } else if (from > queuePos && to <= queuePos) {
+                    queuePos += 1;
+                }
+
                 // What plays next may have changed, anything readied for the
                 // old next song is let go
-                if (from === queuePos + 1 || to === queuePos + 1) {
+                if ((queue[queuePos + 1] || null) !== oldNext) {
                     dropNextReady();
                 }
 
