@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.16";
+    const VERSION = "1.6.0.17";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -645,6 +645,24 @@
 
     // The settings overlay and its controls, built once and reused
     let settingsEl = null;
+
+    // The three settings pages, and which one shows
+    let settingsPages = null;
+
+    function showSettingsPage(name) {
+
+        if (!settingsPages) {
+            return;
+        }
+
+        Object.keys(settingsPages).forEach(function (key) {
+            settingsPages[key].style.display = key === name ? "flex" : "none";
+        });
+
+        if (settingsEl) {
+            settingsEl.scrollTop = 0;
+        }
+    }
     let startPublishedBtn = null;
     let startAllBtn = null;
 
@@ -1029,6 +1047,9 @@
             waveSeek: true,
             webUpNext: true,
             webWave: true,
+            webNames: false,
+            webLyrics: "info",
+            webControlOrder: "repeat,shuffle,stop,play",
             lyricSize: 18,
             lyricSideMul: 0.8,
             lyricLineMul: 1.5,
@@ -1147,6 +1168,12 @@
                     waveSeek: parsed.waveSeek !== false,
                     webUpNext: parsed.webUpNext !== false,
                     webWave: parsed.webWave !== false,
+                    webNames: parsed.webNames === true,
+                    webLyrics: (parsed.webLyrics === "off" || parsed.webLyrics === "cover")
+                        ? parsed.webLyrics : "info",
+                    webControlOrder: typeof parsed.webControlOrder === "string" && parsed.webControlOrder
+                        ? parsed.webControlOrder
+                        : "repeat,shuffle,stop,play",
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
                     lyricSideMul: (typeof parsed.lyricSideMul === "number" && parsed.lyricSideMul >= 0.5 && parsed.lyricSideMul <= 1)
@@ -8649,11 +8676,14 @@
     // in the player and the lower one the buttons that are not shown. The DOM
     // is only ever a rendering of those lists, which is what keeps a chip from
     // ending up in both rows at once
-    function buildControlEditor() {
+    function buildControlEditor(key) {
+
+        // The mobile bar or the car page's, each with its own order
+        key = key || "controlOrder";
 
         const wrap = document.createElement("div");
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
-        wrap.dataset.hostControls = "1";
+        wrap.dataset.hostControls = key === "webControlOrder" ? "web" : "mobile";
 
         let activeNames = [];
         let disabledNames = [];
@@ -8712,7 +8742,7 @@
 
             const seen = {};
 
-            activeNames = String(settings.controlOrder || "")
+            activeNames = String(settings[key] || "")
                 .split(",")
                 .map(function (name) {
                     return name.trim().toLowerCase();
@@ -8745,9 +8775,14 @@
                 });
             }
 
-            settings.controlOrder = activeNames.join(",");
+            settings[key] = activeNames.join(",");
             saveSettings();
-            applyControlOrder();
+
+            if (key === "controlOrder") {
+                applyControlOrder();
+            } else {
+                publishHostSoon();
+            }
         };
 
         // Put the chips where the lists say they go. Every chip that has moved
@@ -11732,10 +11767,14 @@
             carAudio: hostCarAudio,
             signedIn: authState,
             status: statusText || "",
-            upNext: settings.webUpNext ? hostUpNext() : null,
+            showUpNext: settings.webUpNext !== false,
             wave: settings.webWave ? hostWave() : null,
-            controls: hostControls(),
+            controls: hostControls("web"),
+            names: settings.webNames === true,
+            lyricsWhere: settings.webLyrics || "info",
             lyrics: hostLyrics(),
+            prevSong: hostNeighbor(-1),
+            upNext: hostNeighbor(1),
             loading: running === true,
             caching: cacheRunning === true,
             vocals: settings.vocalFilter || "all",
@@ -11748,7 +11787,7 @@
     // the cover. The car works out the current line from its own clock
     function hostLyrics() {
 
-        const active = settings.artOverlayMode === "all"
+        const active = settings.webLyrics !== "off"
             && lyricRows.length > 0
             && !(currentSong && isManualInstrumental(currentSong));
 
@@ -11762,10 +11801,10 @@
     }
 
     // The transport row as the phone lays it out, for the car to copy
-    function hostControls() {
+    function hostControls(which) {
 
         const seen = {};
-        const names = String(settings.controlOrder || "")
+        const names = String((which === "mobile" ? settings.controlOrder : settings.webControlOrder) || "")
             .split(",")
             .map(function (name) {
                 return name.trim().toLowerCase();
@@ -11879,27 +11918,15 @@
         };
     }
 
-    // The song after the current one, as the queue stands, for the car page
-    function hostUpNext() {
+    // The song one step from the current one, as the queue stands, for the
+    // car page's up next line and the covers beside the current one
+    function hostNeighbor(step) {
 
         if (!currentSong || queue.length === 0) {
             return null;
         }
 
-        let pos = queuePos + 1;
-
-        if (repeatMode === "one") {
-            pos = queuePos;
-        } else if (pos >= queue.length) {
-
-            if (repeatMode !== "all") {
-                return null;
-            }
-
-            pos = 0;
-        }
-
-        const song = queue[pos];
+        const song = neighborSong(step);
 
         if (!song) {
             return null;
@@ -12167,7 +12194,12 @@
         // its chips cannot do, so the car gets the lists and draws its own
         if (el.dataset.hostControls) {
 
-            out.push({ t: "controls", active: hostControls(), all: CONTROL_NAMES.slice() });
+            out.push({
+                t: "controls",
+                which: el.dataset.hostControls,
+                active: hostControls(el.dataset.hostControls),
+                all: CONTROL_NAMES.slice()
+            });
             return;
         }
 
@@ -12178,7 +12210,8 @@
                 id: hostId(el, path),
                 s: hostText(el) || el.title || el.getAttribute("aria-label") || "",
                 on: hostOn(el),
-                off: el.disabled === true
+                off: el.disabled === true,
+                wide: el.style.textAlign === "left"
             });
             return;
         }
@@ -12264,7 +12297,13 @@
             const text = hostText(el);
 
             if (text) {
-                out.push({ t: "text", s: text, small: parseFloat(el.style.fontSize || "13") <= 12 });
+
+                // Hints and status lines are small or grey on the phone, the
+                // rest of the standalone lines are section headings
+                const rgb = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(String(el.style.color || ""));
+                const grey = !!rgb && rgb[1] === rgb[2] && rgb[2] === rgb[3] && Number(rgb[1]) < 180;
+
+                out.push({ t: "text", s: text, small: parseFloat(el.style.fontSize || "13") <= 12 || grey });
             }
 
             return;
@@ -12545,10 +12584,12 @@
             closePlaylists();
         } else if (cmd === "setControls") {
 
-            // The transport row rearranged on the car, the same setting the
-            // phone's own editor writes
+            // The transport row rearranged on the car. The car's own order
+            // unless the mobile editor was used from the car
+            const which = arg && !Array.isArray(arg) && arg.which === "mobile" ? "controlOrder" : "webControlOrder";
+            const list = Array.isArray(arg) ? arg : (arg && Array.isArray(arg.names) ? arg.names : []);
             const seen = {};
-            const names = (Array.isArray(arg) ? arg : []).map(function (name) {
+            const names = list.map(function (name) {
                 return String(name).trim().toLowerCase();
             }).filter(function (name) {
 
@@ -12561,9 +12602,13 @@
                 return true;
             });
 
-            settings.controlOrder = (names.length > 0 ? names : ["play"]).join(",");
+            settings[which] = (names.length > 0 ? names : ["play"]).join(",");
             saveSettings();
-            applyControlOrder();
+
+            if (which === "controlOrder") {
+                applyControlOrder();
+            }
+
             publishHostSoon();
 
             settingsRefreshers.forEach(function (fn) {
@@ -16509,6 +16554,70 @@
         head.appendChild(heading);
         head.appendChild(doneBtn);
 
+        // The settings are three pages: what applies everywhere, what only
+        // shapes the mobile player and what only shapes the car page. One
+        // page shows at a time, the other two are hidden
+        const makePage = function () {
+
+            const page = document.createElement("div");
+
+            page.style.cssText = "display:none;flex-direction:column;gap:12px";
+
+            return page;
+        };
+
+        let webPageBtn = null;
+
+        const mainPage = makePage();
+        const mobilePage = makePage();
+        const webPage = makePage();
+
+        mainPage.style.display = "flex";
+        settingsPages = { main: mainPage, mobile: mobilePage, web: webPage };
+
+        const makeLabel = function (text) {
+
+            const el = document.createElement("div");
+
+            el.textContent = text;
+            el.style.cssText = "color:#bbb";
+
+            return el;
+        };
+
+        // A row that opens one of the other pages, and the row at the top
+        // of such a page that leads back
+        const makePageButton = function (text, name) {
+
+            const btn = makeButton(text + "  \u203A", "#333", "#fff", function () {
+                showSettingsPage(name);
+            });
+
+            btn.style.textAlign = "left";
+            btn.style.padding = "10px 12px";
+
+            return btn;
+        };
+
+        const makeBackRow = function (title) {
+
+            const row = document.createElement("div");
+            const back = makeButton("\u2039  Back", "#333", "#fff", function () {
+                showSettingsPage("main");
+            });
+            const name = document.createElement("span");
+
+            row.style.cssText = "display:flex;align-items:center;gap:10px";
+            back.style.flex = "0 0 auto";
+            back.style.padding = "6px 12px";
+            name.textContent = title;
+            name.style.cssText = "font-weight:600";
+            row.appendChild(back);
+            row.appendChild(name);
+
+            return row;
+        };
+
         // Start feed section, which list the player opens on
         const startLabel = document.createElement("div");
         startLabel.textContent = "Start with";
@@ -16608,19 +16717,19 @@
         const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
 
         settingsEl.appendChild(head);
-        settingsEl.appendChild(startLabel);
-        settingsEl.appendChild(startRow);
-        settingsEl.appendChild(refreshLabel);
-        settingsEl.appendChild(pubRow);
-        settingsEl.appendChild(allRow);
-        settingsEl.appendChild(playbackLabel);
-        settingsEl.appendChild(autoplayRow);
-        settingsEl.appendChild(reportRow);
-        settingsEl.appendChild(cacheRow);
-        settingsEl.appendChild(nowPlayingLabel);
-        settingsEl.appendChild(titleTplRow);
-        settingsEl.appendChild(subtitleTplRow);
-        settingsEl.appendChild(tplHint);
+        mainPage.appendChild(startLabel);
+        mainPage.appendChild(startRow);
+        mainPage.appendChild(refreshLabel);
+        mainPage.appendChild(pubRow);
+        mainPage.appendChild(allRow);
+        mainPage.appendChild(playbackLabel);
+        mainPage.appendChild(autoplayRow);
+        mainPage.appendChild(reportRow);
+        mainPage.appendChild(cacheRow);
+        mainPage.appendChild(nowPlayingLabel);
+        mainPage.appendChild(titleTplRow);
+        mainPage.appendChild(subtitleTplRow);
+        mainPage.appendChild(tplHint);
 
         // Three way art overlay mode, also cycled by double tapping the art
         const overlayLabels = { none: "None", info: "Info", all: "Info + lyrics" };
@@ -16771,28 +16880,38 @@
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
 
-        settingsEl.appendChild(overlayRow);
-        settingsEl.appendChild(lyricSizeRow);
-        settingsEl.appendChild(lyricSideRow);
-        settingsEl.appendChild(lyricSpaceRow);
-        settingsEl.appendChild(lyricShiftRow);
-        settingsEl.appendChild(lyricSideShiftRow);
-        settingsEl.appendChild(directRow);
-        settingsEl.appendChild(carBlackoutRow);
-        settingsEl.appendChild(carGateRow);
-        settingsEl.appendChild(carBlackRow);
-        settingsEl.appendChild(blackTextRow);
-        settingsEl.appendChild(blackColorRow);
-        settingsEl.appendChild(blackSizeRow);
-        settingsEl.appendChild(blackDriftRow);
-        settingsEl.appendChild(blackResetRow);
-        settingsEl.appendChild(artworkRow);
-        settingsEl.appendChild(controlLabelRow);
-        settingsEl.appendChild(controlOrderRow);
-        settingsEl.appendChild(artResumeRow);
-        settingsEl.appendChild(countsAgeRow);
-        settingsEl.appendChild(waveRow);
-        settingsEl.appendChild(artStarsRow);
+        // Common: the rest of playback, the artwork and the library counts
+        mainPage.appendChild(directRow);
+        mainPage.appendChild(makeLabel("Artwork"));
+        mainPage.appendChild(artworkRow);
+        mainPage.appendChild(artResumeRow);
+        mainPage.appendChild(makeLabel("Counts"));
+        mainPage.appendChild(countsAgeRow);
+
+        // Mobile: what is drawn on this screen
+        mobilePage.appendChild(makeBackRow("Mobile player"));
+        mobilePage.appendChild(makeLabel("Main page"));
+        mobilePage.appendChild(waveRow);
+        mobilePage.appendChild(artStarsRow);
+        mobilePage.appendChild(makeLabel("Cover and lyrics"));
+        mobilePage.appendChild(overlayRow);
+        mobilePage.appendChild(lyricSizeRow);
+        mobilePage.appendChild(lyricSideRow);
+        mobilePage.appendChild(lyricSpaceRow);
+        mobilePage.appendChild(lyricShiftRow);
+        mobilePage.appendChild(lyricSideShiftRow);
+        mobilePage.appendChild(makeLabel("Control buttons"));
+        mobilePage.appendChild(controlLabelRow);
+        mobilePage.appendChild(controlOrderRow);
+        mobilePage.appendChild(makeLabel("Screen off and fullscreen"));
+        mobilePage.appendChild(carGateRow);
+        mobilePage.appendChild(carBlackoutRow);
+        mobilePage.appendChild(carBlackRow);
+        mobilePage.appendChild(blackTextRow);
+        mobilePage.appendChild(blackColorRow);
+        mobilePage.appendChild(blackSizeRow);
+        mobilePage.appendChild(blackDriftRow);
+        mobilePage.appendChild(blackResetRow);
         // Your own data, song tweaks and settings kept apart, since the
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
@@ -16874,13 +16993,13 @@
 
         updateDriveStatus();
 
-        settingsEl.appendChild(dataLabel);
-        settingsEl.appendChild(dataHint);
-        settingsEl.appendChild(exportRow);
-        settingsEl.appendChild(importRow);
-        settingsEl.appendChild(dataChoiceEl);
-        settingsEl.appendChild(driveInfoRow);
-        settingsEl.appendChild(dataMsgEl);
+        mainPage.appendChild(dataLabel);
+        mainPage.appendChild(dataHint);
+        mainPage.appendChild(exportRow);
+        mainPage.appendChild(importRow);
+        mainPage.appendChild(dataChoiceEl);
+        mainPage.appendChild(driveInfoRow);
+        mainPage.appendChild(dataMsgEl);
 
         // Which networks may open the car page, only in the Android app. Kept
         // out of the car's copy of the settings, so the car cannot lock
@@ -16888,7 +17007,7 @@
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
 
             const carLabel = document.createElement("div");
-            carLabel.textContent = "Car page";
+            carLabel.textContent = "Network";
             carLabel.style.cssText = "color:#bbb";
             carLabel.dataset.hostSkip = "1";
 
@@ -16997,25 +17116,81 @@
                 function () { return settings.webWave; },
                 function (v) { settings.webWave = v; publishHostSoon(); });
 
-            settingsEl.appendChild(webLabel);
-            settingsEl.appendChild(webUpNextRow);
-            settingsEl.appendChild(webWaveRow);
+            // The car page's own transport bar, names and lyrics
+            const webNamesRow = makeBoolRow("Names under the buttons",
+                function () { return settings.webNames; },
+                function (v) { settings.webNames = v; publishHostSoon(); });
 
-            settingsEl.appendChild(carLabel);
-            settingsEl.appendChild(hotspotRow);
-            settingsEl.appendChild(wifiRow);
-            settingsEl.appendChild(vpnRow);
-            settingsEl.appendChild(addressRow);
-            settingsEl.appendChild(nameRow);
-            settingsEl.appendChild(carStatusEl);
-            settingsEl.appendChild(carHint);
+            const webControlRow = buildControlEditor("webControlOrder");
+
+            const webLyricLabels = { off: "Off", info: "Beside the cover", cover: "On the cover" };
+            const webLyricRow = document.createElement("div");
+            webLyricRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+            const webLyricName = document.createElement("span");
+            webLyricName.textContent = "Lyrics";
+            webLyricName.style.cssText = "flex:1;min-width:0";
+
+            const webLyricBtn = makeButton(webLyricLabels[settings.webLyrics || "info"], "#333", "#fff", function () {
+
+                const order = ["off", "info", "cover"];
+                const at = order.indexOf(settings.webLyrics || "info");
+
+                settings.webLyrics = order[(at + 1) % order.length];
+                webLyricBtn.textContent = webLyricLabels[settings.webLyrics];
+                saveSettings();
+                publishHostSoon();
+            });
+
+            webLyricBtn.style.flex = "0 0 auto";
+            webLyricBtn.style.minWidth = "56px";
+            webLyricBtn.style.padding = "6px 12px";
+
+            settingsRefreshers.push(function () {
+                webLyricBtn.textContent = webLyricLabels[settings.webLyrics || "info"];
+            });
+
+            webLyricRow.appendChild(webLyricName);
+            webLyricRow.appendChild(webLyricBtn);
+
+            webPage.appendChild(makeBackRow("Car page"));
+            webPage.appendChild(makeLabel("Main page"));
+            webPage.appendChild(webUpNextRow);
+            webPage.appendChild(webWaveRow);
+            webPage.appendChild(webLyricRow);
+            webPage.appendChild(makeLabel("Control buttons"));
+            webPage.appendChild(webNamesRow);
+            webPage.appendChild(webControlRow);
+
+            webPage.appendChild(carLabel);
+            webPage.appendChild(hotspotRow);
+            webPage.appendChild(wifiRow);
+            webPage.appendChild(vpnRow);
+            webPage.appendChild(addressRow);
+            webPage.appendChild(nameRow);
+            webPage.appendChild(carStatusEl);
+            webPage.appendChild(carHint);
+
+            webPageBtn = makePageButton("Car page", "web");
         }
 
-        settingsEl.appendChild(devLabel);
-        settingsEl.appendChild(debugRow);
-        settingsEl.appendChild(debugLineRow);
-        settingsEl.appendChild(artTestRow);
-        settingsEl.appendChild(copyFeedBtn);
+        // The other two pages, the car one only exists in the Android app
+        mainPage.appendChild(makeLabel("Display"));
+        mainPage.appendChild(makePageButton("Mobile player", "mobile"));
+
+        if (webPageBtn) {
+            mainPage.appendChild(webPageBtn);
+        }
+
+        mainPage.appendChild(devLabel);
+        mainPage.appendChild(debugRow);
+        mainPage.appendChild(debugLineRow);
+        mainPage.appendChild(artTestRow);
+        mainPage.appendChild(copyFeedBtn);
+
+        settingsEl.appendChild(mainPage);
+        settingsEl.appendChild(mobilePage);
+        settingsEl.appendChild(webPage);
 
         panelEl.appendChild(settingsEl);
 
@@ -18378,6 +18553,8 @@
         if (minimized) {
             setMinimized(false);
         }
+
+        showSettingsPage("main");
 
         if (settingsEl) {
             settingsOpen = true;

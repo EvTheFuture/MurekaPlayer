@@ -75,14 +75,82 @@
         align-items: center;
     }
 
-    #cover {
+    /* The cover with the covers before and after peeking in at the sides,
+       like the phone's strip. The wrap is wider than the cover and clips
+       the neighbours, the strip slides under the finger */
+    #coverWrap {
+        position: relative;
         height: 100%;
         max-height: 62vh;
+        aspect-ratio: 1.5 / 1;
+        flex: 0 0 auto;
+        overflow: hidden;
+        touch-action: pan-y;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    #coverStrip {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        display: flex;
+        align-items: center;
+        gap: 3%;
+        transform: translateX(-50%);
+    }
+
+    .tile {
+        height: 100%;
         aspect-ratio: 1 / 1;
         border-radius: 14px;
         background: var(--card) center / cover no-repeat;
         flex: 0 0 auto;
         box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .tile.side {
+        height: 78%;
+        opacity: 0.45;
+        cursor: pointer;
+    }
+
+    .tile.side.empty {
+        visibility: hidden;
+    }
+
+    #cover {
+        position: relative;
+        overflow: hidden;
+    }
+
+    #lyricsOver {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 12% 4% 4%;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
+        display: none;
+        flex-direction: column;
+        gap: 0.2em;
+        font-size: clamp(16px, 1.7vw, 26px);
+        color: var(--muted);
+        text-align: center;
+    }
+
+    #lyricsOver .cur {
+        color: #fff;
+        font-weight: 700;
+        font-size: 1.15em;
+    }
+
+    #lyricsOver div {
+        min-height: 1.3em;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
     }
 
     #info {
@@ -374,15 +442,54 @@
         font-weight: 600;
     }
 
-    #creators {
-        height: var(--ctl-h);
-        font: inherit;
+    #filterText {
+        display: none;
+        color: var(--accent);
         font-size: clamp(15px, 1.5vw, 22px);
-        padding: 0 16px;
-        border-radius: 999px;
-        border: 1px solid var(--line);
-        background: var(--card);
-        color: var(--text);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    #controls .ctl {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .ctlLbl {
+        display: none;
+        font-size: clamp(12px, 1.2vw, 16px);
+        line-height: 1;
+    }
+
+    #controls.names .ctlLbl {
+        display: block;
+    }
+
+    #controls.names .ctl svg,
+    #controls.names .ctl .ico {
+        height: 42%;
+    }
+
+    .pText.head {
+        color: var(--accent);
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding-top: 20px;
+    }
+
+    .pBtn.wide {
+        display: flex;
+        width: 100%;
+        flex: 1;
+        text-align: left;
+        justify-content: flex-start;
+        margin: 5px 0;
+    }
+
+    .pRow {
+        margin: 2px 0;
     }
 
     #counts {
@@ -703,15 +810,52 @@
         text-overflow: ellipsis;
     }
 
-    /* Room for the scrollbar beside the controls, not on top of them, so a
-       press meant for a button at the right edge does not grab the bar */
+    /* Room for the scrollbar beside the controls, not on top of them. The
+       page pushes each scrolling box out to the right by the bar's width,
+       so the content keeps the same distance from both edges */
     .sheetBody,
     #rows,
     #menuBox,
     #actionsBox,
     #helpBox {
         scrollbar-gutter: stable;
-        padding-right: 28px;
+    }
+
+    #confirmPop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #confirmBox {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 3vh 3vw;
+        width: min(560px, 92vw);
+        display: flex;
+        flex-direction: column;
+        gap: 2vh;
+        font-size: clamp(18px, 1.9vw, 26px);
+    }
+
+    #confirmBtns {
+        display: flex;
+        gap: 2vw;
+    }
+
+    #confirmBtns .chip {
+        flex: 1;
+        justify-content: center;
+    }
+
+    #confirmYes.danger {
+        background: #5a1f2b;
+        border-color: #5a1f2b;
+        color: #fff;
     }
 
     .sheetBody {
@@ -1174,11 +1318,10 @@
             align-items: stretch;
         }
 
-        #cover {
+        #coverWrap {
             height: auto;
             width: 100%;
-            max-height: none;
-            max-width: 50vh;
+            max-height: 45vh;
             align-self: center;
         }
     }
@@ -1188,7 +1331,13 @@
 <div id="app">
     <div id="signin">Mureka Player on the phone is not signed in to Mureka. Open the app on the phone and sign in.</div>
     <div id="main">
-        <div id="cover"></div>
+        <div id="coverWrap">
+            <div id="coverStrip">
+                <div class="tile side empty" id="tilePrev"></div>
+                <div class="tile" id="cover"><div id="lyricsOver"><div id="loPrev"></div><div id="loCur" class="cur"></div><div id="loNext"></div></div></div>
+                <div class="tile side empty" id="tileNext"></div>
+            </div>
+        </div>
         <div id="info">
             <div id="title">Connecting to the phone</div>
             <div id="subtitle"></div>
@@ -1206,27 +1355,27 @@
         <span id="left">-0:00</span>
     </div>
     <div id="controls">
-        <button class="ctl" id="shuffle" type="button" aria-label="Shuffle">
+        <button class="ctl" id="shuffle" type="button" data-label="Shuffle" aria-label="Shuffle">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
         </button>
-        <button class="ctl" id="prev" type="button" aria-label="Previous">
+        <button class="ctl" id="prev" type="button" data-label="Prev" aria-label="Previous">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
         </button>
-        <button class="ctl big" id="play" type="button" aria-label="Play or pause">
+        <button class="ctl big" id="play" type="button" data-label="Play" aria-label="Play or pause">
             <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>
             <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
         </button>
-        <button class="ctl" id="next" type="button" aria-label="Next">
+        <button class="ctl" id="next" type="button" data-label="Next" aria-label="Next">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
         </button>
-        <button class="ctl" id="repeat" type="button" aria-label="Repeat">
+        <button class="ctl" id="repeat" type="button" data-label="Repeat" aria-label="Repeat">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><text id="repeatOne" x="12" y="15" font-size="8" text-anchor="middle" fill="currentColor" stroke="none" style="display:none">1</text></svg>
         </button>
-        <button class="ctl" id="stopBtn" type="button" aria-label="Stop" data-icon="stop"></button>
-        <button class="ctl" id="pubBtn" type="button" aria-label="Published or all songs" data-icon="check"></button>
-        <button class="ctl" id="vocBtn" type="button" aria-label="Vocals, instrumental or all" data-icon="all"></button>
-        <button class="ctl" id="rateBtn" type="button" aria-label="Rate the playing song" data-icon="star"></button>
-        <button class="ctl" id="browseBtn" type="button" aria-label="Songs">
+        <button class="ctl" id="stopBtn" type="button" data-label="Stop" aria-label="Stop" data-icon="stop"></button>
+        <button class="ctl" id="pubBtn" type="button" data-label="Published" aria-label="Published or all songs" data-icon="check"></button>
+        <button class="ctl" id="vocBtn" type="button" data-label="Vocals" aria-label="Vocals, instrumental or all" data-icon="all"></button>
+        <button class="ctl" id="rateBtn" type="button" data-label="Rate" aria-label="Rate the playing song" data-icon="star"></button>
+        <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
     </div>
@@ -1263,8 +1412,8 @@
         <button class="chip" id="allFilters" type="button" data-icon="sliders"><span class="lbl">Edit filters</span></button>
         <button class="chip" id="artists" type="button" data-icon="person"><span class="lbl">Artists</span></button>
         <button class="chip" id="playlistsBtn" type="button" data-icon="playlists"><span class="lbl">Playlists</span></button>
-        <select id="creators"></select>
     </div>
+    <div id="filterText"></div>
     <div id="counts"></div>
     <div id="rowsWrap">
         <div id="rows"></div>
@@ -1301,6 +1450,15 @@
     </div>
 </div>
 <div id="blackout"><div id="blackMark">&#9835;</div></div>
+<div id="confirmPop">
+    <div id="confirmBox">
+        <div id="confirmText"></div>
+        <div id="confirmBtns">
+            <button class="chip" id="confirmNo" type="button">Cancel</button>
+            <button class="chip" id="confirmYes" type="button">Yes</button>
+        </div>
+    </div>
+</div>
 <div id="helpPop">
     <div id="helpBox">
         <div id="helpTitle">Keyboard shortcuts</div>
@@ -1606,6 +1764,17 @@
     for (const el of document.querySelectorAll("[data-icon]")) {
         setIcon(el, el.dataset.icon);
     }
+
+    // The names under the transport buttons, shown when the phone's car
+    // page settings ask for them
+    for (const el of document.querySelectorAll("#controls [data-label]")) {
+
+        const lbl = document.createElement("span");
+
+        lbl.className = "ctlLbl";
+        lbl.textContent = el.dataset.label;
+        el.appendChild(lbl);
+    }
     const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
         + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
 
@@ -1778,8 +1947,19 @@
             $("cover").style.backgroundImage = cover ? "url(\"" + cover.replace(/"/g, "%22") + "\")" : "none";
         }
 
+        setTile($("tilePrev"), s && s.prevSong ? s.prevSong : null);
+        setTile($("tileNext"), s && s.upNext ? s.upNext : null);
+
+        // A swipe that asked for another song is done once that song is here
+        if (stripPending && (!s || s.id !== stripPending)) {
+            resetStrip();
+        }
+
+        $("controls").classList.toggle("names", !!(s && s.names));
+        $("lyrics").dataset.where = s && s.lyricsWhere ? s.lyricsWhere : "info";
+
         // What plays after this one, when the phone's settings ask for it
-        const next = s && s.upNext ? s.upNext : null;
+        const next = s && s.upNext && s.showUpNext !== false ? s.upNext : null;
 
         $("upNext").style.display = next ? "flex" : "none";
         $("upTitle").textContent = next ? next.title : "";
@@ -1907,6 +2087,7 @@
 
                 lyricShown = -2;
                 $("lyrics").style.display = "none";
+                $("lyricsOver").style.display = "none";
             }
 
             return;
@@ -1924,15 +2105,20 @@
             }
         }
 
-        if (idx === lyricShown && $("lyrics").style.display === "flex") {
+        const onCover = $("lyrics").dataset.where === "cover";
+        const box = onCover ? $("lyricsOver") : $("lyrics");
+        const other = onCover ? $("lyrics") : $("lyricsOver");
+
+        if (idx === lyricShown && box.style.display === "flex") {
             return;
         }
 
         lyricShown = idx;
-        $("lyrics").style.display = "flex";
-        $("lyPrev").textContent = idx - 1 >= 0 ? rows[idx - 1].text : "";
-        $("lyCur").textContent = idx >= 0 ? rows[idx].text : "";
-        $("lyNext").textContent = idx + 1 < rows.length ? rows[idx + 1].text : "";
+        other.style.display = "none";
+        box.style.display = "flex";
+        $(onCover ? "loPrev" : "lyPrev").textContent = idx - 1 >= 0 ? rows[idx - 1].text : "";
+        $(onCover ? "loCur" : "lyCur").textContent = idx >= 0 ? rows[idx].text : "";
+        $(onCover ? "loNext" : "lyNext").textContent = idx + 1 < rows.length ? rows[idx + 1].text : "";
     }
 
     // The seek bar and the times move smoothly between the polls
@@ -2568,39 +2754,16 @@
 
         // Like the phone's Filters on and off, parked or restored without
         // losing what is ticked, and nothing to switch when nothing is set
-        setLabel($("smart"), (f.smart ? "Filters on" : "Filters off")
-            + (f.smart && f.smartText ? ": " + f.smartText : ""));
+        setLabel($("smart"), f.smart ? "Filters on" : "Filters off");
+
+        // What is filtered, on a line of its own so the chips keep their room
+        const text = f.smart && f.smartText ? "Filtering by " + f.smartText : "";
+
+        $("filterText").textContent = text;
+        $("filterText").style.display = text ? "block" : "none";
         $("smart").classList.toggle("on", !!(f.smart && f.smartAny));
         $("smart").disabled = !f.smartAny;
 
-        // The creator list only changes when one is added on the phone
-        const wanted = (f.creator ? f.creator.id : "") + "|"
-            + f.creators.map(function (c) {
-                return c.id;
-            }).join(",");
-
-        if ($("creators").dataset.key !== wanted) {
-
-            $("creators").dataset.key = wanted;
-            $("creators").textContent = "";
-
-            const mine = document.createElement("option");
-
-            mine.value = "";
-            mine.textContent = "My songs";
-            $("creators").appendChild(mine);
-
-            for (const c of f.creators) {
-
-                const opt = document.createElement("option");
-
-                opt.value = c.id;
-                opt.textContent = c.name;
-                $("creators").appendChild(opt);
-            }
-
-            $("creators").value = f.creator ? f.creator.id : "";
-        }
     }
 
     // A filter command needs a moment before the list is asked again
@@ -2674,8 +2837,8 @@
 
         box.textContent = "";
 
-        for (const node of panelClean(items)) {
-            box.appendChild(panelNode(node, false));
+        for (const node of panelClean(items, true)) {
+            box.appendChild(panelNode(node, false, true));
         }
 
         box.scrollTop = keep;
@@ -2683,11 +2846,19 @@
 
     // The phone's own Done buttons close its panel, here Close does that, so
     // they are left out. A row left with one thing is just that thing
-    function panelClean(items) {
+    const PANEL_HEADS = ["Settings", "Filters", "Creators", "Playlists", "Information", "Song"];
+
+    function panelClean(items, top) {
 
         const out = [];
 
         for (const node of items) {
+
+            // The phone's own heading, this page has one of its own
+            if (top && out.length === 0 && node.t === "row" && node.c.length > 0
+                && node.c[0].t === "text" && PANEL_HEADS.indexOf(node.c[0].s) !== -1) {
+                continue;
+            }
 
             if (node.t === "button" && node.s === "Done") {
                 continue;
@@ -2712,7 +2883,7 @@
         return out;
     }
 
-    function panelNode(node, hasButtons) {
+    function panelNode(node, hasButtons, top) {
 
         if (node.t === "row") {
 
@@ -2749,7 +2920,8 @@
             const btn = document.createElement("button");
 
             btn.type = "button";
-            btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "");
+            btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
+                + (node.wide ? " wide" : "");
             btn.disabled = node.off === true;
 
             // A tag and its count, the count kept to the right
@@ -2810,7 +2982,8 @@
 
         const text = document.createElement("div");
 
-        text.className = "pText" + (node.small ? " small" : "");
+        // A line of its own that is not a hint is a section heading
+        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small ? " head" : "");
         text.textContent = node.s || "";
 
         return text;
@@ -2931,7 +3104,7 @@
             }
 
             draw();
-            panelAction("setControls", active.slice());
+            panelAction("setControls", { which: node.which || "web", names: active.slice() });
         };
 
         const draw = function () {
@@ -3426,10 +3599,6 @@
 
     $("smart").addEventListener("click", function () {
         filterCommand("smart", null);
-    });
-
-    $("creators").addEventListener("change", function () {
-        filterCommand("creator", $("creators").value);
     });
 
     // The phone answers /state as soon as the player has something new,
@@ -4029,15 +4198,20 @@
 
         box.appendChild(menuItem("close", "Delete from list", function () {
 
-            songAction("delete").then(function () {
+            const id = m.id;
 
-                if ($("browse").style.display === "flex") {
-                    setTimeout(function () {
-                        loadList(true);
-                    }, 300);
-                }
-            });
             closeSongMenu();
+            askConfirm("Delete \"" + m.title + "\" from the list on the phone?", "Delete", true, function () {
+
+                send("songAction", { id: id, action: "delete", value: null }).then(function () {
+
+                    if ($("browse").style.display === "flex") {
+                        setTimeout(function () {
+                            loadList(true);
+                        }, 300);
+                    }
+                });
+            });
         }, "danger"));
     }
 
@@ -4105,35 +4279,159 @@
         }
     });
 
-    // Swipe the cover sideways for the next or previous song, like the
-    // phone's cover
-    let coverSwipe = null;
+    // The covers before and after, and the strip that slides under the
+    // finger. Past the threshold it slides on to the neighbour, asks the
+    // phone for that song, and snaps back into place once the song is here
+    let stripPending = null;
+    let stripDrag = null;
 
-    $("cover").style.touchAction = "pan-y";
+    function setTile(tile, song) {
 
-    $("cover").addEventListener("pointerdown", function (ev) {
-        coverSwipe = { x: ev.clientX, y: ev.clientY, t: Date.now() };
-    });
+        const url = song && song.cover ? song.cover : "";
 
-    $("cover").addEventListener("pointerup", function (ev) {
+        tile.classList.toggle("empty", !song);
 
-        if (!coverSwipe) {
+        if (tile.dataset.src !== url) {
+
+            tile.dataset.src = url;
+            tile.style.backgroundImage = url ? "url(\"" + url.replace(/"/g, "%22") + "\")" : "none";
+        }
+    }
+
+    function stripOffset(px, animate) {
+
+        const strip = $("coverStrip");
+
+        strip.style.transition = animate ? "transform 0.28s cubic-bezier(0.4, 0, 0.2, 1)" : "none";
+        strip.style.transform = "translateX(calc(-50% + " + px + "px))";
+    }
+
+    function resetStrip() {
+
+        stripPending = null;
+        stripOffset(0, false);
+    }
+
+    // How far the strip moves for one song: the cover plus the gap
+    function stripStep() {
+
+        const cover = $("cover").getBoundingClientRect();
+        const side = $("tileNext").getBoundingClientRect();
+
+        return side.left > 0 ? (side.left + side.width / 2) - (cover.left + cover.width / 2) : cover.width;
+    }
+
+    $("coverWrap").addEventListener("pointerdown", function (ev) {
+
+        if (stripPending || (ev.button !== undefined && ev.button !== 0)) {
             return;
         }
 
-        const dx = ev.clientX - coverSwipe.x;
-        const dy = ev.clientY - coverSwipe.y;
-        const quick = Date.now() - coverSwipe.t < 800;
+        stripDrag = { x: ev.clientX, y: ev.clientY, t: Date.now(), moved: false, target: ev.target };
 
-        coverSwipe = null;
-
-        if (quick && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-            send(dx < 0 ? "next" : "prev");
+        try {
+            $("coverWrap").setPointerCapture(ev.pointerId);
+        } catch (e) {
+            // Still followed while the pointer stays over the strip
         }
     });
 
-    $("cover").addEventListener("pointercancel", function () {
-        coverSwipe = null;
+    $("coverWrap").addEventListener("pointermove", function (ev) {
+
+        if (!stripDrag) {
+            return;
+        }
+
+        const dx = ev.clientX - stripDrag.x;
+        const dy = ev.clientY - stripDrag.y;
+
+        if (!stripDrag.moved && Math.abs(dx) < 8) {
+            return;
+        }
+
+        // Mostly up or down is the page's own scroll, not a swipe
+        if (!stripDrag.moved && Math.abs(dy) > Math.abs(dx)) {
+
+            stripDrag = null;
+            return;
+        }
+
+        stripDrag.moved = true;
+        ev.preventDefault();
+
+        // No neighbour on that side, so the strip only gives a little
+        const noPrev = $("tilePrev").classList.contains("empty");
+        const noNext = $("tileNext").classList.contains("empty");
+        let shown = dx;
+
+        if ((dx > 0 && noPrev) || (dx < 0 && noNext)) {
+            shown = dx / 4;
+        }
+
+        stripOffset(shown, false);
+    });
+
+    function endStripDrag(ev) {
+
+        if (!stripDrag) {
+            return;
+        }
+
+        const d = stripDrag;
+
+        stripDrag = null;
+
+        const dx = ev.clientX - d.x;
+        const step = stripStep();
+        const quick = Date.now() - d.t < 500 && Math.abs(dx) > 40;
+
+        if (!d.moved) {
+
+            // A tap on a neighbour goes to that song, a tap on the cover
+            // itself does nothing
+            if (d.target === $("tilePrev") && !$("tilePrev").classList.contains("empty")) {
+                slideTo(1, step);
+            } else if (d.target === $("tileNext") && !$("tileNext").classList.contains("empty")) {
+                slideTo(-1, step);
+            }
+
+            return;
+        }
+
+        const noPrev = $("tilePrev").classList.contains("empty");
+        const noNext = $("tileNext").classList.contains("empty");
+
+        if ((Math.abs(dx) > step * 0.3 || quick) && dx > 0 && !noPrev) {
+            slideTo(1, step);
+        } else if ((Math.abs(dx) > step * 0.3 || quick) && dx < 0 && !noNext) {
+            slideTo(-1, step);
+        } else {
+            stripOffset(0, true);
+        }
+    }
+
+    // Slide one song to the side, then ask the phone for it. The strip is
+    // put back the moment the new song arrives, with the covers moved on
+    function slideTo(dir, step) {
+
+        stripPending = state && state.id ? state.id : "none";
+        stripOffset(dir * step, true);
+        send(dir > 0 ? "prev" : "next");
+
+        // If the phone never changes song, do not stay stuck to the side
+        setTimeout(function () {
+
+            if (stripPending) {
+                resetStrip();
+            }
+        }, 2500);
+    }
+
+    $("coverWrap").addEventListener("pointerup", endStripDrag);
+    $("coverWrap").addEventListener("pointercancel", function () {
+
+        stripDrag = null;
+        stripOffset(0, true);
     });
 
     // The phone's keyboard shortcuts, for a laptop or a keyboard in the car
@@ -4191,6 +4489,12 @@
         if (isShown("blackout")) {
 
             $("blackout").click();
+            return true;
+        }
+
+        if (isShown("confirmPop")) {
+
+            closeConfirm();
             return true;
         }
 
@@ -4365,10 +4669,46 @@
         }
     });
 
+    // A question before something that cannot be undone
+    let confirmAction = null;
+
+    function askConfirm(text, yesLabel, danger, then) {
+
+        confirmAction = then;
+        $("confirmText").textContent = text;
+        $("confirmYes").textContent = yesLabel;
+        $("confirmYes").classList.toggle("danger", danger === true);
+        $("confirmPop").style.display = "flex";
+    }
+
+    function closeConfirm() {
+
+        confirmAction = null;
+        $("confirmPop").style.display = "none";
+    }
+
+    $("confirmNo").addEventListener("click", closeConfirm);
+
+    $("confirmYes").addEventListener("click", function () {
+
+        const then = confirmAction;
+
+        closeConfirm();
+
+        if (then) {
+            then();
+        }
+    });
+
+    $("confirmPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("confirmPop")) {
+            closeConfirm();
+        }
+    });
+
     // The phone's action menu, the parts that make sense from here: load,
     // rescan, clear, cache all, and a screen off cover for this screen
-    let clearArmed = 0;
-
     function drawActions() {
 
         const box = $("actionItems");
@@ -4388,25 +4728,27 @@
             $("actionsPop").style.display = "none";
         }));
 
-        box.appendChild(menuItem("trash", Date.now() < clearArmed ? "Tap again to clear" : "Clear", function () {
+        box.appendChild(menuItem("trash", "Clear", function () {
 
-            // Clearing throws the song list away, so it takes a second tap
-            if (Date.now() < clearArmed) {
-
-                clearArmed = 0;
+            $("actionsPop").style.display = "none";
+            askConfirm("Clear the song list on the phone? It is loaded again on the next Load.", "Clear", true, function () {
                 send("clearCache");
-                $("actionsPop").style.display = "none";
-                return;
-            }
-
-            clearArmed = Date.now() + 4000;
-            drawActions();
+            });
         }, "danger"));
 
         box.appendChild(menuItem("cache", s.caching ? "Stop caching" : "Cache all", function () {
 
-            send("cacheAll");
             $("actionsPop").style.display = "none";
+
+            if (s.caching) {
+
+                send("cacheAll");
+                return;
+            }
+
+            askConfirm("Store every song on the phone for offline play? This downloads the whole library.", "Cache all", false, function () {
+                send("cacheAll");
+            });
         }, "accent"));
 
         box.appendChild(menuItem("playlists", "Playlists", function () {
@@ -4472,6 +4814,31 @@
         $("blackout").style.display = "none";
         clearInterval(blackTimer);
     });
+
+    // Push each scrolling box out to the right by its scrollbar's width, so
+    // the bar sits in the margin and the content keeps the same distance
+    // from both edges. Browsers with overlay bars have nothing to push
+    function fixGutters() {
+
+        for (const id of ["panelBody", "rows", "menuBox", "actionsBox", "helpBox"]) {
+
+            const el = $(id);
+
+            if (!el || el.offsetWidth === 0) {
+                continue;
+            }
+
+            const bar = el.offsetWidth - el.clientWidth;
+            const want = bar > 0 ? (-bar) + "px" : "0px";
+
+            if (el.style.marginRight !== want) {
+                el.style.marginRight = want;
+            }
+        }
+    }
+
+    window.addEventListener("resize", fixGutters);
+    setInterval(fixGutters, 500);
 
     poll();
     requestAnimationFrame(tick);
