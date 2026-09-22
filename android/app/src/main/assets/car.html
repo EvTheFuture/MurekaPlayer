@@ -140,6 +140,20 @@
         visibility: hidden;
     }
 
+    /* The cover inside a tile, filling it, under the shade, the up next pill
+       and the lyrics */
+    .tileImg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: inherit;
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-drag: none;
+    }
+
     #cover {
         overflow: hidden;
     }
@@ -617,6 +631,40 @@
         font-weight: 600;
     }
 
+    /* The handle to drag a song to another place in the queue */
+    .rowGrip {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.6em;
+        align-self: stretch;
+        margin: -18px 0 -18px -8px;
+        padding: 0 0 0 8px;
+        color: var(--muted);
+        cursor: grab;
+        touch-action: none;
+    }
+
+    .rowGrip .ico {
+        width: 1.2em;
+        height: 1.2em;
+    }
+
+    .rowGrip.spacer {
+        visibility: hidden;
+        cursor: default;
+    }
+
+    .rowGrip.off {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
+    .row.dragging {
+        opacity: 0.25;
+    }
+
     /* Stands in for the remove button on rows that have none, so every
        row's columns line up */
     .rowNext.spacer {
@@ -856,6 +904,15 @@
     .actionsSong .loadRow {
         justify-content: flex-start;
         padding: 0;
+    }
+
+    /* The player's version, small at the foot of the actions and the help */
+    .versionLine {
+        padding: 1.4vh 6px 0;
+        color: var(--muted);
+        font-size: 0.7em;
+        text-align: right;
+        opacity: 0.7;
     }
 
     #actionsTitle,
@@ -1814,6 +1871,7 @@
     <div id="actionsBox">
         <div id="actionsTitle">Actions</div>
         <div id="actionItems"></div>
+        <div class="versionLine"></div>
     </div>
 </div>
 <div id="blackout"><div id="blackMark">&#9835;</div></div>
@@ -1830,6 +1888,7 @@
     <div id="helpBox">
         <div id="helpTitle">Keyboard shortcuts</div>
         <div id="helpRows"></div>
+        <div class="versionLine"></div>
     </div>
 </div>
 <div id="ratePop">
@@ -1911,6 +1970,14 @@
         ],
         circle: [
             ["circle", { cx: "12", cy: "12", r: "8" }]
+        ],
+        grip: [
+            ["circle", { cx: "9", cy: "6", r: "1.4", fill: "currentColor", stroke: "none" }],
+            ["circle", { cx: "15", cy: "6", r: "1.4", fill: "currentColor", stroke: "none" }],
+            ["circle", { cx: "9", cy: "12", r: "1.4", fill: "currentColor", stroke: "none" }],
+            ["circle", { cx: "15", cy: "12", r: "1.4", fill: "currentColor", stroke: "none" }],
+            ["circle", { cx: "9", cy: "18", r: "1.4", fill: "currentColor", stroke: "none" }],
+            ["circle", { cx: "15", cy: "18", r: "1.4", fill: "currentColor", stroke: "none" }]
         ],
         chevronDown: [
             ["polyline", { points: "6 9 12 15 18 9" }]
@@ -2203,6 +2270,21 @@
         }
 
         return state.duration ? Math.min(p, state.duration) : p;
+    }
+
+    // A count as it shows beside the heart: as it is under a thousand, then
+    // 1.0k, 1.3k, 12k, and 1.2M for millions
+    function compactCount(n) {
+
+        if (n < 1000) {
+            return String(n);
+        }
+
+        if (n < 1000000) {
+            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
+        }
+
+        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
     }
 
     function send(cmd, arg) {
@@ -2557,12 +2639,12 @@
         // How many hearts the song has on Mureka, once the phone knows
         const likes = s && typeof s.likes === "number" ? s.likes : null;
 
-        $("likeCount").textContent = likes === null ? "" : String(likes);
+        $("likeCount").textContent = likes === null ? "" : compactCount(likes);
 
         // And how many times it has been played
         const plays = s && typeof s.plays === "number" ? s.plays : null;
 
-        $("playCount").textContent = plays === null ? "" : "\u25B6 " + plays;
+        $("playCount").textContent = plays === null ? "" : "\u25B6 " + compactCount(plays);
 
         const rated = s && s.rating !== null && s.rating !== undefined;
 
@@ -3533,8 +3615,67 @@
         row.setAttribute("role", "button");
         row.className = "row" + (item.index === pos ? " playing" : "")
             + (item.index < pos ? " past" : "");
+        row.dataset.qi = String(item.index);
         attachLongPress(row, item.id);
 
+        // A handle to drag a song still to come to another place. Only in
+        // the queue's own order, a sorted or searched list is not its order.
+        // Other rows keep an empty place, so everything lines up
+        const grip = document.createElement("span");
+        const upcoming = item.index > pos;
+        const movable = upcoming && !listSort && !listQuery;
+
+        grip.className = "rowGrip" + (upcoming ? (movable ? "" : " off") : " spacer");
+        grip.appendChild(icon("grip"));
+
+        if (movable) {
+
+            grip.title = "Drag to move";
+            grip.addEventListener("pointerdown", function (ev) {
+                startQueueDrag(row, ev);
+            });
+
+            // With a mouse the whole row can be dragged too: pressed and
+            // moved up or down a little, it becomes a drag instead of a tap
+            row.addEventListener("pointerdown", function (ev) {
+
+                if (ev.pointerType !== "mouse" || ev.button !== 0 || ev.target.closest("button")) {
+                    return;
+                }
+
+                const y0 = ev.clientY;
+
+                const watch = function (e) {
+
+                    if (Math.abs(e.clientY - y0) > 8) {
+
+                        stop();
+                        startQueueDrag(row, e, true);
+                    }
+                };
+
+                const stop = function () {
+
+                    document.removeEventListener("pointermove", watch, true);
+                    document.removeEventListener("pointerup", stop, true);
+                };
+
+                document.addEventListener("pointermove", watch, true);
+                document.addEventListener("pointerup", stop, true);
+            });
+        } else if (upcoming) {
+
+            // Sorted or searched, the list is not the queue's order, so the
+            // handle only says how to get the order back
+            grip.title = listQuery ? "Clear the search to move songs" : "Turn sorting off to move songs";
+            grip.addEventListener("pointerdown", function (ev) {
+
+                ev.stopPropagation();
+                flashCounts(grip.title);
+            });
+        }
+
+        row.appendChild(grip);
         songLine(item, row);
 
         if (item.index > pos) {
@@ -3565,6 +3706,186 @@
         });
 
         return row;
+    }
+
+    // A short note in the counts line above the list, then the counts again
+    let countsTimer = 0;
+
+    function flashCounts(text) {
+
+        const el = $("counts");
+
+        if (!el.dataset.keep) {
+            el.dataset.keep = el.textContent;
+        }
+
+        el.textContent = text;
+        clearTimeout(countsTimer);
+
+        countsTimer = setTimeout(function () {
+
+            el.textContent = el.dataset.keep || "";
+            delete el.dataset.keep;
+        }, 3000);
+    }
+
+    // Drag a song in the queue to another place among those still to come.
+    // A copy follows the finger up and down, the song's own row stays as the
+    // gap, and the rows it passes slide out of the way, like the buttons in
+    // the transport bar. Near the top or the bottom of the list it scrolls.
+    // On letting go the phone moves the song
+    let qDrag = null;
+
+    function queueRows() {
+
+        return Array.prototype.filter.call($("rows").querySelectorAll(".row"), function (r) {
+            return Number(r.dataset.qi) > queuePos;
+        });
+    }
+
+    function startQueueDrag(row, ev, moving) {
+
+        // A press with another button is not a drag. A drag begun by moving
+        // the mouse comes with a move, which carries no button
+        if (!moving && ev.button !== undefined && ev.button !== 0) {
+            return;
+        }
+
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        // The press is a drag now, not the start of a long press menu
+        clearTimeout(rowPressTimer);
+        rowPress = null;
+        row.classList.remove("pressing");
+
+        const ghost = makeGhost(row, ev.clientX, ev.clientY);
+
+        ghost.el.style.transform = "scale(1.02)";
+        row.classList.add("dragging");
+
+        qDrag = {
+            row: row,
+            ghost: ghost,
+            from: Number(row.dataset.qi),
+            left: row.getBoundingClientRect().left,
+            y: ev.clientY,
+            timer: 0
+        };
+
+        document.addEventListener("pointermove", moveQueueDrag, true);
+        document.addEventListener("pointerup", endQueueDrag, true);
+        document.addEventListener("pointercancel", endQueueDrag, true);
+
+        // Scrolling near the edges goes on while the finger rests there
+        qDrag.timer = setInterval(edgeScrollQueue, 30);
+    }
+
+    function edgeScrollQueue() {
+
+        if (!qDrag) {
+            return;
+        }
+
+        const box = $("rows");
+        const r = box.getBoundingClientRect();
+        const zone = Math.min(90, r.height / 5);
+
+        if (qDrag.y < r.top + zone) {
+            box.scrollTop -= Math.ceil((r.top + zone - qDrag.y) / 5);
+        } else if (qDrag.y > r.bottom - zone) {
+            box.scrollTop += Math.ceil((qDrag.y - (r.bottom - zone)) / 5);
+        } else {
+            return;
+        }
+
+        placeQueueDrag();
+    }
+
+    function moveQueueDrag(ev) {
+
+        if (!qDrag) {
+            return;
+        }
+
+        ev.preventDefault();
+        qDrag.y = ev.clientY;
+
+        // Up and down only, the copy stays in line with the list
+        moveGhost(qDrag.ghost, qDrag.left + qDrag.ghost.dx, ev.clientY);
+        placeQueueDrag();
+    }
+
+    // Put the dragged row where the finger is, among the songs to come, the
+    // others sliding aside
+    function placeQueueDrag() {
+
+        const rows = queueRows();
+        const others = rows.filter(function (r) {
+            return r !== qDrag.row;
+        });
+
+        if (others.length === 0) {
+            return;
+        }
+
+        let before = null;
+
+        for (const r of others) {
+
+            const b = r.getBoundingClientRect();
+
+            if (qDrag.y < b.top + b.height / 2) {
+                before = r;
+                break;
+            }
+        }
+
+        const last = others[others.length - 1];
+        const target = before || last.nextSibling;
+
+        if (target === qDrag.row || qDrag.row.nextSibling === target) {
+            return;
+        }
+
+        slideAside(rows, function () {
+            $("rows").insertBefore(qDrag.row, target);
+        });
+    }
+
+    function endQueueDrag() {
+
+        const d = qDrag;
+
+        if (!d) {
+            return;
+        }
+
+        qDrag = null;
+        clearInterval(d.timer);
+        document.removeEventListener("pointermove", moveQueueDrag, true);
+        document.removeEventListener("pointerup", endQueueDrag, true);
+        document.removeEventListener("pointercancel", endQueueDrag, true);
+        d.ghost.el.remove();
+        d.row.classList.remove("dragging");
+
+        // The tap that ends a drag must not also play the song
+        rowSwallow = true;
+
+        setTimeout(function () {
+            rowSwallow = false;
+        }, 400);
+
+        const to = queuePos + 1 + queueRows().indexOf(d.row);
+
+        if (to !== d.from) {
+
+            send("queueMove", { from: d.from, to: to }).then(function () {
+                setTimeout(function () {
+                    loadQueue(false);
+                }, 200);
+            });
+        }
     }
 
     // Scroll a box to a place with an ease in and out, like the phone's list.
@@ -5203,7 +5524,11 @@
         if (before !== s.id && $("browse").style.display === "flex") {
 
             if (listView === "queue") {
-                loadQueue(false);
+
+                // Not under a finger dragging a song, it reloads once let go
+                if (!qDrag) {
+                    loadQueue(false);
+                }
             } else {
 
                 for (const row of $("rows").querySelectorAll(".row")) {
@@ -5962,27 +6287,41 @@
         }
     }
 
-    // Load the cover first, then show it, so a tile is never left with a
-    // picture that failed on the way. A failed one is asked for again a
-    // few times, a fresh browser's first requests can go astray
+    // The cover is an image inside the tile rather than the tile's
+    // background. Firefox does not always repaint a masked, filtered tile
+    // whose background finishes loading after it was set, so a first visit
+    // with an empty cache left the covers blank until a reload. An image
+    // element paints itself when it arrives. A failed one is asked for again
+    // a few times, a fresh browser's first requests can go astray
     function paintTile(tile, url, tries) {
+
+        let img = tile.querySelector(".tileImg");
+
+        if (!img) {
+
+            img = document.createElement("img");
+            img.className = "tileImg";
+            img.alt = "";
+            img.decoding = "async";
+            img.draggable = false;
+            tile.insertBefore(img, tile.firstChild);
+        }
+
+        tile.style.backgroundImage = "none";
 
         if (!url) {
 
-            tile.style.backgroundImage = "none";
+            img.removeAttribute("src");
+            img.style.visibility = "hidden";
             return;
         }
 
         const src = tries > 0 ? url + (url.indexOf("?") === -1 ? "?" : "&") + "r=" + tries : url;
-        const css = "url(\"" + src.replace(/"/g, "%22") + "\")";
-        const img = new Image();
-
-        tile.style.backgroundImage = css;
 
         img.onload = function () {
 
             if (tile.dataset.src === url) {
-                tile.style.backgroundImage = css;
+                img.style.visibility = "visible";
             }
         };
 
@@ -6680,6 +7019,7 @@
         } else if (key === "F") {
             send("smart");
         } else if (key === "?") {
+            paintVersion();
             $("helpPop").style.display = isShown("helpPop") ? "none" : "flex";
         } else if (key === " ") {
             $("play").click();
@@ -6879,9 +7219,20 @@
         });
     }
 
+    // The version the phone runs, the web view comes from the same build
+    function paintVersion() {
+
+        const v = state && state.version ? "Mureka Player " + state.version : "Mureka Player";
+
+        for (const el of document.querySelectorAll(".versionLine")) {
+            el.textContent = v;
+        }
+    }
+
     $("actionsBtn").addEventListener("click", function () {
 
         drawActions();
+        paintVersion();
         $("actionsPop").style.display = "flex";
     });
 

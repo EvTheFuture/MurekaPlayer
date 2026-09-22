@@ -52,6 +52,12 @@ least once since it was installed, so open it once after installing.
   dimmed. Tap a song to jump to it, the cross takes an upcoming song out.
   **Now playing** scrolls to the current song, the round button jumps to the
   top or the end, and covers load as the rows scroll into sight.
+- In the queue, the handle at the start of a song still to come drags it to
+  another place, the songs it passes sliding out of the way, and the list
+  scrolls when the song is held near its top or bottom. With a mouse the
+  whole row drags too. The queue's own order only: while it is sorted or
+  searched the handles are dimmed and a tap on one says why.
+- Plays and hearts over a thousand show short, 1.0k, 1.3k, 12k, 1.2M.
 - The button at the end of a song in the list plays it next, a tick shows
   it is, and a second press takes it out of play next again, back where it
   was in the queue. The heart in each row likes or unlikes the song, as on
@@ -63,7 +69,9 @@ least once since it was installed, so open it once after installing.
   play next, add to queue, refresh, download, copy link, information,
   instrumental, set BPM, cache or remove from cache, delete from the list and
   the stars.
-- The phone's keyboard shortcuts work here too, `?` lists them.
+- The phone's keyboard shortcuts work here too, `?` lists them. The
+  player's version stands small at the foot of that list and of the actions
+  menu.
 - The menu button next to Settings has load, rescan, clear, cache all,
   playlists, creators, screen off and fullscreen, and under the playing
   song's title the long press choices for it: refresh, download, copy link,
@@ -266,12 +274,3 @@ to the phone. On Linux the browser shows it over MPRIS, so playerctl, media
 keys and the desktop's media controls work, elsewhere in the system's own
 media controls. A browser shows it while the web view plays the music
 itself, Music in this browser.
-
-## Web view on a computer, its own audio stream
-
-Firefox plays every tab as one application, "Firefox", so the web view's
-music cannot be routed apart. `tools/mureka-web-view.sh` opens the web view
-in a Firefox of its own, with its own profile, and names its audio stream
-**MurekaPlayer**. pavucontrol then remembers where that stream goes, and
-`tools/51-mureka-web-view.conf`, copied to
-`~/.config/pipewire/pipewire-pulse.conf.d/`, always sends it to one output.

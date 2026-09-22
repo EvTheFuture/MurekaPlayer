@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.33";
+    const VERSION = "1.6.0.37";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -10286,6 +10286,25 @@
         return { setText: setText };
     }
 
+    // A count as it is shown in small places: as it is under a thousand, then
+    // 1.0k, 1.3k, 12k, and 1.2M for millions
+    function compactCount(n) {
+
+        if (typeof n !== "number" || !isFinite(n)) {
+            return "";
+        }
+
+        if (n < 1000) {
+            return String(n);
+        }
+
+        if (n < 1000000) {
+            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
+        }
+
+        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
+    }
+
     // Build the plays and likes line for the current song, empty until known
     function playerCountsText(song) {
 
@@ -10297,11 +10316,11 @@
         const parts = [];
 
         if (typeof c.play_count === "number") {
-            parts.push("\u25B6 " + c.play_count + " plays");
+            parts.push("\u25B6 " + compactCount(c.play_count) + " plays");
         }
 
         if (typeof c.fav_count === "number") {
-            parts.push("\u2665 " + c.fav_count + " likes");
+            parts.push("\u2665 " + compactCount(c.fav_count) + " likes");
         }
 
         return parts.join("  \u00B7  ");
@@ -11376,10 +11395,10 @@
             ? nowPlayingCounts
             : null;
         const plays = (counts && typeof counts.play_count === "number")
-            ? String(counts.play_count)
+            ? compactCount(counts.play_count)
             : "";
         const likes = (counts && typeof counts.fav_count === "number")
-            ? String(counts.fav_count)
+            ? compactCount(counts.fav_count)
             : "";
 
         return {
@@ -12073,6 +12092,7 @@
             plays: song && nowPlayingCounts && nowPlayingCounts.song_id === song.song_id
                 && typeof nowPlayingCounts.play_count === "number" ? nowPlayingCounts.play_count : null,
             playFrom: hostPlayFrom(),
+            version: VERSION,
             shuffle: shuffleMode,
             repeat: repeatMode,
             carAudio: hostCarAudio,
@@ -13104,6 +13124,31 @@
 
                 queuePos = i;
                 playCurrent();
+            }
+        } else if (cmd === "queueMove") {
+
+            // A song dragged to another place among the ones still to come
+            const from = Number(arg && arg.from);
+            const to = Number(arg && arg.to);
+
+            if (from > queuePos && from < queue.length && to > queuePos && to < queue.length && from !== to) {
+
+                const moved = queue.splice(from, 1)[0];
+
+                queue.splice(to, 0, moved);
+
+                // What plays next may have changed, anything readied for the
+                // old next song is let go
+                if (from === queuePos + 1 || to === queuePos + 1) {
+                    dropNextReady();
+                }
+
+                renderList();
+                saveQueue();
+                setArtTransition("none");
+                setArtSources();
+                positionArt(0);
+                prefetchNext();
             }
         } else if (cmd === "queueRemove") {
 
