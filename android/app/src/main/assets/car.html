@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
   Mureka Player - load and play all your Mureka songs
-  Car page, served by the Android app to the car's browser over the hotspot
+  Web view, served by the Android app to a browser over the hotspot
 
   Copyright (C) 2026 EvTheFuture
   https://github.com/EvTheFuture/MurekaPlayer
@@ -303,8 +303,18 @@
     }
 
     .soundIco {
+        border: none;
+        background: none;
         color: var(--muted);
+        font: inherit;
         line-height: 0;
+        padding: 0 6px;
+        cursor: pointer;
+    }
+
+    /* Silent, so the speaker says so without a second icon */
+    .soundIco.quiet {
+        opacity: 0.4;
     }
 
     #seek {
@@ -631,6 +641,23 @@
         font-weight: 600;
     }
 
+    /* A short word about what just happened, over everything else */
+    #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 6vh;
+        transform: translateX(-50%);
+        max-width: 80vw;
+        padding: 12px 18px;
+        border-radius: 12px;
+        background: rgba(20, 20, 20, 0.95);
+        color: var(--text);
+        font-size: clamp(16px, 1.6vw, 22px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        display: none;
+        z-index: 60;
+    }
+
     /* The handle to drag a song to another place in the queue */
     .rowGrip {
         flex: 0 0 auto;
@@ -866,7 +893,7 @@
     }
 
     /* Two columns of choices where there is room, so the whole menu and its
-       stars fit on a car screen without scrolling */
+       stars fit on a wide screen without scrolling */
     #menuItems,
     #actionItems {
         display: grid;
@@ -1319,6 +1346,58 @@
         flex: 0 0 auto;
         display: flex;
         color: var(--accent);
+    }
+
+    #volPop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+    }
+
+    #volBox {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 2vh 2vw;
+        width: min(700px, 92vw);
+        display: flex;
+        flex-direction: column;
+        gap: 1.4vh;
+    }
+
+    #volTop {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1.5vw;
+    }
+
+    #volTitle {
+        font-size: clamp(20px, 2vw, 30px);
+        font-weight: 600;
+    }
+
+    #volRow {
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+    }
+
+    #volSlider {
+        flex: 1 1 auto;
+        height: 42px;
+        accent-color: var(--accent);
+    }
+
+    #volNow {
+        min-width: 3.2em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-size: clamp(18px, 1.8vw, 26px);
     }
 
     #fromPop {
@@ -1780,7 +1859,7 @@
         </button>
     </div>
     <div id="bottom">
-        <span class="soundIco" data-icon="speaker" title="Music"></span>
+        <button class="soundIco" id="volBtn" type="button" data-icon="speaker" aria-label="Volume" title="Volume"></button>
         <div id="sound">
             <button id="soundPhone" type="button" class="on" data-icon="bluetooth" aria-label="Music on the phone or Bluetooth" title="Music on the phone or Bluetooth"></button>
             <button id="soundCar" type="button" data-icon="browser" aria-label="Music in this browser" title="Music in this browser"></button>
@@ -1839,6 +1918,7 @@
         <div class="sheetBody" id="panelScroll"><div id="panelBody"></div></div>
     </div>
 </div>
+<div id="toast"></div>
 <div id="songMenu">
     <div id="menuBox">
         <div id="menuTitle"></div>
@@ -1860,6 +1940,21 @@
             <button class="chip iconOnly" id="closeFrom" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
         <div id="fromBody"></div>
+    </div>
+</div>
+<div id="volPop">
+    <div id="volBox">
+        <div id="volTop">
+            <div id="volTitle">Volume</div>
+            <button class="chip iconOnly" id="closeVol" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="volRow">
+            <button class="chip iconOnly" id="volDown" type="button" data-icon="arrowDown" aria-label="Quieter" title="Quieter"></button>
+            <input id="volSlider" type="range" min="0" max="15" step="1" value="0" aria-label="Volume">
+            <button class="chip iconOnly" id="volUp" type="button" data-icon="arrowUp" aria-label="Louder" title="Louder"></button>
+            <span id="volNow"></span>
+        </div>
+        <div id="volWhere" class="ceLabel"></div>
     </div>
 </div>
 <div id="actionsPop">
@@ -1920,6 +2015,18 @@
             ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }],
             ["path", { d: "M15.54 8.46a5 5 0 0 1 0 7.07" }],
             ["path", { d: "M19.07 4.93a10 10 0 0 1 0 14.14" }]
+        ],
+        speakerOff: [
+            ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }],
+            ["line", { x1: "23", y1: "9", x2: "17", y2: "15" }],
+            ["line", { x1: "17", y1: "9", x2: "23", y2: "15" }]
+        ],
+        speakerLow: [
+            ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }]
+        ],
+        speakerMid: [
+            ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }],
+            ["path", { d: "M15.54 8.46a5 5 0 0 1 0 7.07" }]
         ],
         bluetooth: [
             ["polyline", { points: "6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5" }]
@@ -2230,7 +2337,7 @@
         + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
 
     // The last state from the phone and when it arrived here. The position
-    // moves on between polls, worked out from the local clock, since the car
+    // moves on between polls, worked out from the local clock, since this
     // and the phone clocks need not agree
     let state = null;
     let stateAt = 0;
@@ -2698,6 +2805,7 @@
 
         $("soundPhone").classList.toggle("on", !carAudio);
         $("soundCar").classList.toggle("on", carAudio);
+        paintVolIcon();
         statusLine.setText(online ? (s && s.status ? s.status : "") : "Not connected to the phone");
         $("signin").style.display = online && s && s.signedIn === "no" ? "block" : "none";
 
@@ -2777,8 +2885,8 @@
     // and brightens as it reaches the middle and shrinks and fades as it
     // leaves over the top, like text on a turning cylinder. A jump, a seek
     // or a new song just puts the rows in place. The sizes come from the
-    // phone: the car's lyric size, and the mobile player's side line
-    // percent, line spacing and side offset unless the car sets its own
+    // phone: the web view's lyric size, and the mobile player's side line
+    // percent, line spacing and side offset unless the web view sets its own
     function makeLyricRoll(roll) {
 
         const slots = [];
@@ -2919,7 +3027,7 @@
     // The layout the phone sends, with the phone's defaults. The size is
     // not in pixels but against the second line under the title, 20 being
     // as big as that line, so the lyrics grow and shrink with the page like
-    // all the other text and look the same in a small car browser and on a
+    // all the other text and look the same in a small browser and on a
     // large screen
     function lyricLayout() {
 
@@ -3096,6 +3204,8 @@
             }
         }
 
+        applyWebVolume();
+
         if (s.playing && audio.paused) {
 
             audio.play().catch(function () {
@@ -3235,6 +3345,7 @@
     function unlockAudio() {
 
         unlocked = true;
+        applyWebVolume();
 
         if (state && state.src) {
 
@@ -4520,6 +4631,359 @@
         $("fromPop").style.display = "none";
     }
 
+    // The volume, the phone's own media volume when the phone makes the
+    // sound, this page's own level when the sound is here. The phone's is
+    // one of Android's steps, and over Bluetooth with absolute volume it is
+    // the audio system's own level
+    let volMode = "phone";
+    let volSending = 0;
+    let volPending = 0;
+    let volWanted = -1;
+    let volBefore = -1;
+
+    function webVolume() {
+
+        let raw = null;
+
+        try {
+            raw = localStorage.getItem("murekaCarVolume");
+        } catch (e) {
+            // A browser that keeps nothing, full volume then
+        }
+
+        const saved = raw === null || raw === "" ? NaN : Number(raw);
+
+        return isFinite(saved) && saved >= 0 && saved <= 1 ? saved : 1;
+    }
+
+    function applyWebVolume() {
+
+        const want = webVolume();
+
+        if (audio.volume !== want) {
+            audio.volume = want;
+        }
+
+        paintVolIcon();
+    }
+
+    // The speaker at the bottom shows how loud it is: crossed out at
+    // nothing, then one wave, two waves and the full one near the top
+    function paintVolIcon() {
+
+        const top = volTop();
+        const level = volLevel();
+        const part = level < 0 || top <= 0 ? -1 : level / top;
+        const btn = $("volBtn");
+        let name = "speaker";
+
+        if (part === 0) {
+            name = "speakerOff";
+        } else if (part > 0 && part <= 0.34) {
+            name = "speakerLow";
+        } else if (part > 0.34 && part <= 0.67) {
+            name = "speakerMid";
+        }
+
+        btn.classList.toggle("quiet", part === 0);
+
+        if (btn.dataset.icon !== name) {
+
+            btn.dataset.icon = name;
+            setIcon(btn, name);
+        }
+    }
+
+    // The level this page last had, ready before the first song plays
+    applyWebVolume();
+
+    function openVol() {
+
+        volMode = state && state.carAudio ? "here" : "phone";
+        paintVol(true);
+        $("volPop").style.display = "flex";
+    }
+
+    function closeVol() {
+        $("volPop").style.display = "none";
+    }
+
+    function volOpen() {
+        return $("volPop").style.display === "flex";
+    }
+
+    // The slider and the number, from this page when the sound is here and
+    // from the phone's last word when it is there. A move of our own stands
+    // for a moment, so an older answer does not pull the slider back
+    function paintVol(force) {
+
+        const slider = $("volSlider");
+        const here = volMode === "here";
+        const max = here ? 100 : (state && state.volMax > 0 ? state.volMax : 0);
+        const known = here || (state && typeof state.vol === "number" && state.vol >= 0 && max > 0);
+
+        $("volWhere").textContent = here
+            ? "This browser, the audio system's volume is on top of it"
+            : (known ? "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
+                + ", the one its volume buttons move"
+                : "The phone did not say what its volume is");
+        slider.style.display = known ? "" : "none";
+        $("volDown").style.display = known ? "" : "none";
+        $("volUp").style.display = known ? "" : "none";
+
+        if (!known) {
+
+            $("volNow").textContent = "";
+            return;
+        }
+
+        slider.max = String(max);
+        slider.step = here ? "5" : "1";
+
+        if (force || Date.now() > volPending) {
+
+            const level = here ? Math.round(webVolume() * 100) : state.vol;
+
+            slider.value = String(level);
+            volWanted = level;
+        }
+
+        const value = Number(slider.value);
+
+        $("volNow").textContent = volText(value);
+    }
+
+    // Whether the sound comes out of this browser rather than the phone
+    function volHere() {
+        return !!(state && state.carAudio);
+    }
+
+    // The loudest step there is, 100 for this browser's own level
+    function volTop() {
+
+        if (volHere()) {
+            return 100;
+        }
+
+        return state && state.volMax > 0 ? state.volMax : 0;
+    }
+
+    // Where the volume is now, our own move first while it still stands
+    function volLevel() {
+
+        if (volHere()) {
+            return Math.round(webVolume() * 100);
+        }
+
+        if (volWanted >= 0 && Date.now() < volPending) {
+            return volWanted;
+        }
+
+        return state && typeof state.vol === "number" ? state.vol : -1;
+    }
+
+    // Put the volume at this step. The phone is told at most a few times a
+    // second, and always when the move is the last one
+    function volSet(level, last) {
+
+        const top = volTop();
+
+        if (top <= 0) {
+            return;
+        }
+
+        const value = Math.max(0, Math.min(top, Math.round(level)));
+
+        volWanted = value;
+        volPending = Date.now() + 1500;
+
+        if (volOpen()) {
+
+            $("volSlider").value = String(value);
+            paintVol(false);
+        }
+
+        paintVolIcon();
+
+        if (volHere()) {
+
+            try {
+                localStorage.setItem("murekaCarVolume", String(value / 100));
+            } catch (e) {
+                // A browser that keeps nothing, the level lasts this visit
+            }
+
+            applyWebVolume();
+            return;
+        }
+
+        if (!last && Date.now() - volSending < 150) {
+            return;
+        }
+
+        volSending = Date.now();
+        send("sysVolume", value);
+    }
+
+    // Move the volume where the slider now is
+    function volChanged(last) {
+
+        volMode = volHere() ? "here" : "phone";
+        volSet(Number($("volSlider").value), last);
+    }
+
+    // A step up or down from a key or the buttons beside the slider, and
+    // a word about where it landed when the slider is not on screen
+    function volNudge(by) {
+
+        const top = volTop();
+        const now = volLevel();
+
+        if (top <= 0 || now < 0) {
+
+            toast("The phone did not say what its volume is");
+            return;
+        }
+
+        const step = volHere() ? 5 : 1;
+
+        volSet(now + by * step, true);
+        volSay();
+    }
+
+    // Off, and back to where it was. With nothing to go back to it comes
+    // back a third of the way up
+    function volMute() {
+
+        const top = volTop();
+        const now = volLevel();
+
+        if (top <= 0 || now < 0) {
+
+            toast("The phone did not say what its volume is");
+            return;
+        }
+
+        if (now > 0) {
+
+            volBefore = now;
+            volSet(0, true);
+        } else {
+            volSet(volBefore > 0 ? volBefore : Math.max(1, Math.round(top / 3)), true);
+        }
+
+        volSay();
+    }
+
+    // A level written the way the settings ask for, a percentage or the
+    // step the phone counts. This browser's own level is a percentage
+    // either way, since that is what it is
+    function volText(level) {
+
+        const top = volTop();
+
+        if (level < 0 || top <= 0) {
+            return "";
+        }
+
+        if (level === 0) {
+            return "Off";
+        }
+
+        if (volHere() || !state || state.volUnit !== "steps") {
+            return Math.round(level / top * 100) + "%";
+        }
+
+        return level + " of " + top;
+    }
+
+    // The level in a word, for when the slider is not open
+    function volSay() {
+
+        if (volOpen()) {
+            return;
+        }
+
+        const value = volLevel();
+
+        if (value === 0) {
+
+            toast("Sound off");
+            return;
+        }
+
+        toast("Volume " + volText(value));
+    }
+
+    function volStep(by) {
+        volNudge(by);
+    }
+
+    // Volume from the keyboard, also the keys a media keyboard sends
+    function volumeKey(key, onSlider) {
+
+        if (key === "m" || key === "AudioVolumeMute") {
+
+            volMute();
+            return true;
+        }
+
+        if (onSlider) {
+            return false;
+        }
+
+        if (key === "v") {
+
+            if (volOpen()) {
+                closeVol();
+            } else {
+                openVol();
+            }
+
+            return true;
+        }
+
+        if (key === "ArrowUp" || key === "+" || key === "AudioVolumeUp") {
+
+            volNudge(1);
+            return true;
+        }
+
+        if (key === "ArrowDown" || key === "-" || key === "AudioVolumeDown") {
+
+            volNudge(-1);
+            return true;
+        }
+
+        return false;
+    }
+
+    $("volBtn").addEventListener("click", openVol);
+    $("closeVol").addEventListener("click", closeVol);
+
+    $("volPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("volPop")) {
+            closeVol();
+        }
+    });
+
+    $("volSlider").addEventListener("input", function () {
+        volChanged(false);
+    });
+
+    $("volSlider").addEventListener("change", function () {
+        volChanged(true);
+    });
+
+    $("volDown").addEventListener("click", function () {
+        volStep(-1);
+    });
+
+    $("volUp").addEventListener("click", function () {
+        volStep(1);
+    });
+
     function paintFilters(f) {
 
         if (!f) {
@@ -4805,6 +5269,15 @@
             }
 
             btn.addEventListener("click", function () {
+
+                // An export can land here, in the browser showing this page,
+                // or on the phone. Only this page knows which one is wanted
+                if (node.exp) {
+
+                    exportChoice(node.exp, node.id);
+                    return;
+                }
+
                 panelAction("hclick", node.id);
             });
 
@@ -5338,7 +5811,7 @@
         showPanel("playlists");
     });
 
-    // Fullscreen for the car browser, where it offers it
+    // Fullscreen for the browser showing the web view, where it offers it
     function fullscreenOn() {
         return !!(document.fullscreenElement || document.webkitFullscreenElement);
     }
@@ -5567,7 +6040,12 @@
         state = s;
         stateAt = Date.now();
         online = true;
+        paintVolIcon();
         render();
+
+        if (volOpen()) {
+            paintVol(false);
+        }
 
         // Keep the open list in step when the song changes on its own,
         // without losing the place in it
@@ -6011,7 +6489,95 @@
 
         $("songMenu").style.display = "none";
         $("bpmRow").style.display = "none";
+        $("menuStars").style.display = "";
+        $("menuCaption").style.display = "";
         menuSong = null;
+    }
+
+    // A short word over the page, gone again after a few seconds
+    let toastTimer = 0;
+
+    function toast(text) {
+
+        const el = $("toast");
+
+        el.textContent = text;
+        el.style.display = "block";
+        clearTimeout(toastTimer);
+
+        toastTimer = setTimeout(function () {
+            el.style.display = "none";
+        }, 4000);
+    }
+
+    // The song menu's box used for a plain question, with no song behind it
+    function openChoice(title, items) {
+
+        const box = $("menuItems");
+
+        menuSong = null;
+        box.textContent = "";
+        $("menuTitle").textContent = title;
+        $("bpmRow").style.display = "none";
+        $("menuStars").style.display = "none";
+        $("menuCaption").style.display = "none";
+
+        for (const item of items) {
+            box.appendChild(menuItem(item.icon, item.label, item.fn));
+        }
+
+        $("songMenu").style.display = "flex";
+    }
+
+    // Export from the settings panel: the file can be saved by the browser
+    // showing this page, or on the phone, where the app asks for the place
+    function exportChoice(kind, buttonId) {
+
+        openChoice(kind === "songs" ? "Export song tweaks to" : "Export settings to", [
+            { icon: "download", label: "This browser", fn: function () {
+
+                closeSongMenu();
+                exportHere(kind);
+            } },
+            { icon: "speaker", label: "The phone", fn: function () {
+
+                closeSongMenu();
+                panelAction("hclick", buttonId);
+            } }
+        ]);
+    }
+
+    // Ask the phone for the data and let this browser save the file
+    function exportHere(kind) {
+
+        toast("Getting the file...");
+
+        fetch("/export?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (out) {
+
+            if (!out || !out.data) {
+                throw new Error("no data");
+            }
+
+            const text = JSON.stringify(out.data, null, 2);
+            const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = out.name || "mureka-player.json";
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            setTimeout(function () {
+                URL.revokeObjectURL(url);
+            }, 10000);
+
+            toast("Saved " + (out.name || "the file"));
+        }).catch(function () {
+            toast("Could not get the file from the phone");
+        });
     }
 
     function menuItem(iconName, label, action, cls, disabled) {
@@ -6886,7 +7452,7 @@
     $("artStage").addEventListener("pointercancel", flowEnd);
 
     placeFlow(0);
-    // The phone's keyboard shortcuts, for a laptop or a keyboard in the car
+    // The phone's keyboard shortcuts, for a laptop or an attached keyboard
     const SHORTCUT_HELP = [
         ["/", "Search"],
         ["Esc", "Close a dialog or leave a field"],
@@ -6895,6 +7461,9 @@
         ["Space", "Play or pause"],
         ["n / p", "Next or previous song"],
         ["\u2190 / \u2192", "Back or ahead 10 seconds"],
+        ["\u2191 / \u2193", "Volume up or down, + and - too"],
+        ["m", "Sound off, and back to where it was"],
+        ["v", "The volume slider, open or close"],
         ["s", "Shuffle on or off"],
         ["l", "Repeat, all, one or off"],
         ["0 to 5", "Rate the playing song, the same digit again takes a half off"],
@@ -6959,6 +7528,12 @@
         if (isShown("fromPop")) {
 
             closeFrom();
+            return true;
+        }
+
+        if (isShown("volPop")) {
+
+            closeVol();
             return true;
         }
 
@@ -7042,6 +7617,17 @@
             } else {
                 closeTop();
             }
+
+            ev.preventDefault();
+            return;
+        }
+
+        // The volume keys work with the slider under the finger too, only
+        // the arrows are left to the slider itself there. In a field every
+        // key is the field's own
+        const onSlider = typing && target.id === "volSlider";
+
+        if ((!typing || onSlider) && volumeKey(ev.key, onSlider)) {
 
             ev.preventDefault();
             return;

@@ -1,6 +1,6 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * Android host, the meeting point of the WebView, the service and the car page
+ * Android host, the meeting point of the WebView, the service and the web view
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -36,7 +36,7 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 // The player in the WebView publishes its now playing state here, and the
-// media session, the notification and the car page read it from here. Their
+// media session, the notification and the web view read it from here. Their
 // commands go the other way, into the player, through the same place
 final class Hub {
 
@@ -48,11 +48,15 @@ final class Hub {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final CopyOnWriteArrayList<Listener> LISTENERS = new CopyOnWriteArrayList<>();
 
-    // The last state as the player sent it, and parsed
+    // The last state as the player sent it, and parsed. What the app knows
+    // by itself, the phone's media volume, is added to it on the way out
+    private static volatile String playerJson = "{}";
     private static volatile String stateJson = "{}";
     private static volatile JSONObject state = new JSONObject();
+    private static int volLevel = -1;
+    private static int volMax = 0;
 
-    // Counts the states published, so the car page can wait for the next
+    // Counts the states published, so the web view can wait for the next
     // one instead of asking again and again. Guarded by LOCK
     private static final Object LOCK = new Object();
     private static long seq = 0;
@@ -95,7 +99,7 @@ final class Hub {
     }
 
     // The state with its number, as soon as there is one newer than the one
-    // the car page already has, or after the timeout with what there is. A
+    // the web view already has, or after the timeout with what there is. A
     // number from before the app restarted is answered at once
     static String awaitState(long since, long timeoutMs) {
 
@@ -130,18 +134,18 @@ final class Hub {
     // Called from the JavaScript bridge thread, handed over to the main one
     static void publish(String json) {
 
-        final JSONObject parsed;
-
         try {
-            parsed = new JSONObject(json);
+            new JSONObject(json);
         } catch (JSONException e) {
             return;
         }
 
+        final JSONObject parsed;
+
         synchronized (LOCK) {
 
-            stateJson = json;
-            state = parsed;
+            playerJson = json;
+            parsed = rebuild();
             seq += 1;
             LOCK.notifyAll();
         }
@@ -152,6 +156,45 @@ final class Hub {
                 l.onState(parsed);
             }
         });
+    }
+
+    // The phone's media volume, as one of Android's steps and how many
+    // steps there are. A change counts as a new state, so a web view waiting
+    // for one sees it at once
+    static void setVolume(int level, int max) {
+
+        synchronized (LOCK) {
+
+            if (level == volLevel && max == volMax) {
+                return;
+            }
+
+            volLevel = level;
+            volMax = max;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
+    // The player's state with the app's own fields in it. Called with LOCK
+    private static JSONObject rebuild() {
+
+        JSONObject o;
+
+        try {
+
+            o = new JSONObject(playerJson);
+            o.put("vol", volLevel);
+            o.put("volMax", volMax);
+        } catch (JSONException e) {
+            o = new JSONObject();
+        }
+
+        state = o;
+        stateJson = o.toString();
+
+        return o;
     }
 
     // Send a command to the player. Safe from any thread
@@ -176,9 +219,9 @@ final class Hub {
     }
 
     // Call one of the player's host functions and wait for what it returns,
-    // as JSON. Called from a car server thread, which waits here, and gives
+    // as JSON. Called from a web server thread, which waits here, and gives
     // up rather than holding the connection open if the player does not
-    // come back. The function name is fixed by the caller, never by the car
+    // come back. The function name is fixed by the caller, never by the page
     static String request(String function, String argJson, long timeoutMs) {
 
         final BlockingQueue<String> answer = new ArrayBlockingQueue<>(1);
@@ -251,7 +294,7 @@ final class Hub {
             return JSONObject.quote((String) arg);
         }
 
-        // Objects and lists from the car are already valid JavaScript
+        // Objects and lists from the web view are already valid JavaScript
         if (arg instanceof JSONObject || arg instanceof org.json.JSONArray) {
             return arg.toString();
         }

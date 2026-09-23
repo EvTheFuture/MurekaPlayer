@@ -1,8 +1,8 @@
 # Mureka Player for Android
 
 A small app that runs mureka.ai in its own WebView with the shared
-`src/player.js`, keeps playing with the screen off, and serves a car page on
-the phone's hotspot. The car's browser opens that page and becomes the
+`src/player.js`, keeps playing with the screen off, and serves a web view on
+the phone's hotspot. A browser in the car opens that page and becomes the
 remote: now playing, cover, stars, like, play and pause, previous and next,
 seeking, shuffle and repeat, the queue, a song list with search and Play
 next, and the player's own settings, all the filters and the artists.
@@ -17,13 +17,13 @@ next, and the player's own settings, all the filters and the artists.
   the app closed.
 - **PlayerService** is a foreground service and creates the WebView. It owns
   the Android media session (lock screen, Bluetooth, steering wheel buttons,
-  the car's own now playing), runs the car page server and shows its address
+  the vehicle's own now playing), runs the web view server and shows its address
   in the notification. When Mureka turns the session down, it posts a "Sign
   in to Mureka" notification that opens the app.
 - **BootReceiver** starts the service when the phone starts and after the
-  app is updated, so the car page is there without opening the app.
+  app is updated, so the web view is there without opening the app.
 - **MainActivity** only shows the WebView. Closing it leaves the music and
-  the car page running, Quit in the notification ends everything.
+  the web view running, Quit in the notification ends everything.
 - **CarVpn** is a VPN that carries no traffic. It only gives the phone one
   extra address that is not private, 3.3.3.3 unless changed, since Tesla's
   browser refuses private addresses. See "Use in the car".
@@ -32,10 +32,10 @@ next, and the player's own settings, all the filters and the artists.
   name. Tesla's browser does not look up local names. It is plain Java, no
   Android classes, and answers with the phone's address on whichever network
   the question came from.
-- **CarSettings** holds the car page settings and checks every value.
+- **CarSettings** holds the web view settings and checks every value.
 - **CarServer** listens on port 8080, retrying every 5 seconds if the port is
   busy, and the notification says so when it is not listening. `GET /` is the
-  car page, `GET /state?since=` the now
+  web view, `GET /state?since=` the now
   playing state, answered as soon as there is a newer one than `since`, `GET /list?q=&offset=&limit=` a page of the song
   list, `GET /queue?q=` the whole queue,
   `GET /panel?name=settings|filters|creators` a copy of one of the player's
@@ -88,7 +88,7 @@ least once since it was installed, so open it once after installing.
   the second line, up next and the status line walk across with the phone's
   easing when they do not fit, instead of being cut off.
 - Most settings have a short explanation under them, on the phone and on
-  the car page. The car's settings scroll in a box that reaches the right
+  the web view. The web view's settings scroll in a box that reaches the right
   edge, so the scrollbar never lies over the buttons.
 - **Remove ; from lyrics** in the settings takes the semicolons out of the
   lyrics everywhere they show.
@@ -102,7 +102,7 @@ least once since it was installed, so open it once after installing.
   fades out. The covers reach out over the page margin and fade out towards
   the screen edge. Swipe the strip, or tap a neighbour, for that song. A
   song change from a button, Bluetooth or the end of a song slides the
-  covers the same way in 300 ms, on the car page and on the phone.
+  covers the same way in 300 ms, on the web view and on the phone.
 - Previous always goes to the previous song, also a few seconds into one.
 - A queue saved under other filters, vocals only then and all now for one,
   is built again from what the filters admit now when the player starts.
@@ -135,34 +135,34 @@ least once since it was installed, so open it once after installing.
 - The song information keeps the lyrics' lines and capitals, and its names
   and values line up in two columns.
 - Lyric size in the web view follows the page, so it looks the same in the
-  car browser and on a large screen.
+  browser and on a large screen.
 - The web view hears of song changes at once, also with the phone's screen
   off or the app in the background. In fullscreen, Escape closes the page's
   own dialogs where the browser allows it, holding it leaves fullscreen.
 - **Start with** in the settings can also be **As last time**, the list and
   artist the player was showing when it was last used.
 - **Up next**, the **waveform seek bar**, where the lyrics go, the names
-  under the buttons and the car's own transport bar are set on the phone
+  under the buttons and the web view's own transport bar are set on the phone
   under Settings, Web view. The settings have three pages: what applies
   everywhere, Mobile player and Web view.
-- **Fullscreen** on the main screen, where the car's browser offers it.
+- **Fullscreen** on the main screen, where the browser offers it.
 - **Settings** on the main screen, and **Edit filters** and **Artists** in the
   song list, show the phone's own panels with large controls. They are read
   from the player itself, so everything the phone has is there, and every
   tap goes back through the same control on the phone. Filters need Apply
   filters, as on the phone. Artists picks your own library or a creator.
 
-## Who may open the car page
+## Who may open the web view
 
 Only the local network, never the mobile network:
 
 - The sender has to be on the hotspot or a Wi-Fi the phone is on, and ask
-  for one of the phone's addresses on that network or for the car address.
+  for one of the phone's addresses on that network or for the public address.
 - Requests arriving on a cellular interface are refused, IPv6 included.
 - In the app's settings, under Web view, "Allow from the phone's hotspot"
   and "Allow from Wi-Fi networks" pick which of the two are allowed. Both
-  are on from the start. These two rows are not shown on the car page, so
-  the car cannot lock itself out.
+  are on from the start. These two rows are not shown on the web view, so
+  a browser cannot lock itself out.
 
 ## Fullscreen
 
@@ -172,14 +172,14 @@ leaves fullscreen.
 
 ## Sound in the car
 
-The car page has a Sound switch:
+The web view has a Sound switch:
 
 - **Phone / Bluetooth**, the phone plays and the car speakers get it over
-  Bluetooth. The car page is only the remote.
-- **This browser**, the car browser plays the song itself. The phone keeps
+  Bluetooth. The web view is only the remote.
+- **This browser**, the browser plays the song itself. The phone keeps
   playing at a volume too low to hear and stays in charge of the queue, the
-  car page follows its position. Not muted, since Android stops muted media
-  in the background, which paused the song and broke the next one. If the car page goes away for 8 seconds, the phone takes the
+  web view follows its position. Not muted, since Android stops muted media
+  in the background, which paused the song and broke the next one. If the web view goes away for 8 seconds, the phone takes the
   sound back.
 
 ## Build
@@ -221,16 +221,16 @@ Tesla's browser has refused private addresses (10.x, 172.16 to 31.x,
 192.168.x) since at least 2015, and a hotspot only hands out private ones.
 So the app can give the phone a fixed address that is not private:
 
-1. In the player's settings, under Car page, switch on "Fixed car address
+1. In the player's settings, under Web view, switch on "Public address
    (VPN)". Android asks once whether the app may run a VPN.
 2. Switch on the phone's hotspot and connect the car to it.
-3. In the car's browser open `http://3.3.3.3:8080` and bookmark it. It is the
+3. In the car's own browser open `http://3.3.3.3:8080` and bookmark it. It is the
    same every time, whatever address the hotspot picked.
 
 How it works: the VPN has no traffic and only this app inside it. It exists
 so Android assigns the address to the phone. The car sends requests for
 3.3.3.3 to its gateway, the phone, and since the address is the phone's own
-they go straight to the car page server. The hotspot, the car's internet and
+they go straight to the web view server. The hotspot, the car's internet and
 every other app are not touched. The Android Auto in the browser apps have
 used the same address for years.
 
@@ -240,7 +240,7 @@ used the same address for years.
 - Android allows one VPN at a time. Starting another VPN app turns this one
   off, and the settings say so. Switch it off and on to get it back, Android
   asks again.
-- The notification shows the car address when it is up, and the local name
+- The notification shows the public address when it is up, and the local name
   and addresses for other devices.
 
 Other devices, a laptop for one, open `http://murekaplayer.local:8080` or the
@@ -251,11 +251,52 @@ settings, `.local` is added.
 
 - Google sign in runs in the app's WebView with the WebView markers taken
   out of the user agent. Google may still refuse it.
-- Export in the settings (download or share) does not work inside the app
-  yet. Import from a file does.
-- Anyone on the same network can open the car page and control the player.
+- Anyone on the same network can open the web view and control the player.
   On the phone's own hotspot that is only the car. Turn off "Allow from
   Wi-Fi networks" to keep it to the hotspot.
+
+## Volume
+
+The speaker at the bottom left of the web view opens a volume slider. With
+the music on the phone it is the phone's own media volume, the one its
+volume buttons move, in Android's own steps. Over Bluetooth with absolute
+volume, which most car stereos and every recent Android have, that is the
+car stereo's level, so the number in the car follows the slider and the
+other way round: turning the knob in the car moves the slider within a few
+seconds. Do not disturb can refuse a change, and then the slider goes back
+to where the phone is.
+
+The number of steps is Android's own, read with getStreamMaxVolume, never a
+fixed number, so a phone with 15 steps shows 0 to 15 and one with 25 shows 0
+to 25. The step itself is what the slider shows, and 0 shows as Off. The
+speaker at the bottom follows the level: crossed out and faint at Off, then
+one wave up to a third, two waves up to two thirds and the full one above
+that.
+
+How the level is written is a setting, Settings, Web view, Volume shown as:
+a percentage, which is how it starts, or the step the phone counts. The
+steps are the phone's own either way, only the words change. This browser's
+own level is always a percentage, since that is what it is.
+
+From a keyboard the arrows up and down move it a step, plus and minus do the
+same, m turns the sound off and back to where it was, and v opens the slider.
+The keys a media keyboard sends work too. Without the slider open a short
+word shows where the volume landed.
+
+With Music in this browser the slider is this browser's own level instead,
+from 0 to 100 percent, kept for the next visit. The audio system's volume still
+sits on top of it, and nothing on the phone is touched.
+
+## Export and import
+
+Export in the app's settings hands the file to Android, which asks where it
+goes with its own dialog, the same one every app uses. Off screen, with
+nobody there to answer, the file lands in Downloads instead and the settings
+line says so. Import picks a file the same way.
+
+Export in the web view asks first whether the file is wanted in the browser
+showing the page or on the phone. The browser saves it where it saves
+downloads, the phone asks for a place as above.
 
 ## A phone left lying a while
 

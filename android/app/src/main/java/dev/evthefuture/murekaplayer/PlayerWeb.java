@@ -32,7 +32,10 @@ import android.net.VpnService;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.os.Build;
+import android.os.Environment;
 import android.os.PowerManager;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -45,9 +48,14 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import android.content.ContentValues;
+
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -59,7 +67,7 @@ import org.json.JSONObject;
 // The player runs in a single WebView that belongs to the app, not to the
 // screen. The service creates it, even at boot with nothing on screen, and
 // the activity only borrows it to show it. Closing the activity leaves the
-// player playing and the car page working
+// player playing and the web view working
 final class PlayerWeb {
 
     static final String HOME = "https://www.mureka.ai/";
@@ -87,6 +95,10 @@ final class PlayerWeb {
 
         // The page's process died and a new WebView took the old one's place
         void replaceWeb(WebView fresh);
+
+        // Save a file the player built, asking the user where it goes. Only
+        // an activity can show that question
+        void saveFile(String name, String text);
     }
 
     private static WebView web;
@@ -214,7 +226,7 @@ final class PlayerWeb {
         // The page runs in a process of its own. Off screen Android counts
         // it as unimportant and freezes it after a while, and the player then
         // does nothing until the app is opened again. Kept important, the
-        // page keeps running with the phone asleep in a pocket or in the car
+        // page keeps running with the phone asleep in a pocket or a bag
         w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
 
         return w;
@@ -245,6 +257,109 @@ final class PlayerWeb {
     }
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    // The player has a file to save. On screen the user is asked where it
+    // goes, otherwise it lands in Downloads, which needs nobody to answer
+    static void saveFile(String name, String text) {
+
+        MAIN.post(() -> {
+
+            Host host = hostRef.get();
+
+            if (host != null) {
+
+                host.saveFile(name, text);
+                return;
+            }
+
+            saveToDownloads(name, text);
+        });
+    }
+
+    // Straight into the phone's Downloads folder, no question asked
+    static void saveToDownloads(String name, String text) {
+
+        if (appContext == null) {
+
+            savedResult(false, "Nothing to save with");
+            return;
+        }
+
+        byte[] data = text.getBytes(StandardCharsets.UTF_8);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+
+            ContentValues values = new ContentValues();
+
+            values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+            values.put(MediaStore.Downloads.MIME_TYPE, "application/json");
+
+            try {
+
+                Uri where = appContext.getContentResolver()
+                    .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+
+                if (where == null) {
+
+                    savedResult(false, "Could not save the file");
+                    return;
+                }
+
+                try (OutputStream out = appContext.getContentResolver().openOutputStream(where)) {
+
+                    if (out == null) {
+
+                        savedResult(false, "Could not save the file");
+                        return;
+                    }
+
+                    out.write(data);
+                }
+
+                savedResult(true, "Downloads, " + name);
+            } catch (IOException | SecurityException | IllegalArgumentException e) {
+                savedResult(false, "Could not save the file");
+            }
+
+            return;
+        }
+
+        // Before Android 10 the folder is written straight
+        try {
+
+            File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+
+            if (dir != null && !dir.exists() && !dir.mkdirs()) {
+
+                savedResult(false, "Could not save the file");
+                return;
+            }
+
+            File file = new File(dir, name);
+
+            try (FileOutputStream out = new FileOutputStream(file)) {
+                out.write(data);
+            }
+
+            savedResult(true, "Downloads, " + name);
+        } catch (IOException | SecurityException e) {
+            savedResult(false, "Could not save the file");
+        }
+    }
+
+    // Tell the player how the save went, so it can show it in its own line
+    static void savedResult(boolean ok, String where) {
+
+        MAIN.post(() -> {
+
+            if (web == null) {
+                return;
+            }
+
+            web.evaluateJavascript("window.__murekaSaveResult && window.__murekaSaveResult("
+                + (ok ? "true" : "false") + ", " + JSONObject.quote(where == null ? "" : where) + ")", null);
+        });
+    }
 
     // The permission is given once and stays until another VPN app takes
     // over. When it is missing and the app is not on screen, the setting
@@ -307,8 +422,8 @@ final class PlayerWeb {
             Hub.publish(json);
         }
 
-        // The app's own car page settings: which networks may open it, the
-        // fixed car address and the local name
+        // The app's own web view settings: which networks may open it, the
+        // fixed public address and the local name
         @JavascriptInterface
         public String getPref(String key, String fallback) {
 
@@ -331,7 +446,7 @@ final class PlayerWeb {
         }
 
         // Stores the value when it is valid, and brings the name and the VPN
-        // in line. Switching the car address on asks for the VPN permission
+        // in line. Switching the public address on asks for the VPN permission
         // the first time, which needs the app on screen
         @JavascriptInterface
         public boolean setPref(String key, String value) {
@@ -390,7 +505,21 @@ final class PlayerWeb {
             }
         }
 
-        // What the car page is reachable at right now, for the settings panel
+        // What the web view is reachable at right now, for the settings panel
+        // A file the player built, saved where the user says or, with the
+        // app off screen, in Downloads
+        @JavascriptInterface
+        public void saveFile(String name, String text) {
+
+            String clean = name == null ? "" : name.replaceAll("[^A-Za-z0-9._-]", "_");
+
+            if (clean.isEmpty()) {
+                clean = "mureka-player.json";
+            }
+
+            PlayerWeb.saveFile(clean, text == null ? "" : text);
+        }
+
         @JavascriptInterface
         public String carStatus() {
 
@@ -402,13 +531,13 @@ final class PlayerWeb {
 
             try {
 
-                String car = CarVpn.activeAddress();
+                String publicAddr = CarVpn.activeAddress();
                 String name = CarSettings.mdnsName(appContext);
                 List<String> addresses = CarServer.addresses(PlayerService.PORT);
 
                 o.put("vpnEnabled", CarSettings.vpnEnabled(appContext));
                 o.put("vpn", CarVpn.status());
-                o.put("carUrl", car != null ? "http://" + car + ":" + PlayerService.PORT : "");
+                o.put("carUrl", publicAddr != null ? "http://" + publicAddr + ":" + PlayerService.PORT : "");
                 o.put("name", name);
                 o.put("localUrl", "http://" + name + ":" + PlayerService.PORT);
                 o.put("mdns", PlayerService.mdnsStatus());

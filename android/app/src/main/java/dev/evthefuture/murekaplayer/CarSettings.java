@@ -1,6 +1,6 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * Android host, the car page settings and what counts as a valid value
+ * Android host, the web view settings and what counts as a valid value
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -24,9 +24,9 @@ package dev.evthefuture.murekaplayer;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-// The app's own settings for the car page, stored apart from the player's.
+// The app's own settings for the web view, stored apart from the player's.
 // The player's settings panel reads and writes them through the bridge, and
-// every value is checked here, so a typo can never break the car page
+// every value is checked here, so a typo can never break the web view
 final class CarSettings {
 
     static final String PREFS = "car";
@@ -96,9 +96,9 @@ final class CarSettings {
         return true;
     }
 
-    // A plain IPv4 address the car's browser will open and the phone may
-    // take as its own. Private, loopback, link local, carrier grade NAT and
-    // multicast ranges are refused, an empty string means not usable
+    // A plain IPv4 address a browser will open and the phone may take as its
+    // own. Private, loopback, link local, carrier grade NAT and multicast
+    // ranges are refused, an empty string means not usable
     static String cleanAddress(String text) {
 
         String[] parts = text == null ? new String[0] : text.trim().split("\\.", -1);

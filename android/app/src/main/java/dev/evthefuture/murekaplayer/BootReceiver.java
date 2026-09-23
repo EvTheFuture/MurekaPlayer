@@ -26,7 +26,7 @@ import android.content.Context;
 import android.content.Intent;
 
 // Starts the service after the phone has started, and again after the app
-// was updated, so the car page is there without opening the app first.
+// was updated, so the web view is there without opening the app first.
 // Android only delivers this once the app has been opened at least once
 public class BootReceiver extends BroadcastReceiver {
 

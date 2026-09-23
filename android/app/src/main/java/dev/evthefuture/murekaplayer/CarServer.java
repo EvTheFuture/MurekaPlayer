@@ -1,6 +1,6 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * Android host, the small web server the car browser connects to
+ * Android host, the small web server the browser showing the web view connects to
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -55,14 +55,14 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-// Serves the car page and a tiny JSON API on the local network, the phone's
-// hotspot in the car. GET / is the page, GET /state the now playing state,
+// Serves the web view and a tiny JSON API on the local network, the phone's
+// hotspot in the web view. GET / is the page, GET /state the now playing state,
 // POST /cmd with {"cmd": "...", "arg": ...} runs a command in the player
 final class CarServer {
 
-    // With the sound in the car browser, the phone plays muted. If the car
-    // page stops asking for the state for this long, it is gone, and the
-    // phone takes the sound back so the music does not go silent
+    // With the sound in the browser, the phone plays muted. If the web view
+    // stops asking for the state for this long, it is gone, and the phone
+    // takes the sound back so the music does not go silent
     private static final long CAR_GONE_MS = 8000;
 
     // Requests larger than this are refused, the API only needs a few bytes
@@ -313,6 +313,13 @@ final class CarServer {
                 }
 
                 sendCall(out, "__murekaHostPanel", JSONObject.quote(name));
+            } else if ("GET".equals(method) && "/export".equals(path)) {
+
+                // The data behind an export, so the browser showing the web
+                // view can save the file itself
+                String kind = "songs".equals(param(query, "kind")) ? "songs" : "settings";
+
+                sendCall(out, "__murekaHostExport", JSONObject.quote(kind));
             } else if ("GET".equals(method) && "/menu".equals(path)) {
 
                 // What the long press menu offers for one song, the id goes
@@ -373,7 +380,7 @@ final class CarServer {
         send(out, 200, "application/json", bytes(json));
     }
 
-    // Whether a connection may use the car page. The sender has to be on a
+    // Whether a connection may use the web view. The sender has to be on a
     // network the phone is on, the hotspot or a Wi-Fi, as the settings
     // allow, and the request has to be for one of the phone's own addresses
     // that is not on the mobile network. The mobile network never, whatever
@@ -641,8 +648,19 @@ final class CarServer {
                 return;
             }
 
-            // Asking for the sound counts as the car being there
+            // Asking for the sound counts as the web view being there
             lastPoll = System.currentTimeMillis();
+
+            // The phone's own media volume is the app's business, not the
+            // player's, so it never goes into the page
+            if ("sysVolume".equals(cmd)) {
+
+                SysVolume.set(arg instanceof Number ? ((Number) arg).intValue()
+                    : number(String.valueOf(arg), 0));
+                send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
             Hub.command(cmd, arg);
             send(out, 200, "application/json", bytes("{\"ok\":true}"));
         } catch (JSONException e) {

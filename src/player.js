@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.39";
+    const VERSION = "1.6.0.47";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1076,6 +1076,7 @@
             lyricShift: 0,
             lyricSideShift: 0,
             lyricNoSemicolon: false,
+            webVolumeUnit: "percent",
             webLyricSize: 26,
             webLyricSideMul: 0,
             webLyricLineMul: 0,
@@ -1211,6 +1212,7 @@
                     lyricSideShift: (typeof parsed.lyricSideShift === "number" && parsed.lyricSideShift >= -20 && parsed.lyricSideShift <= 20)
                         ? parsed.lyricSideShift : 0,
                     lyricNoSemicolon: parsed.lyricNoSemicolon === true,
+                    webVolumeUnit: parsed.webVolumeUnit === "steps" ? "steps" : "percent",
                     webLyricSize: (typeof parsed.webLyricSize === "number" && parsed.webLyricSize >= 10 && parsed.webLyricSize <= 60)
                         ? parsed.webLyricSize : 26,
 
@@ -1859,7 +1861,7 @@
     }
 
     // Keep a typed tempo, or clear the hand entered one when the text is
-    // empty. Shared by the prompt and the car page
+    // empty. Shared by the prompt and the web view
     function setManualBpmText(song, text) {
 
         const typed = String(text).trim();
@@ -8905,7 +8907,7 @@
     // ending up in both rows at once
     function buildControlEditor(key) {
 
-        // The mobile bar or the car page's, each with its own order
+        // The mobile bar or the web view's, each with its own order
         key = key || "controlOrder";
 
         const wrap = document.createElement("div");
@@ -11423,7 +11425,7 @@
     // kept only when every tag inside it has a value, so labels and separators
     // disappear cleanly when a field is missing
     // The rating for the templates, a star and the number, like 3.5. Lock
-    // screens and car displays have no half star glyph. Empty while the song
+    // screens and dashboard displays have no half star glyph. Empty while the song
     // is not rated, so a bracket section around it drops away
     function starsText(song) {
 
@@ -11708,7 +11710,7 @@
         }
 
         // Re-encode the cover to clean JPEG data urls, a small one for compact
-        // slots and a large one up to 1024 for a sharp lock screen and car
+        // slots and a large one up to 1024 for a sharp lock screen and wide
         // display. The large one is capped to the source so it never upscales
         const small = await makeScaledDataUrl(blob, 128, 0.85);
         const big = await makeCoverDataUrl(blob, 1024, 0.82);
@@ -12035,7 +12037,7 @@
 
     // The Android app runs the player in its own WebView. It tags the page
     // with data-mureka-host="apk" and adds window.MurekaHost, which takes the
-    // now playing state for the phone's media controls and for the car page
+    // now playing state for the phone's media controls and for the web view
     // the app serves on the local network. Commands come back through
     // window.__murekaHostCommand
     function isApkHost() {
@@ -12047,13 +12049,13 @@
     // Whether Mureka accepted the session, unknown until the first check
     let authState = "unknown";
 
-    // While the car browser plays the sound, the phone keeps playing and
-    // stays in charge of the queue, the car follows its position
+    // While the browser plays the sound, the phone keeps playing and stays
+    // in charge of the queue, and the web view follows its position
     let hostCarAudio = false;
 
-    // The phone's own level while the car plays the sound. Not muted and not
+    // The phone's own level while the browser plays the sound. Not muted and not
     // zero: Android suspends media that is silent in a page nobody can see,
-    // which with the app closed paused the phone and stopped the car with it.
+    // which with the app closed paused the phone and stopped the browser with it.
     // At this level nothing can be heard, from the phone or over Bluetooth
     const CAR_SHADOW_VOLUME = 0.001;
 
@@ -12067,7 +12069,7 @@
         audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
     }
 
-    // The state handed to the app, everything the car page shows
+    // The state handed to the app, everything the web view shows
     function hostState() {
 
         const song = currentSong;
@@ -12092,6 +12094,7 @@
             plays: song && nowPlayingCounts && nowPlayingCounts.song_id === song.song_id
                 && typeof nowPlayingCounts.play_count === "number" ? nowPlayingCounts.play_count : null,
             playFrom: hostPlayFrom(),
+            volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
             version: VERSION,
             shuffle: shuffleMode,
             repeat: repeatMode,
@@ -12118,7 +12121,7 @@
     }
 
     // The synced lyrics of the playing song, when the phone shows them on
-    // the cover. The car works out the current line from its own clock
+    // the cover. The web view works out the current line from its own clock
     function hostLyrics() {
 
         const active = settings.webLyrics !== "off"
@@ -12134,8 +12137,8 @@
         });
     }
 
-    // How the car page lays its lyric rows out, the phone's five row roll
-    // with the car's own sizes. What the car page has not set follows the
+    // How the web view lays its lyric rows out, the phone's five row roll
+    // with the web view's own sizes. What the web view has not set follows the
     // mobile player, so both roll the same way
     function hostLyricLayout() {
 
@@ -12152,7 +12155,7 @@
         };
     }
 
-    // The transport row as the phone lays it out, for the car to copy
+    // The transport row as the phone lays it out, for the web view to copy
     function hostControls(which) {
 
         const seen = {};
@@ -12233,7 +12236,7 @@
     }
 
     // The number each song carries in the phone's list, the same rule the
-    // list uses, so the car shows the same numbers
+    // list uses, so the web view shows the same numbers
     function hostNumbers() {
 
         const numberById = new Map();
@@ -12271,7 +12274,7 @@
     }
 
     // The song one step from the current one, as the queue stands, for the
-    // car page's up next line and the covers beside the current one
+    // web view's up next line and the covers beside the current one
     function hostNeighbor(step) {
 
         if (!currentSong || queue.length === 0) {
@@ -12298,7 +12301,7 @@
     let hostWaveFrom = null;
     let hostWaveCache = null;
 
-    // The song whose stored waveform was last asked for on the car's behalf
+    // The song whose stored waveform was last asked for on the web view's behalf
     let hostWaveAsked = null;
 
     function hostWave() {
@@ -12345,7 +12348,7 @@
         return out;
     }
 
-    // The smart filters in words, for the car page. Empty when none is on
+    // The smart filters in words, for the web view. Empty when none is on
     function hostSmartText() {
 
         const parts = [];
@@ -12400,7 +12403,7 @@
         };
     }
 
-    // What the car page needs to draw its filter row
+    // What the web view needs to draw its filter row
     function hostFilters() {
 
         return {
@@ -12459,8 +12462,8 @@
         return hostListMemo;
     }
 
-    // One page of the song list the car asked for, the player's own filters
-    // applied, then the car's search text on top
+    // One page of the song list the web view asked for, the player's own filters
+    // applied, then the web view's search text on top
     function hostList(req) {
 
         const q = String(req && req.q ? req.q : "").trim().toLowerCase();
@@ -12529,9 +12532,9 @@
         };
     }
 
-    // The queue for the car, all of it as on the phone: what already played,
+    // The queue for the web view, all of it as on the phone: what already played,
     // the current song and what comes next, with the index each has in the
-    // queue. The car's search text narrows it down
+    // queue. The web view's search text narrows it down
     function hostQueue(req) {
 
         const q = String(req && req.q ? req.q : "").trim().toLowerCase();
@@ -12566,7 +12569,7 @@
     }
 
     // A readable copy of one of the player's panels, the settings, the
-    // filters or the creators, for the car to draw with its own large
+    // filters or the creators, for the web view to draw with its own large
     // controls. It is read from the panel itself, so everything the phone
     // shows is there without a second list to keep in step, and every change
     // goes back through the same buttons and fields the phone uses
@@ -12574,7 +12577,7 @@
     // A control is named by its place in the panel, the panel name and the
     // child positions down to it. Panels such as the creators are drawn
     // again whenever they are read, so a name stored on the element itself
-    // would be gone by the time the car taps it
+    // would be gone by the time the web view taps it
     function hostId(el, path) {
         return path;
     }
@@ -12603,7 +12606,7 @@
         }
 
         // The transport bar editor is dragged about, which a plain copy of
-        // its chips cannot do, so the car gets the lists and draws its own
+        // its chips cannot do, so the web view gets the lists and draws its own
         if (el.dataset.hostControls) {
 
             out.push({
@@ -12623,6 +12626,7 @@
                 s: hostText(el) || el.title || el.getAttribute("aria-label") || "",
                 on: hostOn(el),
                 off: el.disabled === true,
+                exp: el.dataset.hostExport || "",
                 wide: el.style.textAlign === "left"
             });
             return;
@@ -12672,7 +12676,7 @@
         });
 
         // A setting's name with its explanation under it, kept as one column
-        // so the car draws them together beside the switch
+        // so the web view draws them together beside the switch
         if (el.dataset.hostCol) {
 
             const col = [];
@@ -12849,7 +12853,7 @@
         return { name: name, items: items };
     }
 
-    // Find a control the car picked from a panel copy
+    // Find a control the web view picked from a panel copy
     function hostElement(id) {
 
         const m = /^([a-z]+):([0-9.]+)$/.exec(String(id));
@@ -12901,7 +12905,7 @@
         });
     }
 
-    // One choice from the car's song menu, the same things the phone's long
+    // One choice from the web view's song menu, the same things the phone's long
     // press menu does, plus adding to the end of the queue
     function hostSongAction(a) {
 
@@ -12957,7 +12961,7 @@
         publishHostSoon();
     }
 
-    // Run one command from the app, from the phone's media buttons or the car
+    // Run one command from the app, from the phone's media buttons or the web view
     function hostCommand(cmd, arg) {
 
         if (cmd === "toggle") {
@@ -12978,7 +12982,7 @@
             playPrev();
         } else if (cmd === "coverStep") {
 
-            // A swipe on the car's covers goes to the song on that cover and
+            // A swipe on the web view's covers goes to the song on that cover and
             // plays it, paused or not. Previous never restarts the song
             // instead, the cover that came in is the song that plays
             const step = arg && arg.step < 0 ? -1 : 1;
@@ -13042,8 +13046,8 @@
             closePlaylists();
         } else if (cmd === "setControls") {
 
-            // The transport row rearranged on the car. The car's own order
-            // unless the mobile editor was used from the car
+            // The transport row rearranged in the web view. The web view's own order
+            // unless the mobile editor was used from the web view
             const which = arg && !Array.isArray(arg) && arg.which === "mobile" ? "controlOrder" : "webControlOrder";
             const list = Array.isArray(arg) ? arg : (arg && Array.isArray(arg.names) ? arg.names : []);
             const seen = {};
@@ -13074,7 +13078,7 @@
             });
         } else if (cmd === "likeId") {
 
-            // A heart tapped in the car's song list or queue
+            // A heart tapped in the web view's song list or queue
             const wanted = String(arg);
             const song = cache.songs.find(function (x) {
                 return String(x.song_id) === wanted;
@@ -13242,6 +13246,7 @@
         }
 
         window.__murekaHostCommand = hostCommand;
+        window.__murekaHostExport = hostExport;
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
@@ -13251,7 +13256,7 @@
             document.addEventListener(type, publishHostSoon, true);
         });
 
-        // A new song must not come in at full volume while the car plays
+        // A new song must not come in at full volume while the browser plays
         document.addEventListener("play", function () {
 
             if (hostCarAudio && audio && audio.volume !== CAR_SHADOW_VOLUME) {
@@ -13915,7 +13920,7 @@
         // All six are built, the controlOrder setting decides which of them go
         // into the row and in which order. Previous and next are off by
         // default because the album art swipe already does that job, and fewer
-        // buttons means a much larger target for each, which matters in a car
+        // buttons means a much larger target for each, which matters on a
         playPauseBtn = makeIconButton(iconPlay(), "Play / Pause", togglePlayPause);
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
@@ -13943,7 +13948,7 @@
         });
 
         // Opens the large star popup for the playing song, a bigger target
-        // than the stars on the cover, which matters in a car
+        // than the stars on the cover, which matters on a screen at arm's length
         rateIconSvg = makeStarSvg(22);
         rateCtrlBtn = makeIconButton(rateIconSvg, "Rate the playing song", function (ev) {
 
@@ -17077,7 +17082,7 @@
         head.appendChild(doneBtn);
 
         // The settings are three pages: what applies everywhere, what only
-        // shapes the mobile player and what only shapes the car page. One
+        // shapes the mobile player and what only shapes the web view. One
         // page shows at a time, the other two are hidden
         const makePage = function () {
 
@@ -17297,7 +17302,7 @@
         mainPage.appendChild(subtitleTplRow);
         mainPage.appendChild(tplHint);
 
-        // Lyrics everywhere: the cover, the car page and song information
+        // Lyrics everywhere: the cover, the web view and song information
         const semicolonRow = makeBoolRow("Remove ; from lyrics",
             function () { return settings.lyricNoSemicolon; },
             function (v) {
@@ -17513,12 +17518,20 @@
         const exportRow = document.createElement("div");
         exportRow.style.cssText = "display:flex;gap:6px";
 
-        exportRow.appendChild(makeButton("Export song tweaks", "#333", "#fff", function () {
+        const songsExport = makeButton("Export song tweaks", "#333", "#fff", function () {
             chooseExport("songs");
-        }));
-        exportRow.appendChild(makeButton("Export settings", "#333", "#fff", function () {
+        });
+        const settingsExport = makeButton("Export settings", "#333", "#fff", function () {
             chooseExport("settings");
-        }));
+        });
+
+        // The web view takes these over, so the file can land in the browser
+        // it runs in instead of on the phone
+        songsExport.dataset.hostExport = "songs";
+        settingsExport.dataset.hostExport = "settings";
+
+        exportRow.appendChild(songsExport);
+        exportRow.appendChild(settingsExport);
 
         const importRow = document.createElement("div");
         importRow.style.cssText = "display:flex;gap:6px";
@@ -17584,8 +17597,8 @@
         mainPage.appendChild(driveInfoRow);
         mainPage.appendChild(dataMsgEl);
 
-        // Which networks may open the car page, only in the Android app. Kept
-        // out of the car's copy of the settings, so the car cannot lock
+        // Which networks may open the web view, only in the Android app. Kept
+        // out of the web view's copy of the settings, so the web view cannot lock
         // itself out
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
 
@@ -17613,7 +17626,7 @@
             // Tesla's browser refuses private addresses, and the hotspot only
             // hands out private ones. The app can run a VPN that carries no
             // traffic and only gives the phone this one extra address, which
-            // the car accepts and which never changes
+            // the browser accepts and which never changes
             const vpnGet = function () {
                 return window.MurekaHost.getPref("carVpn", "0") === "1";
             };
@@ -17723,7 +17736,7 @@
                 el.dataset.hostSkip = "1";
             });
 
-            // How the car page looks. Shown on the car page too, unlike the
+            // How the web view looks. Shown on the web view too, unlike the
             // network rows above
             const webLabel = document.createElement("div");
             webLabel.textContent = "Web view display";
@@ -17737,7 +17750,7 @@
                 function () { return settings.webWave; },
                 function (v) { settings.webWave = v; publishHostSoon(); });
 
-            // The car page's own transport bar, names and lyrics
+            // The web view's own transport bar, names and lyrics
             const webNamesRow = makeBoolRow("Names under the buttons",
                 function () { return settings.webNames; },
                 function (v) { settings.webNames = v; publishHostSoon(); });
@@ -17774,7 +17787,37 @@
             webLyricRow.appendChild(webLyricName);
             webLyricRow.appendChild(webLyricBtn);
 
-            // The car's lyric roll, laid out like the mobile player's. Side
+            // How the web view writes the volume, as a percentage or as the
+            // step Android counts
+            const webVolumeRow = document.createElement("div");
+            webVolumeRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+
+            const webVolumeName = document.createElement("span");
+            webVolumeName.textContent = "Volume shown as";
+            webVolumeName.style.cssText = "flex:1;min-width:0";
+
+            const webVolumeLabels = { percent: "Percent", steps: "Steps" };
+
+            const webVolumeBtn = makeButton(webVolumeLabels[settings.webVolumeUnit || "percent"], "#333", "#fff", function () {
+
+                settings.webVolumeUnit = (settings.webVolumeUnit || "percent") === "percent" ? "steps" : "percent";
+                webVolumeBtn.textContent = webVolumeLabels[settings.webVolumeUnit];
+                saveSettings();
+                publishHostSoon();
+            });
+
+            webVolumeBtn.style.flex = "0 0 auto";
+            webVolumeBtn.style.minWidth = "56px";
+            webVolumeBtn.style.padding = "6px 12px";
+
+            settingsRefreshers.push(function () {
+                webVolumeBtn.textContent = webVolumeLabels[settings.webVolumeUnit || "percent"];
+            });
+
+            webVolumeRow.appendChild(webVolumeName);
+            webVolumeRow.appendChild(webVolumeBtn);
+
+            // The web view's lyric roll, laid out like the mobile player's. Side
             // lines and spacing start out as the mobile player has them
             const webLyricSizeRow = makeStepperRow("Lyric size",
                 function () { return settings.webLyricSize; },
@@ -17798,6 +17841,7 @@
             webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
             webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
+            webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
             webPage.appendChild(webLyricSizeRow);
             webPage.appendChild(webLyricSideRow);
             webPage.appendChild(webLyricSpaceRow);
@@ -17821,7 +17865,7 @@
             webPageBtn = makePageButton("Web view", "web");
         }
 
-        // The other two pages, the car one only exists in the Android app
+        // The other two pages, the web view one only exists in the Android app
         // The pages for one place only come first, before what applies
         // everywhere
         mainPage.insertBefore(makeLabel("Display"), startLabel);
@@ -18480,6 +18524,15 @@
 
         const data = collectUserData(kind);
         const text = JSON.stringify(data, null, 2);
+
+        // In the app a download goes nowhere, the WebView has no place to put
+        // it, so the app is asked to save the file and show where it goes
+        if (hostSaveFile(exportBaseName(data) + ".json", text)) {
+
+            dataStatus("Saving " + exportedText(data) + "...");
+            return;
+        }
+
         const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
         const a = document.createElement("a");
 
@@ -18496,6 +18549,44 @@
         }, 10000);
 
         dataStatus("Downloaded " + exportedText(data));
+    }
+
+    // Hand a file to the app, which asks where it goes and answers through
+    // __murekaSaveResult. False when there is no app to ask
+    function hostSaveFile(name, text) {
+
+        if (!isApkHost() || typeof window.MurekaHost.saveFile !== "function") {
+            return false;
+        }
+
+        try {
+            window.MurekaHost.saveFile(name, text);
+        } catch (e) {
+            return false;
+        }
+
+        return true;
+    }
+
+    // The app says where the file went, or that nothing was saved
+    window.__murekaSaveResult = function (ok, where) {
+
+        if (ok) {
+            dataStatus("Saved to " + (where || "the phone"));
+        } else if (where) {
+            dataStatus(where);
+        } else {
+            dataStatus("Export cancelled");
+        }
+    };
+
+    // What the web view downloads in the browser it runs in, the file name
+    // with it so both hosts name the file the same way
+    function hostExport(kind) {
+
+        const data = collectUserData(kind === "songs" ? "songs" : "settings");
+
+        return { name: exportBaseName(data) + ".json", data: data };
     }
 
     // A file the share sheet accepts. Chromium only shares a short list of

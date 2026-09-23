@@ -33,7 +33,7 @@ import java.io.IOException;
 // hands out private ones. This VPN carries no traffic at all. It exists so
 // Android gives the phone one more address, 3.3.3.3 unless changed, which
 // is not private. The car sends to it through the phone, its gateway, and
-// since the address is the phone's own, the request goes straight to the car
+// since the address is the phone's own, the request goes straight to the web view
 // page server. Only this app is inside the VPN, the only route is the
 // address itself and it can be bypassed, so nothing else on the phone is
 // touched

@@ -37,7 +37,7 @@ import java.util.List;
 
 // A very small multicast DNS responder, so a laptop or a tablet can open the
 // page by name instead of by an address the hotspot picks anew every time.
-// Tesla's browser does not look up local names, the car uses the fixed VPN
+// Tesla's browser does not look up local names, it uses the fixed VPN
 // address instead. It answers questions for one name, murekaplayer.local
 // unless changed, with the phone's address on the network the question came
 // from, and announces itself now and then. Plain Java on purpose, no Android
@@ -373,7 +373,7 @@ final class MdnsResponder {
         return out;
     }
 
-    // Every ordinary IPv4 address on this interface. Anything a car or a
+    // Every ordinary IPv4 address on this interface. Anything a screen or a
     // laptop on the same network could reach us at
     private static List<InetAddress> addressesOf(NetworkInterface ni) {
 

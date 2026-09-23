@@ -52,8 +52,8 @@ import org.json.JSONObject;
 
 // A foreground service, so Android keeps the app and its WebView running with
 // the screen off. It owns the media session, which is what the lock screen,
-// Bluetooth, the steering wheel buttons and the car's now playing talk to,
-// and it runs the small web server the car browser connects to
+// Bluetooth, the steering wheel buttons and the web view's now playing talk to,
+// and it runs the small web server the browser showing the web view connects to
 public class PlayerService extends Service implements Hub.Listener {
 
     static final int PORT = 8080;
@@ -77,7 +77,7 @@ public class PlayerService extends Service implements Hub.Listener {
     private static PlayerService instance;
 
     // Held for a while after each request from a web view, so a phone left
-    // in the car and gone to sleep wakes up for the web view and stays up
+    // left alone and gone to sleep wakes up for the web view and stays up
     // while it is in use, even with the music paused
     private PowerManager.WakeLock clientLock;
 
@@ -110,7 +110,7 @@ public class PlayerService extends Service implements Hub.Listener {
     // Whether the sign in notification is showing
     private boolean signinShown = false;
 
-    // The car page addresses, looked up again now and then since the hotspot
+    // The web view addresses, looked up again now and then since the hotspot
     // may be switched on after the app started
     private List<String> addresses;
     private long addressesAt = 0;
@@ -132,6 +132,9 @@ public class PlayerService extends Service implements Hub.Listener {
             NotificationManager.IMPORTANCE_HIGH);
 
         nm.createNotificationChannel(signin);
+
+        // The phone's media volume, so the web view can show and move it
+        SysVolume.start(this);
 
         session = new MediaSession(this, "MurekaPlayer");
         session.setCallback(new MediaSession.Callback() {
@@ -195,13 +198,13 @@ public class PlayerService extends Service implements Hub.Listener {
 
         instance = this;
 
-        // The local name for other devices and the car's fixed address
+        // The local name for other devices and the web view's fixed address
         applySettings();
 
         Hub.addListener(this);
     }
 
-    // A car page setting changed in the player's settings panel
+    // A web view setting changed in the player's settings panel
     static void settingsChanged() {
 
         MAIN.post(() -> {
@@ -287,7 +290,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
     // The player's WebView. Built after the service is safely in the
     // foreground, and never allowed to take the service down with it, since
-    // the car page has to work even if the page itself will not start
+    // the web view has to work even if the page itself will not start
     private void ensurePlayer() {
 
         if (PlayerWeb.exists()) {
@@ -361,6 +364,7 @@ public class PlayerService extends Service implements Hub.Listener {
     public void onDestroy() {
 
         Hub.removeListener(this);
+        SysVolume.stop();
         instance = null;
 
         if (CarVpn.activeAddress() != null) {
@@ -508,7 +512,7 @@ public class PlayerService extends Service implements Hub.Listener {
         getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, buildNotification());
     }
 
-    // Where the car browser finds the player: the fixed car address when the
+    // Where a browser finds the player: the fixed public address when the
     // VPN is up, then the name and the addresses for other devices
     private String carText() {
 
@@ -528,12 +532,12 @@ public class PlayerService extends Service implements Hub.Listener {
             return "Web view: switch on the hotspot or Wi-Fi";
         }
 
-        String car = CarVpn.activeAddress();
+        String publicAddr = CarVpn.activeAddress();
         String name = "http://" + CarSettings.mdnsName(this) + ":" + PORT;
         String local = name + (addresses.isEmpty() ? "" : "  or  " + String.join("  ", addresses));
 
-        if (car != null) {
-            return "Web view: http://" + car + ":" + PORT + "  Local: " + local;
+        if (publicAddr != null) {
+            return "Web view: http://" + publicAddr + ":" + PORT + "  Local: " + local;
         }
 
         if (CarSettings.vpnEnabled(this)) {

@@ -42,13 +42,18 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+
 // Only a window onto the player. The WebView belongs to PlayerWeb and keeps
 // running when this screen closes, so leaving the app never stops the music
-// or the car page. Quit in the notification ends everything
+// or the web view. Quit in the notification ends everything
 public class MainActivity extends Activity implements PlayerWeb.Host {
 
     private static final int PICK_FILE = 7;
     private static final int ASK_VPN = 8;
+    private static final int SAVE_FILE = 9;
 
     private FrameLayout root;
     private WebView web;
@@ -58,6 +63,10 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
     // The page waiting for the file picker to answer
     private ValueCallback<Uri[]> fileCallback;
+
+    // The file waiting for the user to say where it goes
+    private String saveText;
+    private String saveName;
 
     // What the page shows fullscreen, and how to tell it fullscreen ended
     private android.view.View fullView;
@@ -77,7 +86,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         WebView.setWebContentsDebuggingEnabled(true);
 
         // The service owns the player. Started here as well, so the music and
-        // the car page keep going once this screen is closed
+        // the web view keep going once this screen is closed
         startForegroundService(new Intent(this, PlayerService.class));
         askForNotifications();
 
@@ -149,10 +158,16 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
             return;
         }
 
+        if (requestCode == SAVE_FILE) {
+
+            writeSaved(resultCode == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
+
         super.onActivityResult(requestCode, resultCode, data);
     }
 
-    // Android asks once whether the app may run a VPN. A no switches the car
+    // Android asks once whether the app may run a VPN. A no switches the public
     // address off again, so the setting never claims more than is running
     @Override
     @SuppressWarnings("deprecation")
@@ -318,6 +333,65 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         }
 
         return true;
+    }
+
+    // The player has a file to save, so the user picks the place with the
+    // system's own dialog, which starts in the last folder they used
+    @Override
+    @SuppressWarnings("deprecation")
+    public void saveFile(String name, String text) {
+
+        saveName = name;
+        saveText = text;
+
+        Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("application/json");
+        pick.putExtra(Intent.EXTRA_TITLE, name);
+
+        try {
+            startActivityForResult(pick, SAVE_FILE);
+        } catch (ActivityNotFoundException e) {
+
+            // No file app on this phone, so it goes to Downloads instead
+            saveText = null;
+            PlayerWeb.saveToDownloads(name, text);
+        }
+    }
+
+    // Write what is waiting to the place the user picked, or say it was left
+    private void writeSaved(Uri where) {
+
+        String text = saveText;
+        String name = saveName;
+
+        saveText = null;
+        saveName = null;
+
+        if (text == null) {
+            return;
+        }
+
+        if (where == null) {
+
+            PlayerWeb.savedResult(false, "");
+            return;
+        }
+
+        try (OutputStream out = getContentResolver().openOutputStream(where)) {
+
+            if (out == null) {
+
+                PlayerWeb.savedResult(false, "Could not save the file");
+                return;
+            }
+
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+            PlayerWeb.savedResult(true, name);
+        } catch (IOException | SecurityException e) {
+            PlayerWeb.savedResult(false, "Could not save the file");
+        }
     }
 
     // Android 15 draws apps under the status and navigation bars, so the
