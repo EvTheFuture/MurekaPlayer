@@ -65,6 +65,9 @@ final class CarServer {
     // takes the sound back so the music does not go silent
     private static final long CAR_GONE_MS = 8000;
 
+    // A browser that has not asked for the state for this long has gone
+    private static final long CLIENT_GONE_MS = 20000;
+
     // Requests larger than this are refused, the API only needs a few bytes
     private static final int MAX_BODY = 16384;
 
@@ -75,6 +78,10 @@ final class CarServer {
 
     private volatile ServerSocket socket;
     private volatile long lastPoll = 0;
+
+    // Every browser that asked for the state lately, by the id it sends with
+    // the request. Two browsers on one page each count once
+    private final java.util.Map<String, Long> clients = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile boolean running = false;
 
     // What the server is doing, shown in the notification so a server that
@@ -195,6 +202,39 @@ final class CarServer {
         if (s.optBoolean("carAudio", false) && System.currentTimeMillis() - lastPoll > CAR_GONE_MS) {
             Hub.command("carAudio", false);
         }
+
+        countClients();
+    }
+
+    // A browser asked for the state, so it is here. Its own id keeps two
+    // pages on one machine apart
+    private void noteClient(String id) {
+
+        if (id == null || id.isEmpty() || id.length() > 64) {
+            return;
+        }
+
+        clients.put(id, System.currentTimeMillis());
+        countClients();
+    }
+
+    // How many browsers are here now, into the state so each of them can
+    // tell whether it is alone
+    private void countClients() {
+
+        long now = System.currentTimeMillis();
+        int here = 0;
+
+        for (java.util.Map.Entry<String, Long> e : clients.entrySet()) {
+
+            if (now - e.getValue() > CLIENT_GONE_MS) {
+                clients.remove(e.getKey());
+            } else {
+                here += 1;
+            }
+        }
+
+        Hub.setClients(here);
     }
 
     // One request per connection, then close. Plenty for one car browser
@@ -278,6 +318,7 @@ final class CarServer {
                 String json;
 
                 lastPoll = System.currentTimeMillis();
+                noteClient(param(query, "cid"));
 
                 if (since.isEmpty()) {
                     json = Hub.awaitState(-1, 0);

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.54";
+    const VERSION = "1.6.0.57";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -12486,6 +12486,7 @@
             playFrom: hostPlayFrom(),
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
             artOnResume: settings.artOnResume === true,
+            songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
             shuffle: shuffleMode,

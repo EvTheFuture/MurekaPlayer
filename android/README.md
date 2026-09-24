@@ -271,6 +271,41 @@ is read back from it afterwards and the list shows what Mureka really has. A
 refused change goes back to what it was and the status line says so. Another
 creator's songs have neither choice.
 
+## How the buttons show what is going on
+
+Filled cyan means a real choice that narrows things or a toggle that is on.
+Ringed, cyan text and icon with a cyan line drawn inside the button over its
+usual background, so nothing moves, means the whole library or something
+simply running:
+
+- **Play** is filled while the music plays, ringed while it is paused and
+  an ordinary button with nothing loaded.
+- **Published** is filled for published songs only and ringed for all
+  songs. **Vocals** is filled for vocals or instrumental only and ringed for
+  all. The same goes for the two chips in the song list.
+- **Songs** is ringed when the library is narrowed by a style, mood, model,
+  tempo, date or rating filter, or by a playlist. The vocals choice is not
+  counted as a filter.
+- **Load** and **Rescan** are ringed while they run.
+
+## Sound here, there or nowhere
+
+The sound switch has a third button, **No music in this browser**. It is
+this browser's own choice: nothing is sent to the phone, so the phone and
+any other browser go on exactly as before. It is meant for two browsers
+open at once, where only one of them should play. Each browser tells the
+phone who it is when it asks for the state, so the phone knows how many are
+connected, and the button stays greyed while this is the only one, since
+turning the sound off there would leave nothing playing it. Choosing Phone
+or This browser again lifts it. When a page opens with the music set to play
+in the browser, the start prompt offers the same choice beside Play the music
+here and Use the phone instead, as long as another browser is connected.
+
+A **Public** or **Draft** badge for the playing song, the same as in the
+list, sits on the line of the stars and counts, so the second line under the
+title never moves. It is left out for another creator's songs, which are all
+public.
+
 ## What the phone is working on
 
 Above the list the web view shows what the phone is doing: loading new

@@ -55,6 +55,7 @@ final class Hub {
     private static volatile JSONObject state = new JSONObject();
     private static int volLevel = -1;
     private static int volMax = 0;
+    private static int clients = 0;
 
     // Counts the states published, so the web view can wait for the next
     // one instead of asking again and again. Guarded by LOCK
@@ -177,6 +178,23 @@ final class Hub {
         }
     }
 
+    // How many browsers are showing the web view right now. A change is a
+    // new state, so each of them learns it is no longer alone
+    static void setClients(int count) {
+
+        synchronized (LOCK) {
+
+            if (count == clients) {
+                return;
+            }
+
+            clients = count;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
     // The player's state with the app's own fields in it. Called with LOCK
     private static JSONObject rebuild() {
 
@@ -187,6 +205,7 @@ final class Hub {
             o = new JSONObject(playerJson);
             o.put("vol", volLevel);
             o.put("volMax", volMax);
+            o.put("clients", clients);
         } catch (JSONException e) {
             o = new JSONObject();
         }

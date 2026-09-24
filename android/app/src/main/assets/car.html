@@ -406,6 +406,30 @@
         color: #000;
     }
 
+    /* Ringed rather than filled: the whole library, or something running.
+       The ring is drawn inside, so the button keeps its size */
+    .ctl.big.flat {
+        background: #333;
+        color: #fff;
+    }
+
+    .ctl.ring,
+    .ctl.big.ring {
+        background: #333;
+        color: var(--accent);
+        box-shadow: inset 0 0 0 4px var(--accent);
+    }
+
+    .chip.ring {
+        background: var(--card);
+        color: var(--accent);
+        box-shadow: inset 0 0 0 4px var(--accent);
+    }
+
+    .chip.ring {
+        border-color: var(--accent);
+    }
+
     #bottom {
         display: flex;
         align-items: center;
@@ -428,6 +452,10 @@
         padding: 12px 22px;
         cursor: pointer;
         line-height: 0;
+    }
+
+    #sound button.off {
+        opacity: 0.35;
     }
 
     #sound button.on {
@@ -1326,6 +1354,16 @@
         text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
     }
 
+    /* Public or draft for the playing song, as in the list. It sits on the
+       line of the stars and counts, so the second line never moves */
+    #pubBadge {
+        display: none;
+        width: auto;
+        margin-left: 1.2vw;
+        padding: 0 0.7em;
+        font-size: clamp(12px, 1.3vw, 18px);
+    }
+
     #playCount {
         margin-left: 1vw;
         font-size: clamp(14px, 1.5vw, 22px);
@@ -1805,6 +1843,15 @@
         padding: 5vw;
     }
 
+    /* One column as wide as the widest choice, so every button in it has
+       the same width whichever of them are shown */
+    #overlayChoices {
+        display: inline-grid;
+        grid-template-columns: 1fr;
+        gap: 3vh;
+        max-width: 90vw;
+    }
+
     #overlay button {
         border: none;
         border-radius: 16px;
@@ -1819,9 +1866,15 @@
         color: #000;
     }
 
-    #toPhone {
+    #toPhone,
+    #overlayNone {
         background: #333;
         color: #fff;
+    }
+
+    /* Only offered when another browser is there to play the music */
+    #overlayNone {
+        display: none;
     }
 
     @media (max-aspect-ratio: 1/1) {
@@ -1858,6 +1911,7 @@
                 <button id="like" type="button" aria-label="Like" title="Like" data-icon="heart"></button>
                 <span id="likeCount"></span>
                 <span id="playCount"></span>
+                <span id="pubBadge" class="rowBadge"></span>
             </div>
             <button id="fromLine" type="button" aria-label="Playing from, change the list and the filters"><span class="upLabel">Playing from</span><span id="fromText" class="marquee"></span><span id="fromMore" data-icon="chevronDown"></span></button>
             <div id="lyrics"><div class="lyricRoll"></div></div>
@@ -1898,6 +1952,7 @@
         <div id="sound">
             <button id="soundPhone" type="button" class="on" data-icon="bluetooth" aria-label="Music on the phone or Bluetooth" title="Music on the phone or Bluetooth"></button>
             <button id="soundCar" type="button" data-icon="browser" aria-label="Music in this browser" title="Music in this browser"></button>
+            <button id="soundNone" type="button" data-icon="speakerOff" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
         </div>
         <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
@@ -2034,8 +2089,11 @@
 </div>
 <div id="overlay">
     <div>The music is set to play in this browser. Tap to start it here.</div>
-    <button id="resume" type="button">Play the music here</button>
-    <button id="toPhone" type="button">Use the phone instead</button>
+    <div id="overlayChoices">
+        <button id="resume" type="button">Play the music here</button>
+        <button id="toPhone" type="button">Use the phone instead</button>
+        <button id="overlayNone" type="button">No music in this browser</button>
+    </div>
 </div>
 <audio id="audio" preload="auto"></audio>
 <script>
@@ -2769,6 +2827,10 @@
 
         $("playIcon").style.display = playing ? "none" : "";
         $("pauseIcon").style.display = playing ? "" : "none";
+        const stopped = !s || !s.id;
+
+        $("play").classList.toggle("ring", !stopped && !playing);
+        $("play").classList.toggle("flat", stopped);
         $("shuffle").classList.toggle("on", !!(s && s.shuffle));
         $("repeat").classList.toggle("on", !!(s && s.repeat && s.repeat !== "none"));
         $("repeatOne").style.display = s && s.repeat === "one" ? "" : "none";
@@ -2795,6 +2857,7 @@
         }
 
         $("vocBtn").classList.toggle("on", vocals !== "all");
+        $("vocBtn").classList.toggle("ring", vocals === "all");
         $("pubBtn").disabled = !!(s && s.browsing);
         $("rateBtn").classList.toggle("on", !!(s && s.rating !== null && s.rating !== undefined));
 
@@ -2811,11 +2874,20 @@
         }
 
         $("pubBtn").classList.toggle("on", onlyPublished);
+        $("pubBtn").classList.toggle("ring", !onlyPublished);
 
         // How many hearts the song has on Mureka, once the phone knows
         const likes = s && typeof s.likes === "number" ? s.likes : null;
 
         $("likeCount").textContent = likes === null ? "" : compactCount(likes);
+
+        // Public or draft, only for your own songs, another creator's are all
+        // public anyway
+        const pub = s && typeof s.songPublic === "boolean" ? s.songPublic : null;
+
+        $("pubBadge").style.display = pub === null ? "none" : "inline-block";
+        $("pubBadge").classList.toggle("draft", pub === false);
+        $("pubBadge").textContent = pub === null ? "" : (pub ? "Public" : "Draft");
 
         // And how many times it has been played
         const plays = s && typeof s.plays === "number" ? s.plays : null;
@@ -2843,19 +2915,29 @@
         const loading = !!(s && s.loading);
         const scanning = kind === "rescan";
 
-        $("loadBtn").classList.toggle("on", loading && !scanning);
+        $("loadBtn").classList.toggle("ring", loading && !scanning);
         setLabel($("loadBtn"), loading && !scanning ? "Loading" : "Load");
-        $("rescanBtn").classList.toggle("on", scanning);
+        $("rescanBtn").classList.toggle("ring", scanning);
         setLabel($("rescanBtn"), scanning ? "Rescanning" : "Rescan");
-        $("soundPhone").classList.toggle("on", !carAudio);
-        $("soundCar").classList.toggle("on", carAudio);
+        const from = s && s.playFrom ? s.playFrom : null;
+        const narrowed = !!(from && ((from.smart && from.smartAny) || from.playlist));
+
+        $("browseBtn").classList.toggle("ring", narrowed);
+
+        const alone = !s || Number(s.clients) < 2;
+
+        $("soundPhone").classList.toggle("on", !carAudio && !localMute);
+        $("soundCar").classList.toggle("on", carAudio && !localMute);
+        $("soundNone").classList.toggle("on", localMute);
+        $("soundNone").classList.toggle("off", alone && !localMute);
         paintVolIcon();
         statusLine.setText(online ? (s && s.status ? s.status : "") : "Not connected to the phone");
         $("signin").style.display = online && s && s.signedIn === "no" ? "block" : "none";
 
         // The phone asks for the sound here but this page has not been
         // allowed to play since it loaded, so a tap is needed first
-        $("overlay").style.display = online && carAudio && !unlocked ? "flex" : "none";
+        $("overlay").style.display = online && carAudio && !unlocked && !localMute ? "flex" : "none";
+        $("overlayNone").style.display = alone ? "none" : "block";
 
         syncAudio();
         syncSession();
@@ -3213,7 +3295,7 @@
 
         const s = state;
 
-        if (!s || !s.carAudio || !unlocked) {
+        if (!s || !s.carAudio || !unlocked || localMute) {
 
             if (!audio.paused) {
                 audio.pause();
@@ -5105,10 +5187,12 @@
 
         setLabel($("vocalsCycle"), voc === "vocal" ? "Vocals" : (voc === "instrumental" ? "Instrumental" : "All"));
         $("vocalsCycle").classList.toggle("on", voc !== "all");
+        $("vocalsCycle").classList.toggle("ring", voc === "all");
 
         setLabel($("feed"), f.published === "published" ? "Published" : "All songs");
         setIcon($("feed"), f.published === "published" ? "check" : "circle");
         $("feed").classList.toggle("on", f.published === "published");
+        $("feed").classList.toggle("ring", f.published !== "published");
 
         // Like the phone's Filters on and off, parked or restored without
         // losing what is ticked, and nothing to switch when nothing is set
@@ -6140,6 +6224,32 @@
     // follows a tap on play without waiting for the next round
     let seq = -1;
 
+    // This page's own name for itself, so the phone can tell two browsers
+    // apart and each of them knows whether it is alone
+    const clientId = (function () {
+
+        let id = null;
+
+        try {
+            id = localStorage.getItem("murekaCarClient");
+        } catch (e) {
+            // Not kept, a new one each visit then
+        }
+
+        if (!id) {
+
+            id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+            try {
+                localStorage.setItem("murekaCarClient", id);
+            } catch (e) {
+                // Only for this visit
+            }
+        }
+
+        return id;
+    })();
+
     // A play or pause shown before the phone confirms it. Until then an
     // older state still on its way is not allowed to flip the button back
     let pending = null;
@@ -6207,7 +6317,7 @@
             }
         }, 10000);
 
-        fetch("/state?since=" + seq, { cache: "no-store", signal: abort ? abort.signal : undefined }).then(function (res) {
+        fetch("/state?since=" + seq + "&cid=" + esc(clientId), { cache: "no-store", signal: abort ? abort.signal : undefined }).then(function (res) {
             return res.json();
         }).then(function (s) {
 
@@ -6518,16 +6628,59 @@
         }
     });
 
+    // No music in this browser. It is this page's own choice, nothing is
+    // sent to the phone, so the phone and any other browser keep playing
+    let localMute = false;
+
+    try {
+        localMute = localStorage.getItem("murekaCarMute") === "1";
+    } catch (e) {
+        // Not kept, so this visit starts with the sound allowed
+    }
+
+    function setLocalMute(on) {
+
+        localMute = on;
+
+        try {
+            localStorage.setItem("murekaCarMute", on ? "1" : "0");
+        } catch (e) {
+            // Only for this visit
+        }
+
+        if (on && !audio.paused) {
+            audio.pause();
+        }
+
+        render();
+        syncAudio();
+    }
+
     $("soundCar").addEventListener("click", function () {
 
+        setLocalMute(false);
         unlockAudio();
         send("carAudio", true);
     });
 
     $("soundPhone").addEventListener("click", function () {
 
+        setLocalMute(false);
         audio.pause();
         send("carAudio", false);
+    });
+
+    $("soundNone").addEventListener("click", function () {
+
+        // Alone here, turning the sound off would leave nothing playing it
+        if (!state || Number(state.clients) < 2) {
+
+            toast("Only this browser is connected, so there is nothing else to play it");
+            return;
+        }
+
+        setLocalMute(true);
+        toast("No music in this browser");
     });
 
     $("resume").addEventListener("click", function () {
@@ -6538,6 +6691,12 @@
 
     $("toPhone").addEventListener("click", function () {
         send("carAudio", false);
+    });
+
+    // Another browser plays the music, this one stays quiet, and the phone
+    // is not told anything
+    $("overlayNone").addEventListener("click", function () {
+        setLocalMute(true);
     });
 
     // Seeking, the bar follows the finger and the phone jumps on release
