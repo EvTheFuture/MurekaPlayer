@@ -99,6 +99,10 @@ final class PlayerWeb {
         // Save a file the player built, asking the user where it goes. Only
         // an activity can show that question
         void saveFile(String name, String text);
+
+        // Hide or show Android's status and navigation bars, which only an
+        // activity can do
+        void applyFullscreen();
     }
 
     private static WebView web;
@@ -361,6 +365,17 @@ final class PlayerWeb {
         });
     }
 
+    // The bars follow the setting as soon as it moves, while the app is on
+    // screen. With no activity there is nothing to hide
+    private static void tellFullscreen() {
+
+        Host host = hostRef.get();
+
+        if (host != null) {
+            host.applyFullscreen();
+        }
+    }
+
     // The permission is given once and stays until another VPN app takes
     // over. When it is missing and the app is not on screen, the setting
     // says so and switching it on again asks
@@ -457,6 +472,10 @@ final class PlayerWeb {
 
             if (CarSettings.VPN.equals(key) && "1".equals(value)) {
                 MAIN.post(PlayerWeb::askVpnIfNeeded);
+            }
+
+            if (CarSettings.FULLSCREEN.equals(key)) {
+                MAIN.post(PlayerWeb::tellFullscreen);
             }
 
             PlayerService.settingsChanged();

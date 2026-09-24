@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.47";
+    const VERSION = "1.6.0.51";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -4952,6 +4952,138 @@
         }
     }
 
+    // Publish a song on Mureka, or take it down again. The same endpoint
+    // does both, type 1 publishes it with the title and cover it carries,
+    // type 2 takes it off. The list state is refreshed from the server
+    // after, so what shows is what Mureka really has
+    async function setPublished(song, publish) {
+
+        const name = (song.title || "").trim() || "Untitled";
+        const before = song.publish_state;
+        const body = publish
+            ? {
+                time: Date.now(),
+                song_id: song.song_id,
+                title: name,
+                type: 1,
+                cover: song.cover || ""
+            }
+            : {
+                time: Date.now(),
+                song_id: song.song_id,
+                type: 2
+            };
+
+        // Shown at once, put back if Mureka refuses
+        song.publish_state = publish ? 1 : 2;
+        renderList();
+        publishHostSoon();
+        setStatus((publish ? "Publishing: " : "Unpublishing: ") + name);
+
+        try {
+
+            const res = await fetch("/api/pgc/song/publish", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
+
+            const json = await res.json();
+
+            if (!res.ok || !json || json.code !== 0) {
+                throw new Error("publish failed");
+            }
+
+            saveCache();
+            setStatus((publish ? "Published: " : "Unpublished: ") + name);
+
+            // The server decides the state and the publish date, so take its
+            // word for it rather than ours
+            await refreshOne(song);
+            publishHostSoon();
+
+        } catch (e) {
+
+            song.publish_state = before;
+            renderList();
+            publishHostSoon();
+            setStatus("Could not " + (publish ? "publish" : "unpublish") + " " + name + ", try again");
+        }
+    }
+
+    // Give a song another title on Mureka. The cover and the published state
+    // go with it, since the endpoint takes the whole song line
+    async function renameSong(song, title) {
+
+        const clean = String(title == null ? "" : title).trim();
+        const was = (song.title || "").trim();
+
+        if (clean === "" || clean === was) {
+            return;
+        }
+
+        song.title = clean;
+        renderList();
+
+        if (currentSong && currentSong.song_id === song.song_id) {
+            updatePlayerInfo(currentSong);
+        }
+
+        publishHostSoon();
+        setStatus("Renaming: " + clean);
+
+        try {
+
+            const res = await fetch("/api/pgc/song/modify", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: song.song_id,
+                    title: clean,
+                    type: song.publish_state === 1 ? 1 : 2,
+                    cover: song.cover || ""
+                })
+            });
+
+            const json = await res.json();
+
+            if (!res.ok || !json || json.code !== 0) {
+                throw new Error("modify failed");
+            }
+
+            saveCache();
+            setStatus("Renamed: " + clean);
+            publishHostSoon();
+
+        } catch (e) {
+
+            song.title = was;
+            renderList();
+
+            if (currentSong && currentSong.song_id === song.song_id) {
+                updatePlayerInfo(currentSong);
+            }
+
+            publishHostSoon();
+            setStatus("Could not rename the song, try again");
+        }
+    }
+
+    // Ask for a new title, the mobile player's own way in
+    function promptRename(song) {
+
+        const answer = window.prompt("Title for this song", (song.title || "").trim());
+
+        if (answer === null) {
+            return;
+        }
+
+        renameSong(song, answer);
+    }
+
     // Format a number of seconds as m:ss
     function formatTime(seconds) {
 
@@ -7520,10 +7652,10 @@
     // Whether the gate should stand in front of the player right now
     function gateWanted() {
 
-        // Nothing to gate when the browser will not go fullscreen anyway. The
-        // Android app does fullscreen too, it hides the status and
-        // navigation bars
-        if (!fullscreenSupported()) {
+        // Nothing to gate when the browser will not go fullscreen anyway, and
+        // nothing to ask for in the Android app, which is fullscreen by its
+        // own setting
+        if (!fullscreenSupported() || isApkHost()) {
             return false;
         }
 
@@ -7716,6 +7848,12 @@
     // Whether fullscreen is worth putting in front of the user at all. Where it
     // can be switched on it is, with an explanation, rather than hidden
     function fullscreenOffered() {
+
+        // The Android app is fullscreen by its own setting, hiding Android's
+        // bars, so the page's fullscreen has nothing left to give there
+        if (isApkHost()) {
+            return false;
+        }
 
         return fullscreenSupported() || isIosLike();
     }
@@ -12198,6 +12336,8 @@
             manualInstrumental: isManualInstrumental(song),
             bpm: effectiveBpm(song) || 0,
             canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
+            published: song.publish_state === 1,
+            mine: !creatorSource,
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
             src: songUrl(song) || ""
         };
@@ -12943,6 +13083,12 @@
             if (song.generation_method !== 7) {
                 toggleManualInstrumental(song);
             }
+        } else if (act === "publish") {
+            setPublished(song, true);
+        } else if (act === "unpublish") {
+            setPublished(song, false);
+        } else if (act === "rename") {
+            renameSong(song, a.value === null || a.value === undefined ? "" : String(a.value));
         } else if (act === "bpm") {
             setManualBpmText(song, a.value === null || a.value === undefined ? "" : String(a.value));
         } else if (act === "cache") {
@@ -17479,6 +17625,16 @@
         mobilePage.appendChild(makeLabel("Main page"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars on the cover, tap one to rate."));
+
+        // Only the Android app has a window of its own to make fullscreen
+        if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
+
+            const appFullRow = makeBoolRow("Fullscreen",
+                function () { return window.MurekaHost.getPref("appFullscreen", "1") === "1"; },
+                function (v) { window.MurekaHost.setPref("appFullscreen", v ? "1" : "0"); });
+
+            mobilePage.appendChild(withHint(appFullRow, "The app hides Android's status and navigation bars while it is on screen. A swipe from the edge brings them back for a moment."));
+        }
         mobilePage.appendChild(makeLabel("Cover and lyrics"));
         mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(lyricSizeRow);
@@ -20749,6 +20905,19 @@
         addMenuRow("Information", "#fff", function () {
             openInfo(song);
         });
+
+        // Only your own songs can be renamed or published, another creator's
+        // library is theirs
+        if (!creatorSource) {
+
+            addMenuRow("Rename", "#fff", function () {
+                promptRename(song);
+            });
+
+            addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", "#fff", function () {
+                setPublished(song, song.publish_state !== 1);
+            });
+        }
 
         // A song the server already reports as instrumental cannot be marked
         // by hand, the mark exists only for songs whose lyrics field holds

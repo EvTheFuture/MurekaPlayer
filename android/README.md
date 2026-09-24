@@ -255,6 +255,31 @@ settings, `.local` is added.
   On the phone's own hotspot that is only the car. Turn off "Allow from
   Wi-Fi networks" to keep it to the hotspot.
 
+## Publishing and renaming
+
+The song menu, long press on the phone and the same menu in the web view,
+has **Rename** and **Publish** or **Unpublish** for your own songs. Renaming
+asks for the new title, on the phone in a plain box and in the web view in a
+field in the menu. Publishing sends the song's title and cover with it,
+taking it down sends only the song. Mureka decides the outcome, so the song
+is read back from it afterwards and the list shows what Mureka really has. A
+refused change goes back to what it was and the status line says so. Another
+creator's songs have neither choice.
+
+## Fullscreen in the app
+
+The app hides Android's status and navigation bars while it is on screen, so
+the player fills the phone. It is a window setting, not the page's
+fullscreen, so it needs no tap and is there from the first frame. A swipe
+from an edge brings the bars back for a moment and they hide themselves
+again, which every app has to live with. Settings, Mobile player,
+Fullscreen turns it off. The page's own fullscreen has nothing left to give
+in the app, so the Fullscreen button in the actions menu, the Start in
+fullscreen setting and the tap gate that went with it are not shown there.
+With it on the page uses the whole screen, the
+strip beside a camera cutout included, so nothing is left over. The
+keyboard is still kept clear, or it would cover what is being typed.
+
 ## Volume
 
 The speaker at the bottom left of the web view opens a volume slider. With

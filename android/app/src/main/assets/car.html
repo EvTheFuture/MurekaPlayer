@@ -1004,6 +1004,26 @@
         padding: 6px 14px;
     }
 
+    #titleRow {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 14px;
+    }
+
+    #titleInput {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: var(--ctl-h);
+        font: inherit;
+        font-size: 1.1em;
+        padding: 0 10px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+    }
+
     #bpmInput {
         width: 6em;
         min-height: var(--ctl-h);
@@ -1928,6 +1948,11 @@
             <input id="bpmInput" type="number" min="1" max="400" step="1" inputmode="numeric">
             <button class="chip" id="bpmSave" type="button">Save</button>
             <button class="chip" id="bpmClear" type="button">Clear</button>
+        </div>
+        <div id="titleRow">
+            <span>Title</span>
+            <input id="titleInput" type="text" autocomplete="off">
+            <button class="chip" id="titleSave" type="button">Save</button>
         </div>
         <div id="menuStars"></div>
         <div id="menuCaption" class="ceLabel" style="text-align:center"></div>
@@ -6489,6 +6514,7 @@
 
         $("songMenu").style.display = "none";
         $("bpmRow").style.display = "none";
+        $("titleRow").style.display = "none";
         $("menuStars").style.display = "";
         $("menuCaption").style.display = "";
         menuSong = null;
@@ -6519,6 +6545,7 @@
         box.textContent = "";
         $("menuTitle").textContent = title;
         $("bpmRow").style.display = "none";
+        $("titleRow").style.display = "none";
         $("menuStars").style.display = "none";
         $("menuCaption").style.display = "none";
 
@@ -6704,6 +6731,30 @@
                 close();
             }, "", m.serverInstrumental));
 
+        if (m.mine) {
+
+            box.appendChild(menuItem("person", "Rename", function () {
+
+                // The field lives in the song menu, so from the actions menu
+                // the song menu opens with it
+                if (fromActions) {
+
+                    close();
+                    openSongMenu(m.id, false, true);
+                    return;
+                }
+
+                showTitleField(m);
+            }));
+
+            box.appendChild(menuItem(m.published ? "close" : "check",
+                m.published ? "Unpublish" : "Publish", function () {
+
+                    act(m.published ? "unpublish" : "publish");
+                    close();
+                }));
+        }
+
         if (m.canSetBpm) {
 
             box.appendChild(menuItem("tempo", "Set BPM", function () {
@@ -6765,9 +6816,19 @@
 
     function showBpmField(m) {
 
+        $("titleRow").style.display = "none";
         $("bpmInput").value = m.bpm > 0 ? String(m.bpm) : "";
         $("bpmRow").style.display = "flex";
         $("bpmInput").focus();
+    }
+
+    function showTitleField(m) {
+
+        $("bpmRow").style.display = "none";
+        $("titleInput").value = m.title === "Untitled" ? "" : m.title;
+        $("titleRow").style.display = "flex";
+        $("titleInput").focus();
+        $("titleInput").select();
     }
 
     function refreshMenu() {
@@ -6789,7 +6850,7 @@
         });
     }
 
-    function openSongMenu(id, bpm) {
+    function openSongMenu(id, bpm, title) {
 
         fetch("/menu?id=" + esc(id), { cache: "no-store" }).then(function (res) {
             return res.json();
@@ -6803,9 +6864,11 @@
             $("bpmRow").style.display = "none";
             $("songMenu").style.display = "flex";
 
-            // Opened for its tempo field, from the actions menu
+            // Opened for one of its fields, from the actions menu
             if (bpm && m.canSetBpm) {
                 showBpmField(m);
+            } else if (title && m.mine) {
+                showTitleField(m);
             }
         }).catch(function () {
         });
@@ -6828,6 +6891,31 @@
 
         songAction("bpm", "");
         closeSongMenu();
+    });
+
+    $("titleSave").addEventListener("click", function () {
+
+        const typed = $("titleInput").value.trim();
+
+        if (typed !== "") {
+            songAction("rename", typed);
+        }
+
+        closeSongMenu();
+    });
+
+    $("titleInput").addEventListener("keydown", function (ev) {
+
+        ev.stopPropagation();
+
+        if (ev.key === "Enter") {
+            $("titleSave").click();
+        } else if (ev.key === "Escape") {
+
+            // Out of the field, the next Escape closes the menu
+            $("titleInput").blur();
+            ev.preventDefault();
+        }
     });
 
     $("bpmInput").addEventListener("keydown", function (ev) {

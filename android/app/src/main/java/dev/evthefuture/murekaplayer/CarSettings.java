@@ -36,6 +36,7 @@ final class CarSettings {
     static final String VPN = "carVpn";
     static final String VPN_ADDRESS = "vpnAddress";
     static final String MDNS_NAME = "mdnsName";
+    static final String FULLSCREEN = "appFullscreen";
 
     // Tesla's browser refuses private addresses, 3.3.3.3 is the one the
     // Android Auto in the browser apps have used for years
@@ -47,6 +48,11 @@ final class CarSettings {
 
     static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    // Whether the app hides Android's bars while it is on screen
+    static boolean fullscreen(Context c) {
+        return !"0".equals(prefs(c).getString(FULLSCREEN, "1"));
     }
 
     static boolean vpnEnabled(Context c) {
@@ -80,7 +86,8 @@ final class CarSettings {
         } else if (MDNS_NAME.equals(key)) {
 
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
-        } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)) {
+        } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
+            || FULLSCREEN.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";
         } else {

@@ -80,7 +80,16 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.parseColor("#1d1d22"));
         setContentView(root);
+
+        // Without this the system keeps the page out of the cutout strip,
+        // whatever padding we ask for
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
+
         applyInsets();
+        applyFullscreen();
 
         // chrome://inspect on the desktop can debug the page on the phone
         WebView.setWebContentsDebuggingEnabled(true);
@@ -139,6 +148,25 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         }
 
         moveTaskToBack(true);
+    }
+
+    // Coming back from another app, or from the bars showing for a moment,
+    // puts them away again
+    @Override
+    protected void onResume() {
+
+        super.onResume();
+        applyFullscreen();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+
+        super.onWindowFocusChanged(hasFocus);
+
+        if (hasFocus) {
+            applyFullscreen();
+        }
     }
 
     @Override
@@ -245,11 +273,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         fullView = null;
         fullCallback = null;
 
-        if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
-            getWindow().getInsetsController().show(WindowInsets.Type.systemBars());
-        }
-
-        root.requestApplyInsets();
+        applyFullscreen();
     }
 
     // Leaving from our side, the back button, tells the page as well
@@ -394,6 +418,47 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         }
     }
 
+    // Android's own status and navigation bars, hidden while the setting
+    // asks for it. A swipe from the edge still brings them back for a
+    // moment, which every app has to live with
+    @Override
+    public void applyFullscreen() {
+
+        // The page showing something fullscreen of its own already hides them
+        if (fullView != null) {
+            return;
+        }
+
+        boolean full = CarSettings.fullscreen(this);
+
+        if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
+
+            getWindow().getInsetsController().setSystemBarsBehavior(
+                android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+
+            if (full) {
+                getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
+            } else {
+                getWindow().getInsetsController().show(WindowInsets.Type.systemBars());
+            }
+        } else {
+
+            // Android 10 has only the older flags
+            int flags = full
+                ? (android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+                : 0;
+
+            root.setSystemUiVisibility(flags);
+        }
+
+        root.requestApplyInsets();
+    }
+
     // Android 15 draws apps under the status and navigation bars, so the
     // bars, the keyboard and any camera cutout are kept clear with padding
     @SuppressWarnings("deprecation")
@@ -410,8 +475,15 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
             if (Build.VERSION.SDK_INT >= 30) {
 
-                Insets i = insets.getInsets(WindowInsets.Type.systemBars()
-                    | WindowInsets.Type.ime() | WindowInsets.Type.displayCutout());
+                // Fullscreen means the whole screen, the strip beside a
+                // camera cutout included. The keyboard is still kept clear,
+                // or it would cover what is being typed
+                int types = CarSettings.fullscreen(this)
+                    ? WindowInsets.Type.ime()
+                    : (WindowInsets.Type.systemBars() | WindowInsets.Type.ime()
+                        | WindowInsets.Type.displayCutout());
+
+                Insets i = insets.getInsets(types);
 
                 v.setPadding(i.left, i.top, i.right, i.bottom);
             } else {
