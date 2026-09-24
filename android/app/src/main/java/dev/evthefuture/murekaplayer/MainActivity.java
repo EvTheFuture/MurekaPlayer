@@ -442,21 +442,27 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
                 getWindow().getInsetsController().show(WindowInsets.Type.systemBars());
             }
         } else {
-
-            // Android 10 has only the older flags
-            int flags = full
-                ? (android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
-                : 0;
-
-            root.setSystemUiVisibility(flags);
+            applyOldFullscreen(full);
         }
 
         root.requestApplyInsets();
+    }
+
+    // Android 10 has only the older flags. They are deprecated from Android
+    // 11 on, which never gets here, so the warning says nothing new
+    @SuppressWarnings("deprecation")
+    private void applyOldFullscreen(boolean full) {
+
+        int flags = full
+            ? (android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+            : 0;
+
+        root.setSystemUiVisibility(flags);
     }
 
     // Android 15 draws apps under the status and navigation bars, so the

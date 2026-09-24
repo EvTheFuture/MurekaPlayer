@@ -234,6 +234,10 @@ final class Hub {
                 // Timers are shared by every WebView in the app, and a paused
                 // set would leave the command waiting in the page
                 web.resumeTimers();
+
+                // With the screen off the page has to count as on screen for
+                // a moment, or a paused song does not start again
+                PlayerWeb.wake();
                 web.evaluateJavascript(js, null);
             }
         });

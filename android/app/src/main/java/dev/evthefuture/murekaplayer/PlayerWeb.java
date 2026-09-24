@@ -33,6 +33,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Build;
+import android.os.SystemClock;
 import android.os.Environment;
 import android.os.PowerManager;
 import android.provider.MediaStore;
@@ -134,7 +135,7 @@ final class PlayerWeb {
         // when it is not, so the activity is never kept alive by the page
         context = new MutableContextWrapper(appContext);
 
-        web = make(context);
+        web = setUp(new PageView(context));
         web.setWebViewClient(new MainClient());
         web.setWebChromeClient(new MainChrome());
         web.addJavascriptInterface(new Bridge(), "MurekaHost");
@@ -205,10 +206,13 @@ final class PlayerWeb {
     // A WebView set up like a real phone browser. Google refuses to sign in
     // inside anything that calls itself a WebView, so the markers that give
     // it away are taken out of the user agent
-    @SuppressWarnings("deprecation")
     static WebView make(Context c) {
+        return setUp(new WebView(c));
+    }
 
-        WebView w = new WebView(c);
+    @SuppressWarnings("deprecation")
+    private static WebView setUp(WebView w) {
+
         WebSettings s = w.getSettings();
 
         s.setJavaScriptEnabled(true);
@@ -234,6 +238,63 @@ final class PlayerWeb {
         w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
 
         return w;
+    }
+
+    // How long the page counts as on screen after a command
+    private static final long WAKE_MS = 15000;
+
+    // A command arrived, from a Bluetooth button, the lock screen or a web
+    // view. Main thread only
+    static void wake() {
+
+        if (web instanceof PageView) {
+            ((PageView) web).wakeFor(WAKE_MS);
+        }
+    }
+
+    // The player's own WebView. Android tells a WebView its window is hidden
+    // as soon as the screen goes off, and the page's paused song then does
+    // not start again while it stays hidden: the lock screen shows it
+    // playing, but no sound comes until the phone is unlocked. For a short
+    // while after each command the view tells the page its window is
+    // visible, so the song gets going. Once it plays it keeps playing with
+    // the screen off, as it always has, and the rest of the time the page
+    // sees the window as it really is, so a paused player uses nothing
+    static final class PageView extends WebView {
+
+        private int realVisibility = VISIBLE;
+        private long awakeUntil;
+
+        private final Runnable settle = this::applyVisibility;
+
+        PageView(Context c) {
+            super(c);
+        }
+
+        @Override
+        protected void onWindowVisibilityChanged(int visibility) {
+
+            realVisibility = visibility;
+            applyVisibility();
+        }
+
+        void wakeFor(long ms) {
+
+            awakeUntil = SystemClock.uptimeMillis() + ms;
+            applyVisibility();
+
+            // A view's own post waits while it has no window, the main
+            // handler runs either way
+            MAIN.removeCallbacks(settle);
+            MAIN.postDelayed(settle, ms);
+        }
+
+        private void applyVisibility() {
+
+            boolean awake = SystemClock.uptimeMillis() < awakeUntil;
+
+            super.onWindowVisibilityChanged(awake ? VISIBLE : realVisibility);
+        }
     }
 
     // Web pages stay in the app, anything else, mail or a store link, goes

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.69";
+    const VERSION = "1.6.0.72";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1119,7 +1119,7 @@
             bpmUnknown: "any",
             carBlackout: false,
             carGate: false,
-            keepScreenOn: false,
+            screenOn: "",
             carAutoBlack: 20,
             blackoutText: "\u266B",
             blackoutColor: "#333333",
@@ -1238,7 +1238,9 @@
                         : "repeat,shuffle,stop,play",
                     carBlackout: parsed.carBlackout === true,
                     carGate: parsed.carGate === true,
-                    keepScreenOn: parsed.keepScreenOn === true,
+                    screenOn: ["never", "playing", "always"].indexOf(parsed.screenOn) >= 0
+                        ? parsed.screenOn
+                        : (parsed.keepScreenOn === true ? "always" : ""),
                     carAutoBlack: (typeof parsed.carAutoBlack === "number"
                         && parsed.carAutoBlack >= 0 && parsed.carAutoBlack <= 300)
                         ? parsed.carAutoBlack : 20,
@@ -5375,8 +5377,9 @@
             switchingTrack = false;
             playFailStreak = 0;
 
-            // Keep the screen awake and start the countdown to the blackout
-            requestWakeLock();
+            // Keep the screen awake if wanted and start the countdown to the
+            // blackout
+            syncWakeLock();
             resetIdleTimer();
 
             // iOS drops the action handlers and the now playing ownership after
@@ -7836,15 +7839,32 @@
         }
     }
 
-    // Hold the screen on only while it is wanted: music playing on a visible
-    // page, or the black cover up. Anything else gives it back, so the
-    // phone's own screen timeout works while the music is paused or stopped
+    // When the player keeps the screen on: never, while music plays or
+    // always. Unset, the Android app leaves it to the phone's own timeout,
+    // and a browser keeps it on while music plays, so an iPhone in a holder
+    // does not lock and ask for Face ID in the middle of a song
+    function screenMode() {
+
+        const mode = settings.screenOn;
+
+        if (mode === "never" || mode === "playing" || mode === "always") {
+            return mode;
+        }
+
+        return isApkHost() ? "never" : "playing";
+    }
+
+    // Hold the screen on only while it is wanted. While playing counts the
+    // black cover as playing too, it only comes up over music. Anything else
+    // gives the screen back, so the phone's own timeout turns it off
     function syncWakeLock() {
 
+        const mode = screenMode();
         const playingNow = !!(audio && !audio.paused && currentSong);
-        const wanted = playingNow || settings.keepScreenOn === true;
+        const wanted = mode === "always"
+            || (mode === "playing" && (playingNow || isBlackedOut()));
 
-        if ((wanted && !document.hidden) || isBlackedOut()) {
+        if (wanted && !document.hidden) {
             requestWakeLock();
         } else {
             releaseWakeLock();
@@ -7898,8 +7918,9 @@
             document.documentElement.style.background = "#000";
         }
 
-        // A dark screen is no use if the phone then locks and asks for Face ID
-        requestWakeLock();
+        // A dark screen is no use if the phone then locks and asks for Face
+        // ID, unless the screen is meant to follow the phone's own timeout
+        syncWakeLock();
 
         // Fade in, so the screen dims rather than snapping to black. Skipped
         // when the cover is already up, otherwise a re-show would flash
@@ -14046,7 +14067,6 @@
         const blackoutButton = makeActionButton(iconBlackout(), "Screen off", "#444", "#fff", function () {
 
             closeActions();
-            requestWakeLock();
             showBlackout();
         });
 
@@ -15165,10 +15185,8 @@
             offerGate();
 
             // The system drops the wake lock whenever the page is hidden, so
-            // claim it again if the cover is still meant to be holding it
-            if (isBlackedOut()) {
-                requestWakeLock();
-            }
+            // claim it again if it is still wanted
+            syncWakeLock();
         });
 
         window.addEventListener("focus", resyncPlayback);
@@ -17477,6 +17495,9 @@
 
         highlight();
 
+        // Settings read again from storage show on the row as well
+        settingsRefreshers.push(highlight);
+
         return row;
     }
 
@@ -18019,11 +18040,18 @@
 
         // The screen stays on while music plays. This keeps it on when the
         // music is paused or stopped too, so the phone never locks
-        const keepOnRow = makeBoolRow("Keep the screen on when paused",
-            function () { return settings.keepScreenOn === true; },
-            function (v) { settings.keepScreenOn = v; syncWakeLock(); });
+        const keepOnRow = makeChoiceRow([
+            { label: "Never", value: "never" },
+            { label: "While playing", value: "playing" },
+            { label: "Always", value: "always" }
+        ], screenMode, function (v) {
+            settings.screenOn = v;
+            syncWakeLock();
+        });
 
-        devicePage.appendChild(withHint(keepOnRow, "The screen always stays on while music plays. With this on it also stays on when the music is paused or stopped, the way the player worked before, so the phone never locks while the player is open and Bluetooth buttons always reach it. Off, the phone's own screen timeout applies while paused."));
+        devicePage.appendChild(makeLabel("Keep the screen on"));
+        devicePage.appendChild(keepOnRow);
+        devicePage.appendChild(makeHint("Never leaves the screen to the phone's own timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the phone never locks and Bluetooth buttons always reach it."));
 
         // Only the Android app has a window of its own to make fullscreen
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
@@ -18723,6 +18751,9 @@
         settingsRefreshers.forEach(function (fn) {
             fn();
         });
+
+        // The imported screen mode applies at once
+        syncWakeLock();
 
         metaPreviewUpdaters.forEach(function (fn) {
             fn();
@@ -21499,10 +21530,18 @@
     // Expose a toggle so a second bookmarklet tap minimizes or restores the panel
     window.__murekaPlayerToggle = toggleMinimize;
 
+    // Build the player, then hold the screen on right away if it is always
+    // meant to be
+    function startPlayer() {
+
+        buildPanel();
+        syncWakeLock();
+    }
+
     // The bookmarklet runs after load, so build now, otherwise wait for the body
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", buildPanel);
+        document.addEventListener("DOMContentLoaded", startPlayer);
     } else {
-        buildPanel();
+        startPlayer();
     }
 })();

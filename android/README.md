@@ -357,16 +357,21 @@ without trying to put it back.
 
 ## The phone's screen timeout
 
-The player keeps the screen on while music plays, so the phone does not lock
-in the middle of a drive, and while the black screen off cover is up. It
-used to also take that hold every time the app came back to the front,
-playing or not, and only let go at the next pause, so a paused player kept
-the screen on for good and the phone's own timeout never came. Now the hold
-follows one rule everywhere: music playing on a visible page, or the cover
-up. Paused or stopped, Android's own sleep setting applies again, unless
-**Keep the screen on when paused** is switched on under Settings, This
-device, which keeps the screen on as long as the player is open, the way it
-worked before.
+**Keep the screen on**, under Settings, This device, has three choices:
+
+- **Never** leaves the screen to the phone's own timeout, also while music
+  plays and while the black screen is up. The black screen comes first and
+  Android turns the screen off when its own timeout runs out. This is what
+  the app starts with.
+- **While playing** keeps the screen on while music plays and while the
+  black screen is up, so a phone in a holder does not lock in the middle of
+  a drive. Paused or stopped, the phone's own timeout applies. This is what
+  a browser starts with, so an iPhone does not lock and ask for Face ID.
+- **Always** keeps the screen on as long as the player is open, so the
+  phone never locks and Bluetooth buttons always reach it.
+
+The old on and off switch, Keep the screen on when paused, carries over:
+on becomes Always, off takes the new start value.
 
 A play, next or previous from Bluetooth, the steering wheel or the lock
 screen used to wait, with the screen dark and the music paused, until the
@@ -374,6 +379,17 @@ phone was unlocked: the phone handed the command to the page and went back to
 sleep before the page could act on it. Each command now holds the phone
 awake for a minute and a half, long enough for the page to start the music,
 after which playing keeps it awake by itself.
+
+That was not all of it. With the screen off, Android tells the page's
+WebView that its window is hidden, and the page's paused song then does not
+start again while it stays hidden. The lock screen showed the song playing,
+since the page had said play, but no sound came until the phone was
+unlocked and the page was on screen again. For 15 seconds after each
+command the WebView now tells the page its window is visible, which is long
+enough for the song to get going. Once it plays it keeps playing with the
+screen off, as it always has, and the rest of the time the page sees its
+window as it really is, so a paused player with the screen off costs
+nothing and the screen can stay off.
 
 ## Fullscreen in the app
 
@@ -484,7 +500,7 @@ The main settings page is now only a list of pages, in groups:
   player.
 - **Device**: Connections (in the app only: hotspot, Wi-Fi, the public
   address, the address, the local name and the status) and This device
-  (Keep the screen on when paused, and Run freely in the background in the
+  (Keep the screen on, and Run freely in the background in the
   app). These are about the phone or computer itself and will never be
   synced between devices.
 - **Music**: Library (Start with, Refresh on open, numbers across the whole
