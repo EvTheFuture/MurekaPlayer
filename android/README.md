@@ -47,11 +47,11 @@ least once since it was installed, so open it once after installing.
 
 ## Queue, settings, filters and artists
 
-- In the Mureka view the chip row ends with **Load** and **Rescan**: Load
-  asks the phone for what is new, and says Loading while it works, Rescan
-  reads the whole library again and asks first. Both are gone in the queue,
-  where they would mean nothing.
-
+- In the Mureka view the chip row ends with **Update**, which opens a small
+  menu with Load new songs and Rescan the whole library, the rescan asking
+  first. While one runs the chip says Loading or Rescanning and the menu
+  offers Stop. After a try that could not reach Mureka it turns red and says
+  Load failed or Rescan failed. It is gone in the queue.
 - The song list button opens the songs with the same views as the phone:
   **Mureka**, **Queue** and **A-Z**. The queue shows all of it, played songs
   dimmed. Tap a song to jump to it, the cross takes an upcoming song out.
@@ -287,6 +287,7 @@ simply running:
   tempo, date or rating filter, or by a playlist. The vocals choice is not
   counted as a filter.
 - **Load** and **Rescan** are ringed while they run.
+- **Repeat** is filled for repeat all and ringed for repeat one.
 
 ## Sound here, there or nowhere
 
@@ -313,7 +314,27 @@ songs, rescanning the library or caching songs. A rescan reads the library
 again, so what it had before is about what it will have after, and caching
 knows exactly how many songs it will fetch. Both show a bar, "90 of about
 300" and "45 of 60". A quick load has no number to go by and only turns its
-glyph. The chip that is running says so, Load or Rescan, never both.
+glyph. The line also says how long it has been going, and once there is a
+pace to go by, about how long is left.
+
+The main screen shows it too, without words: a thin bar level with the foot
+of the playing cover, starting where the song's title starts and ending with
+a turning update icon. A quick load, whose size is not known, shows only the
+turning icon.
+
+When a Load or Rescan cannot reach Mureka, a name that does not resolve,
+no network, a server error or no answer in time, the line says so in red
+with the reason, the Update chip turns red, and the Songs button on the main
+screen gets a red dot. The phone's own Load and Rescan buttons turn red too
+and the status line keeps the reason. The next one that gets through clears
+it all.
+
+The information dialog shows a line with a running bar while it gets a
+song's details from Mureka, and says in red why when that fails.
+
+In the actions menu and the song menu, Remove from cache and Delete from
+list always share a row: an empty cell finishes the row before them when
+needed.
 
 ## Remixing
 
@@ -331,6 +352,18 @@ the song off Mureka, make the change and publish it again. Answering on
 either side closes the question on the other. A no leaves everything as it
 was, and a step that fails stops the run rather than leaving the song down
 without trying to put it back.
+
+## The phone's screen timeout
+
+The player keeps the screen on while music plays, so the phone does not lock
+in the middle of a drive, and while the black screen off cover is up. It
+used to also take that hold every time the app came back to the front,
+playing or not, and only let go at the next pause, so a paused player kept
+the screen on for good and the phone's own timeout never came. Now the hold
+follows one rule everywhere: music playing on a visible page, or the cover
+up. Paused or stopped, Android's own sleep setting applies again, unless
+**Keep the screen on when paused** is switched on under Settings, Mobile
+player, which keeps the screen on as long as the player is open.
 
 ## Fullscreen in the app
 

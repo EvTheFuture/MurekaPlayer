@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.57";
+    const VERSION = "1.6.0.65";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -312,12 +312,62 @@
     // True while a cache-all run is in progress
     let cacheRunning = false;
 
+    // The last Load or Rescan that could not reach Mureka, cleared by the
+    // next one of the same kind that gets through. Both the Load and Rescan
+    // buttons and the web view show it in red
+    let loadFail = null;
+    let runFailed = false;
+
+    // A failed request in words. A name that does not resolve, no network
+    // at all and a refused connection all arrive as the same TypeError
+    function describeNetError(e) {
+
+        const msg = e && e.message ? String(e.message) : "";
+
+        if (e && e.name === "AbortError") {
+            return "Mureka did not answer in time";
+        }
+
+        if (/^HTTP \d+/.test(msg)) {
+            return "Mureka answered " + msg;
+        }
+
+        return "could not reach mureka.ai, check the connection";
+    }
+
+    function noteLoadFail(kind, e) {
+
+        runFailed = true;
+        loadFail = { kind: kind === "rescan" ? "rescan" : "load", why: describeNetError(e), at: Date.now() };
+        updateButton();
+        publishHostSoon();
+    }
+
+    function clearLoadFail() {
+
+        if (!loadFail) {
+            return;
+        }
+
+        loadFail = null;
+        updateButton();
+        publishHostSoon();
+    }
+
     // What the player is working through right now, for the web view's
     // progress bar. Total 0 means the size is not known in advance
     let hostProgress = null;
 
+    let progressStarted = 0;
+    let progressKind = "";
+
     function setProgress(kind, label, done, total) {
 
+        if (kind && kind !== progressKind) {
+            progressStarted = Date.now();
+        }
+
+        progressKind = kind || "";
         hostProgress = kind ? { kind: kind, label: label, done: done, total: total } : null;
         publishHostSoon();
     }
@@ -1068,6 +1118,7 @@
             bpmUnknown: "any",
             carBlackout: false,
             carGate: false,
+            keepScreenOn: false,
             carAutoBlack: 20,
             blackoutText: "\u266B",
             blackoutColor: "#333333",
@@ -1186,6 +1237,7 @@
                         : "repeat,shuffle,stop,play",
                     carBlackout: parsed.carBlackout === true,
                     carGate: parsed.carGate === true,
+                    keepScreenOn: parsed.keepScreenOn === true,
                     carAutoBlack: (typeof parsed.carAutoBlack === "number"
                         && parsed.carAutoBlack >= 0 && parsed.carAutoBlack <= 300)
                         ? parsed.carAutoBlack : 20,
@@ -3783,6 +3835,7 @@
 
         running = true;
         runOwner = "load";
+        runFailed = false;
         const myToken = ++loadToken;
 
         // Confirm login state for your own feed and warn if logged out
@@ -3819,12 +3872,18 @@
         } catch (e) {
 
             // The API is unreachable, the cached songs still work offline
-            setStatus("Could not reach Mureka, showing " + cache.songs.length + " cached songs");
+            noteLoadFail("load", e);
+            setStatus("Load failed, " + loadFail.why + ". Showing " + cache.songs.length + " cached songs");
 
         } finally {
 
             // Only clear the running state if a newer run has not taken over
             if (myToken === loadToken) {
+
+                // Ran to the end without a failure, so any old one is over
+                if (running && !runFailed) {
+                    clearLoadFail();
+                }
 
                 running = false;
                 runOwner = null;
@@ -3855,6 +3914,7 @@
 
         running = true;
         runOwner = "rescan";
+        runFailed = false;
         const myToken = ++loadToken;
 
         if (!creatorSource) {
@@ -3866,10 +3926,16 @@
         try {
             await refreshNew(myToken, true);
         } catch (e) {
-            setStatus("Could not reach Mureka, showing " + cache.songs.length + " cached songs");
+
+            noteLoadFail("rescan", e);
+            setStatus("Rescan failed, " + loadFail.why + ". Showing " + cache.songs.length + " cached songs");
         } finally {
 
             if (myToken === loadToken) {
+
+                if (running && !runFailed) {
+                    clearLoadFail();
+                }
 
                 running = false;
                 runOwner = null;
@@ -3900,7 +3966,9 @@
             try {
                 page = await fetchPage(cursor);
             } catch (e) {
-                setStatus("Network error, paused");
+
+                noteLoadFail(runOwner, e);
+                setStatus("Load failed, " + loadFail.why);
                 break;
             }
 
@@ -3986,6 +4054,7 @@
             saveCache();
 
             setStatus("Loading older songs, total: " + cache.songs.length);
+            setProgress("load", "Loading older songs", cache.songs.length, 0);
 
             await sleep(PAGE_DELAY);
         }
@@ -4022,6 +4091,11 @@
         let stop = false;
         let reachedEnd = false;
 
+        // Shown at once, the first page can take a while on a slow line
+        setProgress(deep ? "rescan" : "load",
+            deep ? "Rescanning the library" : "Loading songs from Mureka",
+            0, deep ? baseSongs.length : 0);
+
         while (running && myToken === loadToken && !stop) {
 
             let page;
@@ -4029,7 +4103,9 @@
             try {
                 page = await fetchPage(cursor);
             } catch (e) {
-                setStatus("Network error, stopped");
+
+                noteLoadFail(runOwner, e);
+                setStatus((deep ? "Rescan failed, " : "Load failed, ") + loadFail.why);
                 break;
             }
 
@@ -4280,6 +4356,15 @@
         if (pruneSkipped) {
             parts.push("nothing removed, sign in to Mureka so drafts are not"
                 + " mistaken for deleted songs");
+        }
+
+        // A run that could not reach Mureka is not complete, and its failure
+        // stays on the status line rather than a summary that says otherwise
+        if (runFailed && loadFail) {
+
+            setStatus((deep ? "Rescan failed, " : "Load failed, ") + loadFail.why
+                + ". Showing " + cache.songs.length + " cached songs");
+            return;
         }
 
         setStatus((deep
@@ -5422,10 +5507,8 @@
             }
 
             // Nothing playing, so let the screen sleep normally again, unless
-            // the cover is up, which needs the phone to stay unlocked
-            if (!isBlackedOut()) {
-                releaseWakeLock();
-            }
+            // the cover is up or the screen is asked to stay on anyway
+            syncWakeLock();
 
             resetIdleTimer();
 
@@ -7198,9 +7281,20 @@
                 + "&song_id=" + song.song_id;
 
             const res = await timedFetch(url, { credentials: "include" });
+
+            if (!res.ok) {
+
+                setStatus("Song details failed: HTTP " + res.status);
+                return null;
+            }
+
             const json = await res.json();
 
             if (!json || json.code !== 0 || !json.data) {
+
+                // Say it, or lyrics and counts just quietly go missing
+                setStatus("Song details failed: Mureka answered code "
+                    + (json ? json.code : "none") + (json && json.msg ? ", " + json.msg : ""));
                 return null;
             }
 
@@ -7741,6 +7835,21 @@
         }
     }
 
+    // Hold the screen on only while it is wanted: music playing on a visible
+    // page, or the black cover up. Anything else gives it back, so the
+    // phone's own screen timeout works while the music is paused or stopped
+    function syncWakeLock() {
+
+        const playingNow = !!(audio && !audio.paused && currentSong);
+        const wanted = playingNow || settings.keepScreenOn === true;
+
+        if ((wanted && !document.hidden) || isBlackedOut()) {
+            requestWakeLock();
+        } else {
+            releaseWakeLock();
+        }
+    }
+
     // Give the screen back to the system
     function releaseWakeLock() {
 
@@ -7921,7 +8030,7 @@
             btn.addEventListener("click", function () {
 
                 enterFullscreen();
-                requestWakeLock();
+                syncWakeLock();
                 hideGate();
                 resetIdleTimer();
             });
@@ -9013,6 +9122,10 @@
         // chrome free without needing a tap it is not allowed to ask for.
         // The back gesture or Escape leaves it when actually wanted
         resetIdleTimer();
+
+        // Paused under the cover, the screen may sleep now it is gone. The
+        // cover is still counted as up until its fade ends, so look after it
+        setTimeout(syncWakeLock, 400);
     }
 
     // True while the black cover is up
@@ -9095,8 +9208,9 @@
     // session was lost without the element noticing
     function resyncPlayback() {
 
-        // Coming back to the foreground drops the wake lock, so take it again
-        requestWakeLock();
+        // Coming back to the foreground drops the wake lock, so take it again,
+        // but only when there is music playing to keep the screen on for
+        syncWakeLock();
 
         if (!audio) {
             return;
@@ -12506,8 +12620,10 @@
             prevSong2: hostNeighbor(-2),
             upNext2: hostNeighbor(2),
             loading: running === true,
+            loadKind: running === true ? (runOwner || "load") : "",
             caching: cacheRunning === true,
-            progress: hostProgress,
+            progress: hostProgress ? Object.assign({ elapsed: Date.now() - progressStarted }, hostProgress) : null,
+            loadFail: loadFail ? { kind: loadFail.kind, why: loadFail.why } : null,
             vocals: settings.vocalFilter || "all",
             published: publishFilter,
             browsing: !!creatorSource
@@ -16571,8 +16687,12 @@
             // Cyan marks the run in progress, like every other lit control.
             // Load used to be cyan at rest, which during a rescan made it
             // look like the active one while Rescan was the one saying Stop
+            const failed = !active && loadFail && loadFail.kind === owner;
+
             btn.style.background = active ? "#48e1eb" : "#444";
-            btn.style.color = active ? "#000" : "#fff";
+            btn.style.color = active ? "#000" : (failed ? "#ff8a8a" : "#fff");
+            btn.style.boxShadow = failed ? "inset 0 0 0 2px #ff6b6b" : "";
+            btn.title = failed ? restLabel + " failed: " + loadFail.why : "";
 
             // The other button cannot start anything while a run is going on,
             // so it is greyed rather than left looking available
@@ -17893,6 +18013,14 @@
         mobilePage.appendChild(makeLabel("Main page"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars on the cover, tap one to rate."));
+
+        // The screen stays on while music plays. This keeps it on when the
+        // music is paused or stopped too, so the phone never locks
+        const keepOnRow = makeBoolRow("Keep the screen on when paused",
+            function () { return settings.keepScreenOn === true; },
+            function (v) { settings.keepScreenOn = v; syncWakeLock(); });
+
+        mobilePage.appendChild(withHint(keepOnRow, "The screen always stays on while music plays. With this on it also stays on when the music is paused or stopped, so the phone does not lock while the player is open."));
 
         // Only the Android app has a window of its own to make fullscreen
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
@@ -19873,13 +20001,21 @@
     }
 
     // Fetch the full detail object for a song, the song plus its social counts
+    // Why the last detail request came back empty, in words, so the
+    // information dialog can say it instead of showing dashes
+    let detailError = "";
+
     function fetchSongDetail(songId) {
 
         const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + songId;
 
+        detailError = "";
+
         return fetch(url, { credentials: "include" }).then(function (res) {
 
             if (!res.ok) {
+
+                detailError = "HTTP " + res.status;
                 return null;
             }
 
@@ -19891,9 +20027,15 @@
                 return json.data;
             }
 
+            if (json && !detailError) {
+                detailError = "Mureka answered code " + json.code + (json.msg ? ", " + json.msg : "");
+            }
+
             return null;
 
-        }).catch(function () {
+        }).catch(function (e) {
+
+            detailError = "no answer" + (e && e.message ? ", " + e.message : "");
             return null;
         });
     }
@@ -20073,6 +20215,31 @@
         const lyricsBlock = addCopyBlock("Lyrics", true);
         lyricsBlock.wrap.style.display = "none";
 
+        // A line saying the details are on their way, with a bar that runs
+        // while it waits. The web view's copy of this dialog shows the words
+        const fetchRow = document.createElement("div");
+        const fetchText = document.createElement("div");
+        const fetchBar = document.createElement("div");
+        const fetchFill = document.createElement("div");
+
+        fetchRow.style.cssText = "display:flex;flex-direction:column;gap:4px";
+        fetchText.textContent = "Getting the details from Mureka";
+        fetchText.style.cssText = "color:#48e1eb;font-size:12px";
+        fetchBar.style.cssText = "height:3px;border-radius:2px;background:#333;overflow:hidden";
+        fetchFill.style.cssText = "height:100%;width:35%;background:#48e1eb;border-radius:2px";
+        fetchBar.appendChild(fetchFill);
+        fetchRow.appendChild(fetchText);
+        fetchRow.appendChild(fetchBar);
+        infoBodyEl.insertBefore(fetchRow, header.nextSibling);
+
+        if (fetchFill.animate) {
+
+            fetchFill.animate([
+                { transform: "translateX(-100%)" },
+                { transform: "translateX(300%)" }
+            ], { duration: 1100, iterations: Infinity, easing: "ease-in-out" });
+        }
+
         infoEl.style.display = "flex";
 
         const data = await fetchSongDetail(song.song_id);
@@ -20082,8 +20249,20 @@
             return;
         }
 
+        // Done waiting. A failure keeps the line, in red, saying why
+        if (data) {
+            fetchRow.remove();
+        } else {
+
+            fetchBar.remove();
+            fetchText.style.color = "#ff8a8a";
+            fetchText.textContent = "Could not get the details from Mureka"
+                + (detailError ? ": " + detailError : "");
+        }
+
         if (!data) {
-            promptBlock.set("Could not load details");
+            promptBlock.set("Could not load details" + (detailError ? ": " + detailError : ""));
+            setStatus("Song details failed" + (detailError ? ": " + detailError : ""));
             playsEl.textContent = "-";
             likesEl.textContent = "-";
             sharesEl.textContent = "-";

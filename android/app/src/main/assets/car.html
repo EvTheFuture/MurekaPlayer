@@ -426,6 +426,41 @@
         box-shadow: inset 0 0 0 4px var(--accent);
     }
 
+    /* The last Load or Rescan could not reach Mureka */
+    .chip.fail {
+        color: #ff8a8a;
+        box-shadow: inset 0 0 0 4px #ff6b6b;
+    }
+
+    /* A red dot on the songs button, seen from the main screen */
+    #browseBtn {
+        position: relative;
+    }
+
+    #browseBtn.fail::after {
+        content: "";
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #ff6b6b;
+        box-shadow: 0 0 0 3px #333;
+    }
+
+    .workFail {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+        color: #ff8a8a;
+    }
+
+    .workFail .ico {
+        width: 1.2em;
+        height: 1.2em;
+    }
+
     .chip.ring {
         border-color: var(--accent);
     }
@@ -738,6 +773,49 @@
     }
 
     /* The loading glyph, a turning arc like the phone's refresh icon */
+    /* The phone loading or rescanning, seen from the main screen: a bar
+       level with the foot of the cover, starting where the song's text
+       starts, with a turning icon at its end. Only the icon when the size
+       is not known */
+    #workMain {
+        position: absolute;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        height: 28px;
+        z-index: 2;
+        pointer-events: none;
+        color: var(--accent);
+    }
+
+    #workMainBar {
+        flex: 1 1 auto;
+        height: 6px;
+        border-radius: 3px;
+        background: rgba(51, 51, 51, 0.9);
+        overflow: hidden;
+    }
+
+    #workMainFill {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+        transition: width 0.3s ease;
+    }
+
+    #workMainSpin {
+        flex: 0 0 auto;
+        line-height: 0;
+        margin-left: auto;
+    }
+
+    #workMainSpin .ico {
+        width: 26px;
+        height: 26px;
+        animation: spinTurn 0.8s linear infinite;
+        filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9));
+    }
+
     .spin {
         display: inline-block;
         width: 1.1em;
@@ -949,6 +1027,11 @@
         #menuItems,
         #actionItems {
             grid-template-columns: 1fr;
+        }
+
+        /* One column has no row to finish */
+        .menuSpacer {
+            display: none;
         }
     }
 
@@ -1916,6 +1999,7 @@
             <button id="fromLine" type="button" aria-label="Playing from, change the list and the filters"><span class="upLabel">Playing from</span><span id="fromText" class="marquee"></span><span id="fromMore" data-icon="chevronDown"></span></button>
             <div id="lyrics"><div class="lyricRoll"></div></div>
         </div>
+        <div id="workMain"><div id="workMainBar"><div id="workMainFill"></div></div><span id="workMainSpin" data-icon="refresh"></span></div>
     </div>
     <div id="seek">
         <span id="cur">0:00</span>
@@ -1979,8 +2063,7 @@
         <button class="chip" id="toCurrent" type="button" data-icon="target"><span class="lbl">Now playing</span></button>
         <span class="chipSep" id="libSep"></span>
         <span class="chipGroup" id="libGroup">Mureka</span>
-        <button class="chip" id="loadBtn" type="button" data-icon="refresh"><span class="lbl">Load</span></button>
-        <button class="chip" id="rescanBtn" type="button" data-icon="spin"><span class="lbl">Rescan</span></button>
+        <button class="chip" id="libBtn" type="button" data-icon="refresh" aria-label="Load or rescan from Mureka"><span class="lbl">Update</span></button>
     </div>
     <div class="chipRow" id="filterRow">
         <span class="chipGroup">Songs</span>
@@ -2832,7 +2915,9 @@
         $("play").classList.toggle("ring", !stopped && !playing);
         $("play").classList.toggle("flat", stopped);
         $("shuffle").classList.toggle("on", !!(s && s.shuffle));
-        $("repeat").classList.toggle("on", !!(s && s.repeat && s.repeat !== "none"));
+        // Repeat all is filled, repeat one ringed, off is an ordinary button
+        $("repeat").classList.toggle("on", !!(s && s.repeat === "all"));
+        $("repeat").classList.toggle("ring", !!(s && s.repeat === "one"));
         $("repeatOne").style.display = s && s.repeat === "one" ? "" : "none";
 
         if (s && s.controls) {
@@ -2910,15 +2995,20 @@
 
         const carAudio = !!(s && s.carAudio);
 
-        // Whichever of the two the phone is running says so, not both
-        const kind = s && s.progress ? s.progress.kind : "";
+        // What the phone is running, in its own words, or what failed last
+        const kind = s && s.loadKind ? s.loadKind : "";
         const loading = !!(s && s.loading);
-        const scanning = kind === "rescan";
+        const fail = s && s.loadFail ? s.loadFail : null;
 
-        $("loadBtn").classList.toggle("ring", loading && !scanning);
-        setLabel($("loadBtn"), loading && !scanning ? "Loading" : "Load");
-        $("rescanBtn").classList.toggle("ring", scanning);
-        setLabel($("rescanBtn"), scanning ? "Rescanning" : "Rescan");
+        $("libBtn").classList.toggle("ring", loading);
+        $("libBtn").classList.toggle("fail", !!fail && !loading);
+        setLabel($("libBtn"), loading
+            ? (kind === "rescan" ? "Rescanning" : "Loading")
+            : (fail ? (fail.kind === "rescan" ? "Rescan failed" : "Load failed") : "Update"));
+        $("libBtn").title = fail && !loading ? (fail.kind === "rescan" ? "Rescan" : "Load") + " failed: " + fail.why : "Load or rescan from Mureka";
+        $("browseBtn").classList.toggle("fail", !!fail && !loading);
+        $("browseBtn").title = fail && !loading ? (fail.kind === "rescan" ? "Rescan" : "Load") + " failed: " + fail.why : "Songs";
+
         const from = s && s.playFrom ? s.playFrom : null;
         const narrowed = !!(from && ((from.smart && from.smartAny) || from.playlist));
 
@@ -3591,8 +3681,8 @@
         viewAlpha: [["alpha", "A-Z"], ["alpha", "Z-A"]],
         viewStars: [["star", "Stars"], ["star", "Stars \u2191"], ["star", "Stars \u2193"]],
         viewPlays: [["play", "Plays"], ["play", "Plays \u2191"], ["play", "Plays \u2193"]],
-        loadBtn: [["refresh", "Load"], ["refresh", "Loading"]],
-        rescanBtn: [["spin", "Rescan"], ["spin", "Rescanning"]]
+        libBtn: [["refresh", "Update"], ["refresh", "Loading"], ["refresh", "Rescanning"],
+            ["refresh", "Load failed"], ["refresh", "Rescan failed"]]
     };
 
     function sizeChips() {
@@ -3665,15 +3755,76 @@
     // get a bar. A quick load has no number and only turns its glyph
     let workKey = "";
 
-    function paintWork(s) {
+    function paintWorkMain(s) {
 
         const p = s && s.progress ? s.progress : null;
         const busy = !!(s && (s.loading || s.caching)) || !!p;
+        const box = $("workMain");
+
+        if (!busy) {
+
+            box.style.display = "none";
+            return;
+        }
+
+        const done = p ? Number(p.done) || 0 : 0;
+        const total = p ? Number(p.total) || 0 : 0;
+        const known = total > 0;
+
+        $("workMainBar").style.visibility = known ? "visible" : "hidden";
+        $("workMainFill").style.width = known ? Math.round(Math.max(0, Math.min(1, done / total)) * 100) + "%" : "0";
+        box.style.display = "flex";
+        placeWorkMain();
+    }
+
+    // Level with the foot of the playing cover, from the left edge of the
+    // song's text to its right edge
+    function placeWorkMain() {
+
+        const box = $("workMain");
+
+        if (box.style.display === "none") {
+            return;
+        }
+
+        const main = $("main").getBoundingClientRect();
+        const info = $("info").getBoundingClientRect();
+        const cover = $("cover").getBoundingClientRect();
+        const height = box.offsetHeight || 28;
+
+        box.style.left = Math.round(info.left - main.left) + "px";
+        box.style.width = Math.max(60, Math.round(info.right - info.left)) + "px";
+        box.style.top = Math.round(cover.bottom - main.top - height) + "px";
+    }
+
+    window.addEventListener("resize", placeWorkMain);
+
+    function paintWork(s) {
+
+        paintWorkMain(s);
+
+        const p = s && s.progress ? s.progress : null;
+        const busy = !!(s && (s.loading || s.caching)) || !!p;
+        const fail = !busy && s && s.loadFail ? s.loadFail : null;
         const label = p ? p.label : "Loading songs from Mureka";
         const done = p ? Number(p.done) || 0 : 0;
         const total = p ? Number(p.total) || 0 : 0;
         const frac = total > 0 ? Math.max(0, Math.min(1, done / total)) : -1;
-        const key = busy ? label + "|" + done + "|" + total : "";
+
+        // How long it has been going, the phone's count carried on by this
+        // page's clock, and from the pace so far about how long is left
+        const secs = p && typeof p.elapsed === "number"
+            ? Math.max(0, Math.round((p.elapsed + Date.now() - stateAt) / 1000)) : -1;
+        let timing = secs >= 0 ? fmt(secs) : "";
+
+        if (secs > 3 && total > 0 && done > 0 && done < total) {
+
+            const left = Math.round((total - done) * secs / done);
+
+            timing += ", about " + (left >= 90 ? Math.round(left / 60) + " min" : Math.max(5, Math.round(left / 5) * 5) + " s") + " left";
+        }
+
+        const key = busy ? label + "|" + done + "|" + total + "|" + timing : (fail ? "fail|" + fail.kind + "|" + fail.why : "");
 
         if (key === workKey) {
             return;
@@ -3681,6 +3832,21 @@
 
         workKey = key;
         $("libLoad").textContent = "";
+
+        // Nothing running, but the last try did not get through
+        if (fail) {
+
+            const row = document.createElement("div");
+            const word = document.createElement("span");
+
+            row.className = "workFail";
+            row.appendChild(icon("close"));
+            word.textContent = (fail.kind === "rescan" ? "Rescan" : "Load") + " failed, " + fail.why
+                + ". Update tries again.";
+            row.appendChild(word);
+            $("libLoad").appendChild(row);
+            return;
+        }
 
         if (!busy) {
             return;
@@ -3691,7 +3857,7 @@
         const rough = p && p.kind === "rescan" ? "of about " : "of ";
         const row = loadingNode(label + (total > 0
             ? " " + done + " " + rough + total
-            : (done > 0 ? " " + done : "")));
+            : (done > 0 ? " " + done : "")) + (timing ? " (" + timing + ")" : ""));
 
         $("libLoad").appendChild(row);
 
@@ -3708,6 +3874,13 @@
         bar.appendChild(fill);
         $("libLoad").appendChild(bar);
     }
+
+    setInterval(function () {
+
+        if (state && state.progress) {
+            paintWork(state);
+        }
+    }, 1000);
 
     // One loading line at the end of the list while a page is on its way
     function showListLoading(on) {
@@ -4283,7 +4456,7 @@
         // away in the queue
         const onMureka = listView === "mureka";
 
-        for (const id of ["libSep", "libGroup", "loadBtn", "rescanBtn"]) {
+        for (const id of ["libSep", "libGroup", "libBtn"]) {
             $(id).style.display = onMureka ? "" : "none";
         }
 
@@ -6129,27 +6302,50 @@
     // Load asks the phone for whatever is new on Mureka, Rescan reads the
     // whole library again. Both run on the phone, so the list here is
     // reloaded once it has had a moment to work
-    $("loadBtn").addEventListener("click", function () {
+    // Load asks the phone for whatever is new on Mureka, Rescan reads the
+    // whole library again. While one runs the choice is to stop it. The list
+    // here is reloaded once the phone has had a moment to work
+    $("libBtn").addEventListener("click", function () {
 
-        send("refresh");
-        toast("Loading songs from Mureka");
-
-        setTimeout(function () {
-            loadList(true);
-        }, 1500);
-    });
-
-    $("rescanBtn").addEventListener("click", function () {
-
-        askConfirm("Read the whole library from Mureka again? It takes a while.", "Rescan", false, function () {
-
-            send("rescan");
-            toast("Rescanning the library");
+        const s = state || {};
+        const again = function () {
 
             setTimeout(function () {
                 loadList(true);
             }, 1500);
-        });
+        };
+
+        if (s.loading) {
+
+            openChoice(s.loadKind === "rescan" ? "Rescanning the library" : "Loading from Mureka", [
+                { icon: "stop", label: "Stop", fn: function () {
+
+                    closeSongMenu();
+                    send(s.loadKind === "rescan" ? "rescan" : "refresh");
+                } }
+            ]);
+            return;
+        }
+
+        openChoice("Update from Mureka", [
+            { icon: "refresh", label: "Load new songs", fn: function () {
+
+                closeSongMenu();
+                send("refresh");
+                toast("Loading songs from Mureka");
+                again();
+            } },
+            { icon: "spin", label: "Rescan the whole library", fn: function () {
+
+                closeSongMenu();
+                askConfirm("Read the whole library from Mureka again? It takes a while.", "Rescan", false, function () {
+
+                    send("rescan");
+                    toast("Rescanning the library");
+                    again();
+                });
+            } }
+        ]);
     });
 
     $("toCurrent").addEventListener("click", function () {
@@ -6944,6 +7140,24 @@
         songMenuItems(m, box, closeSongMenu, false);
     }
 
+    // How many cells the grid has since the last heading that spans the
+    // whole width, which starts a fresh row
+    function cellsInSection(box) {
+
+        let count = 0;
+
+        for (let el = box.lastElementChild; el; el = el.previousElementSibling) {
+
+            if (el.classList.contains("actionsSong")) {
+                break;
+            }
+
+            count += 1;
+        }
+
+        return count;
+    }
+
     // The choices for one song that do not start it playing, shared by the
     // long press menu and the actions menu, where they are for the playing
     // song. Close is how the menu they sit in closes
@@ -7057,6 +7271,18 @@
         }
 
         if (m.cached) {
+
+            // The two red choices, Remove from cache and Delete from list,
+            // share a row. With an odd number of choices before them in this
+            // section the row is finished with an empty cell first
+            if (cellsInSection(box) % 2 === 1) {
+
+                const gap = document.createElement("div");
+
+                gap.className = "menuSpacer";
+                gap.setAttribute("aria-hidden", "true");
+                box.appendChild(gap);
+            }
 
             box.appendChild(menuItem("trash", "Remove from cache", function () {
 
