@@ -1,2 +1,3 @@
 *.zip
 run-mobile-firefox.sh
+.adb-reconnect.sh
