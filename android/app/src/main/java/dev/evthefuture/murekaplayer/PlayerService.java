@@ -241,6 +241,21 @@ public class PlayerService extends Service implements Hub.Listener {
     // A web view asked for something. The CPU stays awake for a minute and
     // a half after the last request, the web view asks at least every half
     // minute while it is open, so it is awake exactly while one is in use
+    // A command for the player, from a Bluetooth button, the steering wheel,
+    // the lock screen or a web view. With the music paused the phone holds
+    // nothing awake, and a phone that has gone to sleep hands the command to
+    // the page and sleeps again before the page gets to run it. It then ran
+    // only once the screen was unlocked. Held for a while, the page gets the
+    // time to start the music, and playing holds the phone awake by itself
+    static void commandArrived() {
+
+        PlayerService s = instance;
+
+        if (s != null && s.clientLock != null) {
+            s.clientLock.acquire(90 * 1000L);
+        }
+    }
+
     static void webViewActive() {
 
         PlayerService s = instance;

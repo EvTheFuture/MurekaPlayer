@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.65";
+    const VERSION = "1.6.0.69";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -712,7 +712,8 @@
     // The settings overlay and its controls, built once and reused
     let settingsEl = null;
 
-    // The three settings pages, and which one shows
+    // The settings pages by name: the main list of pages, the two views,
+    // this device, the connections, the music, backup and developer
     let settingsPages = null;
 
     function showSettingsPage(name) {
@@ -17628,13 +17629,36 @@
         };
 
         let webPageBtn = null;
+        let connPageBtn = null;
 
         const mainPage = makePage();
         const mobilePage = makePage();
         const webPage = makePage();
 
+        // What only this device is about, how other devices reach it, the
+        // music settings a future sync would carry, and the data and the
+        // tools for tracking down problems
+        const devicePage = makePage();
+        const connPage = makePage();
+        const libraryPage = makePage();
+        const playbackPage = makePage();
+        const nowPage = makePage();
+        const backupPage = makePage();
+        const devPage = makePage();
+
         mainPage.style.display = "flex";
-        settingsPages = { main: mainPage, mobile: mobilePage, web: webPage };
+        settingsPages = {
+            main: mainPage,
+            mobile: mobilePage,
+            web: webPage,
+            device: devicePage,
+            connections: connPage,
+            library: libraryPage,
+            playback: playbackPage,
+            nowplaying: nowPage,
+            backup: backupPage,
+            developer: devPage
+        };
 
         const makeLabel = function (text) {
 
@@ -17744,11 +17768,6 @@
         startRow.appendChild(startAllBtn);
         startRow.appendChild(startLastBtn);
 
-        // Refresh on open, one library so one flag
-        const refreshLabel = document.createElement("div");
-        refreshLabel.textContent = "Library";
-        refreshLabel.style.cssText = "color:#bbb";
-
         const pubRow = makeBoolRow("Refresh on open",
             function () { return settings.refreshOnStart; },
             function (v) { settings.refreshOnStart = v; });
@@ -17756,11 +17775,6 @@
         const allRow = makeBoolRow("Number across the whole library",
             function () { return settings.absoluteNumbers; },
             function (v) { settings.absoluteNumbers = v; renderList(); });
-
-        // Playback section, autoplay on open
-        const playbackLabel = document.createElement("div");
-        playbackLabel.textContent = "Playback";
-        playbackLabel.style.cssText = "color:#bbb";
 
         const autoplayRow = makeBoolRow("Autoplay on start",
             function () { return settings.autoPlay; },
@@ -17774,11 +17788,6 @@
             function () { return settings.prefetchCount; },
             function (v) { settings.prefetchCount = v; },
             0, 50);
-
-        // Now playing text shown on the lock screen and over Bluetooth
-        const nowPlayingLabel = document.createElement("div");
-        nowPlayingLabel.textContent = "Now Playing text";
-        nowPlayingLabel.style.cssText = "color:#bbb";
 
         const titleTplRow = makeTextRow("Title line",
             function () { return settings.metaTitle; },
@@ -17798,11 +17807,6 @@
             + " Text in [ ] is dropped when a tag inside it is empty.";
         tplHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
 
-        // Developer section, turn on debug tools and share raw API data
-        const devLabel = document.createElement("div");
-        devLabel.textContent = "Developer";
-        devLabel.style.cssText = "color:#bbb";
-
         const debugRow = makeBoolRow("Debug mode",
             function () { return isDebug(); },
             function (v) { setDebug(v); });
@@ -17820,21 +17824,20 @@
         const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
 
         settingsEl.appendChild(head);
-        mainPage.appendChild(startLabel);
-        mainPage.appendChild(startRow);
-        mainPage.appendChild(makeHint("Which list the player opens on: only your published songs, all of them including drafts, or the same list as when it was last used, an artist included."));
-        mainPage.appendChild(refreshLabel);
-        mainPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
-        mainPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
-        mainPage.appendChild(playbackLabel);
-        mainPage.appendChild(withHint(autoplayRow, "Starts playing as soon as the player has opened and has songs."));
-        mainPage.appendChild(withHint(reportRow, "Counts each play on Mureka, as Mureka's own player does. Off keeps your listening out of the play counts."));
-        mainPage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
-        mainPage.appendChild(nowPlayingLabel);
-        mainPage.appendChild(makeHint("The two lines shown on the lock screen, in the notification and on screens connected over Bluetooth."));
-        mainPage.appendChild(titleTplRow);
-        mainPage.appendChild(subtitleTplRow);
-        mainPage.appendChild(tplHint);
+        libraryPage.appendChild(startLabel);
+        libraryPage.appendChild(startRow);
+        libraryPage.appendChild(makeHint("Which list the player opens on: only your published songs, all of them including drafts, or the same list as when it was last used, an artist included."));
+        libraryPage.appendChild(makeLabel("Updates and numbers"));
+        libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
+        libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
+        playbackPage.appendChild(withHint(autoplayRow, "Starts playing as soon as the player has opened and has songs."));
+        playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka, as Mureka's own player does. Off keeps your listening out of the play counts."));
+        playbackPage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
+        nowPage.appendChild(makeLabel("Text"));
+        nowPage.appendChild(makeHint("The two lines shown on the lock screen, in the notification and on screens connected over Bluetooth."));
+        nowPage.appendChild(titleTplRow);
+        nowPage.appendChild(subtitleTplRow);
+        nowPage.appendChild(tplHint);
 
         // Lyrics everywhere: the cover, the web view and song information
         const semicolonRow = makeBoolRow("Remove ; from lyrics",
@@ -17846,8 +17849,8 @@
                 publishHostSoon();
             });
 
-        mainPage.appendChild(makeLabel("Lyrics"));
-        mainPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
+        nowPage.appendChild(makeLabel("Lyrics"));
+        nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
         // Three way art overlay mode, also cycled by double tapping the art
         const overlayLabels = { none: "None", info: "Info", all: "Info + lyrics" };
@@ -17999,13 +18002,13 @@
             function (v) { settings.waveSeek = v; updateSeekMode(); });
 
         // Common: the rest of playback, the artwork and the library counts
-        mainPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
-        mainPage.appendChild(makeLabel("Artwork"));
-        mainPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
-        mainPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
-        mainPage.appendChild(withHint(artResumeRow, "Sends the cover again each time playback resumes, for Bluetooth screens that drop it. An iPhone greys the cover out when it is sent too often, so keep it off there."));
-        mainPage.appendChild(makeLabel("Counts"));
-        mainPage.appendChild(withHint(countsAgeRow, "How long the plays and likes shown for a song are kept before they are fetched from Mureka again."));
+        playbackPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
+        nowPage.appendChild(makeLabel("Artwork"));
+        nowPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
+        nowPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
+        nowPage.appendChild(withHint(artResumeRow, "Sends the cover again each time playback resumes, for Bluetooth screens that drop it. An iPhone greys the cover out when it is sent too often, so keep it off there."));
+        libraryPage.appendChild(makeLabel("Counts"));
+        libraryPage.appendChild(withHint(countsAgeRow, "How long the plays and likes shown for a song are kept before they are fetched from Mureka again."));
 
         // Mobile: what is drawn on this screen
         mobilePage.appendChild(makeBackRow("Mobile player"));
@@ -18020,7 +18023,7 @@
             function () { return settings.keepScreenOn === true; },
             function (v) { settings.keepScreenOn = v; syncWakeLock(); });
 
-        mobilePage.appendChild(withHint(keepOnRow, "The screen always stays on while music plays. With this on it also stays on when the music is paused or stopped, so the phone does not lock while the player is open."));
+        devicePage.appendChild(withHint(keepOnRow, "The screen always stays on while music plays. With this on it also stays on when the music is paused or stopped, the way the player worked before, so the phone never locks while the player is open and Bluetooth buttons always reach it. Off, the phone's own screen timeout applies while paused."));
 
         // Only the Android app has a window of its own to make fullscreen
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
@@ -18055,10 +18058,6 @@
         // Your own data, song tweaks and settings kept apart, since the
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
-        const dataLabel = document.createElement("div");
-        dataLabel.textContent = "Your data";
-        dataLabel.style.cssText = "color:#bbb";
-
         const dataHint = document.createElement("div");
         dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks and saved creators."
             + " Share saves to the Google Drive or Files app, Import can pick the file"
@@ -18141,23 +18140,17 @@
 
         updateDriveStatus();
 
-        mainPage.appendChild(dataLabel);
-        mainPage.appendChild(dataHint);
-        mainPage.appendChild(exportRow);
-        mainPage.appendChild(importRow);
-        mainPage.appendChild(dataChoiceEl);
-        mainPage.appendChild(driveInfoRow);
-        mainPage.appendChild(dataMsgEl);
+        backupPage.appendChild(dataHint);
+        backupPage.appendChild(exportRow);
+        backupPage.appendChild(importRow);
+        backupPage.appendChild(dataChoiceEl);
+        backupPage.appendChild(driveInfoRow);
+        backupPage.appendChild(dataMsgEl);
 
         // Which networks may open the web view, only in the Android app. Kept
         // out of the web view's copy of the settings, so the web view cannot lock
         // itself out
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
-
-            const carLabel = document.createElement("div");
-            carLabel.textContent = "Network";
-            carLabel.style.cssText = "color:#bbb";
-            carLabel.dataset.hostSkip = "1";
 
             const pref = function (key) {
                 return window.MurekaHost.getPref(key, "1") === "1";
@@ -18403,41 +18396,84 @@
             webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
             webPage.appendChild(webControlRow);
 
-            webPage.appendChild(carLabel);
-            webPage.appendChild(netHint);
-            webPage.appendChild(hotspotRow);
-            webPage.appendChild(wifiRow);
-            webPage.appendChild(withHint(vpnRow, vpnHint.textContent));
-            webPage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
-            webPage.appendChild(addressRow);
-            webPage.appendChild(nameRow);
-            webPage.appendChild(carStatusEl);
-            webPage.appendChild(carHint);
+            connPage.appendChild(netHint);
+            connPage.appendChild(hotspotRow);
+            connPage.appendChild(wifiRow);
+            connPage.appendChild(withHint(vpnRow, vpnHint.textContent));
+            connPage.appendChild(addressRow);
+            connPage.appendChild(nameRow);
+            connPage.appendChild(carStatusEl);
+            connPage.appendChild(carHint);
+            devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
 
             webPageBtn = makePageButton("Web view", "web");
+            connPageBtn = makePageButton("Connections", "connections");
+
+            // A browser could lock itself out from here, so the web view's
+            // copy of the settings never offers the page
+            connPageBtn.dataset.hostSkip = "1";
         }
 
-        // The other two pages, the web view one only exists in the Android app
-        // The pages for one place only come first, before what applies
-        // everywhere
-        mainPage.insertBefore(makeLabel("Display"), startLabel);
-        mainPage.insertBefore(makeHint("Settings for one place only. Everything below applies everywhere."), startLabel);
-        mainPage.insertBefore(makePageButton("Mobile player", "mobile"), startLabel);
+        devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
+        devPage.appendChild(debugRow);
+        devPage.appendChild(withHint(debugLineRow, "A line of layout numbers from the browser, tap it to copy."));
+        devPage.appendChild(artTestRow);
+        devPage.appendChild(copyFeedBtn);
+
+        // Each page opens with the way back and a word on what it holds
+        const heads = [
+            [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
+            [connPage, "Connections", "How browsers on other devices reach the web view on this phone."],
+            [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
+            [playbackPage, "Playback", "How the music plays and what is stored ahead of it."],
+            [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
+            [backupPage, "Backup and restore", null],
+            [devPage, "Developer", null]
+        ];
+
+        for (const h of heads) {
+            const first = h[0].firstChild;
+
+            if (h[2]) {
+                h[0].insertBefore(makeHint(h[2]), first);
+            }
+
+            h[0].insertBefore(makeBackRow(h[1]), h[0].firstChild);
+        }
+
+        // The main page is only a list of the others, grouped: the views,
+        // this device, the music, the data and the tools
+        mainPage.appendChild(makeLabel("Views"));
+        mainPage.appendChild(makeHint("How the player looks in each place it can be shown."));
+        mainPage.appendChild(makePageButton("Mobile player", "mobile"));
 
         if (webPageBtn) {
-            mainPage.insertBefore(webPageBtn, startLabel);
+            mainPage.appendChild(webPageBtn);
         }
 
-        mainPage.appendChild(devLabel);
-        mainPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
-        mainPage.appendChild(debugRow);
-        mainPage.appendChild(withHint(debugLineRow, "A line of layout numbers from the browser, tap it to copy."));
-        mainPage.appendChild(artTestRow);
-        mainPage.appendChild(copyFeedBtn);
+        mainPage.appendChild(makeLabel("Device"));
+        mainPage.appendChild(makeHint("About the device itself and how others reach it, not how the player looks. Never synced."));
 
-        settingsEl.appendChild(mainPage);
-        settingsEl.appendChild(mobilePage);
-        settingsEl.appendChild(webPage);
+        if (connPageBtn) {
+            mainPage.appendChild(connPageBtn);
+        }
+
+        mainPage.appendChild(makePageButton("This device", "device"));
+        mainPage.appendChild(makeLabel("Music"));
+        mainPage.appendChild(makeHint("Which songs load, how they play and what is shown while they play."));
+        mainPage.appendChild(makePageButton("Library", "library"));
+        mainPage.appendChild(makePageButton("Playback", "playback"));
+        mainPage.appendChild(makePageButton("Now playing", "nowplaying"));
+        mainPage.appendChild(makeLabel("Data"));
+        mainPage.appendChild(makeHint("Save your ratings, song tweaks and settings, and bring them back."));
+        mainPage.appendChild(makePageButton("Backup and restore", "backup"));
+        mainPage.appendChild(makeLabel("Troubleshooting"));
+        mainPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
+        mainPage.appendChild(makePageButton("Developer", "developer"));
+
+        for (const key of Object.keys(settingsPages)) {
+            settingsEl.appendChild(settingsPages[key]);
+        }
 
         panelEl.appendChild(settingsEl);
 

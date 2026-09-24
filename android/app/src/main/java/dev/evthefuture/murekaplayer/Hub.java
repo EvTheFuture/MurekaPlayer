@@ -222,11 +222,18 @@ final class Hub {
         final String js = "window.__murekaHostCommand && window.__murekaHostCommand("
             + JSONObject.quote(cmd) + "," + toJs(arg) + ")";
 
+        // Keep the phone awake long enough for the page to act on it
+        PlayerService.commandArrived();
+
         MAIN.post(() -> {
 
             WebView web = webRef.get();
 
             if (web != null) {
+
+                // Timers are shared by every WebView in the app, and a paused
+                // set would leave the command waiting in the page
+                web.resumeTimers();
                 web.evaluateJavascript(js, null);
             }
         });

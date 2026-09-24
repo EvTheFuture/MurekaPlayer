@@ -22,27 +22,28 @@ ANDROID_HOME ?= /usr/lib/android-sdk
 APK_DEBUG := android/app/build/outputs/apk/debug/app-debug.apk
 APK_RELEASE := android/app/build/outputs/apk/release/app-release.apk
 
-.PHONY: help all ext android apk release install check version clean distclean
+.PHONY: help all ext android apk debug release install install-debug check version clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
 	@echo
-	@echo "  make all        bump, checks, extension packages and the debug APK"
-	@echo "  make ext        mureka-player-firefox.zip and -chromium.zip"
-	@echo "  make android    the debug APK, same as make apk"
-	@echo "  make release    the release APK, signed with the debug key"
-	@echo "  make install    install the debug APK on the connected phone"
-	@echo "  make check      syntax check the player and compare versions"
-	@echo "  make version    bump manifest.json to the player version"
-	@echo "  make clean      remove build output, keep the caches"
-	@echo "  make distclean  also remove the Gradle and SDK caches in the tree"
+	@echo "  make all            bump, checks, extension packages and the release APK"
+	@echo "  make ext            mureka-player-firefox.zip and -chromium.zip"
+	@echo "  make release        the release APK, signed with the debug key"
+	@echo "  make debug          the debug APK, same as make apk and make android"
+	@echo "  make install        build and install the release APK on the connected phone"
+	@echo "  make install-debug  build and install the debug APK on the connected phone"
+	@echo "  make check          syntax check the player and compare versions"
+	@echo "  make version        bump manifest.json to the player version"
+	@echo "  make clean          remove build output, keep the caches"
+	@echo "  make distclean      also remove the Gradle and SDK caches in the tree"
 	@echo
 	@echo "  JAVA_HOME    $(JAVA_HOME)"
 	@echo "  ANDROID_HOME $(ANDROID_HOME)"
 
 # The manifest is brought to the player's version first, so a build never
 # stops on a version mismatch it could have fixed itself
-all: version check ext apk
+all: version check ext release
 	@echo "Built everything at version $(VERSION)"
 
 # The extension packages, including the version check build.sh does itself
@@ -66,7 +67,10 @@ check:
 	fi; \
 	echo "Versions agree at $(VERSION)"
 
+# The debug APK goes by three names
 android: apk
+
+debug: apk
 
 apk: android/local.properties
 	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
@@ -83,7 +87,12 @@ android/local.properties:
 	@test -d "$(ANDROID_HOME)" || { echo "No Android SDK at $(ANDROID_HOME), set ANDROID_HOME"; exit 1; }
 	echo "sdk.dir=$(ANDROID_HOME)" > $@
 
-install: apk
+# Both builds carry the same app id and the same debug key, so either one
+# replaces the other on the phone and the app's data stays
+install: release
+	adb install -r $(APK_RELEASE)
+
+install-debug: apk
 	adb install -r $(APK_DEBUG)
 
 clean:

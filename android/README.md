@@ -148,8 +148,8 @@ least once since it was installed, so open it once after installing.
   artist the player was showing when it was last used.
 - **Up next**, the **waveform seek bar**, where the lyrics go, the names
   under the buttons and the web view's own transport bar are set on the phone
-  under Settings, Web view. The settings have three pages: what applies
-  everywhere, Mobile player and Web view.
+  under Settings, Web view. See "Settings pages" below for where everything
+  else lives.
 - **Fullscreen** on the main screen, where the browser offers it.
 - **Settings** on the main screen, and **Edit filters** and **Artists** in the
   song list, show the phone's own panels with large controls. They are read
@@ -164,7 +164,7 @@ Only the local network, never the mobile network:
 - The sender has to be on the hotspot or a Wi-Fi the phone is on, and ask
   for one of the phone's addresses on that network or for the public address.
 - Requests arriving on a cellular interface are refused, IPv6 included.
-- In the app's settings, under Web view, "Allow from the phone's hotspot"
+- In the app's settings, under Connections, "Allow from the phone's hotspot"
   and "Allow from Wi-Fi networks" pick which of the two are allowed. Both
   are on from the start. These two rows are not shown on the web view, so
   a browser cannot lock itself out.
@@ -204,8 +204,10 @@ From the repository root the Makefile does the rest, it finds the JDK, writes
 
 ```sh
 #!/bin/sh
-make android          # app/build/outputs/apk/debug/app-debug.apk
-make install          # and put it on the connected phone
+make release          # app/build/outputs/apk/release/app-release.apk
+make install          # build the release APK and put it on the connected phone
+make install-debug    # the same with the debug APK
+make all              # checks, extension packages and the release APK
 ```
 
 Or by hand, from this folder:
@@ -226,7 +228,7 @@ Tesla's browser has refused private addresses (10.x, 172.16 to 31.x,
 192.168.x) since at least 2015, and a hotspot only hands out private ones.
 So the app can give the phone a fixed address that is not private:
 
-1. In the player's settings, under Web view, switch on "Public address
+1. In the player's settings, under Connections, switch on "Public address
    (VPN)". Android asks once whether the app may run a VPN.
 2. Switch on the phone's hotspot and connect the car to it.
 3. In the car's own browser open `http://3.3.3.3:8080` and bookmark it. It is the
@@ -362,8 +364,16 @@ playing or not, and only let go at the next pause, so a paused player kept
 the screen on for good and the phone's own timeout never came. Now the hold
 follows one rule everywhere: music playing on a visible page, or the cover
 up. Paused or stopped, Android's own sleep setting applies again, unless
-**Keep the screen on when paused** is switched on under Settings, Mobile
-player, which keeps the screen on as long as the player is open.
+**Keep the screen on when paused** is switched on under Settings, This
+device, which keeps the screen on as long as the player is open, the way it
+worked before.
+
+A play, next or previous from Bluetooth, the steering wheel or the lock
+screen used to wait, with the screen dark and the music paused, until the
+phone was unlocked: the phone handed the command to the page and went back to
+sleep before the page could act on it. Each command now holds the phone
+awake for a minute and a half, long enough for the page to start the music,
+after which playing keeps it awake by itself.
 
 ## Fullscreen in the app
 
@@ -443,7 +453,7 @@ while, and the web view then got no music until the app was opened. The app
 now keeps that process important, keeps the phone awake for a minute and a
 half after each request from a web view, so exactly while one is in use,
 and loads the player again by itself should Android end the process anyway.
-**Run freely in the background**, under Settings, Web view, asks Android to
+**Run freely in the background**, under Settings, This device, asks Android to
 leave the app out of battery saving, which some phones need on top.
 
 ## Media keys and MPRIS
@@ -464,3 +474,27 @@ web view then no longer pulls its own sound back to that frozen place,
 which used to loop the first seconds of the song. It keeps playing, hands
 the phone its place every ten seconds, which can also get the phone going
 again, and asks for the next song when the song ends here.
+
+## Settings pages
+
+The main settings page is now only a list of pages, in groups:
+
+- **Views**: Mobile player and Web view, how the player looks in each place.
+  Fullscreen and the black screen belong to the view and stay in Mobile
+  player.
+- **Device**: Connections (in the app only: hotspot, Wi-Fi, the public
+  address, the address, the local name and the status) and This device
+  (Keep the screen on when paused, and Run freely in the background in the
+  app). These are about the phone or computer itself and will never be
+  synced between devices.
+- **Music**: Library (Start with, Refresh on open, numbers across the whole
+  library, how long counts are kept), Playback (Autoplay, reporting plays,
+  songs cached ahead, playing straight from Mureka's link) and Now playing
+  (the two lock screen lines, artwork, resending the cover and the lyrics'
+  semicolons). These are the settings a future sync would carry.
+- **Data**: Backup and restore, with export, import and Google Drive.
+- **Troubleshooting**: Developer, with the debug tools.
+
+Each page has a back button to the list. The web view's copy of the
+settings has the same pages, apart from Connections, so a browser still
+cannot lock itself out.
