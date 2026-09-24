@@ -31,6 +31,9 @@ import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.Icon;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
@@ -100,6 +103,12 @@ public class PlayerService extends Service implements Hub.Listener {
     private String shownKey = "";
     private String metaKey = "";
 
+    // Whether the player was playing at the last state, and whether it asks
+    // for the cover to be sent again when it picks up
+    private boolean wasPlaying = false;
+    private boolean artOnResume = false;
+    private AudioDeviceCallback deviceWatcher;
+
     // The cover of the playing song, fetched once per song
     private String artUrl = "";
     private Bitmap art;
@@ -135,6 +144,9 @@ public class PlayerService extends Service implements Hub.Listener {
 
         // The phone's media volume, so the web view can show and move it
         SysVolume.start(this);
+
+        // Bluetooth coming back wants the song and its cover again
+        watchAudioDevices();
 
         session = new MediaSession(this, "MurekaPlayer");
         session.setCallback(new MediaSession.Callback() {
@@ -365,6 +377,17 @@ public class PlayerService extends Service implements Hub.Listener {
 
         Hub.removeListener(this);
         SysVolume.stop();
+
+        if (deviceWatcher != null) {
+
+            AudioManager am = getSystemService(AudioManager.class);
+
+            if (am != null) {
+                am.unregisterAudioDeviceCallback(deviceWatcher);
+            }
+
+            deviceWatcher = null;
+        }
         instance = null;
 
         if (CarVpn.activeAddress() != null) {
@@ -411,6 +434,7 @@ public class PlayerService extends Service implements Hub.Listener {
         title = s.optString("title", "");
         subtitle = s.optString("subtitle", "");
         playing = s.optBoolean("playing", false);
+        artOnResume = s.optBoolean("artOnResume", false);
         durationMs = (long) (s.optDouble("duration", 0) * 1000);
 
         long positionMs = (long) (s.optDouble("position", 0) * 1000);
@@ -446,6 +470,15 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         updateMetadata();
+
+        // Picking up again after a pause is where a head unit loses the
+        // cover, and the metadata is the same as before, so nothing would be
+        // sent without this
+        if (playing && !wasPlaying && artOnResume) {
+            resendMetadata();
+        }
+
+        wasPlaying = playing;
         updateNotification();
         updateSignin("no".equals(s.optString("signedIn", "unknown")),
             "yes".equals(s.optString("signedIn", "unknown")));
@@ -498,6 +531,61 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         session.setMetadata(b.build());
+    }
+
+    // Send the song again even though nothing about it changed. A head unit
+    // ignores metadata it already has, so the song goes out without its
+    // cover first and with it straight after, which is a change either way
+    private void resendMetadata() {
+
+        final Bitmap keep = art;
+
+        art = null;
+        metaKey = "";
+        updateMetadata();
+        art = keep;
+        metaKey = "";
+
+        main.postDelayed(() -> {
+
+            metaKey = "";
+            updateMetadata();
+        }, 400);
+    }
+
+    // A car stereo or headphones that has just connected asks for the song
+    // over AVRCP, and some ask too early, so it is sent again a moment after
+    private void watchAudioDevices() {
+
+        AudioManager am = getSystemService(AudioManager.class);
+
+        if (am == null) {
+            return;
+        }
+
+        deviceWatcher = new AudioDeviceCallback() {
+
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] added) {
+
+                boolean bluetooth = false;
+
+                for (AudioDeviceInfo info : added) {
+
+                    if (info.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+                        bluetooth = true;
+                    }
+                }
+
+                if (!bluetooth || title.isEmpty()) {
+                    return;
+                }
+
+                main.postDelayed(PlayerService.this::resendMetadata, 1500);
+            }
+        };
+
+        am.registerAudioDeviceCallback(deviceWatcher, main);
     }
 
     private void updateNotification() {

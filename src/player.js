@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.51";
+    const VERSION = "1.6.0.54";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -311,6 +311,16 @@
 
     // True while a cache-all run is in progress
     let cacheRunning = false;
+
+    // What the player is working through right now, for the web view's
+    // progress bar. Total 0 means the size is not known in advance
+    let hostProgress = null;
+
+    function setProgress(kind, label, done, total) {
+
+        hostProgress = kind ? { kind: kind, label: label, done: done, total: total } : null;
+        publishHostSoon();
+    }
 
     // Object URL of the blob currently feeding the audio element, for cleanup
     let currentObjectUrl = null;
@@ -1717,7 +1727,8 @@
             is_liked: s.is_liked === true,
             model: s.model,
             bpm: s.bpm,
-            generation_method: s.generation_method
+            generation_method: s.generation_method,
+            allow_remix: s.allow_remix
         };
     }
 
@@ -3765,6 +3776,7 @@
             running = false;
             runOwner = null;
             loadToken += 1;
+            setProgress(null);
             updateButton();
             return;
         }
@@ -3813,8 +3825,10 @@
 
             // Only clear the running state if a newer run has not taken over
             if (myToken === loadToken) {
+
                 running = false;
                 runOwner = null;
+                setProgress(null);
                 updateButton();
             }
 
@@ -3834,6 +3848,7 @@
             running = false;
             runOwner = null;
             loadToken += 1;
+            setProgress(null);
             updateButton();
             return;
         }
@@ -3855,8 +3870,10 @@
         } finally {
 
             if (myToken === loadToken) {
+
                 running = false;
                 runOwner = null;
+                setProgress(null);
                 updateButton();
             }
 
@@ -4063,6 +4080,12 @@
 
             setStatus((deep ? "Rescanning, songs: " : "Checking for new songs, found: ")
                 + (deep ? fresh.length : newCount));
+
+            // A rescan reads the whole library again, so what it had before is
+            // about what it will have after. A quick check has no such number
+            setProgress(deep ? "rescan" : "load",
+                deep ? "Rescanning the library" : "Loading songs from Mureka",
+                deep ? fresh.length : newCount, deep ? baseSongs.length : 0);
 
             // Merge the pages seen so far into the cache and render through the
             // normal path, so during the scan the list is deduped and publish
@@ -5003,24 +5026,28 @@
             await refreshOne(song);
             publishHostSoon();
 
+            return true;
+
         } catch (e) {
 
             song.publish_state = before;
             renderList();
             publishHostSoon();
             setStatus("Could not " + (publish ? "publish" : "unpublish") + " " + name + ", try again");
+
+            return false;
         }
     }
 
     // Give a song another title on Mureka. The cover and the published state
     // go with it, since the endpoint takes the whole song line
-    async function renameSong(song, title) {
+    async function renameSong(song, title, forced) {
 
         const clean = String(title == null ? "" : title).trim();
         const was = (song.title || "").trim();
 
         if (clean === "" || clean === was) {
-            return;
+            return false;
         }
 
         song.title = clean;
@@ -5058,6 +5085,8 @@
             setStatus("Renamed: " + clean);
             publishHostSoon();
 
+            return true;
+
         } catch (e) {
 
             song.title = was;
@@ -5068,8 +5097,142 @@
             }
 
             publishHostSoon();
+
+            if (!forced && song.publish_state === 1) {
+
+                askForce("rename", song, clean);
+                return false;
+            }
+
             setStatus("Could not rename the song, try again");
+
+            return false;
         }
+    }
+
+    // Whether Mureka lets other people remix this song. 1 allows it, 2 does
+    // not, anything else means the song was cached before the player kept
+    // the field and it is not known yet
+    function remixState(song) {
+
+        const v = Number(song.allow_remix);
+
+        return v === 1 || v === 2 ? v : 0;
+    }
+
+    function remixText(song) {
+
+        const v = remixState(song);
+
+        return v === 1 ? "Allowed" : (v === 2 ? "Not allowed" : "-");
+    }
+
+    // Allow other people to remix a song, or stop them. Mureka may refuse it
+    // on a published song, and then the change can be forced through by
+    // taking the song down and publishing it again
+    async function setRemixAllowed(song, allow, forced) {
+
+        const name = (song.title || "").trim() || "Untitled";
+        const before = song.allow_remix;
+
+        song.allow_remix = allow ? 1 : 2;
+        publishHostSoon();
+
+        try {
+
+            const res = await fetch("/api/pgc/song/remix/allow", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: song.song_id,
+                    allow_remix: allow ? 1 : 2
+                })
+            });
+
+            const json = await res.json();
+
+            if (!res.ok || !json || json.code !== 0) {
+                throw new Error("remix failed");
+            }
+
+            saveCache();
+            setStatus((allow ? "Remixing allowed: " : "Remixing turned off: ") + name);
+            publishHostSoon();
+
+            return true;
+
+        } catch (e) {
+
+            song.allow_remix = before;
+            publishHostSoon();
+
+            if (!forced && song.publish_state === 1) {
+
+                askForce("remix", song, allow);
+                return false;
+            }
+
+            setStatus("Could not change remixing for " + name);
+
+            return false;
+        }
+    }
+
+    // Mureka refused a change on a published song. Taking it off, changing it
+    // and publishing it again does work, but it is the user's call, so both
+    // the phone and the web view ask first
+    let forcePending = null;
+
+    function askForce(kind, song, value) {
+
+        const what = kind === "rename" ? "rename" : "change remixing for";
+        const text = "Mureka would not " + what + " this published song."
+            + " Take it off Mureka, change it and publish it again?";
+
+        forcePending = { song: song, kind: kind, value: value, text: text };
+        publishHostSoon();
+
+        askYesNo("Publish again?", text, "Do it", runForce, cancelForce);
+    }
+
+    function cancelForce() {
+
+        forcePending = null;
+        publishHostSoon();
+        setStatus("Left as it was");
+    }
+
+    // Down, changed, and up again. Each step waits for the one before, and a
+    // step that fails still puts the song back where it was published
+    async function runForce() {
+
+        const job = forcePending;
+
+        forcePending = null;
+        publishHostSoon();
+
+        if (!job) {
+            return;
+        }
+
+        const name = (job.song.title || "").trim() || "Untitled";
+
+        setStatus("Taking " + name + " off Mureka");
+
+        if (!await setPublished(job.song, false)) {
+            return;
+        }
+
+        if (job.kind === "rename") {
+            await renameSong(job.song, job.value, true);
+        } else {
+            await setRemixAllowed(job.song, job.value, true);
+        }
+
+        setStatus("Publishing " + ((job.song.title || "").trim() || "Untitled") + " again");
+        await setPublished(job.song, true);
     }
 
     // Ask for a new title, the mobile player's own way in
@@ -7342,9 +7505,11 @@
             }
 
             setStatus("Caching " + done + " / " + cache.songs.length + ", stored " + ok);
+            setProgress("cache", "Caching songs", done, cache.songs.length);
         }
 
         cacheRunning = false;
+        setProgress(null);
         updateCacheButton();
         refreshCachedIds();
 
@@ -7859,6 +8024,93 @@
     }
 
     // A plain message box inside the panel, with one way out
+    // A yes or no question in the panel. window.confirm would do, but it
+    // stops the page, and with it the state the web view lives on
+    function askYesNo(title, body, yesLabel, onYes, onNo) {
+
+        if (!panelEl) {
+
+            if (onNo) {
+                onNo();
+            }
+
+            return;
+        }
+
+        const back = document.createElement("div");
+        back.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:rgba(0,0,0,0.6)",
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
+            "padding:16px",
+            "box-sizing:border-box",
+            "z-index:10"
+        ].join(";");
+
+        const card = document.createElement("div");
+        card.style.cssText = [
+            "background:#26262c",
+            "border:1px solid #3a3a42",
+            "border-radius:10px",
+            "padding:14px",
+            "max-width:340px",
+            "display:flex",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        const head = document.createElement("div");
+        head.textContent = title;
+        head.style.cssText = "font-weight:600";
+
+        const text = document.createElement("div");
+        text.textContent = body;
+        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = function (fn) {
+
+            back.remove();
+
+            if (fn) {
+                fn();
+            }
+        };
+
+        const no = makeButton("Cancel", "#444", "#fff", function () {
+            close(onNo);
+        });
+
+        const yes = makeButton(yesLabel, "#48e1eb", "#000", function () {
+            close(onYes);
+        });
+
+        no.style.flex = "1";
+        yes.style.flex = "1";
+        row.appendChild(no);
+        row.appendChild(yes);
+        card.appendChild(head);
+        card.appendChild(text);
+        card.appendChild(row);
+        back.appendChild(card);
+
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close(onNo);
+            }
+        });
+
+        panelEl.appendChild(back);
+
+        return back;
+    }
+
     function showNotice(title, body) {
 
         if (!panelEl) {
@@ -12233,6 +12485,8 @@
                 && typeof nowPlayingCounts.play_count === "number" ? nowPlayingCounts.play_count : null,
             playFrom: hostPlayFrom(),
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
+            artOnResume: settings.artOnResume === true,
+            forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
             shuffle: shuffleMode,
             repeat: repeatMode,
@@ -12252,6 +12506,7 @@
             upNext2: hostNeighbor(2),
             loading: running === true,
             caching: cacheRunning === true,
+            progress: hostProgress,
             vocals: settings.vocalFilter || "all",
             published: publishFilter,
             browsing: !!creatorSource
@@ -12337,6 +12592,8 @@
             bpm: effectiveBpm(song) || 0,
             canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
             published: song.publish_state === 1,
+            remix: remixState(song),
+            canRemix: song.generation_method !== 7,
             mine: !creatorSource,
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
             src: songUrl(song) || ""
@@ -13087,6 +13344,8 @@
             setPublished(song, true);
         } else if (act === "unpublish") {
             setPublished(song, false);
+        } else if (act === "remix") {
+            setRemixAllowed(song, a.value === true || a.value === 1 || a.value === "1");
         } else if (act === "rename") {
             renameSong(song, a.value === null || a.value === undefined ? "" : String(a.value));
         } else if (act === "bpm") {
@@ -13172,6 +13431,14 @@
             stopPlay();
         } else if (cmd === "songAction") {
             hostSongAction(arg || {});
+        } else if (cmd === "forceAnswer") {
+
+            // The web view answered the question about a published song
+            if (arg === true || arg === "true") {
+                runForce();
+            } else {
+                cancelForce();
+            }
         } else if (cmd === "rateKey") {
             rateFromKey(Math.max(0, Math.min(5, Math.round(Number(arg) || 0))));
         } else if (cmd === "seekBy") {
@@ -19791,6 +20058,9 @@
         const sharesEl = addInfoRow("Shares", "...");
         const commentsEl = addInfoRow("Comments", "...");
 
+        const remixEl = addInfoRow("Remixing",
+            song.generation_method === 7 ? "Instrumental, no remixing" : remixText(song));
+
         addInfoRow("Created", fmtDate(song.generate_at));
         addInfoRow("Published", song.publish_at ? fmtDate(song.publish_at) : "-");
         addInfoRow("Song ID", String(song.song_id));
@@ -19821,6 +20091,14 @@
         }
 
         const detail = data.song || {};
+
+        // Mureka's own word on remixing, kept on the song so the menus know
+        if (detail.allow_remix === 1 || detail.allow_remix === 2) {
+
+            song.allow_remix = detail.allow_remix;
+            remixEl.textContent = remixText(song);
+            publishHostSoon();
+        }
 
         playsEl.textContent = numOr(data.play_count);
         likesEl.textContent = numOr(data.fav_count);
@@ -20917,6 +21195,13 @@
             addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", "#fff", function () {
                 setPublished(song, song.publish_state !== 1);
             });
+
+            if (song.generation_method !== 7) {
+
+                addMenuRow(remixState(song) === 1 ? "No remixing" : "Allow remixing", "#fff", function () {
+                    setRemixAllowed(song, remixState(song) !== 1);
+                });
+            }
         }
 
         // A song the server already reports as instrumental cannot be marked

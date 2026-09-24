@@ -641,6 +641,21 @@
         font-weight: 600;
     }
 
+    /* How far the phone has come with a load, a rescan or caching */
+    .workBar {
+        height: 6px;
+        margin: 6px 0 2px;
+        border-radius: 3px;
+        background: var(--card);
+        overflow: hidden;
+    }
+
+    .workFill {
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.3s ease;
+    }
+
     /* A short word about what just happened, over everything else */
     #toast {
         position: fixed;
@@ -1907,6 +1922,10 @@
         <button class="chip" id="viewPlays" type="button" data-icon="play"><span class="lbl">Plays</span></button>
         <span class="chipSep"></span>
         <button class="chip" id="toCurrent" type="button" data-icon="target"><span class="lbl">Now playing</span></button>
+        <span class="chipSep" id="libSep"></span>
+        <span class="chipGroup" id="libGroup">Mureka</span>
+        <button class="chip" id="loadBtn" type="button" data-icon="refresh"><span class="lbl">Load</span></button>
+        <button class="chip" id="rescanBtn" type="button" data-icon="spin"><span class="lbl">Rescan</span></button>
     </div>
     <div class="chipRow" id="filterRow">
         <span class="chipGroup">Songs</span>
@@ -2806,16 +2825,7 @@
         const rated = s && s.rating !== null && s.rating !== undefined;
 
         // The phone is loading songs from Mureka, shown above the list
-        const libLoading = !!(s && s.loading);
-
-        if (libLoading !== ($("libLoad").childElementCount > 0)) {
-
-            $("libLoad").textContent = "";
-
-            if (libLoading) {
-                $("libLoad").appendChild(loadingNode("Loading songs from Mureka"));
-            }
-        }
+        paintWork(s);
 
         setCtlLabel("play", playing ? "Pause" : "Play");
         setCtlLabel("pubBtn", onlyPublished ? "Public" : "All");
@@ -2828,6 +2838,15 @@
 
         const carAudio = !!(s && s.carAudio);
 
+        // Whichever of the two the phone is running says so, not both
+        const kind = s && s.progress ? s.progress.kind : "";
+        const loading = !!(s && s.loading);
+        const scanning = kind === "rescan";
+
+        $("loadBtn").classList.toggle("on", loading && !scanning);
+        setLabel($("loadBtn"), loading && !scanning ? "Loading" : "Load");
+        $("rescanBtn").classList.toggle("on", scanning);
+        setLabel($("rescanBtn"), scanning ? "Rescanning" : "Rescan");
         $("soundPhone").classList.toggle("on", !carAudio);
         $("soundCar").classList.toggle("on", carAudio);
         paintVolIcon();
@@ -3489,7 +3508,9 @@
         smart: [["filter", "Filters on"], ["filter", "Filters off"]],
         viewAlpha: [["alpha", "A-Z"], ["alpha", "Z-A"]],
         viewStars: [["star", "Stars"], ["star", "Stars \u2191"], ["star", "Stars \u2193"]],
-        viewPlays: [["play", "Plays"], ["play", "Plays \u2191"], ["play", "Plays \u2193"]]
+        viewPlays: [["play", "Plays"], ["play", "Plays \u2191"], ["play", "Plays \u2193"]],
+        loadBtn: [["refresh", "Load"], ["refresh", "Loading"]],
+        rescanBtn: [["spin", "Rescan"], ["spin", "Rescanning"]]
     };
 
     function sizeChips() {
@@ -3555,6 +3576,55 @@
         box.appendChild(word);
 
         return box;
+    }
+
+    // What the phone is working through, above the list. A rescan knows
+    // about how many songs there are, and caching knows exactly, so those
+    // get a bar. A quick load has no number and only turns its glyph
+    let workKey = "";
+
+    function paintWork(s) {
+
+        const p = s && s.progress ? s.progress : null;
+        const busy = !!(s && (s.loading || s.caching)) || !!p;
+        const label = p ? p.label : "Loading songs from Mureka";
+        const done = p ? Number(p.done) || 0 : 0;
+        const total = p ? Number(p.total) || 0 : 0;
+        const frac = total > 0 ? Math.max(0, Math.min(1, done / total)) : -1;
+        const key = busy ? label + "|" + done + "|" + total : "";
+
+        if (key === workKey) {
+            return;
+        }
+
+        workKey = key;
+        $("libLoad").textContent = "";
+
+        if (!busy) {
+            return;
+        }
+
+        // A rescan only guesses the size from what the library had before,
+        // caching counts the songs it is going to fetch
+        const rough = p && p.kind === "rescan" ? "of about " : "of ";
+        const row = loadingNode(label + (total > 0
+            ? " " + done + " " + rough + total
+            : (done > 0 ? " " + done : "")));
+
+        $("libLoad").appendChild(row);
+
+        if (frac < 0) {
+            return;
+        }
+
+        const bar = document.createElement("div");
+        const fill = document.createElement("div");
+
+        bar.className = "workBar";
+        fill.className = "workFill";
+        fill.style.width = Math.round(frac * 100) + "%";
+        bar.appendChild(fill);
+        $("libLoad").appendChild(bar);
     }
 
     // One loading line at the end of the list while a page is on its way
@@ -4126,6 +4196,14 @@
     }
 
     function paintViews() {
+
+        // Loading from Mureka is about Mureka's songs, so the two buttons go
+        // away in the queue
+        const onMureka = listView === "mureka";
+
+        for (const id of ["libSep", "libGroup", "loadBtn", "rescanBtn"]) {
+            $(id).style.display = onMureka ? "" : "none";
+        }
 
         $("viewMureka").classList.toggle("on", listView === "mureka");
         $("viewQueue").classList.toggle("on", listView === "queue");
@@ -5964,6 +6042,32 @@
     });
 
     // The playing song may be further down than what is loaded so far
+    // Load asks the phone for whatever is new on Mureka, Rescan reads the
+    // whole library again. Both run on the phone, so the list here is
+    // reloaded once it has had a moment to work
+    $("loadBtn").addEventListener("click", function () {
+
+        send("refresh");
+        toast("Loading songs from Mureka");
+
+        setTimeout(function () {
+            loadList(true);
+        }, 1500);
+    });
+
+    $("rescanBtn").addEventListener("click", function () {
+
+        askConfirm("Read the whole library from Mureka again? It takes a while.", "Rescan", false, function () {
+
+            send("rescan");
+            toast("Rescanning the library");
+
+            setTimeout(function () {
+                loadList(true);
+            }, 1500);
+        });
+    });
+
     $("toCurrent").addEventListener("click", function () {
 
         if (listView === "queue" || $("rows").querySelector(".row.playing")) {
@@ -6067,6 +6171,7 @@
         online = true;
         paintVolIcon();
         render();
+        paintForceAsk();
 
         if (volOpen()) {
             paintVol(false);
@@ -6753,6 +6858,17 @@
                     act(m.published ? "unpublish" : "publish");
                     close();
                 }));
+
+            // Remixing is only offered for songs Mureka says have lyrics
+            if (m.canRemix) {
+
+                box.appendChild(menuItem("shuffle",
+                    m.remix === 1 ? "No remixing" : "Allow remixing", function () {
+
+                        act("remix", m.remix !== 1);
+                        close();
+                    }));
+            }
         }
 
         if (m.canSetBpm) {
@@ -7803,12 +7919,55 @@
         }
     });
 
+    // Mureka refused a change on a published song, so the phone asks whether
+    // to take it off, change it and publish it again. The question shows here
+    // as well, and either side's answer closes both
+    let forceShown = "";
+    let forceAsking = false;
+
+    function paintForceAsk() {
+
+        const ask = state && state.forceAsk ? state.forceAsk : null;
+        const key = ask ? ask.id + "|" + ask.text : "";
+
+        if (key === forceShown) {
+            return;
+        }
+
+        forceShown = key;
+
+        if (!ask) {
+
+            // Answered on the phone, so this one goes away by itself
+            if (forceAsking) {
+
+                forceAsking = false;
+                closeConfirm();
+            }
+
+            return;
+        }
+
+        forceAsking = true;
+        askConfirm(ask.text, "Do it", false, function () {
+
+            forceAsking = false;
+            send("forceAnswer", true);
+        }, function () {
+
+            forceAsking = false;
+            send("forceAnswer", false);
+        });
+    }
+
     // A question before something that cannot be undone
     let confirmAction = null;
+    let confirmNoAction = null;
 
-    function askConfirm(text, yesLabel, danger, then) {
+    function askConfirm(text, yesLabel, danger, then, onNo) {
 
         confirmAction = then;
+        confirmNoAction = onNo || null;
         $("confirmText").textContent = text;
         $("confirmYes").textContent = yesLabel;
         $("confirmYes").classList.toggle("danger", danger === true);
@@ -7818,10 +7977,20 @@
     function closeConfirm() {
 
         confirmAction = null;
+        confirmNoAction = null;
         $("confirmPop").style.display = "none";
     }
 
-    $("confirmNo").addEventListener("click", closeConfirm);
+    $("confirmNo").addEventListener("click", function () {
+
+        const no = confirmNoAction;
+
+        closeConfirm();
+
+        if (no) {
+            no();
+        }
+    });
 
     $("confirmYes").addEventListener("click", function () {
 

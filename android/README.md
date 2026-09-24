@@ -47,6 +47,11 @@ least once since it was installed, so open it once after installing.
 
 ## Queue, settings, filters and artists
 
+- In the Mureka view the chip row ends with **Load** and **Rescan**: Load
+  asks the phone for what is new, and says Loading while it works, Rescan
+  reads the whole library again and asks first. Both are gone in the queue,
+  where they would mean nothing.
+
 - The song list button opens the songs with the same views as the phone:
   **Mureka**, **Queue** and **A-Z**. The queue shows all of it, played songs
   dimmed. Tap a song to jump to it, the cross takes an upcoming song out.
@@ -266,6 +271,32 @@ is read back from it afterwards and the list shows what Mureka really has. A
 refused change goes back to what it was and the status line says so. Another
 creator's songs have neither choice.
 
+## What the phone is working on
+
+Above the list the web view shows what the phone is doing: loading new
+songs, rescanning the library or caching songs. A rescan reads the library
+again, so what it had before is about what it will have after, and caching
+knows exactly how many songs it will fetch. Both show a bar, "90 of about
+300" and "45 of 60". A quick load has no number to go by and only turns its
+glyph. The chip that is running says so, Load or Rescan, never both.
+
+## Remixing
+
+The song menu has **Allow remixing** or **No remixing**, Mureka's own
+switch for whether other people may remix the song. It is offered only for
+songs Mureka itself counts as having lyrics, and the instrumental mark set
+by hand in the player has no say in that. The
+information dialog shows where it stands, as Allowed, Not allowed, or a dash
+when the song was cached before the player kept the field. Opening the
+information for a song reads it from Mureka and remembers it.
+
+Mureka may refuse a change on a song that is already published, renaming
+included. When it does, the phone and the web view both ask whether to take
+the song off Mureka, make the change and publish it again. Answering on
+either side closes the question on the other. A no leaves everything as it
+was, and a step that fails stops the run rather than leaving the song down
+without trying to put it back.
+
 ## Fullscreen in the app
 
 The app hides Android's status and navigation bars while it is on screen, so
@@ -279,6 +310,19 @@ fullscreen setting and the tap gate that went with it are not shown there.
 With it on the page uses the whole screen, the
 strip beside a camera cutout included, so nothing is left over. The
 keyboard is still kept clear, or it would cover what is being typed.
+
+## The cover on the car screen
+
+The app's own media session is what the lock screen, the car stereo and
+Bluetooth see, and it used to skip an update whose title, second line and
+cover were the same as the last one. Picking up again after a pause is
+exactly that case, so a head unit that had forgotten the cover never got it
+back until the song changed. With **Resend art on resume** on in the
+settings, the song is now sent again when playback picks up: first without
+the cover and 400 ms later with it, since an identical update is ignored
+further down the line. A Bluetooth device that connects gets the same
+treatment a second and a half later, whatever the setting says, because
+that is when a car stereo asks for the song and some ask too early.
 
 ## Volume
 
