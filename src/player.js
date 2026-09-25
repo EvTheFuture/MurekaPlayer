@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.72";
+    const VERSION = "1.6.0.82";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -236,6 +236,26 @@
 
     // User settings, loaded once on startup, published is the default start feed
     let settings = loadSettings();
+
+    // Debug overlay, declared early since anything can log from the start.
+    // A see-through layer over the whole page that lists what happens as it
+    // happens: keys, taps, media buttons, commands from the app, the audio
+    // element's events, fullscreen and visibility, with live numbers at the
+    // top. It never takes a tap. Nothing in it receives pointer events, so
+    // every touch and click goes to what is underneath
+    let debugOverlayEl = null;
+    let debugStateEl = null;
+    let debugLogEl = null;
+    let debugTimer = null;
+
+    // The event log, newest last. It is kept with the overlay off as well,
+    // so switching it on shows what just happened
+    const DEBUG_LOG_KEEP = 300;
+    const DEBUG_LOG_SHOW = 80;
+    const debugLog = [];
+
+    // The status line's last text, each new one is logged once
+    let debugLastStatus = "";
 
     // The last browsed source, used to reopen on your feed or a creator when
     // the player is set to start where it was left. Set to published or all,
@@ -1094,6 +1114,8 @@
             directAudio: true,
             remoteArtwork: false,
             artOnResume: false,
+            pauseOnDisconnect: false,
+            playOnConnect: "never",
             controlOrder: "repeat,shuffle,stop,play",
             controlLabels: false,
             tagGenres: [],
@@ -1126,6 +1148,8 @@
             blackoutSize: 64,
             blackoutDrift: 25,
             countsMaxAge: 4,
+            prevRestartOn: true,
+            prevRestart: 3,
             waveSeek: true,
             webUpNext: true,
             webWave: true,
@@ -1145,7 +1169,9 @@
             webLyricSideShift: null,
             metaTitle: "${title}",
             metaSubtitle: "${genre}",
-            debugLine: false
+            debugOverlay: false,
+            webDebugOverlay: false,
+            webSeekActions: true
         };
 
         try {
@@ -1203,6 +1229,11 @@
                     directAudio: parsed.directAudio !== false,
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
+                    pauseOnDisconnect: parsed.pauseOnDisconnect === true,
+                    // Never, only if it was playing when Bluetooth went away,
+                    // or always. The first version was a plain switch
+                    playOnConnect: ["never", "resume", "always"].indexOf(parsed.playOnConnect) >= 0
+                        ? parsed.playOnConnect : (parsed.playOnConnect === true ? "always" : "never"),
                     controlLabels: parsed.controlLabels === true,
                     tagGenres: Array.isArray(parsed.tagGenres) ? parsed.tagGenres : [],
                     tagMoods: Array.isArray(parsed.tagMoods) ? parsed.tagMoods : [],
@@ -1257,6 +1288,12 @@
                     countsMaxAge: (typeof parsed.countsMaxAge === "number"
                         && parsed.countsMaxAge >= 1 && parsed.countsMaxAge <= 72)
                         ? parsed.countsMaxAge : 4,
+                    // 0 seconds used to mean off, from before the switch
+                    prevRestartOn: typeof parsed.prevRestartOn === "boolean"
+                        ? parsed.prevRestartOn : parsed.prevRestart !== 0,
+                    prevRestart: (typeof parsed.prevRestart === "number"
+                        && parsed.prevRestart >= 1 && parsed.prevRestart <= 30)
+                        ? parsed.prevRestart : 3,
                     waveSeek: parsed.waveSeek !== false,
                     webUpNext: parsed.webUpNext !== false,
                     webWave: parsed.webWave !== false,
@@ -1294,7 +1331,9 @@
                     metaSubtitle: typeof parsed.metaSubtitle === "string"
                         ? parsed.metaSubtitle
                         : "${genre}",
-                    debugLine: parsed.debugLine === true
+                    debugOverlay: parsed.debugOverlay === true || parsed.debugLine === true,
+                    webDebugOverlay: parsed.webDebugOverlay === true,
+                    webSeekActions: parsed.webSeekActions !== false
                 };
             }
         } catch (e) {
@@ -1306,9 +1345,37 @@
     // Persist the settings object to localStorage
     function saveSettings() {
 
+        logSettingChanges();
+
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (e) {
+        }
+    }
+
+    // Each changed setting as one log line, long values shortened. The
+    // settings as last saved are kept on the function itself, which exists
+    // from the start. The first time they are read back from storage the
+    // way the player reads them, defaults filled in
+    function logSettingChanges() {
+
+        const now = JSON.parse(JSON.stringify(settings));
+        const before = logSettingChanges.saved || loadSettings();
+
+        logSettingChanges.saved = now;
+
+        const show = function (v) {
+
+            const text = JSON.stringify(v);
+
+            return text === undefined ? "unset" : (text.length > 40 ? text.slice(0, 40) + "..." : text);
+        };
+
+        for (const key of Object.keys(now)) {
+
+            if (JSON.stringify(now[key]) !== JSON.stringify(before[key])) {
+                dbgLog("Setting", key + " " + show(before[key]) + " -> " + show(now[key]));
+            }
         }
     }
 
@@ -2372,6 +2439,11 @@
 
         const r = currentSong ? getRating(currentSong) : null;
 
+        // Filled once the song is rated, plain before. On the filled button
+        // the star takes the button's own dark colour, gold would not show
+        // on the accent
+        paintCtrl(rateCtrlBtn, r === null ? "plain" : "fill");
+
         if (r === null) {
 
             rateIconSvg.starPath.setAttribute("fill", "none");
@@ -2379,7 +2451,14 @@
             rateIconSvg.starHalf.style.display = "none";
 
         } else {
-            paintStar(rateIconSvg, r >= 1 ? 1 : (r > 0 ? 0.5 : 0), true);
+
+            const level = r >= 1 ? 1 : (r > 0 ? 0.5 : 0);
+
+            rateIconSvg.starPath.setAttribute("fill", level >= 1 ? "currentColor" : "none");
+            rateIconSvg.starPath.setAttribute("stroke", "currentColor");
+            rateIconSvg.starHalf.setAttribute("fill", "currentColor");
+            rateIconSvg.starHalf.setAttribute("stroke", "currentColor");
+            rateIconSvg.starHalf.style.display = level === 0.5 ? "" : "none";
         }
 
         updateControlLabels();
@@ -4492,6 +4571,9 @@
             updateControlLabels();
             publishedCtrlBtn.title = onlyPublished ? "Showing published, tap for all" : "Showing all, tap for published";
 
+            // Filled for published only, ringed for every song
+            paintCtrl(publishedCtrlBtn, onlyPublished ? "fill" : "ring");
+
             // Greyed and inert while browsing a creator
             publishedCtrlBtn.style.opacity = creatorSource ? "0.35" : "1";
             publishedCtrlBtn.style.cursor = creatorSource ? "default" : "pointer";
@@ -5365,6 +5447,15 @@
         audio.preload = "auto";
         (document.body || document.documentElement).appendChild(audio);
 
+        // What the element does, for the debug overlay
+        ["loadstart", "canplay", "play", "playing", "pause", "waiting", "stalled",
+            "seeked", "ended", "emptied", "error"].forEach(function (name) {
+
+            audio.addEventListener(name, function () {
+                dbgLog("Audio", name + " at " + dbgNum(audio.currentTime));
+            });
+        });
+
         audio.addEventListener("ended", function () {
             handleSongEnded();
         });
@@ -5975,7 +6066,25 @@
 
     // Go to the previous song, however far into the current one. Only at the
     // first song, with nothing to wrap round to, does it start this one over
+    // Previous, from any button: the player's own, the lock screen,
+    // Bluetooth, a steering wheel or the web view. With the setting on,
+    // past the first seconds of a song it goes back to the start of the
+    // song first, the way a car stereo does. Off, it always goes to the
+    // previous song
     function playPrev() {
+
+        const restartAfter = settings.prevRestartOn === false ? 0
+            : (typeof settings.prevRestart === "number" ? settings.prevRestart : 3);
+
+        if (restartAfter > 0 && audio && audio.src && isFinite(audio.currentTime)
+            && audio.currentTime > restartAfter) {
+
+            dbgLog("Song", "previous restarts the song");
+            audio.currentTime = 0;
+            updateSeekDisplay();
+            publishHostSoon();
+            return;
+        }
 
         if (queuePos > 0) {
             queuePos -= 1;
@@ -6104,15 +6213,41 @@
         saveSettings();
     }
 
-    // Highlight the shuffle button when shuffle mode is active
-    function updateShuffleButton() {
+    // The three looks a control button has, the same as in the web view.
+    // Filled: on, or narrowing things down. Ringed: a ring drawn inside,
+    // for the whole library or for something paused or running. Plain: off
+    const CTRL_ACCENT = "#48e1eb";
 
-        if (!shuffleBtn) {
+    // Thinner than the web view's, the buttons here are much smaller
+    const CTRL_RING = "inset 0 0 0 2px ";
+
+    function paintCtrl(btn, look) {
+
+        if (!btn) {
             return;
         }
 
-        shuffleBtn.style.background = shuffleMode ? "#48e1eb" : "#333";
-        shuffleBtn.style.color = shuffleMode ? "#000" : "#fff";
+        if (look === "fill") {
+
+            btn.style.background = CTRL_ACCENT;
+            btn.style.color = "#000";
+            btn.style.boxShadow = "none";
+        } else if (look === "ring") {
+
+            btn.style.background = "#333";
+            btn.style.color = CTRL_ACCENT;
+            btn.style.boxShadow = CTRL_RING + CTRL_ACCENT;
+        } else {
+
+            btn.style.background = "#333";
+            btn.style.color = "#fff";
+            btn.style.boxShadow = "none";
+        }
+    }
+
+    // Shuffle on is filled, off is plain
+    function updateShuffleButton() {
+        paintCtrl(shuffleBtn, shuffleMode ? "fill" : "plain");
     }
 
     // Readable label for the current repeat mode
@@ -6170,9 +6305,8 @@
         // Replace the icon, repeat one shows a 1 inside the loop
         setTransportIcon(repeatBtn, makeRepeatIcon(repeatMode === "one"));
 
-        const on = repeatMode !== "none";
-        repeatBtn.style.background = on ? "#48e1eb" : "#333";
-        repeatBtn.style.color = on ? "#000" : "#fff";
+        // Repeat all is filled, repeat one ringed, off plain
+        paintCtrl(repeatBtn, repeatMode === "all" ? "fill" : (repeatMode === "one" ? "ring" : "plain"));
         repeatBtn.title = "Repeat: " + repeatLabel();
     }
 
@@ -6754,11 +6888,8 @@
             ? "Vocals only, tap for instrumental"
             : (mode === "instrumental" ? "Instrumental only, tap for all" : "All songs, tap for vocals");
 
-        // Highlighted whenever it is actually filtering something out
-        const on = mode !== "all";
-
-        vocalsCtrlBtn.style.background = on ? "#48e1eb" : "#333";
-        vocalsCtrlBtn.style.color = on ? "#000" : "#fff";
+        // Filled while it filters something out, ringed for all songs
+        paintCtrl(vocalsCtrlBtn, mode !== "all" ? "fill" : "ring");
     }
 
     // A filter left on from last time must be visible, otherwise a short list
@@ -7022,6 +7153,8 @@
 
         ensureAudio();
         currentSong = song;
+        dbgLog("Song", (song.title || "Untitled") + " (" + song.song_id + "), queue "
+            + (queuePos + 1) + "/" + queue.length);
 
         // Drop counts from the previous song until the detail call returns
         nowPlayingCounts = null;
@@ -7828,14 +7961,18 @@
 
         try {
             wakeLock = await navigator.wakeLock.request("screen");
+            dbgLog("Screen", "kept on");
 
             // The system drops the lock whenever the page is hidden
             wakeLock.addEventListener("release", function () {
+
                 wakeLock = null;
+                dbgLog("Screen", "left to the phone");
             });
         } catch (e) {
 
             wakeLock = null;
+            dbgLog("Screen", "could not keep it on");
         }
     }
 
@@ -7890,6 +8027,8 @@
     // so this costs almost nothing and reads as a screen that went dark, while
     // the phone stays unlocked and one tap brings the player straight back
     function showBlackout() {
+
+        dbgLog("Screen", "black cover up");
 
         if (!blackoutEl) {
             buildBlackout();
@@ -8676,6 +8815,9 @@
     // With Debug mode on, say why a key was passed over
     function shortcutTrace(ev, why) {
 
+        dbgLog("Key", (isField(ev.target) && ev.key && ev.key.length === 1
+            ? "(a typed character)" : JSON.stringify(ev.key)) + ": " + why);
+
         if (isDebug()) {
             setStatus("Key " + JSON.stringify(ev.key) + ": " + why);
         }
@@ -9101,6 +9243,8 @@
 
     // Take the black cover away and start counting idle time again
     function hideBlackout() {
+
+        dbgLog("Screen", "black cover down");
 
         stopDrift();
 
@@ -10190,6 +10334,9 @@
         // Pause glyph while playing, play glyph while paused
         setTransportIcon(playPauseBtn, playing ? iconPause() : iconPlay());
         updateControlLabels();
+
+        // Filled while playing, ringed while paused, plain when stopped
+        paintCtrl(playPauseBtn, playing ? "fill" : (currentSong ? "ring" : "plain"));
 
         if ("mediaSession" in navigator) {
 
@@ -11737,9 +11884,16 @@
 
         const setHandler = function (action, fn) {
 
+            // Every action goes through the log on its way in
+            const logged = function (details) {
+
+                dbgLog("Media", action + dbgDetails(details));
+                fn(details);
+            };
+
             try {
 
-                navigator.mediaSession.setActionHandler(action, fn);
+                navigator.mediaSession.setActionHandler(action, logged);
                 accepted.push(action);
 
             } catch (e) {
@@ -12621,7 +12775,11 @@
                 && typeof nowPlayingCounts.play_count === "number" ? nowPlayingCounts.play_count : null,
             playFrom: hostPlayFrom(),
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
+            debugOverlay: settings.webDebugOverlay === true,
+            seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
+            pauseOnDisconnect: settings.pauseOnDisconnect === true,
+            playOnConnect: settings.playOnConnect || "never",
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
@@ -13508,6 +13666,17 @@
     // Run one command from the app, from the phone's media buttons or the web view
     function hostCommand(cmd, arg) {
 
+        // A web view's debug log, kept for Copy debug log, not a command for
+        // the player
+        if (cmd === "webDebugLog") {
+
+            receiveWebViewLog(arg);
+            return;
+        }
+
+        dbgLog("Command", cmd + (arg !== null && arg !== undefined
+            ? " " + String(JSON.stringify(arg)).slice(0, 80) : ""));
+
         if (cmd === "toggle") {
             togglePlayPause();
         } else if (cmd === "play") {
@@ -13784,6 +13953,19 @@
             applyCarAudioVolume();
 
             setStatus(hostCarAudio ? "Music plays in the browser" : "Music plays on the phone");
+        } else if (cmd === "takeSound") {
+
+            // Play, a skip or a seek from Bluetooth, the lock screen or a
+            // steering wheel, sent just before the command itself. With the
+            // music set to a browser, the car has gone back to Bluetooth, a
+            // Tesla does once the page pauses, so the sound comes back here
+            // and the web view follows
+            if (hostCarAudio) {
+
+                hostCarAudio = false;
+                applyCarAudioVolume();
+                setStatus("Music plays on the phone, Bluetooth took it back");
+            }
         }
 
         publishHostSoon();
@@ -14936,33 +15118,7 @@
         bodyEl.appendChild(countsEl);
         bodyEl.appendChild(listWrapEl);
 
-        // The debug readout sits between the header and the body, outside the
-        // player block, so it stays in view while the keyboard hides that
-        // block. Tapping it copies everything it holds
-        debugLineEl = document.createElement("div");
-        debugLineEl.style.cssText = [
-            "display:none",
-            "flex:0 0 auto",
-            "margin:2px 0 4px",
-            "padding:4px 6px",
-            "border-radius:6px",
-            "background:#101014",
-            "border:1px solid #2e2e36",
-            "color:#9fe8ee",
-            "font:10px/1.35 ui-monospace,Menlo,monospace",
-            "white-space:pre-wrap",
-            "word-break:break-all",
-            "cursor:copy"
-        ].join(";");
-        debugLineEl.title = "Tap to copy the debug line";
-        debugLineEl.addEventListener("click", function (ev) {
-
-            ev.stopPropagation();
-            copyDebugLine();
-        });
-
         panel.appendChild(header);
-        panel.appendChild(debugLineEl);
         panel.appendChild(bodyEl);
         buildResizeHandles(panel);
 
@@ -15106,9 +15262,9 @@
             });
         }
 
-        // Bring the debug line up first when it is switched on, so the very
-        // first sizing passes are in its history
-        updateDebugLine();
+        // Bring the debug overlay up first when it is switched on, so the
+        // very first sizing passes are in its log
+        updateDebugOverlay();
 
         // Size the panel to the real visible area and keep it in sync as iOS
         // Safari shows or hides its toolbar
@@ -15549,12 +15705,6 @@
         applyPosition(left, top);
     }
 
-    // Debug line, a diagnostic readout under the header that is only there
-    // while the Debug line setting is on. It exists to see what the browser
-    // reports at the moments the panel is sized, which cannot be seen any
-    // other way on a phone
-    let debugLineEl = null;
-    let debugTimer = null;
 
     // The most recent sizing passes, newest last. A few are shown, all of
     // them go out with a copy
@@ -15657,35 +15807,209 @@
             + " -> " + f.set;
     }
 
-    // Put the readout on screen, or take it away when the setting is off
-    function renderDebugLine() {
+    function debugOverlayOn() {
 
-        if (!debugLineEl) {
-            return;
+        return settings.debugOverlay === true;
+    }
+
+    // Which kind of window the browser says it is, the way a web app can
+    // tell a fullscreen launch from a normal tab
+    function dbgDisplayMode() {
+
+        const modes = ["fullscreen", "standalone", "minimal-ui", "browser"];
+
+        for (const m of modes) {
+
+            try {
+
+                if (window.matchMedia("(display-mode: " + m + ")").matches) {
+                    return m;
+                }
+            } catch (e) {
+                return "-";
+            }
         }
 
-        const show = settings.debugLine === true && !minimized;
+        return "-";
+    }
 
-        debugLineEl.style.display = show ? "block" : "none";
+    // A short description of an element, enough to tell what a tap hit.
+    // A tap on an icon inside a button names the button
+    function dbgTarget(el) {
 
-        if (!show) {
-            return;
+        if (!el || !el.tagName) {
+            return "-";
         }
 
-        const lines = debugNowLines();
-        const recent = debugFits.slice(-DEBUG_FIT_SHOW);
+        if (el.closest) {
+            el = el.closest("button, a, input, select, textarea, label, [role=button], [title], [aria-label], [id]") || el;
+        }
 
-        for (const f of recent) {
+        let text = el.tagName.toLowerCase();
+
+        if (el.id) {
+            text += "#" + el.id;
+        }
+
+        const label = el.getAttribute("aria-label") || el.getAttribute("title");
+
+        if (label) {
+            text += " \"" + label.slice(0, 30) + "\"";
+        } else if (el.textContent && el.textContent.trim()) {
+            text += " \"" + el.textContent.trim().replace(/\s+/g, " ").slice(0, 30) + "\"";
+        }
+
+        return text;
+    }
+
+    // What came with a media action, the seek step or the position
+    function dbgDetails(d) {
+
+        if (!d) {
+            return "";
+        }
+
+        const parts = [];
+
+        if (typeof d.seekOffset === "number") {
+            parts.push("offset " + d.seekOffset);
+        }
+
+        if (typeof d.seekTime === "number") {
+            parts.push("time " + dbgNum(d.seekTime));
+        }
+
+        if (d.fastSeek) {
+            parts.push("fast");
+        }
+
+        return parts.length ? " (" + parts.join(", ") + ")" : "";
+    }
+
+    // Add one line to the log, and show it at once while the overlay is up
+    function dbgLog(kind, text) {
+
+        debugLog.push(dbgTime() + " " + kind + " " + text);
+
+        while (debugLog.length > DEBUG_LOG_KEEP) {
+            debugLog.shift();
+        }
+
+        if (debugOverlayOn() && debugLogEl) {
+            debugLogEl.textContent = debugLog.slice(-DEBUG_LOG_SHOW).join("\n");
+        }
+    }
+
+    // The audio element in one line
+    function debugAudioLine() {
+
+        if (!audio) {
+            return "audio none";
+        }
+
+        let src = "none";
+
+        if (audio.src) {
+            src = audio.src.indexOf("blob:") === 0 ? "saved copy" : "link";
+        }
+
+        return "audio " + (audio.paused ? "paused" : "playing")
+            + " " + dbgNum(audio.currentTime) + "/" + dbgNum(audio.duration)
+            + " | ready " + audio.readyState + " net " + audio.networkState
+            + " | src " + src
+            + " | vol " + dbgNum(audio.volume) + (audio.muted ? " muted" : "")
+            + (audio.error ? " | error " + audio.error.code : "");
+    }
+
+    // The live numbers at the top of the overlay
+    function debugStateLines() {
+
+        let host = "bookmarklet";
+
+        if (isApkHost()) {
+            host = "app";
+        } else if (isExtensionHost()) {
+            host = "extension";
+        }
+
+        const lines = [];
+
+        lines.push("Mureka Player " + VERSION + " | " + host
+            + " | " + dbgDisplayMode()
+            + " | vis " + dbgFlag(!document.hidden)
+            + " foc " + dbgFlag(document.hasFocus()));
+
+        Array.prototype.push.apply(lines, debugNowLines());
+
+        lines.push(debugAudioLine());
+        lines.push("song " + (currentSong ? currentSong.song_id : "-")
+            + " | queue " + (queuePos + 1) + "/" + queue.length
+            + " | repeat " + repeatMode + " | shuffle " + dbgFlag(shuffleMode)
+            + " | user paused " + dbgFlag(userPaused));
+        lines.push("screen " + screenMode()
+            + " | lock " + dbgFlag(!!wakeLock)
+            + " | cover " + dbgFlag(isBlackedOut()));
+
+        for (const f of debugFits.slice(-DEBUG_FIT_SHOW)) {
             lines.push(debugFitLine(f));
         }
 
-        debugLineEl.textContent = lines.join("\n");
+        return lines;
     }
 
-    // Log one sizing pass, only kept while the setting is on
+    function buildDebugOverlay() {
+
+        const flat = "pointer-events:none;white-space:pre-wrap;word-break:break-all";
+
+        debugOverlayEl = document.createElement("div");
+        debugOverlayEl.setAttribute("aria-hidden", "true");
+        debugOverlayEl.style.cssText = [
+            "position:fixed",
+            "inset:0",
+            "z-index:2147483647",
+            "pointer-events:none",
+            "user-select:none",
+            "-webkit-user-select:none",
+            "display:none",
+            "flex-direction:column",
+            "gap:6px",
+            "box-sizing:border-box",
+            "padding:calc(env(safe-area-inset-top) + 6px) calc(env(safe-area-inset-right) + 6px)"
+                + " calc(env(safe-area-inset-bottom) + 6px) calc(env(safe-area-inset-left) + 6px)",
+            "background:rgba(0,0,0,0.55)",
+            "color:#9fe8ee",
+            "font:10px/1.35 ui-monospace,Menlo,monospace",
+            "text-shadow:0 0 2px #000",
+            "overflow:hidden"
+        ].join(";");
+
+        debugStateEl = document.createElement("div");
+        debugStateEl.style.cssText = flat + ";flex:0 0 auto;color:#fff";
+
+        // Newest at the bottom, the oldest scroll off the top
+        debugLogEl = document.createElement("div");
+        debugLogEl.style.cssText = flat + ";flex:1 1 auto;min-height:0;overflow:hidden"
+            + ";display:flex;flex-direction:column;justify-content:flex-end"
+            + ";border-top:1px solid rgba(159,232,238,0.35);padding-top:4px";
+
+        debugOverlayEl.appendChild(debugStateEl);
+        debugOverlayEl.appendChild(debugLogEl);
+    }
+
+    // Refresh the live numbers
+    function renderDebugOverlay() {
+
+        if (!debugOverlayEl || !debugOverlayOn()) {
+            return;
+        }
+
+        debugStateEl.textContent = debugStateLines().join("\n");
+    }
+
+    // Log one sizing pass, kept while the overlay is on
     function recordFit(entry) {
 
-        if (settings.debugLine !== true) {
+        if (!debugOverlayOn()) {
             return;
         }
 
@@ -15696,11 +16020,11 @@
             debugFits.shift();
         }
 
-        renderDebugLine();
+        dbgLog("Size", debugFitLine(entry));
     }
 
-    // Start or stop the live refresh to match the setting
-    function updateDebugLine() {
+    // Show or hide the overlay to match the setting
+    function updateDebugOverlay() {
 
         if (debugTimer) {
 
@@ -15708,44 +16032,230 @@
             debugTimer = null;
         }
 
-        if (settings.debugLine === true) {
+        if (!debugOverlayOn()) {
 
-            // The now lines keep moving after the last sizing pass, which is
-            // exactly the part worth watching once the keyboard has gone
-            debugTimer = setInterval(renderDebugLine, 500);
-        } else {
+            if (debugOverlayEl) {
+                debugOverlayEl.style.display = "none";
+            }
+
             debugFits.length = 0;
+            return;
         }
 
-        renderDebugLine();
+        if (!debugOverlayEl) {
+            buildDebugOverlay();
+        }
+
+        // On the root element, after everything else, so it is above the
+        // page and the player, fullscreen included
+        if (debugOverlayEl.parentNode !== document.documentElement
+            || debugOverlayEl.nextSibling) {
+            document.documentElement.appendChild(debugOverlayEl);
+        }
+
+        debugOverlayEl.style.display = "flex";
+        debugLogEl.textContent = debugLog.slice(-DEBUG_LOG_SHOW).join("\n");
+        renderDebugOverlay();
+        debugTimer = setInterval(renderDebugOverlay, 500);
     }
 
-    // Copy everything the readout holds, the full pass history included, so
-    // it can be pasted rather than read off the screen
-    function copyDebugLine() {
+    // The last log a web view sent, copied along with this one
+    let webViewDebugLog = "";
 
-        const lines = debugNowLines();
+    function receiveWebViewLog(text) {
 
-        for (const f of debugFits) {
-            lines.push(debugFitLine(f));
+        webViewDebugLog = String(text || "");
+        dbgLog("App", "web view log received, " + webViewDebugLog.split("\n").length + " lines");
+        setStatus("Web view log received, Copy debug log includes it");
+    }
+
+    // Copy the live numbers and the whole log, so they can be pasted rather
+    // than read off the screen
+    function copyDebugLog() {
+
+        const lines = debugStateLines();
+
+        lines.push("");
+        Array.prototype.push.apply(lines, debugLog);
+        lines.push("");
+        lines.push(navigator.userAgent || "");
+
+        if (webViewDebugLog) {
+
+            lines.push("");
+            lines.push("Web view log:");
+            lines.push(webViewDebugLog);
         }
-
-        lines.push("v" + VERSION + " " + (navigator.userAgent || ""));
 
         const text = lines.join("\n");
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
 
             navigator.clipboard.writeText(text).then(function () {
-                setStatus("Debug line copied");
+                setStatus("Debug log copied");
             }, function () {
-                setStatus("Could not copy the debug line");
+                setStatus("Could not copy the debug log");
             });
 
             return;
         }
 
         setStatus("Clipboard not available");
+    }
+
+    // What the page receives, written to the log. Only ever listens: every
+    // listener is passive, none of them stops or changes an event
+    let debugWatching = false;
+    let debugWheel = null;
+    let debugResizeTimer = null;
+
+    function installDebugWatchers() {
+
+        if (debugWatching) {
+            return;
+        }
+
+        debugWatching = true;
+
+        const opts = { capture: true, passive: true };
+
+        const keyText = function (ev) {
+
+            // What is typed into a field stays private, only that it was
+            const key = isField(ev.target) && ev.key && ev.key.length === 1
+                ? "(a typed character)"
+                : JSON.stringify(ev.key);
+
+            return key + " code " + (ev.code || "-") + " keyCode " + ev.keyCode
+                + (ev.repeat ? " repeat" : "")
+                + (ev.ctrlKey ? " ctrl" : "") + (ev.altKey ? " alt" : "")
+                + (ev.metaKey ? " meta" : "") + (ev.shiftKey ? " shift" : "");
+        };
+
+        window.addEventListener("keydown", function (ev) {
+            dbgLog("Key", "down " + keyText(ev));
+        }, opts);
+
+        window.addEventListener("keyup", function (ev) {
+            dbgLog("Key", "up " + keyText(ev));
+        }, opts);
+
+        window.addEventListener("pointerdown", function (ev) {
+
+            dbgLog("Press", (ev.pointerType || "pointer") + " at " + Math.round(ev.clientX)
+                + "," + Math.round(ev.clientY) + " on " + dbgTarget(ev.target));
+        }, opts);
+
+        window.addEventListener("click", function (ev) {
+            dbgLog("Click", dbgTarget(ev.target) + (ev.isTrusted ? "" : " (from a script)"));
+        }, opts);
+
+        window.addEventListener("dblclick", function (ev) {
+            dbgLog("Click", "double on " + dbgTarget(ev.target));
+        }, opts);
+
+        window.addEventListener("contextmenu", function (ev) {
+            dbgLog("Press", "long on " + dbgTarget(ev.target));
+        }, opts);
+
+        // Browsers without pointer events still send touches
+        if (!window.PointerEvent) {
+
+            window.addEventListener("touchstart", function (ev) {
+
+                const t = ev.touches && ev.touches[0];
+
+                dbgLog("Press", "touch" + (t ? " at " + Math.round(t.clientX) + "," + Math.round(t.clientY) : "")
+                    + " on " + dbgTarget(ev.target));
+            }, opts);
+        }
+
+        // A scroll wheel sends many events, so they are added up and written
+        // as one line once it stops for a moment
+        window.addEventListener("wheel", function (ev) {
+
+            if (!debugWheel) {
+
+                debugWheel = { x: 0, y: 0, n: 0 };
+
+                setTimeout(function () {
+
+                    const w = debugWheel;
+
+                    debugWheel = null;
+                    dbgLog("Wheel", w.n + " events, x " + dbgNum(w.x) + " y " + dbgNum(w.y));
+                }, 300);
+            }
+
+            debugWheel.x += ev.deltaX;
+            debugWheel.y += ev.deltaY;
+            debugWheel.n += 1;
+        }, opts);
+
+        document.addEventListener("visibilitychange", function () {
+            dbgLog("Page", document.hidden ? "hidden" : "visible");
+        });
+
+        window.addEventListener("focus", function () {
+            dbgLog("Page", "focus");
+        });
+
+        window.addEventListener("blur", function () {
+            dbgLog("Page", "blur");
+        });
+
+        document.addEventListener("fullscreenchange", function () {
+            dbgLog("Page", "fullscreen " + (document.fullscreenElement ? "on" : "off"));
+        });
+
+        document.addEventListener("webkitfullscreenchange", function () {
+            dbgLog("Page", "fullscreen " + (document.webkitFullscreenElement ? "on" : "off") + " (webkit)");
+        });
+
+        window.addEventListener("resize", function () {
+
+            clearTimeout(debugResizeTimer);
+
+            debugResizeTimer = setTimeout(function () {
+                dbgLog("Page", "resize " + window.innerWidth + "x" + window.innerHeight);
+            }, 300);
+        });
+
+        window.addEventListener("popstate", function () {
+            dbgLog("Page", "back or forward in history");
+        });
+
+        window.addEventListener("pagehide", function () {
+            dbgLog("Page", "hide");
+        });
+
+        window.addEventListener("online", function () {
+            dbgLog("Net", "online");
+        });
+
+        window.addEventListener("offline", function () {
+            dbgLog("Net", "offline");
+        });
+
+        window.addEventListener("error", function (ev) {
+            dbgLog("Error", String(ev.message || "unknown") + " line " + (ev.lineno || "-"));
+        });
+
+        // The app writes here what reached it, a Bluetooth button or a web
+        // view, before the command itself arrives
+        window.__murekaDebugNote = function (text) {
+            dbgLog("App", String(text).slice(0, 200));
+        };
+    }
+
+    // The status line into the log too, each new text once
+    function debugStatus(text) {
+
+        if (text && text !== debugLastStatus) {
+
+            debugLastStatus = text;
+            dbgLog("Status", text);
+        }
     }
 
     // On phones the panel fills the screen, but iOS Safari changes the visible
@@ -16318,6 +16828,7 @@
     function setStatus(text) {
 
         statusText = text || "";
+        debugStatus(statusText);
 
         // Before the panel is built there is nowhere to put it, and the
         // marquee picks the text up from statusText once it exists
@@ -16708,9 +17219,12 @@
             // look like the active one while Rescan was the one saying Stop
             const failed = !active && loadFail && loadFail.kind === owner;
 
-            btn.style.background = active ? "#48e1eb" : "#444";
-            btn.style.color = active ? "#000" : (failed ? "#ff8a8a" : "#fff");
-            btn.style.boxShadow = failed ? "inset 0 0 0 2px #ff6b6b" : "";
+            // Ringed while it runs, like the web view's Update button, and a
+            // red ring after a failure
+            btn.style.background = "#444";
+            btn.style.color = active ? CTRL_ACCENT : (failed ? "#ff8a8a" : "#fff");
+            btn.style.boxShadow = active ? CTRL_RING + CTRL_ACCENT
+                : (failed ? CTRL_RING + "#ff6b6b" : "");
             btn.title = failed ? restLabel + " failed: " + loadFail.why : "";
 
             // The other button cannot start anything while a run is going on,
@@ -17652,6 +18166,10 @@
         let webPageBtn = null;
         let connPageBtn = null;
 
+        // The Bluetooth start and stop rows, only in the app, put under This
+        // device together with Autoplay on start further down
+        const bluetoothPlayEls = [];
+
         const mainPage = makePage();
         const mobilePage = makePage();
         const webPage = makePage();
@@ -17832,11 +18350,12 @@
             function () { return isDebug(); },
             function (v) { setDebug(v); });
 
-        // A readout of what the browser reports while the panel is sized, for
-        // chasing layout problems on a phone
-        const debugLineRow = makeBoolRow("Debug line",
-            function () { return settings.debugLine === true; },
-            function (v) { settings.debugLine = v; updateDebugLine(); });
+        // Everything the player receives and does, over the whole page
+        const debugOverlayRow = makeBoolRow("Debug overlay",
+            function () { return settings.debugOverlay === true; },
+            function (v) { settings.debugOverlay = v; updateDebugOverlay(); });
+
+        const copyLogBtn = makeButton("Copy debug log", "#333", "#fff", copyDebugLog);
 
         const artTestRow = makeBoolRow("Artwork test button (blocks swipe)",
             function () { return settings.artTest; },
@@ -17851,9 +18370,33 @@
         libraryPage.appendChild(makeLabel("Updates and numbers"));
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
-        playbackPage.appendChild(withHint(autoplayRow, "Starts playing as soon as the player has opened and has songs."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka, as Mureka's own player does. Off keeps your listening out of the play counts."));
         playbackPage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
+
+        // The seconds only matter with the switch on, so they are hidden
+        // with it off, on the phone and in the web view alike
+        const prevSecondsRow = makeStepperRow("Seconds before it restarts",
+            function () { return typeof settings.prevRestart === "number" ? settings.prevRestart : 3; },
+            function (v) { settings.prevRestart = v; }, 1, 30);
+        const prevSecondsBox = withHint(prevSecondsRow, "A press within this many seconds of the start still goes to the previous song. Raise it if the car or the phone is slow to react.");
+
+        const showPrevSeconds = function () {
+            prevSecondsBox.style.display = settings.prevRestartOn === false ? "none" : "";
+        };
+
+        const prevRestartRow = makeBoolRow("Previous restarts the song",
+            function () { return settings.prevRestartOn !== false; },
+            function (v) {
+
+                settings.prevRestartOn = v;
+                showPrevSeconds();
+            });
+
+        settingsRefreshers.push(showPrevSeconds);
+        showPrevSeconds();
+
+        playbackPage.appendChild(withHint(prevRestartRow, "On, previous first goes back to the start of the song, like a car stereo. Off, it always goes straight to the previous song. It applies to every previous button: the player's, the lock screen, Bluetooth, the steering wheel and the web view."));
+        playbackPage.appendChild(prevSecondsBox);
         nowPage.appendChild(makeLabel("Text"));
         nowPage.appendChild(makeHint("The two lines shown on the lock screen, in the notification and on screens connected over Bluetooth."));
         nowPage.appendChild(titleTplRow);
@@ -18058,7 +18601,11 @@
 
             const appFullRow = makeBoolRow("Fullscreen",
                 function () { return window.MurekaHost.getPref("appFullscreen", "1") === "1"; },
-                function (v) { window.MurekaHost.setPref("appFullscreen", v ? "1" : "0"); });
+                function (v) {
+
+                    dbgLog("Setting", "app fullscreen -> " + (v ? "on" : "off"));
+                    window.MurekaHost.setPref("appFullscreen", v ? "1" : "0");
+                });
 
             mobilePage.appendChild(withHint(appFullRow, "The app hides Android's status and navigation bars while it is on screen. A swipe from the edge brings them back for a moment."));
         }
@@ -18434,6 +18981,27 @@
             connPage.appendChild(carHint);
             devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
 
+            // The phone tells the service when a Bluetooth output goes away,
+            // the service does the pausing, so it works with the screen off
+            const pauseBtRow = makeBoolRow("Pause when Bluetooth disconnects",
+                function () { return settings.pauseOnDisconnect === true; },
+                function (v) { settings.pauseOnDisconnect = v; publishHostSoon(); });
+
+            const playBtRow = makeChoiceRow([
+                { label: "Never", value: "never" },
+                { label: "If it was playing", value: "resume" },
+                { label: "Always", value: "always" }
+            ], function () { return settings.playOnConnect || "never"; }, function (v) {
+
+                settings.playOnConnect = v;
+                publishHostSoon();
+            });
+
+            bluetoothPlayEls.push(makeLabel("Play when Bluetooth connects"));
+            bluetoothPlayEls.push(playBtRow);
+            bluetoothPlayEls.push(makeHint("Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
+            bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the phone's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));
+
             webPageBtn = makePageButton("Web view", "web");
             connPageBtn = makePageButton("Connections", "connections");
 
@@ -18442,9 +19010,40 @@
             connPageBtn.dataset.hostSkip = "1";
         }
 
+        // Everything that starts or stops the music by itself, together.
+        // What starts it depends on the device, so it lives here and is
+        // never synced
+        devicePage.appendChild(makeLabel("Playing by itself"));
+        devicePage.appendChild(withHint(autoplayRow, "Starts playing as soon as the player has opened and has songs."));
+
+        for (const el of bluetoothPlayEls) {
+            devicePage.appendChild(el);
+        }
+
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         devPage.appendChild(debugRow);
-        devPage.appendChild(withHint(debugLineRow, "A line of layout numbers from the browser, tap it to copy."));
+        devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, commands and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
+        devPage.appendChild(copyLogBtn);
+
+        if (isApkHost()) {
+
+            const webDebugRow = makeBoolRow("Debug overlay in the web view",
+                function () { return settings.webDebugOverlay === true; },
+                function (v) { settings.webDebugOverlay = v; publishHostSoon(); });
+
+            devPage.appendChild(withHint(webDebugRow, "The same layer in every browser showing the web view, with what that browser receives from its keys, media buttons and steering wheel, and how the page was opened."));
+
+            const webSeekRow = makeBoolRow("Offer seeking to the browser",
+                function () { return settings.webSeekActions !== false; },
+                function (v) { settings.webSeekActions = v; publishHostSoon(); });
+
+            devPage.appendChild(withHint(webSeekRow, "The web view offers the browser seeking by ten seconds and to a place, next to play, pause, next and previous. A Tesla greys out next and previous while a page plays the music, and this is to try whether it gives them back once seeking is not offered."));
+
+            // The phone's own overlay and its clipboard are no use from a
+            // browser, so the web view's copy of the page leaves them out
+            debugOverlayRow.dataset.hostSkip = "1";
+            copyLogBtn.dataset.hostSkip = "1";
+        }
         devPage.appendChild(artTestRow);
         devPage.appendChild(copyFeedBtn);
 
@@ -18762,7 +19361,7 @@
         applyControlOrder();
         updateControlLabels();
         applyLyricLayout();
-        updateDebugLine();
+        updateDebugOverlay();
         updateVocalsCtrlButton();
         updateTestButton();
         setView(settings.view);
@@ -21534,6 +22133,7 @@
     // meant to be
     function startPlayer() {
 
+        installDebugWatchers();
         buildPanel();
         syncWakeLock();
     }

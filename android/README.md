@@ -291,6 +291,11 @@ simply running:
 - **Load** and **Rescan** are ringed while they run.
 - **Repeat** is filled for repeat all and ringed for repeat one.
 
+The mobile player's buttons follow the same rules: Play, Repeat, Shuffle,
+Published, Vocals and the rate button (filled once the song is rated), and
+Load and Rescan in the list are ringed while they run and red ringed after
+a failure.
+
 ## Sound here, there or nowhere
 
 The sound switch has a third button, **No music in this browser**. It is
@@ -500,17 +505,138 @@ The main settings page is now only a list of pages, in groups:
   player.
 - **Device**: Connections (in the app only: hotspot, Wi-Fi, the public
   address, the address, the local name and the status) and This device
-  (Keep the screen on, and Run freely in the background in the
-  app). These are about the phone or computer itself and will never be
-  synced between devices.
+  (Keep the screen on, Run freely in the background in the app, and
+  Playing by itself: Autoplay on start and, in the app, Play when
+  Bluetooth connects and Pause when Bluetooth disconnects). These are
+  about the phone or computer itself and will never be synced between
+  devices.
 - **Music**: Library (Start with, Refresh on open, numbers across the whole
-  library, how long counts are kept), Playback (Autoplay, reporting plays,
-  songs cached ahead, playing straight from Mureka's link) and Now playing
+  library, how long counts are kept), Playback (reporting plays, songs
+  cached ahead, playing straight from Mureka's link, and whether previous
+  restarts the song) and Now playing
   (the two lock screen lines, artwork, resending the cover and the lyrics'
   semicolons). These are the settings a future sync would carry.
 - **Data**: Backup and restore, with export, import and Google Drive.
-- **Troubleshooting**: Developer, with the debug tools.
+- **Troubleshooting**: Developer, with the debug tools and the debug overlay.
 
 Each page has a back button to the list. The web view's copy of the
 settings has the same pages, apart from Connections, so a browser still
 cannot lock itself out.
+
+## The Tesla's fullscreen from its YouTube app
+
+A Tesla opens a page fullscreen when it is opened from the car's YouTube
+app, and only then does its browser add `TESLA_AUTO` to its user agent. The
+web view looks for that:
+
+- The music moves to the browser by itself when the page opens, since the
+  car shows nothing but the page. Moved back to the phone by hand, it stays
+  there. The question where to play is never shown there, the choice is
+  made. If the car does not let the page make sound until it is touched,
+  a short note says so, and the first tap or wheel press anywhere starts
+  the music.
+- The steering wheel's left and right arrive there as the arrow keys. They
+  skip songs: right is next, left is previous, following the Previous
+  setting below. Held down, only the first press counts. Everywhere else
+  the arrow keys still seek 10 seconds.
+- Pressing the scroll wheel already arrives as the browser's play and pause.
+
+In the car's normal browser with the music in the browser, the Tesla greys
+out next and previous and shows the page's address. Pausing there makes the
+car go back to Bluetooth, and its next play reached the phone while the
+music was still set to the browser, so nothing was heard. Play, next,
+previous and seek from Bluetooth, a steering wheel or the lock screen now
+take the sound back to the phone first, and the web view follows. Pause
+does not, so a car pausing the phone as it switches to the browser cannot
+undo the switch.
+
+**Offer seeking to the browser**, under Developer, is an experiment for the
+greyed out buttons: switched off, the web view no longer offers the browser
+seeking, only play, pause, next and previous.
+
+## Play when Bluetooth connects
+
+**Play when Bluetooth connects**, under Device, This device, starts the
+music when a Bluetooth car stereo, speaker or headphones connects, from
+where it was:
+
+- **Never**, which is how it starts.
+- **If it was playing**: only when the music was playing as the last
+  Bluetooth output went away, so a drive picks up where it stopped and a
+  player paused before getting out stays paused. What it was doing is kept
+  on the phone, so a restart of the app in between does not lose it. The
+  moment is taken before Pause when Bluetooth disconnects pauses it.
+- **Always**: on every connection.
+
+The app's service watches for it, so it works with the screen off. It
+waits two seconds for Android to move the sound over, does nothing if the
+music already plays, and brings the sound back to the phone first if it
+was set to play in a browser, or nothing would be heard over Bluetooth.
+The outputs already connected when the app starts do not count as a
+connection. The debug overlay notes each connection and what was done.
+
+## Pause when Bluetooth disconnects
+
+**Pause when Bluetooth disconnects**, under Device, This device, pauses the
+music when the Bluetooth car stereo, speaker or headphones it plays on goes
+away, so it does not carry on from the phone's own speaker as you walk off.
+It is off to start with. The app's service watches for it, so it works with
+the screen off and the app in the background. It pauses rather than stops,
+so play picks up where it was. It leaves the music alone while it plays in
+a browser, and when another Bluetooth output is still connected and takes
+the sound over. Classic Bluetooth audio and, from Android 12, LE Audio
+count. The debug overlay notes each disconnect and what was done.
+
+## Previous restarts the song
+
+Under Music, Playback, **Previous restarts the song** decides how every
+previous button behaves: the player's own, the lock screen, Bluetooth, a
+steering wheel, the Tesla's wheel in its fullscreen and the web view's
+button.
+
+- On, which is how it starts, previous first goes back to the start of the
+  song, the way a car stereo does. Only a press within the first
+  **Seconds before it restarts** goes to the previous song. That is 3 to
+  start with and can be set from 1 to 30, higher for a car or phone that is
+  slow to react.
+- Off, previous always goes straight to the previous song, as the player
+  used to, and the seconds are hidden.
+
+## Debug overlay
+
+Settings, Developer, has a **Debug overlay** in place of the old debug line.
+It is a see-through layer over the whole player that lists what happens as
+it happens, newest at the bottom, with live numbers at the top: the layout
+numbers the debug line had, the audio element, the song and queue, the
+screen mode and the wake lock. The log shows:
+
+- Presses and clicks, with the button they hit, double clicks and long
+  presses, keys with their code, and the scroll wheel.
+- Every setting that changes, from what to what, the app's own fullscreen
+  included.
+- Media actions with their seek step, commands, song changes, the black
+  cover, the audio element's events and the status line.
+- Visibility, focus, fullscreen, size changes, steps back in history, the
+  network and errors.
+- From the app, what reached the phone before the command: a media button
+  with its Android key code, a media session call (fast forward and rewind
+  are noted but not used yet) or a command from a web view.
+
+**Debug overlay in the web view** puts the same layer over the web view in
+every connected browser. It logs presses, clicks, keys, the wheel, media
+actions, what it sends to the phone, what changed on the phone (song,
+playing, where the sound is, repeat, shuffle, browsers connected, status),
+panels, the black cover, fullscreen and steps back in history. At the top
+it shows how the page was opened: the address, the referrer, the display
+mode, window and screen sizes and the browser's user agent.
+
+Neither layer can take a tap or a click: nothing in it receives pointer
+events, every listener only watches, and characters typed in a text field
+are logged only as a typed character. So the copy buttons live elsewhere:
+
+- On the phone, **Copy debug log** under Developer puts the live numbers
+  and the whole log on the phone's clipboard.
+- In the web view the actions menu has **Copy debug log**, onto that
+  browser's clipboard, and **Send debug log to the phone**, for browsers
+  such as a car's that have nothing to paste into. The phone keeps the
+  last log sent, and its own Copy debug log adds it at the end.

@@ -702,6 +702,11 @@ final class CarServer {
                 return;
             }
 
+            // A web view's own debug log is too long for one line
+            String shown = "webDebugLog".equals(cmd) ? "its debug log"
+                : cmd + (arg != null ? " " + arg : "");
+
+            Hub.note("From a web view: " + (shown.length() > 100 ? shown.substring(0, 100) + "..." : shown));
             Hub.command(cmd, arg);
             send(out, 200, "application/json", bytes("{\"ok\":true}"));
         } catch (JSONException e) {

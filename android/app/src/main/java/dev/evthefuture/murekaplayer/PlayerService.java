@@ -39,10 +39,12 @@ import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.net.VpnService;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.view.KeyEvent;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -107,6 +109,23 @@ public class PlayerService extends Service implements Hub.Listener {
     // for the cover to be sent again when it picks up
     private boolean wasPlaying = false;
     private boolean artOnResume = false;
+
+    // Pause when the Bluetooth output the music plays on goes away, and
+    // whether the music plays in a browser rather than on the phone
+    private boolean pauseOnDisconnect = false;
+    private boolean soundInBrowser = false;
+
+    // Start playing when a Bluetooth output connects: never, if it was
+    // playing when the last one went away, or always. Android reports the
+    // outputs already there as soon as the watcher is set up, which is not
+    // a connection, so that first report is skipped
+    private String playOnConnect = "never";
+    private boolean firstDeviceReport = true;
+
+    // Whether the music played as the last Bluetooth output went away, kept
+    // on disk so a restart of the app in between does not lose it
+    private static final String BT_PREFS = "bluetooth";
+    private static final String BT_WAS_PLAYING = "wasPlaying";
     private AudioDeviceCallback deviceWatcher;
 
     // The cover of the playing song, fetched once per song
@@ -149,36 +168,86 @@ public class PlayerService extends Service implements Hub.Listener {
         watchAudioDevices();
 
         session = new MediaSession(this, "MurekaPlayer");
+        // Play, skips and seeks from here first take the sound back from a
+        // browser: they come from Bluetooth, a steering wheel or the lock
+        // screen, so the music is wanted from the phone. Pause does not, a
+        // car pausing the phone as it switches to a browser must not undo
+        // the switch
         session.setCallback(new MediaSession.Callback() {
+
+            // A hardware button, from Bluetooth, a headset or a steering
+            // wheel, before Android turns it into one of the calls below.
+            // Only noted for the debug overlay, Android still handles it
+            @Override
+            public boolean onMediaButtonEvent(Intent intent) {
+
+                KeyEvent key = keyOf(intent);
+
+                if (key != null) {
+                    Hub.note("Media button " + KeyEvent.keyCodeToString(key.getKeyCode())
+                        + (key.getAction() == KeyEvent.ACTION_DOWN ? " down" : " up")
+                        + (key.getRepeatCount() > 0 ? " repeat " + key.getRepeatCount() : ""));
+                }
+
+                return super.onMediaButtonEvent(intent);
+            }
 
             @Override
             public void onPlay() {
+
+                Hub.note("Media session: play");
+                Hub.command("takeSound", null);
                 Hub.command("play", null);
             }
 
             @Override
             public void onPause() {
+
+                Hub.note("Media session: pause");
                 Hub.command("pause", null);
             }
 
             @Override
             public void onStop() {
+
+                Hub.note("Media session: stop");
                 Hub.command("pause", null);
             }
 
             @Override
             public void onSkipToNext() {
+
+                Hub.note("Media session: next");
+                Hub.command("takeSound", null);
                 Hub.command("next", null);
             }
 
             @Override
             public void onSkipToPrevious() {
+
+                Hub.note("Media session: previous");
+                Hub.command("takeSound", null);
                 Hub.command("prev", null);
             }
 
             @Override
             public void onSeekTo(long pos) {
+
+                Hub.note("Media session: seek to " + pos + " ms");
+                Hub.command("takeSound", null);
                 Hub.command("seek", pos / 1000.0);
+            }
+
+            // Not used for anything yet, noted so the debug overlay shows
+            // what a car or headset sends
+            @Override
+            public void onFastForward() {
+                Hub.note("Media session: fast forward, not used");
+            }
+
+            @Override
+            public void onRewind() {
+                Hub.note("Media session: rewind, not used");
             }
         });
         session.setSessionActivity(openAppIntent());
@@ -214,6 +283,22 @@ public class PlayerService extends Service implements Hub.Listener {
         applySettings();
 
         Hub.addListener(this);
+    }
+
+    // The key inside a media button intent. Android 13 has a typed way to
+    // read it, older versions only the untyped one
+    @SuppressWarnings("deprecation")
+    private static KeyEvent keyOf(Intent intent) {
+
+        if (intent == null) {
+            return null;
+        }
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            return intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent.class);
+        }
+
+        return intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
     }
 
     // A web view setting changed in the player's settings panel
@@ -450,6 +535,9 @@ public class PlayerService extends Service implements Hub.Listener {
         subtitle = s.optString("subtitle", "");
         playing = s.optBoolean("playing", false);
         artOnResume = s.optBoolean("artOnResume", false);
+        pauseOnDisconnect = s.optBoolean("pauseOnDisconnect", false);
+        playOnConnect = s.optString("playOnConnect", "never");
+        soundInBrowser = s.optBoolean("carAudio", false);
         durationMs = (long) (s.optDouble("duration", 0) * 1000);
 
         long positionMs = (long) (s.optDouble("position", 0) * 1000);
@@ -584,23 +672,123 @@ public class PlayerService extends Service implements Hub.Listener {
             public void onAudioDevicesAdded(AudioDeviceInfo[] added) {
 
                 boolean bluetooth = false;
+                boolean first = firstDeviceReport;
+
+                firstDeviceReport = false;
 
                 for (AudioDeviceInfo info : added) {
 
-                    if (info.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+                    if (isBluetoothOutput(info)) {
                         bluetooth = true;
                     }
                 }
 
-                if (!bluetooth || title.isEmpty()) {
+                if (!bluetooth || first) {
                     return;
                 }
 
-                main.postDelayed(PlayerService.this::resendMetadata, 1500);
+                Hub.note("Bluetooth audio connected");
+
+                if (!title.isEmpty()) {
+                    main.postDelayed(PlayerService.this::resendMetadata, 1500);
+                }
+
+                // A moment for Android to move the sound over before it starts
+                boolean start = "always".equals(playOnConnect)
+                    || ("resume".equals(playOnConnect) && wasPlayingAtDisconnect());
+
+                if (start) {
+                    main.postDelayed(PlayerService.this::playForBluetooth, 2000);
+                } else if ("resume".equals(playOnConnect)) {
+                    Hub.note("Not playing, it was not playing when Bluetooth went away");
+                }
+            }
+
+            // A Bluetooth output went away. With the setting on and the
+            // music playing on the phone, it is paused, unless another
+            // Bluetooth output is still there and takes the sound over
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removed) {
+
+                boolean bluetooth = false;
+
+                for (AudioDeviceInfo info : removed) {
+
+                    if (isBluetoothOutput(info)) {
+                        bluetooth = true;
+                    }
+                }
+
+                if (!bluetooth) {
+                    return;
+                }
+
+                Hub.note("Bluetooth audio disconnected");
+
+                for (AudioDeviceInfo info : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+
+                    if (isBluetoothOutput(info)) {
+
+                        Hub.note("Another Bluetooth output is still there, playing on");
+                        return;
+                    }
+                }
+
+                // The last one is gone. Remembered before any pause below,
+                // for If it was playing on the next connection
+                rememberPlaying(playing && !soundInBrowser);
+
+                if (!pauseOnDisconnect || !playing || soundInBrowser) {
+                    return;
+                }
+
+                Hub.note("Pausing, the Bluetooth output went away");
+                Hub.command("pause", null);
             }
         };
 
         am.registerAudioDeviceCallback(deviceWatcher, main);
+    }
+
+    private void rememberPlaying(boolean was) {
+
+        getSharedPreferences(BT_PREFS, MODE_PRIVATE).edit().putBoolean(BT_WAS_PLAYING, was).apply();
+    }
+
+    private boolean wasPlayingAtDisconnect() {
+
+        return getSharedPreferences(BT_PREFS, MODE_PRIVATE).getBoolean(BT_WAS_PLAYING, false);
+    }
+
+    // Play on the Bluetooth output that just connected, unless the music
+    // already plays. The sound is taken back from a browser first, or it
+    // would play there and not be heard in the car or the headphones
+    private void playForBluetooth() {
+
+        if (playing) {
+            return;
+        }
+
+        Hub.note("Playing, Bluetooth connected");
+        Hub.command("takeSound", null);
+        Hub.command("play", null);
+    }
+
+    // Bluetooth outputs: classic audio and, from Android 12, LE Audio
+    private static boolean isBluetoothOutput(AudioDeviceInfo info) {
+
+        if (!info.isSink()) {
+            return false;
+        }
+
+        int type = info.getType();
+
+        if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+            return true;
+        }
+
+        return Build.VERSION.SDK_INT >= 31
+            && (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER);
     }
 
     private void updateNotification() {

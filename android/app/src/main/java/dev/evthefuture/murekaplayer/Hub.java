@@ -243,6 +243,24 @@ final class Hub {
         });
     }
 
+    // A line for the player's debug overlay, telling what reached the app
+    // and from where. Safe from any thread. The page drops it while the
+    // overlay is off
+    static void note(String text) {
+
+        final String js = "window.__murekaDebugNote && window.__murekaDebugNote("
+            + JSONObject.quote(text) + ")";
+
+        MAIN.post(() -> {
+
+            WebView web = webRef.get();
+
+            if (web != null) {
+                web.evaluateJavascript(js, null);
+            }
+        });
+    }
+
     // Ask the player for a page of its song list
     static String requestList(String argJson, long timeoutMs) {
         return request("__murekaHostList", argJson, timeoutMs);
