@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.82";
+    const VERSION = "1.6.0.84";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -13440,7 +13440,12 @@
                 const rgb = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(String(el.style.color || ""));
                 const grey = !!rgb && rgb[1] === rgb[2] && rgb[2] === rgb[3] && Number(rgb[1]) < 180;
 
-                out.push({ t: "text", s: text, small: parseFloat(el.style.fontSize || "13") <= 12 || grey });
+                out.push({
+                    t: "text",
+                    s: text,
+                    small: parseFloat(el.style.fontSize || "13") <= 12 || grey,
+                    line: el.dataset.sectionLine === "1"
+                });
             }
 
             return;
@@ -18199,12 +18204,25 @@
             developer: devPage
         };
 
+        // A section heading, underlined by a thin line once the pages are
+        // built, so the words and the line read as one heading
         const makeLabel = function (text) {
 
             const el = document.createElement("div");
 
             el.textContent = text;
             el.style.cssText = "color:#bbb";
+            el.dataset.section = "1";
+
+            return el;
+        };
+
+        // A heading inside a section, without the line
+        const makeSubLabel = function (text) {
+
+            const el = makeLabel(text);
+
+            delete el.dataset.section;
 
             return el;
         };
@@ -18281,6 +18299,7 @@
         const startLabel = document.createElement("div");
         startLabel.textContent = "Start with";
         startLabel.style.cssText = "color:#bbb";
+        startLabel.dataset.section = "1";
 
         const startRow = document.createElement("div");
         startRow.style.cssText = "display:flex;gap:6px";
@@ -18997,7 +19016,7 @@
                 publishHostSoon();
             });
 
-            bluetoothPlayEls.push(makeLabel("Play when Bluetooth connects"));
+            bluetoothPlayEls.push(makeSubLabel("Play when Bluetooth connects"));
             bluetoothPlayEls.push(playBtRow);
             bluetoothPlayEls.push(makeHint("Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
             bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the phone's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));
@@ -19098,7 +19117,26 @@
         mainPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         mainPage.appendChild(makePageButton("Developer", "developer"));
 
+        // Every section heading gets a thin, slightly lighter line right
+        // under it, with some room above so the sections stand apart. The
+        // web view draws the same line
         for (const key of Object.keys(settingsPages)) {
+
+            let first = true;
+
+            for (const el of settingsPages[key].children) {
+
+                if (el.dataset.section !== "1") {
+                    continue;
+                }
+
+                el.dataset.sectionLine = "1";
+                el.style.borderBottom = "1px solid #3a3a42";
+                el.style.paddingBottom = "4px";
+                el.style.marginTop = first ? "0" : "22px";
+                first = false;
+            }
+
             settingsEl.appendChild(settingsPages[key]);
         }
 

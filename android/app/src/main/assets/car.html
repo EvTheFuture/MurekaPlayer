@@ -656,6 +656,23 @@
         padding-top: 20px;
     }
 
+    /* A section heading underlined by a thin, slightly lighter line, as
+       on the phone */
+    .pText.line {
+        border-bottom: 1px solid #3a3a42;
+        padding-bottom: 6px;
+        margin-bottom: 4px;
+    }
+
+    /* Room above each heading, away from the section before it */
+    .pText.line.head {
+        margin-top: 22px;
+    }
+
+    #panelBody > .pText.line.head:first-child {
+        margin-top: 0;
+    }
+
     .pBtn.wide {
         display: flex;
         align-items: center;
@@ -6314,7 +6331,8 @@
         }
 
         // A line of its own that is not a hint is a section heading
-        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small ? " head" : "");
+        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small ? " head" : "")
+            + (node.line ? " line" : "");
         text.textContent = node.s || "";
 
         return text;

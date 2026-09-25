@@ -519,7 +519,9 @@ The main settings page is now only a list of pages, in groups:
 - **Data**: Backup and restore, with export, import and Google Drive.
 - **Troubleshooting**: Developer, with the debug tools and the debug overlay.
 
-Each page has a back button to the list. The web view's copy of the
+Each page has a back button to the list. Each section heading is
+underlined by a thin, slightly lighter line, on the phone and in the web
+view. The web view's copy of the
 settings has the same pages, apart from Connections, so a browser still
 cannot lock itself out.
 
