@@ -108,7 +108,7 @@ least once since it was installed, so open it once after installing.
   the screen edge. Swipe the strip, or tap a neighbour, for that song. A
   song change from a button, Bluetooth or the end of a song slides the
   covers the same way in 300 ms, on the web view and on the phone.
-- Previous always goes to the previous song, also a few seconds into one.
+- Previous follows **Previous restarts the song**, see below.
 - A queue saved under other filters, vocals only then and all now for one,
   is built again from what the filters admit now when the player starts.
 - **A-Z** sorts the view shown, Mureka's songs or the queue, and a second
@@ -204,11 +204,39 @@ From the repository root the Makefile does the rest, it finds the JDK, writes
 
 ```sh
 #!/bin/sh
-make release          # app/build/outputs/apk/release/app-release.apk
+make release          # mureka-player-<version>.apk and its .sha256
 make install          # build the release APK and put it on the connected phone
 make install-debug    # the same with the debug APK
 make all              # checks, extension packages and the release APK
 ```
+
+### The release key
+
+The release APK is signed with a key kept outside the repository. Its place
+and passwords go in `~/.gradle/gradle.properties`, which Gradle reads by
+itself:
+
+```properties
+MUREKA_STORE_FILE=$HOME/.android/murekaplayer-release.jks
+MUREKA_STORE_PASSWORD=...
+MUREKA_KEY_ALIAS=murekaplayer
+MUREKA_KEY_PASSWORD=...
+```
+
+The path may start with `~`, `$HOME` or `${HOME}`, the build turns them into
+the home folder, since Gradle itself leaves them as they are. Without these the
+release build is signed with the debug key and Gradle says so, which is fine
+for a phone of your own but never for a published APK. `make release` shows
+the signer's name and certificate fingerprint at the end, so a debug signed
+APK is seen before it goes out. The APK is signed with the v2 and v3
+schemes, v3 so the key can be rotated to a new one later without anyone
+reinstalling.
+
+Android only installs an update signed with the same key as the installed
+app, so keep the keystore and its password backed up. An app installed from
+a debug signed build has to be uninstalled once before the first release
+signed one goes on, which clears its data, so export the song tweaks and
+settings first.
 
 Or by hand, from this folder:
 

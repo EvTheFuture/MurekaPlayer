@@ -30,6 +30,32 @@ def playerVersionCode() {
     return code
 }
 
+// A path from gradle.properties with ~, $HOME or ${HOME} turned into the
+// home folder, since Gradle leaves them as they are
+def homePath(String path) {
+
+    if (path == null) {
+        return null
+    }
+
+    def home = System.getProperty("user.home")
+
+    return path.replaceFirst(/^~(?=\/|$)/, home)
+        .replace('${HOME}', home)
+        .replace('$HOME', home)
+}
+
+// The release key lives outside the repository. Where it is and its
+// passwords come from ~/.gradle/gradle.properties, which Gradle reads by
+// itself: MUREKA_STORE_FILE, MUREKA_STORE_PASSWORD, MUREKA_KEY_ALIAS and
+// MUREKA_KEY_PASSWORD. The path may start with ~ or $HOME. Without them the
+// release build is signed with the debug key, which only suits a phone of
+// your own
+def releaseStoreFile = homePath(findProperty("MUREKA_STORE_FILE"))
+def hasReleaseKey = (releaseStoreFile != null && file(releaseStoreFile).exists()
+    && findProperty("MUREKA_STORE_PASSWORD") != null
+    && findProperty("MUREKA_KEY_ALIAS") != null)
+
 android {
     namespace "dev.evthefuture.murekaplayer"
     compileSdk 36
@@ -45,13 +71,31 @@ android {
         versionCode playerVersionCode()
     }
 
+    signingConfigs {
+
+        // Only filled in when the key is there, so a checkout without it
+        // still builds
+        release {
+
+            if (hasReleaseKey) {
+
+                storeFile file(releaseStoreFile)
+                storePassword findProperty("MUREKA_STORE_PASSWORD")
+                keyAlias findProperty("MUREKA_KEY_ALIAS")
+                keyPassword findProperty("MUREKA_KEY_PASSWORD") ?: findProperty("MUREKA_STORE_PASSWORD")
+
+                // v2 for every supported Android, v3 so the key can be
+                // rotated to a new one later without a reinstall
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-
-            // Signed with the debug key until a release key is set up, which
-            // is enough for sideloading
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
         }
     }
 
@@ -70,4 +114,10 @@ def copyPlayer = tasks.register("copyPlayer", Copy) {
 
 tasks.named("preBuild") {
     dependsOn(copyPlayer)
+}
+
+// Say which key the release build is signed with, so a debug signed APK is
+// never published by mistake
+if (!hasReleaseKey) {
+    logger.warn("No release key set up in ~/.gradle/gradle.properties, the release APK is signed with the debug key")
 }

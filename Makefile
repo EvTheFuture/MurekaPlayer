@@ -22,6 +22,12 @@ ANDROID_HOME ?= /usr/lib/android-sdk
 APK_DEBUG := android/app/build/outputs/apk/debug/app-debug.apk
 APK_RELEASE := android/app/build/outputs/apk/release/app-release.apk
 
+# The release APK under the name it is published with, and its checksum
+DIST_APK := mureka-player-$(VERSION).apk
+
+# The newest apksigner in the SDK, to show who signed the release
+APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
+
 .PHONY: help all ext android apk debug release install install-debug check version clean distclean
 
 help:
@@ -29,7 +35,7 @@ help:
 	@echo
 	@echo "  make all            bump, checks, extension packages and the release APK"
 	@echo "  make ext            mureka-player-firefox.zip and -chromium.zip"
-	@echo "  make release        the release APK, signed with the debug key"
+	@echo "  make release        the release APK, signed with the release key, as $(DIST_APK)"
 	@echo "  make debug          the debug APK, same as make apk and make android"
 	@echo "  make install        build and install the release APK on the connected phone"
 	@echo "  make install-debug  build and install the debug APK on the connected phone"
@@ -77,10 +83,17 @@ apk: android/local.properties
 	cd android && JAVA_HOME="$(JAVA_HOME)" ./gradlew assembleDebug
 	@echo "APK: $(APK_DEBUG)"
 
+# Also copied to the name it is published with, next to its SHA-256, and
+# the signer is shown, so a debug signed APK is noticed before it goes out
 release: android/local.properties
 	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
 	cd android && JAVA_HOME="$(JAVA_HOME)" ./gradlew assembleRelease
-	@echo "APK: $(APK_RELEASE)"
+	cp $(APK_RELEASE) $(DIST_APK)
+	sha256sum $(DIST_APK) > $(DIST_APK).sha256
+	@if [ -n "$(APKSIGNER)" ]; then \
+	    JAVA_HOME="$(JAVA_HOME)" $(APKSIGNER) verify --print-certs $(DIST_APK) | grep -E "DN:|SHA-256"; \
+	fi
+	@echo "APK: $(DIST_APK)"
 
 # Written once, and again whenever the SDK moves
 android/local.properties:
@@ -96,7 +109,8 @@ install-debug: apk
 	adb install -r $(APK_DEBUG)
 
 clean:
-	rm -rf android/app/build android/build mureka-player-firefox.zip mureka-player-chromium.zip .build
+	rm -rf android/app/build android/build mureka-player-firefox.zip mureka-player-chromium.zip .build \
+	    mureka-player-*.apk mureka-player-*.apk.sha256
 
 distclean: clean
 	rm -rf android/.gradle android/local.properties android/app/src/main/assets/player.js
