@@ -24,6 +24,9 @@ the new settings layout and a number of smaller improvements.
   beside a camera cutout. Can be turned off under Mobile player.
 - Export uses Android's own save dialog, or Downloads when nobody is there to
   answer. Import picks a file the same way.
+- Exported settings include the app's own: Connections, the public address
+  (VPN) and the local name, and Fullscreen. Importing them brings them back,
+  asking about the VPN as when switched on by hand.
 - Stays reachable when the phone lies still for a long time: the page's
   process is kept important, the player loads again by itself if Android ends
   it anyway, and **Run freely in the background** takes the app out of
@@ -81,6 +84,10 @@ the new settings layout and a number of smaller improvements.
 - Keyboard shortcuts, including volume and mute, `?` lists them. The browser
   gets a media session, so media keys, MPRIS and playerctl work.
 - Export asks whether the file should be saved in the browser or on the phone.
+- A phone opening the web view gets the same page laid out for a small
+  screen held upright: smaller text and buttons, the status on its own
+  line and the song list and panels edge to edge. Upright, the cover takes
+  the room the text leaves, so the text no longer runs into the seek bar.
 - Tesla's fullscreen from its YouTube app is recognised. There the music moves
   to the browser without asking, and the steering wheel's left and right
   skip to the previous and next song instead of seeking.
@@ -129,8 +136,9 @@ the new settings layout and a number of smaller improvements.
 - **About Mureka Player**, a page of its own at the end of the settings,
   shows the version and whether the player runs as the app, the add-on or a
   bookmarklet. In the app it also lists every address other devices can open
-  the web view on, each with its network (hotspot, the fixed hotspot
-  address, Wi-Fi, USB, the local name) and whether that network is allowed.
+  the web view on, each with its network (the phone's hotspot, its fixed
+  address, a joined Wi-Fi, USB tethering, the local name) and whether that
+  network is allowed.
 - **Debug overlay** replaces the debug line: a see-through layer listing keys,
   taps, media buttons, commands, setting changes and playback events live,
   with the layout numbers at the top. It never takes a tap. **Copy debug

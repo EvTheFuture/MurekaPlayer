@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.93";
+    const VERSION = "1.6.0.95";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -19139,14 +19139,23 @@
 
                 const rows = [];
 
+                // The phone's own hotspot, a Wi-Fi network the phone has
+                // joined, or USB tethering, in the words the Connections page
+                // uses
+                const netNames = {
+                    Hotspot: "Phone's hotspot",
+                    "Wi-Fi": "Joined Wi-Fi",
+                    USB: "USB tethering"
+                };
+
                 for (const n of (Array.isArray(st.nets) ? st.nets : [])) {
-                    rows.push([n.url, n.net + (n.allowed === false ? ", not allowed" : "")]);
+                    rows.push([n.url, (netNames[n.net] || n.net) + (n.allowed === false ? ", not allowed" : "")]);
                 }
 
                 // The VPN's address answers on the hotspot only, the one that
                 // stays the same whatever address the hotspot hands out
                 if (st.carUrl) {
-                    rows.push([st.carUrl, "Hotspot, fixed address"]);
+                    rows.push([st.carUrl, "Phone's hotspot, fixed address"]);
                 }
 
                 if (st.localUrl && st.mdns && st.mdns !== "off") {
@@ -19342,6 +19351,54 @@
         return kind === "settings" ? "settings" : "song tweaks";
     }
 
+    // The settings the Android app keeps itself, with what they are when
+    // never changed, as the app reads them
+    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName", "appFullscreen"];
+    const APP_PREF_DEFAULTS = {
+        allowHotspot: "1",
+        allowWifi: "1",
+        carVpn: "0",
+        vpnAddress: "3.3.3.3",
+        mdnsName: "murekaplayer",
+        appFullscreen: "1"
+    };
+
+    // Give the app back the settings it keeps itself. Only in the app, and
+    // only what the file has, one from a browser has none. Switching the
+    // public address on makes Android ask about the VPN, as by hand. Values
+    // that are already set are left alone, so the VPN and the web server
+    // only start again for what really changed
+    function applyImportedAppPrefs(app) {
+
+        const host = window.MurekaHost;
+
+        if (!app || typeof app !== "object" || !isApkHost()
+            || typeof host.setPref !== "function" || typeof host.getPref !== "function") {
+            return false;
+        }
+
+        let done = false;
+
+        for (const key of APP_PREF_KEYS) {
+
+            if (typeof app[key] !== "string") {
+                continue;
+            }
+
+            if (String(host.getPref(key, APP_PREF_DEFAULTS[key])) !== app[key]) {
+                host.setPref(key, app[key]);
+            }
+
+            done = true;
+        }
+
+        settingsRefreshers.forEach(function (fn) {
+            fn();
+        });
+
+        return done;
+    }
+
     // One kind of data entered by hand, gathered into one object, either
     // the song tweaks or the settings. Downloads, the queue and the caches
     // belong to this device and are left out
@@ -19359,6 +19416,19 @@
         if (kind === "settings") {
 
             base.settings = JSON.parse(JSON.stringify(settings));
+
+            // The Android app keeps some settings itself, outside the
+            // player: the connections and its fullscreen. They go along, so
+            // a restore on the phone brings them back too
+            if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
+
+                base.appSettings = {};
+
+                for (const key of APP_PREF_KEYS) {
+                    base.appSettings[key] = String(window.MurekaHost.getPref(key, APP_PREF_DEFAULTS[key]));
+                }
+            }
+
             return base;
         }
 
@@ -19404,7 +19474,8 @@
             instr: [],
             creators: [],
             cleared: { rating: [], bpm: [], instr: [] },
-            settings: (data.settings && typeof data.settings === "object") ? data.settings : null
+            settings: (data.settings && typeof data.settings === "object") ? data.settings : null,
+            appSettings: (data.appSettings && typeof data.appSettings === "object") ? data.appSettings : null
         };
 
         if (data.ratings && typeof data.ratings === "object") {
@@ -19812,6 +19883,7 @@
                 return;
             }
 
+            applyImportedAppPrefs(p.appSettings);
             dataStatus(applyImportedSettings(p.settings)
                 ? donePrefix + " settings"
                 : "Could not store the imported settings");

@@ -503,6 +503,16 @@ Export in the web view asks first whether the file is wanted in the browser
 showing the page or on the phone. The browser saves it where it saves
 downloads, the phone asks for a place as above.
 
+Settings exported from the app also hold the settings the app keeps itself:
+Connections (the hotspot, Wi-Fi networks, the public address and its
+address, and the local name) and Fullscreen. Importing them in the app puts
+them back, and a restored public address makes Android ask about the VPN as
+when it is switched on by hand. Values that are already the same are left
+alone, so the VPN and the web server only start again for what changed.
+The same file imported in the add-on or a bookmarklet leaves them out.
+Running freely in the background, notifications and the Mureka sign in are
+Android's and Mureka's, and have to be set again on a new phone.
+
 ## A phone left lying a while
 
 The page the player runs in has a process of its own. Off screen Android
@@ -643,6 +653,22 @@ button.
 - Off, previous always goes straight to the previous song, as the player
   used to, and the seconds are hidden.
 
+## The web view on a phone
+
+A phone can open the web view too, from another phone on the same hotspot
+or Wi-Fi. The page tells a phone by its shape and screen: held upright, at
+most 600 pixels wide and with a sharp screen or a touch screen. It then
+lays the same page out for a small screen, with less room around things,
+smaller text, lower buttons, the status on a line of its own above the
+bottom buttons, and the song list and panels edge to edge. It is the same
+page with the same controls, only sized differently, so everything works
+the same way. Turned sideways, and on a computer, a tablet or the car's
+screen, the page keeps the large layout. The debug overlay shows which
+layout is in use.
+
+Upright on any screen, the cover now takes the room the title, stars and
+lines under it leave, so they never reach down over the seek bar.
+
 ## About and the web view's addresses
 
 **About Mureka Player**, at the end of the settings, shows the version and
@@ -651,9 +677,11 @@ it lists every address a browser on another device can open the web view
 on, read from the phone as it is right now and kept up to date while the
 page shows:
 
-- each address the phone has on a hotspot, a Wi-Fi or USB tethering, with
-  the network beside it, and "not allowed" when Connections keeps that
-  network out
+- each address the phone has, with the network beside it: **Phone's
+  hotspot** when the phone shares its own Wi-Fi, **Joined Wi-Fi** when the
+  phone is on someone else's Wi-Fi, such as the one at home, and **USB
+  tethering**. "Not allowed" is added when Connections keeps that network
+  out
 - the fixed address on the hotspot, 3.3.3.3 unless changed, when Public
   address (VPN) is on
 - the local name, `murekaplayer.local` unless changed, which not every

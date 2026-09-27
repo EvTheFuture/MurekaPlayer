@@ -1996,17 +1996,182 @@
         display: none;
     }
 
+    /* Upright the cover goes above the text. The text keeps its own
+       height, the script gives the cover the rest, and what is left over
+       is shared above and below so the two stay together in the middle */
     @media (max-aspect-ratio: 1/1) {
 
         #main {
             flex-direction: column;
             align-items: stretch;
+            justify-content: center;
         }
 
         #coverSpace {
             height: 45vh;
             width: 100%;
         }
+
+        #info {
+            flex: 0 0 auto;
+        }
+    }
+
+    /* A phone opening the web view. The same page and the same controls,
+       only sized for a small screen held upright: less room around
+       things, smaller text and lower buttons. The script sets the class */
+    html.phone {
+        --ctl-h: 46px;
+    }
+
+    html.phone #app {
+        padding: max(12px, env(safe-area-inset-top)) 14px max(12px, env(safe-area-inset-bottom));
+        gap: 12px;
+    }
+
+    html.phone #info {
+        gap: 8px;
+    }
+
+    html.phone #title {
+        font-size: 24px;
+    }
+
+    html.phone #subtitle {
+        font-size: 15px;
+    }
+
+    html.phone #rateRow {
+        gap: 4px;
+    }
+
+    html.phone .star,
+    html.phone #like {
+        padding: 4px;
+    }
+
+    html.phone .star svg,
+    html.phone #like .ico {
+        width: 32px;
+        height: 32px;
+    }
+
+    html.phone #fromLine {
+        gap: 8px;
+        margin-top: 0;
+        font-size: 15px;
+    }
+
+    html.phone #seek {
+        gap: 10px;
+        font-size: 14px;
+    }
+
+    html.phone #bar {
+        height: 36px;
+    }
+
+    html.phone #controls {
+        gap: 8px;
+    }
+
+    html.phone .ctl {
+        height: 60px;
+        border-radius: 14px;
+    }
+
+    /* The status gets a line of its own above the buttons, beside them it
+       would have no room at all, and gives it back when there is nothing
+       to say */
+    html.phone #bottom {
+        flex-wrap: wrap;
+        gap: 8px;
+        font-size: 15px;
+    }
+
+    html.phone #status {
+        order: -1;
+        flex: 1 0 100%;
+        text-align: center;
+    }
+
+    html.phone #status.blank {
+        display: none;
+    }
+
+    html.phone #fullBtn {
+        margin-left: auto;
+    }
+
+    html.phone #sound button {
+        padding: 10px 12px;
+    }
+
+    html.phone #bottom .chip {
+        padding: 10px 12px;
+    }
+
+    /* The song list and the panels, edge to edge with less space inside */
+    html.phone #browse,
+    html.phone .sheet {
+        padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
+        gap: 8px;
+    }
+
+    html.phone #browseTop,
+    html.phone .chipRow {
+        gap: 6px;
+    }
+
+    html.phone #search {
+        font-size: 17px;
+        padding: 0 12px;
+    }
+
+    html.phone .chip {
+        font-size: 15px;
+        padding: 0 14px;
+    }
+
+    /* The group names and dividers ended up at odd places once the chips
+       wrap on a narrow screen, the icons and names say enough on their own */
+    html.phone .chipGroup,
+    html.phone .chipSep {
+        display: none;
+    }
+
+    html.phone .row {
+        gap: 8px;
+        font-size: 16px;
+        padding: 10px 4px;
+    }
+
+    html.phone .rowNum {
+        min-width: 2em;
+    }
+
+    html.phone .rowHeart {
+        padding: 4px;
+    }
+
+    html.phone .rowGrip {
+        margin: -10px 0 -10px -4px;
+        padding: 0 0 0 4px;
+    }
+
+    html.phone #panel {
+        padding: 0;
+    }
+
+    html.phone .sheetInner {
+        border: none;
+        border-radius: 0;
+        padding: max(12px, env(safe-area-inset-top)) 0 max(12px, env(safe-area-inset-bottom)) 14px;
+    }
+
+    html.phone .sheetInner .sheetTop,
+    html.phone #panelBody {
+        padding-right: 14px;
     }
 </style>
 </head>
@@ -2224,6 +2389,30 @@
     };
 
     const NS = "http://www.w3.org/2000/svg";
+
+    // A phone opening the web view gets the same page laid out smaller,
+    // through the phone class and the rules under it in the styles. A
+    // phone is told by its shape and screen: upright, narrow and with a
+    // sharp screen or a touch screen. A narrow window on a computer, a
+    // tablet and the car's screen keep the large layout
+    function isPhoneLayout() {
+
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const sharp = (window.devicePixelRatio || 1) >= 2;
+        const touch = window.matchMedia("(pointer: coarse)").matches;
+
+        return h > w && w <= 600 && (sharp || touch);
+    }
+
+    function applyPhoneLayout() {
+
+        document.documentElement.classList.toggle("phone", isPhoneLayout());
+    }
+
+    applyPhoneLayout();
+    window.addEventListener("resize", applyPhoneLayout);
+    window.addEventListener("orientationchange", applyPhoneLayout);
 
     // The icons, drawn like the phone player's, 24 units square with round
     // strokes in the button's own colour. Each is a list of shapes
@@ -2804,7 +2993,8 @@
                 + " outer " + window.outerWidth + "x" + window.outerHeight
                 + " | screen " + screen.width + "x" + screen.height
                 + " avail " + screen.availWidth + "x" + screen.availHeight
-                + " | dpr " + dbgNum(window.devicePixelRatio),
+                + " | dpr " + dbgNum(window.devicePixelRatio)
+                + " | layout " + (document.documentElement.classList.contains("phone") ? "phone" : "large"),
             "phone " + (online ? "reached" : "not reached")
                 + " | " + (s.playing ? "playing" : "paused")
                 + " " + dbgNum(position()) + "/" + dbgNum(s.duration)
@@ -3374,6 +3564,7 @@
         first.style.cssText = "display:inline-block;white-space:nowrap";
         second.style.cssText = "display:none;white-space:nowrap";
         first.textContent = box.textContent;
+        box.classList.toggle("blank", !first.textContent);
         track.appendChild(first);
         track.appendChild(second);
         box.textContent = "";
@@ -3466,6 +3657,10 @@
 
                 first.textContent = value;
                 second.textContent = value;
+
+                // Marked when empty, so a line that has a row of its own on
+                // a phone can give its room back
+                box.classList.toggle("blank", !value);
                 restart(MARQUEE_DELAY);
             },
 
@@ -8338,12 +8533,23 @@
         if (portrait) {
 
             // Like the phone: the cover in the middle, the sides anchored to
-            // the edges behind it
-            const size = Math.min($("coverSpace").clientHeight || h * 0.5, w * 0.62);
+            // the edges behind it. The title, stars and lines under it keep
+            // their own height and the cover takes what is left, so they
+            // never reach down over the seek bar. A phone gets a larger
+            // share of the width, as in the app
+            const space = $("coverSpace");
+            const gap = parseFloat(getComputedStyle(main).rowGap) || 0;
+            const room = h - $("info").offsetHeight - gap;
+            const share = document.documentElement.classList.contains("phone") ? 0.86 : 0.62;
+            const size = Math.max(0, Math.floor(Math.min(room, w * share)));
+
+            if (space.style.height !== size + "px") {
+                space.style.height = size + "px";
+            }
 
             return {
                 size: size,
-                top: size / 2,
+                top: space.offsetTop + size / 2,
                 xC: (w - size) / 2,
                 xL: 0,
                 xR: w - size * SIDE_SCALE,
@@ -8353,7 +8559,10 @@
         }
 
         // Landscape: a sliver of the previous cover at the left edge, the
-        // playing cover, and the next one reaching in under the text
+        // playing cover, and the next one reaching in under the text. The
+        // cover space is the full height again after being upright
+        $("coverSpace").style.height = "";
+
         const size = Math.min(h, w * 0.5);
         const xC = size * 0.12;
         const full = xC + size + size * 0.06;
@@ -8554,8 +8763,15 @@
     window.addEventListener("resize", replaceFlow);
     window.addEventListener("load", replaceFlow);
 
+    // Upright the cover takes the room the text leaves, so a text that
+    // grows or shrinks, a lyric area or a line coming or going, places the
+    // covers again too
     if (window.ResizeObserver) {
-        new ResizeObserver(replaceFlow).observe($("main"));
+
+        const flowWatch = new ResizeObserver(replaceFlow);
+
+        flowWatch.observe($("main"));
+        flowWatch.observe($("info"));
     }
 
     if (document.fonts && document.fonts.ready) {
