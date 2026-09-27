@@ -52,6 +52,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -795,6 +796,60 @@ final class CarServer {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    // The addresses other devices can open the page on, each with the
+    // network it is on, the hotspot, a Wi-Fi or USB tethering, and whether
+    // the settings let that network in. IPv4 only, never the mobile data
+    // side or the VPN
+    JSONArray describeAddresses(int port) {
+
+        refreshInterfaces();
+
+        JSONArray out = new JSONArray();
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        boolean allowWifi = "1".equals(prefs.getString(CarSettings.ALLOW_WIFI, "1"));
+        boolean allowHotspot = "1".equals(prefs.getString(CarSettings.ALLOW_HOTSPOT, "1"));
+
+        try {
+
+            java.util.Enumeration<NetworkInterface> all = NetworkInterface.getNetworkInterfaces();
+
+            if (all == null) {
+                return out;
+            }
+
+            for (NetworkInterface ni : Collections.list(all)) {
+
+                String name = ni.getName() == null ? "" : ni.getName();
+
+                if (!usable(ni) || isCell(name)) {
+                    continue;
+                }
+
+                boolean wifi = wifiInterfaces.contains(name);
+                boolean usb = name.startsWith("rndis") || name.startsWith("usb") || name.startsWith("ncm");
+                String net = wifi ? "Wi-Fi" : (usb ? "USB" : "Hotspot");
+
+                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+
+                    if (!(a instanceof Inet4Address) || a.isLinkLocalAddress()) {
+                        continue;
+                    }
+
+                    JSONObject o = new JSONObject();
+
+                    o.put("url", "http://" + a.getHostAddress() + ":" + port);
+                    o.put("net", net);
+                    o.put("allowed", wifi ? allowWifi : allowHotspot);
+                    out.put(o);
+                }
+            }
+        } catch (IOException | JSONException e) {
+            // What was found so far
+        }
+
+        return out;
     }
 
     // The addresses other devices can reach the page on, on the hotspot or

@@ -1,3 +1,5 @@
 *.zip
 run-mobile-firefox.sh
 .adb-reconnect.sh
+*.apk
+*.apk.sha256

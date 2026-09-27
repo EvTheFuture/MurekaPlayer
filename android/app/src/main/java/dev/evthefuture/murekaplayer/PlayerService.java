@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 // A foreground service, so Android keeps the app and its WebView running with
@@ -348,6 +349,14 @@ public class PlayerService extends Service implements Hub.Listener {
         if (s != null && s.clientLock != null) {
             s.clientLock.acquire(90 * 1000L);
         }
+    }
+
+    // Where other devices can open the web view, for the About page
+    static JSONArray webAddresses() {
+
+        PlayerService s = instance;
+
+        return s != null && s.server != null ? s.server.describeAddresses(PORT) : new JSONArray();
     }
 
     static String mdnsStatus() {

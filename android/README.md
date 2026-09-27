@@ -200,7 +200,9 @@ sudo apt install -y openjdk-21-jdk \
 ```
 
 From the repository root the Makefile does the rest, it finds the JDK, writes
-`local.properties` and runs Gradle:
+`local.properties` and runs Gradle. Unless `JAVA_HOME` is set, it asks every
+JDK under `/usr/lib/jvm`, on a Mac, and the one `javac` on the PATH belongs
+to for its version, and uses the newest one of 17 or later:
 
 ```sh
 #!/bin/sh
@@ -212,9 +214,22 @@ make all              # checks, extension packages and the release APK
 
 ### The release key
 
-The release APK is signed with a key kept outside the repository. Its place
-and passwords go in `~/.gradle/gradle.properties`, which Gradle reads by
-itself:
+The release APK is signed with a key kept outside the repository. The first
+`make release`, `make install` or debug build asks three questions and
+keeps the answers in `android/keystore.properties`, which git ignores and
+only you can read:
+
+1. Which keystore. It suggests the one it finds in `~/.android`: a `.jks`,
+   `.keystore` or `.p12` file that is not Android's own `debug.keystore`,
+   one with `mureka` in its name first. Enter with nothing there means no
+   key, and the debug key signs the APKs.
+2. Its password, checked with `keytool` and asked again until it is right.
+3. Which key in it, `murekaplayer` or the only one there suggested.
+
+`make signing` asks again, and deleting the file does the same on the next
+build. `make help` shows the keystore found and whether the answers are
+kept. Settings in `~/.gradle/gradle.properties` or the environment win over
+the file, for a build machine with no one to answer:
 
 ```properties
 MUREKA_STORE_FILE=$HOME/.android/murekaplayer-release.jks
@@ -223,32 +238,24 @@ MUREKA_KEY_ALIAS=murekaplayer
 MUREKA_KEY_PASSWORD=...
 ```
 
-The path may start with `~`, `$HOME` or `${HOME}`, the build turns them into
-the home folder, since Gradle itself leaves them as they are. Without these the
-release build is signed with the debug key and Gradle says so, which is fine
-for a phone of your own but never for a published APK. `make release` shows
-the signer's name and certificate fingerprint at the end, so a debug signed
-APK is seen before it goes out. The APK is signed with the v2 and v3
-schemes, v3 so the key can be rotated to a new one later without anyone
-reinstalling.
+A path may start with `~`, `$HOME` or `${HOME}`. Without a key, or with a
+wrong password, the APKs are signed with the debug key and Gradle says so,
+which is fine for a phone of your own but never for a published APK.
+`make release` shows the signer's name and certificate fingerprint at the
+end, so a debug signed APK is seen before it goes out. The APK is signed
+with the v2 and v3 schemes, v3 so the key can be rotated to a new one later
+without anyone reinstalling.
+
+The debug build is signed with the same key when it is found, so
+`make install-debug` and `make install` replace each other on the phone
+without an uninstall. A debug build can be inspected over adb, so only the
+release APK is ever published.
 
 Android only installs an update signed with the same key as the installed
 app, so keep the keystore and its password backed up. An app installed from
 a debug signed build has to be uninstalled once before the first release
 signed one goes on, which clears its data, so export the song tweaks and
 settings first.
-
-Or by hand, from this folder:
-
-```sh
-#!/bin/sh
-echo "sdk.dir=/usr/lib/android-sdk" > local.properties
-JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew assembleDebug
-```
-
-Ubuntu's own `gradle` package is far too old, the wrapper in this folder
-fetches the Gradle it needs. The app version comes from `VERSION` in
-`src/player.js`, so there is nothing to bump here.
 
 ## Use in the car
 
@@ -278,9 +285,11 @@ used the same address for years.
 - The notification shows the public address when it is up, and the local name
   and addresses for other devices.
 
-Other devices, a laptop for one, open `http://murekaplayer.local:8080` or the
-plain address from the notification. The name can be changed in the
-settings, `.local` is added.
+Other devices, a laptop for one, open `http://murekaplayer.local:8080` or one
+of the plain addresses from the notification or from About Mureka Player in
+the settings. Connections only says how things stand, whether the public
+address and the local name are up, and leaves the addresses to About. The
+name can be changed in the settings, `.local` is added.
 
 ## Known limits in this first version
 
@@ -546,6 +555,8 @@ The main settings page is now only a list of pages, in groups:
   semicolons). These are the settings a future sync would carry.
 - **Data**: Backup and restore, with export, import and Google Drive.
 - **Troubleshooting**: Developer, with the debug tools and the debug overlay.
+- **About**: About Mureka Player, with the version, how the player runs,
+  and in the app the addresses other devices open the web view on.
 
 Each page has a back button to the list. Each section heading is
 underlined by a thin, slightly lighter line, on the phone and in the web
@@ -631,6 +642,25 @@ button.
   slow to react.
 - Off, previous always goes straight to the previous song, as the player
   used to, and the seconds are hidden.
+
+## About and the web view's addresses
+
+**About Mureka Player**, at the end of the settings, shows the version and
+whether the player runs as the app, the add-on or a bookmarklet. In the app
+it lists every address a browser on another device can open the web view
+on, read from the phone as it is right now and kept up to date while the
+page shows:
+
+- each address the phone has on a hotspot, a Wi-Fi or USB tethering, with
+  the network beside it, and "not allowed" when Connections keeps that
+  network out
+- the fixed address on the hotspot, 3.3.3.3 unless changed, when Public
+  address (VPN) is on
+- the local name, `murekaplayer.local` unless changed, which not every
+  browser can open
+
+The web view's copy of the settings has the page too, so the addresses can
+be read from a browser that is already connected.
 
 ## Debug overlay
 

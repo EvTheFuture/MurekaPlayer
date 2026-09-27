@@ -126,6 +126,11 @@ the new settings layout and a number of smaller improvements.
   when stopped. Repeat all is filled, repeat one ringed.
 - Large play and like counts are shortened, 1.0k, 12k, 1.2M.
 - The tag list's **Popularity** sort is now called **Most songs**.
+- **About Mureka Player**, a page of its own at the end of the settings,
+  shows the version and whether the player runs as the app, the add-on or a
+  bookmarklet. In the app it also lists every address other devices can open
+  the web view on, each with its network (hotspot, the fixed hotspot
+  address, Wi-Fi, USB, the local name) and whether that network is allowed.
 - **Debug overlay** replaces the debug line: a see-through layer listing keys,
   taps, media buttons, commands, setting changes and playback events live,
   with the layout numbers at the top. It never takes a tap. **Copy debug
@@ -137,9 +142,12 @@ the new settings layout and a number of smaller improvements.
   builds the extension packages and the release APK, `make install` installs
   the release APK, `make install-debug` the debug one. The JDK is found by
   itself and the manifest is brought to the player's version first.
-- `make release` signs the APK with the release key set up in
-  `~/.gradle/gradle.properties`, saves it as `mureka-player-<version>.apk`
-  with a SHA-256 file and shows who signed it.
+- The first build asks which key signs the APKs, suggesting the one it
+  finds in `~/.android`, checks its password and keeps the answers in
+  `android/keystore.properties`, which git ignores. `make signing` asks
+  again. `make release` saves the APK as `mureka-player-<version>.apk` with
+  a SHA-256 file and shows who signed it. Debug builds use the same key, so
+  both install over each other.
 - `adb-reconnect.sh` reconnects adb to a phone over the network.
 
 ### Known limits

@@ -4,3 +4,4 @@ app/build/
 local.properties
 app/src/main/assets/player.js
 *.apk
+keystore.properties

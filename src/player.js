@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.86";
+    const VERSION = "1.6.0.93";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -13444,7 +13444,8 @@
                     t: "text",
                     s: text,
                     small: parseFloat(el.style.fontSize || "13") <= 12 || grey,
-                    line: el.dataset.sectionLine === "1"
+                    line: el.dataset.sectionLine === "1",
+                    plain: el.dataset.hostPlain === "1"
                 });
             }
 
@@ -13463,7 +13464,7 @@
             if (row.length === 1) {
                 out.push(row[0]);
             } else if (row.length > 1) {
-                out.push({ t: "row", c: row });
+                out.push({ t: "row", c: row, spread: el.dataset.hostSpread === "1" });
             }
 
             return;
@@ -18189,6 +18190,7 @@
         const nowPage = makePage();
         const backupPage = makePage();
         const devPage = makePage();
+        const aboutPage = makePage();
 
         mainPage.style.display = "flex";
         settingsPages = {
@@ -18201,7 +18203,8 @@
             playback: playbackPage,
             nowplaying: nowPage,
             backup: backupPage,
-            developer: devPage
+            developer: devPage,
+            about: aboutPage
         };
 
         // A section heading, underlined by a thin line once the pages are
@@ -18832,27 +18835,23 @@
                     st = {};
                 }
 
+                // How things stand, not the phone's own addresses, which
+                // About lists with the network each one is on
                 const lines = [];
 
                 if (st.carUrl) {
-                    lines.push("Web view: " + st.carUrl);
+                    lines.push("Public address is on");
                 } else if (st.vpnEnabled) {
-                    lines.push("Public address: " + (st.vpn || "starting"));
+                    lines.push("Public address: " + (st.vpn && st.vpn !== "off" ? st.vpn : "starting"));
                 } else {
                     lines.push("Public address is off, browsers that refuse private addresses cannot open the web view");
-                }
-
-                if (st.localUrl) {
-                    lines.push("Other devices: " + st.localUrl);
                 }
 
                 if (st.mdns) {
                     lines.push("Local name: " + st.mdns);
                 }
 
-                if (st.addresses && st.addresses.length) {
-                    lines.push("Or: " + st.addresses.join("  "));
-                }
+                lines.push("The addresses to open the web view on are under About");
 
                 carStatusEl.textContent = lines.join("\n");
                 paintBattery();
@@ -19066,6 +19065,125 @@
         devPage.appendChild(artTestRow);
         devPage.appendChild(copyFeedBtn);
 
+        // About: the version, where the player runs, and in the app where
+        // other devices open the web view
+        let runsAs = "a bookmarklet in this browser";
+
+        if (isApkHost()) {
+            runsAs = "the Android app";
+        } else if (isExtensionHost()) {
+            runsAs = "the browser add-on";
+        }
+
+        const aboutLine = function (text) {
+
+            const el = document.createElement("div");
+
+            el.textContent = text;
+            el.style.cssText = "user-select:text;-webkit-user-select:text";
+
+            // Ordinary text in the web view too, not a heading
+            el.dataset.hostPlain = "1";
+
+            return el;
+        };
+
+        aboutPage.appendChild(makeLabel("Mureka Player"));
+        aboutPage.appendChild(aboutLine("Version " + VERSION));
+        aboutPage.appendChild(aboutLine("Running as " + runsAs));
+        aboutPage.appendChild(makeHint("Free software under the GNU GPL, version 3 or later. github.com/EvTheFuture/MurekaPlayer"));
+
+        if (isApkHost()) {
+
+            aboutPage.appendChild(makeLabel("Open the web view"));
+            aboutPage.appendChild(makeHint("From a browser on a device on the same hotspot or Wi-Fi as this phone, open one of these. They change when the phone joins another network."));
+
+            const addressesEl = document.createElement("div");
+
+            addressesEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
+            aboutPage.appendChild(addressesEl);
+
+            // One address with the network it is on beside it
+            const addressRow = function (url, net) {
+
+                const row = document.createElement("div");
+                const link = document.createElement("span");
+                const where = document.createElement("span");
+
+                row.style.cssText = "display:flex;justify-content:space-between;gap:10px;align-items:baseline";
+
+                // The web view spreads it the same way, the network to the right
+                row.dataset.hostSpread = "1";
+                link.textContent = url;
+                link.style.cssText = "user-select:text;-webkit-user-select:text;word-break:break-all";
+                where.textContent = net;
+                where.style.cssText = "font-size:11px;color:#888;flex:0 0 auto";
+                row.appendChild(link);
+                row.appendChild(where);
+
+                return row;
+            };
+
+            // Read again while the page shows, a network can come or go
+            let aboutKey = "";
+
+            const renderAddresses = function () {
+
+                let st = {};
+
+                try {
+                    st = JSON.parse(window.MurekaHost.carStatus ? window.MurekaHost.carStatus() : "{}");
+                } catch (e) {
+                    st = {};
+                }
+
+                const rows = [];
+
+                for (const n of (Array.isArray(st.nets) ? st.nets : [])) {
+                    rows.push([n.url, n.net + (n.allowed === false ? ", not allowed" : "")]);
+                }
+
+                // The VPN's address answers on the hotspot only, the one that
+                // stays the same whatever address the hotspot hands out
+                if (st.carUrl) {
+                    rows.push([st.carUrl, "Hotspot, fixed address"]);
+                }
+
+                if (st.localUrl && st.mdns && st.mdns !== "off") {
+                    rows.push([st.localUrl, "Local name"]);
+                }
+
+                if (rows.length === 0) {
+                    rows.push(["Not on a hotspot or Wi-Fi right now", ""]);
+                }
+
+                const key = JSON.stringify(rows);
+
+                if (key === aboutKey) {
+                    return;
+                }
+
+                aboutKey = key;
+                addressesEl.textContent = "";
+
+                for (const r of rows) {
+                    addressesEl.appendChild(addressRow(r[0], r[1]));
+                }
+            };
+
+            renderAddresses();
+            settingsRefreshers.push(renderAddresses);
+
+            setInterval(function () {
+
+                if (settingsEl && aboutPage.style.display !== "none" && settingsEl.offsetParent !== null) {
+                    renderAddresses();
+                }
+            }, 2000);
+
+            aboutPage.appendChild(makeHint("Allowed networks are set under Device, Connections. The local name does not work in every browser, Tesla's among them."));
+        }
+
         // Each page opens with the way back and a word on what it holds
         const heads = [
             [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
@@ -19074,7 +19192,8 @@
             [playbackPage, "Playback", "How the music plays and what is stored ahead of it."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
             [backupPage, "Backup and restore", null],
-            [devPage, "Developer", null]
+            [devPage, "Developer", null],
+            [aboutPage, "About", null]
         ];
 
         for (const h of heads) {
@@ -19116,6 +19235,11 @@
         mainPage.appendChild(makeLabel("Troubleshooting"));
         mainPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         mainPage.appendChild(makePageButton("Developer", "developer"));
+        mainPage.appendChild(makeLabel("About"));
+        mainPage.appendChild(makeHint(isApkHost()
+            ? "The version, and the addresses other devices open the web view on."
+            : "The version and where the player runs."));
+        mainPage.appendChild(makePageButton("About Mureka Player", "about"));
 
         // Every section heading gets a thin, slightly lighter line right
         // under it, with some room above so the sections stand apart. The
@@ -19756,8 +19880,15 @@
     function platformTag() {
 
         const ua = navigator.userAgent || "";
-        const host = isExtensionHost() ? "plugin" : "bookmarklet";
+        let host = "bookmarklet";
         let os = "other";
+
+        // The Android app, the browser add-on, or else a bookmarklet
+        if (isApkHost()) {
+            host = "app";
+        } else if (isExtensionHost()) {
+            host = "plugin";
+        }
 
         if (isIosLike()) {
             os = "ios";

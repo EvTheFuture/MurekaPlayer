@@ -622,6 +622,8 @@ final class PlayerWeb {
                 o.put("localUrl", "http://" + name + ":" + PlayerService.PORT);
                 o.put("mdns", PlayerService.mdnsStatus());
                 o.put("addresses", new JSONArray(addresses));
+                o.put("nets", PlayerService.webAddresses());
+                o.put("port", PlayerService.PORT);
             } catch (JSONException e) {
                 // Whatever was put so far
             }

@@ -1314,6 +1314,25 @@
         font-variant-numeric: tabular-nums;
     }
 
+    /* Spread out: the first part on the left, the last at the right edge */
+    .pRow.spread {
+        flex-wrap: nowrap;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .pRow.spread > .pText:first-child {
+        flex: 1 1 auto;
+        min-width: 0;
+        word-break: break-all;
+    }
+
+    .pRow.spread > .pText:last-child {
+        flex: 0 0 auto;
+        text-align: right;
+        padding-right: 0;
+    }
+
     .pRow.kv {
         flex-wrap: nowrap;
         align-items: baseline;
@@ -6167,7 +6186,7 @@
                 if (kids.length === 1) {
                     out.push(kids[0]);
                 } else if (kids.length > 1) {
-                    out.push({ t: "row", c: kids });
+                    out.push({ t: "row", c: kids, spread: node.spread === true });
                 }
 
                 continue;
@@ -6212,6 +6231,12 @@
             if (node.c.length === 2 && node.c[0].t === "text" && node.c[0].small
                 && node.c[1].t === "text" && !node.c[1].small) {
                 row.classList.add("kv");
+            }
+
+            // Something on the left and a word about it at the right edge, the
+            // addresses under About with their networks
+            if (node.spread) {
+                row.classList.add("spread");
             }
 
             // A name with an explanation lines up with its switch at the top
@@ -6331,7 +6356,7 @@
         }
 
         // A line of its own that is not a hint is a section heading
-        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small ? " head" : "")
+        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small && !node.plain ? " head" : "")
             + (node.line ? " line" : "");
         text.textContent = node.s || "";
 

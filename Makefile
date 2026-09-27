@@ -11,10 +11,23 @@ SHELL := /bin/sh
 # The version the whole project follows, read from the shared player
 VERSION := $(shell sed -n 's/.*const VERSION = "\([^"]*\)".*/\1/p' src/player.js | head -1)
 
-# The Android build needs a JDK 17 or newer. The newest installed one is
-# used unless JAVA_HOME is already set to something suitable
-JAVA_HOME ?= $(firstword $(shell ls -d /usr/lib/jvm/java-2[1-9]-openjdk-* /usr/lib/jvm/java-1[7-9]-openjdk-* \
-    /Library/Java/JavaVirtualMachines/*/Contents/Home 2>/dev/null | sort -rV))
+# The Android build needs a JDK 17 or newer. Unless JAVA_HOME is set
+# already, every JDK found is asked for its version and the newest one of
+# 17 or later is used: the ones under /usr/lib/jvm on Ubuntu, Alpine and
+# most other distributions, the ones on a Mac, and the one javac on the
+# PATH belongs to. Worked out once, not for every use
+ifeq ($(origin JAVA_HOME),undefined)
+JAVA_HOME := $(shell \
+    for d in /usr/lib/jvm/* /Library/Java/JavaVirtualMachines/*/Contents/Home \
+        "$$(dirname "$$(dirname "$$(readlink -f "$$(command -v javac)" 2>/dev/null)")")"; do \
+        if [ -x "$$d/bin/javac" ]; then \
+            v=$$("$$d/bin/javac" -version 2>&1 | sed -n 's/^javac \([0-9][0-9]*\).*/\1/p' | head -1); \
+            if [ -n "$$v" ] && [ "$$v" -ge 17 ]; then \
+                echo "$$v $$(readlink -f "$$d")"; \
+            fi; \
+        fi; \
+    done | sort -rn | head -1 | cut -d' ' -f2-)
+endif
 
 # Where the Android SDK lives. Ubuntu packages put it here
 ANDROID_HOME ?= /usr/lib/android-sdk
@@ -25,10 +38,21 @@ APK_RELEASE := android/app/build/outputs/apk/release/app-release.apk
 # The release APK under the name it is published with, and its checksum
 DIST_APK := mureka-player-$(VERSION).apk
 
+# The release key, found the way the Gradle build finds it: a keystore in
+# ~/.android that is not the debug one, one with mureka in its name first
+KEYSTORE := $(firstword $(shell { ls -1 $$HOME/.android/*.jks $$HOME/.android/*.keystore $$HOME/.android/*.p12 2>/dev/null | grep -i mureka; \
+    ls -1 $$HOME/.android/*.jks $$HOME/.android/*.keystore $$HOME/.android/*.p12 2>/dev/null; } | grep -v '/debug\.keystore$$'))
+
+# Where the signing answers are kept, asked for once. Git ignores the file
+SIGNING := android/keystore.properties
+
+# keytool of the chosen JDK, to check the password and list the keys
+KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
+
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all ext android apk debug release install install-debug check version clean distclean
+.PHONY: help all ext android apk debug release install install-debug signing check version clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
@@ -39,12 +63,15 @@ help:
 	@echo "  make debug          the debug APK, same as make apk and make android"
 	@echo "  make install        build and install the release APK on the connected phone"
 	@echo "  make install-debug  build and install the debug APK on the connected phone"
+	@echo "  make signing        ask again which key signs the APKs"
 	@echo "  make check          syntax check the player and compare versions"
 	@echo "  make version        bump manifest.json to the player version"
 	@echo "  make clean          remove build output, keep the caches"
 	@echo "  make distclean      also remove the Gradle and SDK caches in the tree"
 	@echo
 	@echo "  JAVA_HOME    $(JAVA_HOME)"
+	@echo "  KEYSTORE     $(if $(KEYSTORE),$(KEYSTORE),none found in ~/.android)"
+	@echo "  SIGNING      $(if $(wildcard $(SIGNING)),$(SIGNING),asked for on the first build)"
 	@echo "  ANDROID_HOME $(ANDROID_HOME)"
 
 # The manifest is brought to the player's version first, so a build never
@@ -78,14 +105,14 @@ android: apk
 
 debug: apk
 
-apk: android/local.properties
+apk: android/local.properties $(SIGNING)
 	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
 	cd android && JAVA_HOME="$(JAVA_HOME)" ./gradlew assembleDebug
 	@echo "APK: $(APK_DEBUG)"
 
 # Also copied to the name it is published with, next to its SHA-256, and
 # the signer is shown, so a debug signed APK is noticed before it goes out
-release: android/local.properties
+release: android/local.properties $(SIGNING)
 	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
 	cd android && JAVA_HOME="$(JAVA_HOME)" ./gradlew assembleRelease
 	cp $(APK_RELEASE) $(DIST_APK)
@@ -94,6 +121,46 @@ release: android/local.properties
 	    JAVA_HOME="$(JAVA_HOME)" $(APKSIGNER) verify --print-certs $(DIST_APK) | grep -E "DN:|SHA-256"; \
 	fi
 	@echo "APK: $(DIST_APK)"
+
+# The first build asks which keystore signs the APKs, its password and the
+# key, checks the password with keytool and keeps the answers in
+# android/keystore.properties, readable by you only. Enter at the keystore
+# question means no key, the debug key then. make signing asks again
+$(SIGNING):
+	@umask 077; \
+	printf 'Keystore to sign the APKs with, Enter for none [%s]: ' "$(KEYSTORE)"; \
+	read -r store; store="$${store:-$(KEYSTORE)}"; \
+	case "$$store" in "~/"*) store="$$HOME/$${store#\~/}";; esac; \
+	if [ -z "$$store" ]; then \
+	    printf '# No release key, the APKs are signed with the debug key\nstoreFile=\n' > $@; \
+	    echo "No release key, the debug key signs the APKs. make signing sets one later"; \
+	    exit 0; \
+	fi; \
+	if [ ! -f "$$store" ]; then echo "No such file: $$store"; exit 1; fi; \
+	while :; do \
+	    printf 'Password for %s: ' "$$store"; stty -echo 2>/dev/null; read -r MUREKA_PW; stty echo 2>/dev/null; echo; \
+	    export MUREKA_PW; \
+	    if "$(KEYTOOL)" -list -keystore "$$store" -storepass:env MUREKA_PW >/dev/null 2>&1; then break; fi; \
+	    echo "Wrong password, or not a keystore"; \
+	done; \
+	keys=$$("$(KEYTOOL)" -list -keystore "$$store" -storepass:env MUREKA_PW 2>/dev/null \
+	    | sed -n 's/^\([^,]*\),.*PrivateKeyEntry.*/\1/p'); \
+	alias=$$(echo "$$keys" | grep -x murekaplayer || echo "$$keys" | head -1); \
+	printf 'Key to sign with [%s]: ' "$$alias"; read -r answer; alias="$${answer:-$$alias}"; \
+	pw=$$(printf '%s' "$$MUREKA_PW" | sed 's/\\/\\\\/g'); \
+	{ \
+	    printf '%s\n' "# Signing for the Mureka Player APKs, written by make, ignored by git"; \
+	    printf 'storeFile=%s\n' "$$store"; \
+	    printf 'storePassword=%s\n' "$$pw"; \
+	    printf 'keyAlias=%s\n' "$$alias"; \
+	    printf 'keyPassword=%s\n' "$$pw"; \
+	} > $@; \
+	echo "Saved in $@"
+
+# Ask the signing questions again
+signing:
+	rm -f $(SIGNING)
+	$(MAKE) $(SIGNING)
 
 # Written once, and again whenever the SDK moves
 android/local.properties:

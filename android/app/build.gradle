@@ -45,16 +45,87 @@ def homePath(String path) {
         .replace('$HOME', home)
 }
 
-// The release key lives outside the repository. Where it is and its
-// passwords come from ~/.gradle/gradle.properties, which Gradle reads by
-// itself: MUREKA_STORE_FILE, MUREKA_STORE_PASSWORD, MUREKA_KEY_ALIAS and
-// MUREKA_KEY_PASSWORD. The path may start with ~ or $HOME. Without them the
-// release build is signed with the debug key, which only suits a phone of
-// your own
-def releaseStoreFile = homePath(findProperty("MUREKA_STORE_FILE"))
-def hasReleaseKey = (releaseStoreFile != null && file(releaseStoreFile).exists()
-    && findProperty("MUREKA_STORE_PASSWORD") != null
-    && findProperty("MUREKA_KEY_ALIAS") != null)
+// The answers make asked for the first time and keeps in
+// android/keystore.properties, which git ignores
+def signingFile = rootProject.file("keystore.properties")
+def signingProps = new Properties()
+
+if (signingFile.exists()) {
+    signingFile.withInputStream { signingProps.load(it) }
+}
+
+// The same settings under the names gradle.properties and the environment
+// use, which win over the file when they are set
+ext.signingNames = [
+    MUREKA_STORE_FILE: "storeFile",
+    MUREKA_STORE_PASSWORD: "storePassword",
+    MUREKA_KEY_ALIAS: "keyAlias",
+    MUREKA_KEY_PASSWORD: "keyPassword"
+]
+ext.signingProps = signingProps
+ext.signingFileExists = signingFile.exists()
+
+// A signing setting from ~/.gradle/gradle.properties, the environment or
+// android/keystore.properties, in that order
+def keySetting(String name) {
+
+    def v = findProperty(name) ?: System.getenv(name) ?: signingProps.getProperty(signingNames[name])
+
+    return v ? v.toString() : null
+}
+
+// The release key: the one named in the settings, which may start with ~
+// or $HOME. Without one, a .jks, .keystore or .p12 file in ~/.android that
+// is not Android's debug.keystore, one with mureka in its name first. An
+// empty storeFile in keystore.properties means no key, the debug key then
+def findReleaseStore() {
+
+    def set = homePath(keySetting("MUREKA_STORE_FILE"))
+
+    if (set) {
+        return new File(set).exists() ? new File(set) : null
+    }
+
+    if (signingFileExists && signingProps.containsKey("storeFile")) {
+        return null
+    }
+
+    def dir = new File(System.getProperty("user.home"), ".android")
+    def found = (dir.listFiles() ?: ([] as File[])).findAll {
+        it.isFile() && it.name != "debug.keystore" && (it.name ==~ /.*\.(jks|keystore|p12)/)
+    }.sort { it.name }
+
+    return found.find { it.name.toLowerCase().contains("mureka") } ?: (found ? found[0] : null)
+}
+
+// The key inside the store: MUREKA_KEY_ALIAS, or murekaplayer when the
+// store has it, or the only key in it
+def findKeyAlias(File store, String password) {
+
+    def set = keySetting("MUREKA_KEY_ALIAS")
+
+    if (set) {
+        return set
+    }
+
+    try {
+
+        def ks = java.security.KeyStore.getInstance(store, password.toCharArray())
+        def aliases = Collections.list(ks.aliases()).findAll { ks.isKeyEntry(it) }
+
+        return aliases.contains("murekaplayer") ? "murekaplayer" : (aliases.size() == 1 ? aliases[0] : null)
+    } catch (Exception e) {
+        logger.warn("Could not open " + store + ": " + e.message)
+        return null
+    }
+}
+
+// Without a store or a password the APKs are signed with the debug key,
+// which only suits a phone of your own
+def releaseStore = findReleaseStore()
+def releasePassword = keySetting("MUREKA_STORE_PASSWORD")
+def releaseAlias = releaseStore && releasePassword ? findKeyAlias(releaseStore, releasePassword) : null
+def hasReleaseKey = releaseStore != null && releasePassword != null && releaseAlias != null
 
 android {
     namespace "dev.evthefuture.murekaplayer"
@@ -79,10 +150,10 @@ android {
 
             if (hasReleaseKey) {
 
-                storeFile file(releaseStoreFile)
-                storePassword findProperty("MUREKA_STORE_PASSWORD")
-                keyAlias findProperty("MUREKA_KEY_ALIAS")
-                keyPassword findProperty("MUREKA_KEY_PASSWORD") ?: findProperty("MUREKA_STORE_PASSWORD")
+                storeFile releaseStore
+                storePassword releasePassword
+                keyAlias releaseAlias
+                keyPassword keySetting("MUREKA_KEY_PASSWORD") ?: releasePassword
 
                 // v2 for every supported Android, v3 so the key can be
                 // rotated to a new one later without a reinstall
@@ -96,6 +167,16 @@ android {
         release {
             minifyEnabled false
             signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
+        }
+
+        // The debug build takes the release key too when it is there, so a
+        // debug and a release build install over each other on the same
+        // phone without an uninstall, which would clear the app's data
+        debug {
+
+            if (hasReleaseKey) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -118,6 +199,10 @@ tasks.named("preBuild") {
 
 // Say which key the release build is signed with, so a debug signed APK is
 // never published by mistake
-if (!hasReleaseKey) {
-    logger.warn("No release key set up in ~/.gradle/gradle.properties, the release APK is signed with the debug key")
+if (hasReleaseKey) {
+    logger.lifecycle("Signing with " + releaseStore + ", key " + releaseAlias)
+} else if (releaseStore == null) {
+    logger.warn("No release key found in ~/.android, the APKs are signed with the debug key")
+} else {
+    logger.warn("The release key " + releaseStore + " could not be used, the APKs are signed with the debug key")
 }
