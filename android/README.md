@@ -256,8 +256,8 @@ release APK is ever published.
 Android only installs an update signed with the same key as the installed
 app, so keep the keystore and its password backed up. An app installed from
 a debug signed build has to be uninstalled once before the first release
-signed one goes on, which clears its data, so export the song tweaks and
-settings first.
+signed one goes on, which clears its data, so export the song tweaks, the
+settings and the song library first.
 
 ## Use in the car
 
@@ -470,7 +470,27 @@ real cover** to try it by hand: the first sends the playing song with only
 the loading ring, the second with its own cover again. Either stays until
 the song changes. If the loading ring never shows in the car, the car does
 not take a new cover for the same song at all. The debug overlay lists
-every cover sent, and whether the song's cover could be downloaded.
+every cover sent, and whether the song's cover could be downloaded. That
+download happens once per song, when it starts, so the buttons show no
+download line; they send the cover already held.
+
+A car fetches the cover when it is told the song changed. When only the
+picture changes, Android may not tell it, or the car keeps the cover it has
+for that song. **How the cover is sent again**, on the Now playing page
+beside Resend art on resume, chooses what is sent:
+
+- **Cover only**: just the picture changes, as before.
+- **New song**: the loading cover goes out with another song id, the real
+  cover with the song's own id again, so Android sees the song change twice.
+  The song then carries its id in every update.
+- **New title**, the default: as New song, and the title gets a space at its
+  end with the loading cover. The space does not show. In a car tried, only
+  this way brought the new cover: Android tells the car about a new cover
+  only when the song's text changes. Skipping between two songs with the
+  same title but different second lines updated the cover too.
+
+The buttons, the resend on resume and the resend when Bluetooth connects all
+send the way chosen, so the buttons show which way works in the car.
 
 ## Volume
 
@@ -524,6 +544,16 @@ alone, so the VPN and the web server only start again for what changed.
 The same file imported in the add-on or a bookmarklet leaves them out.
 Running freely in the background, notifications and the Mureka sign in are
 Android's and Mureka's, and have to be set again on a new phone.
+
+**Export song library** saves every song the player keeps, the same data a
+rescan reads from Mureka, without covers, audio or waveforms, as compact
+JSON. Importing it on a new or cleared phone fills
+the library without the rescan, and Load then picks up songs made since.
+Songs already on the phone are kept as they are and only the missing ones
+are added, newest first. A file from another Mureka account is imported
+only after a warning. The library has no Google Drive option, it is saved
+as a file. The web view waits up to 30 seconds for the phone to put the
+file together.
 
 ## A phone left lying a while
 
@@ -800,13 +830,29 @@ mode, window and screen sizes and the browser's user agent.
 
 **What the debug overlays log**, under the same page, has a switch for each
 kind of line: Keys and taps, Media buttons, Bluetooth, Cover, Playback,
-Commands, Screen and page, Setting changes, Network and Errors. A group
+Commands, Screen and page, Setting changes, Network, Errors and Mureka
+requests. A group
 switched off is not logged at all, on the phone and in the web view alike,
 so the overlay and **Copy debug log** hold only what is being looked at,
 and the lines that matter are not pushed out by the rest. The app says
 itself which group each of its lines belongs to: media buttons and media
 session calls, Bluetooth coming and going, every cover sent and downloaded,
 and commands from a web view.
+
+**Clear debug log**, beside Copy debug log, starts the log again from
+nothing, for a test to begin clean: the phone's own lines, the web view log
+the phone was sent, and the log of every connected web view, which clears
+its own when the phone says so. It is in the web view's copy of the
+settings as well.
+
+**Mureka requests** lists every request the page makes to Mureka's server:
+the player's own, and those of Mureka's site under it, with the query and
+the body of a request that sends one, beacons included, which sites often
+use for play and listening events. The player runs in Mureka's page, so it sees what
+Mureka's own player sends, which is how to find out what Mureka does when a
+song is played there. A play report from the player is followed by what
+Mureka answered, taken or not. Only watched, every request goes through
+untouched; the same read again within ten seconds is left out.
 
 Neither layer can take a tap or a click: nothing in it receives pointer
 events, every listener only watches, and characters typed in a text field

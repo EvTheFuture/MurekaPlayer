@@ -151,12 +151,14 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
     }
 
     // Coming back from another app, or from the bars showing for a moment,
-    // puts them away again
+    // puts them away again. Opened, the player shows itself rather than its
+    // black cover
     @Override
     protected void onResume() {
 
         super.onResume();
         applyFullscreen();
+        Hub.appShown();
     }
 
     @Override

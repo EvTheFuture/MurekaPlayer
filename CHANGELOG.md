@@ -35,9 +35,12 @@ the new settings layout and a number of smaller improvements.
   screen start the music with the screen off and the phone locked.
 - **Resend art on resume** sends the cover again when playback picks up, for
   head units that drop it: first a loading ring as the cover, then the
-  song's own cover two seconds later, two pictures the head unit cannot
-  skip. A Bluetooth device that connects gets the song and cover again a
-  moment later.
+  song's own cover two seconds later. The loading step goes out with an
+  invisible change to the title, since Android only tells the car about a
+  new cover when the song's text changes. **How the cover is sent again**,
+  beside it, can also send the picture only or change just the song's id.
+  A Bluetooth device that connects gets the song and cover again a moment
+  later.
 - **Play when Bluetooth connects**: Never, If it was playing (only when the
   music was playing as the last Bluetooth device went away) or Always.
 - **Pause when Bluetooth disconnects**, so the music does not carry on from
@@ -133,7 +136,24 @@ the new settings layout and a number of smaller improvements.
   start with). Applies to every previous button, from the player, the lock
   screen, Bluetooth, a steering wheel and the web view. Turn it off to always
   go to the previous song.
+- **Report plays to Mureka** also takes Mureka's new mark off a song played
+  for the first time, as Mureka's own player does. Before, a song played
+  here stayed marked as new on Mureka.
+- A **New** mark after the title of your own songs not played yet, as on
+  Mureka, in the song list and in the web view's list and queue. It goes
+  once the song has been played with **Report plays to Mureka** on.
+- **Export song library** under Backup and restore saves every song as the
+  player keeps it, without covers or audio, in one compact file. Importing
+  it on a new or cleared device fills the library at once instead of
+  reading thousands of songs from Mureka again, and Load then picks up
+  anything newer. A device that already has songs keeps them and only adds
+  the missing ones. The import says so when the file is from another Mureka
+  account. From the web view it can be saved in the browser or on the
+  phone.
 - **Autoplay on start** moved to This device, under Playing by itself.
+- Opening the app, or coming back to the page from another tab or app,
+  takes the black screen cover away as a tap would, so the player shows
+  at once.
 - **Start with** can also be **As last time**, the list and artist the player
   showed when it was last used.
 - **Remove ; from lyrics** takes Mureka's pause marks out of the lyrics
@@ -165,18 +185,22 @@ the new settings layout and a number of smaller improvements.
 - **Debug overlay** replaces the debug line: a see-through layer listing keys,
   taps, media buttons, commands, setting changes and playback events live,
   with the layout numbers at the top. It never takes a tap. **Copy debug
-  log** copies it all.
+  log** copies it all, **Clear debug log** starts it again, in the web views
+  too.
 - **What the debug overlays log**: a switch for each kind of line, Keys and
   taps, Media buttons, Bluetooth, Cover, Playback, Commands, Screen and
-  page, Setting changes, Network and Errors, so the overlays and the copied
-  log hold only what is being looked at. In the app it applies to the web
-  view's overlay too.
+  page, Setting changes, Network, Errors and Mureka requests, so the
+  overlays and the copied log hold only what is being looked at. In the app
+  it applies to the web view's overlay too. Mureka requests lists every
+  request the page makes to Mureka, the player's and those of Mureka's own
+  site, and what Mureka answered a play report.
 - **Cover test** under Developer replaces the artwork test button over the
   cover: **Send loading cover** and **Send real cover** send the playing song
   with a loading ring as its cover or with its own, to find out what a car or
   the lock screen takes. A button rings briefly when it has sent, red if
   nothing was playing. The debug overlay lists every cover sent and whether
-  the cover downloaded.
+  the cover downloaded. In the app the buttons send the way chosen under
+  **How the cover is sent again**.
 
 ### Build
 

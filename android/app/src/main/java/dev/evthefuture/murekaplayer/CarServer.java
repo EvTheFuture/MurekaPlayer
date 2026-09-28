@@ -365,9 +365,13 @@ final class CarServer {
 
                 // The data behind an export, so the browser showing the web
                 // view can save the file itself
-                String kind = "songs".equals(param(query, "kind")) ? "songs" : "settings";
+                String asked = param(query, "kind");
+                String kind = "songs".equals(asked) || "library".equals(asked) ? asked : "settings";
 
-                sendCall(out, "__murekaHostExport", JSONObject.quote(kind));
+                // The song library is thousands of songs and takes the page
+                // longer to put together
+                sendCall(out, "__murekaHostExport", JSONObject.quote(kind),
+                    "library".equals(kind) ? 30000 : 4000);
             } else if ("GET".equals(method) && "/menu".equals(path)) {
 
                 // What the long press menu offers for one song, the id goes
@@ -414,10 +418,16 @@ final class CarServer {
 
     // Whatever one of the player's host functions returns
     private void sendCall(OutputStream out, String function, String argJson) throws IOException {
+        sendCall(out, function, argJson, 4000);
+    }
+
+    // The same, waiting longer for a call with a large answer
+    private void sendCall(OutputStream out, String function, String argJson, long timeoutMs)
+        throws IOException {
 
         lastPoll = System.currentTimeMillis();
 
-        String json = Hub.request(function, argJson, 4000);
+        String json = Hub.request(function, argJson, timeoutMs);
 
         if (json.isEmpty()) {
 

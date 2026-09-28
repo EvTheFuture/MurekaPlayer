@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.108";
+    const VERSION = "1.6.0.117";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -278,7 +278,9 @@
         { id: "network", name: "Network", kinds: ["Net"],
             hint: "Going online and offline, and the phone not answering the web view." },
         { id: "errors", name: "Errors", kinds: ["Error"],
-            hint: "Errors in the page." }
+            hint: "Errors in the page." },
+        { id: "mureka", name: "Mureka requests", kinds: ["Mureka"],
+            hint: "Every request to Mureka's server from the page, the player's and those of Mureka's own site, and what a play report got back. Play a song in Mureka's own player to see what it sends." }
     ];
 
     // The kinds of lines left out by the groups switched off
@@ -336,6 +338,9 @@
 
     // The logged in user id, learned from your own feed, used to list who you follow
     let selfUserId = loadSelfUserId();
+
+    // Counts the New marks taken off, so the web view knows to repaint its rows
+    let playedMarks = 0;
 
     // Creators you follow plus any added by hand, loaded on demand into the picker
     let followedCreators = [];
@@ -1158,6 +1163,7 @@
             artOnResume: false,
             pauseOnDisconnect: false,
             playOnConnect: "never",
+            coverResend: "title",
             controlOrder: "repeat,shuffle,stop,play",
             controlLabels: false,
             tagGenres: [],
@@ -1272,6 +1278,9 @@
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
+                    coverResend: ["art", "id", "title"].indexOf(parsed.coverResend) >= 0
+                        ? parsed.coverResend
+                        : "title",
                     // Never, only if it was playing when Bluetooth went away,
                     // or always. The first version was a plain switch
                     playOnConnect: ["never", "resume", "always"].indexOf(parsed.playOnConnect) >= 0
@@ -1924,7 +1933,11 @@
             model: s.model,
             bpm: s.bpm,
             generation_method: s.generation_method,
-            allow_remix: s.allow_remix
+            allow_remix: s.allow_remix,
+
+            // False until the song has been played, Mureka's "new" mark. Only
+            // songs of your own library carry it, others leave it out
+            is_played: typeof s.is_played === "boolean" ? s.is_played : undefined
         };
     }
 
@@ -7325,10 +7338,22 @@
 
     // Report a play to Mureka, fire and forget so it never blocks playback
     // The body matches the site, play_type 1 is a normal play, playlist_id 0
+    // What Mureka answered goes to the debug overlay under Mureka requests,
+    // so it can be seen whether the report was taken. A song Mureka still
+    // marks as new is first reported as played, the request Mureka's own
+    // player sends for it, spelt palyed by Mureka, which takes the new mark
+    // away. Mureka's page sends that one many times over, once is enough
     async function reportPlay(song) {
 
+        if (song.is_played === false) {
+            await reportPlayed(song);
+        }
+
+        const what = "play report for " + song.song_id;
+
         try {
-            await fetch("/api/pgc/song/play/report", {
+
+            const res = await fetch("/api/pgc/song/play/report", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -7339,7 +7364,201 @@
                     playlist_id: 0
                 })
             });
+
+            let json = null;
+
+            try {
+                json = await res.json();
+            } catch (e) {
+                json = null;
+            }
+
+            dbgLog("Mureka", what + ": HTTP " + res.status
+                + (json && json.code !== undefined ? ", code " + json.code : ", no answer")
+                + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
         } catch (e) {
+            dbgLog("Mureka", what + " failed, " + (e && e.message ? e.message : "no connection"));
+        }
+    }
+
+    // Tell Mureka a song has been played, so it is no longer marked as new,
+    // and remember it here too once Mureka took it
+    async function reportPlayed(song) {
+
+        const what = "played report for " + song.song_id;
+
+        try {
+
+            const res = await fetch("/api/pgc/song/palyed/report", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: song.song_id
+                })
+            });
+
+            let json = null;
+
+            try {
+                json = await res.json();
+            } catch (e) {
+                json = null;
+            }
+
+            dbgLog("Mureka", what + ": HTTP " + res.status
+                + (json && json.code !== undefined ? ", code " + json.code : ", no answer")
+                + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+
+            if (res.ok && json && json.code === 0) {
+
+                song.is_played = true;
+                playedMarks++;
+
+                // The copy in the library too, the one kept on disk
+                const kept = cache.songs.find(function (x) {
+                    return x.song_id === song.song_id;
+                });
+
+                if (kept && kept !== song) {
+                    kept.is_played = true;
+                }
+
+                saveCache();
+
+                // Take the New mark off the row, here and in the web view
+                renderList();
+                publishHostSoon();
+            }
+        } catch (e) {
+            dbgLog("Mureka", what + " failed, " + (e && e.message ? e.message : "no connection"));
+        }
+    }
+
+    // Every request the page makes to Mureka's server, the player's own and
+    // those of Mureka's site under it, for the debug overlay, to find out
+    // what Mureka's own player sends when a song is played. Watching only,
+    // each request goes through untouched. The same read again within ten
+    // seconds is left out, or polling would fill the log
+    function installRequestLog() {
+
+        if (window.__murekaRequestLog) {
+            return;
+        }
+
+        window.__murekaRequestLog = true;
+
+        const reads = new Map();
+
+        const note = function (method, url, body) {
+
+            let path = "";
+            let query = "";
+
+            try {
+
+                const u = new URL(String(url), location.href);
+
+                if (u.host !== location.host || u.pathname.indexOf("/api/") !== 0) {
+                    return;
+                }
+
+                path = u.pathname;
+                query = u.search;
+            } catch (e) {
+                return;
+            }
+
+            const verb = String(method || "GET").toUpperCase();
+            const key = verb + " " + path;
+
+            if (verb === "GET") {
+
+                if (Date.now() - (reads.get(key) || 0) < 10000) {
+                    return;
+                }
+
+                reads.set(key, Date.now());
+            }
+
+            // The query too, it can name the song a request is about. A
+            // body that is not text, a beacon's Blob, is named by its kind
+            let sent = "";
+
+            if (typeof body === "string" && body) {
+                sent = " " + body.slice(0, 300);
+            } else if (body && typeof body === "object") {
+                sent = " [" + (body.constructor && body.constructor.name ? body.constructor.name : "data") + "]";
+            }
+
+            dbgLog("Mureka", key + (query ? query.slice(0, 160) : "") + sent);
+        };
+
+        const plainFetch = window.fetch;
+
+        if (typeof plainFetch === "function") {
+
+            window.fetch = function (input, init) {
+
+                try {
+
+                    const url = typeof input === "string" ? input : (input && input.url) || "";
+                    const method = (init && init.method) || (input && input.method) || "GET";
+
+                    note(method, url, init ? init.body : null);
+                } catch (e) {
+                    // Never in the way of the request itself
+                }
+
+                return plainFetch.apply(window, arguments);
+            };
+        }
+
+        // Sites often send play and listening events as beacons, which go
+        // neither through fetch nor through XMLHttpRequest
+        if (navigator.sendBeacon) {
+
+            const plainBeacon = navigator.sendBeacon;
+
+            navigator.sendBeacon = function (url, data) {
+
+                try {
+                    note("BEACON", url, data);
+                } catch (e) {
+                    // Never in the way of the beacon itself
+                }
+
+                return plainBeacon.apply(navigator, arguments);
+            };
+        }
+
+        const xhr = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+
+        if (xhr) {
+
+            const plainOpen = xhr.open;
+            const plainSend = xhr.send;
+
+            xhr.open = function (method, url) {
+
+                this.__murekaRequest = [method, url];
+                return plainOpen.apply(this, arguments);
+            };
+
+            xhr.send = function (body) {
+
+                try {
+
+                    if (this.__murekaRequest) {
+                        note(this.__murekaRequest[0], this.__murekaRequest[1], body);
+                    }
+                } catch (e) {
+                    // Never in the way of the request itself
+                }
+
+                return plainSend.apply(this, arguments);
+            };
         }
     }
 
@@ -9366,6 +9585,20 @@
         // Paused under the cover, the screen may sleep now it is gone. The
         // cover is still counted as up until its fade ends, so look after it
         setTimeout(syncWakeLock, 400);
+    }
+
+    // Opening the app or coming back to the page counts as a tap: the black
+    // cover goes, and without it the countdown starts again
+    function wakeFromCover(why) {
+
+        if (isBlackedOut()) {
+
+            dbgLog("Screen", why + ", black cover down");
+            hideBlackout();
+            return;
+        }
+
+        resetIdleTimer();
     }
 
     // True while the black cover is up
@@ -12843,15 +13076,17 @@
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
             debugOverlay: settings.webDebugOverlay === true,
             debugHide: debugHiddenKinds(),
+            debugClear: debugClearedAt,
 
             // Changes whenever a song or a cover is stored or taken out, or a
             // song starts or stops downloading, so the web view knows to
             // paint the cache dots in its list again
-            cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(","),
+            cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(",") + "|" + playedMarks,
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
             playOnConnect: settings.playOnConnect || "never",
+            coverResend: settings.coverResend || "title",
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
@@ -13289,6 +13524,7 @@
                 number: numbers.get(song.song_id) || null,
                 published: song.publish_state === 1,
                 cached: hostCacheState(song),
+                isNew: song.is_played === false,
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -13335,6 +13571,7 @@
                 number: numbers.get(song.song_id) || null,
                 published: song.publish_state === 1,
                 cached: hostCacheState(song),
+                isNew: song.is_played === false,
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -14134,6 +14371,11 @@
         }
 
         window.__murekaHostCommand = hostCommand;
+
+        // The app's own screen came to the front
+        window.__murekaAppShown = function () {
+            wakeFromCover("app opened");
+        };
         window.__murekaHostExport = hostExport;
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
@@ -15480,9 +15722,10 @@
                 return;
             }
 
-            // Back in the foreground, so make sure playback really is running
+            // Back in the foreground, so make sure playback really is running.
+            // Coming back is use, so the black cover goes as on a tap
             resyncPlayback();
-            resetIdleTimer();
+            wakeFromCover("page shown");
 
             // Safari may have dropped fullscreen while the page was away, and
             // anything measured while hidden is not to be trusted either way.
@@ -16224,6 +16467,27 @@
     // The last log a web view sent, copied along with this one
     let webViewDebugLog = "";
 
+    // When the log was last cleared, sent to the web views so they clear
+    // theirs at the same moment
+    let debugClearedAt = 0;
+
+    // Start the log again from nothing, for a test to begin clean: the
+    // phone's own lines, the web view log it was sent, and through the state
+    // the log of every web view
+    function clearDebugLog() {
+
+        debugLog.length = 0;
+        webViewDebugLog = "";
+        debugClearedAt = Date.now();
+
+        if (debugLogEl) {
+            debugLogEl.textContent = "";
+        }
+
+        publishHostSoon();
+        setStatus("Debug log cleared");
+    }
+
     function receiveWebViewLog(text) {
 
         webViewDebugLog = String(text || "");
@@ -16278,6 +16542,7 @@
         }
 
         debugWatching = true;
+        installRequestLog();
 
         const opts = { capture: true, passive: true };
 
@@ -17404,6 +17669,18 @@
     }
 
     // Render the cached song list
+    // The small New mark after a title
+    function makeNewBadge() {
+
+        const badge = document.createElement("span");
+
+        badge.textContent = "New";
+        badge.title = "Not played yet";
+        badge.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;border:1px solid #48e1eb;color:#48e1eb;font-size:10px;line-height:14px;font-weight:600";
+
+        return badge;
+    }
+
     function renderList() {
 
         // Anything that changes what the list holds comes through here, so
@@ -17541,6 +17818,12 @@
         item.appendChild(dot);
         item.appendChild(numEl);
         item.appendChild(titleEl);
+
+        // Mureka's new mark, a song of your own never played. It goes once
+        // Mureka has taken the played report
+        if (song.is_played === false) {
+            item.appendChild(makeNewBadge());
+        }
 
         // The rating, but only once any song has one, so a library nobody has
         // rated keeps the full width for titles. A fixed column keeps the
@@ -18510,6 +18793,19 @@
 
         const copyLogBtn = makeButton("Copy debug log", "#333", "#fff", copyDebugLog);
 
+        // Beside it, starting the log again. From the web view's copy of the
+        // settings too, where copying has no clipboard to go to
+        const clearLogBtn = makeButton("Clear debug log", "#333", "#fff", function (ev) {
+
+            clearDebugLog();
+            flashButton(ev.currentTarget, true);
+        });
+        const logRow = document.createElement("div");
+
+        logRow.style.cssText = "display:flex;gap:8px";
+        logRow.appendChild(copyLogBtn);
+        logRow.appendChild(clearLogBtn);
+
         const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
 
         settingsEl.appendChild(head);
@@ -18519,7 +18815,7 @@
         libraryPage.appendChild(makeLabel("Updates and numbers"));
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
-        playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka, as Mureka's own player does. Off keeps your listening out of the play counts."));
+        playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
         playbackPage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
 
         // The seconds only matter with the switch on, so they are hidden
@@ -18720,6 +19016,25 @@
         nowPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
         nowPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
         nowPage.appendChild(withHint(artResumeRow, "Sends the cover again each time playback resumes, for Bluetooth screens that drop it. An iPhone greys the cover out when it is sent too often, so keep it off there."));
+
+        // How the app sends the cover again, on resume and when Bluetooth
+        // connects. Only the app sends to a car itself
+        if (isApkHost()) {
+
+            const resendRow = makeChoiceRow([
+                { label: "Cover only", value: "art" },
+                { label: "New song", value: "id" },
+                { label: "New title", value: "title" }
+            ], function () { return settings.coverResend || "title"; }, function (v) {
+
+                settings.coverResend = v;
+                publishHostSoon();
+            });
+
+            nowPage.appendChild(makeSubLabel("How the cover is sent again"));
+            nowPage.appendChild(resendRow);
+            nowPage.appendChild(makeHint("The cover goes out twice: first a loading picture, then the song's own two seconds later. Android only tells the car about a new cover when the song's text changes, so New title, the one to use, adds an invisible space to the title with the loading picture. New song changes only the song's id, Cover only just the picture. Used on resume, when Bluetooth connects and by the cover test under Developer."));
+        }
         libraryPage.appendChild(makeLabel("Counts"));
         libraryPage.appendChild(withHint(countsAgeRow, "How long the plays and likes shown for a song are kept before they are fetched from Mureka again."));
 
@@ -18787,7 +19102,9 @@
             + " Share saves to the Google Drive or Files app, Import can pick the file"
             + " from there. Import sees what a file holds. Song tweaks are merged, and"
             + " when a song has a different value here and in the file you are asked"
-            + " which to keep.";
+            + " which to keep. The song library is every song as kept here, so a new"
+            + " or cleared device imports it instead of reading the whole library from"
+            + " Mureka again. Songs already here are kept, missing ones are added.";
         dataHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
 
         const exportRow = document.createElement("div");
@@ -18807,6 +19124,16 @@
 
         exportRow.appendChild(songsExport);
         exportRow.appendChild(settingsExport);
+
+        // Every song as kept here, on a row of its own
+        const libraryRow = document.createElement("div");
+        const libraryExport = makeButton("Export song library", "#333", "#fff", function () {
+            chooseExport("library");
+        });
+
+        libraryRow.style.cssText = "display:flex;gap:6px";
+        libraryExport.dataset.hostExport = "library";
+        libraryRow.appendChild(libraryExport);
 
         const importRow = document.createElement("div");
         importRow.style.cssText = "display:flex;gap:6px";
@@ -18866,6 +19193,7 @@
 
         backupPage.appendChild(dataHint);
         backupPage.appendChild(exportRow);
+        backupPage.appendChild(libraryRow);
         backupPage.appendChild(importRow);
         backupPage.appendChild(dataChoiceEl);
         backupPage.appendChild(driveInfoRow);
@@ -19168,7 +19496,7 @@
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         devPage.appendChild(debugRow);
         devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, commands and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
-        devPage.appendChild(copyLogBtn);
+        devPage.appendChild(logRow);
 
         if (isApkHost()) {
 
@@ -19234,7 +19562,7 @@
 
         devPage.appendChild(copyFeedBtn);
         devPage.appendChild(makeLabel("Cover test"));
-        devPage.appendChild(makeHint("Sends the playing song with a loading ring as its cover, or with its own cover again, to see what the car or the lock screen shows. Either stays until the song changes. In the app, with Resend art on resume on, picking up again sends the loading cover first and the real one two seconds later."));
+        devPage.appendChild(makeHint("Sends the playing song with a loading ring as its cover, or with its own cover again, to see what the car or the lock screen shows. Either stays until the song changes. In the app they send the way chosen under Now playing, How the cover is sent again."));
         devPage.appendChild(coverTestRow);
 
         // About: the version, where the player runs, and in the app where
@@ -19520,7 +19848,86 @@
 
     // The words used for each kind of export
     function dataKindName(kind) {
+
+        if (kind === "library") {
+            return "the song library";
+        }
+
         return kind === "settings" ? "settings" : "song tweaks";
+    }
+
+    // The own library as kept on this device. While a creator's songs are
+    // shown the active cache is theirs, so the own one is read from storage
+    function ownLibrary() {
+
+        if (!creatorSource) {
+            return cache;
+        }
+
+        try {
+
+            const kept = JSON.parse(localStorage.getItem(OWN_FEED.cacheKey));
+
+            if (kept && Array.isArray(kept.songs)) {
+                return kept;
+            }
+        } catch (e) {
+            // Nothing readable kept, an empty library then
+        }
+
+        return { songs: [] };
+    }
+
+    // Take in a song library from an export. An empty library here takes
+    // the file as it is. Songs already here are kept as they are, being as
+    // new or newer, and only songs missing here are added, newest first as
+    // the feed lists them. Returns how many were added, or -1 when the
+    // library could not be stored
+    function applyLibraryImport(lib) {
+
+        const here = ownLibrary();
+        const had = Array.isArray(here.songs) ? here.songs : [];
+        const known = new Set(had.map(function (x) {
+            return x.song_id;
+        }));
+        const added = lib.songs.filter(function (x) {
+            return !known.has(x.song_id);
+        });
+
+        let songs = had;
+
+        if (had.length === 0) {
+            songs = lib.songs.slice();
+        } else if (added.length > 0) {
+
+            songs = had.concat(added).sort(function (a, b) {
+                return (b.generate_at || 0) - (a.generate_at || 0);
+            });
+        }
+
+        const merged = Object.assign({}, here, {
+            songs: songs,
+            updated: Date.now(),
+            complete: here.complete === true || lib.complete === true
+        });
+
+        if (!creatorSource) {
+
+            cache = merged;
+            saveCache();
+            renderList();
+            publishHostSoon();
+
+            return added.length;
+        }
+
+        try {
+            localStorage.setItem(OWN_FEED.cacheKey, JSON.stringify(merged));
+        } catch (e) {
+            return -1;
+        }
+
+        return added.length;
     }
 
     // The settings the Android app keeps itself, with what they are when
@@ -19578,12 +19985,32 @@
 
         const base = {
             app: "mureka-player",
-            kind: kind === "settings" ? "settings" : "song-data",
+            kind: kind === "settings" ? "settings" : (kind === "library" ? "library" : "song-data"),
             // 2 since ratings come in half steps
             format: 2,
             version: VERSION,
             exported: new Date().toISOString()
         };
+
+        // Every song as the player keeps it, so a new device or a cleared
+        // one needs no full scan of Mureka. Covers, audio and waveforms are
+        // fetched again as needed and stay out, the file would be huge
+        if (kind === "library") {
+
+            const lib = ownLibrary();
+
+            base.library = {
+                songs: Array.isArray(lib.songs) ? lib.songs : [],
+                complete: lib.complete === true,
+                updated: lib.updated || 0
+            };
+
+            if (selfUserId !== null) {
+                base.user = String(selfUserId);
+            }
+
+            return base;
+        }
 
         if (kind === "settings") {
 
@@ -19632,7 +20059,7 @@
     // understood. Returns null when it is not a Mureka Player export at all
     function parseUserData(data) {
 
-        const kinds = ["song-data", "settings", "user-data"];
+        const kinds = ["song-data", "settings", "user-data", "library"];
 
         if (!data || data.app !== "mureka-player" || kinds.indexOf(data.kind) < 0) {
             return null;
@@ -19647,8 +20074,27 @@
             creators: [],
             cleared: { rating: [], bpm: [], instr: [] },
             settings: (data.settings && typeof data.settings === "object") ? data.settings : null,
-            appSettings: (data.appSettings && typeof data.appSettings === "object") ? data.appSettings : null
+            appSettings: (data.appSettings && typeof data.appSettings === "object") ? data.appSettings : null,
+            library: null,
+            user: typeof data.user === "string" ? data.user : ""
         };
+
+        // A song library keeps only songs that can be played
+        if (data.kind === "library") {
+
+            const lib = data.library && typeof data.library === "object" ? data.library : {};
+            const songs = Array.isArray(lib.songs) ? lib.songs.filter(function (x) {
+                return x && typeof x === "object" && isUsableSong(x);
+            }).map(trim) : [];
+
+            out.library = {
+                songs: songs,
+                complete: lib.complete === true,
+                updated: typeof lib.updated === "number" ? lib.updated : 0
+            };
+
+            return out;
+        }
 
         if (data.ratings && typeof data.ratings === "object") {
 
@@ -20046,6 +20492,36 @@
     // without asking, so importing never loses data
     function importParsed(p, sourceName, donePrefix) {
 
+        if (p.kind === "library") {
+
+            const here = ownLibrary();
+            const had = Array.isArray(here.songs) ? here.songs.length : 0;
+            const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
+            let question = "Import the song library from the " + sourceName + " saved " + when
+                + ", " + p.library.songs.length + " songs?";
+
+            if (had > 0) {
+                question += "\n\nThe " + had + " songs here are kept, songs only in the file are added.";
+            }
+
+            if (p.user && selfUserId !== null && p.user !== String(selfUserId)) {
+                question += "\n\nThe file is from another Mureka account.";
+            }
+
+            if (!window.confirm(question)) {
+
+                dataStatus("Import cancelled");
+                return;
+            }
+
+            const added = applyLibraryImport(p.library);
+
+            dataStatus(added < 0
+                ? "Could not store the imported song library, the device is out of room"
+                : donePrefix + " song library, " + added + " songs added. Load picks up anything newer.");
+            return;
+        }
+
         if (p.kind === "settings") {
 
             if (!confirmImport(p, sourceName)) {
@@ -20103,6 +20579,10 @@
             return "settings";
         }
 
+        if (data.kind === "library") {
+            return "the song library, " + data.library.songs.length + " songs";
+        }
+
         return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
             Object.keys(data.manualBpm).length, data.manualInstrumental.length,
             data.creators.length);
@@ -20113,6 +20593,10 @@
 
         if (data.kind === "settings") {
             return "mureka-player-settings-" + platformTag() + "-" + data.exported.slice(0, 10);
+        }
+
+        if (data.kind === "library") {
+            return "mureka-player-library-" + data.exported.slice(0, 10);
         }
 
         return "mureka-player-songs-" + data.exported.slice(0, 10);
@@ -20150,10 +20634,17 @@
 
     // Save one kind of data as a JSON file. A plain download works on every
     // host, on an iPhone it lands in Files
+    // The text of an export. Laid out for reading, except the song library,
+    // thousands of songs, which is kept compact
+    function exportJson(data) {
+
+        return data.kind === "library" ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+    }
+
     function downloadUserData(kind) {
 
         const data = collectUserData(kind);
-        const text = JSON.stringify(data, null, 2);
+        const text = exportJson(data);
 
         // In the app a download goes nowhere, the WebView has no place to put
         // it, so the app is asked to save the file and show where it goes
@@ -20214,7 +20705,7 @@
     // with it so both hosts name the file the same way
     function hostExport(kind) {
 
-        const data = collectUserData(kind === "songs" ? "songs" : "settings");
+        const data = collectUserData(kind === "songs" || kind === "library" ? kind : "settings");
 
         return { name: exportBaseName(data) + ".json", data: data };
     }
@@ -20262,7 +20753,7 @@
     function shareUserData(kind) {
 
         const data = collectUserData(kind);
-        const file = shareableFile(JSON.stringify(data, null, 2), exportBaseName(data));
+        const file = shareableFile(exportJson(data), exportBaseName(data));
 
         if (!file) {
 
@@ -20351,7 +20842,8 @@
             downloadUserData(kind);
         } });
 
-        if (GOOGLE_CLIENT_ID) {
+        // The library is a file of its own, Drive keeps only the other two
+        if (GOOGLE_CLIENT_ID && kind !== "library") {
             options.push({ label: "Google Drive", fn: function () {
                 saveToDrive(kind);
             } });

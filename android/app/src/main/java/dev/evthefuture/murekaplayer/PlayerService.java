@@ -151,6 +151,16 @@ public class PlayerService extends Service implements Hub.Listener {
     // for the head unit to fetch it
     private static final long ART_SWAP_MS = 2000;
 
+    // How the cover is sent again, the player's setting under Developer:
+    // "art" changes only the picture, "id" sends the loading cover as if it
+    // were another song and the real cover as the song again, "title" also
+    // adds a space to the title with the loading cover. Android only tells
+    // the head unit about a new cover when the song's text changes, and in
+    // a car tried only "title" brought a new cover, so it is the default.
+    // And the playing song's id, for the song's identity
+    private String coverResend = "title";
+    private String songId = "";
+
     // Whether the foreground state has been claimed, and with which types
     private int foregroundTypes = 0;
 
@@ -562,6 +572,8 @@ public class PlayerService extends Service implements Hub.Listener {
         subtitle = s.optString("subtitle", "");
         playing = s.optBoolean("playing", false);
         artOnResume = s.optBoolean("artOnResume", false);
+        coverResend = s.optString("coverResend", "title");
+        songId = s.optString("id", "");
         pauseOnDisconnect = s.optBoolean("pauseOnDisconnect", false);
         playOnConnect = s.optString("playOnConnect", "never");
         soundInBrowser = s.optBoolean("carAudio", false);
@@ -656,7 +668,7 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         metaKey = key;
-        pushMetadata(art);
+        pushMetadata(art, false);
     }
 
     // What the song sent last was, to tell a change from the same again
@@ -666,15 +678,26 @@ public class PlayerService extends Service implements Hub.Listener {
     }
 
     // Hand the song to the media session with the given picture as its
-    // cover, or none
-    private void pushMetadata(Bitmap picture) {
+    // cover, or none. Sent as another song, for the loading cover when the
+    // setting asks for it, the song gets another id, and with "title" a
+    // space after its title too, so the head unit takes it for a new song
+    // and fetches its cover. Only while the setting is not "art" does the
+    // song carry an id at all, so that way sends what it always did
+    private void pushMetadata(Bitmap picture, boolean asOther) {
+
+        boolean withId = !"art".equals(coverResend) && !songId.isEmpty();
+        String shown = asOther && "title".equals(coverResend) ? title + " " : title;
 
         MediaMetadata.Builder b = new MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadata.METADATA_KEY_TITLE, shown)
             .putString(MediaMetadata.METADATA_KEY_ARTIST, subtitle)
-            .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, title)
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, shown)
             .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
             .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs);
+
+        if (withId) {
+            b.putString(MediaMetadata.METADATA_KEY_MEDIA_ID, asOther ? songId + ":cover" : songId);
+        }
 
         if (picture != null) {
             b.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, picture);
@@ -697,12 +720,12 @@ public class PlayerService extends Service implements Hub.Listener {
 
         final int round = ++artRound;
 
-        pushMetadata(loadingArt());
+        pushMetadata(loadingArt(), true);
 
         // Counted as sent, so a state arriving meanwhile does not send the
         // real cover early and cut the loading one short
         metaKey = metaKeyNow();
-        Hub.note("Cover", "loading cover sent, the real one follows in " + (ART_SWAP_MS / 1000) + " s");
+        Hub.note("Cover", "loading cover sent" + resendWay() + ", the real one follows in " + (ART_SWAP_MS / 1000) + " s");
 
         main.postDelayed(() -> {
 
@@ -710,7 +733,7 @@ public class PlayerService extends Service implements Hub.Listener {
                 return;
             }
 
-            pushMetadata(art);
+            pushMetadata(art, false);
             metaKey = metaKeyNow();
             Hub.note("Cover", art != null ? "real cover sent" : "the real cover has not loaded yet");
         }, ART_SWAP_MS);
@@ -741,16 +764,30 @@ public class PlayerService extends Service implements Hub.Listener {
 
         boolean loading = "loading".equals(which);
 
-        pushMetadata(loading ? loadingArt() : art);
+        pushMetadata(loading ? loadingArt() : art, loading);
 
         // Stays until the song or its cover changes, so it can be looked at
         metaKey = metaKeyNow();
 
         if (loading) {
-            Hub.note("Cover", "loading cover sent");
+            Hub.note("Cover", "loading cover sent" + resendWay());
         } else {
             Hub.note("Cover", art != null ? "real cover sent" : "the real cover has not loaded, sent without one");
         }
+    }
+
+    // How the loading cover went out, for the debug overlay
+    private String resendWay() {
+
+        if ("id".equals(coverResend)) {
+            return " as another song";
+        }
+
+        if ("title".equals(coverResend)) {
+            return " as another song with a touched title";
+        }
+
+        return "";
     }
 
     // A dark square with a loading ring, the player's colours. Plainly not

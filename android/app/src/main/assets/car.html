@@ -1928,6 +1928,18 @@
         color: var(--accent);
     }
 
+    .rowNew {
+        flex: 0 0 auto;
+        margin-left: 0.4em;
+        padding: 0 0.4em;
+        border: 1px solid var(--accent);
+        border-radius: 5px;
+        color: var(--accent);
+        font-size: 0.6em;
+        font-weight: 600;
+        line-height: 1.6;
+    }
+
     .rowBadge.draft {
         background: #3a3226;
         color: #f0a94a;
@@ -3210,6 +3222,10 @@
     // download starting or ending, paints the dots in the list again
     let cacheSig = null;
     let cacheTimer = null;
+
+    // When the phone last cleared the debug log, to clear this browser's
+    // log along with it. Null until the first state, which only notes it
+    let debugClearSeen = null;
     let debugEl = null;
     let debugStateEl = null;
     let debugLogEl = null;
@@ -5743,6 +5759,18 @@
     // One song line, laid out like a row in the phone's list: the number,
     // the cover, the title, the rating column once any song is rated, the
     // heart, the length, and public or draft when both kinds are listed
+    // The small New mark after a title
+    function newMark() {
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowNew";
+        mark.textContent = "New";
+        mark.title = "Not played yet";
+
+        return mark;
+    }
+
     function songLine(song, row) {
 
         const num = document.createElement("span");
@@ -5791,6 +5819,11 @@
         });
 
         row.appendChild(title);
+
+        // Mureka's new mark, a song of your own never played
+        if (song.isNew) {
+            row.appendChild(newMark());
+        }
 
         if (rowMeta.anyRated) {
             row.appendChild(rate);
@@ -7673,16 +7706,26 @@
             // A queue row is known by its place in the queue, a list row by
             // its song
             for (const item of list) {
-                found.set(queueView ? String(item.index) : String(item.id), item.cached || "");
+                found.set(queueView ? String(item.index) : String(item.id), item);
             }
 
             for (const row of $("rows").querySelectorAll(".row")) {
 
                 const key = queueView ? row.dataset.qi : row.dataset.id;
                 const dot = row.querySelector(".rowDot");
+                const item = key !== undefined ? found.get(key) : undefined;
 
-                if (dot && key !== undefined && found.has(key)) {
-                    dot.className = "rowDot" + (found.get(key) ? " " + found.get(key) : "");
+                if (!dot || !item) {
+                    continue;
+                }
+
+                dot.className = "rowDot" + (item.cached ? " " + item.cached : "");
+
+                // The New mark goes once the phone has reported the song played
+                const mark = row.querySelector(".rowNew");
+
+                if (mark && !item.isNew) {
+                    mark.remove();
                 }
             }
         }).catch(function () {
@@ -8023,6 +8066,21 @@
         stateAt = Date.now();
         online = true;
         debugHide = Array.isArray(s.debugHide) ? s.debugHide : [];
+
+        // Clear debug log on the phone clears this log too
+        if (typeof s.debugClear === "number" && s.debugClear !== debugClearSeen) {
+
+            if (debugClearSeen !== null) {
+
+                debugLog.length = 0;
+
+                if (debugLogEl) {
+                    debugLogEl.textContent = "";
+                }
+            }
+
+            debugClearSeen = s.debugClear;
+        }
         watchPull(s);
         watchCache(s);
         setDebugOverlay(s.debugOverlay === true);
@@ -8627,7 +8685,13 @@
     // showing this page, or on the phone, where the app asks for the place
     function exportChoice(kind, buttonId) {
 
-        openChoice(kind === "songs" ? "Export song tweaks to" : "Export settings to", [
+        const titles = {
+            songs: "Export song tweaks to",
+            library: "Export the song library to",
+            settings: "Export settings to"
+        };
+
+        openChoice(titles[kind] || titles.settings, [
             { icon: "download", label: "This browser", fn: function () {
 
                 closeSongMenu();
@@ -8654,7 +8718,10 @@
                 throw new Error("no data");
             }
 
-            const text = JSON.stringify(out.data, null, 2);
+            // The song library is kept compact, it holds thousands of songs
+            const text = out.data.kind === "library"
+                ? JSON.stringify(out.data)
+                : JSON.stringify(out.data, null, 2);
             const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
             const link = document.createElement("a");
 

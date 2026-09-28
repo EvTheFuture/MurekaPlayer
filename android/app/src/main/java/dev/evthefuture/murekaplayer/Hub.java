@@ -288,6 +288,21 @@ final class Hub {
         });
     }
 
+    // The app's own screen came to the front. The player takes its black
+    // cover away as a tap would, since the page is kept counting as shown
+    // in the background and would not notice by itself
+    static void appShown() {
+
+        MAIN.post(() -> {
+
+            WebView web = webRef.get();
+
+            if (web != null) {
+                web.evaluateJavascript("window.__murekaAppShown && window.__murekaAppShown()", null);
+            }
+        });
+    }
+
     // Ask the player for a page of its song list
     static String requestList(String argJson, long timeoutMs) {
         return request("__murekaHostList", argJson, timeoutMs);
