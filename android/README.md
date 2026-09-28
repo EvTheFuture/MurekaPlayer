@@ -78,7 +78,9 @@ least once since it was installed, so open it once after installing.
   the stars.
 - The phone's keyboard shortcuts work here too, `?` lists them. The
   player's version stands small at the foot of that list and of the actions
-  menu.
+  menu. The web view adds Ctrl with left or right for the previous or next
+  song, Shift with left for the start of the song and Shift with right for
+  a second before its end. None of them act in a text field.
 - The menu button next to Settings has load, rescan, clear, cache all,
   playlists, creators, screen off and fullscreen, and under the playing
   song's title the long press choices for it: refresh, download, copy link,
@@ -454,11 +456,21 @@ Bluetooth see, and it used to skip an update whose title, second line and
 cover were the same as the last one. Picking up again after a pause is
 exactly that case, so a head unit that had forgotten the cover never got it
 back until the song changed. With **Resend art on resume** on in the
-settings, the song is now sent again when playback picks up: first without
-the cover and 400 ms later with it, since an identical update is ignored
-further down the line. A Bluetooth device that connects gets the same
-treatment a second and a half later, whatever the setting says, because
-that is when a car stereo asks for the song and some ask too early.
+settings, the song is now sent again when playback picks up. Sending it
+first without a cover did not help, some head units skip a song without
+one, so it goes out first with a loading ring as its cover, a real picture
+the head unit has not shown before, and two seconds later with its own
+cover, time for the head unit to fetch the first. A Bluetooth device that
+connects gets the same treatment a second and a half later, whatever the
+setting says, because that is when a car stereo asks for the song and some
+ask too early.
+
+Settings, Developer, **Cover test**, has **Send loading cover** and **Send
+real cover** to try it by hand: the first sends the playing song with only
+the loading ring, the second with its own cover again. Either stays until
+the song changes. If the loading ring never shows in the car, the car does
+not take a new cover for the same song at all. The debug overlay lists
+every cover sent, and whether the song's cover could be downloaded.
 
 ## Volume
 
@@ -653,20 +665,87 @@ button.
 - Off, previous always goes straight to the previous song, as the player
   used to, and the seconds are hidden.
 
+## After an update
+
+Installing a new version ends the running app and Android starts it again.
+The player used to come back with the music on the phone and stopped, with
+**Autoplay on start** off. Now it keeps a small record while it runs: where
+the music plays, whether it plays, the song and the place in it, written at
+once when one of them changes and every few seconds while it plays, since an
+update gives no warning. The app notes when it has been updated, and the
+player asks once as it starts again. After an update, with a record from
+the last few minutes, the music goes back to the browser it played in and
+a song that was playing plays on from about where it was, a few seconds
+back at most; a paused one stays paused. An ordinary start is not affected
+and follows **Autoplay on start** as before.
+
+The web view takes a moment to find the phone again, so after the app
+starts the phone waits 20 seconds longer than usual before it decides the
+browser is gone and takes the sound back.
+
+## The song menu on a cover
+
+In the web view, a right click on a cover, or a press held still on it for
+about half a second, opens the song menu for it: the playing song's on the
+middle cover, a side cover's own song on the side covers. It is the same
+menu as a right click or a press and hold on a row in the list. A held
+press never also counts as a tap, which on a side cover would go to that
+song, and swiping the covers works as before. A browser that sends its own
+long press as a right click as well opens the menu only once.
+
+## Pull to load
+
+In the web view's song list, pulling the list down at its very top and
+letting go loads new songs from Mureka, with a finger or, in a browser on a
+computer, by pressing the mouse at the top of the list and dragging down.
+A drag that turns into a pull does not also play the song it started on.
+It is the same as **Load new songs** under
+the Update chip and the same gesture as in the mobile player. A ring shows
+above the list as it comes down and lights up once a release will load; a
+shorter pull springs back without loading. After the release the list stays
+open with the ring turning until the phone has loaded, and the progress
+line over the list shows how far it has come. The gesture only starts at
+the top of the list, never from the handle that drags a song in the queue,
+and the browser's own pull to refresh, which would reload the whole page,
+is kept away.
+
 ## The web view on a phone
 
 A phone can open the web view too, from another phone on the same hotspot
 or Wi-Fi. The page tells a phone by its shape and screen: held upright, at
 most 600 pixels wide and with a sharp screen or a touch screen. It then
-lays the same page out for a small screen, with less room around things,
-smaller text, lower buttons, the status on a line of its own above the
-bottom buttons, and the song list and panels edge to edge. It is the same
-page with the same controls, only sized differently, so everything works
-the same way. Turned sideways, and on a computer, a tablet or the car's
-screen, the page keeps the large layout. The debug overlay shows which
-layout is in use.
+looks like the mobile player, with its sizes:
 
-Upright on any screen, the cover now takes the room the title, stars and
+- a header with the name and version, then volume, where the music plays,
+  the actions and the settings
+- the covers with the status at the top and the lyrics, title, meta and
+  stars at the bottom, over the mobile player's shading
+- the seek bar and the transport
+- the song list under it on the same screen: search, the views in a row
+  that scrolls sideways, **Playing from** as the filter button, the counts
+  and the songs, with the length before the heart and no pictures. Play
+  next is in the song menu, press and hold a song
+
+Where the music plays is one button showing the choice made. A tap opens
+the three choices under it, Phone / Bluetooth, This browser and No music in
+this browser, and a choice closes them again. Fullscreen is in the actions
+menu. Up next is not shown, the mobile player has no such pill either, and
+Songs is left out of the transport, the list is always there.
+
+The phone's choice shows where the phone's sound goes: a Bluetooth icon
+and the device's name while it goes out over Bluetooth, a phone otherwise.
+From Android 13 the app asks Android where media is sent right now, so a
+car that is connected but not playing the music, during a call or with the
+sound switched to the phone by hand, shows the phone. On older versions a
+connected Bluetooth audio device counts as where the music goes. This
+shows in the large layout too.
+
+It is the same page with the same parts, placed and sized differently, so
+everything works the same way. Turned sideways, and on a computer, a
+tablet or the car's screen, the page keeps the large layout. The debug
+overlay shows which layout is in use.
+
+Upright on other screens, the cover takes the room the title, stars and
 lines under it leave, so they never reach down over the seek bar.
 
 ## About and the web view's addresses
@@ -717,6 +796,16 @@ playing, where the sound is, repeat, shuffle, browsers connected, status),
 panels, the black cover, fullscreen and steps back in history. At the top
 it shows how the page was opened: the address, the referrer, the display
 mode, window and screen sizes and the browser's user agent.
+
+**What the debug overlays log**, under the same page, has a switch for each
+kind of line: Keys and taps, Media buttons, Bluetooth, Cover, Playback,
+Commands, Screen and page, Setting changes, Network and Errors. A group
+switched off is not logged at all, on the phone and in the web view alike,
+so the overlay and **Copy debug log** hold only what is being looked at,
+and the lines that matter are not pushed out by the rest. The app says
+itself which group each of its lines belongs to: media buttons and media
+session calls, Bluetooth coming and going, every cover sent and downloaded,
+and commands from a web view.
 
 Neither layer can take a tap or a click: nothing in it receives pointer
 events, every listener only watches, and characters typed in a text field

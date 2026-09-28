@@ -600,6 +600,22 @@ final class PlayerWeb {
             PlayerWeb.saveFile(clean, text == null ? "" : text);
         }
 
+        // Whether the app was just started again by an update of itself,
+        // true once, so the player can put the music back where it was
+        @JavascriptInterface
+        public boolean takeUpdateRestart() {
+
+            return appContext != null && BootReceiver.takeUpdateRestart(appContext);
+        }
+
+        // The debug buttons that send the car the loading cover, "loading",
+        // or the song's own cover, "real"
+        @JavascriptInterface
+        public void testArt(String which) {
+
+            PlayerService.testArt(which == null ? "" : which);
+        }
+
         @JavascriptInterface
         public String carStatus() {
 

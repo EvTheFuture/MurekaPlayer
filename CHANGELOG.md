@@ -35,13 +35,24 @@ the new settings layout and a number of smaller improvements.
   screen now start the music with the screen off and the phone locked,
   without the screen having to stay on.
 - **Resend art on resume** sends the cover again when playback picks up, for
-  head units that drop it. A Bluetooth device that connects gets the song
-  and cover again a moment later.
+  head units that drop it: first a loading ring as the cover, then the
+  song's own cover two seconds later, two pictures the head unit cannot
+  skip. A Bluetooth device that connects gets the song and cover again a
+  moment later.
+- **Cover test** under Developer: **Send loading cover** and **Send real
+  cover**, to find out by hand what a car or the lock screen takes. A
+  button rings briefly when it has sent, red if nothing was playing. The
+  debug overlay lists every cover sent and whether the cover downloaded.
+  It replaces the artwork test button over the cover, which is gone.
 - **Play when Bluetooth connects**: Never, If it was playing (only when the
   music was playing as the last Bluetooth device went away) or Always.
 - **Pause when Bluetooth disconnects**, so the music does not carry on from
   the phone's speaker. Leaves it alone when another Bluetooth device takes
   over or the music plays in a browser.
+- An update of the app picks up where it was: the music stays in the
+  browser it played in, and a song that was playing plays on from about
+  where it was, whatever **Autoplay on start** says. A paused player stays
+  paused.
 - A play, skip or seek from Bluetooth, the steering wheel or the lock screen
   takes the sound back from a browser to the phone, so a car that falls back
   to Bluetooth is never left silent.
@@ -64,6 +75,12 @@ the new settings layout and a number of smaller improvements.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click.
+- Pull the song list down at its top and let go to load new songs from
+  Mureka, as in the mobile player, with a finger or by dragging with a
+  mouse. The list stays open with a turning ring until the phone has
+  loaded.
+- A right click or a press and hold on a cover opens that song's menu, the
+  playing song's on the middle cover, as on a row in the list.
 - Drag and drop in the queue, for any song including played ones. The playing
   song keeps playing wherever it goes.
 - The phone's own settings, filters and artists panels, shown with large
@@ -77,17 +94,26 @@ the new settings layout and a number of smaller improvements.
   second browser that should stay quiet. The phone takes the sound back if
   the web view goes away. A phone that gets stuck while the browser plays no
   longer loops the start of the song.
+- The phone's sound choice shows a Bluetooth icon with the device's name
+  while the phone's music goes out over Bluetooth, and a phone otherwise.
+  From Android 13 it follows where Android actually sends media, so a car
+  that is connected but not playing the music shows the phone.
 - Volume slider for the phone's media volume, in Android's own steps, which
   over Bluetooth is usually the car stereo's level. The speaker icon follows
   the level, shown as a percentage or as steps. With the music in the browser
   it is the browser's own level.
-- Keyboard shortcuts, including volume and mute, `?` lists them. The browser
+- Keyboard shortcuts, including volume and mute, `?` lists them. Ctrl with
+  left or right skips to the previous or next song, Shift with left goes to
+  the start of the song and Shift with right to a second before its end. The browser
   gets a media session, so media keys, MPRIS and playerctl work.
 - Export asks whether the file should be saved in the browser or on the phone.
-- A phone opening the web view gets the same page laid out for a small
-  screen held upright: smaller text and buttons, the status on its own
-  line and the song list and panels edge to edge. Upright, the cover takes
-  the room the text leaves, so the text no longer runs into the seek bar.
+- A phone opening the web view gets the mobile player's look: the header
+  at the top, the covers with the lyrics, title, meta and stars laid over
+  them, the seek bar, the transport and the song list under it on one
+  screen, with the playing from line as the filter button over the list.
+  Where the music plays is one button in the header with the three choices
+  in a dropdown. Songs is left out, the list is always there. Upright on other screens, the cover takes the room the
+  text leaves, so the text no longer runs into the seek bar.
 - Tesla's fullscreen from its YouTube app is recognised. There the music moves
   to the browser without asking, and the steering wheel's left and right
   skip to the previous and next song instead of seeking.
@@ -120,6 +146,8 @@ the new settings layout and a number of smaller improvements.
   showed when it was last used.
 - **Remove ; from lyrics** takes Mureka's pause marks out of the lyrics
   everywhere they show.
+- The song menu, from a long press or a right click, shows the song's number
+  and title at the top, so it is clear which song it opened on.
 - A **Stars** view sorts the list by rating.
 - Play next can be taken back, and the song returns to where it was in the
   queue.
@@ -143,6 +171,11 @@ the new settings layout and a number of smaller improvements.
   taps, media buttons, commands, setting changes and playback events live,
   with the layout numbers at the top. It never takes a tap. **Copy debug
   log** copies it all.
+- **What the debug overlays log**: a switch for each kind of line, Keys and
+  taps, Media buttons, Bluetooth, Cover, Playback, Commands, Screen and
+  page, Setting changes, Network and Errors, so the overlays and the copied
+  log hold only what is being looked at. In the app it applies to the web
+  view's overlay too.
 
 ### Build
 

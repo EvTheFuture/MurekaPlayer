@@ -78,7 +78,13 @@ final class CarServer {
     private final ScheduledExecutorService watch = Executors.newSingleThreadScheduledExecutor();
 
     private volatile ServerSocket socket;
-    private volatile long lastPoll = 0;
+
+    // The last time a web view asked for the state. It starts a little in
+    // the future, so after the app starts, an update in particular, a
+    // browser playing the music has time to find the phone again before
+    // the phone takes the sound back
+    private static final long START_GRACE_MS = 20000;
+    private volatile long lastPoll = System.currentTimeMillis() + START_GRACE_MS;
 
     // Every browser that asked for the state lately, by the id it sends with
     // the request. Two browsers on one page each count once
@@ -707,7 +713,7 @@ final class CarServer {
             String shown = "webDebugLog".equals(cmd) ? "its debug log"
                 : cmd + (arg != null ? " " + arg : "");
 
-            Hub.note("From a web view: " + (shown.length() > 100 ? shown.substring(0, 100) + "..." : shown));
+            Hub.note("Command", "From a web view: " + (shown.length() > 100 ? shown.substring(0, 100) + "..." : shown));
             Hub.command(cmd, arg);
             send(out, 200, "application/json", bytes("{\"ok\":true}"));
         } catch (JSONException e) {

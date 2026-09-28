@@ -57,6 +57,11 @@ final class Hub {
     private static int volMax = 0;
     private static int clients = 0;
 
+    // Whether the music goes out over Bluetooth, and the device's name, so
+    // the web view shows a Bluetooth or a phone icon for where it plays
+    private static boolean btOut = false;
+    private static String btName = "";
+
     // Counts the states published, so the web view can wait for the next
     // one instead of asking again and again. Guarded by LOCK
     private static final Object LOCK = new Object();
@@ -178,6 +183,26 @@ final class Hub {
         }
     }
 
+    // Where the phone's music goes: out over Bluetooth, to the named
+    // device, or the phone itself. A change is a new state
+    static void setBluetooth(boolean out, String name) {
+
+        String clean = name == null ? "" : name;
+
+        synchronized (LOCK) {
+
+            if (out == btOut && clean.equals(btName)) {
+                return;
+            }
+
+            btOut = out;
+            btName = clean;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
     // How many browsers are showing the web view right now. A change is a
     // new state, so each of them learns it is no longer alone
     static void setClients(int count) {
@@ -206,6 +231,8 @@ final class Hub {
             o.put("vol", volLevel);
             o.put("volMax", volMax);
             o.put("clients", clients);
+            o.put("btOut", btOut);
+            o.put("btName", btName);
         } catch (JSONException e) {
             o = new JSONObject();
         }
@@ -246,10 +273,10 @@ final class Hub {
     // A line for the player's debug overlay, telling what reached the app
     // and from where. Safe from any thread. The page drops it while the
     // overlay is off
-    static void note(String text) {
+    static void note(String kind, String text) {
 
         final String js = "window.__murekaDebugNote && window.__murekaDebugNote("
-            + JSONObject.quote(text) + ")";
+            + JSONObject.quote(text) + ", " + JSONObject.quote(kind) + ")";
 
         MAIN.post(() -> {
 

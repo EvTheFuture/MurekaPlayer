@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.95";
+    const VERSION = "1.6.0.106";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -253,6 +253,49 @@
     const DEBUG_LOG_KEEP = 300;
     const DEBUG_LOG_SHOW = 80;
     const debugLog = [];
+
+    // What the debug overlays log, in groups to pick from under Developer,
+    // each with the kinds of lines it covers and what that is in words. The
+    // same list serves the web view, which is sent the kinds left out. A
+    // kind in no group is always logged
+    const DEBUG_GROUPS = [
+        { id: "keys", name: "Keys and taps", kinds: ["Key", "Press", "Click", "Wheel", "Pad"],
+            hint: "Keys, taps and clicks, the steering wheel and game pads." },
+        { id: "media", name: "Media buttons", kinds: ["Media"],
+            hint: "Play, pause, next and the others from Bluetooth, the lock screen and media keys, as they arrive." },
+        { id: "bluetooth", name: "Bluetooth", kinds: ["Bluetooth"],
+            hint: "Bluetooth audio connecting and going away, and what the player does about it." },
+        { id: "cover", name: "Cover", kinds: ["Cover"],
+            hint: "Every cover sent to the car and the lock screen, and whether the cover downloaded." },
+        { id: "playback", name: "Playback", kinds: ["Song", "Audio", "Status", "Phone"],
+            hint: "Song changes, playing and pausing, the audio element and the status line." },
+        { id: "commands", name: "Commands", kinds: ["Command", "Send"],
+            hint: "What the web view asks the phone to do." },
+        { id: "screen", name: "Screen and page", kinds: ["Screen", "Page", "Size"],
+            hint: "The screen, fullscreen, the page showing or hiding, and its size." },
+        { id: "settings", name: "Setting changes", kinds: ["Setting"],
+            hint: "Each setting changed, from what to what." },
+        { id: "network", name: "Network", kinds: ["Net"],
+            hint: "Going online and offline, and the phone not answering the web view." },
+        { id: "errors", name: "Errors", kinds: ["Error"],
+            hint: "Errors in the page." }
+    ];
+
+    // The kinds of lines left out by the groups switched off
+    function debugHiddenKinds() {
+
+        const hide = Array.isArray(settings.debugHide) ? settings.debugHide : [];
+        const out = [];
+
+        for (const group of DEBUG_GROUPS) {
+
+            if (hide.indexOf(group.id) >= 0) {
+                out.push.apply(out, group.kinds);
+            }
+        }
+
+        return out;
+    }
 
     // The status line's last text, each new one is logged once
     let debugLastStatus = "";
@@ -1109,7 +1152,6 @@
             vocalFilter: "all",
             view: "mureka",
             reportPlays: true,
-            artTest: false,
             artOverlayMode: "all",
             directAudio: true,
             remoteArtwork: false,
@@ -1171,6 +1213,7 @@
             metaSubtitle: "${genre}",
             debugOverlay: false,
             webDebugOverlay: false,
+            debugHide: [],
             webSeekActions: true
         };
 
@@ -1222,7 +1265,6 @@
                     vocalFilter: vocalFilter,
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
-                    artTest: parsed.artTest === true,
                     artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
@@ -1333,6 +1375,9 @@
                         : "${genre}",
                     debugOverlay: parsed.debugOverlay === true || parsed.debugLine === true,
                     webDebugOverlay: parsed.webDebugOverlay === true,
+                    debugHide: Array.isArray(parsed.debugHide)
+                        ? parsed.debugHide.filter(function (id) { return typeof id === "string"; })
+                        : [],
                     webSeekActions: parsed.webSeekActions !== false
                 };
             }
@@ -1804,10 +1849,39 @@
         }
     }
 
-    // Start playback on open when the user has asked for it and songs exist
+    // Start playback on open when the user has asked for it and songs exist.
+    // After an update of the app it is left as it was instead: playing on
+    // from just before the update when it played, paused when it did not
     function maybeAutoPlay() {
 
-        if (settings.autoPlay && cache.songs.length > 0) {
+        const after = resumeAfterUpdate;
+
+        resumeAfterUpdate = null;
+
+        if (cache.songs.length === 0) {
+            return;
+        }
+
+        if (after) {
+
+            // The place from just before the update, closer than the one the
+            // queue kept, when it is the same song
+            if (resumeState && currentSong && after.id === String(currentSong.song_id)
+                && typeof after.time === "number" && after.time > 0) {
+                resumeState.time = after.time;
+            }
+
+            if (after.playing) {
+
+                startPlay();
+                setStatus("Playing on after the update");
+                dbgLog("App", "Updated, playing on from " + Math.round(after.time || 0) + " s");
+            }
+
+            return;
+        }
+
+        if (settings.autoPlay) {
             startPlay();
         }
     }
@@ -12439,18 +12513,17 @@
         updateMediaPosition();
     }
 
-    // Debug artwork test, a transparent tap area over the art cycles through
-    // marker covers plus the real one, to see which the system will show
-    let testBtn = null;
-    let testIcons = null;
-    let testArtIndex = 0;
-    let testArtToken = 0;
+    // The loading cover for the cover test in a browser, a dark square with
+    // a loading ring as the app draws it, built once
+    let loadingCoverUrl = "";
 
-    // Build a recognizable solid color marker cover with a big label as a data
-    // url, used by the artwork test button
-    function makeTestIcon(label, color) {
+    function loadingCover() {
 
-        const size = 128;
+        if (loadingCoverUrl) {
+            return loadingCoverUrl;
+        }
+
+        const size = 512;
         const canvas = document.createElement("canvas");
 
         canvas.width = size;
@@ -12458,99 +12531,78 @@
 
         const ctx = canvas.getContext("2d");
 
-        ctx.fillStyle = color;
+        ctx.fillStyle = "#1d1d22";
         ctx.fillRect(0, 0, size, size);
+        ctx.lineWidth = 40;
+        ctx.lineCap = "round";
 
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 72px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label, size / 2, size / 2);
+        // The track of the ring, then the turning part over it
+        ctx.strokeStyle = "#3a3a42";
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, 100, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = "#48e1eb";
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, 100, -Math.PI / 2, -Math.PI / 2 + Math.PI * 100 / 180);
+        ctx.stroke();
 
-        return canvas.toDataURL("image/jpeg", 0.9);
+        loadingCoverUrl = canvas.toDataURL("image/png");
+
+        return loadingCoverUrl;
     }
 
-    // The marker covers, built once on first use
-    function testArtSet() {
+    // The cover test buttons: "loading" sends the loading cover, "real" the
+    // song's own cover again, to find out what a car or the lock screen
+    // takes. In the app the app sends it to the car itself. True when it
+    // went out
+    function sendCoverTest(which) {
 
-        if (!testIcons) {
+        const loading = which === "loading";
+        const what = loading ? "the loading cover" : "the real cover";
 
-            testIcons = [
-                { name: "Marker 1 red", art: makeTestIcon("1", "#cc3344") },
-                { name: "Marker 2 green", art: makeTestIcon("2", "#2f9e52") },
-                { name: "Marker 3 blue", art: makeTestIcon("3", "#3366cc") }
-            ];
+        if (!currentSong) {
+
+            setStatus("Nothing is playing to send a cover for");
+            return false;
         }
 
-        return testIcons;
+        if (isApkHost() && typeof window.MurekaHost.testArt === "function") {
+
+            window.MurekaHost.testArt(loading ? "loading" : "real");
+            setStatus("Sent " + what);
+            return true;
+        }
+
+        if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") {
+
+            setStatus("This browser has no media session to send a cover to");
+            return false;
+        }
+
+        const artwork = loading
+            ? [{ src: loadingCover(), sizes: "512x512", type: "image/png" }]
+            : artworkFor(currentSong);
+
+        setMediaMetadata(currentSong, artwork);
+        dbgLog("Cover", "sent " + what);
+        setStatus("Sent " + what);
+
+        return true;
     }
 
-    // Push the next test cover to the media session and show a two second sent
-    // note in the artist line so it can be checked over Bluetooth
-    function sendTestArt() {
+    // A short inset ring on a button once it has done its job, cyan when it
+    // went through and red when it could not. Pressed again it starts over,
+    // so presses in quick succession each show and nothing waits for it
+    const flashTimers = new WeakMap();
 
-        if (!currentSong || !("mediaSession" in navigator)) {
+    function flashButton(btn, ok) {
 
-            return;
-        }
+        clearTimeout(flashTimers.get(btn));
+        btn.style.boxShadow = CTRL_RING + (ok ? "#48e1eb" : "#e5484d");
 
-        const icons = testArtSet();
-        const idx = testArtIndex % 4;
-
-        testArtIndex += 1;
-
-        let artwork;
-        let label;
-
-        if (idx < 3) {
-
-            artwork = [{ src: icons[idx].art, sizes: "128x128", type: "image/jpeg" }];
-            label = icons[idx].name;
-
-        } else {
-
-            artwork = artworkFor(currentSong);
-            label = "Real cover";
-        }
-
-        const title = formatMeta(settings.metaTitle, currentSong)
-            || currentSong.title
-            || "Untitled";
-
-        // Push the test cover now with a sent confirmation in the artist line
-        try {
-
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: title,
-                artist: "Sent: " + label,
-                album: "Mureka",
-                artwork: artwork
-            });
-        } catch (e) {
-        }
-
-        setStatus("Sent " + label);
-
-        const token = ++testArtToken;
-
-        // After two seconds, restore the normal artist line but keep the test
-        // cover on screen so it can still be inspected
-        setTimeout(function () {
-
-            if (currentSong && token === testArtToken) {
-
-                setMediaMetadata(currentSong, artwork);
-            }
-        }, 2000);
-    }
-
-    // Show the artwork test tap area only while debug mode is on
-    function updateTestButton() {
-
-        if (testBtn) {
-
-            testBtn.style.display = settings.artTest ? "block" : "none";
-        }
+        flashTimers.set(btn, setTimeout(function () {
+            btn.style.boxShadow = "";
+        }, 700));
     }
 
     // Now Playing send state. A track change coalesces into a single send once
@@ -12733,6 +12785,20 @@
     // in charge of the queue, and the web view follows its position
     let hostCarAudio = false;
 
+    // Where the music played and whether it played, with the song and its
+    // place, kept while the app runs. An update of the app ends it without
+    // warning and starts it again, and the sound then came back on the
+    // phone, stopped. After an update the player picks up from this. Only
+    // a record this recent counts
+    const SESSION_KEY = "mureka_player_session";
+    const SESSION_FRESH_MS = 3 * 60 * 1000;
+    let sessionWritten = "";
+    let sessionWrittenAt = 0;
+
+    // Set when the app was started again by an update of itself, to what
+    // was playing then, until the queue is back and it has been picked up
+    let resumeAfterUpdate = null;
+
     // The phone's own level while the browser plays the sound. Not muted and not
     // zero: Android suspends media that is silent in a page nobody can see,
     // which with the app closed paused the phone and stopped the browser with it.
@@ -12776,6 +12842,7 @@
             playFrom: hostPlayFrom(),
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
             debugOverlay: settings.webDebugOverlay === true,
+            debugHide: debugHiddenKinds(),
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
@@ -13584,6 +13651,70 @@
             window.MurekaHost.publish(JSON.stringify(hostState()));
         } catch (e) {
         }
+
+        saveSession();
+    }
+
+    // Keep the session record up to date: at once on a change of where the
+    // music plays, playing or the song, every few seconds while it plays so
+    // the place is close, and now and then otherwise so it stays fresh
+    function saveSession() {
+
+        const playing = !!(audio && audio.src && !audio.paused);
+        const id = currentSong ? String(currentSong.song_id) : "";
+        const key = hostCarAudio + "|" + playing + "|" + id;
+        const now = Date.now();
+
+        if (key === sessionWritten && now - sessionWrittenAt < (playing ? 3000 : 30000)) {
+            return;
+        }
+
+        sessionWritten = key;
+        sessionWrittenAt = now;
+
+        try {
+            localStorage.setItem(SESSION_KEY, JSON.stringify({
+                carAudio: hostCarAudio,
+                playing: playing,
+                id: id,
+                time: audio && audio.src && isFinite(audio.currentTime) ? audio.currentTime : 0,
+                at: now
+            }));
+        } catch (e) {
+        }
+    }
+
+    // What was playing when the app was updated, if it has just been
+    // started again by that update and the record is recent, else null
+    function takeUpdateSession() {
+
+        let restarted = false;
+        let saved = null;
+
+        try {
+            restarted = typeof window.MurekaHost.takeUpdateRestart === "function"
+                && window.MurekaHost.takeUpdateRestart() === true;
+        } catch (e) {
+            restarted = false;
+        }
+
+        if (!restarted) {
+            return null;
+        }
+
+        try {
+            saved = JSON.parse(localStorage.getItem(SESSION_KEY));
+        } catch (e) {
+            saved = null;
+        }
+
+        if (!saved || typeof saved.at !== "number" || Date.now() - saved.at > SESSION_FRESH_MS) {
+
+            dbgLog("App", "Updated, nothing recent to pick up");
+            return null;
+        }
+
+        return saved;
     }
 
     // Coalesce a burst of events into one publish. A microtask, not a timer:
@@ -14003,6 +14134,17 @@
                 applyCarAudioVolume();
             }
         }, true);
+
+        // Started again by an update of the app: the music goes back to the
+        // browser it played in, and playing picks up once the queue is back
+        resumeAfterUpdate = takeUpdateSession();
+
+        if (resumeAfterUpdate && resumeAfterUpdate.carAudio === true) {
+
+            hostCarAudio = true;
+            applyCarAudioVolume();
+            dbgLog("App", "Updated, the music stays in the browser");
+        }
 
         // The position moves on its own, once a second is plenty
         setInterval(publishHostState, 1000);
@@ -14520,15 +14662,6 @@
         artBox.appendChild(bottomScrim);
         artBox.appendChild(topWrap);
         artBox.appendChild(bottomWrap);
-
-        // Transparent tap area over the art, shown only in debug mode, cycles
-        // the artwork test on each tap
-        testBtn = document.createElement("button");
-        testBtn.title = "Debug, send a test cover over Bluetooth";
-        testBtn.style.cssText = "position:absolute;left:0;top:0;right:0;bottom:0;z-index:5;border:none;background:transparent;cursor:pointer;display:none";
-        testBtn.addEventListener("click", sendTestArt);
-        artBox.appendChild(testBtn);
-        updateTestButton();
 
         const seekRow = document.createElement("div");
         seekRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;height:28px";
@@ -15892,8 +16025,14 @@
         return parts.length ? " (" + parts.join(", ") + ")" : "";
     }
 
-    // Add one line to the log, and show it at once while the overlay is up
+    // Add one line to the log, and show it at once while the overlay is up.
+    // A kind switched off under Developer is not logged at all, so the log
+    // and the copy of it hold only what is being looked at
     function dbgLog(kind, text) {
+
+        if (debugHiddenKinds().indexOf(kind) >= 0) {
+            return;
+        }
 
         debugLog.push(dbgTime() + " " + kind + " " + text);
 
@@ -16249,8 +16388,10 @@
 
         // The app writes here what reached it, a Bluetooth button or a web
         // view, before the command itself arrives
-        window.__murekaDebugNote = function (text) {
-            dbgLog("App", String(text).slice(0, 200));
+        // The app says what kind of line it is, Media, Bluetooth, Cover or
+        // Command, so it can be switched off with its group
+        window.__murekaDebugNote = function (text, kind) {
+            dbgLog(typeof kind === "string" && kind ? kind : "App", String(text).slice(0, 200));
         };
     }
 
@@ -18379,10 +18520,6 @@
 
         const copyLogBtn = makeButton("Copy debug log", "#333", "#fff", copyDebugLog);
 
-        const artTestRow = makeBoolRow("Artwork test button (blocks swipe)",
-            function () { return settings.artTest; },
-            function (v) { settings.artTest = v; updateTestButton(); });
-
         const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
 
         settingsEl.appendChild(head);
@@ -19062,8 +19199,53 @@
             debugOverlayRow.dataset.hostSkip = "1";
             copyLogBtn.dataset.hostSkip = "1";
         }
-        devPage.appendChild(artTestRow);
+        // Which groups the overlays log, a switch each, for the phone's
+        // overlay and the web view's alike
+        devPage.appendChild(makeLabel("What the debug overlays log"));
+        devPage.appendChild(makeHint("Switch off what is not being looked at, so the rest is easier to follow. It applies to Copy debug log too"
+            + (isApkHost() ? ", and to the overlay in the web view." : ".")));
+
+        for (const group of DEBUG_GROUPS) {
+
+            const groupRow = makeBoolRow(group.name,
+                function () {
+                    return !Array.isArray(settings.debugHide) || settings.debugHide.indexOf(group.id) < 0;
+                },
+                function (v) {
+
+                    const hide = (Array.isArray(settings.debugHide) ? settings.debugHide : []).filter(function (id) {
+                        return id !== group.id;
+                    });
+
+                    if (!v) {
+                        hide.push(group.id);
+                    }
+
+                    settings.debugHide = hide;
+                    publishHostSoon();
+                });
+
+            devPage.appendChild(withHint(groupRow, group.hint));
+        }
+
+        devPage.appendChild(makeLabel("Other tools"));
+
+        // The cover test, the loading cover and the real one on a button
+        // each, side by side
+        const coverTestRow = document.createElement("div");
+
+        coverTestRow.style.cssText = "display:flex;gap:8px";
+        coverTestRow.appendChild(makeButton("Send loading cover", "#333", "#fff", function (ev) {
+            flashButton(ev.currentTarget, sendCoverTest("loading"));
+        }));
+        coverTestRow.appendChild(makeButton("Send real cover", "#333", "#fff", function (ev) {
+            flashButton(ev.currentTarget, sendCoverTest("real"));
+        }));
+
         devPage.appendChild(copyFeedBtn);
+        devPage.appendChild(makeLabel("Cover test"));
+        devPage.appendChild(makeHint("Sends the playing song with a loading ring as its cover, or with its own cover again, to see what the car or the lock screen shows. Either stays until the song changes. In the app, with Resend art on resume on, picking up again sends the loading cover first and the real one two seconds later."));
+        devPage.appendChild(coverTestRow);
 
         // About: the version, where the player runs, and in the app where
         // other devices open the web view
@@ -19596,7 +19778,6 @@
         applyLyricLayout();
         updateDebugOverlay();
         updateVocalsCtrlButton();
-        updateTestButton();
         setView(settings.view);
         resetIdleTimer();
 
@@ -22212,6 +22393,38 @@
         contextMenuEl.appendChild(row);
     }
 
+    // The song's number and title at the top of the popup, so a long press
+    // on a small screen shows which song it opened on. Inert, a tap on it
+    // does nothing and leaves the popup open
+    function addMenuSongHead(song) {
+
+        const head = document.createElement("div");
+        const num = document.createElement("span");
+        const title = document.createElement("span");
+        const number = hostNumbers().get(song.song_id);
+
+        head.style.cssText = "display:flex;align-items:baseline;gap:8px;max-width:260px;"
+            + "padding:6px 10px 8px;margin-bottom:4px;border-bottom:1px solid #3a3a42;cursor:default";
+
+        num.textContent = number ? String(number) : "";
+        num.style.cssText = "flex:0 0 auto;color:#888;font-variant-numeric:tabular-nums";
+
+        title.textContent = (song.title || "").trim() || "Untitled";
+        title.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;"
+            + "text-overflow:ellipsis;font-weight:600;color:#48e1eb";
+
+        head.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+
+        if (number) {
+            head.appendChild(num);
+        }
+
+        head.appendChild(title);
+        contextMenuEl.appendChild(head);
+    }
+
     function addMenuRow(label, color, handler) {
 
         const row = document.createElement("div");
@@ -22246,6 +22459,8 @@
         contextMenuEl.textContent = "";
 
         const cached = cachedIds.has(song.song_id);
+
+        addMenuSongHead(song);
 
         addMenuRow("Play", "#fff", function () {
             playFrom(song.song_id);

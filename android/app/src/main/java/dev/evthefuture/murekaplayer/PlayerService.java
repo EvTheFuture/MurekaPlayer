@@ -30,7 +30,12 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.drawable.Icon;
+import android.media.AudioAttributes;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
@@ -133,6 +138,19 @@ public class PlayerService extends Service implements Hub.Listener {
     private String artUrl = "";
     private Bitmap art;
 
+    // A picture sent in between when the cover is sent again, so the real
+    // cover after it is a change a head unit cannot skip. Drawn once, when
+    // first needed
+    private Bitmap loadingArt;
+
+    // Counts the covers sent, so a newer send cancels a real cover still
+    // waiting to follow the loading one
+    private int artRound = 0;
+
+    // How long the loading cover stays before the real one follows, time
+    // for the head unit to fetch it
+    private static final long ART_SWAP_MS = 2000;
+
     // Whether the foreground state has been claimed, and with which types
     private int foregroundTypes = 0;
 
@@ -185,7 +203,7 @@ public class PlayerService extends Service implements Hub.Listener {
                 KeyEvent key = keyOf(intent);
 
                 if (key != null) {
-                    Hub.note("Media button " + KeyEvent.keyCodeToString(key.getKeyCode())
+                    Hub.note("Media", "Media button " + KeyEvent.keyCodeToString(key.getKeyCode())
                         + (key.getAction() == KeyEvent.ACTION_DOWN ? " down" : " up")
                         + (key.getRepeatCount() > 0 ? " repeat " + key.getRepeatCount() : ""));
                 }
@@ -196,7 +214,7 @@ public class PlayerService extends Service implements Hub.Listener {
             @Override
             public void onPlay() {
 
-                Hub.note("Media session: play");
+                Hub.note("Media", "Media session: play");
                 Hub.command("takeSound", null);
                 Hub.command("play", null);
             }
@@ -204,21 +222,21 @@ public class PlayerService extends Service implements Hub.Listener {
             @Override
             public void onPause() {
 
-                Hub.note("Media session: pause");
+                Hub.note("Media", "Media session: pause");
                 Hub.command("pause", null);
             }
 
             @Override
             public void onStop() {
 
-                Hub.note("Media session: stop");
+                Hub.note("Media", "Media session: stop");
                 Hub.command("pause", null);
             }
 
             @Override
             public void onSkipToNext() {
 
-                Hub.note("Media session: next");
+                Hub.note("Media", "Media session: next");
                 Hub.command("takeSound", null);
                 Hub.command("next", null);
             }
@@ -226,7 +244,7 @@ public class PlayerService extends Service implements Hub.Listener {
             @Override
             public void onSkipToPrevious() {
 
-                Hub.note("Media session: previous");
+                Hub.note("Media", "Media session: previous");
                 Hub.command("takeSound", null);
                 Hub.command("prev", null);
             }
@@ -234,7 +252,7 @@ public class PlayerService extends Service implements Hub.Listener {
             @Override
             public void onSeekTo(long pos) {
 
-                Hub.note("Media session: seek to " + pos + " ms");
+                Hub.note("Media", "Media session: seek to " + pos + " ms");
                 Hub.command("takeSound", null);
                 Hub.command("seek", pos / 1000.0);
             }
@@ -243,12 +261,12 @@ public class PlayerService extends Service implements Hub.Listener {
             // what a car or headset sends
             @Override
             public void onFastForward() {
-                Hub.note("Media session: fast forward, not used");
+                Hub.note("Media", "Media session: fast forward, not used");
             }
 
             @Override
             public void onRewind() {
-                Hub.note("Media session: rewind, not used");
+                Hub.note("Media", "Media session: rewind, not used");
             }
         });
         session.setSessionActivity(openAppIntent());
@@ -552,6 +570,13 @@ public class PlayerService extends Service implements Hub.Listener {
         long positionMs = (long) (s.optDouble("position", 0) * 1000);
         String cover = s.optString("cover", "");
 
+        // The route can also change without a device coming or going, for
+        // a call or an output picked by hand, so it is looked at again now
+        // and then as the player reports
+        if (System.currentTimeMillis() - lastBtCheck > 5000) {
+            reportBluetooth();
+        }
+
         // Hold the CPU and the Wi-Fi awake while music plays, let them sleep
         // when it is paused
         if (playing) {
@@ -621,15 +646,28 @@ public class PlayerService extends Service implements Hub.Listener {
         }
     }
 
+    // Send the song when something about it changed
     private void updateMetadata() {
 
-        String key = title + "|" + subtitle + "|" + durationMs + "|" + (art != null);
+        String key = metaKeyNow();
 
         if (key.equals(metaKey)) {
             return;
         }
 
         metaKey = key;
+        pushMetadata(art);
+    }
+
+    // What the song sent last was, to tell a change from the same again
+    private String metaKeyNow() {
+
+        return title + "|" + subtitle + "|" + durationMs + "|" + (art != null);
+    }
+
+    // Hand the song to the media session with the given picture as its
+    // cover, or none
+    private void pushMetadata(Bitmap picture) {
 
         MediaMetadata.Builder b = new MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, title)
@@ -638,31 +676,111 @@ public class PlayerService extends Service implements Hub.Listener {
             .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
             .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs);
 
-        if (art != null) {
-            b.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art);
+        if (picture != null) {
+            b.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, picture);
         }
 
         session.setMetadata(b.build());
     }
 
     // Send the song again even though nothing about it changed. A head unit
-    // ignores metadata it already has, so the song goes out without its
-    // cover first and with it straight after, which is a change either way
+    // ignores metadata it already has, and some also ignore a song sent
+    // without a cover, so sending it first without one changed nothing. A
+    // real picture that is not the cover goes out first, the loading ring,
+    // and the real cover follows once the head unit has had time to fetch
+    // it. Both are pictures it has not shown yet
     private void resendMetadata() {
 
-        final Bitmap keep = art;
+        if (title.isEmpty()) {
+            return;
+        }
 
-        art = null;
-        metaKey = "";
-        updateMetadata();
-        art = keep;
-        metaKey = "";
+        final int round = ++artRound;
+
+        pushMetadata(loadingArt());
+
+        // Counted as sent, so a state arriving meanwhile does not send the
+        // real cover early and cut the loading one short
+        metaKey = metaKeyNow();
+        Hub.note("Cover", "loading cover sent, the real one follows in " + (ART_SWAP_MS / 1000) + " s");
 
         main.postDelayed(() -> {
 
-            metaKey = "";
-            updateMetadata();
-        }, 400);
+            if (round != artRound) {
+                return;
+            }
+
+            pushMetadata(art);
+            metaKey = metaKeyNow();
+            Hub.note("Cover", art != null ? "real cover sent" : "the real cover has not loaded yet");
+        }, ART_SWAP_MS);
+    }
+
+    // The debug buttons: "loading" sends only the loading cover, to see
+    // whether the head unit shows a new picture at all, "real" sends the
+    // song's own cover again. Either cancels a real cover still waiting
+    static void testArt(final String which) {
+
+        MAIN.post(() -> {
+
+            if (instance != null) {
+                instance.sendTestArt(which);
+            }
+        });
+    }
+
+    private void sendTestArt(String which) {
+
+        artRound++;
+
+        if (title.isEmpty()) {
+
+            Hub.note("Cover", "nothing is playing");
+            return;
+        }
+
+        boolean loading = "loading".equals(which);
+
+        pushMetadata(loading ? loadingArt() : art);
+
+        // Stays until the song or its cover changes, so it can be looked at
+        metaKey = metaKeyNow();
+
+        if (loading) {
+            Hub.note("Cover", "loading cover sent");
+        } else {
+            Hub.note("Cover", art != null ? "real cover sent" : "the real cover has not loaded, sent without one");
+        }
+    }
+
+    // A dark square with a loading ring, the player's colours. Plainly not
+    // a song's cover, and a picture of its own for the head unit
+    private Bitmap loadingArt() {
+
+        if (loadingArt != null) {
+            return loadingArt;
+        }
+
+        final int size = 512;
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        RectF box = new RectF(156, 156, 356, 356);
+
+        canvas.drawColor(Color.rgb(29, 29, 34));
+        ring.setStyle(Paint.Style.STROKE);
+        ring.setStrokeWidth(40);
+        ring.setStrokeCap(Paint.Cap.ROUND);
+
+        // The track of the ring, then the turning part over it
+        ring.setColor(Color.rgb(58, 58, 66));
+        canvas.drawArc(box, 0, 360, false, ring);
+        ring.setColor(Color.rgb(72, 225, 235));
+        canvas.drawArc(box, -90, 100, false, ring);
+
+        loadingArt = bmp;
+
+        return loadingArt;
     }
 
     // A car stereo or headphones that has just connected asks for the song
@@ -683,6 +801,11 @@ public class PlayerService extends Service implements Hub.Listener {
                 boolean bluetooth = false;
                 boolean first = firstDeviceReport;
 
+                // Android moves the sound over a moment after a device
+                // connects, so it is looked at again once it has
+                reportBluetooth();
+                main.postDelayed(PlayerService.this::reportBluetooth, 1500);
+
                 firstDeviceReport = false;
 
                 for (AudioDeviceInfo info : added) {
@@ -696,7 +819,7 @@ public class PlayerService extends Service implements Hub.Listener {
                     return;
                 }
 
-                Hub.note("Bluetooth audio connected");
+                Hub.note("Bluetooth", "Bluetooth audio connected");
 
                 if (!title.isEmpty()) {
                     main.postDelayed(PlayerService.this::resendMetadata, 1500);
@@ -709,7 +832,7 @@ public class PlayerService extends Service implements Hub.Listener {
                 if (start) {
                     main.postDelayed(PlayerService.this::playForBluetooth, 2000);
                 } else if ("resume".equals(playOnConnect)) {
-                    Hub.note("Not playing, it was not playing when Bluetooth went away");
+                    Hub.note("Bluetooth", "Not playing, it was not playing when Bluetooth went away");
                 }
             }
 
@@ -720,6 +843,8 @@ public class PlayerService extends Service implements Hub.Listener {
             public void onAudioDevicesRemoved(AudioDeviceInfo[] removed) {
 
                 boolean bluetooth = false;
+
+                reportBluetooth();
 
                 for (AudioDeviceInfo info : removed) {
 
@@ -732,13 +857,13 @@ public class PlayerService extends Service implements Hub.Listener {
                     return;
                 }
 
-                Hub.note("Bluetooth audio disconnected");
+                Hub.note("Bluetooth", "Bluetooth audio disconnected");
 
                 for (AudioDeviceInfo info : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
 
                     if (isBluetoothOutput(info)) {
 
-                        Hub.note("Another Bluetooth output is still there, playing on");
+                        Hub.note("Bluetooth", "Another Bluetooth output is still there, playing on");
                         return;
                     }
                 }
@@ -751,7 +876,7 @@ public class PlayerService extends Service implements Hub.Listener {
                     return;
                 }
 
-                Hub.note("Pausing, the Bluetooth output went away");
+                Hub.note("Bluetooth", "Pausing, the Bluetooth output went away");
                 Hub.command("pause", null);
             }
         };
@@ -778,12 +903,82 @@ public class PlayerService extends Service implements Hub.Listener {
             return;
         }
 
-        Hub.note("Playing, Bluetooth connected");
+        Hub.note("Bluetooth", "Playing, Bluetooth connected");
         Hub.command("takeSound", null);
         Hub.command("play", null);
     }
 
     // Bluetooth outputs: classic audio and, from Android 12, LE Audio
+    // Tell the web view whether the music goes out over Bluetooth. From
+    // Android 13 the phone says where media is routed right now, so a
+    // Bluetooth device that is connected but not playing, say during a call
+    // or with the sound switched to the phone, is not counted. Before that,
+    // or if the phone will not say, a connected Bluetooth audio device is
+    // taken as where the music goes, which is what Android does by itself
+    private long lastBtCheck = 0;
+
+    private void reportBluetooth() {
+
+        AudioManager am = getSystemService(AudioManager.class);
+
+        lastBtCheck = System.currentTimeMillis();
+
+        if (am == null) {
+            return;
+        }
+
+        AudioDeviceInfo out = null;
+        boolean known = false;
+
+        if (Build.VERSION.SDK_INT >= 33) {
+
+            try {
+
+                AudioAttributes media = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build();
+
+                for (AudioDeviceInfo info : am.getAudioDevicesForAttributes(media)) {
+
+                    if (out == null && isBluetoothOutput(info)) {
+                        out = info;
+                    }
+                }
+
+                known = true;
+            } catch (RuntimeException e) {
+                known = false;
+            }
+        }
+
+        if (!known) {
+
+            for (AudioDeviceInfo info : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+
+                if (out == null && isBluetoothOutput(info)) {
+                    out = info;
+                }
+            }
+        }
+
+        String name = "";
+
+        if (out != null) {
+
+            try {
+
+                CharSequence product = out.getProductName();
+
+                name = product != null ? product.toString().trim() : "";
+            } catch (RuntimeException e) {
+                name = "";
+            }
+        }
+
+        Hub.setBluetooth(out != null, name);
+    }
+
     private static boolean isBluetoothOutput(AudioDeviceInfo info) {
 
         if (!info.isSink()) {
@@ -918,6 +1113,12 @@ public class PlayerService extends Service implements Hub.Listener {
                     c.disconnect();
                 }
 
+                if (bmp == null) {
+                    Hub.note("Cover", "downloaded but could not be read");
+                } else {
+                    Hub.note("Cover", "loaded " + bmp.getWidth() + "x" + bmp.getHeight());
+                }
+
                 if (bmp != null && Math.max(bmp.getWidth(), bmp.getHeight()) > 512) {
 
                     float f = 512f / Math.max(bmp.getWidth(), bmp.getHeight());
@@ -926,7 +1127,10 @@ public class PlayerService extends Service implements Hub.Listener {
                         Math.round(bmp.getHeight() * f), true);
                 }
             } catch (Exception e) {
+
                 bmp = null;
+                Hub.note("Cover", "could not load, " + e.getClass().getSimpleName()
+                    + (e.getMessage() != null ? " " + e.getMessage() : ""));
             }
 
             final Bitmap done = bmp;
