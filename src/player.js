@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.106";
+    const VERSION = "1.6.0.108";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -12843,6 +12843,11 @@
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
             debugOverlay: settings.webDebugOverlay === true,
             debugHide: debugHiddenKinds(),
+
+            // Changes whenever a song or a cover is stored or taken out, or a
+            // song starts or stops downloading, so the web view knows to
+            // paint the cache dots in its list again
+            cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(","),
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
@@ -13004,8 +13009,20 @@
 
         if (settings.absoluteNumbers) {
 
+            // Rank by when the song was made. Mureka makes songs two at a
+            // time with the same time on both, and of those the one the list
+            // shows first is the newer, so a tie is broken by the list, later
+            // in it counting as older. Kept in list order, a pair came out
+            // numbered the wrong way round, 4008 above 4009
+            const place = new Map();
+
+            cache.songs.forEach(function (x, i) {
+                place.set(x.song_id, i);
+            });
+
             const byAge = cache.songs.slice().sort(function (a, b) {
-                return (a.generate_at || 0) - (b.generate_at || 0);
+                return ((a.generate_at || 0) - (b.generate_at || 0))
+                    || (place.get(b.song_id) - place.get(a.song_id));
             });
 
             byAge.forEach(function (x, i) {
@@ -17717,36 +17734,9 @@
         // and the newest is the highest, and a song keeps that number across the
         // Queue and A-Z views. For the Published feed the order is by publish
         // date, so the number tracks the publish sorted list shown here
-        const numberById = new Map();
-
-        if (settings.absoluteNumbers) {
-
-            // Rank by when the song was actually made, so number one is the
-            // first song ever created and a song keeps that number whatever is
-            // filtered or sorted. Position in the cache cannot be used for
-            // this, it only reflects the order pages happened to be fetched in
-            const byAge = cache.songs.slice().sort(function (a, b) {
-                return (a.generate_at || 0) - (b.generate_at || 0);
-            });
-
-            byAge.forEach(function (s, i) {
-                numberById.set(s.song_id, i + 1);
-            });
-
-        } else {
-
-            // Rank over the library, or over the published part of it when
-            // that is what is being shown. Deliberately not over the filtered
-            // list: a song must keep its number while tags, tempo, vocals, a
-            // playlist or a search narrow what is visible, otherwise the same
-            // song is numbered differently depending on what else is ticked
-            const scope = orderedSongs().filter(passesPublishFilter);
-            const total = scope.length;
-
-            scope.forEach(function (s, i) {
-                numberById.set(s.song_id, total - i);
-            });
-        }
+        // The same numbers as the web view's list and the song menu, one
+        // way of counting for all of them
+        const numberById = hostNumbers();
 
         listEl.textContent = "";
         playingItemEl = null;

@@ -704,7 +704,8 @@ the Update chip and the same gesture as in the mobile player. A ring shows
 above the list as it comes down and lights up once a release will load; a
 shorter pull springs back without loading. After the release the list stays
 open with the ring turning until the phone has loaded, and the progress
-line over the list shows how far it has come. The gesture only starts at
+line over the list shows how far it has come. Then the list is read again
+and shown from the top, where the songs just loaded are. The gesture only starts at
 the top of the list, never from the handle that drags a song in the queue,
 and the browser's own pull to refresh, which would reload the whole page,
 is kept away.

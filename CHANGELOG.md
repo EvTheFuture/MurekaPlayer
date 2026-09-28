@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0
+## 2.0.0
 
 The big news is a new Android app. It runs the same player as the add-on and
 the bookmarklet, keeps playing with the screen off, and serves a web view that
@@ -32,18 +32,12 @@ the new settings layout and a number of smaller improvements.
   it anyway, and **Run freely in the background** takes the app out of
   battery saving.
 - Play, next and previous from Bluetooth, the steering wheel or the lock
-  screen now start the music with the screen off and the phone locked,
-  without the screen having to stay on.
+  screen start the music with the screen off and the phone locked.
 - **Resend art on resume** sends the cover again when playback picks up, for
   head units that drop it: first a loading ring as the cover, then the
   song's own cover two seconds later, two pictures the head unit cannot
   skip. A Bluetooth device that connects gets the song and cover again a
   moment later.
-- **Cover test** under Developer: **Send loading cover** and **Send real
-  cover**, to find out by hand what a car or the lock screen takes. A
-  button rings briefly when it has sent, red if nothing was playing. The
-  debug overlay lists every cover sent and whether the cover downloaded.
-  It replaces the artwork test button over the cover, which is gone.
 - **Play when Bluetooth connects**: Never, If it was playing (only when the
   music was playing as the last Bluetooth device went away) or Always.
 - **Pause when Bluetooth disconnects**, so the music does not carry on from
@@ -92,8 +86,7 @@ the new settings layout and a number of smaller improvements.
 - Sound: **Phone / Bluetooth**, **This browser** (the browser plays, the phone
   follows silently and stays in charge) or **No music in this browser** for a
   second browser that should stay quiet. The phone takes the sound back if
-  the web view goes away. A phone that gets stuck while the browser plays no
-  longer loops the start of the song.
+  the web view goes away.
 - The phone's sound choice shows a Bluetooth icon with the device's name
   while the phone's music goes out over Bluetooth, and a phone otherwise.
   From Android 13 it follows where Android actually sends media, so a car
@@ -104,16 +97,15 @@ the new settings layout and a number of smaller improvements.
   it is the browser's own level.
 - Keyboard shortcuts, including volume and mute, `?` lists them. Ctrl with
   left or right skips to the previous or next song, Shift with left goes to
-  the start of the song and Shift with right to a second before its end. The browser
-  gets a media session, so media keys, MPRIS and playerctl work.
+  the start of the song and Shift with right to a second before its end.
+  The browser gets a media session, so media keys, MPRIS and playerctl work.
 - Export asks whether the file should be saved in the browser or on the phone.
 - A phone opening the web view gets the mobile player's look: the header
   at the top, the covers with the lyrics, title, meta and stars laid over
   them, the seek bar, the transport and the song list under it on one
   screen, with the playing from line as the filter button over the list.
   Where the music plays is one button in the header with the three choices
-  in a dropdown. Songs is left out, the list is always there. Upright on other screens, the cover takes the room the
-  text leaves, so the text no longer runs into the seek bar.
+  in a dropdown. Songs is left out, the list is always there.
 - Tesla's fullscreen from its YouTube app is recognised. There the music moves
   to the browser without asking, and the steering wheel's left and right
   skip to the previous and next song instead of seeking.
@@ -159,6 +151,9 @@ the new settings layout and a number of smaller improvements.
   narrowing things down, ringed for all songs or something paused or running,
   plain when off. Play is filled while playing, ringed while paused and plain
   when stopped. Repeat all is filled, repeat one ringed.
+- With numbers over the whole library, the two songs Mureka makes together
+  are numbered in the order the list shows them, the upper one higher.
+  They came out the wrong way round, 4008 above 4009.
 - Large play and like counts are shortened, 1.0k, 12k, 1.2M.
 - The tag list's **Popularity** sort is now called **Most songs**.
 - **About Mureka Player**, a page of its own at the end of the settings,
@@ -176,6 +171,12 @@ the new settings layout and a number of smaller improvements.
   page, Setting changes, Network and Errors, so the overlays and the copied
   log hold only what is being looked at. In the app it applies to the web
   view's overlay too.
+- **Cover test** under Developer replaces the artwork test button over the
+  cover: **Send loading cover** and **Send real cover** send the playing song
+  with a loading ring as its cover or with its own, to find out what a car or
+  the lock screen takes. A button rings briefly when it has sent, red if
+  nothing was playing. The debug overlay lists every cover sent and whether
+  the cover downloaded.
 
 ### Build
 
