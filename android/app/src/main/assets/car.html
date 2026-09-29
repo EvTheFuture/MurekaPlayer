@@ -1928,16 +1928,10 @@
         color: var(--accent);
     }
 
-    .rowNew {
-        flex: 0 0 auto;
-        margin-left: 0.4em;
-        padding: 0 0.4em;
-        border: 1px solid var(--accent);
-        border-radius: 5px;
-        color: var(--accent);
-        font-size: 0.6em;
+    .rowBadge.new {
+        background: var(--accent);
+        color: #000;
         font-weight: 600;
-        line-height: 1.6;
     }
 
     .rowBadge.draft {
@@ -4176,9 +4170,13 @@
         // public anyway
         const pub = s && typeof s.songPublic === "boolean" ? s.songPublic : null;
 
+        // A song not played yet says New there instead, as in the list
+        const fresh = pub !== null && s.songNew === true;
+
         $("pubBadge").style.display = pub === null ? "none" : "inline-block";
-        $("pubBadge").classList.toggle("draft", pub === false);
-        $("pubBadge").textContent = pub === null ? "" : (pub ? "Public" : "Draft");
+        $("pubBadge").classList.toggle("draft", pub === false && !fresh);
+        $("pubBadge").classList.toggle("new", fresh);
+        $("pubBadge").textContent = pub === null ? "" : (fresh ? "New" : (pub ? "Public" : "Draft"));
 
         // And how many times it has been played
         const plays = s && typeof s.plays === "number" ? s.plays : null;
@@ -5759,18 +5757,6 @@
     // One song line, laid out like a row in the phone's list: the number,
     // the cover, the title, the rating column once any song is rated, the
     // heart, the length, and public or draft when both kinds are listed
-    // The small New mark after a title
-    function newMark() {
-
-        const mark = document.createElement("span");
-
-        mark.className = "rowNew";
-        mark.textContent = "New";
-        mark.title = "Not played yet";
-
-        return mark;
-    }
-
     function songLine(song, row) {
 
         const num = document.createElement("span");
@@ -5820,11 +5806,6 @@
 
         row.appendChild(title);
 
-        // Mureka's new mark, a song of your own never played
-        if (song.isNew) {
-            row.appendChild(newMark());
-        }
-
         if (rowMeta.anyRated) {
             row.appendChild(rate);
         }
@@ -5836,10 +5817,17 @@
 
             const badge = document.createElement("span");
 
-            badge.className = "rowBadge" + (song.published ? "" : " draft");
-            badge.textContent = song.published ? "public" : "draft";
+            paintBadge(badge, song);
             row.appendChild(badge);
         }
+    }
+
+    // The badge at the end of a line: new for a song not played yet, else
+    // public or draft
+    function paintBadge(badge, song) {
+
+        badge.className = "rowBadge" + (song.isNew ? " new" : (song.published ? "" : " draft"));
+        badge.textContent = song.isNew ? "new" : (song.published ? "public" : "draft");
     }
 
     // A small button at the end of a line, which must not also tap the line
@@ -7721,11 +7709,12 @@
 
                 dot.className = "rowDot" + (item.cached ? " " + item.cached : "");
 
-                // The New mark goes once the phone has reported the song played
-                const mark = row.querySelector(".rowNew");
+                // New becomes public or draft once the phone has reported the
+                // song played
+                const badge = row.querySelector(".rowBadge");
 
-                if (mark && !item.isNew) {
-                    mark.remove();
+                if (badge) {
+                    paintBadge(badge, item);
                 }
             }
         }).catch(function () {

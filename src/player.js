@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.117";
+    const VERSION = "1.6.0.122";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -3759,6 +3759,135 @@
         return out;
     }
 
+    // Count the new marks on one feed page for the debug overlay
+    function logPlayedFlags(page) {
+        dbgLog("Mureka", feedSummary(page, "Feed page"));
+    }
+
+    // One line about the new marks on a feed page: how many songs are new,
+    // played or without the flag, the titles of the new and unflagged ones,
+    // and any other field that looks like a played or new mark, on the
+    // songs or on the feed items around them, with the values it takes.
+    // Used for the player's pages and for the lists Mureka's own site reads
+    function feedSummary(page, label) {
+
+        const songs = extractSongs(page);
+        const others = new Map();
+        const newTitles = [];
+        const bareTitles = [];
+        const unheardTitles = [];
+
+        let unplayed = 0;
+        let played = 0;
+        let missing = 0;
+
+        // Fields named like a mark, anywhere in the page but inside lyrics
+        // and other long text, counted per name and value
+        const look = function (node, depth) {
+
+            if (!node || typeof node !== "object" || depth > 6) {
+                return;
+            }
+
+            if (Array.isArray(node)) {
+
+                for (const item of node) {
+                    look(item, depth + 1);
+                }
+
+                return;
+            }
+
+            for (const key of Object.keys(node)) {
+
+                const v = node[key];
+
+                if (v && typeof v === "object") {
+
+                    look(v, depth + 1);
+                    continue;
+                }
+
+                if (key === "is_played" || !/play|new|read|seen|view|visit/i.test(key)) {
+                    continue;
+                }
+
+                if (typeof v !== "boolean" && typeof v !== "number") {
+                    continue;
+                }
+
+                const tag = key + "=" + v;
+
+                others.set(tag, (others.get(tag) || 0) + 1);
+            }
+        };
+
+        for (const song of songs) {
+
+            const name = String(song.title || song.song_id).slice(0, 24);
+
+            // No plays at all, in case Mureka's new mark follows the count
+            if (song.play_count === 0) {
+                unheardTitles.push(name);
+            }
+
+            if (song.is_played === false) {
+
+                unplayed += 1;
+                newTitles.push(name);
+            } else if (song.is_played === true) {
+                played += 1;
+            } else {
+
+                missing += 1;
+                bareTitles.push(name);
+            }
+        }
+
+        look(page, 0);
+
+        let line = label + ", " + songs.length + " songs: " + unplayed + " new, "
+            + played + " played, " + missing + " without the played flag";
+
+        if (newTitles.length > 0) {
+            line += ". New: " + newTitles.slice(0, 8).join(", ");
+        }
+
+        if (bareTitles.length > 0) {
+            line += ". Without the flag: " + bareTitles.slice(0, 8).join(", ");
+        }
+
+        if (unheardTitles.length > 0) {
+            line += ". " + unheardTitles.length + " with 0 plays: " + unheardTitles.slice(0, 8).join(", ");
+        }
+
+        // Only values that differ between songs can mark some as new, a
+        // field with the same value everywhere is left out of the line, and
+        // so is one with many values, a count rather than a mark
+        const names = new Map();
+
+        for (const tag of others.keys()) {
+
+            const name = tag.split("=")[0];
+
+            names.set(name, (names.get(name) || 0) + 1);
+        }
+
+        const varied = Array.from(others.entries()).filter(function (e) {
+            const n = names.get(e[0].split("=")[0]);
+
+            return n > 1 && n <= 3;
+        }).slice(0, 12).map(function (e) {
+            return e[0] + " x" + e[1];
+        });
+
+        if (varied.length > 0) {
+            line += ". Other marks: " + varied.join(", ");
+        }
+
+        return line;
+    }
+
     // Walk the parsed response and collect every song across all feeds
     // The list is feeds, each feed holds one or more songs under songs
     function extractSongs(node) {
@@ -3796,7 +3925,25 @@
                     node.song.is_liked = node.is_liked;
                 }
 
+                // Mureka's new mark may sit on the wrapper the same way. The
+                // song's own flag wins when it has one
+                if (typeof node.is_played === "boolean" && typeof node.song.is_played !== "boolean") {
+                    node.song.is_played = node.is_played;
+                }
+
                 return [node.song];
+            }
+
+            // A feed item holding the songs of one generation as a list, with
+            // the new mark on the item. Handed down to songs without their own
+            if (typeof node.is_played === "boolean" && Array.isArray(node.songs)) {
+
+                for (const song of node.songs) {
+
+                    if (song && typeof song === "object" && typeof song.is_played !== "boolean") {
+                        song.is_played = node.is_played;
+                    }
+                }
             }
 
             for (const key of Object.keys(node)) {
@@ -3877,6 +4024,22 @@
 
         // Keep the raw page for the debug Copy last feed JSON action
         lastFeedResponse = json;
+
+        // What the page says about Mureka's new mark, under Mureka requests,
+        // so it can be seen whether the feed carries the flag at all
+        if (!feed().creator) {
+
+            logPlayedFlags(json);
+
+            // Mureka leaves the played flag out on songs never played and
+            // shows those as new, so a song of your own without it is new
+            for (const song of extractSongs(json)) {
+
+                if (typeof song.is_played !== "boolean") {
+                    song.is_played = false;
+                }
+            }
+        }
 
         return json;
     }
@@ -4316,10 +4479,12 @@
                 fresh.push(trim(s));
 
                 // A deep rescan pages the whole feed, the streak stop that ends
-                // a quick refresh early is skipped so every song is revisited
+                // a quick refresh early is skipped so every song is revisited.
+                // A quick refresh still reads the rest of the page it has, so
+                // the newest songs all get their played flag and likes brought
+                // up to date, not only the first few before the stop
                 if (!deep && knownStreak >= KNOWN_STREAK_STOP) {
                     stop = true;
-                    break;
                 }
             }
 
@@ -7495,6 +7660,31 @@
             dbgLog("Mureka", key + (query ? query.slice(0, 160) : "") + sent);
         };
 
+        // A song list Mureka's own site reads, the page it shows new marks
+        // on, summed up like the player's own pages. The player's pages ask
+        // with query_type and are counted where they are read
+        const theirList = function (url) {
+
+            try {
+
+                const u = new URL(String(url), location.href);
+
+                return u.host === location.host
+                    && u.pathname === "/api/pgc/feed/list"
+                    && !u.searchParams.get("query_type")
+                    ? (u.searchParams.get("listRenderType") || "feed") : "";
+            } catch (e) {
+                return "";
+            }
+        };
+
+        const sumUp = function (kind, json) {
+
+            if (json && typeof json === "object") {
+                dbgLog("Mureka", feedSummary(json, "Mureka's " + kind + " list"));
+            }
+        };
+
         const plainFetch = window.fetch;
 
         if (typeof plainFetch === "function") {
@@ -7511,7 +7701,28 @@
                     // Never in the way of the request itself
                 }
 
-                return plainFetch.apply(window, arguments);
+                const sent = plainFetch.apply(window, arguments);
+
+                try {
+
+                    const url = typeof input === "string" ? input : (input && input.url) || "";
+                    const kind = theirList(url);
+
+                    // Read from a copy, the site gets the answer untouched
+                    if (kind) {
+
+                        sent.then(function (res) {
+                            return res.clone().json();
+                        }).then(function (json) {
+                            sumUp(kind, json);
+                        }).catch(function () {
+                        });
+                    }
+                } catch (e) {
+                    // Never in the way of the request itself
+                }
+
+                return sent;
             };
         }
 
@@ -7551,7 +7762,27 @@
                 try {
 
                     if (this.__murekaRequest) {
+
                         note(this.__murekaRequest[0], this.__murekaRequest[1], body);
+
+                        const kind = theirList(this.__murekaRequest[1]);
+
+                        if (kind) {
+
+                            this.addEventListener("load", function () {
+
+                                try {
+
+                                    const r = this.responseType === "json"
+                                        ? this.response
+                                        : JSON.parse(this.responseText);
+
+                                    sumUp(kind, r);
+                                } catch (e) {
+                                    // Not JSON, nothing to sum up
+                                }
+                            });
+                        }
                     }
                 } catch (e) {
                     // Never in the way of the request itself
@@ -13088,6 +13319,7 @@
             playOnConnect: settings.playOnConnect || "never",
             coverResend: settings.coverResend || "title",
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
+            songNew: song && !creatorSource ? song.is_played === false : null,
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
             shuffle: shuffleMode,
@@ -17669,18 +17901,6 @@
     }
 
     // Render the cached song list
-    // The small New mark after a title
-    function makeNewBadge() {
-
-        const badge = document.createElement("span");
-
-        badge.textContent = "New";
-        badge.title = "Not played yet";
-        badge.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;border:1px solid #48e1eb;color:#48e1eb;font-size:10px;line-height:14px;font-weight:600";
-
-        return badge;
-    }
-
     function renderList() {
 
         // Anything that changes what the list holds comes through here, so
@@ -17819,12 +18039,6 @@
         item.appendChild(numEl);
         item.appendChild(titleEl);
 
-        // Mureka's new mark, a song of your own never played. It goes once
-        // Mureka has taken the played report
-        if (song.is_played === false) {
-            item.appendChild(makeNewBadge());
-        }
-
         // The rating, but only once any song has one, so a library nobody has
         // rated keeps the full width for titles. A fixed column keeps the
         // durations lined up, zero stars shows grey, not rated shows nothing
@@ -17853,19 +18067,29 @@
 
         // Mark each song as published or still a draft, but only when the list
         // is showing both. Under the published filter every row would carry the
-        // same badge, which tells the reader nothing
+        // same badge, which tells the reader nothing. A song Mureka still marks
+        // as new says new instead, it goes once Mureka has taken the played
+        // report and the badge falls back to public or draft
         if (!creatorSource && publishFilter === "all") {
 
             const published = song.publish_state === 1;
+            const isNew = song.is_played === false;
 
             // Fixed width, so the badge column lines up and the title beside it
             // keeps the same room whichever word the badge happens to carry
             const badge = document.createElement("span");
-            badge.textContent = published ? "public" : "draft";
+            badge.textContent = isNew ? "new" : (published ? "public" : "draft");
             badge.style.cssText = "flex:0 0 auto;width:46px;margin-left:6px;padding:0;border-radius:4px;font-size:11px;line-height:16px;text-align:center;"
-                + (published
-                    ? "background:#1f3a2a;color:#7fd6a0"
-                    : "background:#3a3a42;color:#bbb");
+                + (isNew
+                    ? "background:#48e1eb;color:#000;font-weight:600"
+                    : (published
+                        ? "background:#1f3a2a;color:#7fd6a0"
+                        : "background:#3a3a42;color:#bbb"));
+
+            if (isNew) {
+                badge.title = published ? "Not played yet, public" : "Not played yet, draft";
+            }
+
             item.appendChild(badge);
         }
 

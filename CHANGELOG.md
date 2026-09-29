@@ -139,9 +139,10 @@ the new settings layout and a number of smaller improvements.
 - **Report plays to Mureka** also takes Mureka's new mark off a song played
   for the first time, as Mureka's own player does. Before, a song played
   here stayed marked as new on Mureka.
-- A **New** mark after the title of your own songs not played yet, as on
-  Mureka, in the song list and in the web view's list and queue. It goes
-  once the song has been played with **Report plays to Mureka** on.
+- Your own songs not played yet say **new** where the public or draft
+  badge is, as Mureka marks them, in the song list, in the web view's list
+  and queue and on its now playing screen. The badge goes back to public or
+  draft once the song has been played with **Report plays to Mureka** on.
 - **Export song library** under Backup and restore saves every song as the
   player keeps it, without covers or audio, in one compact file. Importing
   it on a new or cleared device fills the library at once instead of

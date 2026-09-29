@@ -853,6 +853,12 @@ Mureka's own player sends, which is how to find out what Mureka does when a
 song is played there. A play report from the player is followed by what
 Mureka answered, taken or not. Only watched, every request goes through
 untouched; the same read again within ten seconds is left out.
+Each page of your own songs read from Mureka adds a line counting how many
+songs it marks as new, as played, and without the played flag at all, with
+the titles of the new and unflagged ones and any other field that looks
+like a played or new mark. The song lists Mureka's own site reads get the
+same line, so the two can be compared when the new badge and Mureka's
+disagree.
 
 Neither layer can take a tap or a click: nothing in it receives pointer
 events, every listener only watches, and characters typed in a text field
