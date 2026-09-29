@@ -27,6 +27,8 @@ import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.RouteInfo;
+import android.os.Build;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -637,7 +639,7 @@ final class CarServer {
 
                 if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                     cell.add(lp.getInterfaceName());
-                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && joinedWifi(caps, lp)) {
                     wifi.add(lp.getInterfaceName());
                 }
             }
@@ -645,6 +647,31 @@ final class CarServer {
 
         wifiInterfaces = wifi;
         cellInterfaces = cell;
+    }
+
+    // A Wi-Fi the phone has joined, not its own hotspot. From Android 15
+    // the hotspot is listed as a Wi-Fi network too, marked as a local
+    // network, and it leads nowhere: no internet and no router to go out
+    // through, where a joined Wi-Fi has at least one of them
+    private static boolean joinedWifi(NetworkCapabilities caps, LinkProperties lp) {
+
+        if (Build.VERSION.SDK_INT >= 35
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_LOCAL_NETWORK)) {
+            return false;
+        }
+
+        if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+            return true;
+        }
+
+        for (RouteInfo r : lp.getRoutes()) {
+
+            if (r.isDefaultRoute() && r.hasGateway()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // One query parameter, URL decoded, or an empty string

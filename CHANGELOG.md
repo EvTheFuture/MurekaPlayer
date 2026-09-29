@@ -110,15 +110,17 @@ the new settings layout and a number of smaller improvements.
   Where the music plays is one button in the header with the three choices
   in a dropdown. Songs is left out, the list is always there.
 - The screen goes off by itself after a while untouched while music
-  plays, with the phone's screen off settings: on or off, after how long,
-  and the mark with its colour, size and how often it moves.
-- **Settings for this browser**, at the top of the settings, gives one
-  browser its own look: up next, the waveform, where the lyrics go and
-  their size, how the volume is written, names under the buttons, the
-  button order (press and hold to move) and the screen off, also under
-  **Screen off in this browser** in the actions menu. Off by default:
-  switched on, the settings are kept in that browser only, never sent
-  anywhere, and switching it off deletes them.
+  plays. It has its own screen off settings under Web view, apart from the
+  mobile player's: on or off, after how long, and the mark with its colour,
+  size and how often it moves.
+- **Settings for this browser**, at the top of the settings, lets one
+  browser keep its own look. The settings it covers are marked with a dot
+  where they always are, all under Web view, the order of the buttons
+  included. While it is on, a change
+  made in that browser applies there only, and the phone and other
+  browsers keep theirs. Off by default: switched on, the settings are kept
+  in that browser only, never sent anywhere, and switching it off deletes
+  them.
 - Tesla's fullscreen from its YouTube app is recognised. There the music moves
   to the browser without asking, and the steering wheel's left and right
   skip to the previous and next song instead of seeking.
@@ -188,6 +190,12 @@ the new settings layout and a number of smaller improvements.
   the player starts, from what was cached last time. Going through the
   cache itself took several seconds with thousands of songs; it now runs
   in the background and puts the dots right when it is done.
+- **Waveform from**, under Mobile player: Mureka's, as before, or **From
+  the song**, worked out from the song itself once it is cached, far more
+  detailed and in the same colours: the peaks dim, and in front of them
+  how loud the song sounds, bright. It is worked out once and kept, and
+  Mureka's shows until the song is cached. The web view has the same
+  choice of its own, under Web view.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - Opening the app, or coming back to the page from another tab or app,
   takes the black screen cover away as a tap would, so the player shows

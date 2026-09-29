@@ -983,6 +983,12 @@
 
     #panelScroll {
         border-radius: 0 0 18px 0;
+
+        /* Reaches a little into the margin on the left, the content
+           staying where it was, so the dots hung before the names of the
+           settings are not cut off */
+        margin-left: calc(-1 * min(16px, 2.5vw));
+        padding-left: min(16px, 2.5vw);
     }
 
     .row {
@@ -1402,6 +1408,29 @@
         text-align: left;
     }
 
+    /* The mark on a setting a browser can have of its own, the same small
+       circle whatever the size of the text beside it. In front of a name
+       it hangs in the margin: the negative margin takes back its width,
+       so the name starts where the others do */
+    .localDot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin: 0 3px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0.8;
+        vertical-align: middle;
+    }
+
+    .localDot.hang {
+        margin: 0 7px 0 -13px;
+
+        /* A layer of its own, or the part outside the name's box is left
+           unpainted in some browsers when the settings are drawn again */
+        will-change: transform;
+    }
+
     .pBtn.on,
     .pClick.on {
         background: var(--accent);
@@ -1429,6 +1458,15 @@
 
     .pField {
         flex: 1 1 12em;
+    }
+
+    /* A field on a line of its own, the lock screen lines and the like,
+       takes the whole width */
+    #panelBody > .pField,
+    .pCol > .pField {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .pStep {
@@ -3139,10 +3177,14 @@
             names: s.names === true,
             upNext: s.showUpNext !== false,
             wave: typeof s.waveOn === "boolean" ? s.waveOn : true,
+            waveSource: s.webWaveSource === "song" ? "song" : "mureka",
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
-            size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26
+            size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26,
+            sidePct: s.lyricLayout && typeof s.lyricLayout.side === "number" ? Math.round(s.lyricLayout.side * 100) : 80,
+            linePct: s.lyricLayout && typeof s.lyricLayout.line === "number" ? Math.round(s.lyricLayout.line * 100) : 150,
+            sideShift: s.lyricLayout && typeof s.lyricLayout.sideShift === "number" ? s.lyricLayout.sideShift : 0
         };
     }
 
@@ -3158,6 +3200,17 @@
         s.lyricsWhere = look.lyrics === "off" || look.lyrics === "cover" ? look.lyrics : "info";
         s.volUnit = look.volUnit === "steps" ? "steps" : "percent";
 
+        // Our own waveform when chosen and the phone has it ready
+        s.waveFine = false;
+        s.waveLoud = null;
+
+        if (look.waveSource === "song" && Array.isArray(raw.waveOwn) && raw.waveOwn.length > 0) {
+
+            s.wave = raw.waveOwn;
+            s.waveFine = true;
+            s.waveLoud = Array.isArray(raw.waveOwnLoud) && raw.waveOwnLoud.length > 0 ? raw.waveOwnLoud : null;
+        }
+
         if (look.wave === false) {
             s.wave = null;
         }
@@ -3170,8 +3223,15 @@
             s.controls = look.controls.slice();
         }
 
-        if (typeof look.size === "number") {
-            s.lyricLayout = Object.assign({}, raw.lyricLayout || {}, { size: look.size });
+        // The lyric roll's sizes, this browser's where it has them
+        if (local && local.look) {
+
+            s.lyricLayout = Object.assign({}, raw.lyricLayout || {}, {
+                size: typeof look.size === "number" ? look.size : (raw.lyricLayout || {}).size,
+                side: typeof look.sidePct === "number" ? look.sidePct / 100 : (raw.lyricLayout || {}).side,
+                line: typeof look.linePct === "number" ? look.linePct / 100 : (raw.lyricLayout || {}).line,
+                sideShift: typeof look.sideShift === "number" ? look.sideShift : (raw.lyricLayout || {}).sideShift
+            });
         }
 
         return s;
@@ -3201,155 +3261,312 @@
         relook();
     }
 
-    // The switch at the top of the settings, and while it is on this
-    // browser's own look under it. The phone's Web view page is left out
-    // then, its settings would not apply here
+    // The settings a browser can have of its own, found on the phone's Web
+    // view page by their names. Each gets a dot, and while Settings for this
+    // browser is on, a change made here is kept here instead of on the phone
+    const LOCAL_ROWS = [
+        { label: "Show up next", page: "Web view", key: "upNext", kind: "bool" },
+        { label: "Waveform seek bar", page: "Web view", key: "wave", kind: "bool" },
+        { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
+        { label: "Waveform from", page: "Web view", key: "waveSource", kind: "choice", values: ["mureka", "song"],
+            names: { mureka: "Mureka's", song: "From the song" } },
+        { label: "Lyrics", page: "Web view", key: "lyrics", kind: "cycle", values: ["off", "info", "cover"],
+            names: { off: "Off", info: "Beside the cover", cover: "On the cover" } },
+        { label: "Volume shown as", page: "Web view", key: "volUnit", kind: "cycle", values: ["percent", "steps"],
+            names: { percent: "Percent", steps: "Steps" } },
+        { label: "Lyric size", page: "Web view", key: "size", kind: "step", step: 1, min: 10, max: 60 },
+        { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
+        { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
+        { label: "Side line offset", page: "Web view", key: "sideShift", kind: "step", step: 1, min: -40, max: 40 },
+        { label: "Screen off overlay", page: "Web view", screen: true, key: "on", kind: "bool" },
+        { label: "Screen off after seconds", page: "Web view", screen: true, key: "after", kind: "step", step: 5, min: 0, max: 300 },
+        { label: "Screen off mark, blank for none", page: "Web view", screen: true, key: "text", kind: "text" },
+        { label: "Screen off mark color", page: "Web view", screen: true, key: "color", kind: "color" },
+        { label: "Screen off mark size", page: "Web view", screen: true, key: "size", kind: "step", step: 4, min: 12, max: 240 },
+        { label: "Mark moves every seconds", page: "Web view", screen: true, key: "drift", kind: "step", step: 5, min: 5, max: 120 }
+    ];
+
+    // The small cyan circle that marks a setting a browser can have of its own
+    function localDot(hang) {
+
+        const dot = document.createElement("span");
+
+        dot.className = "localDot" + (hang ? " hang" : "");
+        dot.title = "Can be set for this browser alone";
+
+        return dot;
+    }
+
+    // One of this browser's own values, or the phone's while it has none
+    function localValue(def) {
+
+        if (def.screen) {
+            return screenSaver()[def.key];
+        }
+
+        const local = localSettings();
+        const look = Object.assign(phoneLook(rawState), local && local.look ? local.look : {});
+
+        return look[def.key];
+    }
+
+    function setLocalValue(def, value) {
+
+        const local = localSettings();
+
+        if (!local) {
+            return;
+        }
+
+        if (def.screen) {
+
+            local.screen = Object.assign(screenSaverPhone(), local.screen || {});
+            local.screen[def.key] = value;
+            saveLocal(local);
+        } else {
+            changeLocalLook(def.key, value);
+        }
+
+        relook();
+        renderPanelAgain();
+    }
+
+    // The page the settings panel shows, from the name beside its Back
+    function panelPage(box) {
+
+        for (const b of box.querySelectorAll("button")) {
+
+            if (b.textContent.trim().indexOf("\u2039") === 0 && b.parentElement) {
+                return b.parentElement.textContent.replace(b.textContent, "").trim();
+            }
+        }
+
+        return "";
+    }
+
+    // The switch at the top of the main settings page, and on the pages
+    // the dots and this browser's values in the rows that can be its own
     function addLocalSection(box) {
 
         if (panelName !== "settings") {
             return;
         }
 
-        const buttons = Array.from(box.querySelectorAll("button"));
-
-        // Only on the main page, a page of its own has a Back button
-        if (buttons.some(function (b) {
-            return b.textContent.trim().indexOf("\u2039") === 0;
-        })) {
-            return;
-        }
-
+        const page = panelPage(box);
         const local = localSettings();
-        const look = local && local.look ? local.look : phoneLook(rawState);
-        const section = document.createElement("div");
 
-        const row = function (label, control) {
+        if (!page) {
 
+            const section = document.createElement("div");
             const r = document.createElement("div");
             const t = document.createElement("div");
+            const b = document.createElement("button");
+            const hint = document.createElement("div");
 
             r.className = "pRow";
             t.className = "pText";
-            t.textContent = label;
-            r.appendChild(t);
-            r.appendChild(control);
-            section.appendChild(r);
-
-            return r;
-        };
-
-        const button = function (text, on, fn) {
-
-            const b = document.createElement("button");
-
+            t.textContent = "Settings for this browser";
             b.type = "button";
-            b.className = "pBtn" + (on ? " on" : "");
-            b.textContent = text;
-            b.addEventListener("click", fn);
+            b.className = "pBtn" + (local ? " on" : "");
+            b.textContent = local ? "On" : "Off";
+            b.addEventListener("click", function () {
 
-            return b;
-        };
+                if (local) {
 
-        const again = function () {
-            renderPanelAgain();
-        };
-
-        row("Settings for this browser", button(local ? "On" : "Off", !!local, function () {
-
-            if (local) {
-
-                try {
-                    localStorage.removeItem(LOCAL_KEY);
-                } catch (e) {
-                    // Nothing could be stored either
+                    try {
+                        localStorage.removeItem(LOCAL_KEY);
+                    } catch (e) {
+                        // Nothing could be stored either
+                    }
+                } else {
+                    saveLocal({ look: phoneLook(rawState), screen: screenSaverPhone() });
                 }
-            } else {
-                saveLocal({ look: phoneLook(rawState), screen: screenSaverPhone() });
-            }
 
-            relook();
-            again();
-        }));
-
-        const hint = document.createElement("div");
-
-        hint.className = "pText small";
-        hint.textContent = (local
-            ? "This browser uses its own look, button order and screen off. "
-            : "Off, this browser looks the way the phone's Web view settings say. ")
-            + "Switched on, these settings are saved in this browser's own storage on this device, "
-            + "much like a cookie, and used only to show the web view here. They are never sent to "
-            + "the phone, Mureka or anyone else, and hold nothing about you. Switching it off "
-            + "deletes them.";
-        section.appendChild(hint);
-
-        if (local) {
-
-            const lyricNames = { off: "Off", info: "Beside the cover", cover: "On the cover" };
-            const lyricNext = { off: "info", info: "cover", cover: "off" };
-
-            row("Up next", button(look.upNext !== false ? "On" : "Off", look.upNext !== false, function () {
-                changeLocalLook("upNext", look.upNext === false);
-                again();
-            }));
-            row("Waveform seek bar", button(look.wave !== false ? "On" : "Off", look.wave !== false, function () {
-                changeLocalLook("wave", look.wave === false);
-                again();
-            }));
-            row("Lyrics", button(lyricNames[look.lyrics] || "Beside the cover", false, function () {
-                changeLocalLook("lyrics", lyricNext[look.lyrics] || "cover");
-                again();
-            }));
-            row("Volume shown as", button(look.volUnit === "steps" ? "Steps" : "Percent", false, function () {
-                changeLocalLook("volUnit", look.volUnit === "steps" ? "percent" : "steps");
-                again();
-            }));
-            row("Names under the buttons", button(look.names ? "On" : "Off", look.names === true, function () {
-                changeLocalLook("names", look.names !== true);
-                again();
-            }));
-
-            const size = document.createElement("div");
-            const minus = button("-", false, function () {
-                changeLocalLook("size", Math.max(10, (look.size || 26) - 1));
-                again();
+                relook();
+                renderPanelAgain();
             });
-            const shown = document.createElement("div");
-            const plus = button("+", false, function () {
-                changeLocalLook("size", Math.min(60, (look.size || 26) + 1));
-                again();
-            });
-
-            size.style.display = "flex";
-            size.style.alignItems = "center";
-            size.style.gap = "8px";
-            shown.className = "pText pNum";
-            shown.textContent = String(look.size || 26);
-            size.appendChild(minus);
-            size.appendChild(shown);
-            size.appendChild(plus);
-            row("Lyric size", size);
-
-            row("Screen off", button("Settings", false, function () {
-                openScreenSaver();
-            }));
-
-            const more = document.createElement("div");
-
-            more.className = "pText small";
-            more.textContent = "Press and hold a button in the bar at the bottom to move it, the order is kept for this browser.";
-            section.appendChild(more);
-
-            // The phone's page for the web view, not for this browser now
-            for (const b of buttons) {
-
-                if (b.textContent.replace(/\s+/g, " ").trim().indexOf("Web view \u203A") === 0) {
-                    b.style.display = "none";
-                }
-            }
+            r.appendChild(t);
+            r.appendChild(b);
+            hint.className = "pText small";
+            hint.appendChild(document.createTextNode("While on, the settings marked"));
+            hint.appendChild(localDot());
+            hint.appendChild(document.createTextNode(" apply only to this browser when they are changed "
+                + "here. The phone and other browsers keep theirs. These settings are saved in this "
+                + "browser's own storage on this device, much like a cookie, and used only to show the "
+                + "web view here. They are never sent to the phone, Mureka or anyone else, and hold "
+                + "nothing about you. Switching it off deletes them."));
+            section.appendChild(r);
+            section.appendChild(hint);
+            box.insertBefore(section, box.firstChild);
+            return;
         }
 
-        box.insertBefore(section, box.firstChild);
+        for (const label of box.querySelectorAll(".pText")) {
+
+            if (label.classList.contains("pNum")) {
+                continue;
+            }
+
+            const name = label.textContent.trim();
+            const def = LOCAL_ROWS.find(function (d) {
+                return d.label === name && (!d.page || d.page === page);
+            });
+
+            if (!def) {
+                continue;
+            }
+
+            // A heading only carries the dot, what it covers is kept here
+            // by its own code, the button order
+            if (def.kind === "label") {
+
+                label.insertBefore(localDot(true), label.firstChild);
+                continue;
+            }
+
+            // A name in a row with its control, or a name with a field of
+            // its own under it
+            const row = label.closest(".pRow");
+            const below = row ? null : label.nextElementSibling;
+
+            // A name over a row of choices, or over a field
+            const fits = below && (def.kind === "choice"
+                ? below.querySelector("button") !== null
+                : (below.tagName === "INPUT" || below.querySelector("input") !== null));
+
+            if (!row && !fits) {
+                continue;
+            }
+
+            // The dot in the margin before the name, always, so it is clear
+            // which settings can differ
+            label.insertBefore(localDot(true), label.firstChild);
+
+            if (!local) {
+                continue;
+            }
+
+            localRow(row || below, def);
+        }
+    }
+
+    // A row showing this browser's value, its controls changing that value
+    // here. The phone's own handlers never hear of it
+    function localRow(row, def) {
+
+        const value = localValue(def);
+        const buttons = Array.from(row.querySelectorAll("button"));
+
+        const catchAll = function (ev, fn) {
+
+            ev.stopPropagation();
+            ev.preventDefault();
+            fn();
+        };
+
+        if (def.kind === "bool" && buttons.length > 0) {
+
+            const b = buttons[buttons.length - 1];
+
+            b.textContent = value ? "On" : "Off";
+            b.classList.toggle("on", !!value);
+            row.addEventListener("click", function (ev) {
+
+                if (b.contains(ev.target)) {
+
+                    catchAll(ev, function () {
+                        setLocalValue(def, !value);
+                    });
+                }
+            }, true);
+        } else if (def.kind === "cycle" && buttons.length > 0) {
+
+            const b = buttons[buttons.length - 1];
+            const at = def.values.indexOf(value);
+
+            b.textContent = def.names[value] || def.names[def.values[0]];
+            row.addEventListener("click", function (ev) {
+
+                if (b.contains(ev.target)) {
+
+                    catchAll(ev, function () {
+                        setLocalValue(def, def.values[(at + 1) % def.values.length]);
+                    });
+                }
+            }, true);
+        } else if (def.kind === "choice") {
+
+            // The chosen one lit, a tap on another picks it for this browser
+            for (const b of buttons) {
+
+                const pick = def.values.find(function (v) {
+                    return def.names[v] === b.textContent.trim();
+                });
+
+                b.classList.toggle("on", pick === value);
+            }
+
+            row.addEventListener("click", function (ev) {
+
+                const b = ev.target.closest ? ev.target.closest("button") : null;
+                const pick = b ? def.values.find(function (v) {
+                    return def.names[v] === b.textContent.trim();
+                }) : undefined;
+
+                if (pick !== undefined) {
+
+                    catchAll(ev, function () {
+                        setLocalValue(def, pick);
+                    });
+                }
+            }, true);
+        } else if (def.kind === "step") {
+
+            const shown = row.querySelector(".pNum");
+            const v = typeof value === "number" ? value : def.min;
+
+            if (shown) {
+                shown.textContent = String(v);
+            }
+
+            row.addEventListener("click", function (ev) {
+
+                const b = ev.target.closest ? ev.target.closest("button") : null;
+
+                if (!b || !row.contains(b)) {
+                    return;
+                }
+
+                const up = b.textContent.trim() === "+";
+
+                catchAll(ev, function () {
+                    setLocalValue(def, Math.max(def.min, Math.min(def.max, v + (up ? def.step : -def.step))));
+                });
+            }, true);
+        } else if (def.kind === "text" || def.kind === "color") {
+
+            const input = row.tagName === "INPUT" ? row : row.querySelector("input");
+
+            if (!input) {
+                return;
+            }
+
+            input.value = value === undefined || value === null ? "" : String(value);
+
+            // Caught first on the field itself, the phone's handler after it
+            // never runs
+            for (const kind of ["input", "change"]) {
+
+                input.addEventListener(kind, function (ev) {
+
+                    ev.stopImmediatePropagation();
+
+                    if (kind === "change") {
+                        setLocalValue(def, input.value);
+                    }
+                }, true);
+            }
+        }
     }
 
     // Draw the settings again from the last reading, for a change made here
@@ -4515,6 +4732,61 @@
     // when the played part or the size moved on
     let waveShown = -1;
 
+    // A value of a waveform over a slice of it, from and to as fractions of
+    // the song: the highest point when the slice holds several, and a blend
+    // of the two nearest when it is narrower than a point, so a wave with
+    // fewer points than the screen has columns has no steps
+    function waveSlice(list, from, to) {
+
+        const a = Math.floor(from * list.length);
+        const b = Math.floor(to * list.length);
+
+        if (b - a >= 2) {
+
+            let peak = 0;
+
+            for (let j = a; j < b; j++) {
+
+                if (list[j] > peak) {
+                    peak = list[j];
+                }
+            }
+
+            return peak;
+        }
+
+        const at = (from + to) / 2 * list.length - 0.5;
+        const i = Math.max(0, Math.min(list.length - 1, Math.floor(at)));
+        const k = Math.max(0, Math.min(1, at - i));
+        const next = list[Math.min(list.length - 1, i + 1)];
+
+        return list[i] * (1 - k) + next * k;
+    }
+
+    // The waveform from the song as the phone draws it: the peaks dim, and
+    // in front of them how loud the song sounds, bright, a column per
+    // screen pixel
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac) {
+
+        const room = h - 1;
+
+        for (let i = 0; i < w; i++) {
+
+            const from = i / w;
+            const to = (i + 1) / w;
+            const played = (i + 0.5) / w <= frac;
+            const p = waveSlice(peaks, from, to);
+            const l = Math.min(p, waveSlice(loud, from, to) * 0.95);
+            const ph = Math.max(1, p * room);
+            const lh = Math.max(1, l * room);
+
+            ctx.fillStyle = played ? "#2a7f86" : "#3a3a3e";
+            ctx.fillRect(i, (h - ph) / 2, 1, ph);
+            ctx.fillStyle = played ? "#48e1eb" : "#666";
+            ctx.fillRect(i, (h - lh) / 2, 1, lh);
+        }
+    }
+
     function drawWave(frac) {
 
         const canvas = $("wave");
@@ -4527,11 +4799,14 @@
         const dpr = window.devicePixelRatio || 1;
         const w = Math.round(canvas.clientWidth * dpr);
         const h = Math.round(canvas.clientHeight * dpr);
-        const barW = 3 * dpr;
-        const gap = 2 * dpr;
+        // The waveform from the song a column per screen pixel, Mureka's as bars
+        const fine = !!(state && state.waveFine);
+        const loud = fine && state.waveLoud ? state.waveLoud : null;
+        const barW = fine ? 1 : 3 * dpr;
+        const gap = fine ? 0 : 2 * dpr;
         const count = Math.max(1, Math.floor(w / (barW + gap)));
         const played = Math.round(frac * count);
-        const key = played * 100000 + w;
+        const key = played * 100000 + w + (fine ? 0.5 : 0) + (loud ? 0.25 : 0);
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -4548,6 +4823,12 @@
         const ctx = canvas.getContext("2d");
 
         ctx.clearRect(0, 0, w, h);
+
+        if (loud) {
+
+            drawLayeredWave(ctx, w, h, data, loud, played / count);
+            return;
+        }
 
         for (let i = 0; i < count; i++) {
 
@@ -6966,13 +7247,46 @@
     }
 
     // After a change the phone needs a moment before it shows the result
+    // The phone runs a command and a reading in the order they come, so
+    // the reading can follow at once. The regular reading every two
+    // seconds catches anything the phone finishes later
     function panelAction(cmd, arg) {
 
         panelActs += 1;
 
         send(cmd, arg).then(function () {
-            setTimeout(loadPanel, 250);
+            setTimeout(loadPanel, 30);
         });
+    }
+
+    // Each page of a panel as last read, drawn at once when it is opened
+    // again or gone back to, and then brought up to date from the phone
+    const panelPages = {};
+
+    function panelPageKey(page) {
+        return panelName + ":" + (page || "main");
+    }
+
+    // A page button or Back tapped: the page it leads to, when it was seen
+    // before, is drawn straight away
+    function panelJump(label) {
+
+        const text = String(label || "").replace(/\s+/g, " ").trim();
+        let target = null;
+
+        if (text.indexOf("\u2039") === 0) {
+            target = "main";
+        } else if (/\u203A$/.test(text)) {
+            target = text.replace(/\s*\u203A$/, "").trim();
+        }
+
+        const items = target ? panelPages[panelPageKey(target === "main" ? "" : target)] : null;
+
+        if (items) {
+
+            renderPanel(items);
+            $("panelScroll").scrollTop = 0;
+        }
     }
 
     // How wide the column of switches and steppers is, from the widest one
@@ -7032,6 +7346,11 @@
 
         addLocalSection(box);
         measureControlColumn();
+
+        // Kept for drawing this page at once next time, and as the one the
+        // panel showed last
+        panelPages[panelPageKey(panelPage(box))] = items;
+        panelPages[panelName + ":last"] = items;
         scroller.scrollTop = keep;
     }
 
@@ -7187,6 +7506,7 @@
                     btn.classList.toggle("on", on);
                 }
 
+                panelJump(node.s);
                 panelAction("hclick", node.id);
             });
 
@@ -7340,7 +7660,9 @@
         const hiddenRow = document.createElement("div");
         const label1 = document.createElement("div");
         const label2 = document.createElement("div");
-        let active = node.active.slice();
+        // A browser with its own settings starts from its own order
+        const ownOrder = (node.which || "web") === "web" && localSettings() ? localValue({ key: "controls" }) : null;
+        let active = Array.isArray(ownOrder) && ownOrder.length > 0 ? ownOrder.slice() : node.active.slice();
         let hidden = node.all.filter(function (name) {
             return active.indexOf(name) === -1;
         });
@@ -7350,6 +7672,14 @@
         label1.textContent = "Transport bar, drag a button to move it, tap to take it out";
         label2.className = "ceLabel";
         label2.textContent = "Not shown, tap or drag to add";
+
+        // The web view's bar can be kept per browser, marked like the
+        // other settings that can
+        if ((node.which || "web") === "web") {
+
+            label1.insertBefore(localDot(true), label1.firstChild);
+            label2.insertBefore(localDot(true), label2.firstChild);
+        }
         activeRow.className = "ceRow";
         hiddenRow.className = "ceRow";
 
@@ -7364,7 +7694,13 @@
             }
 
             draw();
-            panelAction("setControls", { which: node.which || "web", names: active.slice() });
+            // The web view's bar in a browser with its own settings is kept
+            // here, the phone's own bar still goes to the phone
+            if ((node.which || "web") === "web" && localSettings()) {
+                changeLocalLook("controls", active.slice());
+            } else {
+                panelAction("setControls", { which: node.which || "web", names: active.slice() });
+            }
         };
 
         const draw = function () {
@@ -7689,8 +8025,15 @@
         panelName = name;
         $("panelTitle").textContent = PANEL_TITLES[name] || name;
         $("panelBody").textContent = "";
-        $("panelBody").appendChild(loadingNode("Loading"));
         $("panel").style.display = "flex";
+
+        // The page it showed last right away, otherwise a wait
+        if (panelPages[name + ":last"]) {
+            renderPanel(panelPages[name + ":last"]);
+        } else {
+            $("panelBody").appendChild(loadingNode("Loading"));
+        }
+
         loadPanel();
 
         // Some of it arrives later on the phone, the artist list for one
@@ -10262,7 +10605,18 @@
 
         if (isShown("panel")) {
 
-            closePanel();
+            // A page of the settings goes back one level, the main page
+            // closes them
+            const back = Array.from($("panelBody").querySelectorAll("button")).find(function (b) {
+                return b.textContent.trim().indexOf("\u2039") === 0 && b.offsetParent !== null;
+            });
+
+            if (back) {
+                back.click();
+            } else {
+                closePanel();
+            }
+
             return true;
         }
 

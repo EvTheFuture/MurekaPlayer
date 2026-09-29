@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.8";
+    const VERSION = "1.9.9.20";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -800,11 +800,16 @@
     // this device, the connections, the music, backup and developer
     let settingsPages = null;
 
+    // The settings page shown, main or one of the pages it opens
+    let settingsPageNow = "main";
+
     function showSettingsPage(name) {
 
         if (!settingsPages) {
             return;
         }
+
+        settingsPageNow = name;
 
         Object.keys(settingsPages).forEach(function (key) {
             settingsPages[key].style.display = key === name ? "flex" : "none";
@@ -920,6 +925,14 @@
 
     // Waveform seek bar, the normalized wave data for the current song
     let waveData = null;
+
+    // The playing song's two waveforms, Mureka's and our own from the song.
+    // waveData is the one this screen draws, the web view picks its own
+    let waveMureka = null;
+    let waveOwn = null;
+
+    // How loud each slice of our own waveform sounds, beside its peaks
+    let waveOwnLoud = null;
     let waveCanvas = null;
     let seekBar = null;
     let curTimeEl = null;
@@ -1182,6 +1195,38 @@
         return 30;
     }
 
+    // A number kept within its range, or the fallback
+    function numberIn(v, lo, hi, fallback) {
+        return typeof v === "number" && v >= lo && v <= hi ? v : fallback;
+    }
+
+    // The web view's own screen off. Before it had one it followed the
+    // mobile player's, so a settings file without it starts from those
+    function webScreenFrom(parsed) {
+
+        const pick = function (webKey, phoneKey, lo, hi, fallback) {
+            return numberIn(parsed[webKey], lo, hi, numberIn(parsed[phoneKey], lo, hi, fallback));
+        };
+
+        const text = function (webKey, phoneKey, fallback) {
+
+            if (typeof parsed[webKey] === "string") {
+                return parsed[webKey];
+            }
+
+            return typeof parsed[phoneKey] === "string" ? parsed[phoneKey] : fallback;
+        };
+
+        return {
+            on: typeof parsed.webBlackout === "boolean" ? parsed.webBlackout : parsed.carBlackout === true,
+            after: pick("webAutoBlack", "carAutoBlack", 0, 300, 20),
+            text: text("webMarkText", "blackoutText", "\u266B"),
+            color: text("webMarkColor", "blackoutColor", "#333333"),
+            size: pick("webMarkSize", "blackoutSize", 12, 240, 64),
+            drift: pick("webMarkDrift", "blackoutDrift", 5, 120, 25)
+        };
+    }
+
     // Read the settings from localStorage, falling back to safe defaults
     // Published is the default start feed, refresh on open is off for both feeds
     // Autoplay is off, the default play mode is not shuffled, repeat is all
@@ -1237,12 +1282,20 @@
             blackoutColor: "#333333",
             blackoutSize: 64,
             blackoutDrift: 25,
+            webBlackout: false,
+            webAutoBlack: 20,
+            webMarkText: "\u266B",
+            webMarkColor: "#333333",
+            webMarkSize: 64,
+            webMarkDrift: 25,
             countsMaxMinutes: 30,
             prevRestartOn: true,
             prevRestart: 3,
             waveSeek: true,
+            waveSource: "mureka",
             webUpNext: true,
             webWave: true,
+            webWaveSource: "mureka",
             webNames: false,
             webLyrics: "info",
             webControlOrder: "repeat,shuffle,stop,play",
@@ -1280,6 +1333,7 @@
                 const repeat = (parsed.repeat === "one" || parsed.repeat === "none")
                     ? parsed.repeat
                     : "all";
+                const webScreen = webScreenFrom(parsed);
 
                 let prefetchCount = parseInt(parsed.prefetchCount, 10);
 
@@ -1379,6 +1433,12 @@
                     blackoutDrift: (typeof parsed.blackoutDrift === "number"
                         && parsed.blackoutDrift >= 5 && parsed.blackoutDrift <= 120)
                         ? parsed.blackoutDrift : 25,
+                    webBlackout: webScreen.on,
+                    webAutoBlack: webScreen.after,
+                    webMarkText: webScreen.text,
+                    webMarkColor: webScreen.color,
+                    webMarkSize: webScreen.size,
+                    webMarkDrift: webScreen.drift,
                     countsMaxMinutes: countsMinutesFrom(parsed),
                     // 0 seconds used to mean off, from before the switch
                     prevRestartOn: typeof parsed.prevRestartOn === "boolean"
@@ -1387,8 +1447,10 @@
                         && parsed.prevRestart >= 1 && parsed.prevRestart <= 30)
                         ? parsed.prevRestart : 3,
                     waveSeek: parsed.waveSeek !== false,
+                    waveSource: parsed.waveSource === "song" ? "song" : "mureka",
                     webUpNext: parsed.webUpNext !== false,
                     webWave: parsed.webWave !== false,
+                    webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
                     webNames: parsed.webNames === true,
                     webLyrics: (parsed.webLyrics === "off" || parsed.webLyrics === "cover")
                         ? parsed.webLyrics : "info",
@@ -1887,6 +1949,10 @@
         updatePlayerInfo(currentSong);
         renderList();
         scrollToPlaying();
+
+        // Its waveform and where it was left, shown before Play
+        loadWaveForSong(currentSong);
+        updateSeekDisplay();
 
         setStatus("Resumed queue, press play to continue");
     }
@@ -4965,6 +5031,7 @@
 
                     // The full file is now stored, so light its cached marker
                     cachedIds.add(song.song_id);
+                    ownWaveOnStored(song);
                 }
 
                 cachingIds.delete(song.song_id);
@@ -5075,6 +5142,7 @@
 
             await store.put(url, net.clone());
             cachedIds.add(song.song_id);
+            ownWaveOnStored(song);
 
             return true;
         } catch (e) {
@@ -5427,6 +5495,7 @@
             const waveStore = await caches.open(WAVE_STORE);
 
             await waveStore.delete(waveStoreKey(song.song_id));
+            await waveStore.delete(ownWaveKey(song.song_id));
         } catch (e) {
         }
 
@@ -6136,6 +6205,7 @@
 
                 await store.put(direct, net.clone());
                 cachedIds.add(song.song_id);
+                ownWaveOnStored(song);
                 resp = net;
             }
 
@@ -7706,6 +7776,9 @@
         lyricRows = [];
         lyricIdx = -1;
         waveData = null;
+        waveMureka = null;
+        waveOwn = null;
+        waveOwnLoud = null;
         updateLyricLine(true);
         updateSeekMode();
         loadWaveForSong(song);
@@ -8262,8 +8335,8 @@
 
                 if (currentSong && currentSong.song_id === song.song_id) {
 
-                    waveData = w;
-                    updateSeekMode();
+                    waveMureka = w;
+                    applyWave();
                 }
             }
 
@@ -11876,6 +11949,9 @@
             lyricRows = [];
             lyricIdx = -1;
             waveData = null;
+            waveMureka = null;
+            waveOwn = null;
+            waveOwnLoud = null;
             updateLyricLine(true);
             updateSeekMode();
 
@@ -12494,10 +12570,222 @@
         }
     }
 
-    // Load the stored waveform for the song now starting, if it has one
+    // Our own waveform, worked out from the song itself, many more points
+    // than Mureka's and true to the sound. Kept beside Mureka's in the
+    // same store, so it is only worked out once per song
+    const OWN_WAVE_POINTS = 2000;
+
+    let ownWaveBusy = null;
+
+    function ownWaveKey(id) {
+
+        return "https://mureka-wave-cache/own/" + encodeURIComponent(id);
+    }
+
+    // The peaks and the loudness, each scaled to its own loudest slice.
+    // One kept before the loudness was, a plain list of peaks, is worked
+    // out again
+    async function loadOwnWave(id) {
+
+        try {
+
+            const store = await caches.open(WAVE_STORE);
+            const res = await store.match(ownWaveKey(id));
+            const kept = res ? await res.json() : null;
+
+            if (!kept || Array.isArray(kept) || !Array.isArray(kept.peak) || !Array.isArray(kept.loud)) {
+                return null;
+            }
+
+            const peak = normalizeWave(kept.peak);
+            const loud = normalizeWave(kept.loud);
+
+            return peak && loud ? { peak: peak, loud: loud } : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Decode the cached song at a low rate, enough for the shape, and keep
+    // the loudest sample of each slice. Null when the song is not cached
+    async function makeOwnWave(song) {
+
+        const url = songUrl(song);
+
+        if (!url) {
+            return null;
+        }
+
+        const store = await caches.open(AUDIO_CACHE);
+        const hit = await store.match(url, { ignoreVary: true });
+
+        if (!hit) {
+            return null;
+        }
+
+        const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+
+        if (!Off) {
+            return null;
+        }
+
+        const t0 = Date.now();
+        const buffer = await trimDecode(new Off(1, 1, 8000), await hit.arrayBuffer());
+        const chans = [];
+
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+            chans.push(buffer.getChannelData(c));
+        }
+
+        const n = Math.min(OWN_WAVE_POINTS, buffer.length);
+        const out = { peak: new Array(n), loud: new Array(n) };
+
+        for (let i = 0; i < n; i++) {
+
+            const a = Math.floor(i * buffer.length / n);
+            const b = Math.max(a + 1, Math.floor((i + 1) * buffer.length / n));
+            let peak = 0;
+            let sum = 0;
+
+            // The loudest sample and the average level of the slice, the
+            // second being what the ear hears as loud
+            for (const data of chans) {
+
+                for (let j = a; j < b; j++) {
+
+                    const v = data[j] < 0 ? -data[j] : data[j];
+
+                    sum += v * v;
+
+                    if (v > peak) {
+                        peak = v;
+                    }
+                }
+            }
+
+            out.peak[i] = Math.round(peak * 1000) / 1000;
+            out.loud[i] = Math.round(Math.sqrt(sum / ((b - a) * chans.length)) * 1000) / 1000;
+        }
+
+        dbgLog("Audio", "Own waveform for " + song.song_id + " worked out in " + (Date.now() - t0) + " ms");
+
+        try {
+
+            await (await caches.open(WAVE_STORE)).put(ownWaveKey(song.song_id), new Response(JSON.stringify(out), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        } catch (e) {
+            // Worked out again next time
+        }
+
+        const peak = normalizeWave(out.peak);
+        const loud = normalizeWave(out.loud);
+
+        return peak && loud ? { peak: peak, loud: loud } : null;
+    }
+
+    // Work out the playing song's own waveform a moment after it starts, so
+    // it does not slow the start down, trying again every so often while
+    // the song plays and is not stored yet. Mureka's shows until then. A
+    // newer job takes over, the older one then just stops. now starts it
+    // at once, for a song that has just been stored
+    function makeOwnWaveSoon(song, tries, now) {
+
+        const id = song.song_id;
+
+        if (!now && ownWaveBusy && ownWaveBusy.id === id) {
+            return;
+        }
+
+        const job = { id: id };
+
+        ownWaveBusy = job;
+
+        setTimeout(async function () {
+
+            // Taken over by a newer job
+            if (ownWaveBusy !== job) {
+                return;
+            }
+
+            let own = null;
+            let failed = false;
+
+            try {
+
+                if (currentSong && currentSong.song_id === id && ownWaveWanted()) {
+                    own = await makeOwnWave(song);
+                }
+            } catch (e) {
+
+                // Stored but not readable, trying again would not help
+                failed = true;
+                dbgLog("Audio", "Own waveform for " + id + " failed: " + (e && e.message ? e.message : e));
+            }
+
+            if (ownWaveBusy !== job) {
+                return;
+            }
+
+            ownWaveBusy = null;
+
+            if (!currentSong || currentSong.song_id !== id || !ownWaveWanted()) {
+                return;
+            }
+
+            if (own) {
+
+                waveOwn = own.peak;
+                waveOwnLoud = own.loud;
+                applyWave();
+            } else if (!failed) {
+                makeOwnWaveSoon(song, (tries || 0) + 1);
+            }
+        }, now ? 200 : (tries ? 15000 : 2000));
+    }
+
+    // The playing song has just been stored: its own waveform can be worked
+    // out now instead of at the next try
+    function ownWaveOnStored(song) {
+
+        if (currentSong && currentSong.song_id === song.song_id && !waveOwn && ownWaveWanted()) {
+            makeOwnWaveSoon(song, 0, true);
+        }
+    }
+
+    // Whether our own waveform is worked out: when this screen shows it,
+    // and always in the app, where a web view or a browser may ask for it
+    function ownWaveWanted() {
+        return settings.waveSource === "song" || isApkHost();
+    }
+
+    // The waveform this screen draws, ours when chosen and ready, and the
+    // web view told of both
+    function applyWave() {
+
+        waveData = settings.waveSource === "song" && waveOwn ? waveOwn : waveMureka;
+        updateSeekMode();
+        publishHostSoon();
+    }
+
+    // Load the stored waveforms for the song now starting
     async function loadWaveForSong(song) {
 
         const id = song.song_id;
+        const own = await loadOwnWave(id);
+
+        if (!currentSong || currentSong.song_id !== id) {
+            return;
+        }
+
+        waveOwn = own ? own.peak : null;
+        waveOwnLoud = own ? own.loud : null;
+
+        // Not worked out yet, done in the background once the song is cached
+        if (!own && ownWaveWanted()) {
+            makeOwnWaveSoon(song, 0);
+        }
+
         const stored = await loadWaveFromStore(id);
 
         // A different song took over while reading
@@ -12507,12 +12795,10 @@
 
         const w = normalizeWave(stored);
 
-        if (w) {
+        waveMureka = w;
+        applyWave();
 
-            waveData = w;
-            updateSeekMode();
-
-        } else {
+        if (!w) {
 
             // Not stored yet, collect it from the feed in the background. When
             // the scan reaches this song it re-loads and shows the wave
@@ -12632,18 +12918,26 @@
         const ctx = waveCanvas.getContext("2d");
         ctx.clearRect(0, 0, w, h);
 
-        const barW = 2 * dpr;
-        const gap = 1 * dpr;
-        const count = Math.max(1, Math.floor(w / (barW + gap)));
-        const duration = (audio && isFinite(audio.duration)) ? audio.duration : 0;
-
+        const times = songTimes();
         let frac = 0;
 
         if (typeof previewFrac === "number") {
             frac = previewFrac;
-        } else if (duration > 0 && audio) {
-            frac = audio.currentTime / duration;
+        } else if (times.length > 0) {
+            frac = times.at / times.length;
         }
+
+        // Our own waveform in two layers a column per screen pixel, Mureka's
+        // as bars, so the two look apart
+        if (waveOwn !== null && waveData === waveOwn && waveOwnLoud) {
+
+            drawLayeredWave(ctx, w, h, waveOwn, waveOwnLoud, frac);
+            return;
+        }
+
+        const barW = 2 * dpr;
+        const gap = 1 * dpr;
+        const count = Math.max(1, Math.floor(w / (barW + gap)));
 
         for (let i = 0; i < count; i += 1) {
 
@@ -12668,14 +12962,125 @@
         }
     }
 
+    // A value of a waveform over a slice of it, from and to as fractions of
+    // the song: the highest point when the slice holds several, and a blend
+    // of the two nearest when it is narrower than a point, so a wave with
+    // fewer points than the screen has columns has no steps
+    function waveSlice(list, from, to) {
+
+        const a = Math.floor(from * list.length);
+        const b = Math.floor(to * list.length);
+
+        if (b - a >= 2) {
+
+            let peak = 0;
+
+            for (let j = a; j < b; j++) {
+
+                if (list[j] > peak) {
+                    peak = list[j];
+                }
+            }
+
+            return peak;
+        }
+
+        const at = (from + to) / 2 * list.length - 0.5;
+        const i = Math.max(0, Math.min(list.length - 1, Math.floor(at)));
+        const k = Math.max(0, Math.min(1, at - i));
+        const next = list[Math.min(list.length - 1, i + 1)];
+
+        return list[i] * (1 - k) + next * k;
+    }
+
+    // Our own waveform: the peaks dim, and in front of them how loud the
+    // song sounds, bright, a column per screen pixel. Played in the accent
+    // colour, the rest grey
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac) {
+
+        const room = h - 1;
+
+        for (let i = 0; i < w; i++) {
+
+            const from = i / w;
+            const to = (i + 1) / w;
+            const played = (i + 0.5) / w <= frac;
+            const p = waveSlice(peaks, from, to);
+            const l = Math.min(p, waveSlice(loud, from, to) * 0.95);
+            const ph = Math.max(1, p * room);
+            const lh = Math.max(1, l * room);
+
+            ctx.fillStyle = played ? "#2a7f86" : "#3a3a3e";
+            ctx.fillRect(i, (h - ph) / 2, 1, ph);
+            ctx.fillStyle = played ? "#48e1eb" : "#666";
+            ctx.fillRect(i, (h - lh) / 2, 1, lh);
+        }
+    }
+
+    // The song restored from the last session and not started yet, shown
+    // where it was left. Null once it plays or when there is none
+    function restoredSong() {
+
+        if (!resumeState || !currentSong || (audio && audio.src)) {
+            return null;
+        }
+
+        const song = resumeState.queue[resumeState.queuePos];
+
+        return song === currentSong && Number(song.duration_milliseconds) > 0 ? song : null;
+    }
+
+    // Where the song is and how long it is: from the audio while it is
+    // loaded, else for a restored song where it was left and the length
+    // Mureka gives, so the times and the waveform show before Play
+    function songTimes() {
+
+        if (audio && audio.src && isFinite(audio.duration) && audio.duration > 0) {
+            return { at: isFinite(audio.currentTime) ? audio.currentTime : 0, length: audio.duration };
+        }
+
+        const song = restoredSong();
+
+        if (song) {
+
+            const length = Number(song.duration_milliseconds) / 1000;
+
+            return { at: Math.min(length, resumeState.time || 0), length: length };
+        }
+
+        return { at: 0, length: 0 };
+    }
+
+    // Move to a time: the audio when it is loaded, else the place a
+    // restored song starts from when Play is pressed
+    function seekToTime(t) {
+
+        if (audio && audio.src && isFinite(audio.duration)) {
+
+            audio.currentTime = Math.max(0, Math.min(audio.duration - 0.5, t));
+            return;
+        }
+
+        const song = restoredSong();
+
+        if (song) {
+
+            resumeState.time = Math.max(0, Math.min(Number(song.duration_milliseconds) / 1000 - 0.5, t));
+            saveQueue();
+            updateSeekDisplay();
+            publishHostSoon();
+        }
+    }
+
     function updateSeekDisplay() {
 
         if (!seekBar) {
             return;
         }
 
-        const duration = (audio && isFinite(audio.duration)) ? audio.duration : 0;
-        const current = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+        const times = songTimes();
+        const duration = times.length;
+        const current = times.at;
 
         seekBar.max = duration > 0 ? duration : 0;
 
@@ -13578,7 +13983,10 @@
 
         const song = currentSong;
         const hasAudio = !!(audio && audio.src);
-        const duration = hasAudio && isFinite(audio.duration) ? audio.duration : 0;
+
+        // A song restored from the last session shows where it was left
+        const times = songTimes();
+        const duration = hasAudio ? (isFinite(audio.duration) ? audio.duration : 0) : times.length;
 
         return {
             version: VERSION,
@@ -13589,7 +13997,7 @@
             cover: song ? coverUrl(song) : "",
             src: song ? (songUrl(song) || "") : "",
             playing: hasAudio && !audio.paused,
-            position: hasAudio && isFinite(audio.currentTime) ? audio.currentTime : 0,
+            position: hasAudio ? (isFinite(audio.currentTime) ? audio.currentTime : 0) : times.at,
             duration: duration,
             rating: song ? getRating(song) : null,
             liked: song ? song.is_liked === true : false,
@@ -13615,15 +14023,15 @@
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             songNew: song && !creatorSource ? song.is_played === false : null,
 
-            // The phone's screen off settings, which a web view follows
-            // unless that browser has its own
+            // The web view's screen off, apart from the mobile player's.
+            // A browser can still have its own
             screenSaver: {
-                on: settings.carBlackout === true,
-                after: settings.carAutoBlack,
-                text: settings.blackoutText,
-                color: settings.blackoutColor,
-                size: settings.blackoutSize,
-                drift: settings.blackoutDrift
+                on: settings.webBlackout === true,
+                after: settings.webAutoBlack,
+                text: settings.webMarkText,
+                color: settings.webMarkColor,
+                size: settings.webMarkSize,
+                drift: settings.webMarkDrift
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
@@ -13636,7 +14044,10 @@
             // Sent even with the waveform switched off here, a browser with
             // its own settings may show it
             wave: hostWave(),
+            waveOwn: hostWaveOf(waveOwn, HOST_WAVE_POINTS * 2),
+            waveOwnLoud: hostWaveOf(waveOwnLoud, HOST_WAVE_POINTS * 2),
             waveOn: settings.webWave !== false,
+            webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
             controls: hostControls("web"),
             names: settings.webNames === true,
             lyricsWhere: settings.webLyrics || "info",
@@ -13852,52 +14263,58 @@
     // to go along with every state
     const HOST_WAVE_POINTS = 240;
 
-    let hostWaveFrom = null;
-    let hostWaveCache = null;
+    // The shrunk copies, kept per waveform so they are made once
+    const hostWaveCopies = new WeakMap();
 
     // The song whose stored waveform was last asked for on the web view's behalf
     let hostWaveAsked = null;
 
+    // Mureka's waveform for the web view, read from the store when the
+    // song was restored at start and has not played yet
     function hostWave() {
 
-        if (!waveData || waveData.length === 0) {
+        if (!waveMureka && currentSong && hostWaveAsked !== currentSong.song_id) {
 
-            // A song restored at start is shown before it plays, and its wave
-            // is only read once playback starts, so read it now instead
-            if (currentSong && hostWaveAsked !== currentSong.song_id) {
+            hostWaveAsked = currentSong.song_id;
+            loadWaveForSong(currentSong);
+        }
 
-                hostWaveAsked = currentSong.song_id;
-                loadWaveForSong(currentSong);
-            }
+        return hostWaveOf(waveMureka, HOST_WAVE_POINTS);
+    }
 
+    // A waveform shrunk to a set number of peaks
+    function hostWaveOf(list, points) {
+
+        if (!list || list.length === 0) {
             return null;
         }
 
-        if (hostWaveFrom === waveData) {
-            return hostWaveCache;
+        const kept = hostWaveCopies.get(list);
+
+        if (kept) {
+            return kept;
         }
 
         const out = [];
-        const n = Math.min(HOST_WAVE_POINTS, waveData.length);
+        const n = Math.min(points, list.length);
 
         for (let i = 0; i < n; i++) {
 
-            const a = Math.floor(i * waveData.length / n);
-            const b = Math.max(a + 1, Math.floor((i + 1) * waveData.length / n));
+            const a = Math.floor(i * list.length / n);
+            const b = Math.max(a + 1, Math.floor((i + 1) * list.length / n));
             let peak = 0;
 
             for (let j = a; j < b; j++) {
 
-                if (waveData[j] > peak) {
-                    peak = waveData[j];
+                if (list[j] > peak) {
+                    peak = list[j];
                 }
             }
 
             out.push(Math.round(peak * 100) / 100);
         }
 
-        hostWaveFrom = waveData;
-        hostWaveCache = out;
+        hostWaveCopies.set(list, out);
 
         return out;
     }
@@ -14640,10 +15057,7 @@
                 playCurrent();
             }
         } else if (cmd === "seek") {
-
-            if (audio && audio.src && isFinite(audio.duration)) {
-                audio.currentTime = Math.max(0, Math.min(audio.duration - 0.5, Number(arg) || 0));
-            }
+            seekToTime(Number(arg) || 0);
         } else if (cmd === "seekBy") {
             seekByKey(Number(arg) || 0);
         } else if (cmd === "rate") {
@@ -15489,7 +15903,7 @@
             isSeeking = true;
 
             const value = parseFloat(seekBar.value) || 0;
-            const duration = (audio && isFinite(audio.duration)) ? audio.duration : 0;
+            const duration = songTimes().length;
 
             curTimeEl.textContent = formatTime(value);
             remTimeEl.textContent = "-" + formatTime(duration > 0 ? duration - value : 0);
@@ -15498,10 +15912,7 @@
         // On release, jump the audio to the chosen position
         seekBar.addEventListener("change", function () {
 
-            if (audio && isFinite(audio.duration)) {
-                audio.currentTime = parseFloat(seekBar.value) || 0;
-            }
-
+            seekToTime(parseFloat(seekBar.value) || 0);
             isSeeking = false;
             updateSeekDisplay();
         });
@@ -15511,6 +15922,19 @@
         // from scrolling the page
         waveCanvas = document.createElement("canvas");
         waveCanvas.style.cssText = "flex:1;height:28px;min-width:0;display:none;cursor:pointer;touch-action:none";
+
+        // Drawn again whenever it gets its size or changes it. At start the
+        // player can still be laid out when the waveform arrives, and a
+        // paused song has no time updates to draw it later
+        if (typeof ResizeObserver === "function") {
+
+            new ResizeObserver(function () {
+
+                if (waveData && waveCanvas.style.display !== "none" && !isSeeking) {
+                    drawWave();
+                }
+            }).observe(waveCanvas);
+        }
 
         // Fraction of the canvas width for a pointer event, clamped to 0..1
         const waveFrac = function (ev) {
@@ -15527,7 +15951,7 @@
         // Preview the labels and progress while pressing or dragging
         const wavePreview = function (frac) {
 
-            const duration = (audio && isFinite(audio.duration)) ? audio.duration : 0;
+            const duration = songTimes().length;
             const t = frac * duration;
 
             curTimeEl.textContent = formatTime(t);
@@ -15537,7 +15961,7 @@
 
         waveCanvas.addEventListener("pointerdown", function (ev) {
 
-            if (!audio || !isFinite(audio.duration)) {
+            if (songTimes().length <= 0) {
                 return;
             }
 
@@ -15554,7 +15978,7 @@
 
         waveCanvas.addEventListener("pointermove", function (ev) {
 
-            if (isSeeking && audio && isFinite(audio.duration)) {
+            if (isSeeking) {
                 wavePreview(waveFrac(ev));
             }
         });
@@ -15565,10 +15989,7 @@
                 return;
             }
 
-            if (audio && isFinite(audio.duration)) {
-                audio.currentTime = waveFrac(ev) * audio.duration;
-            }
-
+            seekToTime(waveFrac(ev) * songTimes().length);
             isSeeking = false;
             updateSeekDisplay();
         });
@@ -19446,25 +19867,90 @@
             function () { return settings.directAudio; },
             function (v) { settings.directAudio = v; });
 
-        const carBlackoutRow = makeBoolRow("Screen off overlay",
-            function () { return settings.carBlackout; },
-            function (v) { settings.carBlackout = v; resetIdleTimer(); refreshGate(); });
+        // The screen off rows, built for the mobile player and again for the
+        // web view, each with its own settings. keys names them, changed
+        // runs after every change
+        const buildScreenOff = function (keys, changed) {
 
-        const blackTextRow = makeTextRow("Screen off mark, blank for none",
-            function () { return settings.blackoutText; },
-            function (v) { settings.blackoutText = v; });
+            const onRow = makeBoolRow("Screen off overlay",
+                function () { return settings[keys.on]; },
+                function (v) { settings[keys.on] = v; changed(); });
 
-        const blackColorRow = makeColorRow("Screen off mark color",
-            function () { return settings.blackoutColor; },
-            function (v) { settings.blackoutColor = v; });
+            const afterRow = makeStepperRow("Screen off after seconds",
+                function () { return settings[keys.after]; },
+                function (v) { settings[keys.after] = v; changed(); }, 0, 300, 5);
 
-        const blackSizeRow = makeStepperRow("Screen off mark size",
-            function () { return settings.blackoutSize; },
-            function (v) { settings.blackoutSize = v; }, 12, 240, 4);
+            const textRow = makeTextRow("Screen off mark, blank for none",
+                function () { return settings[keys.text]; },
+                function (v) { settings[keys.text] = v; changed(); });
 
-        const blackDriftRow = makeStepperRow("Mark moves every seconds",
-            function () { return settings.blackoutDrift; },
-            function (v) { settings.blackoutDrift = v; }, 5, 120, 5);
+            const colorRow = makeColorRow("Screen off mark color",
+                function () { return settings[keys.color]; },
+                function (v) { settings[keys.color] = v; changed(); });
+
+            const sizeRow = makeStepperRow("Screen off mark size",
+                function () { return settings[keys.size]; },
+                function (v) { settings[keys.size] = v; changed(); }, 12, 240, 4);
+
+            const driftRow = makeStepperRow("Mark moves every seconds",
+                function () { return settings[keys.drift]; },
+                function (v) { settings[keys.drift] = v; changed(); }, 5, 120, 5);
+
+            const resetRow = document.createElement("div");
+            resetRow.style.cssText = "display:flex";
+
+            resetRow.appendChild(makeButton("Reset mark to default", "#444", "#fff", function () {
+
+                settings[keys.text] = "\u266B";
+                settings[keys.color] = "#333333";
+                settings[keys.size] = 64;
+                saveSettings();
+                changed();
+
+                // Put the fields back in step with what was just restored
+                const textInput = textRow.querySelector("input");
+                const colorInput = colorRow.querySelector("input");
+                const sizeInput = sizeRow.querySelector("input");
+
+                if (textInput) {
+                    textInput.value = settings[keys.text];
+                }
+
+                if (colorInput) {
+                    colorInput.value = settings[keys.color];
+                }
+
+                if (sizeInput) {
+                    sizeInput.value = String(settings[keys.size]);
+                }
+
+                setStatus("Screen off mark reset");
+            }));
+
+            return [
+                withHint(onRow, "Turns the screen black while a song plays and nothing is touched, to save the battery and not dazzle at night. A tap brings the player back."),
+                withHint(afterRow, "How long without a touch before the screen goes black. 0 never does."),
+                textRow,
+                colorRow,
+                sizeRow,
+                driftRow,
+                makeHint("The mark on the black screen shows the player is still running. It moves now and then, so nothing burns into the screen."),
+                resetRow
+            ];
+        };
+
+        const mobileScreenOff = buildScreenOff({
+            on: "carBlackout",
+            after: "carAutoBlack",
+            text: "blackoutText",
+            color: "blackoutColor",
+            size: "blackoutSize",
+            drift: "blackoutDrift"
+        }, function () {
+
+            resetIdleTimer();
+            refreshGate();
+        });
 
         const carGateRow = makeBoolRow("Start in fullscreen",
             function () { return settings.carGate; },
@@ -19484,40 +19970,6 @@
         if (!fullscreenOffered()) {
             carGateRow.style.display = "none";
         }
-
-        const blackResetRow = document.createElement("div");
-        blackResetRow.style.cssText = "display:flex";
-
-        blackResetRow.appendChild(makeButton("Reset mark to default", "#444", "#fff", function () {
-
-            settings.blackoutText = "\u266B";
-            settings.blackoutColor = "#333333";
-            settings.blackoutSize = 64;
-            saveSettings();
-
-            // Put the fields back in step with what was just restored
-            const textInput = blackTextRow.querySelector("input");
-            const colorInput = blackColorRow.querySelector("input");
-            const sizeInput = blackSizeRow.querySelector("input");
-
-            if (textInput) {
-                textInput.value = settings.blackoutText;
-            }
-
-            if (colorInput) {
-                colorInput.value = settings.blackoutColor;
-            }
-
-            if (sizeInput) {
-                sizeInput.value = String(settings.blackoutSize);
-            }
-
-            setStatus("Screen off mark reset");
-        }));
-
-        const carBlackRow = makeStepperRow("Screen off after seconds",
-            function () { return settings.carAutoBlack; },
-            function (v) { settings.carAutoBlack = v; resetIdleTimer(); }, 0, 300, 5);
 
         const artworkRow = makeBoolRow("Remote artwork URL",
             function () { return settings.remoteArtwork; },
@@ -19545,6 +19997,21 @@
                 refreshNowStars();
                 updateLyricLine(true);
             });
+
+        // Which waveform: Mureka's few points, or our own from the song
+        const waveSourceRow = makeChoiceRow([
+            { label: "Mureka's", value: "mureka" },
+            { label: "From the song", value: "song" }
+        ], function () { return settings.waveSource || "mureka"; }, function (v) {
+
+            settings.waveSource = v;
+            applyWave();
+
+            // Chosen now, so worked out now rather than at the next try
+            if (currentSong && v === "song" && !waveOwn) {
+                makeOwnWaveSoon(currentSong, 0, true);
+            }
+        });
 
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
@@ -19583,6 +20050,9 @@
         mobilePage.appendChild(makeHint("How the player looks on this screen. The web view has its own page of settings."));
         mobilePage.appendChild(makeLabel("Main page"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
+        mobilePage.appendChild(makeSubLabel("Waveform from"));
+        mobilePage.appendChild(waveSourceRow);
+        mobilePage.appendChild(makeHint("Mureka's has a few points for the whole song. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars on the cover, tap one to rate."));
 
         // The screen stays on while music plays. This keeps it on when the
@@ -19600,6 +20070,10 @@
         devicePage.appendChild(keepOnRow);
         devicePage.appendChild(makeHint("Never leaves the screen to the phone's own timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the phone never locks and Bluetooth buttons always reach it."));
 
+        // Fullscreen and the screen off of this screen alone, the web view
+        // has its own on its page
+        mobilePage.appendChild(makeLabel("Fullscreen and screen off"));
+
         // Only the Android app has a window of its own to make fullscreen
         if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
 
@@ -19613,6 +20087,11 @@
 
             mobilePage.appendChild(withHint(appFullRow, "The app hides Android's status and navigation bars while it is on screen. A swipe from the edge brings them back for a moment."));
         }
+        mobilePage.appendChild(withHint(carGateRow, "The browser only allows fullscreen after a tap, so the first tap on the player switches to fullscreen."));
+
+        mobileScreenOff.forEach(function (el) {
+            mobilePage.appendChild(el);
+        });
         mobilePage.appendChild(makeLabel("Cover and lyrics"));
         mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(lyricSizeRow);
@@ -19624,16 +20103,6 @@
         mobilePage.appendChild(makeLabel("Control buttons"));
         mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
-        mobilePage.appendChild(makeLabel("Screen off and fullscreen"));
-        mobilePage.appendChild(withHint(carGateRow, "The browser only allows fullscreen after a tap, so the first tap on the player switches to fullscreen."));
-        mobilePage.appendChild(withHint(carBlackoutRow, "Turns the screen black while a song plays and nothing is touched, to save the battery and not dazzle at night. A tap brings the player back."));
-        mobilePage.appendChild(withHint(carBlackRow, "How long without a touch before the screen goes black. 0 never does."));
-        mobilePage.appendChild(blackTextRow);
-        mobilePage.appendChild(blackColorRow);
-        mobilePage.appendChild(blackSizeRow);
-        mobilePage.appendChild(blackDriftRow);
-        mobilePage.appendChild(makeHint("The mark on the black screen shows the player is still running. It moves now and then, so nothing burns into the screen."));
-        mobilePage.appendChild(blackResetRow);
         // Your own data, song tweaks and settings kept apart, since the
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
@@ -19973,6 +20442,20 @@
             webPage.appendChild(makeLabel("Main page"));
             webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
+
+            // The web view's own choice of waveform
+            const webWaveSourceRow = makeChoiceRow([
+                { label: "Mureka's", value: "mureka" },
+                { label: "From the song", value: "song" }
+            ], function () { return settings.webWaveSource || "mureka"; }, function (v) {
+
+                settings.webWaveSource = v;
+                publishHostSoon();
+            });
+
+            webPage.appendChild(makeSubLabel("Waveform from"));
+            webPage.appendChild(webWaveSourceRow);
+            webPage.appendChild(makeHint("Mureka's has a few points for the whole song, From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
             webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
             webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
             webPage.appendChild(webLyricSizeRow);
@@ -19983,6 +20466,20 @@
             webPage.appendChild(makeLabel("Control buttons"));
             webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
             webPage.appendChild(webControlRow);
+
+            // The web view's own screen off, apart from the mobile player's
+            webPage.appendChild(makeLabel("Screen off"));
+
+            buildScreenOff({
+                on: "webBlackout",
+                after: "webAutoBlack",
+                text: "webMarkText",
+                color: "webMarkColor",
+                size: "webMarkSize",
+                drift: "webMarkDrift"
+            }, publishHostSoon).forEach(function (el) {
+                webPage.appendChild(el);
+            });
 
             connPage.appendChild(netHint);
             connPage.appendChild(hotspotRow);
@@ -21999,6 +22496,10 @@
             endControlDrag();
             settingsEl.style.display = "none";
             gateMenuClosed();
+
+            // The seek bar drawn again as the settings left it, the waveform
+            // chosen there included
+            updateSeekMode();
         }
     }
 
@@ -22985,6 +23486,37 @@
     // player's own shortcuts, so it hears the keys first and they never
     // reach the player
     function installTrimKeys() {
+
+        // Escape on a page of the settings goes back to the main page, one
+        // level up, instead of closing them all. On the main page it is
+        // left to the shortcuts, which close the settings
+        window.addEventListener("keydown", function (ev) {
+
+            if (ev.key !== "Escape" || !settingsOpen || settingsPageNow === "main"
+                || (trimEl && trimEl.style.display !== "none")) {
+                return;
+            }
+
+            // A field being typed in lets go of the focus first, the next
+            // Escape goes back
+            const active = document.activeElement;
+
+            if (isField(active)) {
+
+                if (settingsEl && settingsEl.contains(active)) {
+
+                    active.blur();
+                    ev.preventDefault();
+                    ev.stopImmediatePropagation();
+                }
+
+                return;
+            }
+
+            showSettingsPage("main");
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+        }, true);
 
         window.addEventListener("keydown", function (ev) {
 
