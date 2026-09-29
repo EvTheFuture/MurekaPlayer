@@ -120,6 +120,19 @@ the new settings layout and a number of smaller improvements.
   and Connections in the app), Music (Library, Playback, Now playing), Data
   (Backup and restore) and Troubleshooting (Developer). Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **Trim** in the song menu for your own songs cuts the start or the end
+  off, and Mureka makes a new song of it, keeping the original. The trimmer
+  shows the song's real waveform: the whole song with the kept part lit and
+  its ends to drag, and a close up of the start or the end that zooms from
+  30 seconds down to 20 milliseconds, with steps of 10 ms, 100 ms and 1 s
+  and typed times. **Play end** plays the last five seconds and stops on
+  the exact sample where the new song will end, **Repeat the end** plays
+  them again and again while the end is moved, and a tap on the waveform
+  plays from there, with Pause to stop and go on. **Fade out the last
+  second** fades the preview the way Mureka fades a trimmed song. The new
+  song gets a title of its own and is put at the top of the list, marked
+  new. Trim is pressed once: it turns into a turning ring until Mureka has
+  answered.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **No remixing** for songs with lyrics.
   When Mureka refuses a change on a published song, the player offers to take
