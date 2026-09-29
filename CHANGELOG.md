@@ -151,6 +151,13 @@ the new settings layout and a number of smaller improvements.
   the missing ones. The import says so when the file is from another Mureka
   account. From the web view it can be saved in the browser or on the
   phone.
+- **Counts max age** is set in minutes, 30 to start with instead of 4
+  hours, so the plays, hearts and lyrics shown for a song are fetched from
+  Mureka again sooner. A value changed from the old default carries over.
+- Deleting the playing song from the list goes on to the next song, and
+  a paused player stays paused on it. The covers used to show the deleted
+  song's neighbours out of step. Deleting a song beside the playing one
+  updates the covers beside it too.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - Opening the app, or coming back to the page from another tab or app,
   takes the black screen cover away as a tap would, so the player shows
@@ -194,7 +201,9 @@ the new settings layout and a number of smaller improvements.
   overlays and the copied log hold only what is being looked at. In the app
   it applies to the web view's overlay too. Mureka requests lists every
   request the page makes to Mureka, the player's and those of Mureka's own
-  site, and what Mureka answered a play report.
+  site, with what they send, what Mureka answered a play report or a
+  request that changes something, and how many songs each list Mureka's
+  site reads marks as new.
 - **Cover test** under Developer replaces the artwork test button over the
   cover: **Send loading cover** and **Send real cover** send the playing song
   with a loading ring as its cover or with its own, to find out what a car or

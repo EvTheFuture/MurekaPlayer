@@ -851,7 +851,9 @@ the body of a request that sends one, beacons included, which sites often
 use for play and listening events. The player runs in Mureka's page, so it sees what
 Mureka's own player sends, which is how to find out what Mureka does when a
 song is played there. A play report from the player is followed by what
-Mureka answered, taken or not. Only watched, every request goes through
+Mureka answered, taken or not, and so is any request that changes something
+(a POST and the like, reports left out), the first 300 characters of the
+answer. Only watched, every request goes through
 untouched; the same read again within ten seconds is left out.
 Each page of your own songs read from Mureka adds a line counting how many
 songs it marks as new, as played, and without the played flag at all, with

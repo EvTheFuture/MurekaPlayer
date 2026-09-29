@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.122";
+    const VERSION = "1.6.0.124";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -920,6 +920,11 @@
     // system interruption, such as a call or another app taking the audio
     let userPaused = false;
 
+    // A song loaded without starting it: the song after one deleted while
+    // the player was paused. Kept to that song and for a short while, so a
+    // play pressed later is never swallowed
+    let holdStart = null;
+
     // True while a track change is swapping the source. The media load
     // algorithm flips paused on a source change, and some engines fire a pause
     // event for it, which must not be mistaken for an interruption
@@ -1141,6 +1146,26 @@
         }
     }
 
+    // How long the counts and lyrics of a song are kept, in minutes. Older
+    // settings kept it in hours, 4 unless changed: a changed value carries
+    // over, the old default becomes the new one of 30 minutes
+    function countsMinutesFrom(parsed) {
+
+        const m = parsed.countsMaxMinutes;
+
+        if (typeof m === "number" && m >= 5 && m <= 1440) {
+            return m;
+        }
+
+        const h = parsed.countsMaxAge;
+
+        if (typeof h === "number" && h >= 1 && h <= 72 && h !== 4) {
+            return Math.min(1440, h * 60);
+        }
+
+        return 30;
+    }
+
     // Read the settings from localStorage, falling back to safe defaults
     // Published is the default start feed, refresh on open is off for both feeds
     // Autoplay is off, the default play mode is not shuffled, repeat is all
@@ -1195,7 +1220,7 @@
             blackoutColor: "#333333",
             blackoutSize: 64,
             blackoutDrift: 25,
-            countsMaxAge: 4,
+            countsMaxMinutes: 30,
             prevRestartOn: true,
             prevRestart: 3,
             waveSeek: true,
@@ -1336,9 +1361,7 @@
                     blackoutDrift: (typeof parsed.blackoutDrift === "number"
                         && parsed.blackoutDrift >= 5 && parsed.blackoutDrift <= 120)
                         ? parsed.blackoutDrift : 25,
-                    countsMaxAge: (typeof parsed.countsMaxAge === "number"
-                        && parsed.countsMaxAge >= 1 && parsed.countsMaxAge <= 72)
-                        ? parsed.countsMaxAge : 4,
+                    countsMaxMinutes: countsMinutesFrom(parsed),
                     // 0 seconds used to mean off, from before the switch
                     prevRestartOn: typeof parsed.prevRestartOn === "boolean"
                         ? parsed.prevRestartOn : parsed.prevRestart !== 0,
@@ -5260,6 +5283,16 @@
     // it. Used both by the delete menu row and by the rescan prune
     async function forgetSong(song) {
 
+        // A song got ready to follow is no use once it is gone
+        if (nextReady && nextReady.song_id === song.song_id) {
+            dropNextReady();
+        }
+
+        // The playing song itself, which the covers and the lock screen show
+        const wasCurrent = currentSong !== null && currentSong !== undefined
+            && currentSong.song_id === song.song_id;
+        const wasPlaying = wasCurrent && audio && !audio.paused;
+
         const idx = cache.songs.findIndex(function (s) {
             return s.song_id === song.song_id;
         });
@@ -5280,6 +5313,31 @@
             if (qi < queuePos) {
                 queuePos -= 1;
             }
+        }
+
+        // The playing song gone, go on to the one after it, as a skip would.
+        // A paused player stays paused on that song. Otherwise the covers
+        // beside the playing one may have changed
+        if (wasCurrent) {
+
+            if (qi !== -1) {
+                queuePos = qi - 1;
+            }
+
+            if (queue.length === 0) {
+                stopPlay();
+            } else {
+
+                if (!wasPlaying) {
+                    holdStart = { id: String((neighborSong(1) || {}).song_id), until: Date.now() + 15000 };
+                }
+
+                playNext();
+            }
+        } else if (qi !== -1) {
+
+            setArtSources();
+            publishHostSoon();
         }
 
         manualInstrumental.delete(String(song.song_id));
@@ -7678,6 +7736,37 @@
             }
         };
 
+        // What Mureka answered a request that changes something, a POST and
+        // the like, to learn what a call such as trim gives back. Reports,
+        // sent all the time, are left out, the player logs its own already
+        const answerFor = function (method, url) {
+
+            const verb = String(method || "GET").toUpperCase();
+
+            if (verb === "GET" || verb === "HEAD") {
+                return "";
+            }
+
+            try {
+
+                const u = new URL(String(url), location.href);
+
+                if (u.host !== location.host || u.pathname.indexOf("/api/") !== 0
+                    || /report/.test(u.pathname)) {
+                    return "";
+                }
+
+                return verb + " " + u.pathname;
+            } catch (e) {
+                return "";
+            }
+        };
+
+        const logAnswer = function (what, status, text) {
+            dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
+                + String(text || "").replace(/\s+/g, " ").slice(0, 300));
+        };
+
         const sumUp = function (kind, json) {
 
             if (json && typeof json === "object") {
@@ -7707,6 +7796,7 @@
 
                     const url = typeof input === "string" ? input : (input && input.url) || "";
                     const kind = theirList(url);
+                    const what = answerFor((init && init.method) || (input && input.method), url);
 
                     // Read from a copy, the site gets the answer untouched
                     if (kind) {
@@ -7715,6 +7805,17 @@
                             return res.clone().json();
                         }).then(function (json) {
                             sumUp(kind, json);
+                        }).catch(function () {
+                        });
+                    }
+
+                    if (what) {
+
+                        sent.then(function (res) {
+
+                            return res.clone().text().then(function (text) {
+                                logAnswer(what, res.status, text);
+                            });
                         }).catch(function () {
                         });
                     }
@@ -7766,6 +7867,25 @@
                         note(this.__murekaRequest[0], this.__murekaRequest[1], body);
 
                         const kind = theirList(this.__murekaRequest[1]);
+                        const what = answerFor(this.__murekaRequest[0], this.__murekaRequest[1]);
+
+                        if (what) {
+
+                            this.addEventListener("load", function () {
+
+                                try {
+
+                                    const text = this.responseType === "json"
+                                        ? JSON.stringify(this.response)
+                                        : (this.responseType === "" || this.responseType === "text"
+                                            ? this.responseText : "[" + this.responseType + "]");
+
+                                    logAnswer(what, this.status, text);
+                                } catch (e) {
+                                    // Nothing readable to log
+                                }
+                            });
+                        }
 
                         if (kind) {
 
@@ -7894,9 +8014,9 @@
             return false;
         }
 
-        const hours = settings.countsMaxAge || 4;
+        const minutes = settings.countsMaxMinutes || 30;
 
-        return (Date.now() - entry.t) < hours * 3600000;
+        return (Date.now() - entry.t) < minutes * 60000;
     }
 
     // Pulse the counts line while the numbers are being refetched, the same
@@ -8117,6 +8237,21 @@
         // through the queue instead of playing an empty element
         if (!audio || !audio.src) {
             startPlay();
+            return;
+        }
+
+        // Loaded to stay paused, the song after a deleted one
+        const hold = holdStart;
+
+        holdStart = null;
+
+        if (hold && currentSong && String(currentSong.song_id) === hold.id && Date.now() < hold.until) {
+
+            userPaused = true;
+            switchingTrack = false;
+            updatePlayPause();
+            setupMediaSession();
+            publishHostSoon();
             return;
         }
 
@@ -19217,9 +19352,9 @@
             function () { return settings.artOnResume; },
             function (v) { settings.artOnResume = v; });
 
-        const countsAgeRow = makeStepperRow("Counts max age in hours",
-            function () { return settings.countsMaxAge; },
-            function (v) { settings.countsMaxAge = v; }, 1, 72);
+        const countsAgeRow = makeStepperRow("Counts max age in minutes",
+            function () { return settings.countsMaxMinutes; },
+            function (v) { settings.countsMaxMinutes = v; }, 5, 1440, 5);
 
         const artStarsRow = makeBoolRow("Rating stars on the cover",
             function () { return settings.artStars; },
