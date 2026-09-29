@@ -4692,7 +4692,18 @@
 
             width = box.clientWidth;
 
+            // Not laid out yet, a hidden or still narrow box would take nearly
+            // any text as too long. The check after a resize starts it later
+            if (width < 40) {
+                return;
+            }
+
+            // It fits, so it stands still with the trailing copy and its gap
+            // taken away again, not left waiting at the right edge after a
+            // walk that began while the box was narrower
             if (textWidth - width <= 2) {
+
+                stop();
                 return;
             }
 
@@ -8615,6 +8626,13 @@
                 }
 
                 dot.className = "rowDot" + (item.cached ? " " + item.cached : "");
+
+                // A song renamed since the list was drawn
+                const title = row.querySelector(".rowTitle");
+
+                if (title && typeof item.title === "string" && item.title && title.textContent !== item.title) {
+                    title.textContent = item.title;
+                }
 
                 // New becomes public or draft once the phone has reported the
                 // song played

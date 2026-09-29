@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.27";
+    const VERSION = "1.9.9.30";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -357,6 +357,9 @@
 
     // Counts the New marks taken off, so the web view knows to repaint its rows
     let playedMarks = 0;
+
+    // Counts renames, so a web view knows to write the titles in its list again
+    let songEdits = 0;
 
     // Creators you follow plus any added by hand, loaded on demand into the picker
     let followedCreators = [];
@@ -3847,6 +3850,29 @@
     }
 
     // Remove duplicate songs by song_id, keeping the first occurrence
+    // A merged song list with each song the library already had as the same
+    // copy it had, brought up to date with the fields just read, and the new
+    // songs as they came
+    function keepSongCopies(list, held) {
+
+        const byId = new Map(held.map(function (x) {
+            return [x.song_id, x];
+        }));
+
+        return list.map(function (x) {
+
+            const old = byId.get(x.song_id);
+
+            if (!old || old === x) {
+                return x;
+            }
+
+            Object.assign(old, x);
+
+            return old;
+        });
+    }
+
     function dedupe(list) {
 
         const seen = new Set();
@@ -4689,8 +4715,13 @@
 
         // New and republished songs move to the front, duplicates are dropped
         // A deep rescan rebuilds the whole list, so the fresh fields, publish
-        // date, like flag and publish state, replace the older cached copies
-        cache.songs = dedupe(fresh.concat(baseSongs));
+        // date, like flag and publish state, replace the older cached copies.
+        // They are written into the copies already held rather than swapping
+        // them for new ones: the playing song, the queue, a resume point and
+        // open menus hold those same copies, and swapped out they went stale,
+        // a rename then changed the list but not the playing song or the
+        // other way round
+        cache.songs = keepSongCopies(dedupe(fresh.concat(baseSongs)), baseSongs);
         cache.updated = Date.now();
 
         // A deep rescan that ran to the end has now seen the entire library
@@ -5754,6 +5785,7 @@
         }
 
         song.title = clean;
+        songEdits += 1;
         renderList();
 
         if (currentSong && currentSong.song_id === song.song_id) {
@@ -5793,6 +5825,7 @@
         } catch (e) {
 
             song.title = was;
+            songEdits += 1;
             renderList();
 
             if (currentSong && currentSong.song_id === song.song_id) {
@@ -6817,8 +6850,11 @@
 
         updateRepeatButton();
 
-        // Update the playing row badge and the side cover greying for the new mode
+        // Update the playing row badge and the side covers for the new mode:
+        // which songs they show, at the ends of the queue the one it wraps
+        // round to only while repeating all, and their greying
         renderList();
+        setArtSources();
         setArtTransition("none");
         positionArt(0);
 
@@ -11331,11 +11367,14 @@
                 // recycled tile keeps its already decoded image
                 if (artTiles[i].dataset.cover !== cover) {
 
-                    artTiles[i].src = cover;
                     artTiles[i].dataset.cover = cover;
+                    artTiles[i].dataset.fallback = "";
+                    artTiles[i].dataset.failed = "";
+                    artTiles[i].src = cover;
                 }
 
-                artTiles[i].style.visibility = "visible";
+                // A cover that could not be loaded at all stays left out
+                artTiles[i].style.visibility = artTiles[i].dataset.failed === cover ? "hidden" : "visible";
                 artTiles[i].dataset.songId = String(song.song_id);
 
                 // A cover shown in the carousel has been downloaded to display
@@ -11784,6 +11823,18 @@
             box.style.maskImage = mask;
         };
 
+        // Back to the plain line: one copy, no gap, where it began
+        const settle = function () {
+
+            track.style.transform = "none";
+            track.style.willChange = "auto";
+            first.style.marginRight = "0px";
+            second.style.display = "none";
+        };
+
+        // The box's width when last measured, so a change can be caught
+        let measured = 0;
+
         const start = function () {
 
             edgeFade();
@@ -11792,11 +11843,25 @@
                 return;
             }
 
+            // Not laid out yet, a hidden or still narrow box would measure
+            // nearly any text as too long and walk it with a tiny gap. The
+            // size watch below starts it once the box has its width
+            if (box.clientWidth < 40) {
+                return;
+            }
+
             // Measured from the box, which is accurate for a fractional width
             const textWidth = Math.ceil(first.getBoundingClientRect().width);
             const overflow = textWidth - box.clientWidth;
 
+            measured = box.clientWidth;
+
+            // It fits, so it stands still, with the trailing copy and its gap
+            // taken away again. Left in place after a walk, when the box had
+            // grown meanwhile, that copy stood waiting at the right edge
             if (overflow <= 2) {
+
+                settle();
                 return;
             }
 
@@ -11862,13 +11927,10 @@
                 anim = null;
             }
 
-            track.style.transform = "none";
-            track.style.willChange = "auto";
-            first.style.marginRight = "0px";
+            settle();
             first.textContent = value;
 
             // The trailing copy is only needed while scrolling
-            second.style.display = "none";
             second.textContent = value;
 
             // The fade at once, the walk after the rest
@@ -11886,6 +11948,43 @@
                 start();
             }, META_SCROLL_DELAY);
         };
+
+        // The box changing width, laid out at last or the screen turned,
+        // measures the line again: one that now fits stops and settles, one
+        // that no longer fits starts walking after the usual rest
+        if (typeof ResizeObserver === "function") {
+
+            new ResizeObserver(function () {
+
+                const w = box.clientWidth;
+
+                if (w < 40 || Math.abs(w - measured) < 2 || !first.textContent) {
+                    return;
+                }
+
+                measured = w;
+
+                if (timer) {
+
+                    clearTimeout(timer);
+                    timer = null;
+                }
+
+                if (anim) {
+
+                    anim.cancel();
+                    anim = null;
+                }
+
+                settle();
+                requestAnimationFrame(edgeFade);
+                timer = setTimeout(function () {
+
+                    timer = null;
+                    start();
+                }, META_SCROLL_DELAY);
+            }).observe(box);
+        }
 
         return { setText: setText };
     }
@@ -14033,7 +14132,8 @@
             // Changes whenever a song or a cover is stored or taken out, or a
             // song starts or stops downloading, so the web view knows to
             // paint the cache dots in its list again
-            cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(",") + "|" + playedMarks,
+            cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(",") + "|" + playedMarks
+                + "|" + songEdits,
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
@@ -15718,6 +15818,43 @@
             const tile = document.createElement("img");
 
             tile.style.cssText = "position:absolute;top:0;left:0;height:100%;aspect-ratio:1/1;object-fit:cover;will-change:transform,filter";
+
+            // A cover that will not load, a link Mureka no longer serves,
+            // would stand there as an empty grey box. The copy kept here
+            // takes its place, and without one the tile is left out
+            tile.addEventListener("error", function () {
+
+                const cover = tile.dataset.cover || "";
+
+                if (!cover || tile.dataset.fallback === cover) {
+
+                    tile.dataset.failed = cover;
+                    tile.style.visibility = "hidden";
+                    return;
+                }
+
+                tile.dataset.fallback = cover;
+                dbgLog("Cover", "could not load the cover of " + tile.dataset.songId + ", trying the kept copy");
+
+                loadArtFromStore(tile.dataset.songId).then(function (entry) {
+
+                    const kept = entry ? (entry.large || entry.small) : null;
+
+                    // The tile has moved on to another song meanwhile
+                    if (tile.dataset.cover !== cover) {
+                        return;
+                    }
+
+                    if (kept) {
+                        tile.src = kept;
+                    } else {
+
+                        tile.dataset.failed = cover;
+                        tile.style.visibility = "hidden";
+                    }
+                });
+            });
+
             artWrapEl.appendChild(tile);
             artTiles.push(tile);
         }
