@@ -128,18 +128,18 @@ def releaseAlias = releaseStore && releasePassword ? findKeyAlias(releaseStore, 
 def hasReleaseKey = releaseStore != null && releasePassword != null && releaseAlias != null
 
 android {
-    namespace "dev.evthefuture.murekaplayer"
-    compileSdk 36
+    namespace = "dev.evthefuture.murekaplayer"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId "dev.evthefuture.murekaplayer"
-        minSdk 29
-        targetSdk 36
+        applicationId = "dev.evthefuture.murekaplayer"
+        minSdk = 29
+        targetSdk = 36
 
         // Taken from VERSION in src/player.js, so the app, the extension
         // and the bookmarklet always report the same version
-        versionName playerVersion()
-        versionCode playerVersionCode()
+        versionName = playerVersion()
+        versionCode = playerVersionCode()
     }
 
     signingConfigs {
@@ -150,10 +150,10 @@ android {
 
             if (hasReleaseKey) {
 
-                storeFile releaseStore
-                storePassword releasePassword
-                keyAlias releaseAlias
-                keyPassword keySetting("MUREKA_KEY_PASSWORD") ?: releasePassword
+                storeFile = releaseStore
+                storePassword = releasePassword
+                keyAlias = releaseAlias
+                keyPassword = keySetting("MUREKA_KEY_PASSWORD") ?: releasePassword
 
                 // v2 for every supported Android, v3 so the key can be
                 // rotated to a new one later without a reinstall
@@ -165,8 +165,8 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
-            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled = false
+            signingConfig = hasReleaseKey ? signingConfigs.release : signingConfigs.debug
         }
 
         // The debug build takes the release key too when it is there, so a
@@ -175,14 +175,14 @@ android {
         debug {
 
             if (hasReleaseKey) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
         }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 
