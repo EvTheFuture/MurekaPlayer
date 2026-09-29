@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.30";
+    const VERSION = "1.9.9.31";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11371,6 +11371,13 @@
                     artTiles[i].dataset.fallback = "";
                     artTiles[i].dataset.failed = "";
                     artTiles[i].src = cover;
+
+                    // Which song each side shows, for the debug log, so a
+                    // side cover that looks wrong can be traced to its song
+                    if (rel === -1 || rel === 1) {
+                        dbgLog("Cover", (rel < 0 ? "left" : "right") + " side: " + song.song_id + " "
+                            + (song.title || "Untitled") + ", " + cover.split("/").pop().slice(0, 60));
+                    }
                 }
 
                 // A cover that could not be loaded at all stays left out
@@ -15818,6 +15825,14 @@
             const tile = document.createElement("img");
 
             tile.style.cssText = "position:absolute;top:0;left:0;height:100%;aspect-ratio:1/1;object-fit:cover;will-change:transform,filter";
+
+            // How big a side cover came in, for the debug log
+            tile.addEventListener("load", function () {
+
+                if (tile.dataset.songId && tile !== artTiles[ART_SIDE_TILES]) {
+                    dbgLog("Cover", "loaded " + tile.dataset.songId + ", " + tile.naturalWidth + "x" + tile.naturalHeight);
+                }
+            });
 
             // A cover that will not load, a link Mureka no longer serves,
             // would stand there as an empty grey box. The copy kept here
