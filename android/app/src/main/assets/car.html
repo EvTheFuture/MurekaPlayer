@@ -1243,6 +1243,14 @@
         justify-content: center;
     }
 
+    /* A field in the question, shown when something is to be typed */
+    #confirmField {
+        display: none;
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 0.8em;
+    }
+
     #confirmBox {
         background: var(--card);
         border: 1px solid var(--line);
@@ -2749,10 +2757,13 @@
         cursor: pointer;
     }
 
+    /* In the accent colour when ticked, plain grey is hard to read */
     .trimCheck input {
         width: 22px;
         height: 22px;
         margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
     }
 
 </style>
@@ -2938,6 +2949,7 @@
 <div id="confirmPop">
     <div id="confirmBox">
         <div id="confirmText"></div>
+        <input class="pField" id="confirmField" type="text" autocomplete="off" spellcheck="false">
         <div id="confirmBtns">
             <button class="chip" id="confirmNo" type="button">Cancel</button>
             <button class="chip" id="confirmYes" type="button">Yes</button>
@@ -9759,6 +9771,61 @@
         return count;
     }
 
+    // The name a song is saved under, as on the phone: the title first, then
+    // the song's id, so two songs with the same title never overwrite each
+    // other
+    function songFileName(m) {
+
+        const base = String(m.title || "track").replace(/[\\/:*?"<>|]+/g, "_").trim();
+
+        return base + " [" + m.id + "].mp3";
+    }
+
+    // A typed file name made safe to save, ending in .mp3. Empty when
+    // nothing usable is left
+    function cleanFileName(typed) {
+
+        const base = String(typed || "").replace(/[\\/:*?"<>|]+/g, "_").trim().replace(/\.mp3$/i, "").trim();
+
+        return base ? base + ".mp3" : "";
+    }
+
+    // Save a song under a name of its own. The phone fetches the file from
+    // Mureka for the browser, which could not name a file from another
+    // address. Where that fails the song opens as before, under Mureka's name
+    function saveSong(m, name) {
+
+        statusLine.setText("Downloading: " + name);
+
+        fetch("/audio?url=" + encodeURIComponent(m.src), { cache: "no-store" }).then(function (res) {
+
+            if (!res.ok) {
+                throw new Error("HTTP " + res.status);
+            }
+
+            return res.blob();
+        }).then(function (blob) {
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () {
+                URL.revokeObjectURL(url);
+            }, 30000);
+            statusLine.setText("Downloaded: " + name);
+            dbgLog("Download", name);
+        }).catch(function (e) {
+
+            dbgLog("Download", "through the phone failed, " + (e && e.message ? e.message : e) + ", opening the link");
+            window.open(m.src, "_blank");
+        });
+    }
+
     // The choices for one song that do not start it playing, shared by the
     // long press menu and the actions menu, where they are for the playing
     // song. Close is how the menu they sit in closes
@@ -9776,11 +9843,13 @@
 
         box.appendChild(menuItem("download", "Download", function () {
 
-            if (m.src) {
-                window.open(m.src, "_blank");
-            }
-
             close();
+
+            if (m.src) {
+                askText("File name", songFileName(m), "Download", function (typed) {
+                    saveSong(m, cleanFileName(typed) || songFileName(m));
+                });
+            }
         }, "", !m.src));
 
         box.appendChild(menuItem("link", "Copy link", function () {
@@ -11216,11 +11285,42 @@
 
         confirmAction = then;
         confirmNoAction = onNo || null;
+        $("confirmField").style.display = "none";
         $("confirmText").textContent = text;
         $("confirmYes").textContent = yesLabel;
         $("confirmYes").classList.toggle("danger", danger === true);
         $("confirmPop").style.display = "flex";
     }
+
+    // The question with a field to type in, filled in to start with. then
+    // hears what was typed
+    function askText(text, value, yesLabel, then) {
+
+        askConfirm(text, yesLabel, false, function () {
+            then($("confirmField").value);
+        });
+
+        $("confirmField").value = value;
+        $("confirmField").style.display = "block";
+        $("confirmField").focus();
+
+        // The name selected up to the part in brackets, ready to type over
+        const cut = value.lastIndexOf(" [");
+
+        $("confirmField").setSelectionRange(0, cut > 0 ? cut : value.length);
+    }
+
+    $("confirmField").addEventListener("keydown", function (ev) {
+
+        // The page's own keys never hear what is typed here
+        ev.stopPropagation();
+
+        if (ev.key === "Enter") {
+            $("confirmYes").click();
+        } else if (ev.key === "Escape") {
+            closeConfirm();
+        }
+    });
 
     function closeConfirm() {
 

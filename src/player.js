@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.31";
+    const VERSION = "1.9.9.34";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5276,12 +5276,23 @@
             + (fail ? ", " + fail + " failed, the audio host blocked the download" : ""));
     }
 
-    // Build a safe file name for a downloaded song
+    // Build a safe file name for a downloaded song: the title first, then
+    // the song's id, so files sort by name and two songs with the same title
+    // never overwrite each other
     function fileName(song) {
 
         const base = (song.title || "track").replace(/[\\/:*?"<>|]+/g, "_").trim();
 
         return base + " [" + song.song_id + "].mp3";
+    }
+
+    // A file name typed by hand made safe to save: no characters a file
+    // system refuses, and ending in .mp3. Empty when nothing usable is left
+    function cleanFileName(typed) {
+
+        const base = String(typed || "").replace(/[\\/:*?"<>|]+/g, "_").trim().replace(/\.mp3$/i, "").trim();
+
+        return base ? base + ".mp3" : "";
     }
 
     // Ask the browser to keep the cache instead of evicting it under pressure
@@ -5653,7 +5664,16 @@
             return;
         }
 
-        requestDownload([{ url: url, filename: "Mureka/" + fileName(song) }]);
+        // The name can be changed before it is saved
+        const typed = window.prompt("File name", fileName(song));
+
+        if (typed === null) {
+            return;
+        }
+
+        const name = cleanFileName(typed) || fileName(song);
+
+        requestDownload([{ url: url, filename: "Mureka/" + name }]);
 
         // Remember it so a later Download all can skip it
         downloadedIds.add(song.song_id);
@@ -11376,7 +11396,7 @@
                     // side cover that looks wrong can be traced to its song
                     if (rel === -1 || rel === 1) {
                         dbgLog("Cover", (rel < 0 ? "left" : "right") + " side: " + song.song_id + " "
-                            + (song.title || "Untitled") + ", " + cover.split("/").pop().slice(0, 60));
+                            + (song.title || "Untitled") + ", " + cover.replace(/^https?:\/\/[^/]+/, ""));
                     }
                 }
 
@@ -13891,6 +13911,40 @@
         flashTimers.set(btn, setTimeout(function () {
             btn.style.boxShadow = "";
         }, 700));
+    }
+
+    // A button that has done its job says so for a moment: it lights up in
+    // cyan, or red when it could not, with a word in place of its name, then
+    // goes back to how it was. Pressed again it starts over
+    const doneTimers = new WeakMap();
+
+    function buttonDone(btn, text, ok) {
+
+        if (!btn) {
+            return;
+        }
+
+        const was = doneTimers.get(btn);
+
+        if (was) {
+            clearTimeout(was.timer);
+        } else {
+            doneTimers.set(btn, { label: btn.textContent, bg: btn.style.background, fg: btn.style.color });
+        }
+
+        const keep = doneTimers.get(btn);
+
+        btn.textContent = text;
+        btn.style.background = ok ? "#48e1eb" : "#e5484d";
+        btn.style.color = ok ? "#000" : "#fff";
+
+        keep.timer = setTimeout(function () {
+
+            btn.textContent = keep.label;
+            btn.style.background = keep.bg;
+            btn.style.color = keep.fg;
+            doneTimers.delete(btn);
+        }, 1200);
     }
 
     // Now Playing send state. A track change coalesces into a single send once
@@ -17655,7 +17709,9 @@
 
     // Copy the live numbers and the whole log, so they can be pasted rather
     // than read off the screen
-    function copyDebugLog() {
+    function copyDebugLog(ev) {
+
+        const btn = ev && ev.currentTarget ? ev.currentTarget : null;
 
         const lines = debugStateLines();
 
@@ -17676,15 +17732,20 @@
         if (navigator.clipboard && navigator.clipboard.writeText) {
 
             navigator.clipboard.writeText(text).then(function () {
+
                 setStatus("Debug log copied");
+                buttonDone(btn, "Copied", true);
             }, function () {
+
                 setStatus("Could not copy the debug log");
+                buttonDone(btn, "Could not copy", false);
             });
 
             return;
         }
 
         setStatus("Clipboard not available");
+        buttonDone(btn, "No clipboard", false);
     }
 
     // What the page receives, written to the log. Only ever listens: every
@@ -19954,7 +20015,7 @@
         const clearLogBtn = makeButton("Clear debug log", "#333", "#fff", function (ev) {
 
             clearDebugLog();
-            flashButton(ev.currentTarget, true);
+            buttonDone(ev.currentTarget, "Cleared", true);
         });
         const logRow = document.createElement("div");
 
@@ -23602,7 +23663,9 @@
         deleteLabel.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer";
         ui.askDelete = document.createElement("input");
         ui.askDelete.type = "checkbox";
-        ui.askDelete.style.cssText = "width:18px;height:18px;margin:0";
+        // In the accent colour when ticked, so it can be seen at a glance on
+        // the dark box. Left to the browser, it was grey with a grey tick
+        ui.askDelete.style.cssText = "width:20px;height:20px;margin:0;accent-color:#48e1eb;cursor:pointer";
         deleteLabel.appendChild(ui.askDelete);
         deleteLabel.appendChild(document.createTextNode("Delete original"));
 

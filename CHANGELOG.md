@@ -150,6 +150,10 @@ the new settings layout and a number of smaller improvements.
   arrived. While Mureka works, a turning ring covers the page. The web
   view has the same trimmer in its song menu, drawn in the browser, with
   the phone fetching the song and sending the trim to Mureka.
+- **Download** in the song menu asks for the file name first, filled in
+  with the song's title followed by its id in brackets, ready to change.
+  In the web view the song is saved under that name too, the phone
+  fetching it for the browser.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **No remixing** for songs with lyrics.
   When Mureka refuses a change on a published song, the player offers to take
