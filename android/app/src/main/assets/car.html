@@ -6631,38 +6631,68 @@
     let panelTimer = null;
     let panelBusy = false;
 
+    // Counts the changes sent from the panel. A reading of the panel asked
+    // for before the latest change is stale and is not drawn, or a switch
+    // just turned off would show on again until the next reading
+    let panelActs = 0;
+
+    // A reading wanted while another was still on its way
+    let panelAgain = false;
+
     function panelOpen() {
         return $("panel").style.display === "flex";
     }
 
     function loadPanel() {
 
-        if (!panelName || panelBusy) {
+        if (!panelName) {
+            return Promise.resolve();
+        }
+
+        if (panelBusy) {
+
+            panelAgain = true;
             return Promise.resolve();
         }
 
         panelBusy = true;
+        panelAgain = false;
+
+        const acts = panelActs;
+
+        // Once this reading is in, another if a change came in meanwhile
+        const next = function () {
+
+            panelBusy = false;
+
+            if (panelAgain || acts !== panelActs) {
+
+                panelAgain = false;
+                setTimeout(loadPanel, 150);
+            }
+        };
 
         return fetch("/panel?name=" + esc(panelName), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (data) {
 
-            panelBusy = false;
-
             // Never redrawn under a finger typing in one of its fields, or
-            // moving a button in the transport bar editor
+            // moving a button in the transport bar editor, nor from a
+            // reading older than the last change
             const typing = document.activeElement && document.activeElement.classList.contains("pField");
 
-            if (data && data.items && panelOpen() && !typing && !editorBusy) {
+            if (data && data.items && panelOpen() && !typing && !editorBusy && acts === panelActs) {
                 renderPanel(data.items);
             }
-        }).catch(function () {
-            panelBusy = false;
-        });
+
+            next();
+        }).catch(next);
     }
 
     // After a change the phone needs a moment before it shows the result
     function panelAction(cmd, arg) {
+
+        panelActs += 1;
 
         send(cmd, arg).then(function () {
             setTimeout(loadPanel, 250);
@@ -6866,6 +6896,16 @@
 
                     exportChoice(node.exp, node.id);
                     return;
+                }
+
+                // A switch shows its new state at once, the reading from the
+                // phone follows
+                if (node.s === "On" || node.s === "Off") {
+
+                    const on = btn.textContent !== "On";
+
+                    btn.textContent = on ? "On" : "Off";
+                    btn.classList.toggle("on", on);
                 }
 
                 panelAction("hclick", node.id);

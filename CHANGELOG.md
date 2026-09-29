@@ -197,7 +197,8 @@ the new settings layout and a number of smaller improvements.
   too.
 - **What the debug overlays log**: a switch for each kind of line, Keys and
   taps, Media buttons, Bluetooth, Cover, Playback, Commands, Screen and
-  page, Setting changes, Network, Errors and Mureka requests, so the
+  page, Setting changes, Network, Errors and Mureka requests (Bluetooth and
+  Commands only in the app, where they happen), so the
   overlays and the copied log hold only what is being looked at. In the app
   it applies to the web view's overlay too. Mureka requests lists every
   request the page makes to Mureka, the player's and those of Mureka's own

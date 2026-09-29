@@ -852,8 +852,10 @@ use for play and listening events. The player runs in Mureka's page, so it sees 
 Mureka's own player sends, which is how to find out what Mureka does when a
 song is played there. A play report from the player is followed by what
 Mureka answered, taken or not, and so is any request that changes something
-(a POST and the like, reports left out), the first 300 characters of the
-answer. Only watched, every request goes through
+(a POST and the like, reports left out), and the song check and song info
+reads Mureka's trim screen makes first, the first 800 characters of the
+answer. Bluetooth and Commands are only offered in the app, where those
+lines come from. Only watched, every request goes through
 untouched; the same read again within ten seconds is left out.
 Each page of your own songs read from Mureka adds a line counting how many
 songs it marks as new, as played, and without the played flag at all, with

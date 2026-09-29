@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.6.0.125";
+    const VERSION = "1.6.0.126";
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -263,20 +263,21 @@
             hint: "Keys, taps and clicks, the steering wheel and game pads." },
         { id: "media", name: "Media buttons", kinds: ["Media"],
             hint: "Play, pause, next and the others from Bluetooth, the lock screen and media keys, as they arrive." },
-        { id: "bluetooth", name: "Bluetooth", kinds: ["Bluetooth"],
+        { id: "bluetooth", name: "Bluetooth", kinds: ["Bluetooth"], app: true,
             hint: "Bluetooth audio connecting and going away, and what the player does about it." },
         { id: "cover", name: "Cover", kinds: ["Cover"],
             hint: "Every cover sent to the car and the lock screen, and whether the cover downloaded." },
         { id: "playback", name: "Playback", kinds: ["Song", "Audio", "Status", "Phone"],
             hint: "Song changes, playing and pausing, the audio element and the status line." },
-        { id: "commands", name: "Commands", kinds: ["Command", "Send"],
+        { id: "commands", name: "Commands", kinds: ["Command", "Send"], app: true,
             hint: "What the web view asks the phone to do." },
         { id: "screen", name: "Screen and page", kinds: ["Screen", "Page", "Size"],
             hint: "The screen, fullscreen, the page showing or hiding, and its size." },
         { id: "settings", name: "Setting changes", kinds: ["Setting"],
             hint: "Each setting changed, from what to what." },
         { id: "network", name: "Network", kinds: ["Net"],
-            hint: "Going online and offline, and the phone not answering the web view." },
+            hint: "Going online and offline, and the phone not answering the web view.",
+            plainHint: "Going online and offline." },
         { id: "errors", name: "Errors", kinds: ["Error"],
             hint: "Errors in the page." },
         { id: "mureka", name: "Mureka requests", kinds: ["Mureka"],
@@ -7738,14 +7739,12 @@
 
         // What Mureka answered a request that changes something, a POST and
         // the like, to learn what a call such as trim gives back. Reports,
-        // sent all the time, are left out, the player logs its own already
+        // sent all the time, are left out, the player logs its own already.
+        // Of the reads only the two Mureka's trim screen makes first, song
+        // check and song info with the silence at the ends
         const answerFor = function (method, url) {
 
             const verb = String(method || "GET").toUpperCase();
-
-            if (verb === "GET" || verb === "HEAD") {
-                return "";
-            }
 
             try {
 
@@ -7753,6 +7752,11 @@
 
                 if (u.host !== location.host || u.pathname.indexOf("/api/") !== 0
                     || /report/.test(u.pathname)) {
+                    return "";
+                }
+
+                if ((verb === "GET" || verb === "HEAD")
+                    && u.pathname !== "/api/pgc/song/check" && u.pathname !== "/api/pgc/song/info") {
                     return "";
                 }
 
@@ -7764,7 +7768,7 @@
 
         const logAnswer = function (what, status, text) {
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
-                + String(text || "").replace(/\s+/g, " ").slice(0, 300));
+                + String(text || "").replace(/\s+/g, " ").slice(0, 800));
         };
 
         const sumUp = function (kind, json) {
@@ -19854,7 +19858,8 @@
 
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         devPage.appendChild(debugRow);
-        devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, commands and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
+        devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, "
+            + (isApkHost() ? "commands " : "") + "and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
         devPage.appendChild(logRow);
 
         if (isApkHost()) {
@@ -19884,6 +19889,11 @@
 
         for (const group of DEBUG_GROUPS) {
 
+            // Bluetooth and the web view's commands only come from the app
+            if (group.app && !isApkHost()) {
+                continue;
+            }
+
             const groupRow = makeBoolRow(group.name,
                 function () {
                     return !Array.isArray(settings.debugHide) || settings.debugHide.indexOf(group.id) < 0;
@@ -19902,7 +19912,7 @@
                     publishHostSoon();
                 });
 
-            devPage.appendChild(withHint(groupRow, group.hint));
+            devPage.appendChild(withHint(groupRow, !isApkHost() && group.plainHint ? group.plainHint : group.hint));
         }
 
         devPage.appendChild(makeLabel("Other tools"));
@@ -19921,7 +19931,9 @@
 
         devPage.appendChild(copyFeedBtn);
         devPage.appendChild(makeLabel("Cover test"));
-        devPage.appendChild(makeHint("Sends the playing song with a loading ring as its cover, or with its own cover again, to see what the car or the lock screen shows. Either stays until the song changes. In the app they send the way chosen under Now playing, How the cover is sent again."));
+        devPage.appendChild(makeHint(isApkHost()
+            ? "Sends the playing song with a loading ring as its cover, or with its own cover again, to see what the car or the lock screen shows. Either stays until the song changes. They send the way chosen under Now playing, How the cover is sent again."
+            : "Sends the playing song with a loading ring as its cover, or with its own cover again, to see what the lock screen shows. Either stays until the song changes."));
         devPage.appendChild(coverTestRow);
 
         // About: the version, where the player runs, and in the app where
