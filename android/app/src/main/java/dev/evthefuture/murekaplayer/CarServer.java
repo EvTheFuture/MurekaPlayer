@@ -38,10 +38,13 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.HttpURLConnection;
 import java.net.InterfaceAddress;
+import java.net.MalformedURLException;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -379,6 +382,8 @@ final class CarServer {
                 // What the long press menu offers for one song, the id goes
                 // in quoted, as data
                 sendCall(out, "__murekaHostSongMenu", JSONObject.quote(param(query, "id")));
+            } else if ("GET".equals(method) && "/audio".equals(path)) {
+                sendAudio(out, param(query, "url"));
             } else if ("POST".equals(method) && "/cmd".equals(path)) {
                 runCommand(out, body);
             } else {
@@ -416,6 +421,87 @@ final class CarServer {
         }
 
         send(out, 200, "application/json", bytes(json));
+    }
+
+    // A song's file from Mureka, handed on to the web view, whose trimmer
+    // reads it in the browser. The browser may not fetch it from Mureka
+    // itself, the file comes from another address. Only Mureka's own files
+    // over https, never an address of the car's choosing
+    private void sendAudio(OutputStream out, String url) throws IOException {
+
+        lastPoll = System.currentTimeMillis();
+
+        URL parsed;
+
+        try {
+            parsed = new URL(url);
+        } catch (MalformedURLException e) {
+            parsed = null;
+        }
+
+        String host = parsed != null && parsed.getHost() != null ? parsed.getHost().toLowerCase(Locale.ROOT) : "";
+
+        if (parsed == null || !"https".equals(parsed.getProtocol())
+            || !(host.equals("mureka.ai") || host.endsWith(".mureka.ai"))) {
+
+            send(out, 403, "text/plain", bytes("Not a Mureka song"));
+            return;
+        }
+
+        HttpURLConnection c = null;
+
+        try {
+
+            c = (HttpURLConnection) parsed.openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(30000);
+            c.setInstanceFollowRedirects(true);
+
+            int code = c.getResponseCode();
+
+            if (code != 200) {
+
+                send(out, 502, "text/plain", bytes("Mureka answered " + code));
+                return;
+            }
+
+            String type = c.getContentType() != null ? c.getContentType() : "audio/mpeg";
+            long length = c.getContentLengthLong();
+            StringBuilder head = new StringBuilder();
+
+            head.append("HTTP/1.1 200 OK\r\nContent-Type: ").append(type).append("\r\n");
+
+            // The length when Mureka says, so the page can show how much
+            // has arrived
+            if (length >= 0) {
+                head.append("Content-Length: ").append(length).append("\r\n");
+            }
+
+            head.append("Cache-Control: no-store\r\nConnection: close\r\n\r\n");
+            out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
+
+            try (InputStream in = c.getInputStream()) {
+
+                byte[] buf = new byte[65536];
+                int n;
+
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                }
+            }
+
+            out.flush();
+        } catch (IOException e) {
+
+            // Nothing sent yet when Mureka could not be reached, the page
+            // hears why. Once the file is under way the connection just ends
+            Hub.note("Web view", "song file for the trimmer failed, " + e.getClass().getSimpleName());
+        } finally {
+
+            if (c != null) {
+                c.disconnect();
+            }
+        }
     }
 
     // Whatever one of the player's host functions returns

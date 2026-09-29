@@ -2538,6 +2538,223 @@
     html.phone #panelBody {
         padding-right: 14px;
     }
+    /* The trimmer, a page over everything with the song's two waveforms */
+    #trimPage {
+        position: fixed;
+        inset: 0;
+        z-index: 70;
+        background: var(--bg);
+        display: none;
+        justify-content: center;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #trimBox {
+        width: min(1000px, 100%);
+        padding: 2vh 3vw 4vh;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        height: max-content;
+    }
+
+    #trimBox .pBtn {
+        margin: 0;
+        padding: 8px 16px;
+    }
+
+    #trimBox .pField {
+        margin: 0;
+    }
+
+    .trimRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .trimWrap {
+        flex-wrap: wrap;
+    }
+
+    .trimGrow {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .trimFill {
+        flex: 1 1 0;
+    }
+
+    .trimHeading {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .trimInfo {
+        color: var(--muted);
+        font-size: 0.8em;
+        font-variant-numeric: tabular-nums;
+        user-select: text;
+        -webkit-user-select: text;
+    }
+
+    .trimStatus {
+        color: #ffb0b0;
+        font-size: 0.85em;
+        display: none;
+    }
+
+    .trimCanvas {
+        width: 100%;
+        display: block;
+        border-radius: 8px;
+        background: #141418;
+        touch-action: none;
+        cursor: pointer;
+    }
+
+    .trimOverview {
+        height: clamp(56px, 9vh, 110px);
+    }
+
+    .trimDetail {
+        height: clamp(130px, 24vh, 280px);
+    }
+
+    .trimLoading {
+        height: clamp(190px, 34vh, 400px);
+        border-radius: 8px;
+        background: #141418;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 0.9em;
+    }
+
+    .trimRing {
+        width: 30px;
+        height: 30px;
+        border: 3px solid rgba(72, 225, 235, 0.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spinTurn 0.8s linear infinite;
+        flex: 0 0 auto;
+    }
+
+    .trimRing.big {
+        width: 44px;
+        height: 44px;
+        border-width: 4px;
+    }
+
+    .trimRing.small {
+        width: 14px;
+        height: 14px;
+        border-width: 2px;
+        border-color: rgba(0, 0, 0, 0.25);
+        border-top-color: #000;
+        display: inline-block;
+        margin-right: 8px;
+        vertical-align: -2px;
+    }
+
+    .trimTime {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .trimTimeField {
+        width: 7.5em;
+        flex: 0 0 auto;
+        font-variant-numeric: tabular-nums;
+        padding: 0 10px;
+    }
+
+    .trimZoomLabel {
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* The steps and the play buttons in even columns, a row each where
+       there is room, two rows each on a phone */
+    .trimNudges,
+    .trimPlays {
+        display: grid;
+        gap: 6px;
+    }
+
+    .trimNudges {
+        grid-template-columns: repeat(6, 1fr);
+    }
+
+    .trimPlays {
+        grid-template-columns: repeat(5, 1fr);
+    }
+
+    .trimNudges .pBtn,
+    .trimPlays .pBtn {
+        min-width: 0;
+        padding: 8px 2px;
+        white-space: nowrap;
+    }
+
+    @media (max-width: 700px) {
+
+        .trimNudges,
+        .trimPlays {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+
+    .trimCover {
+        position: fixed;
+        inset: 0;
+        z-index: 71;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+
+    .trimWorking {
+        z-index: 72;
+        background: rgba(0, 0, 0, 0.7);
+        flex-direction: column;
+        gap: 16px;
+        color: #fff;
+    }
+
+    .trimAskBox {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 18px;
+        width: min(460px, 92vw);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        line-height: 1.4;
+    }
+
+    .trimCheck {
+        cursor: pointer;
+    }
+
+    .trimCheck input {
+        width: 22px;
+        height: 22px;
+        margin: 0;
+    }
+
 </style>
 </head>
 <body>
@@ -3032,6 +3249,13 @@
         trash: [
             ["polyline", { points: "3 6 5 6 21 6" }],
             ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }]
+        ],
+        scissors: [
+            ["circle", { cx: "6", cy: "6", r: "3" }],
+            ["circle", { cx: "6", cy: "18", r: "3" }],
+            ["line", { x1: "20", y1: "4", x2: "8.12", y2: "15.88" }],
+            ["line", { x1: "14.47", y1: "14.48", x2: "20", y2: "20" }],
+            ["line", { x1: "8.12", y1: "8.12", x2: "12", y2: "12" }]
         ]
     };
 
@@ -8738,6 +8962,7 @@
         }
         watchPull(s);
         watchCache(s);
+        trimFollow(s);
         setDebugOverlay(s.debugOverlay === true);
         offerSeek(s.seekActions !== false);
         paintVolIcon();
@@ -9561,6 +9786,16 @@
 
                 showTitleField(m);
             }));
+
+            // Cut the start or the end off, Mureka makes a new song of it
+            if (m.canTrim) {
+
+                box.appendChild(menuItem("scissors", "Trim", function () {
+
+                    close();
+                    openTrimmer(m);
+                }));
+            }
 
             box.appendChild(menuItem(m.published ? "close" : "check",
                 m.published ? "Unpublish" : "Publish", function () {
@@ -11446,6 +11681,1528 @@
 
     window.addEventListener("resize", fixGutters);
     setInterval(fixGutters, 500);
+
+    // The trimmer: a page over everything to cut the start and the end off
+    // a song of your own. The same as the phone's, drawn here: the song is
+    // read and decoded in this browser, so the waveform zooms down to single
+    // samples and the preview stops on the exact sample where the cut is.
+    // The phone fetches the file from Mureka for it and sends the trim to
+    // Mureka, which makes a new song and keeps the original
+    const TRIM_FADE = 1;
+    const TRIM_MIN_LEN = 1;
+    const TRIM_PREVIEW_MIN = 0.5;
+    const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
+
+    let trimCtx = null;
+    let trimToken = 0;
+    let tr = null;
+    let trimUi = null;
+    let trimFadeOn = true;
+
+    // Minutes, seconds and milliseconds, 1:05.250
+    function trimTimeText(t) {
+
+        const ms = Math.max(0, Math.round(t * 1000));
+        const m = Math.floor(ms / 60000);
+        const s = Math.floor((ms % 60000) / 1000);
+        const rest = ms % 1000;
+
+        return m + ":" + (s < 10 ? "0" : "") + s + "." + String(rest).padStart(3, "0");
+    }
+
+    // Read a typed time: 1:05.25, 65.25 or 65. Null when it is not a time
+    function trimParseTime(text) {
+
+        const m = String(text || "").trim().match(/^(?:(\d+):)?(\d+(?:[.,]\d+)?)$/);
+
+        if (!m) {
+            return null;
+        }
+
+        return (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2].replace(",", "."));
+    }
+
+    // Decode with the callback form as well, older Safari has no promise
+    function trimDecode(ctx, bytes) {
+
+        return new Promise(function (resolve, reject) {
+
+            const p = ctx.decodeAudioData(bytes, resolve, reject);
+
+            if (p && typeof p.then === "function") {
+                p.then(resolve, reject);
+            }
+        });
+    }
+
+    // An iPhone or an iPad, where the song is decoded at half the rate to
+    // spare the memory
+    function trimIosLike() {
+        return /iPhone|iPad|iPod/.test(navigator.userAgent)
+            || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    }
+
+    // A button in the look of the settings
+    function trimButton(label, fn, cls) {
+
+        const b = document.createElement("button");
+
+        b.type = "button";
+        b.className = "pBtn" + (cls ? " " + cls : "");
+        b.textContent = label;
+        b.addEventListener("click", fn);
+
+        return b;
+    }
+
+    // A switch that belongs to the trimmer, its name beside it
+    function trimSwitch(label, get, set) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("div");
+        const btn = trimButton("Off", function () {
+
+            set(!get());
+            row.paint();
+        });
+
+        row.className = "trimRow";
+        name.className = "trimGrow";
+        name.textContent = label;
+        row.appendChild(name);
+        row.appendChild(btn);
+        row.paint = function () {
+
+            btn.textContent = get() ? "On" : "Off";
+            btn.classList.toggle("on", !!get());
+        };
+        row.paint();
+
+        return row;
+    }
+
+    // A small row of buttons where one is chosen
+    function trimSegments(choices, get, set) {
+
+        const row = document.createElement("div");
+        const buttons = [];
+
+        row.className = "trimRow";
+
+        for (const c of choices) {
+
+            const b = trimButton(c.label, function () {
+                set(c.value);
+                row.paint();
+            }, "trimFill");
+
+            buttons.push({ el: b, value: c.value });
+            row.appendChild(b);
+        }
+
+        row.paint = function () {
+
+            for (const b of buttons) {
+                b.el.classList.toggle("on", b.value === get());
+            }
+        };
+        row.paint();
+
+        return row;
+    }
+
+    function buildTrimmer() {
+
+        const ui = {};
+        const page = document.createElement("div");
+        const box = document.createElement("div");
+
+        page.id = "trimPage";
+        box.id = "trimBox";
+        page.appendChild(box);
+
+        // Heading with the song's title, Trim within reach and Close
+        const head = document.createElement("div");
+
+        head.className = "trimRow";
+        ui.heading = document.createElement("div");
+        ui.heading.className = "trimGrow trimHeading";
+        ui.trimBtn = trimButton("Trim", askTrim, "on");
+        head.appendChild(ui.heading);
+        head.appendChild(ui.trimBtn);
+        head.appendChild(trimButton("Close", closeTrimmer));
+
+        // The song's id, its length and the length it will have
+        ui.info = document.createElement("div");
+        ui.info.className = "trimInfo";
+
+        ui.status = document.createElement("div");
+        ui.status.className = "trimStatus";
+
+        // The whole song, the kept part lit, the ends to drag
+        ui.overview = document.createElement("canvas");
+        ui.overview.className = "trimCanvas trimOverview";
+
+        // A turning ring with what is going on while the song is fetched
+        // and decoded, in place of the empty waveforms
+        ui.loading = document.createElement("div");
+        ui.loading.className = "trimLoading";
+
+        const loadingRing = document.createElement("span");
+
+        loadingRing.className = "trimRing";
+        ui.loadingText = document.createElement("span");
+        ui.loading.appendChild(loadingRing);
+        ui.loading.appendChild(ui.loadingText);
+
+        // Where the kept part starts and ends, typed or shown
+        const timesRow = document.createElement("div");
+
+        timesRow.className = "trimRow trimWrap";
+
+        const timeField = function (label, which) {
+
+            const wrap = document.createElement("label");
+            const input = document.createElement("input");
+
+            wrap.className = "trimTime";
+            wrap.appendChild(document.createTextNode(label));
+            input.type = "text";
+            input.inputMode = "decimal";
+            input.className = "pField trimTimeField";
+
+            input.addEventListener("change", function () {
+
+                const t = trimParseTime(input.value);
+
+                if (tr && t !== null) {
+                    trimSetEdge(which, t);
+                }
+
+                trimPaint();
+            });
+
+            wrap.appendChild(input);
+            timesRow.appendChild(wrap);
+
+            return input;
+        };
+
+        ui.startInput = timeField("Start", "start");
+        ui.endInput = timeField("End", "end");
+
+        // Which end the close up shows and the buttons move
+        ui.edgeRow = trimSegments([
+            { label: "Start", value: "start" },
+            { label: "End", value: "end" }
+        ], function () {
+            return tr ? tr.edge : "end";
+        }, function (v) {
+
+            if (tr) {
+
+                tr.edge = v;
+                tr.viewC = tr[v];
+                trimPaint();
+            }
+        });
+
+        // The close up around the chosen end
+        ui.detail = document.createElement("canvas");
+        ui.detail.className = "trimCanvas trimDetail";
+
+        // Zoom, the width of the close up in seconds
+        const zoomRow = document.createElement("div");
+
+        zoomRow.className = "trimRow";
+        ui.zoomLabel = document.createElement("div");
+        ui.zoomLabel.className = "trimGrow trimZoomLabel";
+
+        ui.zoomBy = function (step) {
+
+            if (!tr) {
+                return;
+            }
+
+            tr.zoom = Math.max(0, Math.min(TRIM_ZOOMS.length - 1, tr.zoom + step));
+            tr.viewC = tr[tr.edge];
+            trimPaint();
+
+            // Repeating, the new length is heard soon after
+            trimEndMoved("end");
+        };
+
+        zoomRow.appendChild(trimButton("Zoom out", function () {
+            ui.zoomBy(-1);
+        }));
+        zoomRow.appendChild(ui.zoomLabel);
+        zoomRow.appendChild(trimButton("Zoom in", function () {
+            ui.zoomBy(1);
+        }));
+
+        // Fine steps for the chosen end
+        const nudgeRow = document.createElement("div");
+
+        nudgeRow.className = "trimRow trimNudges";
+
+        for (const step of [-1, -0.1, -0.01, 0.01, 0.1, 1]) {
+
+            const label = (step > 0 ? "+" : "-") + (Math.abs(step) >= 1 ? "1 s" : Math.round(Math.abs(step) * 1000) + " ms");
+
+            nudgeRow.appendChild(trimButton(label, function () {
+                trimNudge(step);
+            }, "trimFill"));
+        }
+
+        // Listening
+        const playRow = document.createElement("div");
+
+        playRow.className = "trimRow trimPlays";
+        playRow.appendChild(trimButton("Play start", function () {
+
+            if (tr) {
+                trimPlay(tr.start, Math.min(tr.end, tr.start + trimPreviewLen()));
+            }
+        }, "trimFill"));
+        playRow.appendChild(trimButton("Play end", function () {
+            trimPlayEnd();
+        }, "trimFill"));
+        playRow.appendChild(trimButton("Play all", function () {
+
+            if (tr) {
+                trimPlay(tr.start, tr.end);
+            }
+        }, "trimFill"));
+        ui.pauseBtn = trimButton("Play", function () {
+
+            if (tr && !tr.src && !tr.paused) {
+                trimPlay(tr.start, tr.end);
+            } else {
+                trimPauseResume();
+            }
+        }, "trimFill");
+        playRow.appendChild(ui.pauseBtn);
+        playRow.appendChild(trimButton("Stop", function () {
+
+            if (tr) {
+
+                tr.loop = false;
+                tr.paused = null;
+                ui.loopRow.paint();
+            }
+
+            trimStop();
+        }, "trimFill"));
+
+        // The same switch as on the phone, kept there
+        ui.fadeRow = trimSwitch("Fade out the last second", function () {
+            return trimFadeOn;
+        }, function (v) {
+
+            trimFadeOn = v;
+            send("trimFade", v);
+            trimPaint();
+        });
+
+        ui.loopRow = trimSwitch("Repeat the end", function () {
+            return tr ? tr.loop : false;
+        }, function (v) {
+
+            if (!tr) {
+                return;
+            }
+
+            tr.loop = v;
+
+            if (v) {
+                trimPlayEnd();
+            } else {
+                trimStop();
+            }
+        });
+
+        // The new song's title, the same as the original to start with
+        const titleRow = document.createElement("label");
+
+        titleRow.className = "trimRow";
+        titleRow.appendChild(document.createTextNode("Title"));
+        ui.titleInput = document.createElement("input");
+        ui.titleInput.type = "text";
+        ui.titleInput.maxLength = 50;
+        ui.titleInput.className = "pField trimGrow";
+        titleRow.appendChild(ui.titleInput);
+
+        const hint = document.createElement("div");
+
+        hint.className = "pText small";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms.";
+
+        box.appendChild(head);
+        box.appendChild(ui.info);
+        box.appendChild(ui.status);
+        box.appendChild(ui.loading);
+        box.appendChild(ui.overview);
+        box.appendChild(timesRow);
+        box.appendChild(ui.edgeRow);
+        box.appendChild(ui.detail);
+        box.appendChild(zoomRow);
+        box.appendChild(nudgeRow);
+        box.appendChild(playRow);
+        box.appendChild(ui.fadeRow);
+        box.appendChild(ui.loopRow);
+        box.appendChild(titleRow);
+        box.appendChild(hint);
+
+        // The question before trimming, with the choice to delete the
+        // original, over the trimmer
+        ui.ask = document.createElement("div");
+        ui.ask.className = "trimCover";
+
+        const askBox = document.createElement("div");
+
+        askBox.className = "trimAskBox";
+        ui.askText = document.createElement("div");
+
+        const deleteLabel = document.createElement("label");
+
+        deleteLabel.className = "trimRow trimCheck";
+        ui.askDelete = document.createElement("input");
+        ui.askDelete.type = "checkbox";
+        deleteLabel.appendChild(ui.askDelete);
+        deleteLabel.appendChild(document.createTextNode("Delete original"));
+
+        const askButtons = document.createElement("div");
+
+        askButtons.className = "trimRow";
+        askButtons.appendChild(trimButton("Cancel", function () {
+            ui.ask.style.display = "none";
+        }, "trimFill"));
+        askButtons.appendChild(trimButton("Trim", function () {
+
+            ui.ask.style.display = "none";
+            submitTrim(ui.askDelete.checked === true);
+        }, "trimFill on"));
+
+        askBox.appendChild(ui.askText);
+        askBox.appendChild(deleteLabel);
+        askBox.appendChild(askButtons);
+        ui.ask.appendChild(askBox);
+
+        // While Mureka works: a turning ring and what is going on, over
+        // everything, so it cannot be missed nor anything pressed meanwhile
+        ui.working = document.createElement("div");
+        ui.working.className = "trimCover trimWorking";
+
+        const workingRing = document.createElement("span");
+
+        workingRing.className = "trimRing big";
+        ui.workingText = document.createElement("span");
+        ui.working.appendChild(workingRing);
+        ui.working.appendChild(ui.workingText);
+
+        page.appendChild(ui.ask);
+        page.appendChild(ui.working);
+        document.body.appendChild(page);
+
+        ui.page = page;
+        ui.box = box;
+        trimUi = ui;
+
+        installTrimPointers();
+
+        window.addEventListener("resize", function () {
+
+            if (tr) {
+                tr.overviewPeaks = null;
+                trimPaint();
+            }
+        });
+    }
+
+    function trimOpen() {
+        return !!(trimUi && trimUi.page.style.display === "flex");
+    }
+
+    // Open the trimmer for a song from the song menu: its id, title, length
+    // and the link to its file
+    async function openTrimmer(m) {
+
+        if (!trimUi) {
+            buildTrimmer();
+        }
+
+        // One sound engine for every opening, made during the tap so
+        // Safari lets it play
+        if (!trimCtx) {
+
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+
+            trimCtx = Ctx ? new Ctx() : null;
+        }
+
+        if (trimCtx && trimCtx.state === "suspended") {
+            trimCtx.resume();
+        }
+
+        // The preview needs the sound to itself, the music pauses
+        if (state && state.playing) {
+            send("pause");
+        }
+
+        const token = ++trimToken;
+        const duration = (m.durationMs || 0) / 1000;
+
+        trimFadeOn = !(state && state.trimFade === false);
+        tr = {
+            song: m,
+            buffer: null,
+            mono: null,
+            rate: 0,
+            duration: duration,
+            start: 0,
+            end: duration,
+            edge: "end",
+            zoom: 3,
+            viewC: duration,
+            loop: false,
+            src: null,
+            paused: null,
+            busy: false,
+            job: "",
+            overviewPeaks: null,
+            drag: null
+        };
+
+        trimUi.heading.textContent = "Trim: " + (m.title || "Untitled");
+        trimUi.titleInput.value = (m.title === "Untitled" ? "" : m.title || "").slice(0, 50);
+        trimUi.ask.style.display = "none";
+        trimWorking("");
+        trimBusy(false);
+
+        // Nothing to trim until the song is read
+        trimUi.trimBtn.disabled = true;
+        trimUi.edgeRow.paint();
+        trimUi.fadeRow.paint();
+        trimUi.loopRow.paint();
+        trimUi.page.style.display = "flex";
+        trimUi.page.scrollTop = 0;
+        trimStatus("");
+        trimLoading("Asking the phone for the song");
+        trimPaint();
+        dbgLog("Trim", "opened for " + m.id);
+
+        if (!trimCtx) {
+
+            trimLoading("");
+            trimStatus("This browser cannot play sound this way, so the trimmer does not work here");
+            return;
+        }
+
+        try {
+
+            const bytes = await trimLoadBytes(m, token);
+
+            if (token !== trimToken) {
+                return;
+            }
+
+            trimLoading("Reading the waveform");
+
+            const decodeStart = Date.now();
+            const rate = trimIosLike() ? 22050 : 44100;
+            const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            const buffer = await trimDecode(Off ? new Off(1, 1, rate) : trimCtx, bytes);
+
+            if (token !== trimToken) {
+                return;
+            }
+
+            // One channel to draw from, both mixed
+            let mono = buffer.getChannelData(0);
+
+            if (buffer.numberOfChannels > 1) {
+
+                const right = buffer.getChannelData(1);
+                const mixed = new Float32Array(buffer.length);
+
+                for (let i = 0; i < mixed.length; i++) {
+                    mixed[i] = (mono[i] + right[i]) / 2;
+                }
+
+                mono = mixed;
+            }
+
+            const said = (m.durationMs || 0) / 1000;
+            const short = said - buffer.duration;
+
+            dbgLog("Trim", "decoded " + trimTimeText(buffer.duration) + " at " + buffer.sampleRate
+                + " Hz in " + (Date.now() - decodeStart) + " ms, Mureka says " + trimTimeText(said));
+
+            tr.buffer = buffer;
+            tr.mono = mono;
+            tr.rate = buffer.sampleRate;
+
+            // The decoded file can run a few milliseconds past the length
+            // Mureka has for the song, and Mureka turns down an end past
+            // it, so the song ends where Mureka says
+            tr.duration = said > 0 ? Math.min(buffer.duration, said) : buffer.duration;
+            tr.end = tr.duration;
+            tr.viewC = tr.end;
+            trimUi.trimBtn.disabled = false;
+            trimLoading("");
+            trimStatus(short > 0.2
+                ? "The file reads " + short.toFixed(1) + " s shorter than Mureka says, " + trimTimeText(said)
+                : "");
+            trimPaint();
+        } catch (e) {
+
+            if (token === trimToken) {
+
+                trimLoading("");
+                trimStatus("Could not read the song, " + (e && e.message ? e.message : "unknown error"));
+            }
+        }
+    }
+
+    // The song's file, fetched by the phone from Mureka and handed on, with
+    // the share that has arrived shown as it comes in
+    async function trimLoadBytes(m, token) {
+
+        const t0 = Date.now();
+
+        if (!m.src) {
+            throw new Error("no link to the song");
+        }
+
+        const res = await fetch("/audio?url=" + encodeURIComponent(m.src), { cache: "no-store" });
+
+        if (!res.ok) {
+            throw new Error(res.status === 403 ? "not a Mureka song" : "the phone could not get it, " + res.status);
+        }
+
+        const total = Number(res.headers.get("Content-Length")) || 0;
+        let bytes = null;
+
+        trimLoading("Downloading the song");
+
+        // Read in pieces, so the share downloaded can be shown
+        if (res.body && res.body.getReader && total > 0) {
+
+            const reader = res.body.getReader();
+            const parts = [];
+            let got = 0;
+
+            while (true) {
+
+                const part = await reader.read();
+
+                if (part.done) {
+                    break;
+                }
+
+                parts.push(part.value);
+                got += part.value.length;
+
+                if (token === trimToken) {
+                    trimLoading("Downloading the song, " + Math.min(100, Math.floor(got / total * 100)) + "%");
+                }
+            }
+
+            const all = new Uint8Array(got);
+            let at = 0;
+
+            for (const piece of parts) {
+
+                all.set(piece, at);
+                at += piece.length;
+            }
+
+            bytes = all.buffer;
+        } else {
+            bytes = await res.arrayBuffer();
+        }
+
+        dbgLog("Trim", "song file " + Math.round(bytes.byteLength / 1024) + " kB in " + (Date.now() - t0) + " ms");
+
+        return bytes;
+    }
+
+    function closeTrimmer() {
+
+        trimToken += 1;
+        trimStop();
+        tr = null;
+
+        if (trimUi) {
+
+            trimUi.page.style.display = "none";
+            trimUi.ask.style.display = "none";
+            trimUi.working.style.display = "none";
+        }
+    }
+
+    // The ring and its text in place of the waveforms, or the waveforms
+    // back when the text is empty
+    function trimLoading(text) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        trimUi.loadingText.textContent = text;
+        trimUi.loading.style.display = text ? "flex" : "none";
+        trimUi.overview.style.display = text ? "none" : "block";
+        trimUi.detail.style.display = text ? "none" : "block";
+
+        if (!text) {
+            trimPaint();
+        }
+    }
+
+    function trimStatus(text) {
+
+        if (trimUi) {
+            trimUi.status.textContent = text;
+            trimUi.status.style.display = text ? "block" : "none";
+        }
+    }
+
+    // Move one end, kept inside the song and at least a second apart
+    function trimSetEdge(which, t) {
+
+        if (!tr) {
+            return;
+        }
+
+        // The reminder to move an end is answered
+        if (trimUi && trimUi.status.textContent === "Move the start or the end first") {
+            trimStatus("");
+        }
+
+        if (which === "start") {
+            tr.start = Math.max(0, Math.min(t, tr.end - TRIM_MIN_LEN));
+        } else {
+            tr.end = Math.min(tr.duration, Math.max(t, tr.start + TRIM_MIN_LEN));
+        }
+
+        trimEndMoved(which);
+    }
+
+    // The end repeating is heard again soon after it moved
+    function trimEndMoved(which) {
+
+        if (!tr || !tr.loop || which !== "end") {
+            return;
+        }
+
+        clearTimeout(tr.loopTimer);
+        tr.loopTimer = setTimeout(function () {
+
+            if (tr && tr.loop) {
+                trimPlayEnd();
+            }
+        }, 350);
+    }
+
+    function trimNudge(step) {
+
+        if (!tr || !tr.buffer) {
+            return;
+        }
+
+        trimSetEdge(tr.edge, tr[tr.edge] + step);
+        tr.viewC = tr[tr.edge];
+        trimPaint();
+    }
+
+    // The last second with the fade worked into the samples, as a short
+    // buffer of its own. Played right after the rest, it fades whatever
+    // the browser does with volume changes over time
+    function trimFadeTail(from, to) {
+
+        const key = from.toFixed(4) + ":" + to.toFixed(4);
+
+        if (tr.tail && tr.tail.key === key) {
+            return tr.tail.buffer;
+        }
+
+        const rate = tr.buffer.sampleRate;
+        const a = Math.max(0, Math.round(from * rate));
+        const b = Math.min(tr.buffer.length, Math.round(to * rate));
+        const n = Math.max(1, b - a);
+        const tail = trimCtx.createBuffer(tr.buffer.numberOfChannels, n, rate);
+
+        for (let c = 0; c < tr.buffer.numberOfChannels; c++) {
+
+            const src = tr.buffer.getChannelData(c);
+            const dst = tail.getChannelData(c);
+
+            for (let i = 0; i < n; i++) {
+
+                const t = (a + i) / rate;
+
+                dst[i] = src[a + i] * Math.max(0, Math.min(1, (tr.end - t) / TRIM_FADE));
+            }
+        }
+
+        tr.tail = { key: key, buffer: tail };
+
+        return tail;
+    }
+
+    // Play a stretch of the song. Past the end of the kept part it never
+    // goes, and with the fade on the last second fades out as Mureka's
+    // trimmed song will
+    function trimPlay(from, to) {
+
+        trimStop();
+
+        if (tr) {
+            tr.paused = null;
+        }
+
+        if (!tr || !tr.buffer || !trimCtx || to - from < 0.02) {
+            return;
+        }
+
+        if (trimCtx.state === "suspended") {
+            trimCtx.resume();
+        }
+
+        const at = trimCtx.currentTime + 0.05;
+        const fade = trimFades() && to >= tr.end - 0.0005;
+        const fadeFrom = fade ? Math.max(from, tr.end - TRIM_FADE) : to;
+        const pieces = [];
+
+        // The part before the fade, straight from the song
+        if (fadeFrom - from > 0.001) {
+
+            const main = trimCtx.createBufferSource();
+
+            main.buffer = tr.buffer;
+            main.connect(trimCtx.destination);
+            main.start(at, from, fadeFrom - from);
+            main.stop(at + (fadeFrom - from));
+            pieces.push(main);
+        }
+
+        // The fading second, starting on the sample where the rest ends
+        if (fade) {
+
+            const tail = trimCtx.createBufferSource();
+
+            tail.buffer = trimFadeTail(fadeFrom, tr.end);
+            tail.connect(trimCtx.destination);
+            tail.start(at + (fadeFrom - from));
+            tail.stop(at + (tr.end - from));
+            pieces.push(tail);
+        }
+
+        const last = pieces[pieces.length - 1];
+
+        last.onended = function () {
+
+            if (!tr || tr.src !== last) {
+                return;
+            }
+
+            tr.src = null;
+            tr.pieces = [];
+
+            if (tr.loop) {
+                trimPlayEnd();
+            } else {
+                trimPaint();
+            }
+        };
+
+        tr.src = last;
+        tr.pieces = pieces;
+        tr.playFrom = from;
+        tr.playTo = to;
+        tr.playAt = at;
+        trimAnimate();
+    }
+
+    // Whether the preview fades out the last second: with the switch on and
+    // the end actually cut
+    function trimFades() {
+        return trimFadeOn && tr !== null && tr.end < tr.duration - 0.05;
+    }
+
+    // Pause the preview where it is, or go on from there
+    function trimPauseResume() {
+
+        if (!tr) {
+            return;
+        }
+
+        if (tr.src) {
+
+            const at = trimPlayhead();
+            const to = tr.playTo;
+
+            trimStop();
+            tr.paused = { at: at, to: to };
+            trimPaint();
+            return;
+        }
+
+        if (tr.paused) {
+
+            const p = tr.paused;
+
+            if (p.at >= tr.end - 0.02) {
+                trimPlayEnd();
+            } else {
+                trimPlay(p.at, Math.min(p.to, tr.end));
+            }
+        }
+    }
+
+    // How much Play start, Play end and Repeat the end play: what the close
+    // up shows on one side of the end
+    function trimPreviewLen() {
+        return Math.max(TRIM_PREVIEW_MIN, TRIM_ZOOMS[tr.zoom] / 2);
+    }
+
+    function trimPlayEnd() {
+
+        if (tr) {
+            trimPlay(Math.max(tr.start, tr.end - trimPreviewLen()), tr.end);
+        }
+    }
+
+    function trimStop() {
+
+        if (!tr || !tr.src) {
+            return;
+        }
+
+        const pieces = tr.pieces || [tr.src];
+
+        tr.src = null;
+        tr.pieces = [];
+
+        for (const piece of pieces) {
+
+            try {
+                piece.stop();
+            } catch (e) {
+                // Already stopped
+            }
+
+            piece.disconnect();
+        }
+
+        trimPaint();
+    }
+
+    // Where the preview is, or null when it is not playing
+    function trimPlayhead() {
+
+        if (tr && !tr.src && tr.paused) {
+            return tr.paused.at;
+        }
+
+        if (!tr || !tr.src || !trimCtx) {
+            return null;
+        }
+
+        return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
+    }
+
+    function trimAnimate() {
+
+        const step = function () {
+
+            if (!tr || !tr.src) {
+                return;
+            }
+
+            trimPaint();
+            requestAnimationFrame(step);
+        };
+
+        requestAnimationFrame(step);
+    }
+
+    // Size a canvas to its box, returns the drawing context and the size in
+    // canvas pixels
+    function trimFit(canvas) {
+
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
+        const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+
+        if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+        }
+
+        return { g: canvas.getContext("2d"), w: w, h: h, dpr: dpr };
+    }
+
+    // The lowest and highest sample in each column across a stretch of time
+    function trimPeaks(from, to, cols) {
+
+        const mono = tr.mono;
+        const rate = tr.rate;
+        const lo = new Float32Array(cols);
+        const hi = new Float32Array(cols);
+        const per = (to - from) * rate / cols;
+
+        for (let c = 0; c < cols; c++) {
+
+            let a = Math.floor((from * rate) + c * per);
+            let b = Math.floor((from * rate) + (c + 1) * per);
+
+            if (b <= a) {
+                b = a + 1;
+            }
+
+            let mn = 0;
+            let mx = 0;
+
+            a = Math.max(0, a);
+            b = Math.min(mono.length, b);
+
+            for (let i = a; i < b; i++) {
+
+                const v = mono[i];
+
+                if (v < mn) {
+                    mn = v;
+                }
+
+                if (v > mx) {
+                    mx = v;
+                }
+            }
+
+            lo[c] = mn;
+            hi[c] = mx;
+        }
+
+        return { lo: lo, hi: hi };
+    }
+
+    // The colour of the wave at a time: lit inside the kept part, darker in
+    // the second that fades out, grey outside
+    function trimWaveColor(t) {
+
+        if (t < tr.start || t > tr.end) {
+            return "#4a4a52";
+        }
+
+        if (trimFades() && t > tr.end - TRIM_FADE) {
+            return "#2b8f96";
+        }
+
+        return "#48e1eb";
+    }
+
+    // Draw columns of peaks, or a line through the samples once they are
+    // further apart than a column
+    function trimDrawWave(g, w, h, from, to, peaks) {
+
+        const mid = h / 2;
+        const spanPerCol = (to - from) / w;
+
+        if (spanPerCol * tr.rate < 1) {
+
+            const a = Math.max(0, Math.floor(from * tr.rate));
+            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
+
+            g.lineWidth = Math.max(1, Math.round(w / 400));
+
+            for (let i = a; i < b; i++) {
+
+                const t0 = i / tr.rate;
+                const t1 = (i + 1) / tr.rate;
+
+                g.strokeStyle = trimWaveColor(t0);
+                g.beginPath();
+                g.moveTo((t0 - from) / (to - from) * w, mid - tr.mono[i] * mid * 0.95);
+                g.lineTo((t1 - from) / (to - from) * w, mid - tr.mono[i + 1] * mid * 0.95);
+                g.stroke();
+            }
+
+            return;
+        }
+
+        for (let c = 0; c < w; c++) {
+
+            const t = from + (c + 0.5) * spanPerCol;
+            const top = mid - peaks.hi[c] * mid * 0.95;
+            const bottom = mid - peaks.lo[c] * mid * 0.95;
+
+            g.fillStyle = trimWaveColor(t);
+            g.fillRect(c, top, 1, Math.max(1, bottom - top));
+        }
+    }
+
+    function trimLine(g, x, h, color, width) {
+
+        g.fillStyle = color;
+        g.fillRect(Math.round(x - width / 2), 0, width, h);
+    }
+
+    function trimPaint() {
+
+        if (!trimUi || !tr) {
+            return;
+        }
+
+        trimUi.startInput.value = document.activeElement === trimUi.startInput ? trimUi.startInput.value : trimTimeText(tr.start);
+        trimUi.endInput.value = document.activeElement === trimUi.endInput ? trimUi.endInput.value : trimTimeText(tr.end);
+        trimUi.info.textContent = "ID " + tr.song.id + " · Original " + trimTimeText(tr.duration)
+            + " · New " + trimTimeText(tr.end - tr.start);
+        trimUi.pauseBtn.textContent = tr.src ? "Pause" : "Play";
+        trimUi.zoomLabel.textContent = TRIM_ZOOMS[tr.zoom] >= 1
+            ? TRIM_ZOOMS[tr.zoom] + " s wide"
+            : Math.round(TRIM_ZOOMS[tr.zoom] * 1000) + " ms wide";
+
+        const ov = trimFit(trimUi.overview);
+        const de = trimFit(trimUi.detail);
+        const head = trimPlayhead();
+
+        ov.g.clearRect(0, 0, ov.w, ov.h);
+        de.g.clearRect(0, 0, de.w, de.h);
+
+        if (!tr.mono) {
+            return;
+        }
+
+        // The whole song, its peaks worked out once per width
+        if (!tr.overviewPeaks || tr.overviewPeaks.lo.length !== ov.w) {
+            tr.overviewPeaks = trimPeaks(0, tr.duration, ov.w);
+        }
+
+        trimDrawWave(ov.g, ov.w, ov.h, 0, tr.duration, tr.overviewPeaks);
+
+        const ox = function (t) {
+            return t / tr.duration * ov.w;
+        };
+
+        trimLine(ov.g, ox(tr.start), ov.h, tr.edge === "start" ? "#fff" : "#ffd479", 2 * ov.dpr);
+        trimLine(ov.g, ox(tr.end), ov.h, tr.edge === "end" ? "#fff" : "#ffd479", 2 * ov.dpr);
+
+        // What the close up shows, drawn as a frame on the whole song
+        const span = TRIM_ZOOMS[tr.zoom];
+        const from = tr.viewC - span / 2;
+        const to = tr.viewC + span / 2;
+
+        ov.g.strokeStyle = "rgba(255,255,255,0.5)";
+        ov.g.lineWidth = ov.dpr;
+        ov.g.strokeRect(ox(from), 0.5, Math.max(2, ox(to) - ox(from)), ov.h - 1);
+
+        if (head !== null) {
+            trimLine(ov.g, ox(head), ov.h, "#ff8a8a", 2 * ov.dpr);
+        }
+
+        // The close up, time running from left to right around the end
+        const dx = function (t) {
+            return (t - from) / span * de.w;
+        };
+
+        de.g.fillStyle = "#222228";
+        de.g.fillRect(0, de.h / 2, de.w, 1);
+
+        // Outside the song, marked as nothing
+        if (from < 0) {
+            de.g.fillStyle = "#101012";
+            de.g.fillRect(0, 0, dx(0), de.h);
+        }
+
+        if (to > tr.duration) {
+            de.g.fillStyle = "#101012";
+            de.g.fillRect(dx(tr.duration), 0, de.w - dx(tr.duration), de.h);
+        }
+
+        const cols = de.w;
+        const peaks = (span / cols) * tr.rate >= 1 ? trimPeaks(from, to, cols) : null;
+
+        trimDrawWave(de.g, de.w, de.h, from, to, peaks);
+
+        trimLine(de.g, dx(tr.start), de.h, tr.edge === "start" ? "#fff" : "#ffd479", 2 * de.dpr);
+        trimLine(de.g, dx(tr.end), de.h, tr.edge === "end" ? "#fff" : "#ffd479", 2 * de.dpr);
+
+        if (head !== null && head >= from && head <= to) {
+            trimLine(de.g, dx(head), de.h, "#ff8a8a", 2 * de.dpr);
+        }
+
+        // The time at each side of the close up
+        de.g.fillStyle = "#aaa";
+        de.g.font = Math.round(12 * de.dpr) + "px sans-serif";
+        de.g.textBaseline = "bottom";
+        de.g.textAlign = "left";
+        de.g.fillText(trimTimeText(Math.max(0, from)), 4 * de.dpr, de.h - 3 * de.dpr);
+        de.g.textAlign = "right";
+        de.g.fillText(trimTimeText(Math.min(tr.duration, to)), de.w - 4 * de.dpr, de.h - 3 * de.dpr);
+    }
+
+    // Dragging and tapping on the two waveforms
+    function installTrimPointers() {
+
+        const overview = trimUi.overview;
+        const detail = trimUi.detail;
+
+        // The time under a pointer on the whole song
+        const overviewTime = function (ev) {
+
+            const r = overview.getBoundingClientRect();
+
+            return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * tr.duration;
+        };
+
+        overview.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || !tr.mono) {
+                return;
+            }
+
+            const r = overview.getBoundingClientRect();
+            const px = function (t) {
+                return r.left + t / tr.duration * r.width;
+            };
+            const nearStart = Math.abs(ev.clientX - px(tr.start));
+            const nearEnd = Math.abs(ev.clientX - px(tr.end));
+            const grab = Math.min(nearStart, nearEnd) <= 18 ? (nearStart < nearEnd ? "start" : "end") : null;
+
+            tr.drag = { where: "overview", edge: grab, x: ev.clientX, moved: false };
+
+            if (grab) {
+
+                tr.edge = grab;
+                trimUi.edgeRow.paint();
+            }
+
+            overview.setPointerCapture(ev.pointerId);
+            ev.preventDefault();
+        });
+
+        overview.addEventListener("pointermove", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "overview") {
+                return;
+            }
+
+            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
+                tr.drag.moved = true;
+            }
+
+            if (tr.drag.edge && tr.drag.moved) {
+
+                trimSetEdge(tr.drag.edge, overviewTime(ev));
+                tr.viewC = tr[tr.drag.edge];
+                trimPaint();
+            }
+        });
+
+        overview.addEventListener("pointerup", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "overview") {
+                return;
+            }
+
+            const drag = tr.drag;
+
+            tr.drag = null;
+
+            // A tap away from the ends plays from there to the end
+            if (!drag.moved) {
+
+                const t = overviewTime(ev);
+
+                if (t < tr.end - 0.05) {
+                    trimPlay(Math.max(t, 0), tr.end);
+                }
+            }
+        });
+
+        overview.addEventListener("pointercancel", function () {
+
+            if (tr) {
+                tr.drag = null;
+            }
+        });
+
+        // In the close up the chosen end follows the finger, as finely as
+        // the zoom allows, and the view centres on it again when let go
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || !tr.mono) {
+                return;
+            }
+
+            tr.drag = { where: "detail", x: ev.clientX, from: tr[tr.edge], moved: false };
+            detail.setPointerCapture(ev.pointerId);
+            ev.preventDefault();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "detail") {
+                return;
+            }
+
+            const r = detail.getBoundingClientRect();
+            const perPx = TRIM_ZOOMS[tr.zoom] / r.width;
+
+            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
+                tr.drag.moved = true;
+            }
+
+            if (tr.drag.moved) {
+
+                trimSetEdge(tr.edge, tr.drag.from + (ev.clientX - tr.drag.x) * perPx);
+                trimPaint();
+            }
+        });
+
+        detail.addEventListener("pointerup", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "detail") {
+                return;
+            }
+
+            const drag = tr.drag;
+
+            tr.drag = null;
+
+            if (drag.moved) {
+
+                tr.viewC = tr[tr.edge];
+                trimPaint();
+                return;
+            }
+
+            // A tap plays from the time tapped to the end
+            const r = detail.getBoundingClientRect();
+            const t = tr.viewC - TRIM_ZOOMS[tr.zoom] / 2 + (ev.clientX - r.left) / r.width * TRIM_ZOOMS[tr.zoom];
+
+            if (t < tr.end - 0.02) {
+                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end);
+            }
+        });
+
+        detail.addEventListener("pointercancel", function () {
+
+            if (tr) {
+                tr.drag = null;
+            }
+        });
+
+        // A wheel or a touch pad zooms the close up
+        detail.addEventListener("wheel", function (ev) {
+
+            if (!tr) {
+                return;
+            }
+
+            ev.preventDefault();
+            trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
+        }, { passive: false });
+    }
+
+    // The Trim button busy with a turning ring, and not to be pressed again
+    // while Mureka works
+    function trimBusy(on) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        if (tr) {
+            tr.busy = on;
+        }
+
+        trimUi.trimBtn.textContent = "";
+
+        if (on) {
+
+            const ring = document.createElement("span");
+
+            ring.className = "trimRing small";
+            trimUi.trimBtn.appendChild(ring);
+            trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
+        } else {
+            trimUi.trimBtn.textContent = "Trim";
+        }
+
+        trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
+    }
+
+    // The dimmed page with the turning ring, or away when the text is empty
+    function trimWorking(text) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        trimUi.workingText.textContent = text;
+        trimUi.working.style.display = text ? "flex" : "none";
+    }
+
+    // Ask before trimming, with the choice to delete the original
+    function askTrim() {
+
+        if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        // Nothing cut off, nothing for Mureka to do
+        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
+
+            trimStatus("Move the start or the end first");
+            return;
+        }
+
+        trimUi.askText.textContent = "Trim \"" + (tr.song.title || "Untitled") + "\" to "
+            + trimTimeText(tr.start) + " - " + trimTimeText(tr.end) + "?";
+        trimUi.askDelete.checked = false;
+        trimUi.ask.style.display = "flex";
+    }
+
+    // Hand the trim to the phone, which sends it to Mureka. How it goes
+    // comes back with the state, under this trim's own id
+    function submitTrim(deleteOriginal) {
+
+        if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        const song = tr.song;
+        const songMs = song.durationMs || Math.round(tr.duration * 1000);
+
+        trimStop();
+        tr.paused = null;
+        tr.job = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        trimBusy(true);
+        trimStatus("");
+        trimWorking("Trimming on Mureka");
+        dbgLog("Trim", "sent " + tr.job + " for " + song.id);
+
+        send("trimSong", {
+            job: tr.job,
+            id: song.id,
+            start: Math.max(0, Math.round(tr.start * 1000)),
+            end: Math.min(songMs, Math.round(tr.end * 1000)),
+            title: (trimUi.titleInput.value || "").trim() || song.title || "Untitled",
+            deleteOriginal: deleteOriginal
+        });
+
+        // Given up on when the phone never answers
+        const job = tr.job;
+
+        setTimeout(function () {
+
+            if (tr && tr.job === job && tr.busy) {
+
+                tr.job = "";
+                trimWorking("");
+                trimBusy(false);
+                trimStatus("No answer from the phone, check the song list before trying again");
+            }
+        }, 120000);
+    }
+
+    // Follow the trim this browser asked for, from each state the phone sends
+    function trimFollow(s) {
+
+        const j = s && s.trimJob;
+
+        if (!tr || !tr.job || !j || j.job !== tr.job) {
+            return;
+        }
+
+        if (j.state === "working") {
+
+            trimWorking(j.text || "Trimming on Mureka");
+            return;
+        }
+
+        tr.job = "";
+        dbgLog("Trim", j.state + ": " + (j.text || ""));
+
+        if (j.state === "done") {
+
+            closeTrimmer();
+            statusLine.setText(j.text || "Trimmed");
+
+            // The new song shows in the list that is open
+            if ($("browse").style.display === "flex") {
+                setTimeout(function () {
+                    loadList(true);
+                }, 300);
+            }
+
+            return;
+        }
+
+        trimWorking("");
+        trimBusy(false);
+        trimStatus(j.text || "Mureka did not trim it");
+    }
+
+    // Keys while the trimmer is open: space plays the end or pauses, the
+    // arrows move the chosen end, plus and minus zoom, Escape closes. Heard
+    // before the page's own keys, which never see them
+    window.addEventListener("keydown", function (ev) {
+
+        if (!trimOpen() || ev.ctrlKey || ev.metaKey || ev.altKey) {
+            return;
+        }
+
+        // While Mureka trims, keys wait
+        if (tr && tr.busy) {
+
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            return;
+        }
+
+        const at = document.activeElement;
+        const typing = at && (at.tagName === "INPUT" && at.type !== "checkbox");
+
+        if (ev.key === "Escape") {
+
+            // A field lets go first, then the question, then the trimmer
+            if (typing) {
+                at.blur();
+            } else if (trimUi.ask.style.display === "flex") {
+                trimUi.ask.style.display = "none";
+            } else {
+                closeTrimmer();
+            }
+        } else if (typing) {
+
+            // The page's own keys never hear what is typed here
+            ev.stopImmediatePropagation();
+            return;
+        } else if (ev.key === " ") {
+
+            if (tr && (tr.src || tr.paused)) {
+                trimPauseResume();
+            } else {
+                trimPlayEnd();
+            }
+        } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+            trimNudge((ev.key === "ArrowLeft" ? -1 : 1) * (ev.shiftKey ? 0.1 : 0.01));
+        } else if (ev.key === "+" || ev.key === "=") {
+            trimUi.zoomBy(1);
+        } else if (ev.key === "-") {
+            trimUi.zoomBy(-1);
+        } else {
+
+            ev.stopImmediatePropagation();
+            return;
+        }
+
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+    }, true);
 
     arrangePhone();
     poll();

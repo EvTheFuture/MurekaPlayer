@@ -147,7 +147,9 @@ the new settings layout and a number of smaller improvements.
   moved. The new song gets a title of its own and is put at the top of the
   list, marked new. **Delete original**, ticked when confirming, deletes
   the original on Mureka and from the lists here once the new song has
-  arrived. While Mureka works, a turning ring covers the page.
+  arrived. While Mureka works, a turning ring covers the page. The web
+  view has the same trimmer in its song menu, drawn in the browser, with
+  the phone fetching the song and sending the trim to Mureka.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **No remixing** for songs with lyrics.
   When Mureka refuses a change on a published song, the player offers to take

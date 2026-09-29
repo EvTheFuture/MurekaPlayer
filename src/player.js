@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.20";
+    const VERSION = "1.9.9.25";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2613,12 +2613,6 @@
         const show = settings.artStars === true && !!currentSong;
 
         nowStarsBar.el.style.display = show ? "flex" : "none";
-
-        // The block sits 8px above the cover's lower edge, 12px lower while
-        // the stars show
-        if (bottomWrapEl) {
-            bottomWrapEl.style.bottom = show ? "-4px" : "8px";
-        }
 
         if (show) {
             nowStarsBar.paint();
@@ -11747,9 +11741,14 @@
     function makeMarquee(box) {
 
         // One track holds both copies and is the thing that moves, so the two
-        // can never drift apart
+        // can never drift apart. It only gets a layer of its own while it
+        // moves. Kept on one all the time, whatever is drawn over it near
+        // the line, the cover stars under the status, was put on a layer of
+        // its own too because it touches it, and every new status text made
+        // the browser build that layer again, which on a phone flickered and
+        // left the stars away
         const track = document.createElement("span");
-        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
+        track.style.cssText = "display:inline-block;white-space:nowrap";
 
         // Both are inline-block, a plain inline span reports no width at all
         // and the overflow test would never fire
@@ -11803,12 +11802,14 @@
                 { transform: "translateX(" + (-distance) + "px)", offset: 1 }
             ];
 
+            track.style.willChange = "transform";
             anim = track.animate(frames, { duration: duration });
 
             anim.onfinish = function () {
 
                 anim = null;
                 track.style.transform = "none";
+                track.style.willChange = "auto";
 
                 // Back at the left edge, so rest here exactly as at the start
                 timer = setTimeout(function () {
@@ -11843,6 +11844,7 @@
             }
 
             track.style.transform = "none";
+            track.style.willChange = "auto";
             first.style.marginRight = "0px";
             first.textContent = value;
 
@@ -12184,10 +12186,11 @@
 
         const mode = settings.artOverlayMode;
 
-        // Invisible stars must not take taps meant for the cover underneath
-        if (nowStarsBar) {
-            nowStarsBar.el.style.pointerEvents = mode === "none" ? "none" : "auto";
-        }
+        // The stars are left alone: Rating stars on the cover, their own
+        // setting, decides whether they show, with the overlays off too.
+        // They used to sit in the title block and went with it, and moved
+        // to the top they showed at start and were hidden once playback
+        // began
 
         if (mode === "none") {
 
@@ -12207,10 +12210,7 @@
 
         // Tall shading only while lyrics actually show. Info alone needs just
         // enough to back the title and meta, so the art above stays untinted
-        // A little taller when the star row sits under the meta line
-        const starsShown = nowStarsBar && nowStarsBar.el.style.display !== "none";
-
-        bottomScrimEl.style.height = lyricActive ? "88%" : (starsShown ? "28%" : "20%");
+        bottomScrimEl.style.height = lyricActive ? "88%" : "20%";
         bottomScrimEl.style.opacity = "1";
         bottomWrapEl.style.opacity = "1";
 
@@ -14046,6 +14046,8 @@
             wave: hostWave(),
             waveOwn: hostWaveOf(waveOwn, HOST_WAVE_POINTS * 2),
             waveOwnLoud: hostWaveOf(waveOwnLoud, HOST_WAVE_POINTS * 2),
+            trimJob: hostTrimJob,
+            trimFade: settings.trimFade !== false,
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
             controls: hostControls("web"),
@@ -14152,7 +14154,11 @@
             canRemix: song.generation_method !== 7,
             mine: !creatorSource,
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
-            src: songUrl(song) || ""
+            src: songUrl(song) || "",
+
+            // What the web view's trimmer needs: your own song with a file
+            canTrim: !creatorSource && !!songUrl(song),
+            durationMs: Number(song.duration_milliseconds) || 0
         };
     }
 
@@ -15085,6 +15091,14 @@
             stopPlay();
         } else if (cmd === "songAction") {
             hostSongAction(arg || {});
+        } else if (cmd === "trimSong") {
+            hostTrim(arg || {});
+        } else if (cmd === "trimFade") {
+
+            // The trimmer's fade switch, the same one on the phone and in
+            // the web view
+            settings.trimFade = arg === true || arg === "true";
+            saveSettings();
         } else if (cmd === "forceAnswer") {
 
             // The web view answered the question about a published song
@@ -15850,24 +15864,33 @@
         bottomWrap.appendChild(playerTitle);
         bottomWrap.appendChild(playerMetaEl);
 
-        // Stars for the playing song, tappable straight on the cover. The
-        // overlay around them ignores the pointer, these take it back. The
-        // negative margin lines the first star up with the text, the padding
-        // around each star is only there to make it easier to hit. While the
-        // stars show, refreshNowStars lowers the whole block, lyrics, title,
-        // meta and stars, so the stars float out past the cover's lower edge
-        // just above the seek bar and the text keeps its place above them
+        // Stars for the playing song, tappable straight on the cover, under
+        // the status line at the top, far from the seek bar so a seek does
+        // not rate by mistake. Placed on the cover by themselves rather than
+        // in the status line's box, so neither can move or redraw the other:
+        // the status walks across when it is long. The overlay around them
+        // ignores the pointer, these take it back. Left 5px lines the first
+        // star up with the text, the padding around each star is only there
+        // to make it easier to hit
         nowStarsBar = makeStarBar(function () {
             return currentSong;
         }, { size: 20, pad: 5, caption: false });
 
+        nowStarsBar.el.style.position = "absolute";
+        nowStarsBar.el.style.left = "5px";
+        nowStarsBar.el.style.top = "24px";
+        nowStarsBar.el.style.zIndex = "4";
         nowStarsBar.el.style.alignItems = "flex-start";
-        nowStarsBar.el.style.margin = "0 0 -5px -5px";
         nowStarsBar.el.style.pointerEvents = "auto";
         nowStarsBar.el.style.width = "max-content";
         nowStarsBar.el.style.filter = "drop-shadow(0 1px 2px rgba(0,0,0,0.9))";
 
-        bottomWrap.appendChild(nowStarsBar.el);
+        // Always a layer of their own, so it never depends on what moves
+        // near them. While the status walks across it is on a layer, and
+        // the stars touching it were otherwise put on one and taken off
+        // again with every change, which is what made them flicker and go
+        nowStarsBar.el.style.willChange = "transform";
+
         refreshNowStars();
 
         // Layer the overlays over the coverflow, the tiles stay swipeable below
@@ -15875,6 +15898,7 @@
         artBox.appendChild(topScrim);
         artBox.appendChild(bottomScrim);
         artBox.appendChild(topWrap);
+        artBox.appendChild(nowStarsBar.el);
         artBox.appendChild(bottomWrap);
 
         const seekRow = document.createElement("div");
@@ -20053,7 +20077,7 @@
         mobilePage.appendChild(makeSubLabel("Waveform from"));
         mobilePage.appendChild(waveSourceRow);
         mobilePage.appendChild(makeHint("Mureka's has a few points for the whole song. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
-        mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars on the cover, tap one to rate."));
+        mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. They show with the art overlays off too."));
 
         // The screen stays on while music plays. This keeps it on when the
         // music is paused or stopped too, so the phone never locks
@@ -24495,31 +24519,21 @@
         }
     }
 
-    // Send the trim to Mureka. The new song comes back finished and is put
-    // at the top of the list, the original deleted when asked to
-    async function submitTrim(deleteOriginal) {
+    // Trim a song on Mureka. The new song comes back finished and is put at
+    // the top of the list, the original deleted when asked to, once the new
+    // song is safely there. progress hears what is going on. Answers
+    // whether it went and a line saying what happened
+    async function trimOnMureka(song, startMs, endMs, title, deleteOriginal, progress) {
 
-        if (!tr || !tr.buffer || tr.busy) {
-            return;
-        }
+        const say = typeof progress === "function" ? progress : function () {};
+        let res = null;
+        let json = null;
 
-        const song = tr.song;
-        const songMs = song.duration_milliseconds || Math.round(tr.duration * 1000);
-        const startMs = Math.max(0, Math.round(tr.start * 1000));
-        const endMs = Math.min(songMs, Math.round(tr.end * 1000));
-        const title = (trimUi.titleInput.value || "").trim() || song.title || "Untitled";
-
-        trimStop();
-        tr.paused = null;
-        trimBusy(true);
-        trimStatus("");
-        trimWorking("Trimming on Mureka");
-
-        const token = trimToken;
+        say("Trimming on Mureka");
 
         try {
 
-            const res = await timedFetch("/api/pgc/song/trim", {
+            res = await timedFetch("/api/pgc/song/trim", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -24534,92 +24548,158 @@
                     outer_song: null
                 })
             }, 60000);
-
-            let json = null;
-
-            try {
-                json = await res.json();
-            } catch (e) {
-                json = null;
-            }
-
-            if (!res.ok || !json || json.code !== 0) {
-
-                const why = json && json.msg ? String(json.msg) : "HTTP " + res.status;
-
-                if (token === trimToken) {
-
-                    trimWorking("");
-                    trimBusy(false);
-                    trimStatus("Mureka did not trim it: " + why);
-                }
-
-                return;
-            }
-
-            // The new song, straight into the library, marked new as Mureka
-            // has it
-            const made = extractSongs(json.data || json).filter(isUsableSong);
-            const known = new Set(cache.songs.map(function (x) {
-                return x.song_id;
-            }));
-
-            for (const s of made.reverse()) {
-
-                if (typeof s.is_played !== "boolean") {
-                    s.is_played = false;
-                }
-
-                if (!known.has(s.song_id)) {
-                    cache.songs.unshift(trim(s));
-                }
-            }
-
-            saveCache();
-            renderList();
-            publishHostSoon();
-
-            let note = made.length > 0
-                ? "Trimmed: " + title + ", the new song is at the top of the list"
-                : "Trimmed: " + title + ", Load brings the new song in";
-
-            // The original goes only once the new song is safely there, from
-            // Mureka first and then from the lists here
-            if (deleteOriginal) {
-
-                if (token === trimToken) {
-                    trimWorking("Deleting the original");
-                }
-
-                const gone = await deleteOnMureka(song);
-
-                if (gone.ok) {
-
-                    await forgetSong(song);
-                    saveManualInstrumental();
-                    saveCache();
-                    renderList();
-                    publishHostSoon();
-                    note += ", the original is deleted";
-                } else {
-                    note += ". The original is kept, " + gone.why;
-                }
-            }
-
-            if (token === trimToken) {
-                closeTrimmer();
-            }
-
-            setStatus(note);
         } catch (e) {
+            return { ok: false, text: "Could not reach Mureka, " + (e && e.message ? e.message : "no connection") };
+        }
 
-            if (token === trimToken) {
+        try {
+            json = await res.json();
+        } catch (e) {
+            json = null;
+        }
 
-                trimWorking("");
-                trimBusy(false);
-                trimStatus("Could not reach Mureka, " + (e && e.message ? e.message : "no connection"));
+        if (!res.ok || !json || json.code !== 0) {
+            return { ok: false, text: "Mureka did not trim it: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status) };
+        }
+
+        // The new song, straight into the library, marked new as Mureka has it
+        const made = extractSongs(json.data || json).filter(isUsableSong);
+        const known = new Set(cache.songs.map(function (x) {
+            return x.song_id;
+        }));
+
+        for (const s of made.reverse()) {
+
+            if (typeof s.is_played !== "boolean") {
+                s.is_played = false;
+            }
+
+            if (!known.has(s.song_id)) {
+                cache.songs.unshift(trim(s));
             }
         }
+
+        saveCache();
+        renderList();
+        publishHostSoon();
+
+        let note = made.length > 0
+            ? "Trimmed: " + title + ", the new song is at the top of the list"
+            : "Trimmed: " + title + ", Load brings the new song in";
+
+        // The original goes only once the new song is safely there, from
+        // Mureka first and then from the lists here
+        if (deleteOriginal) {
+
+            say("Deleting the original");
+
+            const gone = await deleteOnMureka(song);
+
+            if (gone.ok) {
+
+                await forgetSong(song);
+                saveManualInstrumental();
+                saveCache();
+                renderList();
+                publishHostSoon();
+                note += ", the original is deleted";
+            } else {
+                note += ". The original is kept, " + gone.why;
+            }
+        }
+
+        setStatus(note);
+
+        return { ok: true, text: note };
+    }
+
+    // Send the trim made in the trimmer to Mureka
+    async function submitTrim(deleteOriginal) {
+
+        if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        const song = tr.song;
+        const songMs = song.duration_milliseconds || Math.round(tr.duration * 1000);
+        const startMs = Math.max(0, Math.round(tr.start * 1000));
+        const endMs = Math.min(songMs, Math.round(tr.end * 1000));
+        const title = (trimUi.titleInput.value || "").trim() || song.title || "Untitled";
+        const token = trimToken;
+
+        trimStop();
+        tr.paused = null;
+        trimBusy(true);
+        trimStatus("");
+
+        const done = await trimOnMureka(song, startMs, endMs, title, deleteOriginal, function (text) {
+
+            if (token === trimToken) {
+                trimWorking(text);
+            }
+        });
+
+        if (token !== trimToken) {
+            return;
+        }
+
+        if (done.ok) {
+
+            closeTrimmer();
+            return;
+        }
+
+        trimWorking("");
+        trimBusy(false);
+        trimStatus(done.text);
+    }
+
+    // A trim asked for by a web view, which has its own trimmer. What is
+    // going on is sent with the state, under the job's own id, so the web
+    // view that asked can follow it and show how it went
+    let hostTrimJob = null;
+
+    async function hostTrim(a) {
+
+        const job = String(a && a.job ? a.job : "");
+        const song = hostFindSong(a && a.id);
+
+        if (!job || (hostTrimJob && hostTrimJob.state === "working")) {
+            return;
+        }
+
+        if (!song || creatorSource) {
+
+            hostTrimJob = { job: job, state: "failed", text: "The song is not in the library on the phone" };
+            publishHostSoon();
+            return;
+        }
+
+        const songMs = Number(song.duration_milliseconds) || 0;
+        const startMs = Math.max(0, Math.round(Number(a.start) || 0));
+        const endMs = Math.round(Number(a.end) || 0);
+        const clippedEnd = songMs > 0 ? Math.min(songMs, endMs) : endMs;
+
+        if (clippedEnd - startMs < 1000) {
+
+            hostTrimJob = { job: job, state: "failed", text: "The kept part must be at least a second" };
+            publishHostSoon();
+            return;
+        }
+
+        const title = String(a.title || "").trim().slice(0, 50) || song.title || "Untitled";
+
+        hostTrimJob = { job: job, state: "working", text: "Trimming on Mureka" };
+        publishHostSoon();
+
+        const done = await trimOnMureka(song, startMs, clippedEnd, title, a.deleteOriginal === true, function (text) {
+
+            hostTrimJob = { job: job, state: "working", text: text };
+            publishHostSoon();
+        });
+
+        hostTrimJob = { job: job, state: done.ok ? "done" : "failed", text: done.text };
+        publishHostSoon();
     }
 
     // Build the playlists overlay once, it covers the panel until closed
