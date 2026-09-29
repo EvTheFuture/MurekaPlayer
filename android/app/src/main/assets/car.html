@@ -4622,6 +4622,9 @@
     const MARQUEE_DELAY = 3000;
     const MARQUEE_SPEED = 60;
     const MARQUEE_GAP = 90;
+
+    // The gap is at least half the line's width as well, as on the phone
+    const MARQUEE_GAP_SHARE = 0.5;
     const marquees = [];
 
     function makeMarquee(box) {
@@ -4645,6 +4648,18 @@
         let timer = null;
         let width = 0;
 
+        // A line too long for its box fades out at the right edge, so the
+        // end cut off there reads as cut off, not as the next copy coming in
+        const edgeFade = function () {
+
+            const over = first.textContent
+                && Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
+            const mask = over ? "linear-gradient(to right, #000 calc(100% - 2em), transparent)" : "";
+
+            box.style.webkitMaskImage = mask;
+            box.style.maskImage = mask;
+        };
+
         const stop = function () {
 
             if (timer) {
@@ -4667,6 +4682,8 @@
 
         const start = function () {
 
+            edgeFade();
+
             if (!track.animate || !first.textContent) {
                 return;
             }
@@ -4681,10 +4698,13 @@
 
             // A right aligned line walks from its start like any other
             box.style.textAlign = "left";
-            first.style.marginRight = MARQUEE_GAP + "px";
+
+            const gap = Math.max(MARQUEE_GAP, Math.round(width * MARQUEE_GAP_SHARE));
+
+            first.style.marginRight = gap + "px";
             second.style.display = "inline-block";
 
-            const distance = textWidth + MARQUEE_GAP;
+            const distance = textWidth + gap;
 
             anim = track.animate([
                 { transform: "translateX(0)", offset: 0, easing: "ease-in" },
@@ -4709,6 +4729,7 @@
         const restart = function (wait) {
 
             stop();
+            requestAnimationFrame(edgeFade);
             timer = setTimeout(function () {
 
                 timer = null;

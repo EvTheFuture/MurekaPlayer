@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.25";
+    const VERSION = "1.9.9.27";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -894,9 +894,11 @@
     // Pixels per second, slow enough to read
     const META_SCROLL_SPEED = 40;
 
-    // The clear space that follows the text before the next copy of it, about
-    // twenty spaces at this size
+    // The clear space that follows the text before the next copy of it, at
+    // least this, and at least half the line's width, so the next copy is
+    // well apart and never seen coming in while the text rests
     const META_SCROLL_GAP = 72;
+    const META_SCROLL_GAP_SHARE = 0.5;
 
     let playerCountsEl = null;
 
@@ -2603,14 +2605,16 @@
     let rateCtrlBtn = null;
     let rateIconSvg = null;
 
-    // Show the cover stars for the playing song, or hide them
+    // Show the cover stars for the playing song, or hide them. They are
+    // part of the overlays, so with the overlays off they are hidden too,
+    // from the start and not only once playback begins
     function refreshNowStars() {
 
         if (!nowStarsBar) {
             return;
         }
 
-        const show = settings.artStars === true && !!currentSong;
+        const show = settings.artStars === true && !!currentSong && settings.artOverlayMode !== "none";
 
         nowStarsBar.el.style.display = show ? "flex" : "none";
 
@@ -11769,7 +11773,20 @@
         let anim = null;
         let timer = null;
 
+        // A line too long for the box fades out at the right edge, so the
+        // end cut off there reads as cut off, not as the next copy coming in
+        const edgeFade = function () {
+
+            const over = Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
+            const mask = over ? "linear-gradient(to right, #000 calc(100% - 28px), transparent)" : "";
+
+            box.style.webkitMaskImage = mask;
+            box.style.maskImage = mask;
+        };
+
         const start = function () {
+
+            edgeFade();
 
             if (!track.animate) {
                 return;
@@ -11784,13 +11801,15 @@
             }
 
             // Show the trailing copy and space it off the first
-            first.style.marginRight = META_SCROLL_GAP + "px";
+            const gap = Math.max(META_SCROLL_GAP, Math.round(box.clientWidth * META_SCROLL_GAP_SHARE));
+
+            first.style.marginRight = gap + "px";
             second.style.display = "inline-block";
 
             // Travel exactly one line plus the gap. At the end the second copy
             // sits where the first began, so resetting to zero is invisible
             // and the line is on screen throughout
-            const distance = textWidth + META_SCROLL_GAP;
+            const distance = textWidth + gap;
             const duration = (distance / META_SCROLL_SPEED) * 1000;
 
             // Ease away from the rest position and ease back into the next
@@ -11851,6 +11870,9 @@
             // The trailing copy is only needed while scrolling
             second.style.display = "none";
             second.textContent = value;
+
+            // The fade at once, the walk after the rest
+            requestAnimationFrame(edgeFade);
 
             if (!value) {
                 return;
@@ -12186,11 +12208,8 @@
 
         const mode = settings.artOverlayMode;
 
-        // The stars are left alone: Rating stars on the cover, their own
-        // setting, decides whether they show, with the overlays off too.
-        // They used to sit in the title block and went with it, and moved
-        // to the top they showed at start and were hidden once playback
-        // began
+        // The stars go with the overlays, see refreshNowStars
+        refreshNowStars();
 
         if (mode === "none") {
 
@@ -20077,7 +20096,7 @@
         mobilePage.appendChild(makeSubLabel("Waveform from"));
         mobilePage.appendChild(waveSourceRow);
         mobilePage.appendChild(makeHint("Mureka's has a few points for the whole song. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
-        mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. They show with the art overlays off too."));
+        mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
 
         // The screen stays on while music plays. This keeps it on when the
         // music is paused or stopped too, so the phone never locks
