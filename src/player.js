@@ -58,7 +58,22 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.3";
+    const VERSION = "1.9.9.8";
+
+    // When the player started, for the startup times in the debug log
+    const PLAYER_START = Date.now();
+    const startupLogged = {};
+
+    // One line in the debug log the first time a step of starting up is done
+    function logStartup(step, text) {
+
+        if (startupLogged[step]) {
+            return;
+        }
+
+        startupLogged[step] = true;
+        dbgLog("Page", "Startup: " + text + " after " + (Date.now() - PLAYER_START) + " ms");
+    }
 
     // The two feeds this player can load
     // published returns only your published songs
@@ -1659,6 +1674,7 @@
 
             cache = creatorCache;
             cachedIds = new Set();
+            restoreCacheMarks();
 
             updateCreatorButton();
             updateFeedButton();
@@ -4775,6 +4791,7 @@
             updateCreatorButton();
             cache = loadCache();
             cachedIds = new Set();
+            restoreCacheMarks();
             refreshCachedIds();
 
         } else {
@@ -5184,7 +5201,143 @@
     }
 
     // Rebuild the set of cached song_ids by scanning the audio cache keys
+    // Which songs and covers were cached when the player last looked,
+    // kept per library, so the dots show the moment the list does. Going
+    // through the cache itself takes seconds with thousands of songs, and
+    // when it is done the dots are put right
+    const MARKS_KEY = "mureka_player_cache_marks";
+
+    let marksTimer = null;
+    let marksSig = "";
+
+    function marksKey() {
+        return MARKS_KEY + ":" + feed().cacheKey;
+    }
+
+    function restoreCacheMarks() {
+
+        try {
+
+            const saved = JSON.parse(localStorage.getItem(marksKey()));
+
+            if (!saved || typeof saved.a !== "string" || typeof saved.c !== "string") {
+                return;
+            }
+
+            const songs = new Set(saved.a.split(","));
+            const covers = saved.c.split(",").filter(Boolean);
+
+            for (const song of cache.songs) {
+
+                if (songs.has(String(song.song_id))) {
+                    cachedIds.add(song.song_id);
+                }
+            }
+
+            for (const id of covers) {
+                artCachedIds.add(id);
+            }
+
+            marksSig = cachedIds.size + "|" + artCachedIds.size;
+            dbgLog("Page", "Startup: " + cachedIds.size + " cached songs and " + artCachedIds.size
+                + " covers marked from last time");
+        } catch (e) {
+            // Nothing kept, the scan marks them
+        }
+    }
+
+    // Keep the marks a moment after they change, once for a burst of changes
+    function saveCacheMarksSoon() {
+
+        if (marksTimer) {
+            return;
+        }
+
+        marksTimer = setTimeout(function () {
+
+            marksTimer = null;
+
+            const sig = cachedIds.size + "|" + artCachedIds.size;
+
+            if (sig === marksSig) {
+                return;
+            }
+
+            marksSig = sig;
+
+            try {
+
+                localStorage.setItem(marksKey(), JSON.stringify({
+                    a: Array.from(cachedIds).join(","),
+                    c: Array.from(artCachedIds).join(",")
+                }));
+            } catch (e) {
+                // No room, the scan still marks them at the next start
+            }
+        }, 3000);
+    }
+
+    // The songs that are seen first, the playing one, the ones around it
+    // in the queue and the top of the list, looked up one by one in the
+    // cache. That is quick, while going through the whole cache takes
+    // seconds with thousands of songs
+    async function markSeenSongs(store) {
+
+        const seen = [];
+
+        if (currentSong) {
+            seen.push(currentSong);
+        }
+
+        for (let i = Math.max(0, queuePos - 3); i < Math.min(queue.length, queuePos + 4); i++) {
+            seen.push(queue[i]);
+        }
+
+        const shown = displaySongs();
+
+        for (let i = 0; i < Math.min(shown.length, 60); i++) {
+            seen.push(shown[i]);
+        }
+
+        let found = 0;
+
+        await Promise.all(seen.map(async function (song) {
+
+            const url = song ? songUrl(song) : "";
+
+            if (!url || cachedIds.has(song.song_id)) {
+                return;
+            }
+
+            try {
+
+                if (await store.match(url, { ignoreVary: true })) {
+
+                    cachedIds.add(song.song_id);
+                    found += 1;
+                }
+            } catch (e) {
+                // Left to the full check
+            }
+        }));
+
+        if (found > 0) {
+            renderList();
+        }
+    }
+
     async function refreshCachedIds() {
+
+        // The covers are looked through at the same time, not after
+        refreshArtCachedIds();
+
+        try {
+
+            // The songs in view first, then the whole cache
+            await markSeenSongs(await caches.open(AUDIO_CACHE));
+        } catch (e) {
+            // The full check below does it all
+        }
 
         try {
             const store = await caches.open(AUDIO_CACHE);
@@ -5207,10 +5360,9 @@
 
             cachedIds = ids;
             renderList();
+            logStartup("songs", "cached songs checked, " + ids.size + " of " + cache.songs.length);
         } catch (e) {
         }
-
-        refreshArtCachedIds();
     }
 
     // Rebuild the set of cover cached song_ids by scanning the art store keys
@@ -5232,6 +5384,7 @@
 
             artCachedIds = ids;
             renderList();
+            logStartup("covers", "cached covers checked, " + ids.size);
         } catch (e) {
         }
     }
@@ -13461,6 +13614,17 @@
             coverResend: settings.coverResend || "title",
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             songNew: song && !creatorSource ? song.is_played === false : null,
+
+            // The phone's screen off settings, which a web view follows
+            // unless that browser has its own
+            screenSaver: {
+                on: settings.carBlackout === true,
+                after: settings.carAutoBlack,
+                text: settings.blackoutText,
+                color: settings.blackoutColor,
+                size: settings.blackoutSize,
+                drift: settings.blackoutDrift
+            },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             version: VERSION,
             shuffle: shuffleMode,
@@ -13469,7 +13633,10 @@
             signedIn: authState,
             status: statusText || "",
             showUpNext: settings.webUpNext !== false,
-            wave: settings.webWave ? hostWave() : null,
+            // Sent even with the waveform switched off here, a browser with
+            // its own settings may show it
+            wave: hostWave(),
+            waveOn: settings.webWave !== false,
             controls: hostControls("web"),
             names: settings.webNames === true,
             lyricsWhere: settings.webLyrics || "info",
@@ -13494,8 +13661,9 @@
     // the cover. The web view works out the current line from its own clock
     function hostLyrics() {
 
-        const active = settings.webLyrics !== "off"
-            && lyricRows.length > 0
+        // Sent whatever the phone's own Lyrics choice, lyricsWhere says
+        // where they go, and a browser with its own settings may differ
+        const active = lyricRows.length > 0
             && !(currentSong && isManualInstrumental(currentSong));
 
         if (!active) {
@@ -15916,6 +16084,7 @@
         document.body.appendChild(panel);
 
         restoreSize();
+        restoreCacheMarks();
 
         renderList();
         setStatus("Cached songs: " + cache.songs.length);
@@ -18048,6 +18217,12 @@
         // the web view's sorted copy is made again on its next request
         hostListStamp += 1;
         renderSongs(displaySongs(), listView === "queue");
+
+        if (cache.songs.length > 0) {
+            logStartup("list", "song list of " + cache.songs.length + " songs drawn");
+        }
+
+        saveCacheMarksSoon();
     }
 
     // Build one list row for a song
@@ -22261,7 +22436,7 @@
     // exact sample where the cut is, which the audio element cannot do
     const TRIM_FADE = 1;
     const TRIM_MIN_LEN = 1;
-    const TRIM_END_PREVIEW = 5;
+    const TRIM_PREVIEW_MIN = 0.5;
     const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
 
     let trimEl = null;
@@ -22306,10 +22481,13 @@
         });
     }
 
-    // The song's file, the cached copy when there is one
-    async function trimLoadBytes(song) {
+    // The song's file, the cached copy when there is one, otherwise
+    // downloaded with the share that has arrived shown as it comes in.
+    // What was done and how long it took goes to the debug log
+    async function trimLoadBytes(song, token) {
 
         const url = songUrl(song);
+        const t0 = Date.now();
 
         if (!url) {
             throw new Error("no link to the song");
@@ -22318,14 +22496,24 @@
         try {
 
             const store = await caches.open(AUDIO_CACHE);
-            const hit = await store.match(url);
+            const hit = await store.match(url, { ignoreVary: true });
 
             if (hit) {
-                return await hit.arrayBuffer();
+
+                trimLoading("Reading the cached song");
+
+                const bytes = await hit.arrayBuffer();
+
+                dbgLog("Audio", "Trimmer read the cached song, " + Math.round(bytes.byteLength / 1024)
+                    + " kB in " + (Date.now() - t0) + " ms");
+
+                return bytes;
             }
         } catch (e) {
-            // No cache, fetched below
+            // No cache, downloaded below
         }
+
+        trimLoading("Downloading the song");
 
         const res = await timedFetch(url, {}, 60000);
 
@@ -22333,7 +22521,51 @@
             throw new Error("HTTP " + res.status);
         }
 
-        return await res.arrayBuffer();
+        const total = Number(res.headers.get("Content-Length")) || 0;
+        let bytes = null;
+
+        // Read in pieces, so the share downloaded can be shown
+        if (res.body && res.body.getReader && total > 0) {
+
+            const reader = res.body.getReader();
+            const parts = [];
+            let got = 0;
+
+            while (true) {
+
+                const part = await reader.read();
+
+                if (part.done) {
+                    break;
+                }
+
+                parts.push(part.value);
+                got += part.value.length;
+
+                if (token === trimToken) {
+                    trimLoading("Downloading the song, " + Math.min(100, Math.floor(got / total * 100)) + "%");
+                }
+            }
+
+            // The pieces joined into one file
+            const all = new Uint8Array(got);
+            let at = 0;
+
+            for (const piece of parts) {
+
+                all.set(piece, at);
+                at += piece.length;
+            }
+
+            bytes = all.buffer;
+        } else {
+            bytes = await res.arrayBuffer();
+        }
+
+        dbgLog("Audio", "Trimmer found no cached copy, downloaded " + Math.round(bytes.byteLength / 1024)
+            + " kB in " + (Date.now() - t0) + " ms");
+
+        return bytes;
     }
 
     // A small row of buttons where one is chosen
@@ -22422,30 +22654,43 @@
             "overflow:auto",
             "display:none",
             "flex-direction:column",
-            "gap:10px"
+            "gap:8px"
         ].join(";");
 
         const ui = {};
 
-        // Heading with the song's title and a Close button
+        // Heading with the song's title, Trim within reach and Close
         const head = document.createElement("div");
 
         head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;flex:0 0 auto";
         ui.heading = document.createElement("div");
-        ui.heading.style.cssText = "font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        ui.heading.style.cssText = "flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+
+        ui.trimBtn = makeButton("Trim", "#48e1eb", "#000", askTrim);
+        ui.trimBtn.style.flex = "0 0 auto";
+        ui.trimBtn.style.padding = "6px 16px";
+        ui.trimBtn.style.display = "flex";
+        ui.trimBtn.style.alignItems = "center";
+        ui.trimBtn.style.justifyContent = "center";
+        ui.trimBtn.style.gap = "8px";
 
         const closeBtn = makeButton("Close", "#333", "#fff", closeTrimmer);
 
         closeBtn.style.flex = "0 0 auto";
         closeBtn.style.padding = "6px 14px";
         head.appendChild(ui.heading);
+        head.appendChild(ui.trimBtn);
         head.appendChild(closeBtn);
 
+        // The song's id, its length and the length it will have
+        ui.info = document.createElement("div");
+        ui.info.style.cssText = "font-size:12px;color:#aaa;font-variant-numeric:tabular-nums;margin-top:-4px;user-select:text;-webkit-user-select:text";
+
         ui.status = document.createElement("div");
-        ui.status.style.cssText = "font-size:12px;color:#aaa;min-height:15px";
+        ui.status.style.cssText = "font-size:12px;color:#ffb0b0;display:none";
 
         // The whole song, the kept part lit, the ends to drag
-        ui.overview = trimCanvas(64);
+        ui.overview = trimCanvas(56);
 
         // A turning ring with what is going on while the song is fetched
         // and decoded, which takes a few seconds, in place of the empty
@@ -22495,9 +22740,6 @@
 
         ui.startInput = timeField("Start", "start");
         ui.endInput = timeField("End", "end");
-        ui.length = document.createElement("span");
-        ui.length.style.cssText = "color:#aaa;font-variant-numeric:tabular-nums";
-        timesRow.appendChild(ui.length);
 
         // Which end the close up shows and the buttons move
         ui.edgeRow = trimSegments([
@@ -22516,7 +22758,7 @@
         });
 
         // The close up around the chosen end
-        ui.detail = trimCanvas(150);
+        ui.detail = trimCanvas(130);
 
         // Zoom, the width of the close up in seconds
         const zoomRow = document.createElement("div");
@@ -22534,6 +22776,9 @@
             tr.zoom = Math.max(0, Math.min(TRIM_ZOOMS.length - 1, tr.zoom + step));
             tr.viewC = tr[tr.edge];
             trimPaint();
+
+            // Repeating, the new length is heard soon after
+            trimEndMoved("end");
         };
 
         const zoomOut = makeButton("Zoom out", "#333", "#fff", function () {
@@ -22575,7 +22820,7 @@
         playRow.appendChild(makeButton("Play start", "#333", "#fff", function () {
 
             if (tr) {
-                trimPlay(tr.start, Math.min(tr.end, tr.start + TRIM_END_PREVIEW));
+                trimPlay(tr.start, Math.min(tr.end, tr.start + trimPreviewLen()));
             }
         }));
         playRow.appendChild(makeButton("Play end", "#333", "#fff", function () {
@@ -22587,8 +22832,13 @@
                 trimPlay(tr.start, tr.end);
             }
         }));
-        ui.pauseBtn = makeButton("Pause", "#333", "#fff", function () {
-            trimPauseResume();
+        ui.pauseBtn = makeButton("Play", "#333", "#fff", function () {
+
+            if (tr && !tr.src && !tr.paused) {
+                trimPlay(tr.start, tr.end);
+            } else {
+                trimPauseResume();
+            }
         });
         playRow.appendChild(ui.pauseBtn);
         playRow.appendChild(makeButton("Stop", "#333", "#fff", function () {
@@ -22640,14 +22890,6 @@
         ui.titleInput.style.cssText = "flex:1;min-width:0;font:inherit;padding:5px 8px;border:1px solid #3a3a42;border-radius:6px;background:#26262c;color:#fff";
         titleRow.appendChild(ui.titleInput);
 
-        ui.trimBtn = makeButton("Trim", "#48e1eb", "#000", askTrim);
-        ui.trimBtn.style.flex = "0 0 auto";
-        ui.trimBtn.style.padding = "9px 14px";
-        ui.trimBtn.style.display = "flex";
-        ui.trimBtn.style.alignItems = "center";
-        ui.trimBtn.style.justifyContent = "center";
-        ui.trimBtn.style.gap = "8px";
-
         // The question before trimming, with the choice to delete the
         // original, over the trimmer
         ui.ask = document.createElement("div");
@@ -22688,9 +22930,10 @@
         const hint = document.createElement("div");
 
         hint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays the last five seconds and stops exactly where the song will end, Repeat the end plays them again and again, also while the end is moved. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Pause stops where it is and goes on from there. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms.";
 
         trimEl.appendChild(head);
+        trimEl.appendChild(ui.info);
         trimEl.appendChild(ui.status);
         trimEl.appendChild(ui.loading);
         trimEl.appendChild(ui.overview);
@@ -22703,13 +22946,25 @@
         trimEl.appendChild(ui.fadeRow);
         trimEl.appendChild(ui.loopRow);
         trimEl.appendChild(titleRow);
-        trimEl.appendChild(ui.trimBtn);
         trimEl.appendChild(hint);
         panelEl.appendChild(trimEl);
 
         // Over the panel, not inside the trimmer, so it shows wherever the
         // trimmer is scrolled to
         panelEl.appendChild(ui.ask);
+
+        // While Mureka works: a turning ring and what is going on, over
+        // everything, so it cannot be missed nor anything pressed meanwhile
+        ui.working = document.createElement("div");
+        ui.working.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.65);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:3;color:#fff;font-size:15px";
+
+        const workingRing = document.createElement("span");
+
+        workingRing.style.cssText = "width:40px;height:40px;border:4px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        ui.workingText = document.createElement("span");
+        ui.working.appendChild(workingRing);
+        ui.working.appendChild(ui.workingText);
+        panelEl.appendChild(ui.working);
 
         trimUi = ui;
 
@@ -22734,6 +22989,14 @@
         window.addEventListener("keydown", function (ev) {
 
             if (!trimEl || trimEl.style.display === "none" || ev.ctrlKey || ev.metaKey || ev.altKey) {
+                return;
+            }
+
+            // While Mureka trims, keys wait
+            if (tr && tr.busy) {
+
+                ev.preventDefault();
+                ev.stopImmediatePropagation();
                 return;
             }
 
@@ -22839,7 +23102,7 @@
         updateToggleButton(trimUi.loopRow.querySelector("button"), false);
         trimEl.style.display = "flex";
         trimEl.scrollTop = 0;
-        trimLoading("Getting the song");
+        trimLoading("Looking for the song");
         trimPaint();
 
         if (!trimCtx) {
@@ -22851,13 +23114,15 @@
 
         try {
 
-            const bytes = await trimLoadBytes(song);
+            const bytes = await trimLoadBytes(song, token);
 
             if (token !== trimToken) {
                 return;
             }
 
             trimLoading("Reading the waveform");
+
+            const decodeStart = Date.now();
 
             // Full quality where memory allows, on an iPhone at half the
             // rate, plenty to judge where the song is cut
@@ -22889,14 +23154,18 @@
             const said = (song.duration_milliseconds || 0) / 1000;
             const short = said - buffer.duration;
 
-            dbgLog("Audio", "Trimmer read " + trimTimeText(buffer.duration) + " at " + buffer.sampleRate
-                + " Hz, Mureka says " + trimTimeText(said));
+            dbgLog("Audio", "Trimmer decoded " + trimTimeText(buffer.duration) + " at " + buffer.sampleRate
+                + " Hz in " + (Date.now() - decodeStart) + " ms, Mureka says " + trimTimeText(said));
 
             tr.buffer = buffer;
             tr.mono = mono;
             tr.rate = buffer.sampleRate;
-            tr.duration = buffer.duration;
-            tr.end = buffer.duration;
+
+            // The decoded file can run a few milliseconds past the length
+            // Mureka has for the song, and Mureka turns down an end past
+            // it, so the song ends where Mureka says
+            tr.duration = said > 0 ? Math.min(buffer.duration, said) : buffer.duration;
+            tr.end = tr.duration;
             tr.viewC = tr.end;
             trimUi.trimBtn.disabled = false;
             trimUi.trimBtn.style.opacity = "1";
@@ -22927,6 +23196,7 @@
 
         if (trimUi) {
             trimUi.ask.style.display = "none";
+            trimUi.working.style.display = "none";
         }
     }
 
@@ -22952,6 +23222,7 @@
 
         if (trimUi) {
             trimUi.status.textContent = text;
+            trimUi.status.style.display = text ? "block" : "none";
         }
     }
 
@@ -22960,6 +23231,11 @@
 
         if (!tr) {
             return;
+        }
+
+        // The reminder to move an end is answered
+        if (trimUi && trimUi.status.textContent === "Move the start or the end first") {
+            trimStatus("");
         }
 
         if (which === "start") {
@@ -22998,9 +23274,46 @@
         trimPaint();
     }
 
+    // The last second with the fade worked into the samples, as a short
+    // buffer of its own. Played right after the rest, it fades whatever
+    // the browser does with volume changes over time. Kept while the end
+    // stays put, so repeating the end does not work it out again
+    function trimFadeTail(from, to) {
+
+        const key = from.toFixed(4) + ":" + to.toFixed(4);
+
+        if (tr.tail && tr.tail.key === key) {
+            return tr.tail.buffer;
+        }
+
+        const rate = tr.buffer.sampleRate;
+        const a = Math.max(0, Math.round(from * rate));
+        const b = Math.min(tr.buffer.length, Math.round(to * rate));
+        const n = Math.max(1, b - a);
+        const tail = trimCtx.createBuffer(tr.buffer.numberOfChannels, n, rate);
+
+        for (let c = 0; c < tr.buffer.numberOfChannels; c++) {
+
+            const src = tr.buffer.getChannelData(c);
+            const dst = tail.getChannelData(c);
+
+            for (let i = 0; i < n; i++) {
+
+                const t = (a + i) / rate;
+
+                dst[i] = src[a + i] * Math.max(0, Math.min(1, (tr.end - t) / TRIM_FADE));
+            }
+        }
+
+        tr.tail = { key: key, buffer: tail };
+
+        return tail;
+    }
+
     // Play a stretch of the song. Past the end of the kept part it never
     // goes, and with the fade on the last second fades out as Mureka's
-    // trimmed song will
+    // trimmed song will. Each piece is stopped at its time as well, in case
+    // a browser plays on past the length it was given
     function trimPlay(from, to) {
 
         trimStop();
@@ -23017,30 +23330,45 @@
             trimCtx.resume();
         }
 
-        const src = trimCtx.createBufferSource();
-        const gain = trimCtx.createGain();
         const at = trimCtx.currentTime + 0.05;
+        const fade = trimFades() && to >= tr.end - 0.0005;
+        const fadeFrom = fade ? Math.max(from, tr.end - TRIM_FADE) : to;
+        const pieces = [];
 
-        src.buffer = tr.buffer;
-        src.connect(gain);
-        gain.connect(trimCtx.destination);
+        // The part before the fade, straight from the song
+        if (fadeFrom - from > 0.001) {
 
-        if (trimFades() && to >= tr.end - 0.0005) {
+            const main = trimCtx.createBufferSource();
 
-            const fadeFrom = Math.max(from, tr.end - TRIM_FADE);
-            const startGain = Math.max(0, Math.min(1, (tr.end - fadeFrom) / TRIM_FADE));
-
-            gain.gain.setValueAtTime(startGain, at + (fadeFrom - from));
-            gain.gain.linearRampToValueAtTime(0, at + (tr.end - from));
+            main.buffer = tr.buffer;
+            main.connect(trimCtx.destination);
+            main.start(at, from, fadeFrom - from);
+            main.stop(at + (fadeFrom - from));
+            pieces.push(main);
         }
 
-        src.onended = function () {
+        // The fading second, starting on the sample where the rest ends
+        if (fade) {
 
-            if (!tr || tr.src !== src) {
+            const tail = trimCtx.createBufferSource();
+
+            tail.buffer = trimFadeTail(fadeFrom, tr.end);
+            tail.connect(trimCtx.destination);
+            tail.start(at + (fadeFrom - from));
+            tail.stop(at + (tr.end - from));
+            pieces.push(tail);
+        }
+
+        const last = pieces[pieces.length - 1];
+
+        last.onended = function () {
+
+            if (!tr || tr.src !== last) {
                 return;
             }
 
             tr.src = null;
+            tr.pieces = [];
 
             if (tr.loop) {
                 trimPlayEnd();
@@ -23049,10 +23377,8 @@
             }
         };
 
-        src.start(at, from, to - from);
-
-        tr.src = src;
-        tr.gain = gain;
+        tr.src = last;
+        tr.pieces = pieces;
         tr.playFrom = from;
         tr.playTo = to;
         tr.playAt = at;
@@ -23097,10 +23423,16 @@
         }
     }
 
+    // How much Play start, Play end and Repeat the end play: what the close
+    // up shows on one side of the end, so zooming in plays a shorter piece
+    function trimPreviewLen() {
+        return Math.max(TRIM_PREVIEW_MIN, TRIM_ZOOMS[tr.zoom] / 2);
+    }
+
     function trimPlayEnd() {
 
         if (tr) {
-            trimPlay(Math.max(tr.start, tr.end - TRIM_END_PREVIEW), tr.end);
+            trimPlay(Math.max(tr.start, tr.end - trimPreviewLen()), tr.end);
         }
     }
 
@@ -23110,17 +23442,22 @@
             return;
         }
 
-        const src = tr.src;
+        const pieces = tr.pieces || [tr.src];
 
         tr.src = null;
+        tr.pieces = [];
 
-        try {
-            src.stop();
-        } catch (e) {
-            // Already stopped
+        for (const piece of pieces) {
+
+            try {
+                piece.stop();
+            } catch (e) {
+                // Already stopped
+            }
+
+            piece.disconnect();
         }
 
-        src.disconnect();
         trimPaint();
     }
 
@@ -23283,8 +23620,9 @@
 
         trimUi.startInput.value = document.activeElement === trimUi.startInput ? trimUi.startInput.value : trimTimeText(tr.start);
         trimUi.endInput.value = document.activeElement === trimUi.endInput ? trimUi.endInput.value : trimTimeText(tr.end);
-        trimUi.length.textContent = "Length " + trimTimeText(tr.end - tr.start);
-        trimUi.pauseBtn.textContent = tr.paused ? "Resume" : "Pause";
+        trimUi.info.textContent = "ID " + tr.song.song_id + " \u00b7 Original " + trimTimeText(tr.duration)
+            + " \u00b7 New " + trimTimeText(tr.end - tr.start);
+        trimUi.pauseBtn.textContent = tr.src ? "Pause" : "Play";
         trimUi.zoomLabel.textContent = TRIM_ZOOMS[tr.zoom] >= 1
             ? TRIM_ZOOMS[tr.zoom] + " s wide"
             : Math.round(TRIM_ZOOMS[tr.zoom] * 1000) + " ms wide";
@@ -23563,10 +23901,28 @@
         trimUi.trimBtn.style.cursor = on ? "default" : "pointer";
     }
 
+    // The dimmed page with the turning ring, or away when the text is empty
+    function trimWorking(text) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        trimUi.workingText.textContent = text;
+        trimUi.working.style.display = text ? "flex" : "none";
+    }
+
     // Ask before trimming, with the choice to delete the original
     function askTrim() {
 
         if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        // Nothing cut off, nothing for Mureka to do
+        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
+
+            trimStatus("Move the start or the end first");
             return;
         }
 
@@ -23576,10 +23932,35 @@
         trimUi.ask.style.display = "flex";
     }
 
-    // Delete a song of your own on Mureka. Mureka's delete request has not
-    // been seen yet, so this answers that it is not known
+    // Delete a song of your own on Mureka, the request Mureka's own site
+    // sends. Answers whether it went and, when not, why
     async function deleteOnMureka(song) {
-        return { ok: false, why: "Mureka's delete request is not known yet" };
+
+        try {
+
+            const res = await timedFetch("/api/pgc/song/delete", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ time: Date.now(), song_id: song.song_id })
+            });
+
+            let json = null;
+
+            try {
+                json = await res.json();
+            } catch (e) {
+                json = null;
+            }
+
+            if (res.ok && json && json.code === 0) {
+                return { ok: true, why: "" };
+            }
+
+            return { ok: false, why: "Mureka did not delete it: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status) };
+        } catch (e) {
+            return { ok: false, why: "could not reach Mureka to delete it" };
+        }
     }
 
     // Send the trim to Mureka. The new song comes back finished and is put
@@ -23591,14 +23972,16 @@
         }
 
         const song = tr.song;
-        const startMs = Math.round(tr.start * 1000);
-        const endMs = Math.round(tr.end * 1000);
+        const songMs = song.duration_milliseconds || Math.round(tr.duration * 1000);
+        const startMs = Math.max(0, Math.round(tr.start * 1000));
+        const endMs = Math.min(songMs, Math.round(tr.end * 1000));
         const title = (trimUi.titleInput.value || "").trim() || song.title || "Untitled";
 
         trimStop();
         tr.paused = null;
         trimBusy(true);
-        trimStatus("Trimming on Mureka");
+        trimStatus("");
+        trimWorking("Trimming on Mureka");
 
         const token = trimToken;
 
@@ -23634,6 +24017,7 @@
 
                 if (token === trimToken) {
 
+                    trimWorking("");
                     trimBusy(false);
                     trimStatus("Mureka did not trim it: " + why);
                 }
@@ -23671,6 +24055,10 @@
             // Mureka first and then from the lists here
             if (deleteOriginal) {
 
+                if (token === trimToken) {
+                    trimWorking("Deleting the original");
+                }
+
                 const gone = await deleteOnMureka(song);
 
                 if (gone.ok) {
@@ -23695,6 +24083,7 @@
 
             if (token === trimToken) {
 
+                trimWorking("");
                 trimBusy(false);
                 trimStatus("Could not reach Mureka, " + (e && e.message ? e.message : "no connection"));
             }
@@ -23971,6 +24360,7 @@
 
         cache = loadCache();
         cachedIds = new Set();
+        restoreCacheMarks();
 
         updateCreatorButton();
         updateFeedButton();
@@ -24012,6 +24402,7 @@
 
         cache = loadCache();
         cachedIds = new Set();
+        restoreCacheMarks();
 
         updateCreatorButton();
         updateFeedButton();
@@ -24056,6 +24447,7 @@
 
         cache = loadCache();
         cachedIds = new Set();
+        restoreCacheMarks();
 
         updateCreatorButton();
         updateFeedButton();

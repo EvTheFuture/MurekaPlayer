@@ -1007,6 +1007,7 @@
 
     #menuBox,
     #actionsBox,
+    #ssBox,
     #helpBox {
         background: var(--card);
         border: 1px solid var(--line);
@@ -1022,6 +1023,7 @@
 
     #menuBox > *,
     #actionsBox > *,
+    #ssBox > *,
     #helpBox > * {
         flex-shrink: 0;
     }
@@ -1884,7 +1886,8 @@
         display: none;
     }
 
-    #actionsPop {
+    #actionsPop,
+    #ssPop {
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.6);
@@ -2673,6 +2676,9 @@
         <div class="versionLine"></div>
     </div>
 </div>
+<div id="ssPop">
+    <div id="ssBox"></div>
+</div>
 <div id="blackout"><div id="blackMark">&#9835;</div></div>
 <div id="confirmPop">
     <div id="confirmBox">
@@ -3086,6 +3092,273 @@
     // moves on between polls, worked out from the local clock, since this
     // and the phone clocks need not agree
     let state = null;
+
+    // The state as the phone sent it, before this browser's own settings
+    let rawState = null;
+
+    // Settings for this browser alone: the look of the web view, the button
+    // order and the screen off. Off by default, nothing is stored then.
+    // Switched on they are kept in this browser's storage, never sent
+    // anywhere, and switching off deletes them
+    const LOCAL_KEY = "mureka_web_local";
+
+    // What an earlier build kept for the screen off alone is not used
+    try {
+        localStorage.removeItem("mureka_web_screensaver");
+    } catch (e) {
+        // No storage at all
+    }
+
+    function localSettings() {
+
+        try {
+
+            const v = JSON.parse(localStorage.getItem(LOCAL_KEY));
+
+            return v && typeof v === "object" ? v : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function saveLocal(v) {
+
+        try {
+            localStorage.setItem(LOCAL_KEY, JSON.stringify(v));
+        } catch (e) {
+            // Private browsing, the phone's settings then
+        }
+    }
+
+    // The look as the phone has it, where this browser starts from
+    function phoneLook(raw) {
+
+        const s = raw || {};
+
+        return {
+            names: s.names === true,
+            upNext: s.showUpNext !== false,
+            wave: typeof s.waveOn === "boolean" ? s.waveOn : true,
+            lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
+            volUnit: s.volUnit === "steps" ? "steps" : "percent",
+            controls: Array.isArray(s.controls) ? s.controls.slice() : null,
+            size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26
+        };
+    }
+
+    // The phone's state with this browser's own look laid over it
+    function applyLocalLook(raw) {
+
+        const s = Object.assign({}, raw);
+        const local = localSettings();
+        const look = local && local.look ? local.look : phoneLook(raw);
+
+        s.names = look.names === true;
+        s.showUpNext = look.upNext !== false;
+        s.lyricsWhere = look.lyrics === "off" || look.lyrics === "cover" ? look.lyrics : "info";
+        s.volUnit = look.volUnit === "steps" ? "steps" : "percent";
+
+        if (look.wave === false) {
+            s.wave = null;
+        }
+
+        if (s.lyricsWhere === "off") {
+            s.lyrics = null;
+        }
+
+        if (Array.isArray(look.controls) && look.controls.length > 0) {
+            s.controls = look.controls.slice();
+        }
+
+        if (typeof look.size === "number") {
+            s.lyricLayout = Object.assign({}, raw.lyricLayout || {}, { size: look.size });
+        }
+
+        return s;
+    }
+
+    // Show a change of this browser's settings at once
+    function relook() {
+
+        if (rawState) {
+
+            state = applyLocalLook(rawState);
+            render();
+        }
+    }
+
+    function changeLocalLook(key, value) {
+
+        const local = localSettings();
+
+        if (!local) {
+            return;
+        }
+
+        local.look = Object.assign(phoneLook(rawState), local.look || {});
+        local.look[key] = value;
+        saveLocal(local);
+        relook();
+    }
+
+    // The switch at the top of the settings, and while it is on this
+    // browser's own look under it. The phone's Web view page is left out
+    // then, its settings would not apply here
+    function addLocalSection(box) {
+
+        if (panelName !== "settings") {
+            return;
+        }
+
+        const buttons = Array.from(box.querySelectorAll("button"));
+
+        // Only on the main page, a page of its own has a Back button
+        if (buttons.some(function (b) {
+            return b.textContent.trim().indexOf("\u2039") === 0;
+        })) {
+            return;
+        }
+
+        const local = localSettings();
+        const look = local && local.look ? local.look : phoneLook(rawState);
+        const section = document.createElement("div");
+
+        const row = function (label, control) {
+
+            const r = document.createElement("div");
+            const t = document.createElement("div");
+
+            r.className = "pRow";
+            t.className = "pText";
+            t.textContent = label;
+            r.appendChild(t);
+            r.appendChild(control);
+            section.appendChild(r);
+
+            return r;
+        };
+
+        const button = function (text, on, fn) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "pBtn" + (on ? " on" : "");
+            b.textContent = text;
+            b.addEventListener("click", fn);
+
+            return b;
+        };
+
+        const again = function () {
+            renderPanelAgain();
+        };
+
+        row("Settings for this browser", button(local ? "On" : "Off", !!local, function () {
+
+            if (local) {
+
+                try {
+                    localStorage.removeItem(LOCAL_KEY);
+                } catch (e) {
+                    // Nothing could be stored either
+                }
+            } else {
+                saveLocal({ look: phoneLook(rawState), screen: screenSaverPhone() });
+            }
+
+            relook();
+            again();
+        }));
+
+        const hint = document.createElement("div");
+
+        hint.className = "pText small";
+        hint.textContent = (local
+            ? "This browser uses its own look, button order and screen off. "
+            : "Off, this browser looks the way the phone's Web view settings say. ")
+            + "Switched on, these settings are saved in this browser's own storage on this device, "
+            + "much like a cookie, and used only to show the web view here. They are never sent to "
+            + "the phone, Mureka or anyone else, and hold nothing about you. Switching it off "
+            + "deletes them.";
+        section.appendChild(hint);
+
+        if (local) {
+
+            const lyricNames = { off: "Off", info: "Beside the cover", cover: "On the cover" };
+            const lyricNext = { off: "info", info: "cover", cover: "off" };
+
+            row("Up next", button(look.upNext !== false ? "On" : "Off", look.upNext !== false, function () {
+                changeLocalLook("upNext", look.upNext === false);
+                again();
+            }));
+            row("Waveform seek bar", button(look.wave !== false ? "On" : "Off", look.wave !== false, function () {
+                changeLocalLook("wave", look.wave === false);
+                again();
+            }));
+            row("Lyrics", button(lyricNames[look.lyrics] || "Beside the cover", false, function () {
+                changeLocalLook("lyrics", lyricNext[look.lyrics] || "cover");
+                again();
+            }));
+            row("Volume shown as", button(look.volUnit === "steps" ? "Steps" : "Percent", false, function () {
+                changeLocalLook("volUnit", look.volUnit === "steps" ? "percent" : "steps");
+                again();
+            }));
+            row("Names under the buttons", button(look.names ? "On" : "Off", look.names === true, function () {
+                changeLocalLook("names", look.names !== true);
+                again();
+            }));
+
+            const size = document.createElement("div");
+            const minus = button("-", false, function () {
+                changeLocalLook("size", Math.max(10, (look.size || 26) - 1));
+                again();
+            });
+            const shown = document.createElement("div");
+            const plus = button("+", false, function () {
+                changeLocalLook("size", Math.min(60, (look.size || 26) + 1));
+                again();
+            });
+
+            size.style.display = "flex";
+            size.style.alignItems = "center";
+            size.style.gap = "8px";
+            shown.className = "pText pNum";
+            shown.textContent = String(look.size || 26);
+            size.appendChild(minus);
+            size.appendChild(shown);
+            size.appendChild(plus);
+            row("Lyric size", size);
+
+            row("Screen off", button("Settings", false, function () {
+                openScreenSaver();
+            }));
+
+            const more = document.createElement("div");
+
+            more.className = "pText small";
+            more.textContent = "Press and hold a button in the bar at the bottom to move it, the order is kept for this browser.";
+            section.appendChild(more);
+
+            // The phone's page for the web view, not for this browser now
+            for (const b of buttons) {
+
+                if (b.textContent.replace(/\s+/g, " ").trim().indexOf("Web view \u203A") === 0) {
+                    b.style.display = "none";
+                }
+            }
+        }
+
+        box.insertBefore(section, box.firstChild);
+    }
+
+    // Draw the settings again from the last reading, for a change made here
+    function renderPanelAgain() {
+
+        if (lastPanelItems && panelOpen()) {
+            renderPanel(lastPanelItems);
+        }
+    }
     let stateAt = 0;
     let online = false;
 
@@ -6631,6 +6904,9 @@
     let panelTimer = null;
     let panelBusy = false;
 
+    // The last reading of the panel, drawn again after a change made here
+    let lastPanelItems = null;
+
     // Counts the changes sent from the panel. A reading of the panel asked
     // for before the latest change is stale and is not drawn, or a switch
     // just turned off would show on again until the next reading
@@ -6742,6 +7018,8 @@
 
     function renderPanel(items) {
 
+        lastPanelItems = items;
+
         const box = $("panelBody");
         const scroller = $("panelScroll");
         const keep = scroller.scrollTop;
@@ -6752,6 +7030,7 @@
             box.appendChild(panelNode(node, false, true));
         }
 
+        addLocalSection(box);
         measureControlColumn();
         scroller.scrollTop = keep;
     }
@@ -8089,6 +8368,10 @@
             dbgLog("Net", "phone reached");
         }
 
+        // The phone's own values kept, what this browser shows may differ
+        rawState = s;
+        s = applyLocalLook(s);
+
         logStateChanges(state, s);
 
         state = s;
@@ -8336,6 +8619,14 @@
         });
 
         controlsKey = names.join(",");
+
+        // This browser's own order, the phone's stays as it is
+        if (localSettings()) {
+
+            changeLocalLook("controls", names);
+            return;
+        }
+
         pendingControls = { key: controlsKey, until: Date.now() + 4000 };
         send("setControls", names);
     }
@@ -9927,6 +10218,12 @@
             return true;
         }
 
+        if (isShown("ssPop")) {
+
+            $("ssPop").style.display = "none";
+            return true;
+        }
+
         if (isShown("actionsPop")) {
 
             $("actionsPop").style.display = "none";
@@ -10401,6 +10698,12 @@
             showBlackout();
         }));
 
+        box.appendChild(menuItem("settings", "Screen off in this browser", function () {
+
+            $("actionsPop").style.display = "none";
+            openScreenSaver();
+        }));
+
         box.appendChild(menuItem("fullscreen", fullscreenOn() ? "Leave fullscreen" : "Fullscreen", function () {
 
             $("actionsPop").style.display = "none";
@@ -10483,19 +10786,280 @@
     function moveMark() {
 
         const mark = $("blackMark");
+        const room = (screenSaver().size || 64) + 16;
 
-        mark.style.left = Math.round(Math.random() * Math.max(0, window.innerWidth - 80)) + "px";
-        mark.style.top = Math.round(Math.random() * Math.max(0, window.innerHeight - 80)) + "px";
+        mark.style.left = Math.round(Math.random() * Math.max(0, window.innerWidth - room)) + "px";
+        mark.style.top = Math.round(Math.random() * Math.max(0, window.innerHeight - room)) + "px";
     }
 
     function showBlackout() {
 
+        const ss = screenSaver();
+        const mark = $("blackMark");
+
         dbgLog("Screen", "black cover up");
+        mark.textContent = ss.text;
+        mark.style.display = ss.text ? "block" : "none";
+        mark.style.color = ss.color;
+        mark.style.fontSize = ss.size + "px";
         $("blackout").style.display = "block";
         moveMark();
         clearInterval(blackTimer);
-        blackTimer = setInterval(moveMark, 25000);
+        blackTimer = setInterval(moveMark, Math.max(5, ss.drift) * 1000);
     }
+
+    // The screen off settings: the phone's, or this browser's own while
+    // Settings for this browser is on
+    function screenSaverOwn() {
+
+        const local = localSettings();
+
+        return local && local.screen ? Object.assign({}, local.screen, { own: true }) : null;
+    }
+
+    function screenSaverPhone() {
+
+        const p = state && state.screenSaver ? state.screenSaver : {};
+
+        return {
+            on: p.on === true,
+            after: Number(p.after) > 0 ? Number(p.after) : 0,
+            text: typeof p.text === "string" ? p.text : "\u266B",
+            color: typeof p.color === "string" ? p.color : "#333333",
+            size: Number(p.size) > 0 ? Number(p.size) : 64,
+            drift: Number(p.drift) > 0 ? Number(p.drift) : 25
+        };
+    }
+
+    function screenSaver() {
+
+        const own = screenSaverOwn();
+        const phone = screenSaverPhone();
+
+        if (!own || own.own !== true) {
+            return phone;
+        }
+
+        return {
+            on: own.on === true,
+            after: Number(own.after) > 0 ? Number(own.after) : 0,
+            text: typeof own.text === "string" ? own.text : phone.text,
+            color: typeof own.color === "string" ? own.color : phone.color,
+            size: Number(own.size) > 0 ? Number(own.size) : phone.size,
+            drift: Number(own.drift) > 0 ? Number(own.drift) : phone.drift
+        };
+    }
+
+    function saveScreenSaver(v) {
+
+        const local = localSettings();
+
+        if (!local) {
+            return;
+        }
+
+        const screen = Object.assign({}, v);
+
+        delete screen.own;
+        local.screen = screen;
+        saveLocal(local);
+    }
+
+    // The screen goes off by itself after a while with nothing touched,
+    // while music plays, as on the phone
+    let lastUse = Date.now();
+
+    for (const kind of ["pointerdown", "keydown", "wheel", "touchstart"]) {
+
+        document.addEventListener(kind, function () {
+            lastUse = Date.now();
+        }, { capture: true, passive: true });
+    }
+
+    setInterval(function () {
+
+        const ss = screenSaver();
+        const active = document.activeElement;
+
+        if (!ss.on || ss.after <= 0 || isShown("blackout") || isShown("ssPop") || !state || state.playing !== true) {
+            return;
+        }
+
+        // Never over a field being typed into
+        if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+            return;
+        }
+
+        if (Date.now() - lastUse >= ss.after * 1000) {
+            showBlackout();
+        }
+    }, 1000);
+
+    // The settings for this browser, drawn again after each change
+    function openScreenSaver() {
+
+        const box = $("ssBox");
+        const mine = localSettings() !== null;
+        const ss = screenSaver();
+
+        box.textContent = "";
+
+        const title = document.createElement("div");
+
+        title.id = "ssTitle";
+        title.className = "pText";
+        title.style.fontWeight = "600";
+        title.textContent = "Screen off in this browser";
+        box.appendChild(title);
+
+        // A change, kept for this browser and shown at once
+        const change = function (key, value) {
+
+            const next = Object.assign({}, screenSaver(), screenSaverOwn() || {}, { own: true });
+
+            next[key] = value;
+            saveScreenSaver(next);
+            openScreenSaver();
+        };
+
+        const row = function (label, control) {
+
+            const r = document.createElement("div");
+            const t = document.createElement("div");
+
+            r.className = "pRow";
+            t.className = "pText";
+            t.textContent = label;
+            r.appendChild(t);
+            r.appendChild(control);
+            box.appendChild(r);
+        };
+
+        const toggle = function (on, fn) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "pBtn" + (on ? " on" : "");
+            b.textContent = on ? "On" : "Off";
+            b.addEventListener("click", fn);
+
+            return b;
+        };
+
+        const stepper = function (value, step, min, max, fn, unit) {
+
+            const w = document.createElement("div");
+            const minus = document.createElement("button");
+            const shown = document.createElement("div");
+            const plus = document.createElement("button");
+
+            w.style.display = "flex";
+            w.style.alignItems = "center";
+            w.style.gap = "8px";
+            minus.type = "button";
+            plus.type = "button";
+            minus.className = "pBtn";
+            plus.className = "pBtn";
+            minus.textContent = "-";
+            plus.textContent = "+";
+            minus.disabled = !mine;
+            plus.disabled = !mine;
+            shown.className = "pText pNum";
+            shown.textContent = value + (unit || "");
+            minus.addEventListener("click", function () {
+                fn(Math.max(min, value - step));
+            });
+            plus.addEventListener("click", function () {
+                fn(Math.min(max, value + step));
+            });
+            w.appendChild(minus);
+            w.appendChild(shown);
+            w.appendChild(plus);
+
+            return w;
+        };
+
+        const hint = document.createElement("div");
+
+        hint.className = "pText small";
+        hint.textContent = mine
+            ? "This browser's own, kept in this browser only. Settings for this browser, at the top of the settings, switches them off again."
+            : "This browser follows the phone's screen off settings. Switch on Settings for this browser, at the top of the settings, to set this browser apart.";
+        box.appendChild(hint);
+
+        const onBtn = toggle(ss.on, function () {
+            change("on", !ss.on);
+        });
+
+        onBtn.disabled = !mine;
+        row("Screen off by itself", onBtn);
+        row("After", stepper(ss.after, 5, 5, 600, function (v) {
+            change("after", v);
+        }, " s"));
+
+        const text = document.createElement("input");
+
+        text.type = "text";
+        text.className = "pField";
+        text.value = ss.text;
+        text.disabled = !mine;
+        text.style.width = "5em";
+        text.addEventListener("change", function () {
+            change("text", text.value);
+        });
+        row("Mark, blank for none", text);
+
+        const color = document.createElement("input");
+
+        color.type = "color";
+        color.value = /^#[0-9a-fA-F]{6}$/.test(ss.color) ? ss.color : "#333333";
+        color.disabled = !mine;
+        color.style.width = "3.2em";
+        color.style.height = "2.2em";
+        color.addEventListener("change", function () {
+            change("color", color.value);
+        });
+        row("Mark color", color);
+        row("Mark size", stepper(ss.size, 8, 16, 240, function (v) {
+            change("size", v);
+        }, ""));
+        row("Mark moves every", stepper(ss.drift, 5, 5, 120, function (v) {
+            change("drift", v);
+        }, " s"));
+
+        const buttons = document.createElement("div");
+        const tryBtn = document.createElement("button");
+        const done = document.createElement("button");
+
+        buttons.className = "pRow";
+        tryBtn.type = "button";
+        done.type = "button";
+        tryBtn.className = "pBtn";
+        done.className = "pBtn on";
+        tryBtn.textContent = "Try it";
+        done.textContent = "Done";
+        tryBtn.addEventListener("click", function () {
+
+            $("ssPop").style.display = "none";
+            showBlackout();
+        });
+        done.addEventListener("click", function () {
+            $("ssPop").style.display = "none";
+        });
+        buttons.appendChild(tryBtn);
+        buttons.appendChild(done);
+        box.appendChild(buttons);
+
+        $("ssPop").style.display = "flex";
+    }
+
+    $("ssPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("ssPop")) {
+            $("ssPop").style.display = "none";
+        }
+    });
 
     $("blackout").addEventListener("click", function () {
 

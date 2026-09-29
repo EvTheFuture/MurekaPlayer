@@ -109,6 +109,16 @@ the new settings layout and a number of smaller improvements.
   screen, with the playing from line as the filter button over the list.
   Where the music plays is one button in the header with the three choices
   in a dropdown. Songs is left out, the list is always there.
+- The screen goes off by itself after a while untouched while music
+  plays, with the phone's screen off settings: on or off, after how long,
+  and the mark with its colour, size and how often it moves.
+- **Settings for this browser**, at the top of the settings, gives one
+  browser its own look: up next, the waveform, where the lyrics go and
+  their size, how the volume is written, names under the buttons, the
+  button order (press and hold to move) and the screen off, also under
+  **Screen off in this browser** in the actions menu. Off by default:
+  switched on, the settings are kept in that browser only, never sent
+  anywhere, and switching it off deletes them.
 - Tesla's fullscreen from its YouTube app is recognised. There the music moves
   to the browser without asking, and the steering wheel's left and right
   skip to the previous and next song instead of seeking.
@@ -125,14 +135,17 @@ the new settings layout and a number of smaller improvements.
   shows the song's real waveform: the whole song with the kept part lit and
   its ends to drag, and a close up of the start or the end that zooms from
   30 seconds down to 20 milliseconds, with steps of 10 ms, 100 ms and 1 s
-  and typed times. **Play end** plays the last five seconds and stops on
-  the exact sample where the new song will end, **Repeat the end** plays
-  them again and again while the end is moved, and a tap on the waveform
-  plays from there, with Pause to stop and go on. **Fade out the last
-  second** fades the preview the way Mureka fades a trimmed song. The new
-  song gets a title of its own and is put at the top of the list, marked
-  new. Trim is pressed once: it turns into a turning ring until Mureka has
-  answered.
+  and typed times. The song's id, its length and the new length show under
+  the title, with Trim beside it. **Play end** plays what the close up
+  shows before the end and stops on the exact sample where the new song
+  will end, **Repeat the end** plays it again and again while the end is
+  moved, **Play** and **Pause** play the kept part and stop where it is,
+  and a tap on the waveform plays from there. **Fade out the last second**
+  fades the preview the way Mureka fades a trimmed song, once the end is
+  moved. The new song gets a title of its own and is put at the top of the
+  list, marked new. **Delete original**, ticked when confirming, deletes
+  the original on Mureka and from the lists here once the new song has
+  arrived. While Mureka works, a turning ring covers the page.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **No remixing** for songs with lyrics.
   When Mureka refuses a change on a published song, the player offers to take
@@ -171,6 +184,10 @@ the new settings layout and a number of smaller improvements.
   a paused player stays paused on it. The covers used to show the deleted
   song's neighbours out of step. Deleting a song beside the playing one
   updates the covers beside it too.
+- The dots for cached songs and covers show as soon as the list does when
+  the player starts, from what was cached last time. Going through the
+  cache itself took several seconds with thousands of songs; it now runs
+  in the background and puts the dots right when it is done.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - Opening the app, or coming back to the page from another tab or app,
   takes the black screen cover away as a tap would, so the player shows
