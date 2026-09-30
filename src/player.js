@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.34";
+    const VERSION = "1.9.9.38";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3858,8 +3858,9 @@
         const byId = new Map(held.map(function (x) {
             return [x.song_id, x];
         }));
+        const newCovers = [];
 
-        return list.map(function (x) {
+        const out = list.map(function (x) {
 
             const old = byId.get(x.song_id);
 
@@ -3867,10 +3868,60 @@
                 return x;
             }
 
+            // A cover Mureka has finished since, in place of its stand in
+            if (x.cover && x.cover !== old.cover) {
+                newCovers.push(old);
+            }
+
             Object.assign(old, x);
 
             return old;
         });
+
+        if (newCovers.length > 0) {
+            showNewCovers(newCovers);
+        }
+
+        return out;
+    }
+
+    // Covers a refresh found changed are shown at once where they are on
+    // screen, the playing cover and those beside it, rather than when the
+    // song is next played. The copies kept for the lock screen and
+    // Bluetooth are dropped, so they are made again from the new cover
+    function showNewCovers(songs) {
+
+        let onScreen = false;
+
+        for (const song of songs) {
+
+            artCache.delete(song.song_id);
+            coverRechecked.delete(String(song.song_id));
+
+            caches.open(ART_STORE).then(function (store) {
+                return store.delete(artStoreKey(song.song_id));
+            }).catch(function () {
+                // Stored again when the cover is next needed
+            });
+
+            if (artTiles.some(function (t) { return t.dataset.songId === String(song.song_id); })) {
+                onScreen = true;
+            }
+        }
+
+        dbgLog("Cover", "new cover for " + songs.map(function (x) {
+            return x.song_id;
+        }).join(", ") + (onScreen ? ", shown now" : ""));
+
+        if (!onScreen) {
+            return;
+        }
+
+        setArtSources();
+
+        if (currentSong && songs.indexOf(currentSong) !== -1) {
+            updatePlayerInfo(currentSong);
+        }
     }
 
     function dedupe(list) {
@@ -6776,14 +6827,13 @@
         // The upcoming order changed, keep the saved queue in step
         saveQueue();
 
-        // Start caching the newly ordered upcoming songs first, so a slow or
-        // failing coverflow refresh can never block the prefetch
-        prefetchNext();
-
-        // The upcoming order changed, so refresh the coverflow neighbors
+        // The upcoming order changed, so refresh the coverflow neighbors,
+        // and then start caching the newly ordered upcoming songs, which
+        // waits for those covers so it does not hold them up
         setArtTransition("none");
         setArtSources();
         positionArt(0);
+        prefetchNext();
     }
 
     // Toggle shuffle as a mode
@@ -8463,7 +8513,43 @@
     }
 
     // Cache the next songs in the queue so playback does not wait on the network
+    // Wait until the covers beside the playing one have come in, or ms has
+    // passed. A song file is several megabytes and the covers a few dozen
+    // kilobytes from the same host, so downloading the next songs first left
+    // the new covers queued behind them for seconds, after shuffle was
+    // switched on or the songs shown were changed
+    function sideCoversLoaded(ms) {
+
+        return new Promise(function (resolve) {
+
+            const until = Date.now() + ms;
+
+            const check = function () {
+
+                const waiting = [artTiles[ART_SIDE_TILES - 1], artTiles[ART_SIDE_TILES + 1]].some(function (t) {
+                    return t && t.style.visibility !== "hidden" && t.getAttribute("src") && !t.complete;
+                });
+
+                if (!waiting || Date.now() >= until) {
+
+                    resolve();
+                    return;
+                }
+
+                setTimeout(check, 100);
+            };
+
+            check();
+        });
+    }
+
+    // Songs readied since the last change of what comes next, so a newer
+    // round started meanwhile lets an older one stop
+    let prefetchRound = 0;
+
     async function prefetchNext() {
+
+        const round = ++prefetchRound;
 
         // Needs no network, only the cache, so it happens before the online
         // check and even when there is no signal
@@ -8471,6 +8557,13 @@
 
         // Nothing to gain from queueing requests that cannot succeed
         if (navigator.onLine === false) {
+            return;
+        }
+
+        // The covers on screen first, the song files after them
+        await sideCoversLoaded(3000);
+
+        if (round !== prefetchRound) {
             return;
         }
 
@@ -8483,6 +8576,11 @@
             }
 
             const song = queue[pos];
+
+            // What comes next changed meanwhile, a newer round takes over
+            if (round !== prefetchRound) {
+                return;
+            }
 
             if (!song) {
                 continue;
@@ -11375,6 +11473,8 @@
             }
         }
 
+        const storeLater = [];
+
         for (let i = 0; i < artTiles.length; i += 1) {
 
             const rel = i - ART_SIDE_TILES;
@@ -11406,9 +11506,10 @@
 
                 // A cover shown in the carousel has been downloaded to display
                 // it, so store it too. The current song is stored by the play
-                // path, so only the neighbors need it here
+                // path, so only the neighbors need it here. Once the covers
+                // are on screen, storing reads and scales them again
                 if (rel !== 0) {
-                    cacheArt(song);
+                    storeLater.push(song);
                 }
 
             } else {
@@ -11418,6 +11519,13 @@
                 artTiles[i].dataset.songId = "";
                 artTiles[i].style.visibility = "hidden";
             }
+        }
+
+        if (storeLater.length > 0) {
+
+            sideCoversLoaded(3000).then(function () {
+                storeLater.forEach(cacheArt);
+            });
         }
     }
 
@@ -12380,6 +12488,73 @@
         saveSettings();
         updateLyricLine(true);
         showArtToast(labels[settings.artOverlayMode]);
+    }
+
+    // A cover this many pixels wide or less is Mureka's grey stand in, not
+    // the song's own. Real covers come in at 536
+    const COVER_STANDIN_MAX = 300;
+
+    // Songs whose cover has been asked for again this session, once each
+    const coverRechecked = new Set();
+
+    // A song captured while Mureka was still making its cover keeps the
+    // stand in's link, and a quick refresh never reads the song again. Its
+    // details are fetched now, and a new cover link replaces the old one
+    // everywhere it shows
+    async function recheckCover(id) {
+
+        const key = String(id);
+
+        if (coverRechecked.has(key) || navigator.onLine === false) {
+            return;
+        }
+
+        coverRechecked.add(key);
+
+        const song = hostFindSong(key);
+
+        if (!song) {
+            return;
+        }
+
+        try {
+
+            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
+                { credentials: "include" });
+            const json = res.ok ? await res.json() : null;
+            const fresh = json && json.data && json.data.song;
+            const cover = fresh && fresh.song_id === song.song_id ? fresh.cover || "" : "";
+
+            if (!cover || cover === song.cover) {
+
+                dbgLog("Cover", "asked again for " + key + ", Mureka still has the same cover");
+                return;
+            }
+
+            song.cover = cover;
+            saveCache();
+            dbgLog("Cover", "new cover for " + key + " " + (song.title || "Untitled"));
+
+            // The stand in kept for the lock screen and Bluetooth goes too
+            artCache.delete(song.song_id);
+
+            try {
+                await (await caches.open(ART_STORE)).delete(artStoreKey(song.song_id));
+            } catch (e) {
+                // Stored again when the cover is next needed
+            }
+
+            setArtSources();
+
+            if (currentSong && currentSong.song_id === song.song_id) {
+                updatePlayerInfo(currentSong);
+            }
+
+            renderList();
+            publishHostSoon();
+        } catch (e) {
+            dbgLog("Cover", "could not ask again for " + key);
+        }
     }
 
     // Show a short confirmation pill centered on the art
@@ -13896,21 +14071,6 @@
         setStatus("Sent " + what);
 
         return true;
-    }
-
-    // A short inset ring on a button once it has done its job, cyan when it
-    // went through and red when it could not. Pressed again it starts over,
-    // so presses in quick succession each show and nothing waits for it
-    const flashTimers = new WeakMap();
-
-    function flashButton(btn, ok) {
-
-        clearTimeout(flashTimers.get(btn));
-        btn.style.boxShadow = CTRL_RING + (ok ? "#48e1eb" : "#e5484d");
-
-        flashTimers.set(btn, setTimeout(function () {
-            btn.style.boxShadow = "";
-        }, 700));
     }
 
     // A button that has done its job says so for a moment: it lights up in
@@ -15628,6 +15788,7 @@
         headerTitle.appendChild(headerSub);
 
         minimizeBtn = document.createElement("span");
+        minimizeBtn.className = "mureka-press-icon";
         minimizeBtn.title = "Minimize or expand";
         minimizeBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:17px;cursor:pointer;line-height:1;padding:2px";
 
@@ -15649,6 +15810,7 @@
 
         // Hamburger that collapses or expands the top action menu to save space
         actionsToggleBtn = document.createElement("span");
+        actionsToggleBtn.className = "mureka-press-icon";
         actionsToggleBtn.textContent = "\u2630";
         actionsToggleBtn.title = "Show or hide the action buttons";
         actionsToggleBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:19px;cursor:pointer;line-height:1;padding:2px";
@@ -15665,6 +15827,7 @@
 
         // Gear that opens the settings overlay
         const settingsBtn = document.createElement("span");
+        settingsBtn.className = "mureka-press-icon";
         settingsBtn.textContent = "\u2699";
         settingsBtn.title = "Settings";
         settingsBtn.style.cssText = "flex:0 0 auto;color:#aaa;font-size:20px;cursor:pointer;line-height:1;padding:2px";
@@ -15847,6 +16010,7 @@
             ev.stopPropagation();
         });
 
+        actionsWrapEl.dataset.murekaPress = "1";
         document.body.appendChild(actionsWrapEl);
 
         // Player block, album art on top, then title, seek bar and play control
@@ -15880,11 +16044,17 @@
 
             tile.style.cssText = "position:absolute;top:0;left:0;height:100%;aspect-ratio:1/1;object-fit:cover;will-change:transform,filter";
 
-            // How big a side cover came in, for the debug log
+            // How big a side cover came in, for the debug log. A small one
+            // is Mureka's stand in, handed out while a new song's cover is
+            // still being made, so the song's cover is asked for again
             tile.addEventListener("load", function () {
 
                 if (tile.dataset.songId && tile !== artTiles[ART_SIDE_TILES]) {
                     dbgLog("Cover", "loaded " + tile.dataset.songId + ", " + tile.naturalWidth + "x" + tile.naturalHeight);
+                }
+
+                if (tile.dataset.songId && tile.naturalWidth > 0 && tile.naturalWidth < COVER_STANDIN_MAX) {
+                    recheckCover(tile.dataset.songId);
                 }
             });
 
@@ -16382,6 +16552,17 @@
             + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
+
+            // Every button lights up and dips a little while it is pressed,
+            // so a tap is seen to have landed even when what it does shows
+            // elsewhere or later. The popups outside the panel are marked
+            // with data-mureka-press to be included
+            + "#mureka-player-panel button,[data-mureka-press] button{transition:filter 0.08s ease,transform 0.08s ease}"
+            + "#mureka-player-panel button:not(:disabled):active,[data-mureka-press] button:not(:disabled):active"
+            + "{filter:brightness(1.45);transform:scale(0.96)}"
+            + ".mureka-menu-row:active{background:#4a4a54 !important}"
+            + ".mureka-press-icon{transition:filter 0.08s ease,transform 0.08s ease}"
+            + ".mureka-press-icon:active{filter:brightness(1.6);transform:scale(0.88)}"
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
@@ -16611,6 +16792,7 @@
             ev.stopPropagation();
         });
 
+        viewMenuEl.dataset.murekaPress = "1";
         document.body.appendChild(viewMenuEl);
 
         // Compact bar that stays visible, shows the current view and filter and
@@ -16752,6 +16934,10 @@
 
         document.body.appendChild(backdropEl);
         document.body.appendChild(panel);
+
+        // Safari on an iPhone only shows the pressed look of a button when
+        // the page listens for touches at all
+        document.addEventListener("touchstart", function () {}, { passive: true });
 
         restoreSize();
         restoreCacheMarks();
@@ -20155,7 +20341,9 @@
             const resetRow = document.createElement("div");
             resetRow.style.cssText = "display:flex";
 
-            resetRow.appendChild(makeButton("Reset mark to default", "#444", "#fff", function () {
+            resetRow.appendChild(makeButton("Reset mark to default", "#444", "#fff", function (ev) {
+
+                buttonDone(ev.currentTarget, "Reset", true);
 
                 settings[keys.text] = "\u266B";
                 settings[keys.color] = "#333333";
@@ -20853,10 +21041,14 @@
 
         coverTestRow.style.cssText = "display:flex;gap:8px";
         coverTestRow.appendChild(makeButton("Send loading cover", "#333", "#fff", function (ev) {
-            flashButton(ev.currentTarget, sendCoverTest("loading"));
+            const ok = sendCoverTest("loading");
+
+            buttonDone(ev.currentTarget, ok ? "Sent" : "Could not send", ok);
         }));
         coverTestRow.appendChild(makeButton("Send real cover", "#333", "#fff", function (ev) {
-            flashButton(ev.currentTarget, sendCoverTest("real"));
+            const ok = sendCoverTest("real");
+
+            buttonDone(ev.currentTarget, ok ? "Sent" : "Could not send", ok);
         }));
 
         devPage.appendChild(copyFeedBtn);
@@ -25784,10 +25976,14 @@
 
     // Copy the last raw feed response to the clipboard, without the wave lists
     // Developer only helper, the feed list is the JSON most useful to share
-    async function copyFeedJson() {
+    async function copyFeedJson(ev) {
+
+        const btn = ev && ev.currentTarget ? ev.currentTarget : null;
 
         if (!lastFeedResponse) {
+
             setStatus("No feed response yet, press Load first");
+            buttonDone(btn, "Nothing loaded yet", false);
             return;
         }
 
@@ -25796,6 +25992,7 @@
         setStatus(ok
             ? "Copied the last feed response to the clipboard"
             : "Could not copy to clipboard");
+        buttonDone(btn, ok ? "Copied" : "Could not copy", ok);
     }
 
     // Fetch the full untrimmed song object and copy it to the clipboard
@@ -25899,6 +26096,7 @@
             "display:none"
         ].join(";");
 
+        contextMenuEl.dataset.murekaPress = "1";
         document.body.appendChild(contextMenuEl);
 
         // A click anywhere else closes the menu
@@ -25970,6 +26168,7 @@
         const row = document.createElement("div");
 
         row.textContent = label;
+        row.className = "mureka-menu-row";
         row.style.cssText = "padding:7px 10px;border-radius:6px;cursor:pointer;color:" + color;
 
         row.addEventListener("mouseenter", function () {

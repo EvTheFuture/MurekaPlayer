@@ -2766,6 +2766,17 @@
         cursor: pointer;
     }
 
+    /* Every button lights up and dips a little while it is pressed, so a
+       tap is seen to have landed even when what it does shows elsewhere */
+    button {
+        transition: filter 0.08s ease, transform 0.08s ease;
+    }
+
+    button:not(:disabled):not(.holding):active {
+        filter: brightness(1.45);
+        transform: scale(0.96);
+    }
+
 </style>
 </head>
 <body>
@@ -13342,6 +13353,10 @@
         ev.preventDefault();
         ev.stopImmediatePropagation();
     }, true);
+
+    // Safari on an iPhone only shows the pressed look of a button when the
+    // page listens for touches at all
+    document.addEventListener("touchstart", function () {}, { passive: true });
 
     arrangePhone();
     poll();
