@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.40";
+    const VERSION = "1.9.9.42";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1233,12 +1233,13 @@
     }
 
     // Read the settings from localStorage, falling back to safe defaults
-    // Published is the default start feed, refresh on open is off for both feeds
+    // As last time is the default start, refresh on open is off for both feeds
     // Autoplay is off, the default play mode is not shuffled, repeat is all
     function loadSettings() {
 
         const defaults = {
             startFeed: "last",
+            startFeedV2: true,
             refreshOnStart: false,
             absoluteNumbers: false,
             autoPlay: false,
@@ -1360,9 +1361,17 @@
                     ? parsed.view
                     : "mureka";
 
+                // Before As last time existed, Published was the default and
+                // was stored with every other setting, chosen or not. Such
+                // settings start as last time once, which still opens on the
+                // published songs when that is what showed last, and keeps a
+                // chosen creator too. Published picked from now on stays
+                const oldDefault = parsed.startFeed === "published" && parsed.startFeedV2 !== true;
+
                 return {
-                    startFeed: (parsed.startFeed === "all" || parsed.startFeed === "published")
+                    startFeed: (parsed.startFeed === "all" || parsed.startFeed === "published") && !oldDefault
                         ? parsed.startFeed : "last",
+                    startFeedV2: true,
                     refreshOnStart: refreshOnStart,
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoPlay: parsed.autoPlay === true,
@@ -9299,6 +9308,12 @@
     // Tested by feature, an iPad or a future iPhone that gains support will
     // simply get the controls
     function fullscreenSupported() {
+
+        // A Tesla browser says it can go fullscreen but does not, so there
+        // the fullscreen controls are left out
+        if (/\bTesla\/|TESLA_AUTO/.test(navigator.userAgent || "")) {
+            return false;
+        }
 
         if (document.fullscreenEnabled === true || document.webkitFullscreenEnabled === true) {
             return true;

@@ -207,7 +207,8 @@ the new settings layout and a number of smaller improvements.
   takes the black screen cover away as a tap would, so the player shows
   at once.
 - **Start with** can also be **As last time**, the list and artist the player
-  showed when it was last used.
+  showed when it was last used. It is the default, also for settings kept
+  from before, where Published was stored whether it was picked or not.
 - **Remove ; from lyrics** takes Mureka's pause marks out of the lyrics
   everywhere they show.
 - The song menu, from a long press or a right click, shows the song's number

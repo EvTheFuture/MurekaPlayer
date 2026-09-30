@@ -3843,6 +3843,11 @@
     // wheel's left and right arrive as the arrow keys, and the music belongs
     // in this browser, since the car shows nothing but this page
     const teslaTheater = /TESLA_AUTO/.test(navigator.userAgent || "");
+
+    // Any Tesla browser, which names itself Tesla/ followed by the software
+    // version. It says it can go fullscreen but does not, so the page offers
+    // no fullscreen there
+    const teslaBrowser = teslaTheater || /\bTesla\//.test(navigator.userAgent || "");
     let theaterAsked = false;
     let theaterTriedAt = 0;
     let theaterHintAt = 0;
@@ -8418,7 +8423,10 @@
         $("fullBtn").title = on ? "Leave fullscreen" : "Fullscreen";
     }
 
-    if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
+    // Where the browser cannot go fullscreen, a Tesla among them
+    const fullscreenOffered = !teslaBrowser && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+
+    if (!fullscreenOffered) {
         $("fullBtn").style.display = "none";
     }
 
@@ -11509,11 +11517,14 @@
             openScreenSaver();
         }));
 
-        box.appendChild(menuItem("fullscreen", fullscreenOn() ? "Leave fullscreen" : "Fullscreen", function () {
+        if (fullscreenOffered) {
 
-            $("actionsPop").style.display = "none";
-            $("fullBtn").click();
-        }));
+            box.appendChild(menuItem("fullscreen", fullscreenOn() ? "Leave fullscreen" : "Fullscreen", function () {
+
+                $("actionsPop").style.display = "none";
+                $("fullBtn").click();
+            }));
+        }
 
         // The debug log, only while the overlay is on. It cannot take a tap
         // itself, so its copy and send live here
