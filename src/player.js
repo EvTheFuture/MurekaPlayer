@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.42";
+    const VERSION = "1.9.9.45";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -758,6 +758,14 @@
     // Timestamp of the last header click, so minimize needs a double click
     let lastHeaderClickT = 0;
     let minimized = false;
+
+    // Where the folded panel was dragged to on a phone, measured from the
+    // top left of the visible screen. Empty means its place at the top, which
+    // is where every fold starts
+    let miniPos = null;
+
+    // The right side of the header, whose buttons keep their own taps
+    let headerRightEl = null;
 
     // Current anchor, the side and edge offset are kept so growth keeps the dock
     let anchorLeft = 8;
@@ -8862,10 +8870,13 @@
         const pr = panelEl.getBoundingClientRect();
         const ar = anchorEl.getBoundingClientRect();
 
-        // Follow the panel width, but never wider than the viewport
+        // Follow the panel width, but never wider than the viewport. The
+        // folded bar on a phone is narrow, so there the screen width is used
+        const phoneBar = minimized && vw <= 640;
+
         let width = Math.min(pr.width, vw) - margin * 2;
 
-        if (width < 120) {
+        if (width < 120 || phoneBar) {
             width = vw - margin * 2;
         }
 
@@ -8889,12 +8900,21 @@
             top = maxTop;
         }
 
+        // A folded bar dragged low opens its menu above it when it would not
+        // fit under it
+        popup.style.width = width + "px";
+
+        const h = popup.offsetHeight;
+
+        if (phoneBar && ar.bottom + 4 + h > vh - margin && ar.top - 4 - h >= margin) {
+            top = pr.top - 4 - h;
+        }
+
         if (top < 4) {
             top = 4;
         }
 
         popup.style.left = left + "px";
-        popup.style.width = width + "px";
         popup.style.top = top + "px";
     }
 
@@ -9310,8 +9330,9 @@
     function fullscreenSupported() {
 
         // A Tesla browser says it can go fullscreen but does not, so there
-        // the fullscreen controls are left out
-        if (/\bTesla\/|TESLA_AUTO/.test(navigator.userAgent || "")) {
+        // the fullscreen controls are left out. Newer Tesla software may not
+        // name itself, but only Tesla calls its system "X11; GNU/Linux"
+        if (/\bTesla\b|TESLA_AUTO|X11; GNU\/Linux/i.test(navigator.userAgent || "")) {
             return false;
         }
 
@@ -15863,10 +15884,12 @@
         headerRight.appendChild(actionsToggleBtn);
         headerRight.appendChild(settingsBtn);
         headerRight.appendChild(minimizeBtn);
+        headerRightEl = headerRight;
 
         header.appendChild(headerTitle);
         header.appendChild(headerRight);
         header.addEventListener("mousedown", startDrag);
+        header.addEventListener("pointerdown", startMiniDrag);
 
         // Everything below the header lives in the body, which can collapse
         bodyEl = document.createElement("div");
@@ -18256,6 +18279,10 @@
             panelEl.style.setProperty("height", height + "px", "important");
         }
 
+        // Folded it is a small bar that can be dragged anywhere, so nothing on
+        // the site stays hidden under it for good
+        placeMiniBar(left, top, width, height);
+
         recordFit({
             why: why,
             kb: dbgFlag(keyboardUp),
@@ -18279,6 +18306,149 @@
         if (!swipeActive) {
             positionArt(0);
         }
+    }
+
+    // On a phone the folded panel shrinks to a rounded bar as wide as its
+    // header needs, placed where it was dragged, or at the top centre until
+    // then. Open, it goes back to filling the screen
+    function placeMiniBar(left, top, width, height) {
+
+        const folded = minimized && window.innerWidth <= 640;
+
+        if (headerEl) {
+            headerEl.style.touchAction = folded ? "none" : "";
+        }
+
+        if (!folded) {
+            panelEl.style.removeProperty("max-width");
+            panelEl.style.removeProperty("border-radius");
+            return;
+        }
+
+        panelEl.style.setProperty("width", "auto", "important");
+        panelEl.style.setProperty("max-width", Math.max(120, width - 16) + "px", "important");
+        panelEl.style.setProperty("border-radius", "14px", "important");
+
+        const w = panelEl.offsetWidth;
+        const h = panelEl.offsetHeight;
+        const maxX = Math.max(0, width - w);
+        const maxY = Math.max(0, height - h);
+
+        let x = Math.round(maxX / 2);
+        let y = 0;
+
+        if (miniPos) {
+            x = Math.max(0, Math.min(miniPos.x, maxX));
+            y = Math.max(0, Math.min(miniPos.y, maxY));
+        }
+
+        panelEl.style.setProperty("left", (left + x) + "px", "important");
+        panelEl.style.setProperty("top", (top + y) + "px", "important");
+    }
+
+    // Drag the folded bar on a phone, sideways and up or down, with a finger
+    // or a mouse. A double tap without movement opens the player, and the
+    // buttons on the right keep their own taps
+    function startMiniDrag(ev) {
+
+        if (!minimized || window.innerWidth > 640 || !panelEl) {
+            return;
+        }
+
+        if (ev.pointerType === "mouse" && ev.button !== 0) {
+            return;
+        }
+
+        if (headerRightEl && headerRightEl.contains(ev.target)) {
+            return;
+        }
+
+        // This drag owns the gesture, so the mouse handler does not also see
+        // it and the page does not scroll along
+        ev.preventDefault();
+        closeDropdowns();
+
+        const header = ev.currentTarget;
+        const rect = panelEl.getBoundingClientRect();
+        const vv = window.visualViewport;
+        const baseX = vv ? vv.offsetLeft : 0;
+        const baseY = vv ? vv.offsetTop : 0;
+        const offsetX = ev.clientX - rect.left;
+        const offsetY = ev.clientY - rect.top;
+        const startX = ev.clientX;
+        const startY = ev.clientY;
+        const pointerId = ev.pointerId;
+
+        let moved = false;
+
+        try {
+            header.setPointerCapture(pointerId);
+        } catch (e) {
+        }
+
+        const onMove = function (e) {
+
+            if (e.pointerId !== pointerId) {
+                return;
+            }
+
+            if (!moved && Math.abs(e.clientX - startX) < 6 && Math.abs(e.clientY - startY) < 6) {
+                return;
+            }
+
+            moved = true;
+            miniPos = {
+                x: e.clientX - offsetX - baseX,
+                y: e.clientY - offsetY - baseY
+            };
+
+            // Only the bar moves here, the full fit runs once on release
+            placeMiniBar(baseX, baseY, vv ? vv.width : window.innerWidth, vv ? vv.height : window.innerHeight);
+        };
+
+        const onEnd = function (e) {
+
+            if (e.pointerId !== pointerId) {
+                return;
+            }
+
+            header.removeEventListener("pointermove", onMove);
+            header.removeEventListener("pointerup", onEnd);
+            header.removeEventListener("pointercancel", onEnd);
+
+            try {
+                header.releasePointerCapture(pointerId);
+            } catch (err) {
+            }
+
+            if (moved) {
+
+                lastHeaderClickT = 0;
+                fitMobile("mini-drag");
+                return;
+            }
+
+            if (e.type !== "pointerup" || !minimized) {
+                return;
+            }
+
+            // The bar is touched to be dragged, so opening takes a double tap,
+            // as folding does, and a single touch never opens it by accident
+            const now = Date.now();
+
+            if (now - lastHeaderClickT < 400) {
+
+                lastHeaderClickT = 0;
+                toggleMinimize();
+
+            } else {
+                lastHeaderClickT = now;
+            }
+        };
+
+        header.addEventListener("pointermove", onMove);
+        header.addEventListener("pointerup", onEnd);
+        header.addEventListener("pointercancel", onEnd);
     }
 
     // Drag the panel by its header, a click without movement toggles minimize
@@ -18377,6 +18547,9 @@
 
         minimized = value;
 
+        // Every fold starts at the top again, dragged away from there after
+        miniPos = null;
+
         if (bodyEl) {
 
             // The phone layout sets display flex with important on this element,
@@ -18413,8 +18586,10 @@
         // The height just changed, so re-clamp into the viewport. Collapsing
         // leaves a small panel, so it re-picks the nearer edge and snaps to it.
         // Expanding keeps the docked side, since a tall panel would otherwise
-        // flip to the top edge and grow off the bottom of the screen
-        if (panelEl) {
+        // flip to the top edge and grow off the bottom of the screen. On a
+        // phone the fit above has placed it already, and a plain value set
+        // here would drop the priority that placement needs
+        if (panelEl && window.innerWidth > 640) {
 
             const rect = panelEl.getBoundingClientRect();
 

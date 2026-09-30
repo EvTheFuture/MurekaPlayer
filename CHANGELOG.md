@@ -132,6 +132,10 @@ the new settings layout and a number of smaller improvements.
   and Connections in the app), Music (Library, Playback, Now playing), Data
   (Backup and restore) and Troubleshooting (Developer). Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **Hide player on a phone** folds the player into a small rounded bar at
+  the top, which can be dragged anywhere on the screen so nothing on Mureka's
+  page stays out of reach. A double tap opens the player full screen again,
+  and the next fold starts at the top.
 - **Trim** in the song menu for your own songs cuts the start or the end
   off, and Mureka makes a new song of it, keeping the original. The trimmer
   shows the song's real waveform: the whole song with the kept part lit and

@@ -3844,10 +3844,11 @@
     // in this browser, since the car shows nothing but this page
     const teslaTheater = /TESLA_AUTO/.test(navigator.userAgent || "");
 
-    // Any Tesla browser, which names itself Tesla/ followed by the software
-    // version. It says it can go fullscreen but does not, so the page offers
-    // no fullscreen there
-    const teslaBrowser = teslaTheater || /\bTesla\//.test(navigator.userAgent || "");
+    // Any Tesla browser. Older software names itself Tesla/ followed by the
+    // version, newer software may leave that out, but only Tesla calls its
+    // system "X11; GNU/Linux". It says it can go fullscreen but does not, so
+    // the page offers no fullscreen there
+    const teslaBrowser = teslaTheater || /\bTesla\b|X11; GNU\/Linux/i.test(navigator.userAgent || "");
     let theaterAsked = false;
     let theaterTriedAt = 0;
     let theaterHintAt = 0;
@@ -4115,7 +4116,8 @@
 
         return [
             "Web view " + (s.version || "-") + " | " + dbgDisplayMode()
-                + (teslaTheater ? " | Tesla fullscreen" : "")
+                + (teslaTheater ? " | Tesla fullscreen" : (teslaBrowser ? " | Tesla" : ""))
+                + ($("fullBtn").style.display === "none" ? " | no fullscreen" : "")
                 + " | fs " + dbgFlag(fs) + " | vis " + dbgFlag(!document.hidden)
                 + " foc " + dbgFlag(document.hasFocus()),
             "url " + location.href,
@@ -8423,11 +8425,44 @@
         $("fullBtn").title = on ? "Leave fullscreen" : "Fullscreen";
     }
 
-    // Where the browser cannot go fullscreen, a Tesla among them
-    const fullscreenOffered = !teslaBrowser && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    // Remembered in this browser once a try to go fullscreen came to nothing
+    const NO_FULLSCREEN_KEY = "murekaNoFullscreen";
+
+    function fullscreenFailedBefore() {
+
+        try {
+            return localStorage.getItem(NO_FULLSCREEN_KEY) === "1";
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Where the browser cannot go fullscreen, a Tesla among them, or where
+    // it said it could but did not the last time
+    let fullscreenOffered = !teslaBrowser && !fullscreenFailedBefore()
+        && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 
     if (!fullscreenOffered) {
         $("fullBtn").style.display = "none";
+    }
+
+    // A browser that claims fullscreen but does not go there, whatever it
+    // calls itself, loses the button and the menu entry for good
+    function fullscreenFailed() {
+
+        if (fullscreenOn()) {
+            return;
+        }
+
+        fullscreenOffered = false;
+        $("fullBtn").style.display = "none";
+
+        try {
+            localStorage.setItem(NO_FULLSCREEN_KEY, "1");
+        } catch (e) {
+        }
+
+        toast("Fullscreen does not work in this browser");
     }
 
     $("fullBtn").addEventListener("click", function () {
@@ -8442,12 +8477,18 @@
             } else if (document.webkitExitFullscreen) {
                 document.webkitExitFullscreen();
             }
-        } else if (root.requestFullscreen) {
-            root.requestFullscreen().catch(function () {
-            });
+
+            return;
+        }
+
+        if (root.requestFullscreen) {
+            root.requestFullscreen().catch(fullscreenFailed);
         } else if (root.webkitRequestFullscreen) {
             root.webkitRequestFullscreen();
         }
+
+        // A browser may accept the request and still stay as it was
+        setTimeout(fullscreenFailed, 1500);
     });
 
     // In fullscreen the browser takes Escape for itself and leaves
