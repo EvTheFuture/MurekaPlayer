@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.38";
+    const VERSION = "1.9.9.40";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23850,16 +23850,40 @@
         ui.askText = document.createElement("div");
         ui.askText.style.cssText = "line-height:1.4";
 
-        const deleteLabel = document.createElement("label");
+        // A box of its own rather than the browser's checkbox. Mureka's page
+        // takes the look away from checkboxes, which left a dark square with
+        // no visible tick on an iPhone. Cyan with a black tick when on
+        const deleteLabel = document.createElement("button");
+        const deleteBox = document.createElement("span");
 
-        deleteLabel.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer";
-        ui.askDelete = document.createElement("input");
-        ui.askDelete.type = "checkbox";
-        // In the accent colour when ticked, so it can be seen at a glance on
-        // the dark box. Left to the browser, it was grey with a grey tick
-        ui.askDelete.style.cssText = "width:20px;height:20px;margin:0;accent-color:#48e1eb;cursor:pointer";
-        deleteLabel.appendChild(ui.askDelete);
+        deleteLabel.type = "button";
+        deleteLabel.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;background:transparent;border:none;color:inherit;font:inherit;padding:2px 0;text-align:left";
+        deleteBox.style.cssText = "flex:0 0 auto;width:22px;height:22px;box-sizing:border-box;border-radius:5px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;line-height:1";
+        deleteLabel.setAttribute("role", "checkbox");
+        deleteLabel.appendChild(deleteBox);
         deleteLabel.appendChild(document.createTextNode("Delete original"));
+
+        ui.askDelete = {
+            checked: false,
+            paint: function () {
+
+                const on = ui.askDelete.checked === true;
+
+                deleteBox.textContent = on ? "\u2713" : "";
+                deleteBox.style.background = on ? "#48e1eb" : "transparent";
+                deleteBox.style.color = "#000";
+                deleteBox.style.border = on ? "2px solid #48e1eb" : "2px solid #8a8a94";
+                deleteLabel.setAttribute("aria-checked", on ? "true" : "false");
+            }
+        };
+
+        deleteLabel.addEventListener("click", function () {
+
+            ui.askDelete.checked = !ui.askDelete.checked;
+            ui.askDelete.paint();
+        });
+
+        ui.askDelete.paint();
 
         const askButtons = document.createElement("div");
 
@@ -24911,6 +24935,7 @@
         trimUi.askText.textContent = "Trim \"" + (tr.song.title || "Untitled") + "\" to "
             + trimTimeText(tr.start) + " - " + trimTimeText(tr.end) + "?";
         trimUi.askDelete.checked = false;
+        trimUi.askDelete.paint();
         trimUi.ask.style.display = "flex";
     }
 

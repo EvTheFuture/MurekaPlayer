@@ -3880,6 +3880,31 @@
         return phonePosition();
     }
 
+    // How far this browser's clock is ahead of the phone's, plus the
+    // shortest time a state has taken to get here. Each state carries the
+    // phone's time it was made at, so how old it is on arrival is known and
+    // a state that took longer, or came again, no longer sets the song back
+    let phoneClockLead = null;
+    let phoneClockNoted = 0;
+
+    function notePhoneClock(s) {
+
+        if (!s || typeof s.at !== "number") {
+            return;
+        }
+
+        const now = Date.now();
+        const lead = now - s.at;
+
+        // The quickest arrival is the truest. It creeps up by 2 percent of
+        // the time passed, so a clock set back on either side is followed
+        // within a minute or so, however often states arrive
+        phoneClockLead = phoneClockLead === null
+            ? lead
+            : Math.min(lead, phoneClockLead + (now - phoneClockNoted) * 0.02);
+        phoneClockNoted = now;
+    }
+
     // Where the phone's song is now, going by its last word
     function phonePosition() {
 
@@ -3890,7 +3915,14 @@
         let p = state.position || 0;
 
         if (state.playing) {
-            p += (Date.now() - stateAt) / 1000;
+
+            // Counted from when the phone made the state, or from when it got
+            // here for a position set in this browser
+            const since = typeof state.at === "number" && phoneClockLead !== null
+                ? Date.now() - phoneClockLead - state.at
+                : Date.now() - stateAt;
+
+            p += Math.max(0, since) / 1000;
         }
 
         return state.duration ? Math.min(p, state.duration) : p;
@@ -5401,10 +5433,39 @@
     }
 
     // The seek bar and the times move smoothly between the polls
+    // The position the bar shows. It runs on with the clock and is eased
+    // toward where the phone says the song is, so the small differences
+    // between one word from the phone and the next never make it jump.
+    // A real change, a seek, a pause or a new song, is taken at once
+    let shownPos = 0;
+    let shownAt = 0;
+    let shownId = "";
+
+    function smoothPosition(target) {
+
+        const now = performance.now();
+        const playing = !!(state && state.playing);
+        const id = state ? String(state.id || "") : "";
+        let next = shownPos + (playing ? (now - shownAt) / 1000 : 0);
+        const off = target - next;
+
+        if (!playing || id !== shownId || Math.abs(off) > 0.6) {
+            next = target;
+        } else {
+            next += off * 0.06;
+        }
+
+        shownPos = next;
+        shownAt = now;
+        shownId = id;
+
+        return next;
+    }
+
     function tick() {
 
         const dur = state && state.duration ? state.duration : 0;
-        const pos = dragging ? dragFrac * dur : position();
+        const pos = dragging ? dragFrac * dur : smoothPosition(position());
         const frac = dur > 0 ? Math.min(1, pos / dur) : 0;
 
         $("fill").style.width = (frac * 100) + "%";
@@ -8997,6 +9058,8 @@
             dbgLog("Net", "phone reached");
         }
 
+        notePhoneClock(s);
+
         // The phone's own values kept, what this browser shows may differ
         rawState = s;
         s = applyLocalLook(s);
@@ -9351,6 +9414,7 @@
         if (state && state.id) {
 
             state.position = position();
+            state.at = null;
             stateAt = Date.now();
             state.playing = !state.playing;
             pending = { playing: state.playing, until: Date.now() + 2000 };
@@ -9551,6 +9615,7 @@
 
         // Shown at once, the next poll confirms it
         state.position = target;
+        state.at = null;
         stateAt = Date.now();
         send("seek", target);
     });
@@ -11120,6 +11185,7 @@
 
                     // Shown at once, the next state from the phone confirms it
                     state.position = to;
+                    state.at = null;
                     stateAt = Date.now();
                     send("seek", to);
                 }
