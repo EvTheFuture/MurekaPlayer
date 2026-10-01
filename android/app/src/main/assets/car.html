@@ -1988,6 +1988,28 @@
         color: #f0a94a;
     }
 
+    /* A song made by trimming, a small yellow T on the badge's corner */
+    .rowBadge {
+        position: relative;
+    }
+
+    .rowTrim {
+        position: absolute;
+        top: -0.4em;
+        right: -0.3em;
+        width: 1.05em;
+        height: 1.05em;
+        border-radius: 50%;
+        background: #c9a83a;
+        color: var(--bg);
+        font-size: 0.75em;
+        line-height: 1.05em;
+        font-weight: 700;
+        text-align: center;
+        opacity: 0.85;
+        pointer-events: none;
+    }
+
     .ceLabel {
         color: var(--muted);
         font-size: 0.85em;
@@ -4136,7 +4158,7 @@
             "here " + (audio.paused ? "paused" : "playing") + " " + dbgNum(audio.currentTime)
                 + " | ready " + audio.readyState + " | unlocked " + dbgFlag(unlocked)
                 + " | muted " + dbgFlag(audio.muted) + " | session " + session,
-            "agent " + (navigator.userAgent || "-")
+            "Web view agent: " + (navigator.userAgent || "-")
         ];
     }
 
@@ -4985,6 +5007,11 @@
         $("pubBadge").classList.toggle("draft", pub === false && !fresh);
         $("pubBadge").classList.toggle("new", fresh);
         $("pubBadge").textContent = pub === null ? "" : (fresh ? "New" : (pub ? "Public" : "Draft"));
+
+        // The same small T as in the list for a song made by trimming
+        if (pub !== null && s.songTrimmed === true) {
+            $("pubBadge").appendChild(trimMark());
+        }
 
         // And how many times it has been played
         const plays = s && typeof s.plays === "number" ? s.plays : null;
@@ -6724,11 +6751,28 @@
     }
 
     // The badge at the end of a line: new for a song not played yet, else
-    // public or draft
+    // public or draft, with a small T for a song made by trimming
     function paintBadge(badge, song) {
 
         badge.className = "rowBadge" + (song.isNew ? " new" : (song.published ? "" : " draft"));
         badge.textContent = song.isNew ? "new" : (song.published ? "public" : "draft");
+
+        if (song.trimmed) {
+            badge.appendChild(trimMark());
+        }
+    }
+
+    // The small yellow T on the corner of a badge, for a song made by
+    // trimming
+    function trimMark() {
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowTrim";
+        mark.textContent = "T";
+        mark.title = "Trimmed";
+
+        return mark;
     }
 
     // A small button at the end of a line, which must not also tap the line
@@ -9997,7 +10041,7 @@
         }));
 
         box.appendChild(menuItem("instrumental",
-            m.serverInstrumental ? "Instrumental" : (m.manualInstrumental ? "Not instrumental" : "Mark instrumental"),
+            m.serverInstrumental ? "Instrumental" : (m.manualInstrumental ? "Unmark instrumental" : "Mark instrumental"),
             function () {
 
                 act("instrumental");
@@ -10037,16 +10081,14 @@
                     close();
                 }));
 
-            // Remixing is only offered for songs Mureka says have lyrics
-            if (m.canRemix) {
+            // Instrumentals can be remixed too, so every song of your own
+            // offers it
+            box.appendChild(menuItem("shuffle",
+                m.remix === 1 ? "Disallow remixing" : "Allow remixing", function () {
 
-                box.appendChild(menuItem("shuffle",
-                    m.remix === 1 ? "No remixing" : "Allow remixing", function () {
-
-                        act("remix", m.remix !== 1);
-                        close();
-                    }));
-            }
+                    act("remix", m.remix !== 1);
+                    close();
+                }));
         }
 
         if (m.canSetBpm) {

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.48";
+    const VERSION = "1.9.9.56";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -142,6 +142,10 @@
     // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
     // track can carry lyrics text while still being an instrumental
     const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
+
+    // localStorage key for songs made by trimming in the player, which the
+    // list marks with a small T on their badge
+    const TRIMMED_KEY = "mureka_trimmed_v1";
 
     // localStorage key for song tweaks the user took away again, a rating,
     // a hand entered tempo or an instrumental mark, with when it happened.
@@ -2064,11 +2068,42 @@
             bpm: s.bpm,
             generation_method: s.generation_method,
             allow_remix: s.allow_remix,
+            trimmed: hasTrimField(s) || undefined,
 
             // False until the song has been played, Mureka's "new" mark. Only
             // songs of your own library carry it, others leave it out
             is_played: typeof s.is_played === "boolean" ? s.is_played : undefined
         };
+    }
+
+    // Mureka marks a trimmed song in its own data, the field's exact name is
+    // not known yet. Any field with trim in its name holding a real value
+    // counts, so the mark comes along on every device after a load. A song
+    // kept from before has it as trimmed already
+    function hasTrimField(s) {
+
+        if (s.trimmed === true) {
+            return true;
+        }
+
+        for (const key of Object.keys(s)) {
+
+            if (!/trim/i.test(key)) {
+                continue;
+            }
+
+            const v = s[key];
+
+            if (v === null || v === undefined || v === false || v === 0 || v === "" || v === "0") {
+                continue;
+            }
+
+            if (Array.isArray(v) ? v.length > 0 : (typeof v === "object" ? Object.keys(v).length > 0 : true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Song ids the user marked as instrumental by hand, loaded once on startup
@@ -2743,6 +2778,39 @@
                 JSON.stringify(Array.from(manualInstrumental)));
         } catch (e) {
         }
+    }
+
+    // Songs made by trimming in the player, kept across restarts
+    let trimmedIds = loadTrimmed();
+
+    function loadTrimmed() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(TRIMMED_KEY));
+
+            if (Array.isArray(raw)) {
+                return new Set(raw.map(String));
+            }
+        } catch (e) {
+        }
+
+        return new Set();
+    }
+
+    function saveTrimmed() {
+
+        try {
+            localStorage.setItem(TRIMMED_KEY, JSON.stringify(Array.from(trimmedIds)));
+        } catch (e) {
+        }
+    }
+
+    // Whether this song was made by trimming another one, by Mureka's own
+    // mark or because it was trimmed here
+    function isTrimmed(song) {
+
+        return song.trimmed === true || trimmedIds.has(String(song.song_id));
     }
 
     // Whether the user marked this song as instrumental by hand
@@ -14524,6 +14592,7 @@
             coverResend: settings.coverResend || "title",
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             songNew: song && !creatorSource ? song.is_played === false : null,
+            songTrimmed: song && !creatorSource ? isTrimmed(song) : null,
 
             // The web view's screen off, apart from the mobile player's.
             // A browser can still have its own
@@ -14653,7 +14722,6 @@
             canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
             published: song.publish_state === 1,
             remix: remixState(song),
-            canRemix: song.generation_method !== 7,
             mine: !creatorSource,
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
             src: songUrl(song) || "",
@@ -14991,6 +15059,7 @@
                 published: song.publish_state === 1,
                 cached: hostCacheState(song),
                 isNew: song.is_played === false,
+                trimmed: isTrimmed(song),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -15038,6 +15107,7 @@
                 published: song.publish_state === 1,
                 cached: hostCacheState(song),
                 isNew: song.is_played === false,
+                trimmed: isTrimmed(song),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -18068,7 +18138,10 @@
         lines.push("");
         Array.prototype.push.apply(lines, debugLog);
         lines.push("");
-        lines.push(navigator.userAgent || "");
+
+        // Named, so this browser is not taken for the one showing the web
+        // view, whose own agent comes in its log below
+        lines.push("This player's agent: " + (navigator.userAgent || "-"));
 
         if (webViewDebugLog) {
 
@@ -19585,6 +19658,19 @@
                 badge.title = published ? "Not played yet, public" : "Not played yet, draft";
             }
 
+            // A song made by trimming carries a small yellow T on the top
+            // right corner of its badge
+            if (isTrimmed(song)) {
+
+                const mark = document.createElement("span");
+
+                mark.textContent = "T";
+                mark.title = "Trimmed";
+                mark.style.cssText = "position:absolute;top:-4px;right:-3px;width:9px;height:9px;border-radius:50%;background:#c9a83a;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.85;pointer-events:none";
+                badge.style.position = "relative";
+                badge.appendChild(mark);
+            }
+
             item.appendChild(badge);
         }
 
@@ -20867,7 +20953,7 @@
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
         const dataHint = document.createElement("div");
-        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks and saved creators."
+        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks, trim marks and saved creators."
             + " Share saves to the Google Drive or Files app, Import can pick the file"
             + " from there. Import sees what a file holds. Song tweaks are merged, and"
             + " when a song has a different value here and in the file you are asked"
@@ -21636,7 +21722,7 @@
     }
 
     // A readable count of what a set of user data holds, zeros left out
-    function userDataSummary(nRatings, nBpm, nInstr, nCreators) {
+    function userDataSummary(nRatings, nBpm, nInstr, nCreators, nTrimmed) {
 
         const parts = [];
 
@@ -21650,6 +21736,7 @@
         add(nRatings, "rating", "ratings");
         add(nBpm, "tempo", "tempos");
         add(nInstr, "instrumental mark", "instrumental marks");
+        add(nTrimmed || 0, "trim mark", "trim marks");
         add(nCreators, "creator", "creators");
 
         return parts.length ? parts.join(", ") : "no song data";
@@ -21844,6 +21931,7 @@
             ratings: {},
             manualBpm: {},
             manualInstrumental: Array.from(manualInstrumental),
+            trimmed: Array.from(trimmedIds),
             creators: savedCreators.slice(),
             cleared: {
                 rating: Object.keys(clearedMarks.rating),
@@ -21880,6 +21968,7 @@
             ratings: [],
             bpm: [],
             instr: [],
+            trimmed: [],
             creators: [],
             cleared: { rating: [], bpm: [], instr: [] },
             settings: (data.settings && typeof data.settings === "object") ? data.settings : null,
@@ -21982,6 +22071,17 @@
             }
         }
 
+        // Songs made by trimming, files from before 1.9.9.55 have none
+        if (Array.isArray(data.trimmed)) {
+
+            for (const id of data.trimmed) {
+
+                if (id !== null && id !== undefined && id !== "") {
+                    out.trimmed.push(String(id));
+                }
+            }
+        }
+
         return out;
     }
 
@@ -21991,7 +22091,7 @@
             return "settings";
         }
 
-        return userDataSummary(p.ratings.length, p.bpm.length, p.instr.length, p.creators.length);
+        return userDataSummary(p.ratings.length, p.bpm.length, p.instr.length, p.creators.length, p.trimmed.length);
     }
 
     // Put imported settings into effect without a reload, as far as the
@@ -22045,7 +22145,15 @@
     // are left alone, and a different value on both sides is a conflict
     function planSongMerge(p) {
 
-        const plan = { ratings: [], bpm: [], instr: [], creators: [], clears: [], same: 0, conflicts: [] };
+        const plan = { ratings: [], bpm: [], instr: [], trimmed: [], creators: [], clears: [], same: 0, conflicts: [] };
+
+        // A trimmed song stays trimmed, so these are only ever added
+        for (const id of p.trimmed) {
+
+            if (!trimmedIds.has(id)) {
+                plan.trimmed.push(id);
+            }
+        }
 
         // A value in the file for a song where it was removed here on
         // purpose is a conflict too, not something new
@@ -22215,6 +22323,10 @@
             manualInstrumental.add(id);
         }
 
+        for (const id of plan.trimmed) {
+            trimmedIds.add(id);
+        }
+
         for (const c of plan.creators) {
             addSavedCreator(c.user_id, c.stage_name);
         }
@@ -22255,7 +22367,14 @@
         saveRatings();
         saveManualBpm();
         saveManualInstrumental();
+        saveTrimmed();
         refreshSongDataViews();
+
+        // The T on the badges of songs that came in trimmed
+        if (plan.trimmed.length > 0) {
+            renderList();
+            publishHostSoon();
+        }
     }
 
     // Everything that shows song tweaks is brought up to date
@@ -22273,7 +22392,7 @@
     // The result of a merge in words
     function mergeSummary(plan, answers) {
 
-        const added = plan.ratings.length + plan.bpm.length + plan.instr.length;
+        const added = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.trimmed.length;
         const taken = answers.filter(Boolean).length;
         const parts = [];
 
@@ -22394,7 +22513,7 @@
 
         return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
             Object.keys(data.manualBpm).length, data.manualInstrumental.length,
-            data.creators.length);
+            data.creators.length, data.trimmed.length);
     }
 
     // The file name of an export, without its extension
@@ -23010,6 +23129,7 @@
         local.ratings = Object.assign(ratingsOut, local.ratings);
         local.manualBpm = Object.assign(bpmOut, local.manualBpm);
         local.manualInstrumental = Array.from(new Set(p.instr.concat(local.manualInstrumental)));
+        local.trimmed = Array.from(new Set(p.trimmed.concat(local.trimmed || [])));
 
         // Removals follow the same rule, this device wins. Removed here takes
         // the value out of the upload, held here drops the other removal
@@ -23584,8 +23704,7 @@
         const sharesEl = addInfoRow("Shares", "...");
         const commentsEl = addInfoRow("Comments", "...");
 
-        const remixEl = addInfoRow("Remixing",
-            song.generation_method === 7 ? "Instrumental, no remixing" : remixText(song));
+        const remixEl = addInfoRow("Remixing", remixText(song));
 
         addInfoRow("Created", fmtDate(song.generate_at));
         addInfoRow("Published", song.publish_at ? fmtDate(song.publish_at) : "-");
@@ -25341,11 +25460,14 @@
                 s.is_played = false;
             }
 
+            trimmedIds.add(String(s.song_id));
+
             if (!known.has(s.song_id)) {
                 cache.songs.unshift(trim(s));
             }
         }
 
+        saveTrimmed();
         saveCache();
         renderList();
         publishHostSoon();
@@ -26586,12 +26708,11 @@
                 setPublished(song, song.publish_state !== 1);
             });
 
-            if (song.generation_method !== 7) {
-
-                addMenuRow(remixState(song) === 1 ? "No remixing" : "Allow remixing", "#fff", function () {
-                    setRemixAllowed(song, remixState(song) !== 1);
-                });
-            }
+            // Mureka lets instrumentals be remixed too, so every song of your
+            // own can have remixing allowed or stopped
+            addMenuRow(remixState(song) === 1 ? "Disallow remixing" : "Allow remixing", "#fff", function () {
+                setRemixAllowed(song, remixState(song) !== 1);
+            });
         }
 
         // A song the server already reports as instrumental cannot be marked
@@ -26603,7 +26724,7 @@
 
         } else {
 
-            addMenuRow(isManualInstrumental(song) ? "Not instrumental" : "Mark instrumental",
+            addMenuRow(isManualInstrumental(song) ? "Unmark instrumental" : "Mark instrumental",
                 "#fff", function () {
                     toggleManualInstrumental(song);
                 });

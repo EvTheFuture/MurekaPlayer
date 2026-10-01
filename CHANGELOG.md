@@ -149,7 +149,10 @@ the new settings layout and a number of smaller improvements.
   and a tap on the waveform plays from there. **Fade out the last second**
   fades the preview the way Mureka fades a trimmed song, once the end is
   moved. The new song gets a title of its own and is put at the top of the
-  list, marked new. **Delete original**, ticked when confirming, deletes
+  list, marked new, and a small yellow T on its public or draft badge shows
+  it was made by trimming, wherever that badge shows: the lists, and the
+  playing song in the web view. The marks travel with the exported song
+  tweaks, so another device shows them after an import. **Delete original**, ticked when confirming, deletes
   the original on Mureka and from the lists here once the new song has
   arrived. While Mureka works, a turning ring covers the page. The web
   view has the same trimmer in its song menu, drawn in the browser, with
@@ -159,7 +162,7 @@ the new settings layout and a number of smaller improvements.
   In the web view the song is saved under that name too, the phone
   fetching it for the browser.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
-  songs, and **Allow remixing** or **No remixing** for songs with lyrics.
+  songs, and **Allow remixing** or **Disallow remixing**, instrumentals included.
   When Mureka refuses a change on a published song, the player offers to take
   it down, make the change and publish it again.
 - The song information shows whether remixing is allowed, and a running bar
