@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.45";
+    const VERSION = "1.9.9.47";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2200,14 +2200,10 @@
     function promptManualBpm(song) {
 
         const current = effectiveBpm(song);
-        const answer = window.prompt("BPM for " + (song.title || "Untitled"),
-            current > 0 ? String(current) : "");
 
-        if (answer === null) {
-            return;
-        }
-
-        setManualBpmText(song, String(answer));
+        askText("BPM for " + (song.title || "Untitled"), current > 0 ? String(current) : "", "Save", function (answer) {
+            setManualBpmText(song, String(answer));
+        });
     }
 
     // Keep a typed tempo, or clear the hand entered one when the text is
@@ -5722,8 +5718,9 @@
             : "Was not in the cache: " + (song.title || "Untitled"));
     }
 
-    // Download one song to disk, caching it on the way if needed
-    async function downloadOne(song) {
+    // Download one song to disk, caching it on the way if needed. The name
+    // can be changed before it is saved
+    function downloadOne(song) {
 
         const url = songUrl(song);
 
@@ -5732,14 +5729,13 @@
             return;
         }
 
-        // The name can be changed before it is saved
-        const typed = window.prompt("File name", fileName(song));
+        askText("File name", fileName(song), "Download", function (typed) {
+            saveOne(song, url, cleanFileName(typed) || fileName(song));
+        });
+    }
 
-        if (typed === null) {
-            return;
-        }
-
-        const name = cleanFileName(typed) || fileName(song);
+    // Hand one song to the browser's downloads under the chosen name
+    function saveOne(song, url, name) {
 
         requestDownload([{ url: url, filename: "Mureka/" + name }]);
 
@@ -6062,13 +6058,9 @@
     // Ask for a new title, the mobile player's own way in
     function promptRename(song) {
 
-        const answer = window.prompt("Title for this song", (song.title || "").trim());
-
-        if (answer === null) {
-            return;
-        }
-
-        renameSong(song, answer);
+        askText("Title for this song", (song.title || "").trim(), "Rename", function (answer) {
+            renameSong(song, answer);
+        });
     }
 
     // Format a number of seconds as m:ss
@@ -9372,7 +9364,140 @@
         return fullscreenSupported() || isIosLike();
     }
 
-    // A plain message box inside the panel, with one way out
+    // A text question in the panel, a title, a field holding the current
+    // value, Cancel and a button to accept. window.prompt would do, but the
+    // Android app's page does not show it, and it stops the page, and with
+    // it the state the web view lives on
+    function askText(title, value, okLabel, onOk) {
+
+        if (!panelEl) {
+            return;
+        }
+
+        const back = document.createElement("div");
+        back.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:rgba(0,0,0,0.6)",
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
+            "padding:16px",
+            "box-sizing:border-box",
+            "z-index:10"
+        ].join(";");
+
+        // Counted as an open dialog, so the shortcuts keep off and Escape
+        // closes it when the field has lost focus
+        back.setAttribute("data-mureka-notice", "1");
+
+        const card = document.createElement("div");
+        card.style.cssText = [
+            "background:#26262c",
+            "border:1px solid #3a3a42",
+            "border-radius:10px",
+            "padding:14px",
+            "width:100%",
+            "max-width:340px",
+            "box-sizing:border-box",
+            "display:flex",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        const head = document.createElement("div");
+        head.textContent = title;
+        head.style.cssText = "font-weight:600;overflow-wrap:anywhere";
+
+        // At least 16 pixels, below that iOS zooms the page in on focus
+        const field = document.createElement("input");
+        field.type = "text";
+        field.value = value || "";
+        field.setAttribute("autocomplete", "off");
+        field.setAttribute("autocapitalize", "off");
+        field.setAttribute("spellcheck", "false");
+        field.style.cssText = [
+            "width:100%",
+            "box-sizing:border-box",
+            "padding:8px 10px",
+            "border:1px solid #4a4a52",
+            "border-radius:6px",
+            "background:#1b1b20",
+            "color:#fff",
+            "font-size:16px",
+            "outline:none"
+        ].join(";");
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = function (accept) {
+
+            back.remove();
+
+            if (accept) {
+                onOk(field.value);
+            }
+        };
+
+        const no = makeButton("Cancel", "#444", "#fff", function () {
+            close(false);
+        });
+
+        const yes = makeButton(okLabel, "#48e1eb", "#000", function () {
+            close(true);
+        });
+
+        no.style.flex = "1";
+        yes.style.flex = "1";
+
+        // Enter accepts and Escape cancels, and no key typed here reaches
+        // the player's own shortcuts
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter") {
+                ev.preventDefault();
+                close(true);
+            } else if (ev.key === "Escape") {
+                ev.preventDefault();
+                close(false);
+            }
+        });
+
+        field.addEventListener("keyup", function (ev) {
+            ev.stopPropagation();
+        });
+
+        field.addEventListener("keypress", function (ev) {
+            ev.stopPropagation();
+        });
+
+        row.appendChild(no);
+        row.appendChild(yes);
+        card.appendChild(head);
+        card.appendChild(field);
+        card.appendChild(row);
+        back.appendChild(card);
+
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close(false);
+            }
+        });
+
+        panelEl.appendChild(back);
+
+        // Focused in the same tap that asked, which is what lets a phone
+        // bring up its keyboard
+        field.focus();
+        field.select();
+
+        return back;
+    }
+
     // A yes or no question in the panel. window.confirm would do, but it
     // stops the page, and with it the state the web view lives on
     function askYesNo(title, body, yesLabel, onYes, onNo) {
@@ -9460,6 +9585,7 @@
         return back;
     }
 
+    // A plain message box inside the panel, with one way out
     function showNotice(title, body) {
 
         if (!panelEl) {
@@ -16604,15 +16730,19 @@
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
+            // The panel has no padding at the bottom, so the list reaches the
+            // lower edge of the screen, and the list carries that room inside
+            // instead, after its last song
+            //
             // overscroll-behavior keeps a drag that runs past the end of the
             // list from handing the rest of the movement to the page, which is
             // what starts the bounce that drags the panel off its own edges
-            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:" + PANEL_PAD_MOBILE + " !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important;overscroll-behavior:none !important}"
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:" + PANEL_PAD_MOBILE + " " + PANEL_PAD_MOBILE + " 0 !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important;overscroll-behavior:none !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
             + ".mureka-resize-handle{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
-            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important;overscroll-behavior:contain !important}"
+            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important;overscroll-behavior:contain !important;padding-bottom:" + PANEL_PAD_MOBILE + " !important}"
             + "#mureka-player-list > div{font-size:15px !important;padding:9px 2px !important}"
             + "}";
         document.head.appendChild(placeholderStyle);
@@ -18322,9 +18452,13 @@
         if (!folded) {
             panelEl.style.removeProperty("max-width");
             panelEl.style.removeProperty("border-radius");
+            panelEl.style.removeProperty("padding-bottom");
             return;
         }
 
+        // Open, the panel leaves the bottom padding to the list, folded the
+        // bar needs it back around its header
+        panelEl.style.setProperty("padding-bottom", PANEL_PAD_MOBILE, "important");
         panelEl.style.setProperty("width", "auto", "important");
         panelEl.style.setProperty("max-width", Math.max(120, width - 16) + "px", "important");
         panelEl.style.setProperty("border-radius", "14px", "important");
