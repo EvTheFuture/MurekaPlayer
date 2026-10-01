@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.47";
+    const VERSION = "1.9.9.48";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16730,19 +16730,15 @@
             // On a phone, fill the screen, shrink the art a touch and let the
             // list grow into the remaining height instead of a fixed box
             + "@media (max-width:640px){"
-            // The panel has no padding at the bottom, so the list reaches the
-            // lower edge of the screen, and the list carries that room inside
-            // instead, after its last song
-            //
             // overscroll-behavior keeps a drag that runs past the end of the
             // list from handing the rest of the movement to the page, which is
             // what starts the bounce that drags the panel off its own edges
-            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:" + PANEL_PAD_MOBILE + " " + PANEL_PAD_MOBILE + " 0 !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important;overscroll-behavior:none !important}"
+            + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:" + PANEL_PAD_MOBILE + " !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important;overscroll-behavior:none !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
             + ".mureka-resize-handle{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
-            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important;overscroll-behavior:contain !important;padding-bottom:" + PANEL_PAD_MOBILE + " !important}"
+            + "#mureka-player-list{flex:1 1 auto !important;height:auto !important;min-height:120px !important;overscroll-behavior:contain !important}"
             + "#mureka-player-list > div{font-size:15px !important;padding:9px 2px !important}"
             + "}";
         document.head.appendChild(placeholderStyle);
@@ -18452,13 +18448,9 @@
         if (!folded) {
             panelEl.style.removeProperty("max-width");
             panelEl.style.removeProperty("border-radius");
-            panelEl.style.removeProperty("padding-bottom");
             return;
         }
 
-        // Open, the panel leaves the bottom padding to the list, folded the
-        // bar needs it back around its header
-        panelEl.style.setProperty("padding-bottom", PANEL_PAD_MOBILE, "important");
         panelEl.style.setProperty("width", "auto", "important");
         panelEl.style.setProperty("max-width", Math.max(120, width - 16) + "px", "important");
         panelEl.style.setProperty("border-radius", "14px", "important");
