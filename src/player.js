@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.59";
+    const VERSION = "1.9.9.63";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1333,6 +1333,21 @@
         };
     }
 
+    // The web view's bar from stored settings. Before Songs could be placed
+    // it always stood at the end of the bar, so a bar stored then gets it
+    // there once
+    function webControlsFrom(parsed) {
+
+        const stored = typeof parsed.webControlOrder === "string" && parsed.webControlOrder
+            ? parsed.webControlOrder : "repeat,shuffle,stop,play";
+
+        if (parsed.webControlsV2 === true || stored.split(",").indexOf("songs") >= 0) {
+            return stored;
+        }
+
+        return stored + ",songs";
+    }
+
     // Read the settings from localStorage, falling back to safe defaults
     // As last time is the default start, refresh on open is off for both feeds
     // Autoplay is off, the default play mode is not shuffled, repeat is all
@@ -1405,7 +1420,8 @@
             webWaveSource: "mureka",
             webNames: false,
             webLyrics: "info",
-            webControlOrder: "repeat,shuffle,stop,play",
+            webControlOrder: "repeat,shuffle,stop,play,songs",
+            webControlsV2: true,
             lyricSize: 18,
             lyricSideMul: 0.8,
             lyricLineMul: 1.5,
@@ -1569,9 +1585,8 @@
                     webNames: parsed.webNames === true,
                     webLyrics: (parsed.webLyrics === "off" || parsed.webLyrics === "cover")
                         ? parsed.webLyrics : "info",
-                    webControlOrder: typeof parsed.webControlOrder === "string" && parsed.webControlOrder
-                        ? parsed.webControlOrder
-                        : "repeat,shuffle,stop,play",
+                    webControlOrder: webControlsFrom(parsed),
+                    webControlsV2: true,
                     lyricSize: (typeof parsed.lyricSize === "number" && parsed.lyricSize >= 12 && parsed.lyricSize <= 30)
                         ? parsed.lyricSize : 18,
                     lyricSideMul: (typeof parsed.lyricSideMul === "number" && parsed.lyricSideMul >= 0.5 && parsed.lyricSideMul <= 1)
@@ -10945,6 +10960,17 @@
     // Every transport button that can be placed, in a fixed reference order
     const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate"];
 
+    // The web view has two more: Songs, which opens the whole song list with
+    // a tap and the small one over the main page with a swipe up, and List,
+    // which opens the small one with a tap. Either or both can be used
+    const WEB_CONTROL_NAMES = CONTROL_NAMES.concat(["songs", "minilist"]);
+
+    // The buttons a bar can hold, by its setting or by mobile or web
+    function controlNamesFor(which) {
+
+        return which === "webControlOrder" || which === "web" ? WEB_CONTROL_NAMES : CONTROL_NAMES;
+    }
+
     // A fresh icon for the editor, the real buttons keep their own nodes
     function controlChipIcon(name) {
 
@@ -10963,6 +10989,27 @@
 
         if (name === "rate") {
             return makeStarSvg(20);
+        }
+
+        // The web view's two list buttons, drawn as they are there
+        if (name === "songs") {
+
+            return makeSvgIcon([
+                ["path", { d: "M4 6h16" }],
+                ["path", { d: "M4 12h16" }],
+                ["path", { d: "M4 18h10" }],
+                ["circle", { cx: "18", cy: "18", r: "3" }]
+            ]);
+        }
+
+        if (name === "minilist") {
+
+            return makeSvgIcon([
+                ["rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }],
+                ["line", { x1: "7", y1: "9", x2: "17", y2: "9" }],
+                ["line", { x1: "7", y1: "13", x2: "17", y2: "13" }],
+                ["line", { x1: "7", y1: "17", x2: "13", y2: "17" }]
+            ]);
         }
 
         const drawn = {
@@ -10993,6 +11040,8 @@
 
         // The mobile bar or the web view's, each with its own order
         key = key || "controlOrder";
+
+        const allNames = controlNamesFor(key);
 
         const wrap = document.createElement("div");
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
@@ -11062,7 +11111,7 @@
                 })
                 .filter(function (name) {
 
-                    if (CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                    if (allNames.indexOf(name) === -1 || seen[name]) {
                         return false;
                     }
 
@@ -11071,7 +11120,7 @@
                     return true;
                 });
 
-            disabledNames = CONTROL_NAMES.filter(function (name) {
+            disabledNames = allNames.filter(function (name) {
                 return !seen[name];
             });
         };
@@ -11083,7 +11132,7 @@
             if (activeNames.length === 0) {
 
                 activeNames = ["play"];
-                disabledNames = CONTROL_NAMES.filter(function (name) {
+                disabledNames = allNames.filter(function (name) {
                     return name !== "play";
                 });
             }
@@ -11107,7 +11156,7 @@
 
             if (animate) {
 
-                for (const name of CONTROL_NAMES) {
+                for (const name of allNames) {
 
                     if (chips[name] && chips[name].isConnected) {
                         before[name] = chips[name].getBoundingClientRect();
@@ -11127,7 +11176,7 @@
                 return;
             }
 
-            for (const name of CONTROL_NAMES) {
+            for (const name of allNames) {
 
                 const old = before[name];
 
@@ -11387,7 +11436,7 @@
             return chip;
         };
 
-        for (const name of CONTROL_NAMES) {
+        for (const name of allNames) {
             chips[name] = makeChip(name);
         }
 
@@ -14815,7 +14864,7 @@
             })
             .filter(function (name) {
 
-                if (CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                if (controlNamesFor(which).indexOf(name) === -1 || seen[name]) {
                     return false;
                 }
 
@@ -14824,7 +14873,7 @@
                 return true;
             });
 
-        return names.length > 0 ? names : ["repeat", "shuffle", "stop", "play"];
+        return names.length > 0 ? names : (which === "mobile" ? ["repeat", "shuffle", "stop", "play"] : ["repeat", "shuffle", "stop", "play", "songs"]);
     }
 
     // Everything the song menu needs for one song, the same choices the
@@ -15291,7 +15340,7 @@
                 t: "controls",
                 which: el.dataset.hostControls,
                 active: hostControls(el.dataset.hostControls),
-                all: CONTROL_NAMES.slice()
+                all: controlNamesFor(el.dataset.hostControls).slice()
             });
             return;
         }
@@ -15835,7 +15884,7 @@
                 return String(name).trim().toLowerCase();
             }).filter(function (name) {
 
-                if (CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                if (controlNamesFor(which).indexOf(name) === -1 || seen[name]) {
                     return false;
                 }
 
@@ -19050,6 +19099,12 @@
 
     // A control's name as shown, starting with a capital letter
     function controlName(name) {
+
+        // The small list over the web view's main page is called List there
+        if (name === "minilist") {
+            return "List";
+        }
+
         return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
     }
 

@@ -68,7 +68,17 @@ the new settings layout and a number of smaller improvements.
   number of hearts, plays, a Public or Draft badge, up next, **Playing from**
   with the source and filters, the waveform seek bar and the status line.
 - Transport bar with its own order, set with press and hold or the editor in
-  the settings, and optional names under the buttons.
+  the settings, and optional names under the buttons. **Songs** and **List**
+  are among its buttons, to be placed or left out like the others, either
+  or both: a tap on Songs opens the song list and a swipe up on it a small
+  one over the main page, a tap on List opens the small one.
+- The small song list reaches from the stars down to the seek bar beside the
+  cover. It is see through, hides the stars, Playing from and the lyrics
+  while open, opens at the playing song, and keeps its cache dots, titles and
+  badges up to date. At its top: the number of songs, **Update**, **Rescan**,
+  a button for the whole list and Close, and under them what the phone is
+  loading with its turning ring and bar. A pull down at its top loads new
+  songs as in the big list.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click.

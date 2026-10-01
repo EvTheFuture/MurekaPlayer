@@ -432,9 +432,27 @@
         box-shadow: inset 0 0 0 4px #ff6b6b;
     }
 
-    /* A red dot on the songs button, seen from the main screen */
+    /* A red dot on the songs button, seen from the main screen. It takes
+       the whole touch, so a swipe up on it is not taken as a scroll */
     #browseBtn {
         position: relative;
+        touch-action: none;
+    }
+
+    /* A small mark at its top for the swipe up that opens the list over
+       the main page */
+    #browseBtn::before {
+        content: "";
+        position: absolute;
+        top: 7px;
+        left: 50%;
+        width: 8px;
+        height: 8px;
+        margin-left: -5px;
+        border-top: 2px solid currentColor;
+        border-left: 2px solid currentColor;
+        transform: rotate(45deg);
+        opacity: 0.45;
     }
 
     #browseBtn.fail::after {
@@ -794,6 +812,132 @@
        level with the foot of the cover, starting where the song's text
        starts, with a turning icon at its end. Only the icon when the size
        is not known */
+    /* The small list over the main page, from the stars down to the seek
+       bar beside the cover. See through, with the stars, the playing from
+       line and the lyrics hidden under it while it is open */
+    #mini {
+        position: fixed;
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 8px 4px;
+        box-sizing: border-box;
+        border-radius: 14px;
+        background: rgba(22, 22, 27, 0.72);
+        -webkit-backdrop-filter: blur(8px);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+        z-index: 3;
+    }
+
+    #app.miniOpen #rateRow,
+    #app.miniOpen #fromLine,
+    #app.miniOpen #lyrics,
+    #app.miniOpen #workMain {
+        visibility: hidden;
+    }
+
+    #miniTop {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        font-size: clamp(12px, 1.2vw, 18px);
+    }
+
+    #miniTop .chip {
+        height: 2.4em;
+        font-size: 1em;
+    }
+
+    #miniCount {
+        flex: 1 1 auto;
+        min-width: 0;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* What the phone is loading, as above the big list */
+    #miniWork {
+        flex: 0 0 auto;
+        font-size: clamp(12px, 1.2vw, 18px);
+    }
+
+    #miniWork:empty {
+        display: none;
+    }
+
+    #miniWork .loadRow,
+    #miniWork .workFail {
+        justify-content: flex-start;
+        padding: 2px 4px;
+    }
+
+    #miniWork .workBar {
+        margin: 4px 4px 2px;
+    }
+
+    /* Clipped, so a pull brings the rows down inside the box */
+    #miniWrap {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        overflow: hidden;
+    }
+
+    #miniRows {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior-y: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #miniRows .row {
+        font-size: clamp(14px, 1.45vw, 22px);
+        padding: 8px 6px;
+    }
+
+    #miniRows .thumb {
+        width: 2.2em;
+        height: 2.2em;
+        border-radius: 6px;
+    }
+
+    #miniRows .rowNext {
+        width: 2.3em;
+        height: 2.3em;
+        border-radius: 8px;
+        font-size: 1em;
+    }
+
+    #miniPull {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--accent);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    #miniPull .ico {
+        width: 24px;
+        height: 24px;
+    }
+
+    #miniPull.turning .ico {
+        animation: spinTurn 0.8s linear infinite;
+    }
+
     #workMain {
         position: absolute;
         display: none;
@@ -2415,9 +2559,10 @@
         border-radius: 8px;
     }
 
-    /* The list is always open under the player, so Songs has nothing to
-       open */
-    html.phone #browseBtn {
+    /* The list is always open under the player, so Songs and List have
+       nothing to open */
+    html.phone #browseBtn,
+    html.phone #miniBtn {
         display: none;
     }
 
@@ -2827,6 +2972,17 @@
             <div id="lyrics"><div class="lyricRoll"></div></div>
         </div>
         <div id="workMain"><div id="workMainBar"><div id="workMainFill"></div></div><span id="workMainSpin" data-icon="refresh"></span></div>
+        <div id="mini">
+            <div id="miniTop">
+                <span id="miniCount"></span>
+                <button class="chip" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"><span class="lbl">Update</span></button>
+                <button class="chip" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"><span class="lbl">Rescan</span></button>
+                <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
+                <button class="chip iconOnly" id="miniClose" type="button" data-icon="close" aria-label="Close the list" title="Close the list"></button>
+            </div>
+            <div id="miniWork"></div>
+            <div id="miniWrap"><div id="miniPull"></div><div id="miniRows"></div></div>
+        </div>
     </div>
     <div id="seek">
         <span id="cur">0:00</span>
@@ -2857,6 +3013,7 @@
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
+        <button class="ctl" id="miniBtn" type="button" data-label="List" aria-label="Song list on the main page" data-icon="miniList"></button>
     </div>
     <div id="bottom">
         <div id="phoneHead">Mureka Player<span id="phoneVer"></span></div>
@@ -3295,6 +3452,18 @@
             ["polyline", { points: "3 6 5 6 21 6" }],
             ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }]
         ],
+        songs: [
+            ["path", { d: "M4 6h16" }],
+            ["path", { d: "M4 12h16" }],
+            ["path", { d: "M4 18h10" }],
+            ["circle", { cx: "18", cy: "18", r: "3" }]
+        ],
+        miniList: [
+            ["rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }],
+            ["line", { x1: "7", y1: "9", x2: "17", y2: "9" }],
+            ["line", { x1: "7", y1: "13", x2: "17", y2: "13" }],
+            ["line", { x1: "7", y1: "17", x2: "13", y2: "17" }]
+        ],
         scissors: [
             ["circle", { cx: "6", cy: "6", r: "3" }],
             ["circle", { cx: "6", cy: "18", r: "3" }],
@@ -3315,9 +3484,11 @@
         repeat: { label: "Repeat", icon: "repeat", el: "repeat" },
         published: { label: "Published", icon: "check", el: "pubBtn" },
         vocals: { label: "Vocals", icon: "all", el: "vocBtn" },
-        rate: { label: "Rate", icon: "star", el: "rateBtn" }
+        rate: { label: "Rate", icon: "star", el: "rateBtn" },
+        songs: { label: "Songs", icon: "songs", el: "browseBtn" },
+        minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "songs", "minilist"];
 
     function icon(name) {
 
@@ -3489,7 +3660,14 @@
         }
 
         if (Array.isArray(look.controls) && look.controls.length > 0) {
+
             s.controls = look.controls.slice();
+
+            // A bar kept here before Songs could be placed always had Songs
+            // at its end, so it keeps it there
+            if (look.controlsV2 !== true && s.controls.indexOf("songs") < 0) {
+                s.controls.push("songs");
+            }
         }
 
         // The lyric roll's sizes, this browser's where it has them
@@ -3526,6 +3704,13 @@
 
         local.look = Object.assign(phoneLook(rawState), local.look || {});
         local.look[key] = value;
+
+        // A bar set here since Songs became a button of its own says itself
+        // whether Songs is on it
+        if (key === "controls") {
+            local.look.controlsV2 = true;
+        }
+
         saveLocal(local);
         relook();
     }
@@ -5944,7 +6129,31 @@
 
     window.addEventListener("resize", placeWorkMain);
 
+    // The same line, with its turning glyph and bar, at the top of the
+    // small list over the main page, copied only when it changed so the
+    // glyph keeps turning smoothly
+    let miniWorkKey = null;
+
     function paintWork(s) {
+
+        paintWorkList(s);
+
+        if (workKey === miniWorkKey) {
+            return;
+        }
+
+        miniWorkKey = workKey;
+
+        const box = $("miniWork");
+
+        box.textContent = "";
+
+        for (const node of $("libLoad").childNodes) {
+            box.appendChild(node.cloneNode(true));
+        }
+    }
+
+    function paintWorkList(s) {
 
         paintWorkMain(s);
 
@@ -8054,9 +8263,25 @@
         const hiddenRow = document.createElement("div");
         const label1 = document.createElement("div");
         const label2 = document.createElement("div");
-        // A browser with its own settings starts from its own order
-        const ownOrder = (node.which || "web") === "web" && localSettings() ? localValue({ key: "controls" }) : null;
+        // A browser with its own settings starts from its own order. Only
+        // buttons the phone offers are kept, a name saved by another version
+        // would have no chip and stop the whole page from being drawn. An
+        // order kept before Songs was a button gets it at the end, as the bar
+        // shows it
+        const local = (node.which || "web") === "web" ? localSettings() : null;
+        const ownOrder = local ? localValue({ key: "controls" }) : null;
         let active = Array.isArray(ownOrder) && ownOrder.length > 0 ? ownOrder.slice() : node.active.slice();
+
+        const keptHere = !!(local && local.look && Array.isArray(local.look.controls));
+
+        if (keptHere && local.look.controlsV2 !== true && active.indexOf("songs") < 0) {
+            active.push("songs");
+        }
+
+        active = active.filter(function (name, i) {
+            return node.all.indexOf(name) >= 0 && active.indexOf(name) === i;
+        });
+
         let hidden = node.all.filter(function (name) {
             return active.indexOf(name) === -1;
         });
@@ -8573,13 +8798,20 @@
         showPanel("creators");
     });
 
-    $("browseBtn").addEventListener("click", function () {
+    // Songs: a tap opens the whole list, closing the small one if open
+    function openFullList() {
+
+        if (miniOpen) {
+            closeMini();
+        }
 
         $("browse").style.display = "flex";
         sizeChips();
         paintViews();
         loadList(true);
-    });
+    }
+
+    $("browseBtn").addEventListener("click", openFullList);
 
     $("viewMureka").addEventListener("click", function () {
         setView("mureka");
@@ -8631,13 +8863,18 @@
     // The playing song may be further down than what is loaded so far
     // Ask the phone for whatever is new on Mureka, from the Update chip or
     // a pull on the list, and reload the list once it has had a moment
-    function loadNewSongs() {
+    function loadNewSongs(reload) {
 
         send("refresh");
         toast("Loading songs from Mureka");
 
         setTimeout(function () {
-            loadList(true);
+
+            if (typeof reload === "function") {
+                reload();
+            } else {
+                loadList(true);
+            }
         }, 1500);
     }
 
@@ -8659,10 +8896,14 @@
     let pullSawLoading = false;
     let pullTimer = null;
 
+    // The list being pulled, the song list or the mini list over the main
+    // page, each with its rows, its ring and how it reads itself again
+    let pullTarget = null;
+
     function paintPull(dist, turning) {
 
-        const rows = $("rows");
-        const ring = $("pullIcon");
+        const rows = pullTarget.rows;
+        const ring = pullTarget.ring;
         const ico = ring.querySelector(".ico");
 
         rows.style.transform = dist > 0 ? "translateY(" + dist + "px)" : "";
@@ -8677,7 +8918,7 @@
     // Back to rest, gliding
     function endPull() {
 
-        const rows = $("rows");
+        const rows = pullTarget.rows;
 
         pullArmed = false;
         pulling = false;
@@ -8698,7 +8939,7 @@
     function finishPull() {
 
         endPull();
-        loadList(true);
+        pullTarget.reload();
     }
 
     // Held open with the ring turning until the phone has loaded. A phone
@@ -8706,13 +8947,13 @@
     // load after a minute, its progress shows over the list anyway
     function holdPull() {
 
-        const rows = $("rows");
+        const rows = pullTarget.rows;
 
         pullHeld = true;
         pullSawLoading = false;
         rows.style.transition = "transform 0.2s ease";
         paintPull(44, true);
-        loadNewSongs();
+        loadNewSongs(pullTarget.reload);
 
         pullTimer = setTimeout(function () {
 
@@ -8763,7 +9004,12 @@
 
         cacheSig = sig;
         clearTimeout(cacheTimer);
-        cacheTimer = setTimeout(repaintDots, 700);
+
+        cacheTimer = setTimeout(function () {
+
+            repaintDots();
+            repaintMini();
+        }, 700);
     }
 
     function repaintDots() {
@@ -8795,192 +9041,516 @@
                 found.set(queueView ? String(item.index) : String(item.id), item);
             }
 
-            for (const row of $("rows").querySelectorAll(".row")) {
-
-                const key = queueView ? row.dataset.qi : row.dataset.id;
-                const dot = row.querySelector(".rowDot");
-                const item = key !== undefined ? found.get(key) : undefined;
-
-                if (!dot || !item) {
-                    continue;
-                }
-
-                dot.className = "rowDot" + (item.cached ? " " + item.cached : "");
-
-                // A song renamed since the list was drawn
-                const title = row.querySelector(".rowTitle");
-
-                if (title && typeof item.title === "string" && item.title && title.textContent !== item.title) {
-                    title.textContent = item.title;
-                }
-
-                // New becomes public or draft once the phone has reported the
-                // song played
-                const badge = row.querySelector(".rowBadge");
-
-                if (badge) {
-                    paintBadge(badge, item);
-                }
-            }
+            refreshRows($("rows"), found, queueView);
         }).catch(function () {
         });
     }
 
-    $("pullIcon").appendChild(icon("refresh"));
+    // The small list over the main page the same way, its rows being songs
+    function repaintMini() {
 
-    $("rows").addEventListener("touchstart", function (ev) {
-
-        // Only at the very top, with one finger, and never from the handle
-        // that drags a song in the queue
-        pullArmed = !pullHeld && ev.touches.length === 1 && $("rows").scrollTop <= 0
-            && !(ev.target.closest && ev.target.closest(".rowGrip"));
-        pulling = false;
-        pullStartY = ev.touches[0].clientY;
-    }, { passive: true });
-
-    $("rows").addEventListener("touchmove", function (ev) {
-
-        if (!pullArmed) {
+        if (!miniOpen || !$("miniRows").querySelector(".rowDot")) {
             return;
         }
 
-        const dy = ev.touches[0].clientY - pullStartY;
+        fetch("/list?q=&view=" + (listSort || "mureka") + "&offset=0&limit="
+            + Math.min(200, Math.max(PAGE, miniLoaded)), { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
 
-        if (dy > 0 && $("rows").scrollTop <= 0) {
+            const found = new Map();
 
-            // Down from the top, the list follows instead of scrolling
-            pulling = true;
-            ev.preventDefault();
-            pullDist = Math.min(PULL_MAX, dy * PULL_FOLLOW);
-            paintPull(pullDist, false);
-        } else if (dy < 0) {
-
-            // Up again, an ordinary scroll
-            if (pulling) {
-                endPull();
+            if (!data || !Array.isArray(data.songs)) {
+                return;
             }
 
-            pullArmed = false;
+            for (const item of data.songs) {
+                found.set(String(item.id), item);
+            }
+
+            refreshRows($("miniRows"), found, false);
+        }).catch(function () {
+        });
+    }
+
+    // The dots, titles and badges of the rows already drawn, from a fresh
+    // read of the same list
+    function refreshRows(box, found, queueView) {
+
+        for (const row of box.querySelectorAll(".row")) {
+
+            const key = queueView ? row.dataset.qi : row.dataset.id;
+            const dot = row.querySelector(".rowDot");
+            const item = key !== undefined ? found.get(key) : undefined;
+
+            if (!dot || !item) {
+                continue;
+            }
+
+            dot.className = "rowDot" + (item.cached ? " " + item.cached : "");
+
+            // A song renamed since the list was drawn
+            const title = row.querySelector(".rowTitle");
+
+            if (title && typeof item.title === "string" && item.title && title.textContent !== item.title) {
+                title.textContent = item.title;
+            }
+
+            // New becomes public or draft once the phone has reported the
+            // song played
+            const badge = row.querySelector(".rowBadge");
+
+            if (badge) {
+                paintBadge(badge, item);
+            }
         }
-    }, { passive: false });
+    }
 
-    const releasePull = function () {
-
-        const far = pullDist >= PULL_TRIGGER;
-
-        if (!pulling) {
-
-            pullArmed = false;
-            return;
-        }
-
-        pulling = false;
-        pullArmed = false;
-
-        // Already loading, nothing more to ask for
-        if (far && state && state.loading) {
-
-            toast("Already loading from Mureka");
-            endPull();
-            return;
-        }
-
-        if (far) {
-            holdPull();
-        } else {
-            endPull();
-        }
-    };
-
-    $("rows").addEventListener("touchend", releasePull);
-    $("rows").addEventListener("touchcancel", releasePull);
-
-    // The same pull with a mouse or a pen, for a browser on a computer:
-    // pressed at the top of the list and dragged down. Touch has its own
-    // handlers above, so it is left out here. A press that turns into a
-    // pull does not also play the song it started on
+    // The same pull with a mouse or a pen, the pointer it started with and
+    // when it ended, so the click that ends it does not also press a row
     let mousePull = null;
     let pullClickBlock = 0;
 
-    $("rows").addEventListener("pointerdown", function (ev) {
+    // Pull to load on a list: down from its top with a finger, or with a
+    // mouse or a pen, held open with the ring turning while the phone loads
+    function installPull(target) {
 
-        if (ev.pointerType === "touch" || ev.button !== 0 || pullHeld) {
-            return;
-        }
+        target.ring.appendChild(icon("refresh"));
 
-        if ($("rows").scrollTop > 0 || (ev.target.closest && ev.target.closest(".rowGrip"))) {
-            return;
-        }
+        target.rows.addEventListener("touchstart", function (ev) {
 
-        mousePull = { id: ev.pointerId, y: ev.clientY };
-        pulling = false;
-        pullDist = 0;
-    });
+            // Only at the very top, with one finger, and never from the handle
+            // that drags a song in the queue
+            pullArmed = !pullHeld && ev.touches.length === 1 && target.rows.scrollTop <= 0
+                && !(ev.target.closest && ev.target.closest(".rowGrip"));
+            pulling = false;
 
-    $("rows").addEventListener("pointermove", function (ev) {
+            if (pullArmed) {
+                pullTarget = target;
+            }
 
-        if (!mousePull || ev.pointerId !== mousePull.id) {
-            return;
-        }
+            pullStartY = ev.touches[0].clientY;
+        }, { passive: true });
 
-        const dy = ev.clientY - mousePull.y;
+        target.rows.addEventListener("touchmove", function (ev) {
 
-        // A few pixels first, so a click that wobbles is still a click, and
-        // a drag upwards is left alone. Past the ten pixels at which a
-        // row's press and hold gives up, before the list takes the pointer
-        // and the row stops seeing it move
-        if (!pulling) {
-
-            if (dy < -4) {
-
-                mousePull = null;
+            if (!pullArmed) {
                 return;
             }
 
-            if (dy < 12) {
+            const dy = ev.touches[0].clientY - pullStartY;
+
+            if (dy > 0 && target.rows.scrollTop <= 0) {
+
+                // Down from the top, the list follows instead of scrolling
+                pulling = true;
+                ev.preventDefault();
+                pullDist = Math.min(PULL_MAX, dy * PULL_FOLLOW);
+                paintPull(pullDist, false);
+            } else if (dy < 0) {
+
+                // Up again, an ordinary scroll
+                if (pulling) {
+                    endPull();
+                }
+
+                pullArmed = false;
+            }
+        }, { passive: false });
+
+        const releasePull = function () {
+
+            const far = pullDist >= PULL_TRIGGER;
+
+            if (!pulling) {
+
+                pullArmed = false;
                 return;
             }
 
-            pulling = true;
+            pulling = false;
+            pullArmed = false;
 
-            try {
-                $("rows").setPointerCapture(ev.pointerId);
-            } catch (e) {
+            // Already loading, nothing more to ask for
+            if (far && state && state.loading) {
+
+                toast("Already loading from Mureka");
+                endPull();
+                return;
             }
-        }
 
-        ev.preventDefault();
-        pullDist = Math.min(PULL_MAX, Math.max(0, dy) * PULL_FOLLOW);
-        paintPull(pullDist, false);
-    });
+            if (far) {
+                holdPull();
+            } else {
+                endPull();
+            }
+        };
 
-    const releaseMousePull = function (ev) {
+        target.rows.addEventListener("touchend", releasePull);
+        target.rows.addEventListener("touchcancel", releasePull);
 
-        if (!mousePull || ev.pointerId !== mousePull.id) {
-            return;
-        }
+        // The same pull with a mouse or a pen, for a browser on a computer:
+        // pressed at the top of the list and dragged down. Touch has its own
+        // handlers above, so it is left out here. A press that turns into a
+        // pull does not also play the song it started on
+        target.rows.addEventListener("pointerdown", function (ev) {
 
-        mousePull = null;
+            if (ev.pointerType === "touch" || ev.button !== 0 || pullHeld) {
+                return;
+            }
 
-        if (pulling) {
-            pullClickBlock = Date.now();
-        }
+            if (target.rows.scrollTop > 0 || (ev.target.closest && ev.target.closest(".rowGrip"))) {
+                return;
+            }
 
-        releasePull();
-    };
+            mousePull = { id: ev.pointerId, y: ev.clientY };
+            pullTarget = target;
+            pulling = false;
+            pullDist = 0;
+        });
 
-    $("rows").addEventListener("pointerup", releaseMousePull);
-    $("rows").addEventListener("pointercancel", releaseMousePull);
+        target.rows.addEventListener("pointermove", function (ev) {
 
-    // Caught before it reaches a row, the click that ends a pull
-    $("rows").addEventListener("click", function (ev) {
+            if (!mousePull || ev.pointerId !== mousePull.id) {
+                return;
+            }
 
-        if (Date.now() - pullClickBlock < 400) {
+            const dy = ev.clientY - mousePull.y;
 
-            ev.stopPropagation();
+            // A few pixels first, so a click that wobbles is still a click, and
+            // a drag upwards is left alone. Past the ten pixels at which a
+            // row's press and hold gives up, before the list takes the pointer
+            // and the row stops seeing it move
+            if (!pulling) {
+
+                if (dy < -4) {
+
+                    mousePull = null;
+                    return;
+                }
+
+                if (dy < 12) {
+                    return;
+                }
+
+                pulling = true;
+
+                try {
+                    target.rows.setPointerCapture(ev.pointerId);
+                } catch (e) {
+                }
+            }
+
             ev.preventDefault();
+            pullDist = Math.min(PULL_MAX, Math.max(0, dy) * PULL_FOLLOW);
+            paintPull(pullDist, false);
+        });
+
+        const releaseMousePull = function (ev) {
+
+            if (!mousePull || ev.pointerId !== mousePull.id) {
+                return;
+            }
+
+            mousePull = null;
+
+            if (pulling) {
+                pullClickBlock = Date.now();
+            }
+
+            releasePull();
+        };
+
+        target.rows.addEventListener("pointerup", releaseMousePull);
+        target.rows.addEventListener("pointercancel", releaseMousePull);
+
+        // Caught before it reaches a row, the click that ends a pull
+        target.rows.addEventListener("click", function (ev) {
+
+            if (Date.now() - pullClickBlock < 400) {
+
+                ev.stopPropagation();
+                ev.preventDefault();
+            }
+        }, true);
+    }
+
+    installPull({ rows: $("rows"), ring: $("pullIcon"), reload: function () {
+        loadList(true);
+    } });
+
+    // The small list over the main page, opened by List among the buttons.
+    // The same songs as Songs shows, in the same order, a page at a time,
+    // opened at the playing song. A tap plays, a long press opens the song
+    // menu, and a pull down at its top loads new songs as in the big list
+    let miniOpen = false;
+    let miniToken = 0;
+    let miniLoaded = 0;
+    let miniTotal = 0;
+    let miniBusy = false;
+    let miniPlaying = "";
+
+    installPull({ rows: $("miniRows"), ring: $("miniPull"), reload: function () {
+        loadMini(true);
+    } });
+
+    // The covers of the small list, loaded as they come near
+    const miniThumbs = window.IntersectionObserver
+        ? new IntersectionObserver(function (entries) {
+
+            for (const entry of entries) {
+
+                if (entry.isIntersecting) {
+
+                    loadThumb(entry.target);
+                    miniThumbs.unobserve(entry.target);
+                }
+            }
+        }, { root: $("miniRows"), rootMargin: "400px 0px" })
+        : null;
+
+    // From the top of the stars to just above the seek bar, as wide as the
+    // song's text beside the cover
+    function placeMini() {
+
+        if (!miniOpen) {
+            return;
         }
-    }, true);
+
+        // On a phone the whole list is under the player already
+        if (isPhone()) {
+
+            closeMini();
+            return;
+        }
+
+        const info = $("info").getBoundingClientRect();
+        const stars = $("rateRow").getBoundingClientRect();
+        const seek = $("seek").getBoundingClientRect();
+        const bottom = seek.top - 10;
+        const top = Math.min(stars.top, bottom - 140);
+        const box = $("mini");
+
+        box.style.left = Math.round(info.left - 8) + "px";
+        box.style.width = Math.round(info.width + 16) + "px";
+        box.style.top = Math.round(top) + "px";
+        box.style.height = Math.max(100, Math.round(bottom - top)) + "px";
+    }
+
+    window.addEventListener("resize", placeMini);
+
+    function openMini() {
+
+        miniOpen = true;
+        $("app").classList.add("miniOpen");
+        $("browseBtn").classList.add("on");
+        $("miniBtn").classList.add("on");
+        $("mini").style.display = "flex";
+        placeMini();
+        loadMini(true);
+    }
+
+    function closeMini() {
+
+        miniOpen = false;
+        miniToken += 1;
+        $("app").classList.remove("miniOpen");
+        $("browseBtn").classList.remove("on");
+        $("miniBtn").classList.remove("on");
+        $("mini").style.display = "none";
+        $("miniRows").textContent = "";
+    }
+
+    // A swipe up on Songs or a tap on List opens the small list, the same
+    // again closes it
+    function toggleMini() {
+
+        if (miniOpen) {
+            closeMini();
+        } else {
+            openMini();
+        }
+    }
+
+    // List opens or closes the small list with a tap
+    $("miniBtn").addEventListener("click", toggleMini);
+
+    $("miniClose").addEventListener("click", closeMini);
+    $("miniExpand").addEventListener("click", openFullList);
+
+    $("miniUpdate").addEventListener("click", function () {
+
+        if (state && state.loading) {
+
+            toast("Already loading from Mureka");
+            return;
+        }
+
+        loadNewSongs(function () {
+            loadMini(true);
+        });
+    });
+
+    $("miniRescan").addEventListener("click", function () {
+
+        if (state && state.loading) {
+
+            toast("Already loading from Mureka");
+            return;
+        }
+
+        askConfirm("Read the whole library from Mureka again? It takes a while.", "Rescan", false, function () {
+
+            send("rescan");
+            toast("Rescanning the library");
+        });
+    });
+
+    // A page of songs, the first one anew. Opened, it goes on to the
+    // playing song and shows it in the middle
+    function loadMini(reset) {
+
+        if (reset) {
+
+            miniToken += 1;
+            miniLoaded = 0;
+            miniBusy = false;
+            $("miniRows").textContent = "";
+            $("miniRows").scrollTop = 0;
+        }
+
+        if (miniBusy || !miniOpen) {
+            return;
+        }
+
+        const token = miniToken;
+
+        miniBusy = true;
+
+        fetch("/list?q=&view=" + (listSort || "mureka") + "&offset=" + miniLoaded + "&limit=" + PAGE,
+            { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            if (token !== miniToken) {
+                return;
+            }
+
+            miniBusy = false;
+
+            if (!data || !data.songs) {
+                return;
+            }
+
+            miniTotal = data.total;
+            miniLoaded += data.songs.length;
+            rowMeta = data.meta || rowMeta;
+
+            for (const song of data.songs) {
+
+                const row = makeRow(song);
+
+                $("miniRows").appendChild(row);
+
+                // Its covers come as this list scrolls, not the big one
+                for (const thumb of row.querySelectorAll(".thumb")) {
+
+                    if (thumbObserver && miniThumbs) {
+
+                        thumbObserver.unobserve(thumb);
+                        miniThumbs.observe(thumb);
+                    }
+                }
+            }
+
+            paintMiniCount();
+
+            const playingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
+
+            // Down to the playing song first, a page at a time, then shown
+            if (reset || $("miniRows").dataset.seeking === "1") {
+
+                if (playingAt >= miniLoaded && miniLoaded < miniTotal && miniLoaded < 3000) {
+
+                    $("miniRows").dataset.seeking = "1";
+                    loadMini(false);
+                    return;
+                }
+
+                $("miniRows").dataset.seeking = "";
+                showMiniPlaying();
+            }
+        }).catch(function () {
+
+            if (token === miniToken) {
+                miniBusy = false;
+            }
+        });
+    }
+
+    function showMiniPlaying() {
+
+        const row = $("miniRows").querySelector(".row.playing");
+
+        if (!row) {
+            return;
+        }
+
+        const box = $("miniRows");
+
+        box.scrollTop = Math.max(0, row.offsetTop - box.offsetTop - (box.clientHeight - row.offsetHeight) / 2);
+    }
+
+    // More songs as the end comes near
+    $("miniRows").addEventListener("scroll", function () {
+
+        const box = $("miniRows");
+
+        if (miniLoaded < miniTotal && box.scrollTop + box.clientHeight > box.scrollHeight - 400) {
+            loadMini(false);
+        }
+    }, { passive: true });
+
+    // How many songs, what the phone is working on shows in the line
+    // under it
+    function paintMiniCount() {
+        $("miniCount").textContent = miniTotal + " song" + (miniTotal === 1 ? "" : "s");
+    }
+
+    // Each state: the playing row lit, and the count or the work shown. A
+    // load or rescan that just ended reads the list again
+    let miniWasLoading = false;
+
+    function watchMini(s) {
+
+        if (!miniOpen) {
+
+            miniWasLoading = !!(s && s.loading);
+            return;
+        }
+
+        placeMini();
+        paintMiniCount();
+
+        const id = s && s.id ? String(s.id) : "";
+
+        if (id !== miniPlaying) {
+
+            miniPlaying = id;
+
+            for (const row of $("miniRows").querySelectorAll(".row")) {
+                row.classList.toggle("playing", row.dataset.id === id);
+            }
+        }
+
+        const loading = !!(s && s.loading);
+
+        if (miniWasLoading && !loading && !pullHeld) {
+            loadMini(true);
+        }
+
+        miniWasLoading = loading;
+    }
 
     // Load asks the phone for whatever is new on Mureka, Rescan reads the
     // whole library again. While one runs the choice is to stop it. The list
@@ -9183,6 +9753,7 @@
         }
         watchPull(s);
         watchCache(s);
+        watchMini(s);
         trimFollow(s);
         setDebugOverlay(s.debugOverlay === true);
         offerSeek(s.seekActions !== false);
@@ -9285,8 +9856,6 @@
                 row.appendChild($(def.el));
             }
         }
-
-        row.appendChild($("browseBtn"));
     }
 
     function controlNameOf(el) {
@@ -9322,6 +9891,9 @@
         });
     }
 
+    // How far up Songs must be swiped to open the small list
+    const SWIPE_UP = 30;
+
     function ctlMove(ev) {
 
         if (!holdStart) {
@@ -9330,8 +9902,33 @@
 
         if (!draggingCtl) {
 
+            const dx = ev.clientX - holdStart.x;
+            const dy = ev.clientY - holdStart.y;
+
+            // Songs swiped upwards opens or closes the small list. Going up
+            // is not a slip there, it gives up the hold that would move the
+            // button and waits for the swipe to be long enough
+            if (holdStart.btn.id === "browseBtn" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+
+                clearTimeout(holdTimer);
+
+                if (dy <= -SWIPE_UP) {
+
+                    endHold();
+                    swallowClick = true;
+
+                    setTimeout(function () {
+                        swallowClick = false;
+                    }, 400);
+
+                    toggleMini();
+                }
+
+                return;
+            }
+
             // Moving before the hold is up is a slip, not a move
-            if (Math.abs(ev.clientX - holdStart.x) > 8 || Math.abs(ev.clientY - holdStart.y) > 8) {
+            if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
                 endHold();
             }
 
@@ -9345,10 +9942,10 @@
         // is to the right of the pointer
         const row = $("controls");
         const others = visibleControls().filter(function (el) {
-            return el !== draggingCtl && el.id !== "browseBtn";
+            return el !== draggingCtl;
         });
 
-        let before = $("browseBtn");
+        let before = null;
 
         for (const el of others) {
 
@@ -9401,9 +9998,7 @@
             swallowClick = false;
         }, 400);
 
-        const names = visibleControls().filter(function (el) {
-            return el.id !== "browseBtn";
-        }).map(controlNameOf).filter(function (name) {
+        const names = visibleControls().map(controlNameOf).filter(function (name) {
             return name;
         });
 
@@ -9424,7 +10019,7 @@
 
         const btn = ev.target.closest(".ctl");
 
-        if (!btn || btn.id === "browseBtn" || holdStart || (ev.button !== undefined && ev.button !== 0)) {
+        if (!btn || holdStart || (ev.button !== undefined && ev.button !== 0)) {
             return;
         }
 
@@ -11137,6 +11732,12 @@
         if (isShown("browse") && !isPhone()) {
 
             $("browse").style.display = "none";
+            return true;
+        }
+
+        if (miniOpen) {
+
+            closeMini();
             return true;
         }
 
