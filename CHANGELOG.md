@@ -152,10 +152,11 @@ the new settings layout and a number of smaller improvements.
   and a tap on the waveform plays from there. **Fade out the last second**
   fades the preview the way Mureka fades a trimmed song, once the end is
   moved. The new song gets a title of its own and is put at the top of the
-  list, marked new, and a small yellow T on its public or draft badge shows
-  it was made by trimming, wherever that badge shows: the lists, and the
-  playing song in the web view. The marks travel with the exported song
-  tweaks, so another device shows them after an import. **Delete original**, ticked when confirming, deletes
+  list, marked new. A small gold T on the public or draft badge marks every
+  trimmed song, from Mureka's own mark, so also songs trimmed on Mureka's
+  site or another device, once a Load or Rescan has read them. It shows
+  wherever that badge shows: the lists, and the playing song in the web
+  view. **Delete original**, ticked when confirming, deletes
   the original on Mureka and from the lists here once the new song has
   arrived. While Mureka works, a turning ring covers the page. The web
   view has the same trimmer in its song menu, drawn in the browser, with

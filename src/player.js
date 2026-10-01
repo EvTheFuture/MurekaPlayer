@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.57";
+    const VERSION = "1.9.9.59";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2165,34 +2165,13 @@
         };
     }
 
-    // Mureka marks a trimmed song in its own data, the field's exact name is
-    // not known yet. Any field with trim in its name holding a real value
-    // counts, so the mark comes along on every device after a load. A song
-    // kept from before has it as trimmed already
+    // Mureka's mark for a trimmed song, is_trimmed on the feed item, handed
+    // down to the song as trimmed when the page is read. A song kept from
+    // before has it as trimmed already, and the song itself may carry
+    // is_trimmed where a reply gives the song alone
     function hasTrimField(s) {
 
-        if (s.trimmed === true) {
-            return true;
-        }
-
-        for (const key of Object.keys(s)) {
-
-            if (!/trim/i.test(key)) {
-                continue;
-            }
-
-            const v = s[key];
-
-            if (v === null || v === undefined || v === false || v === 0 || v === "" || v === "0") {
-                continue;
-            }
-
-            if (Array.isArray(v) ? v.length > 0 : (typeof v === "object" ? Object.keys(v).length > 0 : true)) {
-                return true;
-            }
-        }
-
-        return false;
+        return s.trimmed === true || s.is_trimmed === true;
     }
 
     // Song ids the user marked as instrumental by hand, loaded once on startup
@@ -4113,6 +4092,46 @@
     }
 
     // Count the new marks on one feed page for the debug overlay
+    // The field names Mureka's songs come with, logged when they change, and
+    // how many songs on the page carry a field taken as the trim mark, so a
+    // debug log shows what the feed holds without copying the raw page
+    let loggedFeedFields = "";
+
+    function logFeedFields(page) {
+
+        const songs = extractSongs(page);
+
+        if (songs.length === 0) {
+            return;
+        }
+
+        const keys = new Set();
+        let marked = 0;
+
+        for (const song of songs) {
+
+            Object.keys(song).forEach(function (k) {
+                keys.add(k);
+            });
+
+            if (hasTrimField(song)) {
+                marked += 1;
+            }
+        }
+
+        const names = Array.from(keys).sort().join(", ");
+
+        if (names !== loggedFeedFields) {
+
+            loggedFeedFields = names;
+            dbgLog("Feed", "song fields: " + names);
+        }
+
+        if (marked > 0) {
+            dbgLog("Feed", marked + " of " + songs.length + " songs on the page are marked trimmed");
+        }
+    }
+
     function logPlayedFlags(page) {
         dbgLog("Mureka", feedSummary(page, "Feed page"));
     }
@@ -4278,6 +4297,10 @@
                     node.song.is_liked = node.is_liked;
                 }
 
+                if (node.is_trimmed === true) {
+                    node.song.trimmed = true;
+                }
+
                 // Mureka's new mark may sit on the wrapper the same way. The
                 // song's own flag wins when it has one
                 if (typeof node.is_played === "boolean" && typeof node.song.is_played !== "boolean") {
@@ -4285,6 +4308,19 @@
                 }
 
                 return [node.song];
+            }
+
+            // Mureka marks a trimmed song on the feed item around it, with
+            // is_trimmed, not on the song itself. Handed down so it is kept
+            // with the song
+            if (node.is_trimmed === true && Array.isArray(node.songs)) {
+
+                for (const song of node.songs) {
+
+                    if (song && typeof song === "object") {
+                        song.trimmed = true;
+                    }
+                }
             }
 
             // A feed item holding the songs of one generation as a list, with
@@ -4380,6 +4416,8 @@
 
         // What the page says about Mureka's new mark, under Mureka requests,
         // so it can be seen whether the feed carries the flag at all
+        logFeedFields(json);
+
         if (!feed().creator) {
 
             logPlayedFlags(json);
@@ -18069,6 +18107,14 @@
         Array.prototype.push.apply(lines, debugNowLines());
 
         lines.push(debugAudioLine());
+
+        // Where the T marks come from, Mureka's own field or trims made here
+        const fromData = cache.songs.filter(function (x) {
+            return x.trimmed === true;
+        }).length;
+
+        lines.push("trim marks: " + fromData + " from Mureka's data, " + trimmedIds.size + " trimmed here"
+            + (currentSong ? " | this song " + (isTrimmed(currentSong) ? "trimmed" : "not trimmed") : ""));
         lines.push("song " + (currentSong ? currentSong.song_id : "-")
             + " | queue " + (queuePos + 1) + "/" + queue.length
             + " | repeat " + repeatMode + " | shuffle " + dbgFlag(shuffleMode)
