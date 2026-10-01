@@ -5953,7 +5953,10 @@
         const fail = !busy && s && s.loadFail ? s.loadFail : null;
         const label = p ? p.label : "Loading songs from Mureka";
         const done = p ? Number(p.done) || 0 : 0;
-        const total = p ? Number(p.total) || 0 : 0;
+
+        // A rescan's size is a guess from before, a library that grew since
+        // simply counts on past it
+        const total = p && Number(p.total) > 0 ? Math.max(Number(p.total), done) : 0;
         const frac = total > 0 ? Math.max(0, Math.min(1, done / total)) : -1;
 
         // How long it has been going, the phone's count carried on by this

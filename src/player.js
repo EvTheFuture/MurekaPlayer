@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.56";
+    const VERSION = "1.9.9.57";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -461,6 +461,95 @@
         progressKind = kind || "";
         hostProgress = kind ? { kind: kind, label: label, done: done, total: total } : null;
         publishHostSoon();
+        paintProgress();
+    }
+
+    // The same progress over the list here as the web view shows: what is
+    // going on, how far it is, for how long and about how long is left, and
+    // a bar when the size is known
+    let progressEl = null;
+    let progressTextEl = null;
+    let progressFillEl = null;
+    let progressBarEl = null;
+    let progressTimer = 0;
+
+    function buildProgress() {
+
+        progressEl = document.createElement("div");
+        progressEl.style.cssText = "display:none;margin-top:6px;color:#48e1eb;font-size:12px";
+
+        const line = document.createElement("div");
+        line.style.cssText = "display:flex;align-items:center;gap:7px;min-width:0";
+
+        const ring = document.createElement("span");
+        ring.style.cssText = "flex:0 0 auto;width:10px;height:10px;border:2px solid rgba(72,225,235,0.3);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.9s linear infinite";
+
+        progressTextEl = document.createElement("span");
+        progressTextEl.style.cssText = "flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+
+        line.appendChild(ring);
+        line.appendChild(progressTextEl);
+
+        progressBarEl = document.createElement("div");
+        progressBarEl.style.cssText = "margin-top:5px;height:4px;border-radius:2px;background:#333;overflow:hidden";
+
+        progressFillEl = document.createElement("div");
+        progressFillEl.style.cssText = "height:100%;width:0;background:#48e1eb;border-radius:2px;transition:width 0.3s ease";
+
+        progressBarEl.appendChild(progressFillEl);
+        progressEl.appendChild(line);
+        progressEl.appendChild(progressBarEl);
+
+        return progressEl;
+    }
+
+    function paintProgress() {
+
+        if (!progressEl) {
+            return;
+        }
+
+        const p = hostProgress;
+
+        if (!p) {
+
+            progressEl.style.display = "none";
+            clearInterval(progressTimer);
+            progressTimer = 0;
+            return;
+        }
+
+        const done = Number(p.done) || 0;
+
+        // A rescan's size is a guess from before, a library that grew since
+        // simply counts on past it
+        const total = Number(p.total) > 0 ? Math.max(Number(p.total), done) : 0;
+        const secs = Math.max(0, Math.round((Date.now() - progressStarted) / 1000));
+
+        let timing = formatTime(secs);
+
+        if (secs > 3 && total > 0 && done > 0 && done < total) {
+
+            const left = Math.round((total - done) * secs / done);
+
+            timing += ", about " + (left >= 90 ? Math.round(left / 60) + " min" : Math.max(5, Math.round(left / 5) * 5) + " s") + " left";
+        }
+
+        // A rescan only guesses the size from what the library had before
+        const rough = p.kind === "rescan" ? "of about " : "of ";
+
+        progressTextEl.textContent = p.label + (total > 0
+            ? " " + done + " " + rough + total
+            : (done > 0 ? " " + done : "")) + " (" + timing + ")";
+
+        progressBarEl.style.display = total > 0 ? "block" : "none";
+        progressFillEl.style.width = total > 0 ? Math.round(Math.max(0, Math.min(1, done / total)) * 100) + "%" : "0";
+        progressEl.style.display = "block";
+
+        // The clock keeps counting between the steps
+        if (!progressTimer) {
+            progressTimer = setInterval(paintProgress, 1000);
+        }
     }
 
     // Object URL of the blob currently feeding the audio element, for cleanup
@@ -17141,6 +17230,7 @@
         bodyEl.appendChild(searchRow);
         bodyEl.appendChild(viewMenuBar);
         bodyEl.appendChild(countsEl);
+        bodyEl.appendChild(buildProgress());
         bodyEl.appendChild(listWrapEl);
 
         panel.appendChild(header);

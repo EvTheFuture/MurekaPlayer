@@ -132,6 +132,9 @@ the new settings layout and a number of smaller improvements.
   and Connections in the app), Music (Library, Playback, Now playing), Data
   (Backup and restore) and Troubleshooting (Developer). Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **Progress over the list** while loading, rescanning or caching: what is
+  going on, how far it has come, how long it has taken and about how long is
+  left, with a bar when the size is known, as in the web view.
 - **Hide player on a phone** folds the player into a small rounded bar at
   the top, which can be dragged anywhere on the screen so nothing on Mureka's
   page stays out of reach. A double tap opens the player full screen again,
