@@ -10675,6 +10675,12 @@
             box.appendChild(menuItem(m.published ? "close" : "check",
                 m.published ? "Unpublish" : "Publish", function () {
 
+                    // Publishing puts the song's link on this browser's
+                    // clipboard, in the same tap, as on the phone
+                    if (!m.published && m.link) {
+                        statusLine.setText(copyText(m.link) ? "Publishing, link copied: " + m.title : "Publishing, the link could not be copied");
+                    }
+
                     act(m.published ? "unpublish" : "publish");
                     close();
                 }));
@@ -12607,6 +12613,10 @@
     const TRIM_PREVIEW_MIN = 0.5;
     const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
 
+    // How much two fingers must spread or close for the close up to zoom
+    // one step
+    const TRIM_PINCH_STEP = 1.35;
+
     let trimCtx = null;
     let trimToken = 0;
     let tr = null;
@@ -13918,6 +13928,79 @@
             ev.preventDefault();
             trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
         }, { passive: false });
+
+        // Two fingers on the close up pinch it: apart zooms in, together
+        // zooms out, a step each time their distance grows or shrinks by a
+        // third. An end the first finger was already dragging goes back to
+        // where it was, since a pinch was meant
+        const fingers = new Map();
+        let pinchBase = 0;
+
+        const fingerGap = function () {
+
+            const pts = Array.from(fingers.values());
+
+            return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        };
+
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || ev.pointerType !== "touch") {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (fingers.size !== 2) {
+                return;
+            }
+
+            if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
+
+                trimSetEdge(tr.edge, tr.drag.from);
+                trimPaint();
+            }
+
+            tr.drag = null;
+            pinchBase = fingerGap();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!fingers.has(ev.pointerId)) {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (!tr || fingers.size !== 2 || pinchBase <= 0) {
+                return;
+            }
+
+            const gap = fingerGap();
+
+            if (gap > pinchBase * TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(1);
+                pinchBase = gap;
+            } else if (gap < pinchBase / TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(-1);
+                pinchBase = gap;
+            }
+        });
+
+        const fingerUp = function (ev) {
+
+            fingers.delete(ev.pointerId);
+
+            if (fingers.size < 2) {
+                pinchBase = 0;
+            }
+        };
+
+        detail.addEventListener("pointerup", fingerUp);
+        detail.addEventListener("pointercancel", fingerUp);
     }
 
     // The Trim button busy with a turning ring, and not to be pressed again

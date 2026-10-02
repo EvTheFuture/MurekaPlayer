@@ -142,6 +142,10 @@ the new settings layout and a number of smaller improvements.
   and Connections in the app), Music (Library, Playback, Now playing), Data
   (Backup and restore) and Troubleshooting (Developer). Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **Back to the playing song**: a round target button shows over the list
+  while the playing song is scrolled out of sight, and a tap brings it back
+  to the middle. The status line says which song plays with its id, as in
+  "Playing: Title [id]".
 - **Progress over the list** while loading, rescanning or caching: what is
   going on, how far it has come, how long it has taken and about how long is
   left, with a bar when the size is known, as in the web view.
@@ -153,8 +157,9 @@ the new settings layout and a number of smaller improvements.
   off, and Mureka makes a new song of it, keeping the original. The trimmer
   shows the song's real waveform: the whole song with the kept part lit and
   its ends to drag, and a close up of the start or the end that zooms from
-  30 seconds down to 20 milliseconds, with steps of 10 ms, 100 ms and 1 s
-  and typed times. The song's id, its length and the new length show under
+  30 seconds down to 20 milliseconds, by pinching it with two fingers, the
+  wheel or the zoom buttons, with steps of 10 ms, 100 ms and 1 s and typed
+  times. The song's id, its length and the new length show under
   the title, with Trim beside it. **Play end** plays what the close up
   shows before the end and stops on the exact sample where the new song
   will end, **Repeat the end** plays it again and again while the end is
@@ -177,6 +182,8 @@ the new settings layout and a number of smaller improvements.
   fetching it for the browser.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **Disallow remixing**, instrumentals included.
+  Publishing copies the song's link to the clipboard, in the web view to
+  that browser's.
   When Mureka refuses a change on a published song, the player offers to take
   it down, make the change and publish it again.
 - The song information shows whether remixing is allowed, and a running bar

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.63";
+    const VERSION = "1.9.9.66";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -618,6 +618,10 @@
     let listWrapEl = null;
     let pullEl = null;
     let toTopBtn = null;
+
+    // A round button over the list that brings the playing song into view,
+    // shown only while that song is scrolled out of sight
+    let locateBtn = null;
 
     // Rows are built lazily as the list is scrolled. These hold what the list
     // would show, how many rows of it exist as elements, and the per render
@@ -6007,10 +6011,20 @@
     // does both, type 1 publishes it with the title and cover it carries,
     // type 2 takes it off. The list state is refreshed from the server
     // after, so what shows is what Mureka really has
-    async function setPublished(song, publish) {
+    async function setPublished(song, publish, copy) {
 
         const name = (song.title || "").trim() || "Untitled";
         const before = song.publish_state;
+
+        // Published from the song menu, the link goes to the clipboard. Its
+        // share key is known before publishing, so it is copied right away,
+        // in the same tap, which is what a phone's browser asks for. One
+        // without a key yet is copied once the server has given it one
+        let copied = null;
+
+        if (publish && copy && song.share_key) {
+            copied = copyText("https://www.mureka.ai/song-detail/" + song.share_key);
+        }
         const body = publish
             ? {
                 time: Date.now(),
@@ -6053,6 +6067,13 @@
             // word for it rather than ours
             await refreshOne(song);
             publishHostSoon();
+
+            if (copied) {
+
+                setStatus("Published: " + name + (await copied ? ", link copied" : ", the link could not be copied"));
+            } else if (publish && copy) {
+                copyLink(song);
+            }
 
             return true;
 
@@ -6423,7 +6444,7 @@
 
             // Clear a stale Stopped or Paused line once playback is running
             if (currentSong) {
-                setStatus("Playing: " + (currentSong.title || "Untitled"));
+                setStatus("Playing: " + (currentSong.title || "Untitled") + " [" + currentSong.song_id + "]");
             }
 
             // Only refresh the scrubber position on resume. Re-sending the
@@ -7208,6 +7229,47 @@
         programmaticScrollAt = Date.now();
 
         listEl.scrollTop = Math.max(0, target);
+        updateLocateBtn();
+    }
+
+    // Whether the playing song's row is in sight in the list
+    function playingRowInView() {
+
+        if (!listEl || !playingItemEl || !playingItemEl.isConnected) {
+            return true;
+        }
+
+        const top = playingItemEl.offsetTop - listEl.scrollTop;
+
+        return top + playingItemEl.offsetHeight > 8 && top < listEl.clientHeight - 8;
+    }
+
+    // The locate button shows only while the playing song is out of sight
+    function updateLocateBtn() {
+
+        if (!locateBtn) {
+            return;
+        }
+
+        const show = !!(currentSong && playingItemEl) && !playingRowInView();
+
+        locateBtn.style.opacity = show ? "1" : "0";
+        locateBtn.style.pointerEvents = show ? "auto" : "none";
+    }
+
+    // Glide to the playing song and put it in the middle of the list
+    function showPlayingInList() {
+
+        if (!listEl || !playingItemEl) {
+            return;
+        }
+
+        const target = playingItemEl.offsetTop - (listEl.clientHeight / 2) + (playingItemEl.offsetHeight / 2);
+
+        fadeToTopBtn();
+        programmaticScrollAt = Date.now();
+        edgeJumpUntil = Date.now() + 1500;
+        listEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
     }
 
     // Point the scroll button at the matching edge for the scroll direction,
@@ -12322,7 +12384,15 @@
     // itself plus a gap fully out to the left, then comes straight back in
     // from the right and waits again, so the beginning is always readable.
     // The box keeps its own styling, only its contents are taken over
-    function makeMarquee(box) {
+    function makeMarquee(box, name) {
+
+        // What it decides, for the debug log, only for a line given a name
+        const note = function (text) {
+
+            if (name) {
+                dbgLog("Marquee", name + ": " + text);
+            }
+        };
 
         // One track holds both copies and is the thing that moves, so the two
         // can never drift apart. It only gets a layer of its own while it
@@ -12381,6 +12451,8 @@
             edgeFade();
 
             if (!track.animate) {
+
+                note("this browser cannot animate");
                 return;
             }
 
@@ -12388,6 +12460,8 @@
             // nearly any text as too long and walk it with a tiny gap. The
             // size watch below starts it once the box has its width
             if (box.clientWidth < 40) {
+
+                note("waits for its width, " + box.clientWidth + " px now");
                 return;
             }
 
@@ -12402,9 +12476,12 @@
             // grown meanwhile, that copy stood waiting at the right edge
             if (overflow <= 2) {
 
+                note("fits, " + textWidth + " of " + box.clientWidth + " px");
                 settle();
                 return;
             }
+
+            note("walks, " + textWidth + " px in " + box.clientWidth + " px");
 
             // Show the trailing copy and space it off the first
             const gap = Math.max(META_SCROLL_GAP, Math.round(box.clientWidth * META_SCROLL_GAP_SHARE));
@@ -12470,6 +12547,7 @@
 
             settle();
             first.textContent = value;
+            note("new text, " + value.length + " characters");
 
             // The trailing copy is only needed while scrolling
             second.textContent = value;
@@ -16603,7 +16681,7 @@
         playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
 
         // The text is moved without moving the box, see makeMarquee
-        metaMarquee = makeMarquee(playerMetaEl);
+        metaMarquee = makeMarquee(playerMetaEl, "Second line");
 
         // Plays and likes for the current song, shown at the top of the art
         playerCountsEl = document.createElement("div");
@@ -17264,9 +17342,27 @@
         toTopBtn.textContent = "\u2191";
         toTopBtn.addEventListener("click", scrollListEdge);
 
+        // Above it, the way back to the playing song, a target in the
+        // accent colour on the panel's dark
+        locateBtn = document.createElement("button");
+        locateBtn.type = "button";
+        locateBtn.setAttribute("aria-label", "Show the playing song");
+        locateBtn.title = "Show the playing song";
+        locateBtn.style.cssText = "position:absolute;right:10px;bottom:54px;z-index:3;width:36px;height:36px;border-radius:50%;border:1px solid rgba(72,225,235,0.6);background:rgba(38,38,44,0.94);color:#48e1eb;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.25s ease;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
+        locateBtn.appendChild(makeSvgIcon([
+            ["circle", { cx: "12", cy: "12", r: "8" }],
+            ["circle", { cx: "12", cy: "12", r: "2.5" }],
+            ["line", { x1: "12", y1: "1", x2: "12", y2: "4" }],
+            ["line", { x1: "12", y1: "20", x2: "12", y2: "23" }],
+            ["line", { x1: "1", y1: "12", x2: "4", y2: "12" }],
+            ["line", { x1: "20", y1: "12", x2: "23", y2: "12" }]
+        ], 20));
+        locateBtn.addEventListener("click", showPlayingInList);
+
         listWrapEl.appendChild(pullEl);
         listWrapEl.appendChild(listEl);
         listWrapEl.appendChild(toTopBtn);
+        listWrapEl.appendChild(locateBtn);
 
         // React to scrolling, show a direction aware jump button that idles away
         listEl.addEventListener("scroll", function () {
@@ -17274,6 +17370,8 @@
             const top = listEl.scrollTop;
             const delta = top - lastListScroll;
             lastListScroll = top;
+
+            updateLocateBtn();
 
             // Build more rows once the scroll gets near what has been built
             if (top + listEl.clientHeight > listEl.scrollHeight - 800) {
@@ -20126,6 +20224,8 @@
             playingItemEl = item;
             listEl.insertBefore(item, listEl.firstChild);
         }
+
+        updateLocateBtn();
 
         // Tell the user when the search, vocals or playlist filter hides everything
         const filtering = listView !== "queue"
@@ -24014,6 +24114,10 @@
     const TRIM_PREVIEW_MIN = 0.5;
     const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
 
+    // How much two fingers must spread or close for the close up to zoom
+    // one step
+    const TRIM_PINCH_STEP = 1.35;
+
     let trimEl = null;
     let trimToken = 0;
     let trimCtx = null;
@@ -25501,6 +25605,79 @@
             ev.preventDefault();
             trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
         }, { passive: false });
+
+        // Two fingers on the close up pinch it: apart zooms in, together
+        // zooms out, a step each time their distance grows or shrinks by a
+        // third. An end the first finger was already dragging goes back to
+        // where it was, since a pinch was meant
+        const fingers = new Map();
+        let pinchBase = 0;
+
+        const fingerGap = function () {
+
+            const pts = Array.from(fingers.values());
+
+            return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        };
+
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || ev.pointerType !== "touch") {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (fingers.size !== 2) {
+                return;
+            }
+
+            if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
+
+                trimSetEdge(tr.edge, tr.drag.from);
+                trimPaint();
+            }
+
+            tr.drag = null;
+            pinchBase = fingerGap();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!fingers.has(ev.pointerId)) {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (!tr || fingers.size !== 2 || pinchBase <= 0) {
+                return;
+            }
+
+            const gap = fingerGap();
+
+            if (gap > pinchBase * TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(1);
+                pinchBase = gap;
+            } else if (gap < pinchBase / TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(-1);
+                pinchBase = gap;
+            }
+        });
+
+        const fingerUp = function (ev) {
+
+            fingers.delete(ev.pointerId);
+
+            if (fingers.size < 2) {
+                pinchBase = 0;
+            }
+        };
+
+        detail.addEventListener("pointerup", fingerUp);
+        detail.addEventListener("pointercancel", fingerUp);
     }
 
     // The Trim button busy with a turning ring, and not to be pressed again
@@ -26896,7 +27073,7 @@
             }
 
             addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", "#fff", function () {
-                setPublished(song, song.publish_state !== 1);
+                setPublished(song, song.publish_state !== 1, true);
             });
 
             // Mureka lets instrumentals be remixed too, so every song of your
