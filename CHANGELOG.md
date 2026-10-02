@@ -72,7 +72,8 @@ the new settings layout and a number of smaller improvements.
   are among its buttons, to be placed or left out like the others, either
   or both: a tap on Songs opens the song list and a swipe up on it a small
   one over the main page, a tap on List opens the small one and a swipe up
-  on it the whole list.
+  on it the whole list. A swipe down on either, or a second tap on List,
+  closes the small list.
 - The small song list reaches from the stars down to the seek bar beside the
   cover. It is see through, hides the stars, Playing from and the lyrics
   while open, opens at the playing song, and keeps its cache dots, titles and

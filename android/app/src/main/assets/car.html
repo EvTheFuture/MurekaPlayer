@@ -10004,6 +10004,28 @@
                 return;
             }
 
+            // Swiped downwards, either of them closes the small list
+            if (swipeBtn && dy > 8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+
+                clearTimeout(holdTimer);
+
+                if (dy >= SWIPE_UP) {
+
+                    endHold();
+                    swallowClick = true;
+
+                    setTimeout(function () {
+                        swallowClick = false;
+                    }, 400);
+
+                    if (miniOpen) {
+                        closeMini();
+                    }
+                }
+
+                return;
+            }
+
             // Moving before the hold is up is a slip, not a move
             if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
                 endHold();
