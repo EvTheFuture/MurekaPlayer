@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.78";
+    const VERSION = "1.9.9.79";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13201,7 +13201,7 @@
 
         const number = hostNumbers().get(song.song_id);
 
-        return "Playing: " + (number ? "#" + number + " " : "") + (song.title || "Untitled");
+        return "Playing: " + (number ? "#" + number + " - " : "") + (song.title || "Untitled");
     }
 
     // A short note over the lower part of the panel, for a result that is

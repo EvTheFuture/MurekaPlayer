@@ -165,7 +165,7 @@ the new settings layout and a number of smaller improvements.
 - **Back to the playing song**: a round target button shows over the list
   while the playing song is scrolled out of sight, and a tap brings it back
   to the middle. The status line says which song plays with its number in
-  the list, as in "Playing: #4064 Title".
+  the list, as in "Playing: #4064 - Title".
 - **Progress over the list** while loading, rescanning or caching: what is
   going on, how far it has come, how long it has taken and about how long is
   left, with a bar when the size is known, as in the web view.
