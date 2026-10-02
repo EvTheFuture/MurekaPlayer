@@ -86,9 +86,17 @@ the new settings layout and a number of smaller improvements.
   song when it is out of sight. **Sort** at its top picks Mureka order, A to Z,
   Z to A, or most or fewest stars or plays first, the same sorting as the
   big list. Sorted by plays, both lists show each song's plays, in the
-  small list in place of the stars, and the phone reads the plays of the
-  whole library in the background, a song at a time, with its progress
-  over the lists. Counts are kept on the phone and read again after a day.
+  small list in place of the stars. Mureka's song lists carry no plays, so
+  the counts come from each song's details: every time a song starts, and
+  while the app is open one published song at a random time every 10 to
+  30 seconds (5 to 10 or 30 to 60 under Library, Play counts, or off).
+  Songs gaining plays fast are read often, at most every 15 minutes, songs
+  that barely move about once a day. **Read play counts** under Sort or
+  Update, or in the settings, catches up at a song every 1 to 2 seconds
+  with its progress over the lists and a Stop in the web view and on the
+  phone, reading counts older than a set age. The settings show where it
+  stands: how many songs have a count, the next and last read, and the
+  song gaining plays fastest. Counts are kept on the phone.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click.

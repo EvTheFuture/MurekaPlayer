@@ -6227,7 +6227,8 @@
 
     function paintWorkMain(s) {
 
-        const p = s && s.progress ? s.progress : null;
+        // Reading play counts shows over the lists only, not over the cover
+        const p = s && s.progress && s.progress.kind !== "plays" ? s.progress : null;
         const busy = !!(s && (s.loading || s.caching)) || !!p;
         const box = $("workMain");
 
@@ -7166,7 +7167,7 @@
 
         el.className = "rowPlays" + (known ? "" : " unknown");
         el.textContent = "\u25B6 " + (known ? text : "?");
-        el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, the phone reads them while the list is sorted by plays";
+        el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, Read play counts under Sort or Update reads them";
     }
 
     // The badge at the end of a line: new for a song not played yet, else
@@ -9079,6 +9080,14 @@
             } };
         });
 
+        // Last, the plays Mureka's lists leave out, read when asked for
+        items.push({ icon: readingPlays() ? "stop" : "play",
+            label: readingPlays() ? "Stop reading play counts" : "Read play counts", sort: null, fn: function () {
+
+                closeSongMenu();
+                playsChoice();
+            } });
+
         openChoice("Sort the list", items);
 
         const current = sortInfo(listSort);
@@ -10018,6 +10027,44 @@
     // Load asks the phone for whatever is new on Mureka, Rescan reads the
     // whole library again. While one runs the choice is to stop it. The list
     // here is reloaded once the phone has had a moment to work
+    // Whether the phone is reading play counts right now
+    function readingPlays() {
+        return !!(state && state.progress && state.progress.kind === "plays");
+    }
+
+    // Reading the plays of the published songs, a song a second, or the
+    // stop while it runs
+    function playsChoice() {
+
+        if (readingPlays()) {
+
+            openChoice("Reading play counts", [
+                { icon: "stop", label: "Stop", fn: function () {
+
+                    closeSongMenu();
+                    send("stopPlays");
+                } }
+            ]);
+            return;
+        }
+
+        askConfirm("Read the plays of the published songs not known yet, or older than the age in the settings? A song every 1 to 2 seconds, it can be stopped at any time.", "Read", false, function () {
+            send("readPlays");
+        });
+    }
+
+    // A tap on the line of what the phone works on stops the reading of
+    // play counts
+    for (const id of ["libLoad", "miniWork"]) {
+
+        $(id).addEventListener("click", function () {
+
+            if (readingPlays()) {
+                playsChoice();
+            }
+        });
+    }
+
     $("libBtn").addEventListener("click", function () {
 
         const s = state || {};
@@ -10027,6 +10074,12 @@
                 loadList(true);
             }, 1500);
         };
+
+        if (readingPlays()) {
+
+            playsChoice();
+            return;
+        }
 
         if (s.loading) {
 
@@ -10055,6 +10108,11 @@
                     toast("Rescanning the library");
                     again();
                 });
+            } },
+            { icon: "play", label: "Read play counts", fn: function () {
+
+                closeSongMenu();
+                playsChoice();
             } }
         ]);
     });

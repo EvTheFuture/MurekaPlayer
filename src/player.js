@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.82";
+    const VERSION = "1.9.9.86";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -471,6 +471,7 @@
     let progressTextEl = null;
     let progressFillEl = null;
     let progressBarEl = null;
+    let progressStopEl = null;
     let progressTimer = 0;
 
     function buildProgress() {
@@ -489,6 +490,15 @@
 
         line.appendChild(ring);
         line.appendChild(progressTextEl);
+
+        // Only the reading of play counts is stopped from here, loads and
+        // caching have their own buttons
+        progressStopEl = document.createElement("button");
+        progressStopEl.type = "button";
+        progressStopEl.textContent = "Stop";
+        progressStopEl.style.cssText = "flex:0 0 auto;display:none;padding:2px 10px;border:1px solid #48e1eb;border-radius:10px;background:transparent;color:#48e1eb;font-size:12px;cursor:pointer";
+        progressStopEl.addEventListener("click", stopPlaysJob);
+        line.appendChild(progressStopEl);
 
         progressBarEl = document.createElement("div");
         progressBarEl.style.cssText = "margin-top:5px;height:4px;border-radius:2px;background:#333;overflow:hidden";
@@ -543,6 +553,7 @@
             : (done > 0 ? " " + done : "")) + " (" + timing + ")";
 
         progressBarEl.style.display = total > 0 ? "block" : "none";
+        progressStopEl.style.display = p.kind === "plays" ? "block" : "none";
         progressFillEl.style.width = total > 0 ? Math.round(Math.max(0, Math.min(1, done / total)) * 100) + "%" : "0";
         progressEl.style.display = "block";
 
@@ -1291,6 +1302,27 @@
         }
     }
 
+    // The pace of the fresh play counts, the shortest wait of a range: 5 to
+    // 10, 10 to 30 or 30 to 60 seconds. A fixed 60 from before is the slowest
+    function playsPaceFrom(v) {
+
+        if (v === 5 || v === 10 || v === 30) {
+            return v;
+        }
+
+        return v === 60 ? 30 : 10;
+    }
+
+    // A wait somewhere in the chosen range, in milliseconds, so the requests
+    // come at uneven times like a person's
+    function playsPaceMs() {
+
+        const low = playsPaceFrom(settings.playsTrickleSecs);
+        const high = low === 5 ? 10 : (low === 10 ? 30 : 60);
+
+        return Math.round((low + Math.random() * (high - low)) * 1000);
+    }
+
     // How long the counts and lyrics of a song are kept, in minutes. Older
     // settings kept it in hours, 4 unless changed: a changed value carries
     // over, the old default becomes the new one of 30 minutes
@@ -1378,6 +1410,9 @@
             artOverlayMode: "all",
             copyLinkOnPublish: true,
             noRemixOnPublish: false,
+            playsTrickle: true,
+            playsTrickleSecs: 10,
+            playsMaxAgeHours: 24,
             directAudio: true,
             remoteArtwork: false,
             artOnResume: false,
@@ -1512,6 +1547,10 @@
                     reportPlays: parsed.reportPlays !== false,
                     copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
                     noRemixOnPublish: parsed.noRemixOnPublish === true,
+                    playsTrickle: parsed.playsTrickle !== false,
+                    playsTrickleSecs: playsPaceFrom(parsed.playsTrickleSecs),
+                    playsMaxAgeHours: [6, 24, 72, 168].indexOf(parsed.playsMaxAgeHours) !== -1
+                        ? parsed.playsMaxAgeHours : 24,
                     artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
@@ -8733,6 +8772,13 @@
     const playCountAt = new Map();
     let playsSaveTimer = 0;
 
+    // How fast each song gains plays, plays an hour, worked out over at least
+    // an hour from where the last measure began, so a song read again a minute
+    // later does not swing it. The measure starts again each time
+    const PLAYS_RATE_WINDOW = 3600000;
+    const playCountRate = new Map();
+    const playRateBase = new Map();
+
     function loadStoredPlays() {
 
         try {
@@ -8751,6 +8797,15 @@
 
                     playCounts.set(key, item[0]);
                     playCountAt.set(key, (Number(item[1]) || 0) * 60000);
+
+                    // The pace and where its measure began, kept since 1.9.9.86
+                    if (typeof item[2] === "number") {
+                        playCountRate.set(key, item[2]);
+                    }
+
+                    if (typeof item[3] === "number" && typeof item[4] === "number") {
+                        playRateBase.set(key, [item[3], item[4] * 60000]);
+                    }
                 }
             }
         } catch (e) {
@@ -8770,7 +8825,13 @@
             const out = {};
 
             for (const [key, n] of playCounts) {
-                out[key] = [n, Math.round((playCountAt.get(key) || 0) / 60000)];
+
+                const rate = playCountRate.get(key);
+                const base = playRateBase.get(key) || [n, playCountAt.get(key) || 0];
+
+                out[key] = [n, Math.round((playCountAt.get(key) || 0) / 60000),
+                    typeof rate === "number" ? Math.round(rate * 1000) / 1000 : null,
+                    base[0], Math.round(base[1] / 60000)];
             }
 
             try {
@@ -8789,8 +8850,23 @@
         }
 
         const key = String(id);
+        const now = Date.now();
+        const base = playRateBase.get(key);
 
-        playCountAt.set(key, Date.now());
+        // The pace from where the measure began, once an hour or more has
+        // passed, blended with the pace before so one busy hour does not rule
+        if (!base) {
+            playRateBase.set(key, [data.play_count, now]);
+        } else if (now - base[1] >= PLAYS_RATE_WINDOW) {
+
+            const fresh = Math.max(0, data.play_count - base[0]) / ((now - base[1]) / 3600000);
+            const before = playCountRate.get(key);
+
+            playCountRate.set(key, typeof before === "number" ? before * 0.5 + fresh * 0.5 : fresh);
+            playRateBase.set(key, [data.play_count, now]);
+        }
+
+        playCountAt.set(key, now);
 
         // A new number sorts the web view's list again on its next ask
         if (playCounts.get(key) !== data.play_count) {
@@ -8803,23 +8879,30 @@
         savePlaysSoon();
     }
 
-    // The plays of the whole library, read a song at a time in the background
-    // while the web view sorts by plays. Songs never read come first, the
-    // published before the drafts, then counts older than a day, oldest first
-    const PLAYS_STALE_MS = 24 * 3600000;
-    const PLAYS_DELAY = 300;
+    // The plays of the published songs, read a song at a time when asked for,
+    // since Mureka's song lists carry no counts. Never read before come
+    // first, then counts older than the age in the settings, oldest first.
+    // One request every 1 to 2 seconds, and it can be stopped at any time from
+    // the web view or the line over the list here
+    const PLAYS_DELAY = 1000;
     let playsJob = null;
-    let playsJobEndedAt = 0;
 
     function playsWanted() {
 
         const now = Date.now();
+        const PLAYS_STALE_MS = (settings.playsMaxAgeHours || 24) * 3600000;
         const unknown = [];
         const stale = [];
 
         for (const song of cache.songs) {
 
             const key = String(song.song_id);
+
+            // Drafts are only heard by their maker, their counts can wait
+            // until they are played or opened
+            if (song.publish_state !== 1) {
+                continue;
+            }
 
             if (!playCounts.has(key)) {
                 unknown.push(song);
@@ -8828,10 +8911,6 @@
             }
         }
 
-        unknown.sort(function (a, b) {
-            return (b.publish_state === 1 ? 1 : 0) - (a.publish_state === 1 ? 1 : 0);
-        });
-
         stale.sort(function (a, b) {
             return (playCountAt.get(String(a.song_id)) || 0) - (playCountAt.get(String(b.song_id)) || 0);
         });
@@ -8839,38 +8918,280 @@
         return unknown.concat(stale);
     }
 
-    // Started by a list sorted by plays, at most every ten minutes once a
-    // round has ended, so a finished or failed round is not begun again at once
     function startPlaysJob() {
 
-        if (playsJob || Date.now() - playsJobEndedAt < 10 * 60000) {
+        if (playsJob) {
             return;
         }
 
         const todo = playsWanted();
 
         if (todo.length === 0) {
+
+            showToast("Every published song's plays are known", true);
             return;
         }
 
         const job = { stop: false };
 
         playsJob = job;
+        showToast("Reading the plays of " + todo.length + " songs", true);
         runPlaysJob(job, todo);
     }
 
-    // Another sorting asked for, the round stops where it is
     function stopPlaysJob() {
 
-        if (playsJob) {
-            playsJob.stop = true;
+        if (!playsJob) {
+            return;
         }
+
+        playsJob.stop = true;
+
+        // The line goes at once, not after the request still on its way
+        if (progressKind === "plays") {
+            setProgress(null);
+        }
+    }
+
+    // Keeps the counts fresh on its own: one published song every few
+    // seconds, always the one read longest ago, never read first. Only in
+    // the app, where the web view sorts by plays. It waits while a load,
+    // a rescan, caching or Read play counts runs, and stops until the app
+    // is opened again after 3 failed requests or when Mureka asks to slow down
+    let trickleFails = 0;
+    let trickleHalted = false;
+    let trickleBusy = false;
+
+    // For the status in the settings: why it stopped, the last song read
+    // and when the next one is due
+    let trickleHaltWhy = "";
+    let trickleLast = null;
+    let trickleNextAt = 0;
+    let playsJobDone = 0;
+    let playsJobTotal = 0;
+
+    // The song whose count has most likely moved since it was read: how
+    // long ago, times how fast it gains plays. A still song counts as a play
+    // a day, so it is read about daily, a busy one far more often, but never
+    // within 15 minutes of the last read. A song read only once has no pace
+    // yet and counts as a play an hour until it is read again. Never read
+    // songs come first of all
+    const PLAYS_MIN_AGE = 15 * 60000;
+    const PLAYS_FLOOR = 1 / 24;
+
+    function nextPlaysSong() {
+
+        const now = Date.now();
+        let best = null;
+        let bestScore = 0;
+
+        for (const song of cache.songs) {
+
+            if (song.publish_state !== 1) {
+                continue;
+            }
+
+            const key = String(song.song_id);
+
+            if (!playCounts.has(key)) {
+                return song;
+            }
+
+            const age = now - (playCountAt.get(key) || 0);
+
+            if (age < PLAYS_MIN_AGE) {
+                continue;
+            }
+
+            const rate = playCountRate.has(key) ? playCountRate.get(key) : 1;
+            const score = (age / 3600000) * (rate + PLAYS_FLOOR);
+
+            if (score > bestScore) {
+
+                best = song;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    async function trickleTick() {
+
+        const wait = playsPaceMs();
+
+        trickleNextAt = Date.now() + wait;
+        setTimeout(trickleTick, wait);
+
+        if (!isApkHost() || trickleHalted || trickleBusy || settings.playsTrickle === false || creatorSource
+            || playsJob || running || cacheRunning || progressKind) {
+            return;
+        }
+
+        const song = nextPlaysSong();
+
+        if (!song) {
+            return;
+        }
+
+        trickleBusy = true;
+
+        try {
+
+            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
+                { credentials: "include" });
+
+            if (res.status === 429) {
+
+                trickleHalted = true;
+                trickleHaltWhy = "Mureka asked to slow down";
+                dbgLog("Plays", "Mureka asked to slow down, fresh counts stopped until the app is opened again");
+            } else {
+
+                const json = res.ok ? await res.json() : null;
+
+                if (json && json.code === 0 && json.data && typeof json.data.play_count === "number") {
+
+                    notePlayCount(song.song_id, json.data);
+                    trickleFails = 0;
+                    trickleLast = { title: song.title || "Untitled", plays: json.data.play_count, at: Date.now() };
+                } else {
+                    trickleFails += 1;
+                }
+            }
+        } catch (e) {
+            trickleFails += 1;
+        }
+
+        trickleBusy = false;
+
+        if (trickleFails >= 3 && !trickleHalted) {
+
+            trickleHalted = true;
+            trickleHaltWhy = "3 requests in a row failed";
+            dbgLog("Plays", "3 failed requests, fresh counts stopped until the app is opened again");
+        }
+    }
+
+    // A time ago or ahead in words: seconds, minutes, hours or days
+    function playsAge(ms) {
+
+        const secs = Math.max(0, Math.round(ms / 1000));
+
+        if (secs < 90) {
+            return secs + " s";
+        }
+
+        if (secs < 5400) {
+            return Math.round(secs / 60) + " min";
+        }
+
+        if (secs < 172800) {
+            return Math.round(secs / 3600) + " h";
+        }
+
+        return Math.round(secs / 86400) + " days";
+    }
+
+    // Where the play counts stand, the lines of the status in the settings
+    function playsStatusLines() {
+
+        const now = Date.now();
+        const lines = [];
+        let published = 0;
+        let known = 0;
+        let oldest = Infinity;
+
+        for (const song of cache.songs) {
+
+            if (song.publish_state !== 1) {
+                continue;
+            }
+
+            published += 1;
+
+            const key = String(song.song_id);
+
+            if (playCounts.has(key)) {
+
+                known += 1;
+                oldest = Math.min(oldest, playCountAt.get(key) || 0);
+            }
+        }
+
+        lines.push(known + " of " + published + " published songs have a count"
+            + (known > 0 && oldest > 0 ? ", the oldest read " + playsAge(now - oldest) + " ago" : ""));
+
+        if (playsJob) {
+            lines.push("Read play counts: " + playsJobDone + " of " + playsJobTotal);
+        }
+
+        let fresh = "";
+
+        if (settings.playsTrickle === false) {
+            fresh = "Off";
+        } else if (trickleHalted) {
+            fresh = "Stopped, " + trickleHaltWhy + ". Switch it off and on to start again";
+        } else if (playsJob) {
+            fresh = "Waiting while Read play counts runs";
+        } else if (running) {
+            fresh = "Waiting while songs are loaded from Mureka";
+        } else if (cacheRunning) {
+            fresh = "Waiting while songs are cached";
+        } else if (creatorSource) {
+            fresh = "Waiting while an artist is shown";
+        } else if (trickleBusy) {
+            fresh = "Reading a song now";
+        } else if (trickleNextAt > now) {
+            fresh = "Next song in " + playsAge(trickleNextAt - now);
+        } else {
+            fresh = "Starting";
+        }
+
+        lines.push("Fresh counts: " + fresh);
+
+        if (trickleLast) {
+            lines.push("Last read: " + trickleLast.title + ", " + trickleLast.plays + " plays, "
+                + playsAge(now - trickleLast.at) + " ago");
+        }
+
+        // The song gaining plays fastest, and how many songs move at all
+        let top = null;
+        let topRate = 0;
+        let moving = 0;
+
+        for (const song of cache.songs) {
+
+            const rate = playCountRate.get(String(song.song_id));
+
+            if (song.publish_state !== 1 || typeof rate !== "number") {
+                continue;
+            }
+
+            if (rate * 24 >= 1) {
+                moving += 1;
+            }
+
+            if (rate > topRate) {
+
+                top = song;
+                topRate = rate;
+            }
+        }
+
+        if (top) {
+            lines.push("Fastest: " + (top.title || "Untitled") + ", about " + Math.round(topRate * 24)
+                + " plays a day. " + moving + " songs gain a play a day or more and are read more often");
+        }
+
+        return lines;
     }
 
     async function runPlaysJob(job, todo) {
 
         let done = 0;
         let fails = 0;
+        let ended = "";
 
         dbgLog("Plays", "reading the plays of " + todo.length + " songs");
 
@@ -8878,9 +9199,13 @@
 
             if (job.stop) {
 
-                dbgLog("Plays", "stopped after " + done + ", the list is sorted another way");
+                dbgLog("Plays", "stopped after " + done);
+                ended = "stopped";
                 break;
             }
+
+            playsJobDone = done;
+            playsJobTotal = todo.length;
 
             // A load, a rescan or caching keeps its own progress line
             if (!progressKind || progressKind === "plays") {
@@ -8892,10 +9217,11 @@
                 const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
                     { credentials: "include" });
 
-                // Asked too often, left for the next round
+                // Asked too often, the rest is left for another time
                 if (res.status === 429) {
 
                     dbgLog("Plays", "Mureka asked to slow down after " + done);
+                    ended = "slow";
                     break;
                 }
 
@@ -8915,21 +9241,33 @@
             if (fails >= 5) {
 
                 dbgLog("Plays", "stopped after " + done + ", Mureka did not answer");
-                setStatus("Play counts stopped, Mureka did not answer");
+                ended = "fail";
                 break;
             }
 
             done += 1;
-            await sleep(PLAYS_DELAY);
+
+            if (job.stop) {
+                continue;
+            }
+
+            await sleep(PLAYS_DELAY + Math.round(Math.random() * PLAYS_DELAY));
         }
 
-        // Stopped by another sorting, it may start again as soon as plays
-        // are asked for again
         playsJob = null;
-        playsJobEndedAt = job.stop ? 0 : Date.now();
 
         if (progressKind === "plays") {
             setProgress(null);
+        }
+
+        if (ended === "slow") {
+            showToast("Mureka asked to slow down, plays read for " + done + " songs", false);
+        } else if (ended === "fail") {
+            showToast("Mureka did not answer, plays read for " + done + " songs", false);
+        } else if (ended === "stopped") {
+            showToast("Stopped, plays read for " + done + " songs", true);
+        } else {
+            showToast("Plays read for " + done + " songs", true);
         }
 
         hostListStamp += 1;
@@ -9150,7 +9488,11 @@
             && (!Array.isArray(stored.lyrics) || stored.lyrics.length === 0)
             && !isInstrumental(song);
 
-        if (detailIsFresh(stored) && !lyricsMissing) {
+        // The counts are read anew every time a song starts, unless they were
+        // read in the last minute, a song tapped again or just prepared
+        const justRead = stored && typeof stored.t === "number" && Date.now() - stored.t < 60000;
+
+        if (justRead && !lyricsMissing) {
             return;
         }
 
@@ -15791,14 +16133,6 @@
         // it, or asking again after a tap, does not sort the library again
         const views = ["alpha", "alphaDesc", "starsUp", "starsDown", "stars", "playsUp", "playsDown"];
         const view = req && views.indexOf(req.view) !== -1 ? req.view : "mureka";
-
-        // Sorted by plays, the plays not known yet are read in the background
-        if (view === "playsUp" || view === "playsDown") {
-            startPlaysJob();
-        } else {
-            stopPlaysJob();
-        }
-
         const prepared = hostPrepared(view);
         const numbers = prepared.numbers;
 
@@ -16459,6 +16793,10 @@
             cacheAll();
         } else if (cmd === "rescan") {
             rescan();
+        } else if (cmd === "readPlays") {
+            startPlaysJob();
+        } else if (cmd === "stopPlays") {
+            stopPlaysJob();
         } else if (cmd === "closeInfo") {
             closeInfo();
         } else if (cmd === "openPlaylists") {
@@ -16726,6 +17064,9 @@
 
         // The position moves on its own, once a second is plenty
         setInterval(publishHostState, 1000);
+
+        // Fresh play counts, the first a little after starting up
+        setTimeout(trickleTick, 30000);
         publishHostState();
 
         // The plays known for each song, for sorting the list by them
@@ -21709,7 +22050,93 @@
             nowPage.appendChild(makeHint("The cover goes out twice: first a loading picture, then the song's own two seconds later. Android only tells the car about a new cover when the song's text changes, so New title, the one to use, adds an invisible space to the title with the loading picture. New song changes only the song's id, Cover only just the picture. Used on resume, when Bluetooth connects and by the cover test under Developer."));
         }
         libraryPage.appendChild(makeLabel("Counts"));
-        libraryPage.appendChild(withHint(countsAgeRow, "How long the plays and likes shown for a song are kept before they are fetched from Mureka again."));
+        libraryPage.appendChild(withHint(countsAgeRow, "How long the plays and likes of the songs coming up next are kept before they are fetched from Mureka again. The playing song's are fetched every time it starts."));
+
+        // The plays of the published songs for the web view's sorting by
+        // plays. Mureka's lists carry no counts, each song is asked for alone
+        if (isApkHost()) {
+
+            const trickleRow = makeBoolRow("Keep play counts fresh",
+                function () { return settings.playsTrickle !== false; },
+                function (v) {
+
+                    settings.playsTrickle = v;
+                    trickleHalted = false;
+                    trickleHaltWhy = "";
+                    trickleFails = 0;
+                });
+
+            const paceRow = makeChoiceRow([
+                { label: "5-10 s", value: 5 },
+                { label: "10-30 s", value: 10 },
+                { label: "30-60 s", value: 30 }
+            ], function () { return playsPaceFrom(settings.playsTrickleSecs); }, function (v) {
+                settings.playsTrickleSecs = v;
+            });
+
+            const ageRow = makeChoiceRow([
+                { label: "6 hours", value: 6 },
+                { label: "1 day", value: 24 },
+                { label: "3 days", value: 72 },
+                { label: "1 week", value: 168 }
+            ], function () { return settings.playsMaxAgeHours || 24; }, function (v) {
+                settings.playsMaxAgeHours = v;
+            });
+
+            const readRow = document.createElement("div");
+
+            readRow.style.cssText = "display:flex;gap:6px";
+            readRow.appendChild(makeButton("Read play counts", "#333", "#fff", startPlaysJob));
+            readRow.appendChild(makeButton("Stop", "#333", "#fff", stopPlaysJob));
+
+            // Where it stands, painted every second while the page is open
+            // here, and with every read of the panel from the web view
+            const playsStatusEl = document.createElement("div");
+
+            playsStatusEl.style.cssText = "margin:4px 0 8px;padding:8px 10px;border-radius:8px;background:#26262c;color:#ccc;font-size:12px;line-height:1.5";
+
+            const paintPlaysStatus = function () {
+
+                const lines = playsStatusLines();
+
+                // Only when something changed, so a reader keeps its place
+                if (playsStatusEl.dataset.text === lines.join("\n")) {
+                    return;
+                }
+
+                playsStatusEl.dataset.text = lines.join("\n");
+                playsStatusEl.textContent = "";
+
+                for (const text of lines) {
+
+                    const line = document.createElement("div");
+
+                    line.textContent = text;
+                    playsStatusEl.appendChild(line);
+                }
+            };
+
+            paintPlaysStatus();
+            settingsRefreshers.push(paintPlaysStatus);
+
+            setInterval(function () {
+
+                if (settingsEl && libraryPage.style.display !== "none" && settingsEl.offsetParent !== null) {
+                    paintPlaysStatus();
+                }
+            }, 1000);
+
+            libraryPage.appendChild(makeLabel("Play counts"));
+            libraryPage.appendChild(playsStatusEl);
+            libraryPage.appendChild(withHint(trickleRow, "While the app is open, the plays of one published song at a time are read from Mureka, so sorting by plays in the web view stays right. Songs gaining plays fast are read often, at most every 15 minutes, songs that barely move about once a day. A song's plays are also read every time it starts. It waits while songs are loaded or cached."));
+            libraryPage.appendChild(makeSubLabel("One song every"));
+            libraryPage.appendChild(paceRow);
+            libraryPage.appendChild(makeHint("Each wait is a random time in the range. With 1000 published songs, 10 to 30 seconds reads each one again about every 5 to 6 hours."));
+            libraryPage.appendChild(makeSubLabel("Read play counts reads counts older than"));
+            libraryPage.appendChild(ageRow);
+            libraryPage.appendChild(readRow);
+            libraryPage.appendChild(makeHint("Read play counts catches up at a song every 1 to 2 seconds: published songs never read first, then counts older than the age above. Also under Sort and Update in the web view."));
+        }
 
         // Mobile: what is drawn on this screen
         mobilePage.appendChild(makeBackRow("Mobile player"));
