@@ -83,7 +83,9 @@ the new settings layout and a number of smaller improvements.
   loading with its turning ring and bar. A pull down at its top loads new
   songs as in the big list. As in the phone's list, a round button jumps to
   the top or the end while scrolling, and another goes back to the playing
-  song when it is out of sight.
+  song when it is out of sight. **Sort** at its top picks Mureka order, A to Z,
+  Z to A, or most or fewest stars or plays first, the same sorting as the
+  big list.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click.

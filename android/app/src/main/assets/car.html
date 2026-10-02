@@ -3062,6 +3062,7 @@
         <div id="mini">
             <div id="miniTop">
                 <span id="miniCount"></span>
+                <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
                 <button class="chip" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"><span class="lbl">Update</span></button>
                 <button class="chip" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"><span class="lbl">Rescan</span></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
@@ -6945,7 +6946,44 @@
         // An arrow shows the direction, up for fewest first, down for most
         setLabel($("viewStars"), "Stars" + (listSort === "starsUp" ? " \u2191" : (listSort === "starsDown" ? " \u2193" : "")));
         setLabel($("viewPlays"), "Plays" + (listSort === "playsUp" ? " \u2191" : (listSort === "playsDown" ? " \u2193" : "")));
+        paintMiniSort();
     }
+
+    // The sortings offered in the small list, with the name its button shows
+    // and the line in the menu, the list's own order first
+    const SORTS = [
+        { sort: "", icon: "mureka", chip: "Sort", label: "Mureka order" },
+        { sort: "alpha", icon: "alpha", chip: "A-Z", label: "A to Z" },
+        { sort: "alphaDesc", icon: "alpha", chip: "Z-A", label: "Z to A" },
+        { sort: "starsDown", icon: "star", chip: "Stars \u2193", label: "Most stars first" },
+        { sort: "starsUp", icon: "star", chip: "Stars \u2191", label: "Fewest stars first" },
+        { sort: "playsDown", icon: "play", chip: "Plays \u2193", label: "Most plays first" },
+        { sort: "playsUp", icon: "play", chip: "Plays \u2191", label: "Fewest plays first" }
+    ];
+
+    function sortInfo(sort) {
+
+        for (const item of SORTS) {
+
+            if (item.sort === (sort || "")) {
+                return item;
+            }
+        }
+
+        return SORTS[0];
+    }
+
+    // The small list's sort button names the sorting in use
+    function paintMiniSort() {
+
+        const info = sortInfo(listSort);
+
+        setIcon($("miniSort"), info.icon);
+        setLabel($("miniSort"), info.chip);
+        $("miniSort").classList.toggle("on", info.sort !== "");
+    }
+
+    paintMiniSort();
 
     function setView(view) {
 
@@ -8951,10 +8989,17 @@
 
         // Not sorted this way yet, the first step. After the last, unsorted
         if (at === -1) {
-            listSort = steps[0];
+            applySort(steps[0]);
         } else {
-            listSort = at + 1 < steps.length ? steps[at + 1] : "";
+            applySort(at + 1 < steps.length ? steps[at + 1] : "");
         }
+    }
+
+    // One sorting for both lists, kept for the next visit. Both are read
+    // again in the new order
+    function applySort(sort) {
+
+        listSort = sort;
 
         try {
             localStorage.setItem("murekaCarSort", listSort);
@@ -8964,7 +9009,34 @@
 
         paintViews();
         loadList(true);
+
+        if (miniOpen) {
+            loadMini(true);
+        }
     }
+
+    // The small list's sort button offers every sorting in a menu, the one
+    // in use lit
+    $("miniSort").addEventListener("click", function () {
+
+        const items = SORTS.map(function (item) {
+
+            return { icon: item.icon, label: item.label, sort: item.sort, fn: function () {
+
+                closeSongMenu();
+                applySort(item.sort);
+            } };
+        });
+
+        openChoice("Sort the list", items);
+
+        const current = sortInfo(listSort);
+        const rows = $("menuItems").querySelectorAll(".menuItem");
+
+        for (let i = 0; i < items.length; i += 1) {
+            rows[i].classList.toggle("accent", items[i].sort === current.sort);
+        }
+    });
 
     $("viewAlpha").addEventListener("click", function () {
         setSort("alpha");

@@ -79,6 +79,12 @@ final class CarServer {
     // Requests larger than this are refused, the API only needs a few bytes
     private static final int MAX_BODY = 16384;
 
+    // The sortings of the song list the player knows, anything else is
+    // Mureka's own order
+    private static final String[] LIST_VIEWS = {
+        "alpha", "alphaDesc", "playsDown", "playsUp", "stars", "starsDown", "starsUp"
+    };
+
     private final Context context;
     private final int port;
     private final ExecutorService pool = Executors.newCachedThreadPool();
@@ -402,6 +408,19 @@ final class CarServer {
         }
     }
 
+    // The sorting asked for when the player knows it, otherwise Mureka's order
+    private static String listView(String asked) {
+
+        for (String view : LIST_VIEWS) {
+
+            if (view.equals(asked)) {
+                return view;
+            }
+        }
+
+        return "mureka";
+    }
+
     // A page of the song list, straight from the player. The search text and
     // the paging come in as query parameters
     private void sendList(OutputStream out, String query) throws IOException {
@@ -413,7 +432,7 @@ final class CarServer {
         try {
 
             req.put("q", param(query, "q"));
-            req.put("view", "alpha".equals(param(query, "view")) ? "alpha" : "mureka");
+            req.put("view", listView(param(query, "view")));
             req.put("offset", number(param(query, "offset"), 0));
             req.put("limit", number(param(query, "limit"), 60));
         } catch (JSONException e) {

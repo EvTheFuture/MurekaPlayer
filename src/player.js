@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.79";
+    const VERSION = "1.9.9.80";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8763,8 +8763,11 @@
     // Persist a song's detail entry, replacing any older copy
     async function saveDetailToStore(id, entry) {
 
-        if (entry && typeof entry.play_count === "number") {
+        // A new count sorts the web view's list by plays again on its next ask
+        if (entry && typeof entry.play_count === "number" && playCounts.get(String(id)) !== entry.play_count) {
+
             playCounts.set(String(id), entry.play_count);
+            hostListStamp += 1;
         }
 
         try {
