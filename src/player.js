@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.69";
+    const VERSION = "1.9.9.70";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5966,7 +5966,16 @@
     }
 
     // Re-fetch one song from the detail endpoint to pick up a changed title etc
-    async function refreshOne(song) {
+    async function refreshOne(song, quiet) {
+
+        // A note for the result when asked for from the song menu, not when
+        // read again after another change, which has its own note
+        const say = function (text, ok) {
+
+            if (!quiet) {
+                showToast(text, ok);
+            }
+        };
 
         setStatus("Refreshing: " + (song.title || "Untitled"));
 
@@ -5975,7 +5984,9 @@
             const res = await timedFetch(url, { credentials: "include" });
 
             if (!res.ok) {
+
                 setStatus("Refresh failed, HTTP " + res.status);
+                say("Could not refresh, HTTP " + res.status, false);
                 return;
             }
 
@@ -5983,7 +5994,9 @@
             const fresh = json && json.data && json.data.song;
 
             if (!fresh || fresh.song_id !== song.song_id) {
+
                 setStatus("Refresh returned no matching song");
+                say("Mureka did not return the song", false);
                 return;
             }
 
@@ -6005,9 +6018,12 @@
             }
 
             setStatus("Refreshed: " + (cache.songs[idx].title || "Untitled"));
+            say("Refreshed");
 
         } catch (e) {
+
             setStatus("Refresh failed");
+            say("Could not refresh", false);
         }
     }
 
@@ -6044,10 +6060,7 @@
             if (!await setRemixAllowed(song, false, true)) {
 
                 setStatus("Could not disallow remixing, " + name + " was not published");
-
-                if (copy) {
-                    showToast("Remixing could not be disallowed, not published", false);
-                }
+                showToast("Remixing could not be disallowed, not published", false);
 
                 return false;
             }
@@ -6094,7 +6107,7 @@
 
             // The server decides the state and the publish date, so take its
             // word for it rather than ours
-            await refreshOne(song);
+            await refreshOne(song, true);
             publishHostSoon();
 
             if (copied) {
@@ -6107,6 +6120,8 @@
 
                 showToast("Published");
                 copyLink(song, true);
+            } else {
+                showToast(publish ? "Published" : "Unpublished");
             }
 
             return true;
@@ -6117,10 +6132,7 @@
             renderList();
             publishHostSoon();
             setStatus("Could not " + (publish ? "publish" : "unpublish") + " " + name + ", try again");
-
-            if (copy) {
-                showToast("Could not " + (publish ? "publish" : "unpublish") + ", try again", false);
-            }
+            showToast("Could not " + (publish ? "publish" : "unpublish") + ", try again", false);
 
             return false;
         }
@@ -6171,6 +6183,7 @@
 
             saveCache();
             setStatus("Renamed: " + clean);
+            showToast("Renamed");
             publishHostSoon();
 
             return true;
@@ -6194,6 +6207,7 @@
             }
 
             setStatus("Could not rename the song, try again");
+            showToast("Could not rename, try again", false);
 
             return false;
         }
@@ -6248,6 +6262,7 @@
 
             saveCache();
             setStatus((allow ? "Remixing allowed: " : "Remixing turned off: ") + name);
+            showToast(allow ? "Remixing allowed" : "Remixing disallowed");
             publishHostSoon();
 
             return true;
@@ -6264,6 +6279,7 @@
             }
 
             setStatus("Could not change remixing for " + name);
+            showToast("Could not change remixing", false);
 
             return false;
         }
@@ -13156,7 +13172,15 @@
     // Cyan for done, red for what did not work
     let panelToastEl = null;
 
+    // The latest note with a running number, for the web view to show once
+    let toastSeq = 0;
+    let lastToast = null;
+
     function showToast(text, ok) {
+
+        toastSeq += 1;
+        lastToast = { n: toastSeq, text: text, ok: ok !== false, at: Date.now() };
+        publishHostSoon();
 
         if (!panelEl) {
             return;
@@ -15024,6 +15048,9 @@
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             songNew: song && !creatorSource ? song.is_played === false : null,
             songTrimmed: song && !creatorSource ? isTrimmed(song) : null,
+
+            // The latest note, while it is fresh, for the web view to show
+            toast: lastToast && Date.now() - lastToast.at < 8000 ? lastToast : null,
 
             // The web view's screen off, apart from the mobile player's.
             // A browser can still have its own
@@ -19997,6 +20024,7 @@
             paintHeart(heartEl, liked);
             saveCache();
             setStatus((liked ? "Liked: " : "Unliked: ") + (song.title || "Untitled"));
+            showToast(liked ? "Liked" : "Like removed");
 
         } catch (e) {
 
@@ -20004,6 +20032,7 @@
             song.is_liked = !makeLiked;
             paintHeart(heartEl, song.is_liked);
             setStatus("Could not update like, try again");
+            showToast("Could not " + (makeLiked ? "like" : "remove the like") + ", try again", false);
         }
     }
 
@@ -25962,11 +25991,18 @@
             }
 
             if (res.ok && json && json.code === 0) {
+
+                showToast("Deleted on Mureka");
                 return { ok: true, why: "" };
             }
 
-            return { ok: false, why: "Mureka did not delete it: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status) };
+            const why = "Mureka did not delete it: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status);
+
+            showToast(why, false);
+            return { ok: false, why: why };
         } catch (e) {
+
+            showToast("Could not reach Mureka to delete it", false);
             return { ok: false, why: "could not reach Mureka to delete it" };
         }
     }
@@ -26001,6 +26037,8 @@
                 })
             }, 60000);
         } catch (e) {
+
+            showToast("Could not reach Mureka to trim", false);
             return { ok: false, text: "Could not reach Mureka, " + (e && e.message ? e.message : "no connection") };
         }
 
@@ -26011,6 +26049,8 @@
         }
 
         if (!res.ok || !json || json.code !== 0) {
+
+            showToast("Mureka did not trim it", false);
             return { ok: false, text: "Mureka did not trim it: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status) };
         }
 
@@ -26043,7 +26083,10 @@
             : "Trimmed: " + title + ", Load brings the new song in";
 
         // The original goes only once the new song is safely there, from
-        // Mureka first and then from the lists here
+        // Mureka first and then from the lists here. The note for the delete
+        // comes after the one for the trim
+        showToast("Trimmed");
+
         if (deleteOriginal) {
 
             say("Deleting the original");
@@ -27135,6 +27178,53 @@
 
         // A click anywhere else closes the menu
         document.addEventListener("click", hideContextMenu);
+
+        // A press outside the open menu only closes it. Caught before
+        // anything under it hears of it, and the click that follows is
+        // swallowed too, so a song tapped to close the menu does not start
+        // playing and a long press there does not open another menu
+        let dismissedAt = 0;
+
+        const outside = function (ev) {
+
+            // The touch that follows the pointer press of the same tap is
+            // kept away from the row too, or its press and hold would start
+            if (!contextMenuEl || contextMenuEl.style.display !== "block") {
+
+                if (Date.now() - dismissedAt < 700) {
+                    ev.stopPropagation();
+                }
+
+                return;
+            }
+
+            if (contextMenuEl.contains(ev.target)) {
+                return;
+            }
+
+            dismissedAt = Date.now();
+            hideContextMenu();
+            ev.stopPropagation();
+        };
+
+        document.addEventListener("pointerdown", outside, true);
+        document.addEventListener("touchstart", outside, { capture: true, passive: true });
+        document.addEventListener("mousedown", function (ev) {
+
+            if (Date.now() - dismissedAt < 700) {
+                ev.stopPropagation();
+            }
+        }, true);
+
+        document.addEventListener("click", function (ev) {
+
+            if (Date.now() - dismissedAt < 700) {
+
+                dismissedAt = 0;
+                ev.stopPropagation();
+                ev.preventDefault();
+            }
+        }, true);
 
         // Scrolling closes it so it does not float detached from its row
         window.addEventListener("scroll", hideContextMenu, true);

@@ -143,6 +143,12 @@ the new settings layout and a number of smaller improvements.
   (Backup and restore) and Troubleshooting (Developer), with Your songs
   (Publishing) between Music and Data. Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **A note for everything asked of Mureka**: publishing, unpublishing,
+  renaming, remixing, likes, refreshing a song, trimming and deleting each
+  say how it went in a short note over the player, cyan when it went and red
+  when it did not. The web view shows the same notes.
+- **A tap outside the song menu** only closes it: the song or button under
+  it is not played or pressed.
 - **A tap on the playing song** never restarts it, but when the list shows
   other songs than the queue was made from, published only where it began
   with all songs for example, the queue is made again from the list around

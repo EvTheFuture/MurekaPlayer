@@ -771,6 +771,20 @@
         z-index: 60;
     }
 
+    /* The phone's word on something asked of Mureka: cyan when it went,
+       red when it did not */
+    #toast.ok {
+        background: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    #toast.bad {
+        background: #ff6b6b;
+        color: #000;
+        font-weight: 600;
+    }
+
     /* The handle to drag a song to another place in the queue */
     .rowGrip {
         flex: 0 0 auto;
@@ -9754,6 +9768,7 @@
         watchPull(s);
         watchCache(s);
         watchMini(s);
+        watchToast(s);
         trimFollow(s);
         setDebugOverlay(s.debugOverlay === true);
         offerSeek(s.seekActions !== false);
@@ -10351,14 +10366,40 @@
         menuSong = null;
     }
 
+    // The phone's note on something asked of Mureka, renaming, publishing,
+    // remixing, liking and the like, shown here once, in its colour. A note
+    // already there when the page opens is not shown again
+    let toastSeen = null;
+
+    function watchToast(s) {
+
+        const t = s && s.toast ? s.toast : null;
+        const key = t ? t.n + "|" + t.at : "";
+
+        if (toastSeen === null) {
+
+            toastSeen = key;
+            return;
+        }
+
+        if (!t || key === toastSeen) {
+            return;
+        }
+
+        toastSeen = key;
+        toast(t.text, t.ok === false ? "bad" : "ok");
+    }
+
     // A short word over the page, gone again after a few seconds
     let toastTimer = 0;
 
-    function toast(text) {
+    function toast(text, kind) {
 
         const el = $("toast");
 
         el.textContent = text;
+        el.classList.toggle("ok", kind === "ok");
+        el.classList.toggle("bad", kind === "bad");
         el.style.display = "block";
         clearTimeout(toastTimer);
 
