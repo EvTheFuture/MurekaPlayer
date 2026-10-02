@@ -68,8 +68,10 @@ final class CarServer {
 
     // With the sound in the browser, the phone plays muted. If the web view
     // stops asking for the state for this long, it is gone, and the phone
-    // takes the sound back so the music does not go silent
-    private static final long CAR_GONE_MS = 8000;
+    // takes the sound back so the music does not go silent. Eight seconds
+    // was too short: a car's browser fetching the next song over a slow
+    // hotspot could miss that long and lose the music for no good reason
+    private static final long CAR_GONE_MS = 25000;
 
     // A browser that has not asked for the state for this long has gone
     private static final long CLIENT_GONE_MS = 20000;
@@ -211,8 +213,14 @@ final class CarServer {
 
         JSONObject s = Hub.state();
 
-        if (s.optBoolean("carAudio", false) && System.currentTimeMillis() - lastPoll > CAR_GONE_MS) {
-            Hub.command("carAudio", false);
+        long quiet = System.currentTimeMillis() - lastPoll;
+
+        // Said in the debug log and to the player, so the music moving back
+        // to the phone has a reason everyone can see
+        if (s.optBoolean("carAudio", false) && quiet > CAR_GONE_MS) {
+
+            Hub.note("Command", "no word from the web view's browser for " + (quiet / 1000) + " s, the music comes back to the phone");
+            Hub.command("carGone", quiet / 1000);
         }
 
         countClients();

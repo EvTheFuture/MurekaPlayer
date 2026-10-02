@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.70";
+    const VERSION = "1.9.9.74";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -606,6 +606,12 @@
 
     // A one-shot seek applied once the next song has loaded, used when resuming
     let pendingSeek = 0;
+
+    // When the playing song was asked to start and when its clock last moved,
+    // so a tap on it can tell a song that plays from one that only seems to
+    let trackAskedAt = 0;
+    let clockMovedAt = 0;
+    let clockLast = -1;
 
     // Timestamp of the last periodic queue save, throttles writes during play
     let lastQueueSave = 0;
@@ -6464,6 +6470,12 @@
         // Move the seek bar and time labels as the song plays
         audio.addEventListener("timeupdate", function () {
 
+            if (audio.currentTime !== clockLast) {
+
+                clockLast = audio.currentTime;
+                clockMovedAt = Date.now();
+            }
+
             if (!isSeeking) {
                 updateSeekDisplay();
             }
@@ -6847,6 +6859,23 @@
         // shuffle order is not regenerated
         // With no audio loaded yet, as just after a restored queue, fall through
         if (currentSong && currentSong.song_id === songId && audio && audio.src) {
+
+            // A song that should be playing but whose clock has not moved for
+            // over half a second is stuck, the cached copy loaded and the
+            // waveform drawn but no sound and no progress. Then a tap loads it
+            // again from where it stood, which is what switching away and
+            // back did by hand. The queue stays as it is
+            const stuck = !userPaused && Date.now() - trackAskedAt > 500
+                && Date.now() - Math.max(clockMovedAt, trackAskedAt) > 600;
+
+            if (stuck) {
+
+                dbgLog("Song", "tapped while stuck at " + dbgNum(audio.currentTime) + ", loading it again");
+                pendingSeek = audio.currentTime > 1 ? audio.currentTime : 0;
+                requeueAroundCurrent(songId);
+                playCurrent();
+                return;
+            }
 
             if (audio.paused) {
                 startAudioPlayback();
@@ -8191,6 +8220,9 @@
 
         ensureAudio();
         currentSong = song;
+        trackAskedAt = Date.now();
+        clockMovedAt = 0;
+        clockLast = -1;
         dbgLog("Song", (song.title || "Untitled") + " (" + song.song_id + "), queue "
             + (queuePos + 1) + "/" + queue.length);
 
@@ -13176,6 +13208,9 @@
     let toastSeq = 0;
     let lastToast = null;
 
+    // When the phone took the music back from a browser that went silent
+    let carGoneAt = 0;
+
     function showToast(text, ok) {
 
         toastSeq += 1;
@@ -15052,6 +15087,10 @@
             // The latest note, while it is fresh, for the web view to show
             toast: lastToast && Date.now() - lastToast.at < 8000 ? lastToast : null,
 
+            // When the phone last took the music back from a silent browser,
+            // so that browser can say so once it is heard from again
+            carGone: carGoneAt && Date.now() - carGoneAt < 300000 ? carGoneAt : 0,
+
             // The web view's screen off, apart from the mobile player's.
             // A browser can still have its own
             screenSaver: {
@@ -16344,6 +16383,16 @@
             applyCarAudioVolume();
 
             setStatus(hostCarAudio ? "Music plays in the browser" : "Music plays on the phone");
+        } else if (cmd === "carGone") {
+
+            // The browser playing the music stopped asking for the state,
+            // left the car or lost the hotspot, so the phone plays it again.
+            // Said here and to that browser once it is back
+            hostCarAudio = false;
+            carGoneAt = Date.now();
+            applyCarAudioVolume();
+            setStatus("Music plays on the phone, the browser stopped answering");
+            showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the phone", false);
         } else if (cmd === "takeSound") {
 
             // Play, a skip or a seek from Bluetooth, the lock screen or a

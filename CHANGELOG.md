@@ -71,7 +71,8 @@ the new settings layout and a number of smaller improvements.
   the settings, and optional names under the buttons. **Songs** and **List**
   are among its buttons, to be placed or left out like the others, either
   or both: a tap on Songs opens the song list and a swipe up on it a small
-  one over the main page, a tap on List opens the small one.
+  one over the main page, a tap on List opens the small one and a swipe up
+  on it the whole list.
 - The small song list reaches from the stars down to the seek bar beside the
   cover. It is see through, hides the stars, Playing from and the lyrics
   while open, opens at the playing song, and keeps its cache dots, titles and
@@ -99,7 +100,8 @@ the new settings layout and a number of smaller improvements.
 - Sound: **Phone / Bluetooth**, **This browser** (the browser plays, the phone
   follows silently and stays in charge) or **No music in this browser** for a
   second browser that should stay quiet. The phone takes the sound back if
-  the web view goes away.
+  the web view has not been heard from for 25 seconds, and says so in a red
+  note on the phone and in that browser once it is back.
 - The phone's sound choice shows a Bluetooth icon with the device's name
   while the phone's music goes out over Bluetooth, and a phone otherwise.
   From Android 13 it follows where Android actually sends media, so a car

@@ -432,16 +432,18 @@
         box-shadow: inset 0 0 0 4px #ff6b6b;
     }
 
-    /* A red dot on the songs button, seen from the main screen. It takes
-       the whole touch, so a swipe up on it is not taken as a scroll */
-    #browseBtn {
+    /* A red dot on the songs button, seen from the main screen. Songs and
+       List take the whole touch, so a swipe up on them is not taken as a
+       scroll */
+    #browseBtn,
+    #miniBtn {
         position: relative;
         touch-action: none;
     }
 
-    /* A small mark at its top for the swipe up that opens the list over
-       the main page */
-    #browseBtn::before {
+    /* A small mark at their top for the swipe up that opens the other list */
+    #browseBtn::before,
+    #miniBtn::before {
         content: "";
         position: absolute;
         top: 7px;
@@ -4069,7 +4071,29 @@
     // version, newer software may leave that out, but only Tesla calls its
     // system "X11; GNU/Linux". It says it can go fullscreen but does not, so
     // the page offers no fullscreen there
-    const teslaBrowser = teslaTheater || /\bTesla\b|X11; GNU\/Linux/i.test(navigator.userAgent || "");
+    //
+    // Newer Tesla software sends a plain desktop Chrome agent, X11; Linux
+    // x86_64, with nothing to tell it by. What does tell it is the address:
+    // the public one the phone takes on with Public address (VPN) is there
+    // only because Tesla's browser refuses private addresses, every other
+    // browser opens the page on a private address or the local name
+    const teslaByAddress = (function () {
+
+        const m = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(location.hostname || "");
+
+        if (!m) {
+            return false;
+        }
+
+        const a = Number(m[1]);
+        const b = Number(m[2]);
+        const privateNet = a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31)
+            || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+
+        return !privateNet;
+    })();
+
+    const teslaBrowser = teslaTheater || teslaByAddress || /\bTesla\b|X11; GNU\/Linux/i.test(navigator.userAgent || "");
     let theaterAsked = false;
     let theaterTriedAt = 0;
     let theaterHintAt = 0;
@@ -4337,7 +4361,7 @@
 
         return [
             "Web view " + (s.version || "-") + " | " + dbgDisplayMode()
-                + (teslaTheater ? " | Tesla fullscreen" : (teslaBrowser ? " | Tesla" : ""))
+                + (teslaTheater ? " | Tesla fullscreen" : (teslaBrowser ? (teslaByAddress ? " | Tesla by address" : " | Tesla") : ""))
                 + ($("fullBtn").style.display === "none" ? " | no fullscreen" : "")
                 + " | fs " + dbgFlag(fs) + " | vis " + dbgFlag(!document.hidden)
                 + " foc " + dbgFlag(document.hasFocus()),
@@ -9769,6 +9793,7 @@
         watchCache(s);
         watchMini(s);
         watchToast(s);
+        watchCarGone(s);
         trimFollow(s);
         setDebugOverlay(s.debugOverlay === true);
         offerSeek(s.seekActions !== false);
@@ -9920,14 +9945,19 @@
             const dx = ev.clientX - holdStart.x;
             const dy = ev.clientY - holdStart.y;
 
-            // Songs swiped upwards opens or closes the small list. Going up
-            // is not a slip there, it gives up the hold that would move the
-            // button and waits for the swipe to be long enough
-            if (holdStart.btn.id === "browseBtn" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+            // Songs swiped upwards opens or closes the small list, List swiped
+            // upwards opens the whole one, the other way round from a tap.
+            // Going up is not a slip there, it gives up the hold that would
+            // move the button and waits for the swipe to be long enough
+            const swipeBtn = holdStart.btn.id === "browseBtn" || holdStart.btn.id === "miniBtn";
+
+            if (swipeBtn && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
 
                 clearTimeout(holdTimer);
 
                 if (dy <= -SWIPE_UP) {
+
+                    const which = holdStart.btn.id;
 
                     endHold();
                     swallowClick = true;
@@ -9936,7 +9966,11 @@
                         swallowClick = false;
                     }, 400);
 
-                    toggleMini();
+                    if (which === "browseBtn") {
+                        toggleMini();
+                    } else {
+                        openFullList();
+                    }
                 }
 
                 return;
@@ -10370,6 +10404,29 @@
     // remixing, liking and the like, shown here once, in its colour. A note
     // already there when the page opens is not shown again
     let toastSeen = null;
+
+    // The phone took the music back while this browser was not heard from,
+    // said once it is back, since nothing else would explain the change
+    let carGoneSeen = null;
+
+    function watchCarGone(s) {
+
+        const at = s && typeof s.carGone === "number" ? s.carGone : 0;
+
+        if (carGoneSeen === null) {
+
+            carGoneSeen = at;
+            return;
+        }
+
+        if (!at || at === carGoneSeen) {
+            return;
+        }
+
+        carGoneSeen = at;
+        toast("The phone took the music back, this browser had not been heard from for a while", "bad");
+        dbgLog("Net", "the phone took the music back while this browser was silent");
+    }
 
     function watchToast(s) {
 
