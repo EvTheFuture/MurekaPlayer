@@ -86,7 +86,9 @@ the new settings layout and a number of smaller improvements.
   song when it is out of sight. **Sort** at its top picks Mureka order, A to Z,
   Z to A, or most or fewest stars or plays first, the same sorting as the
   big list. Sorted by plays, both lists show each song's plays, in the
-  small list in place of the stars.
+  small list in place of the stars, and the phone reads the plays of the
+  whole library in the background, a song at a time, with its progress
+  over the lists. Counts are kept on the phone and read again after a day.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click.

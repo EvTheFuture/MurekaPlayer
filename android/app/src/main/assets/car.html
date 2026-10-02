@@ -2200,7 +2200,7 @@
     /* How many times a song has been played, shown while sorting by plays */
     .rowPlays {
         flex: 0 0 auto;
-        min-width: 3.6em;
+        min-width: 4.2em;
         text-align: right;
         color: var(--muted);
         font-variant-numeric: tabular-nums;
@@ -7149,8 +7149,9 @@
         }
     }
 
-    // A song's plays, short for large numbers, a question mark while the
-    // phone has not fetched the count yet
+    // A song's plays, exact up to 99999 so close counts can be told apart,
+    // shorter above that, a question mark while the phone has not read the
+    // count yet
     function paintPlays(el, song) {
 
         const known = typeof song.plays === "number";
@@ -7159,13 +7160,13 @@
 
         if (n >= 1000000) {
             text = (n / 1000000).toFixed(n < 10000000 ? 1 : 0).replace(/\.0$/, "") + "M";
-        } else if (n >= 1000) {
-            text = (n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, "") + "k";
+        } else if (n >= 100000) {
+            text = Math.round(n / 1000) + "k";
         }
 
         el.className = "rowPlays" + (known ? "" : " unknown");
         el.textContent = "\u25B6 " + (known ? text : "?");
-        el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, shown once the song has been played";
+        el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, the phone reads them while the list is sorted by plays";
     }
 
     // The badge at the end of a line: new for a song not played yet, else
@@ -9229,6 +9230,29 @@
         }
     }
 
+    // The phone reads the plays of the library while the list is sorted by
+    // them. The rows show each count as it comes, and once the round is
+    // over the lists are read again in the new order
+    let playsRound = false;
+
+    function watchPlaysRound(s) {
+
+        const now = !!(s && s.progress && s.progress.kind === "plays");
+
+        if (playsRound && !now && (listSort === "playsUp" || listSort === "playsDown")) {
+
+            if ($("browse").style.display === "flex" && listView !== "queue") {
+                loadList(true);
+            }
+
+            if (miniOpen) {
+                loadMini(true);
+            }
+        }
+
+        playsRound = now;
+    }
+
     // The cache dots follow the phone: when its summary changes, the rows
     // already in the list are read again and only their dots are painted,
     // so the list keeps its place. A burst of changes is read once
@@ -10192,6 +10216,7 @@
         }
         watchPull(s);
         watchCache(s);
+        watchPlaysRound(s);
         watchMini(s);
         watchToast(s);
         watchCarGone(s);

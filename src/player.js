@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.81";
+    const VERSION = "1.9.9.82";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6000,6 +6000,10 @@
             const json = await res.json();
             const fresh = json && json.data && json.data.song;
 
+            if (fresh && fresh.song_id === song.song_id) {
+                notePlayCount(song.song_id, json.data);
+            }
+
             if (!fresh || fresh.song_id !== song.song_id) {
 
                 setStatus("Refresh returned no matching song");
@@ -8723,6 +8727,216 @@
     // rows again
     let playCountStamp = 0;
 
+    // Every count read is kept here with the minute it was read, whatever
+    // read it: a song played, its information opened, or the plays job
+    const PLAYS_KEY = "mureka_plays_v1";
+    const playCountAt = new Map();
+    let playsSaveTimer = 0;
+
+    function loadStoredPlays() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(PLAYS_KEY));
+
+            if (!raw || typeof raw !== "object") {
+                return;
+            }
+
+            for (const key of Object.keys(raw)) {
+
+                const item = raw[key];
+
+                if (Array.isArray(item) && typeof item[0] === "number") {
+
+                    playCounts.set(key, item[0]);
+                    playCountAt.set(key, (Number(item[1]) || 0) * 60000);
+                }
+            }
+        } catch (e) {
+            // Read again as songs are played
+        }
+    }
+
+    loadStoredPlays();
+
+    // Written a moment after the last count, a burst of counts is one write
+    function savePlaysSoon() {
+
+        clearTimeout(playsSaveTimer);
+
+        playsSaveTimer = setTimeout(function () {
+
+            const out = {};
+
+            for (const [key, n] of playCounts) {
+                out[key] = [n, Math.round((playCountAt.get(key) || 0) / 60000)];
+            }
+
+            try {
+                localStorage.setItem(PLAYS_KEY, JSON.stringify(out));
+            } catch (e) {
+                // Full storage, kept for this visit only
+            }
+        }, 2000);
+    }
+
+    // A song's plays from any detail Mureka sent, data holding play_count
+    function notePlayCount(id, data) {
+
+        if (!data || typeof data.play_count !== "number") {
+            return;
+        }
+
+        const key = String(id);
+
+        playCountAt.set(key, Date.now());
+
+        // A new number sorts the web view's list again on its next ask
+        if (playCounts.get(key) !== data.play_count) {
+
+            playCounts.set(key, data.play_count);
+            hostListStamp += 1;
+            playCountStamp += 1;
+        }
+
+        savePlaysSoon();
+    }
+
+    // The plays of the whole library, read a song at a time in the background
+    // while the web view sorts by plays. Songs never read come first, the
+    // published before the drafts, then counts older than a day, oldest first
+    const PLAYS_STALE_MS = 24 * 3600000;
+    const PLAYS_DELAY = 300;
+    let playsJob = null;
+    let playsJobEndedAt = 0;
+
+    function playsWanted() {
+
+        const now = Date.now();
+        const unknown = [];
+        const stale = [];
+
+        for (const song of cache.songs) {
+
+            const key = String(song.song_id);
+
+            if (!playCounts.has(key)) {
+                unknown.push(song);
+            } else if (now - (playCountAt.get(key) || 0) > PLAYS_STALE_MS) {
+                stale.push(song);
+            }
+        }
+
+        unknown.sort(function (a, b) {
+            return (b.publish_state === 1 ? 1 : 0) - (a.publish_state === 1 ? 1 : 0);
+        });
+
+        stale.sort(function (a, b) {
+            return (playCountAt.get(String(a.song_id)) || 0) - (playCountAt.get(String(b.song_id)) || 0);
+        });
+
+        return unknown.concat(stale);
+    }
+
+    // Started by a list sorted by plays, at most every ten minutes once a
+    // round has ended, so a finished or failed round is not begun again at once
+    function startPlaysJob() {
+
+        if (playsJob || Date.now() - playsJobEndedAt < 10 * 60000) {
+            return;
+        }
+
+        const todo = playsWanted();
+
+        if (todo.length === 0) {
+            return;
+        }
+
+        const job = { stop: false };
+
+        playsJob = job;
+        runPlaysJob(job, todo);
+    }
+
+    // Another sorting asked for, the round stops where it is
+    function stopPlaysJob() {
+
+        if (playsJob) {
+            playsJob.stop = true;
+        }
+    }
+
+    async function runPlaysJob(job, todo) {
+
+        let done = 0;
+        let fails = 0;
+
+        dbgLog("Plays", "reading the plays of " + todo.length + " songs");
+
+        for (const song of todo) {
+
+            if (job.stop) {
+
+                dbgLog("Plays", "stopped after " + done + ", the list is sorted another way");
+                break;
+            }
+
+            // A load, a rescan or caching keeps its own progress line
+            if (!progressKind || progressKind === "plays") {
+                setProgress("plays", "Getting play counts", done, todo.length);
+            }
+
+            try {
+
+                const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
+                    { credentials: "include" });
+
+                // Asked too often, left for the next round
+                if (res.status === 429) {
+
+                    dbgLog("Plays", "Mureka asked to slow down after " + done);
+                    break;
+                }
+
+                const json = res.ok ? await res.json() : null;
+
+                if (json && json.code === 0 && json.data && typeof json.data.play_count === "number") {
+
+                    notePlayCount(song.song_id, json.data);
+                    fails = 0;
+                } else {
+                    fails += 1;
+                }
+            } catch (e) {
+                fails += 1;
+            }
+
+            if (fails >= 5) {
+
+                dbgLog("Plays", "stopped after " + done + ", Mureka did not answer");
+                setStatus("Play counts stopped, Mureka did not answer");
+                break;
+            }
+
+            done += 1;
+            await sleep(PLAYS_DELAY);
+        }
+
+        // Stopped by another sorting, it may start again as soon as plays
+        // are asked for again
+        playsJob = null;
+        playsJobEndedAt = job.stop ? 0 : Date.now();
+
+        if (progressKind === "plays") {
+            setProgress(null);
+        }
+
+        hostListStamp += 1;
+        playCountStamp += 1;
+        publishHostSoon();
+    }
+
     function songPlays(song) {
 
         if (typeof song.play_count === "number") {
@@ -8754,8 +8968,14 @@
                 const res = await store.match(req);
                 const entry = res ? await res.json() : null;
 
-                if (entry && typeof entry.play_count === "number") {
-                    playCounts.set(decodeURIComponent(url.slice(prefix.length)), entry.play_count);
+                const key = decodeURIComponent(url.slice(prefix.length));
+                const at = entry && typeof entry.t === "number" ? entry.t : 0;
+
+                // A count kept since then, or a newer one, stays
+                if (entry && typeof entry.play_count === "number" && (!playCountAt.has(key) || at > playCountAt.get(key))) {
+
+                    playCounts.set(key, entry.play_count);
+                    playCountAt.set(key, at);
                 }
             }
 
@@ -8768,13 +8988,7 @@
     // Persist a song's detail entry, replacing any older copy
     async function saveDetailToStore(id, entry) {
 
-        // A new count sorts the web view's list by plays again on its next ask
-        if (entry && typeof entry.play_count === "number" && playCounts.get(String(id)) !== entry.play_count) {
-
-            playCounts.set(String(id), entry.play_count);
-            hostListStamp += 1;
-            playCountStamp += 1;
-        }
+        notePlayCount(id, entry);
 
         try {
 
@@ -13172,6 +13386,10 @@
             const fresh = json && json.data && json.data.song;
             const cover = fresh && fresh.song_id === song.song_id ? fresh.cover || "" : "";
 
+            if (fresh && fresh.song_id === song.song_id) {
+                notePlayCount(song.song_id, json.data);
+            }
+
             if (!cover || cover === song.cover) {
 
                 dbgLog("Cover", "asked again for " + key + ", Mureka still has the same cover");
@@ -15573,6 +15791,14 @@
         // it, or asking again after a tap, does not sort the library again
         const views = ["alpha", "alphaDesc", "starsUp", "starsDown", "stars", "playsUp", "playsDown"];
         const view = req && views.indexOf(req.view) !== -1 ? req.view : "mureka";
+
+        // Sorted by plays, the plays not known yet are read in the background
+        if (view === "playsUp" || view === "playsDown") {
+            startPlaysJob();
+        } else {
+            stopPlaysJob();
+        }
+
         const prepared = hostPrepared(view);
         const numbers = prepared.numbers;
 
@@ -24139,6 +24365,8 @@
         }).then(function (json) {
 
             if (json && json.code === 0 && json.data) {
+
+                notePlayCount(songId, json.data);
                 return json.data;
             }
 
