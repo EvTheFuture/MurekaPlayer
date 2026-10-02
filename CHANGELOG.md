@@ -73,14 +73,17 @@ the new settings layout and a number of smaller improvements.
   or both: a tap on Songs opens the song list and a swipe up on it a small
   one over the main page, a tap on List opens the small one and a swipe up
   on it the whole list. A swipe down on either, or a second tap on List,
-  closes the small list.
+  closes the small list. The small mark on both points up, and down at their
+  bottom while the small list is open.
 - The small song list reaches from the stars down to the seek bar beside the
   cover. It is see through, hides the stars, Playing from and the lyrics
   while open, opens at the playing song, and keeps its cache dots, titles and
   badges up to date. At its top: the number of songs, **Update**, **Rescan**,
   a button for the whole list and Close, and under them what the phone is
   loading with its turning ring and bar. A pull down at its top loads new
-  songs as in the big list.
+  songs as in the big list. As in the phone's list, a round button jumps to
+  the top or the end while scrolling, and another goes back to the playing
+  song when it is out of sight.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click.

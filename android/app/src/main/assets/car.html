@@ -457,6 +457,15 @@
         opacity: 0.45;
     }
 
+    /* With the small list open the mark turns into a down arrow at their
+       bottom, for the swipe down that closes it */
+    #app.miniOpen #browseBtn::before,
+    #app.miniOpen #miniBtn::before {
+        top: auto;
+        bottom: 7px;
+        transform: rotate(225deg);
+    }
+
     #browseBtn.fail::after {
         content: "";
         position: absolute;
@@ -948,6 +957,49 @@
         height: 2.3em;
         border-radius: 8px;
         font-size: 1em;
+    }
+
+    /* The jump to an end of the small list and the way back to the playing
+       song, round buttons in its bottom right corner as in the phone's list */
+    #miniEdge,
+    #miniLocate {
+        position: absolute;
+        right: 8px;
+        z-index: 2;
+        width: 2.2em;
+        height: 2.2em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border-radius: 50%;
+        font: inherit;
+        font-size: clamp(14px, 1.45vw, 22px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s;
+    }
+
+    #miniEdge {
+        bottom: 8px;
+        border: none;
+        background: var(--accent);
+        color: #000;
+    }
+
+    #miniLocate {
+        bottom: calc(16px + 2.2em);
+        border: 1px solid var(--accent);
+        background: rgba(38, 38, 44, 0.94);
+        color: var(--accent);
+    }
+
+    #miniEdge .ico,
+    #miniLocate .ico {
+        width: 1.1em;
+        height: 1.1em;
     }
 
     #miniPull {
@@ -3016,7 +3068,7 @@
                 <button class="chip iconOnly" id="miniClose" type="button" data-icon="close" aria-label="Close the list" title="Close the list"></button>
             </div>
             <div id="miniWork"></div>
-            <div id="miniWrap"><div id="miniPull"></div><div id="miniRows"></div></div>
+            <div id="miniWrap"><div id="miniPull"></div><div id="miniRows"></div><button id="miniLocate" type="button" data-icon="target" aria-label="Show the playing song" title="Show the playing song"></button><button id="miniEdge" type="button" data-icon="arrowUp" aria-label="Scroll to top" title="Scroll to top"></button></div>
         </div>
     </div>
     <div id="seek">
@@ -9408,6 +9460,7 @@
     function openMini() {
 
         miniOpen = true;
+        miniPlaying = state && state.id ? String(state.id) : "";
         $("app").classList.add("miniOpen");
         $("browseBtn").classList.add("on");
         $("miniBtn").classList.add("on");
@@ -9425,6 +9478,8 @@
         $("miniBtn").classList.remove("on");
         $("mini").style.display = "none";
         $("miniRows").textContent = "";
+        hideMiniEdge();
+        updateMiniLocate();
     }
 
     // A swipe up on Songs or a tap on List opens the small list, the same
@@ -9472,9 +9527,15 @@
         });
     });
 
+    // Where the playing song was in the list the last time the phone was
+    // asked, and which song that was, -1 when the list does not have it
+    let miniPlayingAt = -1;
+    let miniPlayingAtId = "";
+
     // A page of songs, the first one anew. Opened, it goes on to the
-    // playing song and shows it in the middle
-    function loadMini(reset) {
+    // playing song and shows it in the middle. Done is called once the page
+    // is in, a larger limit is for the jump to the end of the list
+    function loadMini(reset, done, limit) {
 
         if (reset) {
 
@@ -9483,6 +9544,7 @@
             miniBusy = false;
             $("miniRows").textContent = "";
             $("miniRows").scrollTop = 0;
+            hideMiniEdge();
         }
 
         if (miniBusy || !miniOpen) {
@@ -9490,10 +9552,11 @@
         }
 
         const token = miniToken;
+        const askedFor = state && state.id ? String(state.id) : "";
 
         miniBusy = true;
 
-        fetch("/list?q=&view=" + (listSort || "mureka") + "&offset=" + miniLoaded + "&limit=" + PAGE,
+        fetch("/list?q=&view=" + (listSort || "mureka") + "&offset=" + miniLoaded + "&limit=" + (limit || PAGE),
             { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (data) {
@@ -9532,29 +9595,44 @@
             paintMiniCount();
 
             const playingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
+            const seeking = $("miniRows").dataset.seeking;
 
-            // Down to the playing song first, a page at a time, then shown
-            if (reset || $("miniRows").dataset.seeking === "1") {
+            miniPlayingAt = playingAt;
+            miniPlayingAtId = askedFor;
+
+            // Down to the playing song first, a page at a time, then shown,
+            // eased there when asked for with the playing song button
+            if (reset || seeking) {
 
                 if (playingAt >= miniLoaded && miniLoaded < miniTotal && miniLoaded < 3000) {
 
-                    $("miniRows").dataset.seeking = "1";
+                    $("miniRows").dataset.seeking = seeking || "1";
                     loadMini(false);
                     return;
                 }
 
                 $("miniRows").dataset.seeking = "";
-                showMiniPlaying();
+                showMiniPlaying(seeking === "smooth");
+            }
+
+            updateMiniLocate();
+
+            if (done) {
+                done();
             }
         }).catch(function () {
 
             if (token === miniToken) {
+
                 miniBusy = false;
+                $("miniRows").dataset.seeking = "";
             }
         });
     }
 
-    function showMiniPlaying() {
+    // The playing song in the middle of the small list, eased there when
+    // smooth, straight there when the list opens
+    function showMiniPlaying(smooth) {
 
         const row = $("miniRows").querySelector(".row.playing");
 
@@ -9563,18 +9641,182 @@
         }
 
         const box = $("miniRows");
+        const target = Math.max(0, row.offsetTop - box.offsetTop - (box.clientHeight - row.offsetHeight) / 2);
 
-        box.scrollTop = Math.max(0, row.offsetTop - box.offsetTop - (box.clientHeight - row.offsetHeight) / 2);
+        if (smooth === true) {
+
+            miniQuietUntil = Date.now() + 1400;
+            easeScroll(box, target);
+        } else {
+
+            miniQuietUntil = Date.now() + 400;
+            box.scrollTop = target;
+        }
+
+        updateMiniLocate();
     }
 
-    // More songs as the end comes near
-    $("miniRows").addEventListener("scroll", function () {
+    // Everything still missing in the small list, a large page at a time,
+    // then the callback. Used by the jump to the end of the list
+    function loadMiniRest(then) {
+
+        if (!miniOpen) {
+            return;
+        }
+
+        if (miniLoaded >= miniTotal) {
+
+            then();
+            return;
+        }
+
+        // A page on its way is waited for rather than asked for twice
+        if (miniBusy) {
+
+            setTimeout(function () {
+                loadMiniRest(then);
+            }, 150);
+            return;
+        }
+
+        const before = miniLoaded;
+
+        loadMini(false, function () {
+
+            if (miniLoaded > before) {
+                loadMiniRest(then);
+            } else {
+                then();
+            }
+        }, 500);
+    }
+
+    // The jump button of the small list, like the phone's: scrolling down
+    // offers the end of the list, scrolling up the top. It fades after a
+    // while without scrolling, and scrolls made here do not wake it
+    let miniEdgeDir = "up";
+    let miniEdgeTimer = 0;
+    let miniQuietUntil = 0;
+    let miniLastTop = 0;
+
+    function hideMiniEdge() {
+
+        clearTimeout(miniEdgeTimer);
+        $("miniEdge").style.opacity = "0";
+        $("miniEdge").style.pointerEvents = "none";
+    }
+
+    function showMiniEdge(dir) {
+
+        if (dir !== miniEdgeDir) {
+
+            miniEdgeDir = dir;
+            setIcon($("miniEdge"), dir === "down" ? "arrowDown" : "arrowUp");
+            $("miniEdge").setAttribute("aria-label", dir === "down" ? "Scroll to end" : "Scroll to top");
+            $("miniEdge").title = dir === "down" ? "Scroll to end" : "Scroll to top";
+        }
+
+        $("miniEdge").style.opacity = "1";
+        $("miniEdge").style.pointerEvents = "auto";
+
+        clearTimeout(miniEdgeTimer);
+        miniEdgeTimer = setTimeout(hideMiniEdge, 5000);
+    }
+
+    $("miniEdge").addEventListener("click", function () {
 
         const box = $("miniRows");
 
-        if (miniLoaded < miniTotal && box.scrollTop + box.clientHeight > box.scrollHeight - 400) {
+        hideMiniEdge();
+
+        if (miniEdgeDir === "down") {
+
+            loadMiniRest(function () {
+
+                miniQuietUntil = Date.now() + 1400;
+                easeScroll(box, box.scrollHeight);
+            });
+        } else {
+
+            miniQuietUntil = Date.now() + 1400;
+            easeScroll(box, 0);
+        }
+    });
+
+    // The playing song button shows only while that song is out of sight,
+    // or not in the pages loaded so far but somewhere further down
+    function updateMiniLocate() {
+
+        const btn = $("miniLocate");
+        const box = $("miniRows");
+        const row = box.querySelector(".row.playing");
+        let show = false;
+
+        if (miniOpen && miniPlaying && row) {
+
+            const top = row.offsetTop - box.offsetTop - box.scrollTop;
+
+            show = !(top + row.offsetHeight > 8 && top < box.clientHeight - 8);
+        } else if (miniOpen && miniPlaying) {
+
+            // Not in this list at all the last time the phone was asked
+            const missing = miniPlayingAtId === miniPlaying && miniPlayingAt < 0;
+
+            show = !missing && miniLoaded < miniTotal;
+        }
+
+        btn.style.opacity = show ? "1" : "0";
+        btn.style.pointerEvents = show ? "auto" : "none";
+    }
+
+    // Eased to the playing song, the pages down to it loaded first
+    $("miniLocate").addEventListener("click", function () {
+
+        hideMiniEdge();
+
+        if ($("miniRows").querySelector(".row.playing")) {
+
+            showMiniPlaying(true);
+            return;
+        }
+
+        $("miniRows").dataset.seeking = "smooth";
+        loadMini(false);
+    });
+
+    // More songs as the end comes near, and the two buttons follow the
+    // scrolling
+    $("miniRows").addEventListener("scroll", function () {
+
+        const box = $("miniRows");
+        const top = box.scrollTop;
+        const delta = top - miniLastTop;
+
+        miniLastTop = top;
+
+        if (miniLoaded < miniTotal && top + box.clientHeight > box.scrollHeight - 400) {
             loadMini(false);
         }
+
+        updateMiniLocate();
+
+        // Scrolls made here and small jitters leave the jump button alone,
+        // as do lists too short to jump around in
+        if (Date.now() < miniQuietUntil || Math.abs(delta) < 3 || box.scrollHeight - box.clientHeight < 40) {
+            return;
+        }
+
+        // Nothing to jump to at the edge the arrow would point at
+        const atTop = top <= 4;
+        const atEnd = top + box.clientHeight >= box.scrollHeight - 4 && miniLoaded >= miniTotal;
+
+        if ((delta > 0 && atEnd) || (delta < 0 && atTop)) {
+
+            hideMiniEdge();
+            return;
+        }
+
+        showMiniEdge(delta > 0 ? "down" : "up");
     }, { passive: true });
 
     // How many songs, what the phone is working on shows in the line
@@ -9607,6 +9849,8 @@
             for (const row of $("miniRows").querySelectorAll(".row")) {
                 row.classList.toggle("playing", row.dataset.id === id);
             }
+
+            updateMiniLocate();
         }
 
         const loading = !!(s && s.loading);
