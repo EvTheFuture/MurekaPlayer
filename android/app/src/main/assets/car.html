@@ -2197,6 +2197,27 @@
         color: var(--empty);
     }
 
+    /* How many times a song has been played, shown while sorting by plays */
+    .rowPlays {
+        flex: 0 0 auto;
+        min-width: 3.6em;
+        text-align: right;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.8em;
+        font-weight: 400;
+        white-space: nowrap;
+    }
+
+    .rowPlays.unknown {
+        color: var(--empty);
+    }
+
+    /* The small list is narrow, the plays take the place of the stars there */
+    #miniRows .row.byPlays .rowRate {
+        display: none;
+    }
+
     .rowBadge {
         flex: 0 0 auto;
         width: 4.2em;
@@ -7106,6 +7127,16 @@
             row.appendChild(rate);
         }
 
+        // The plays beside the rating while the list is sorted by them
+        if (listSort === "playsUp" || listSort === "playsDown") {
+
+            const plays = document.createElement("span");
+
+            paintPlays(plays, song);
+            row.appendChild(plays);
+            row.classList.add("byPlays");
+        }
+
         row.appendChild(heart);
         row.appendChild(time);
 
@@ -7116,6 +7147,25 @@
             paintBadge(badge, song);
             row.appendChild(badge);
         }
+    }
+
+    // A song's plays, short for large numbers, a question mark while the
+    // phone has not fetched the count yet
+    function paintPlays(el, song) {
+
+        const known = typeof song.plays === "number";
+        const n = known ? song.plays : 0;
+        let text = String(n);
+
+        if (n >= 1000000) {
+            text = (n / 1000000).toFixed(n < 10000000 ? 1 : 0).replace(/\.0$/, "") + "M";
+        } else if (n >= 1000) {
+            text = (n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, "") + "k";
+        }
+
+        el.className = "rowPlays" + (known ? "" : " unknown");
+        el.textContent = "\u25B6 " + (known ? text : "?");
+        el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, shown once the song has been played";
     }
 
     // The badge at the end of a line: new for a song not played yet, else
@@ -9292,6 +9342,13 @@
 
             if (badge) {
                 paintBadge(badge, item);
+            }
+
+            // A count fetched since the list was drawn
+            const plays = row.querySelector(".rowPlays");
+
+            if (plays) {
+                paintPlays(plays, item);
             }
         }
     }

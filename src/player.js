@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.80";
+    const VERSION = "1.9.9.81";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8719,6 +8719,10 @@
     // looked at are not known and sort last
     const playCounts = new Map();
 
+    // Goes up with every new count, so the web view paints the plays in its
+    // rows again
+    let playCountStamp = 0;
+
     function songPlays(song) {
 
         if (typeof song.play_count === "number") {
@@ -8756,6 +8760,7 @@
             }
 
             hostListStamp += 1;
+            playCountStamp += 1;
         } catch (e) {
         }
     }
@@ -8768,6 +8773,7 @@
 
             playCounts.set(String(id), entry.play_count);
             hostListStamp += 1;
+            playCountStamp += 1;
         }
 
         try {
@@ -15112,7 +15118,7 @@
             // song starts or stops downloading, so the web view knows to
             // paint the cache dots in its list again
             cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(",") + "|" + playedMarks
-                + "|" + songEdits,
+                + "|" + songEdits + "|" + playCountStamp,
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
