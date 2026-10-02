@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.74";
+    const VERSION = "1.9.9.76";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5984,6 +5984,7 @@
         };
 
         setStatus("Refreshing: " + (song.title || "Untitled"));
+        say("Refreshing", "wait");
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
@@ -6062,6 +6063,7 @@
         if (publish && !again && settings.noRemixOnPublish === true) {
 
             setStatus("Disallowing remixing before publishing: " + name);
+            showToast("Disallowing remixing, then publishing", "wait");
 
             if (!await setRemixAllowed(song, false, true)) {
 
@@ -6092,6 +6094,7 @@
         renderList();
         publishHostSoon();
         setStatus((publish ? "Publishing: " : "Unpublishing: ") + name);
+        showToast(publish ? "Publishing" : "Unpublishing", "wait");
 
         try {
 
@@ -6165,6 +6168,7 @@
 
         publishHostSoon();
         setStatus("Renaming: " + clean);
+        showToast("Renaming", "wait");
 
         try {
 
@@ -6246,6 +6250,7 @@
 
         song.allow_remix = allow ? 1 : 2;
         publishHostSoon();
+        showToast(allow ? "Allowing remixing" : "Disallowing remixing", "wait");
 
         try {
 
@@ -13207,14 +13212,20 @@
     // The latest note with a running number, for the web view to show once
     let toastSeq = 0;
     let lastToast = null;
+    let toastHideTimer = 0;
 
     // When the phone took the music back from a browser that went silent
     let carGoneAt = 0;
 
     function showToast(text, ok) {
 
+        // Three looks: "wait" while Mureka is asked, ringed with a turning
+        // ring and staying until the answer replaces it, then filled cyan
+        // for done or red for what did not work, fading after a moment
+        const kind = ok === "wait" ? "wait" : (ok === false ? "bad" : "ok");
+
         toastSeq += 1;
-        lastToast = { n: toastSeq, text: text, ok: ok !== false, at: Date.now() };
+        lastToast = { n: toastSeq, text: text, ok: kind !== "bad", kind: kind, at: Date.now() };
         publishHostSoon();
 
         if (!panelEl) {
@@ -13231,6 +13242,9 @@
                 "transform:translateX(-50%)",
                 "max-width:calc(100% - 32px)",
                 "box-sizing:border-box",
+                "display:flex",
+                "align-items:center",
+                "gap:8px",
                 "padding:9px 16px",
                 "border-radius:18px",
                 "font-size:13px",
@@ -13244,19 +13258,27 @@
         }
 
         panelEl.appendChild(panelToastEl);
-        panelToastEl.textContent = text;
-        panelToastEl.style.background = ok === false ? "#ff6b6b" : "#48e1eb";
-        panelToastEl.style.color = "#0c0c0f";
+        panelToastEl.textContent = "";
 
-        if (!panelToastEl.animate) {
+        if (kind === "wait") {
 
-            panelToastEl.style.opacity = "1";
+            const ring = document.createElement("span");
 
-            setTimeout(function () {
-                panelToastEl.style.opacity = "0";
-            }, 2500);
-            return;
+            ring.style.cssText = "flex:0 0 auto;width:11px;height:11px;border:2px solid rgba(72,225,235,0.3);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+            panelToastEl.appendChild(ring);
+            panelToastEl.style.background = "rgba(29,29,34,0.96)";
+            panelToastEl.style.color = "#48e1eb";
+            panelToastEl.style.boxShadow = "inset 0 0 0 2px #48e1eb, 0 4px 14px rgba(0,0,0,0.5)";
+        } else {
+
+            panelToastEl.style.background = kind === "bad" ? "#ff6b6b" : "#48e1eb";
+            panelToastEl.style.color = "#0c0c0f";
+            panelToastEl.style.boxShadow = "0 4px 14px rgba(0,0,0,0.5)";
         }
+
+        panelToastEl.appendChild(document.createTextNode(text));
+
+        clearTimeout(toastHideTimer);
 
         try {
 
@@ -13266,9 +13288,22 @@
         } catch (e) {
         }
 
+        // Waiting stays up until the answer comes, a minute at the most in
+        // case none ever does
+        if (kind === "wait" || !panelToastEl.animate) {
+
+            panelToastEl.style.opacity = "1";
+            panelToastEl.style.transform = "translateX(-50%)";
+
+            toastHideTimer = setTimeout(function () {
+                panelToastEl.style.opacity = "0";
+            }, kind === "wait" ? 60000 : 2800);
+            return;
+        }
+
+        panelToastEl.style.opacity = "0";
         panelToastEl.animate([
-            { opacity: 0, transform: "translate(-50%, 8px)" },
-            { opacity: 1, transform: "translate(-50%, 0)", offset: 0.1 },
+            { opacity: 1, transform: "translate(-50%, 0)", offset: 0 },
             { opacity: 1, transform: "translate(-50%, 0)", offset: 0.85 },
             { opacity: 0, transform: "translate(-50%, 0)" }
         ], {
@@ -20045,6 +20080,7 @@
         // Optimistic update so the heart responds without waiting on the network
         song.is_liked = makeLiked;
         paintHeart(heartEl, makeLiked);
+        showToast(makeLiked ? "Liking" : "Removing the like", "wait");
 
         try {
             const res = await fetch("/api/pgc/user/song/favorite", {
@@ -26022,6 +26058,8 @@
     // sends. Answers whether it went and, when not, why
     async function deleteOnMureka(song) {
 
+        showToast("Deleting on Mureka", "wait");
+
         try {
 
             const res = await timedFetch("/api/pgc/song/delete", {
@@ -26067,6 +26105,7 @@
         let json = null;
 
         say("Trimming on Mureka");
+        showToast("Trimming on Mureka", "wait");
 
         try {
 

@@ -787,6 +787,25 @@
         font-weight: 600;
     }
 
+    /* Asked of Mureka and waiting for the answer: ringed, not filled */
+    #toast.wait {
+        color: var(--accent);
+        font-weight: 600;
+        box-shadow: inset 0 0 0 2px var(--accent), 0 6px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .toastRing {
+        display: inline-block;
+        width: 0.8em;
+        height: 0.8em;
+        margin-right: 0.6em;
+        vertical-align: -0.05em;
+        border: 2px solid rgba(72, 225, 235, 0.3);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spinTurn 0.8s linear infinite;
+    }
+
     /* The handle to drag a song to another place in the queue */
     .rowGrip {
         flex: 0 0 auto;
@@ -4061,6 +4080,11 @@
     const audio = $("audio");
     let unlocked = false;
 
+    // Escape put the question about where the music plays away, leaving
+    // everything as it was. It comes back the next time the music is set
+    // to play here
+    let overlayAway = false;
+
     // A Tesla opens pages fullscreen from its YouTube app, and only then does
     // its browser add TESLA_AUTO to the user agent. There the steering
     // wheel's left and right arrive as the arrow keys, and the music belongs
@@ -5289,7 +5313,11 @@
 
         // The phone asks for the sound here but this page has not been
         // allowed to play since it loaded, so a tap is needed first
-        $("overlay").style.display = online && carAudio && !unlocked && !localMute && !teslaTheater ? "flex" : "none";
+        if (!carAudio) {
+            overlayAway = false;
+        }
+
+        $("overlay").style.display = online && carAudio && !unlocked && !localMute && !teslaTheater && !overlayAway ? "flex" : "none";
         $("overlayNone").style.display = alone ? "none" : "block";
 
         syncAudio();
@@ -10304,6 +10332,30 @@
         render();
     });
 
+    // With a keyboard: Space or Enter plays the music here, Escape only puts
+    // the question away. A key press counts as a tap, so the browser lets
+    // the music start. Caught before the page's other keys, so Space does not
+    // also pause on the phone
+    document.addEventListener("keydown", function (ev) {
+
+        if (!isShown("overlay") || ev.ctrlKey || ev.metaKey || ev.altKey) {
+            return;
+        }
+
+        if (ev.key === " " || ev.key === "Enter") {
+
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            $("resume").click();
+        } else if (ev.key === "Escape") {
+
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            overlayAway = true;
+            render();
+        }
+    }, true);
+
     $("toPhone").addEventListener("click", function () {
         send("carAudio", false);
     });
@@ -10444,7 +10496,7 @@
         }
 
         toastSeen = key;
-        toast(t.text, t.ok === false ? "bad" : "ok");
+        toast(t.text, t.kind === "wait" ? "wait" : (t.ok === false ? "bad" : "ok"));
     }
 
     // A short word over the page, gone again after a few seconds
@@ -10454,15 +10506,28 @@
 
         const el = $("toast");
 
-        el.textContent = text;
+        el.textContent = "";
         el.classList.toggle("ok", kind === "ok");
         el.classList.toggle("bad", kind === "bad");
+        el.classList.toggle("wait", kind === "wait");
+
+        // While the phone waits for Mureka, a turning ring before the words,
+        // and the note stays until the answer replaces it
+        if (kind === "wait") {
+
+            const ring = document.createElement("span");
+
+            ring.className = "toastRing";
+            el.appendChild(ring);
+        }
+
+        el.appendChild(document.createTextNode(text));
         el.style.display = "block";
         clearTimeout(toastTimer);
 
         toastTimer = setTimeout(function () {
             el.style.display = "none";
-        }, 4000);
+        }, kind === "wait" ? 60000 : 4000);
     }
 
     // The song menu's box used for a plain question, with no song behind it

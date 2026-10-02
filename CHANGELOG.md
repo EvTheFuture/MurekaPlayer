@@ -101,7 +101,9 @@ the new settings layout and a number of smaller improvements.
   follows silently and stays in charge) or **No music in this browser** for a
   second browser that should stay quiet. The phone takes the sound back if
   the web view has not been heard from for 25 seconds, and says so in a red
-  note on the phone and in that browser once it is back.
+  note on the phone and in that browser once it is back. When the music is
+  set to play in a browser that still needs a tap to start it, Space or
+  Enter plays it there and Escape puts the question away.
 - The phone's sound choice shows a Bluetooth icon with the device's name
   while the phone's music goes out over Bluetooth, and a phone otherwise.
   From Android 13 it follows where Android actually sends media, so a car
@@ -147,8 +149,9 @@ the new settings layout and a number of smaller improvements.
   settings have a short explanation, and each section heading is underlined.
 - **A note for everything asked of Mureka**: publishing, unpublishing,
   renaming, remixing, likes, refreshing a song, trimming and deleting each
-  say how it went in a short note over the player, cyan when it went and red
-  when it did not. The web view shows the same notes.
+  show a ringed note with a turning ring as soon as Mureka is asked, which
+  turns into a filled one with the answer, cyan when it went and red when it
+  did not. The web view shows the same notes.
 - **A tap outside the song menu** only closes it: the song or button under
   it is not played or pressed.
 - **A tap on the playing song** never restarts it, but when the list shows
