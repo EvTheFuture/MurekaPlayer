@@ -10676,8 +10676,9 @@
                 m.published ? "Unpublish" : "Publish", function () {
 
                     // Publishing puts the song's link on this browser's
-                    // clipboard, in the same tap, as on the phone
-                    if (!m.published && m.link) {
+                    // clipboard, in the same tap, as on the phone, when the
+                    // phone's Publishing settings ask for it
+                    if (!m.published && m.link && m.copyOnPublish !== false) {
                         toast(copyText(m.link) ? "Publishing, link copied" : "Publishing, the link could not be copied");
                     }
 

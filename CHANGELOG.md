@@ -140,8 +140,13 @@ the new settings layout and a number of smaller improvements.
 - **Settings in pages.** The main settings page is a list of pages in
   groups: Views (Mobile player, and Web view in the app), Device (This device,
   and Connections in the app), Music (Library, Playback, Now playing), Data
-  (Backup and restore) and Troubleshooting (Developer). Each group and most
+  (Backup and restore) and Troubleshooting (Developer), with Your songs
+  (Publishing) between Music and Data. Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **A tap on the playing song** never restarts it, but when the list shows
+  other songs than the queue was made from, published only where it began
+  with all songs for example, the queue is made again from the list around
+  it, and the covers beside it follow.
 - **Back to the playing song**: a round target button shows over the list
   while the playing song is scrolled out of sight, and a tap brings it back
   to the middle. The status line says which song plays with its number in
@@ -185,6 +190,10 @@ the new settings layout and a number of smaller improvements.
   Publishing copies the song's link to the clipboard, in the web view to
   that browser's, and a short note on the page says it is published and the
   link copied.
+- **Publishing settings**, a page of their own under Your songs: **Copy the
+  link when publishing**, on by default, and **Always disallow remixing
+  first**, which tells Mureka to disallow remixing before every publish, and
+  does not publish if Mureka refuses that.
   When Mureka refuses a change on a published song, the player offers to take
   it down, make the change and publish it again.
 - The song information shows whether remixing is allowed, and a running bar

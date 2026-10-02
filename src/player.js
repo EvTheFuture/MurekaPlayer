@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.67";
+    const VERSION = "1.9.9.69";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1370,6 +1370,8 @@
             view: "mureka",
             reportPlays: true,
             artOverlayMode: "all",
+            copyLinkOnPublish: true,
+            noRemixOnPublish: false,
             directAudio: true,
             remoteArtwork: false,
             artOnResume: false,
@@ -1502,6 +1504,8 @@
                     vocalFilter: vocalFilter,
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
+                    copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
+                    noRemixOnPublish: parsed.noRemixOnPublish === true,
                     artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
                         ? parsed.artOverlayMode
                         : (parsed.lyricsOn === false ? "info" : "all"),
@@ -6011,20 +6015,45 @@
     // does both, type 1 publishes it with the title and cover it carries,
     // type 2 takes it off. The list state is refreshed from the server
     // after, so what shows is what Mureka really has
-    async function setPublished(song, publish, copy) {
+    async function setPublished(song, publish, copy, again) {
 
         const name = (song.title || "").trim() || "Untitled";
-        const before = song.publish_state;
 
-        // Published from the song menu, the link goes to the clipboard. Its
-        // share key is known before publishing, so it is copied right away,
-        // in the same tap, which is what a phone's browser asks for. One
-        // without a key yet is copied once the server has given it one
+        // Published from the song menu, the link goes to the clipboard when
+        // the setting asks for it. Its share key is known before publishing,
+        // so it is copied right away, in the same tap, which is what a
+        // phone's browser asks for. One without a key yet is copied once the
+        // server has given it one
+        copy = copy && settings.copyLinkOnPublish !== false;
+
         let copied = null;
 
         if (publish && copy && song.share_key) {
             copied = copyText("https://www.mureka.ai/song-detail/" + song.share_key);
         }
+
+        // Remixing turned off first when the setting asks for it, every time,
+        // while the song is still a draft, where Mureka takes the change. Not
+        // for the publish that puts a song back up after a refused change,
+        // which may have been allowing remixing. If Mureka does not take it,
+        // the song is not published
+        if (publish && !again && settings.noRemixOnPublish === true) {
+
+            setStatus("Disallowing remixing before publishing: " + name);
+
+            if (!await setRemixAllowed(song, false, true)) {
+
+                setStatus("Could not disallow remixing, " + name + " was not published");
+
+                if (copy) {
+                    showToast("Remixing could not be disallowed, not published", false);
+                }
+
+                return false;
+            }
+        }
+
+        const before = song.publish_state;
         const body = publish
             ? {
                 time: Date.now(),
@@ -6292,7 +6321,7 @@
         }
 
         setStatus("Publishing " + ((job.song.title || "").trim() || "Untitled") + " again");
-        await setPublished(job.song, true);
+        await setPublished(job.song, true, false, true);
     }
 
     // Ask for a new title, the mobile player's own way in
@@ -6807,11 +6836,74 @@
                 startAudioPlayback();
             }
 
+            // The list may show other songs than the queue was made from, the
+            // published songs where it began with all of them, say. Then the
+            // queue is made again from what the list shows, around the song
+            // that goes on playing, and the covers beside it follow
+            requeueAroundCurrent(songId);
+
             return;
         }
 
         buildQueue(songId);
         playCurrent();
+    }
+
+    // Whether the queue holds other songs than the list's filters give now
+    function queueOutOfStep() {
+
+        const pool = orderedSongs().filter(passesFilters);
+
+        // A song played from outside the filters fell back to the whole
+        // library, which is not a change worth acting on
+        if (currentSong && !pool.some(function (x) {
+            return x.song_id === currentSong.song_id;
+        })) {
+            return false;
+        }
+
+        // Songs put in to play next are the user's own, they do not count
+        const queued = new Set();
+
+        queue.forEach(function (x) {
+
+            if (!isPlayNext(x.song_id)) {
+                queued.add(x.song_id);
+            }
+        });
+
+        if (currentSong) {
+            queued.add(currentSong.song_id);
+        }
+
+        if (queued.size !== pool.length) {
+            return true;
+        }
+
+        return pool.some(function (x) {
+            return !queued.has(x.song_id);
+        });
+    }
+
+    // The queue made anew from the list, the playing song carrying on where
+    // it is, then the list, the saved queue, the covers beside the playing
+    // one and what is cached ahead all brought up to date
+    function requeueAroundCurrent(songId) {
+
+        if (!queueOutOfStep()) {
+            return;
+        }
+
+        buildQueue(songId);
+        renderList();
+        saveQueue();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        publishHostSoon();
+        setStatus("Queue made from the songs shown, " + queue.length + " songs");
+        dbgLog("Song", "queue made again from the list around the playing song, " + queue.length + " songs");
     }
 
     // Insert a song to play right after the current one
@@ -15061,6 +15153,7 @@
             canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
             published: song.publish_state === 1,
             remix: remixState(song),
+            copyOnPublish: settings.copyLinkOnPublish !== false,
             mine: !creatorSource,
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
             src: songUrl(song) || "",
@@ -20783,6 +20876,7 @@
         const libraryPage = makePage();
         const playbackPage = makePage();
         const nowPage = makePage();
+        const publishPage = makePage();
         const backupPage = makePage();
         const devPage = makePage();
         const aboutPage = makePage();
@@ -20797,6 +20891,7 @@
             library: libraryPage,
             playback: playbackPage,
             nowplaying: nowPage,
+            publishing: publishPage,
             backup: backupPage,
             developer: devPage,
             about: aboutPage
@@ -21964,6 +22059,20 @@
             aboutPage.appendChild(makeHint("Allowed networks are set under Device, Connections. The local name does not work in every browser, Tesla's among them."));
         }
 
+        // Publishing a song of your own: the link to the clipboard, and
+        // remixing turned off first
+        const copyOnPublishRow = makeBoolRow("Copy the link when publishing",
+            function () { return settings.copyLinkOnPublish !== false; },
+            function (v) { settings.copyLinkOnPublish = v; });
+
+        const noRemixRow = makeBoolRow("Always disallow remixing first",
+            function () { return settings.noRemixOnPublish === true; },
+            function (v) { settings.noRemixOnPublish = v; });
+
+        publishPage.appendChild(makeLabel("When publishing"));
+        publishPage.appendChild(withHint(copyOnPublishRow, "The song's link goes to the clipboard as it is published, in the web view to that browser's, with a note saying so."));
+        publishPage.appendChild(withHint(noRemixRow, "Before a song is published, Mureka is told to disallow remixing it, then it is published. If Mureka does not take that, the song is not published. Remixing can still be allowed afterwards in the song menu."));
+
         // Each page opens with the way back and a word on what it holds
         const heads = [
             [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
@@ -21971,6 +22080,7 @@
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
             [playbackPage, "Playback", "How the music plays and what is stored ahead of it."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
+            [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
             [backupPage, "Backup and restore", null],
             [devPage, "Developer", null],
             [aboutPage, "About", null]
@@ -22009,6 +22119,9 @@
         mainPage.appendChild(makePageButton("Library", "library"));
         mainPage.appendChild(makePageButton("Playback", "playback"));
         mainPage.appendChild(makePageButton("Now playing", "nowplaying"));
+        mainPage.appendChild(makeLabel("Your songs"));
+        mainPage.appendChild(makeHint("What happens when you publish or change songs of your own."));
+        mainPage.appendChild(makePageButton("Publishing", "publishing"));
         mainPage.appendChild(makeLabel("Data"));
         mainPage.appendChild(makeHint("Save your ratings, song tweaks and settings, and bring them back."));
         mainPage.appendChild(makePageButton("Backup and restore", "backup"));
