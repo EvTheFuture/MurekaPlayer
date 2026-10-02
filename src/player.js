@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.66";
+    const VERSION = "1.9.9.67";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6070,9 +6070,14 @@
 
             if (copied) {
 
-                setStatus("Published: " + name + (await copied ? ", link copied" : ", the link could not be copied"));
+                const done = await copied;
+
+                setStatus("Published: " + name + (done ? ", link copied" : ", the link could not be copied"));
+                showToast(done ? "Published, link copied" : "Published, the link could not be copied", done);
             } else if (publish && copy) {
-                copyLink(song);
+
+                showToast("Published");
+                copyLink(song, true);
             }
 
             return true;
@@ -6083,6 +6088,10 @@
             renderList();
             publishHostSoon();
             setStatus("Could not " + (publish ? "publish" : "unpublish") + " " + name + ", try again");
+
+            if (copy) {
+                showToast("Could not " + (publish ? "publish" : "unpublish") + ", try again", false);
+            }
 
             return false;
         }
@@ -6444,7 +6453,7 @@
 
             // Clear a stale Stopped or Paused line once playback is running
             if (currentSong) {
-                setStatus("Playing: " + (currentSong.title || "Untitled") + " [" + currentSong.song_id + "]");
+                setStatus(playingText(currentSong));
             }
 
             // Only refresh the scrubber position on resume. Re-sending the
@@ -13039,6 +13048,82 @@
         } catch (e) {
             dbgLog("Cover", "could not ask again for " + key);
         }
+    }
+
+    // The status while a song plays, with the number it carries in the list
+    // in front of its title, so it is easy to find there
+    function playingText(song) {
+
+        const number = hostNumbers().get(song.song_id);
+
+        return "Playing: " + (number ? "#" + number + " " : "") + (song.title || "Untitled");
+    }
+
+    // A short note over the lower part of the panel, for a result that is
+    // easy to miss in the status line, like a link put on the clipboard.
+    // Cyan for done, red for what did not work
+    let panelToastEl = null;
+
+    function showToast(text, ok) {
+
+        if (!panelEl) {
+            return;
+        }
+
+        if (!panelToastEl) {
+
+            panelToastEl = document.createElement("div");
+            panelToastEl.style.cssText = [
+                "position:absolute",
+                "left:50%",
+                "bottom:84px",
+                "transform:translateX(-50%)",
+                "max-width:calc(100% - 32px)",
+                "box-sizing:border-box",
+                "padding:9px 16px",
+                "border-radius:18px",
+                "font-size:13px",
+                "font-weight:600",
+                "text-align:center",
+                "pointer-events:none",
+                "opacity:0",
+                "z-index:20",
+                "box-shadow:0 4px 14px rgba(0,0,0,0.5)"
+            ].join(";");
+        }
+
+        panelEl.appendChild(panelToastEl);
+        panelToastEl.textContent = text;
+        panelToastEl.style.background = ok === false ? "#ff6b6b" : "#48e1eb";
+        panelToastEl.style.color = "#0c0c0f";
+
+        if (!panelToastEl.animate) {
+
+            panelToastEl.style.opacity = "1";
+
+            setTimeout(function () {
+                panelToastEl.style.opacity = "0";
+            }, 2500);
+            return;
+        }
+
+        try {
+
+            panelToastEl.getAnimations().forEach(function (a) {
+                a.cancel();
+            });
+        } catch (e) {
+        }
+
+        panelToastEl.animate([
+            { opacity: 0, transform: "translate(-50%, 8px)" },
+            { opacity: 1, transform: "translate(-50%, 0)", offset: 0.1 },
+            { opacity: 1, transform: "translate(-50%, 0)", offset: 0.85 },
+            { opacity: 0, transform: "translate(-50%, 0)" }
+        ], {
+            duration: 2800,
+            easing: "ease-in-out"
+        });
     }
 
     // Show a short confirmation pill centered on the art
@@ -26862,7 +26947,7 @@
 
     // Build the share link for a song and copy it to the clipboard
     // The link is the public song detail page keyed by the song share key
-    async function copyLink(song) {
+    async function copyLink(song, announce) {
 
         let key = song.share_key;
 
@@ -26903,6 +26988,11 @@
 
         const link = "https://www.mureka.ai/song-detail/" + key;
         const ok = await copyText(link);
+
+        // After publishing, the note says whether the link came along
+        if (announce) {
+            showToast(ok ? "Published, link copied" : "Published, the link could not be copied", ok);
+        }
 
         setStatus(ok
             ? "Copied link: " + (song.title || "Untitled")

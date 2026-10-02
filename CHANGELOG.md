@@ -144,8 +144,8 @@ the new settings layout and a number of smaller improvements.
   settings have a short explanation, and each section heading is underlined.
 - **Back to the playing song**: a round target button shows over the list
   while the playing song is scrolled out of sight, and a tap brings it back
-  to the middle. The status line says which song plays with its id, as in
-  "Playing: Title [id]".
+  to the middle. The status line says which song plays with its number in
+  the list, as in "Playing: #4064 Title".
 - **Progress over the list** while loading, rescanning or caching: what is
   going on, how far it has come, how long it has taken and about how long is
   left, with a bar when the size is known, as in the web view.
@@ -183,7 +183,8 @@ the new settings layout and a number of smaller improvements.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **Disallow remixing**, instrumentals included.
   Publishing copies the song's link to the clipboard, in the web view to
-  that browser's.
+  that browser's, and a short note on the page says it is published and the
+  link copied.
   When Mureka refuses a change on a published song, the player offers to take
   it down, make the change and publish it again.
 - The song information shows whether remixing is allowed, and a running bar
