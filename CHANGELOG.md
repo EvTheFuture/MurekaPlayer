@@ -355,6 +355,11 @@ the new settings layout and a number of smaller improvements.
 - The song menu, from a long press or a right click, shows the song's number
   and title at the top, so it is clear which song it opened on.
 - A **Stars** view sorts the list by rating.
+- **How much of the song is here**, as in the web view: a small cyan pie
+  before the time by the seek bar, solid once the playing song is stored on
+  the device, and while it is being stored or loaded a pie that fades in
+  and out and fills as more of it comes in. A song being cached in the
+  list shows the same filling pie in place of its pulsing dot.
 - **Quarter stars**: ratings go in quarters, 4, 4.25, 4.5 and 4.75, where
   they went in halves. A tap on a star lights it in full, and a tap on the
   star the rating already sits in takes a quarter off before it comes back

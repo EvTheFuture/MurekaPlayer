@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.117";
+    const VERSION = "1.9.9.119";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -954,6 +954,94 @@
         }
     }
 
+    // How far a song being cached has come, in percent, 100 while its size
+    // is not known
+    function cachingPercent(id) {
+
+        const c = cachingProgress.has(id) ? cachingProgress.get(id) : 0;
+
+        return c < 0 ? 100 : Math.round(c * 100);
+    }
+
+    // The song id behind each pie in the song list, kept as the id itself,
+    // a number or a string, the way the caching sets hold it
+    const pieSongIds = new WeakMap();
+
+    // One pie in the song list brought up to date
+    function paintListPie(dot) {
+
+        const pie = dot.firstElementChild;
+        const key = pieSongIds.get(dot);
+
+        if (!pie || key === undefined || !cachingIds.has(key)) {
+            return;
+        }
+
+        const p = cachingPercent(key);
+
+        pie.style.setProperty("--mureka-p", String(Math.max(4, p)));
+        dot.title = "Caching, " + p + "%";
+    }
+
+    // The pie before the time: how much of the playing song is here. Stored
+    // on this device, solid. Being stored, a pie filling as it comes in.
+    // Neither, how much the player has loaded to play it. Nothing while
+    // none of it is here
+    function paintSongDot() {
+
+        if (!songDotEl) {
+            return;
+        }
+
+        const id = currentSong ? currentSong.song_id : null;
+        let p = 0;
+        let full = false;
+        let loading = false;
+        let tip = "";
+
+        if (id !== null && cachedIds.has(id)) {
+
+            full = true;
+            tip = "The song is stored on this device";
+        } else if (id !== null && cachingIds.has(id)) {
+
+            loading = true;
+            p = cachingPercent(id);
+            tip = "Storing the song on this device, " + p + "%";
+        } else if (id !== null && audio && audio.src) {
+
+            const d = audio.duration;
+            const b = audio.buffered;
+
+            if (b && b.length > 0 && isFinite(d) && d > 0) {
+                p = Math.min(100, Math.round(b.end(b.length - 1) * 100 / d));
+            }
+
+            full = p >= 99;
+            loading = !full && p > 0;
+            tip = full ? "The whole song is loaded" : "Loading the song, " + p + "%";
+        }
+
+        songDotEl.style.visibility = full || loading ? "visible" : "hidden";
+        songDotEl.classList.toggle("mureka-pie-loading", loading);
+        songDotEl.style.setProperty("--mureka-p", String(loading ? Math.max(4, p) : 100));
+        songDotEl.title = tip;
+    }
+
+    // Every pie brought up to date, once a second
+    function paintCachePies() {
+
+        paintSongDot();
+
+        if (cachingIds.size === 0 || !listEl) {
+            return;
+        }
+
+        for (const dot of listEl.querySelectorAll("[data-mureka-pie]")) {
+            paintListPie(dot);
+        }
+    }
+
     // Current search box text, lowercased, empty means show all
     let searchQuery = "";
 
@@ -1117,6 +1205,9 @@
     let seekBar = null;
     let curTimeEl = null;
     let remTimeEl = null;
+
+    // The pie before the time, how much of the playing song is here
+    let songDotEl = null;
     let playPauseBtn = null;
     let shuffleBtn = null;
     let repeatBtn = null;
@@ -18559,6 +18650,12 @@
         curTimeEl.textContent = "0:00";
         curTimeEl.style.cssText = "font-variant-numeric:tabular-nums;min-width:34px";
 
+        // Hidden rather than left out while there is nothing to show, so the
+        // seek bar does not move when it comes
+        songDotEl = document.createElement("span");
+        songDotEl.className = "mureka-pie";
+        songDotEl.style.cssText = "flex:0 0 auto;width:8px;height:8px;margin-right:-4px;visibility:hidden";
+
         seekBar = document.createElement("input");
         seekBar.type = "range";
         seekBar.id = "mureka-seek-bar";
@@ -18675,6 +18772,7 @@
             updateSeekDisplay();
         });
 
+        seekRow.appendChild(songDotEl);
         seekRow.appendChild(curTimeEl);
         seekRow.appendChild(seekBar);
         seekRow.appendChild(waveCanvas);
@@ -18807,6 +18905,14 @@
             + ".mureka-resize-handle{background:transparent;transition:background 0.12s ease}"
             + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
+
+            // A cyan pie filling as more of a song has come in, as in the web
+            // view. --mureka-p is how much, in percent. Registered, so the
+            // fill grows smoothly between updates where the browser can
+            + "@property --mureka-p{syntax:'<number>';inherits:false;initial-value:100}"
+            + ".mureka-pie{display:inline-block;border-radius:50%;background:conic-gradient(#48e1eb calc(var(--mureka-p) * 1%),rgba(72,225,235,0.25) 0);transition:--mureka-p 1s linear}"
+            + ".mureka-pie.mureka-pie-loading{animation:mureka-fade-dot 1.2s ease-in-out infinite}"
+            + "@keyframes mureka-fade-dot{50%{opacity:0.45}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
 
             // Every button lights up and dips a little while it is pressed,
@@ -19454,6 +19560,9 @@
         if (isApkHost()) {
             checkHotspotAtStart();
         }
+
+        // The pies for songs coming in, before the time and in the list
+        setInterval(paintCachePies, 1000);
 
         trickleNextAt = Date.now() + 30000;
         trickleTimer = setTimeout(trickleTick, 30000);
@@ -21630,39 +21739,40 @@
             item.style.opacity = "0.45";
         }
 
-        // The dot marks cache state, hidden keeps the text aligned
-        // Pulsing while caching, solid once cached
+        // The dot marks whether the song is stored, hidden keeps the text
+        // aligned. A pie filling while it is being cached, solid once cached.
+        // A cover stored without the song gets no dot
         const caching = cachingIds.has(song.song_id);
         const audioCached = cachedIds.has(song.song_id);
         const artCached = artCachedIds.has(String(song.song_id));
-        const anyCached = audioCached || artCached;
 
-        // Cyan when both the song and its cover are stored, otherwise a distinct
-        // color for whichever one is present so far
-        let dotColor = "#48e1eb";
-
-        if (audioCached && !artCached) {
-            dotColor = "#b388ff";
-        } else if (artCached && !audioCached) {
-            dotColor = "#f0a94a";
-        }
+        // Cyan when both the song and its cover are stored, violet while the
+        // cover is not yet
+        const dotColor = audioCached && !artCached ? "#b388ff" : "#48e1eb";
 
         const dot = document.createElement("span");
         dot.textContent = "\u25CF";
         dot.style.cssText = "color:" + dotColor + ";margin-right:6px;flex:0 0 auto;visibility:"
-            + ((caching || anyCached) ? "visible" : "hidden");
+            + ((caching || audioCached) ? "visible" : "hidden");
 
         if (caching) {
 
-            dot.style.animation = "mureka-pulse 1s ease-in-out infinite";
-            dot.title = "Caching";
+            // The glyph keeps its room in the row, unseen, and a pie over it
+            // fills as the song comes in, kept up to date by paintCachePies
+            const pie = document.createElement("span");
 
+            pie.className = "mureka-pie mureka-pie-loading";
+            pie.style.cssText = "position:absolute;left:50%;top:50%;width:0.7em;height:0.7em;transform:translate(-50%,-50%)";
+            dot.style.color = "transparent";
+            dot.style.position = "relative";
+            dot.dataset.murekaPie = "1";
+            pieSongIds.set(dot, song.song_id);
+            dot.appendChild(pie);
+            paintListPie(dot);
         } else if (audioCached && artCached) {
             dot.title = "Song and cover cached";
         } else if (audioCached) {
             dot.title = "Song cached, cover not yet";
-        } else if (artCached) {
-            dot.title = "Cover cached, song not yet";
         }
 
         // Number column, right aligned and fixed width so titles line up
