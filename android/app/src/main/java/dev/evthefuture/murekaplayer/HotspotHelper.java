@@ -109,7 +109,22 @@ public final class HotspotHelper {
             return;
         }
 
-        Looper.prepareMainLooper();
+        // prepareMainLooper() is deprecated. Same result: a looper on
+        // this thread, registered as the main one for the framework
+        Looper.prepare();
+
+        try {
+
+            Field main = Looper.class.getDeclaredField("sMainLooper");
+
+            main.setAccessible(true);
+
+            if (main.get(null) == null) {
+                main.set(null, Looper.myLooper());
+            }
+        } catch (Throwable t) {
+            // Newer Android without that field, the thread looper is enough
+        }
 
         try {
 
