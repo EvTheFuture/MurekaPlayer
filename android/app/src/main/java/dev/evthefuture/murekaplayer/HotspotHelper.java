@@ -23,9 +23,6 @@ package dev.evthefuture.murekaplayer;
 
 import android.content.Context;
 import android.content.ContextWrapper;
-import android.net.LocalServerSocket;
-import android.net.LocalSocket;
-import android.net.LocalSocketAddress;
 import android.os.IBinder;
 import android.os.Looper;
 
@@ -48,31 +45,28 @@ import java.util.function.Supplier;
 // debugging shell with app_process, from the app's own APK, and keeps
 // running until the phone restarts. The shell may switch tethering, the
 // app may not, so the app asks the helper over a local socket that only
-// the app's own uid may use. The hotspot is switched the way the quick
+// the app's own token may use. The hotspot is switched the way the quick
 // settings tile does it, with the phone's own name and password.
 //
-// Started with:
+// Started in the foreground over adb, one command, then it exits:
 // CLASSPATH=<the app's base.apk> app_process /system/bin
-//     --nice-name=murekaplayer_hotspot
-//     dev.evthefuture.murekaplayer.HotspotHelper <app uid> <app version code>
-// A helper already running is asked to quit, so the new one can take the
-// socket. What the helper says goes to the log the command names
+//     dev.evthefuture.murekaplayer.HotspotHelper <app uid> <version> <command>
+// A backgrounded helper does not survive the adb session closing, and an
+// abstract socket is blocked (untrusted_app connectto shell). The answer
+// is the one line this process prints.
 //
-// Commands, one line each, one answer line back:
 // ping -> ok <version code>
 // state -> on, off, switching on, switching off, failed or unknown
 // on -> on, or refused <error>, or the state when it did not come on
 // off -> off, or the state when it did not go off
-// quit -> bye, and the helper ends
 //
 // No lambdas, kept the same as the tested version run from a plain dex
 public final class HotspotHelper {
 
-    // The socket's name, in Android's abstract namespace
-    static final String SOCKET = "murekaplayer_hotspot";
+    // The app binds this. The helper only connects out
+    static final int PORT = 39173;
 
     private static final String SHELL = "com.android.shell";
-    private static final int SHELL_UID = 2000;
 
     // TETHERING_WIFI in Android's tethering service
     private static final int TETHER_WIFI = 0;
@@ -105,17 +99,19 @@ public final class HotspotHelper {
 
     public static void main(String[] args) {
 
-        if (args.length < 2) {
+        // Foreground, one command, then exit. A backgrounded helper dies
+        // when the adb session closes, which is what the empty log was
+        if (args.length < 3) {
 
-            say("usage: HotspotHelper <app uid> <app version code>");
+            say("usage: HotspotHelper <app uid> <app version code> <ping|state|on|off>");
             System.exit(2);
         }
 
-        int appUid;
         String version = args[1];
+        String what = args[2];
 
         try {
-            appUid = Integer.parseInt(args[0]);
+            Integer.parseInt(args[0]);
         } catch (NumberFormatException e) {
 
             say("not a uid: " + args[0]);
@@ -125,13 +121,11 @@ public final class HotspotHelper {
 
         Looper.prepareMainLooper();
 
-        LocalServerSocket server;
-
         try {
 
             ctx = new ShellContext(systemContext());
             tetheringManager();
-            server = takeSocket();
+            say(handle(what, version));
         } catch (Throwable t) {
 
             Throwable why = t.getCause() != null ? t.getCause() : t;
@@ -141,52 +135,7 @@ public final class HotspotHelper {
             return;
         }
 
-        say("helper running for uid " + appUid + ", version " + version);
-
-        // One question at a time, the answers come back on binder threads
-        while (true) {
-
-            LocalSocket s = null;
-
-            try {
-
-                s = server.accept();
-
-                int uid = s.getPeerCredentials().getUid();
-
-                if (uid != appUid && uid != SHELL_UID && uid != 0) {
-
-                    answer(s, "denied");
-                    continue;
-                }
-
-                BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-                String line = in.readLine();
-                String what = line == null ? "" : line.trim();
-
-                if ("quit".equals(what)) {
-
-                    answer(s, "bye");
-                    System.exit(0);
-                }
-
-                answer(s, handle(what, version));
-            } catch (Throwable t) {
-
-                // One broken question never ends the helper
-                say("question failed: " + t);
-            } finally {
-
-                if (s != null) {
-
-                    try {
-                        s.close();
-                    } catch (IOException e) {
-                        // Already gone
-                    }
-                }
-            }
-        }
+        System.exit(0);
     }
 
     // A line to the log the start command sends the output to, written at
@@ -195,59 +144,6 @@ public final class HotspotHelper {
 
         System.out.println(text);
         System.out.flush();
-    }
-
-    // The socket, taken over from a helper already running, perhaps from
-    // an earlier version of the app: it is asked to quit and make room
-    private static LocalServerSocket takeSocket() throws IOException, InterruptedException {
-
-        IOException last = null;
-
-        for (int i = 0; i < 5; i++) {
-
-            try {
-                return new LocalServerSocket(SOCKET);
-            } catch (IOException e) {
-                last = e;
-            }
-
-            say("the socket is taken, asking the helper running to quit");
-
-            LocalSocket old = new LocalSocket();
-
-            try {
-
-                old.connect(new LocalSocketAddress(SOCKET, LocalSocketAddress.Namespace.ABSTRACT));
-                old.setSoTimeout(2000);
-
-                OutputStream out = old.getOutputStream();
-
-                out.write("quit\n".getBytes(StandardCharsets.UTF_8));
-                out.flush();
-                new BufferedReader(new InputStreamReader(old.getInputStream(), StandardCharsets.UTF_8)).readLine();
-            } catch (IOException e) {
-                // Gone already, or not answering
-            } finally {
-
-                try {
-                    old.close();
-                } catch (IOException e) {
-                    // Already gone
-                }
-            }
-
-            Thread.sleep(500);
-        }
-
-        throw last;
-    }
-
-    private static void answer(LocalSocket s, String text) throws IOException {
-
-        OutputStream out = s.getOutputStream();
-
-        out.write((text + "\n").getBytes(StandardCharsets.UTF_8));
-        out.flush();
     }
 
     private static String handle(String what, String version) throws Exception {

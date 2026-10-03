@@ -24,27 +24,27 @@ package dev.evthefuture.murekaplayer;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.net.LocalSocket;
-import android.net.LocalSocketAddress;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 // Switching the phone's hotspot. Android 16 lets only callers with the
 // system's tethering permission do that, which an app cannot be given,
-// but the debugging shell has it. So the hotspot helper, a small part of
-// this app, runs as the shell (see HotspotHelper) and the app asks it
-// over a local socket. The hotspot comes on with the phone's own name and
-// password, the same as from the quick settings tile
+// but the debugging shell has it. Each switch runs HotspotHelper once in
+// the foreground over wireless debugging and reads the line it prints.
+// A helper left in the background dies when that adb session closes, and
+// an abstract socket from the app to the shell is denied by SELinux.
+// The hotspot comes on with the phone's own name and password, the same
+// as from the quick settings tile
 final class Hotspot {
 
     // One command at a time, never on the main thread
     private static final ExecutorService RUN = Executors.newSingleThreadExecutor();
+
+    // Last one-shot answer, so the page does not open adb just to look
+    private static volatile String cachedState = "";
+    private static volatile boolean proved = false;
 
     // How long an answer may take: a quick question, and a switch, which
     // waits for the hotspot to settle
@@ -65,103 +65,90 @@ final class Hotspot {
     // version of the app) or stopped
     static String helper(Context c) {
 
-        String answer = ask("ping", QUICK_MS);
-
-        if (answer == null || !answer.startsWith("ok")) {
-            return "stopped";
-        }
-
-        return answer.equals("ok " + versionCode(c)) ? "running" : "old";
+        return proved ? "running" : "stopped";
     }
 
-    // The hotspot's state as the helper reads it, or empty without one
+    // The hotspot's state as the last command read it, or empty without one
     static String state() {
 
-        String answer = ask("state", QUICK_MS);
-
-        return answer == null ? "" : answer;
+        return cachedState;
     }
 
     static void start(Context c) {
-        RUN.execute(() -> command("on"));
+
+        final Context app = c.getApplicationContext();
+
+        RUN.execute(new Runnable() {
+            @Override
+            public void run() {
+                command(app, "on");
+            }
+        });
     }
 
     static void stop(Context c) {
-        RUN.execute(() -> command("off"));
+
+        final Context app = c.getApplicationContext();
+
+        RUN.execute(new Runnable() {
+            @Override
+            public void run() {
+                command(app, "off");
+            }
+        });
+    }
+
+    // A ping through adb, used by the start button. The line the helper
+    // printed, empty when it did not run
+    static String prove(Context c) {
+
+        String answer = HelperStart.once(c, "ping");
+
+        proved = answer.startsWith("ok");
+        return answer;
     }
 
     // Where the helper writes what it has to say, a place the shell may
     // write to and adb may read
     static final String HELPER_LOG = "/data/local/tmp/murekaplayer_hotspot.log";
 
-    // The shell command that starts the helper, run through adb. It first
-    // lets the app switch wireless debugging on and off, for the starts
-    // after a restart of the phone. A helper already running, perhaps from
-    // an earlier version, is asked by the new one to make room. setsid
-    // keeps the new one running after adb has gone
-    static String shellCommand(Context c) {
+    // One foreground run. No '&', so the process is not killed when the
+    // adb session ends, and the line it prints comes back on the stream
+    static String shellCommand(Context c, String what) {
 
         return "pm grant " + c.getPackageName() + " android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1; "
             + "CLASSPATH=" + c.getApplicationInfo().sourceDir
-            + " setsid app_process /system/bin --nice-name=murekaplayer_hotspot "
-            + HotspotHelper.class.getName() + " " + c.getApplicationInfo().uid + " " + versionCode(c)
-            + " >" + HELPER_LOG + " 2>&1 </dev/null &";
+            + " app_process /system/bin " + HotspotHelper.class.getName() + " "
+            + c.getApplicationInfo().uid + " " + versionCode(c) + " " + what;
     }
 
     // The same from a computer with adb, for a phone not on Wi-Fi
     static String startCommand(Context c) {
-        return "adb shell '" + shellCommand(c) + "'";
+        return "adb shell '" + shellCommand(c, "on") + "'";
     }
 
-    private static void command(String what) {
+    private static void command(Context c, String what) {
 
-        String answer = ask(what, SWITCH_MS);
+        String answer = HelperStart.once(c, what);
 
-        if (answer == null) {
-            lastResult = "Not switched " + what + ", the hotspot helper is not running";
-        } else if (answer.equals(what)) {
+        if (answer == null || answer.isEmpty()) {
+            lastResult = "Not switched " + what + ", the hotspot helper did not answer";
+        } else if (answer.equals(what) || answer.equals("on") || answer.equals("off")) {
+
+            proved = true;
+            cachedState = answer.equals(what) ? what : answer;
             lastResult = "Switched " + what;
         } else if (answer.startsWith("refused")) {
             lastResult = "Android refused, error " + answer.substring(7).trim();
-        } else if (answer.equals("denied")) {
-            lastResult = "The hotspot helper does not know this app, start it again";
+        } else if (answer.startsWith("ok")) {
+
+            proved = true;
+            lastResult = "The helper answered " + answer;
         } else {
-            lastResult = "Asked to switch " + what + ", the hotspot is " + answer;
+            lastResult = "Asked to switch " + what + ", " + answer;
         }
 
         Hub.note("Hotspot", lastResult);
-    }
-
-    // One question to the helper, its answer, or null when it is not
-    // running or did not answer in time
-    private static String ask(String what, int timeoutMs) {
-
-        LocalSocket s = new LocalSocket();
-
-        try {
-
-            s.connect(new LocalSocketAddress(HotspotHelper.SOCKET, LocalSocketAddress.Namespace.ABSTRACT));
-            s.setSoTimeout(timeoutMs);
-
-            OutputStream out = s.getOutputStream();
-
-            out.write((what + "\n").getBytes(StandardCharsets.UTF_8));
-            out.flush();
-
-            BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-            String line = in.readLine();
-
-            return line == null ? null : line.trim();
-        } catch (IOException e) {
-            return null;
-        } finally {
-
-            try {
-                s.close();
-            } catch (IOException e) {
-                // Already gone
-            }
-        }
     }
 
     private static long versionCode(Context c) {

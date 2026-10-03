@@ -258,12 +258,6 @@ final class HelperStart {
 
     private static void startNow(Context c) {
 
-        if ("running".equals(Hotspot.helper(c))) {
-
-            startText = "The helper is running";
-            return;
-        }
-
         if (!paired(c)) {
 
             startText = "Not paired with wireless debugging yet";
@@ -272,27 +266,45 @@ final class HelperStart {
 
         starting = true;
 
+        try {
+
+            say("Starting the helper");
+
+            String answer = Hotspot.prove(c);
+
+            if (answer.startsWith("ok")) {
+                say("The helper is running");
+            } else {
+                say("The helper did not start" + (answer.isEmpty() ? "" : ": " + answer.replaceAll("\\s+", " ")));
+            }
+        } finally {
+            starting = false;
+        }
+    }
+
+    // One foreground helper command over wireless debugging. The line it
+    // printed, or why it did not run. Not on the main thread
+    static String once(Context c, String what) {
+
+        if (!paired(c)) {
+            return "Not paired with wireless debugging yet";
+        }
+
         boolean switchedOn = false;
         AdbLink link = null;
 
         try {
 
-            // Wireless debugging on for the start, when it is off and the
-            // app may switch it
             if (!adbWifiOn(c)) {
 
                 if (!canSwitchAdb(c)) {
-
-                    say("Wireless debugging is off, switch it on in Developer options and start again");
-                    return;
+                    return "Wireless debugging is off, switch it on in Developer options and start again";
                 }
 
-                say("Switching wireless debugging on");
                 Settings.Global.putInt(c.getContentResolver(), ADB_WIFI, 1);
                 switchedOn = true;
             }
 
-            say("Connecting to wireless debugging");
             link = AdbLink.get(c);
 
             if (!link.isConnected()) {
@@ -300,42 +312,18 @@ final class HelperStart {
             }
 
             if (!link.isConnected()) {
-
-                say("Could not connect to wireless debugging");
-                return;
+                return "Could not connect to wireless debugging";
             }
 
-            say("Starting the helper");
-
-            String out = run(link, Hotspot.shellCommand(c));
-
-            // The helper takes a moment to make its socket
-            String helper = "stopped";
-
-            for (int i = 0; i < 12 && !"running".equals(helper); i++) {
-
-                Thread.sleep(500);
-                helper = Hotspot.helper(c);
-            }
-
-            if ("running".equals(helper)) {
-                say("The helper is running");
-            } else {
-
-                // What the helper said before it ended, from its log
-                String log = run(link, "tail -n 3 " + Hotspot.HELPER_LOG + " 2>&1");
-                String said = (out + " " + log).trim().replaceAll("\\s+", " ");
-
-                say("The helper did not start" + (said.isEmpty() ? "" : ": " + said));
-            }
+            return run(link, Hotspot.shellCommand(c, what)).replaceAll("\\s+", " ").trim();
         } catch (AdbPairingRequiredException e) {
 
             CarSettings.prefs(c).edit().putString(PAIRED, "0").apply();
-            say("Wireless debugging does not know the player any more, pair again");
+            return "Wireless debugging does not know the player any more, pair again";
         } catch (InterruptedException e) {
-            say("Wireless debugging was not found, is the phone on Wi-Fi?");
+            return "Wireless debugging was not found, is the phone on Wi-Fi?";
         } catch (Throwable t) {
-            say("Could not start the helper, " + why(t));
+            return "Could not start the helper, " + why(t);
         } finally {
 
             if (link != null) {
@@ -347,7 +335,6 @@ final class HelperStart {
                 }
             }
 
-            // Left the way it was found
             if (switchedOn) {
 
                 try {
@@ -356,8 +343,6 @@ final class HelperStart {
                     Hub.note("Helper", "could not switch wireless debugging off again, " + why(t));
                 }
             }
-
-            starting = false;
         }
     }
 
