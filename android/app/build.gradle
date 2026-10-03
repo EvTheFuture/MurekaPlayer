@@ -186,13 +186,12 @@ android {
     }
 }
 
-// Two small libraries for switching the phone's hotspot: one reaches the
-// call in Android's tethering service that is left out of its public API,
-// Shizuku is the way left when the phone refuses that one
+// The app's own adb client, to pair with wireless debugging and start the
+// hotspot helper from the phone itself, and Bouncy Castle to make its key
 dependencies {
-    implementation "org.lsposed.hiddenapibypass:hiddenapibypass:6.1"
-    implementation "dev.rikka.shizuku:api:13.1.5"
-    implementation "dev.rikka.shizuku:provider:13.1.5"
+    implementation "com.github.osservatorionessuno:libadb-android-bc:3.4.0"
+    implementation "org.bouncycastle:bcprov-jdk15to18:1.84"
+    implementation "org.bouncycastle:bcpkix-jdk15to18:1.84"
 }
 
 // The player is the same file the extension and the bookmarklet use. It is

@@ -311,6 +311,14 @@ public class PlayerService extends Service implements Hub.Listener {
         // The charger in the car coming and going
         ChargeWatch.start(this);
 
+        // The hotspot name and password once typed for Shizuku, not needed
+        // any more
+        CarSettings.dropRetired(this);
+
+        // The hotspot helper started through wireless debugging when the
+        // hotspot settings need it, after a restart of the phone too
+        HelperStart.atStart(this);
+
         // The local name for other devices and the web view's fixed address
         applySettings();
 

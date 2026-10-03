@@ -140,12 +140,20 @@ the new settings layout and a number of smaller improvements.
   work stop, so a phone left somewhere warm stays cooler. A note counts
   down on the phone and in the web view with **Skip shutdown**, and
   plugging in again in time stops it. Plugged in, the hotspot can come on
-  and the background work starts again. The hotspot is switched through
-  Android's own tethering, with the phone's own name and password, once
-  Android lets the player modify system settings, and through Shizuku
-  only if the phone refuses that. The page and the start of the app ask
-  for the permission when it is missing, the web view says to open the
-  phone, and the hotspot can be tried from the settings.
+  and the background work starts again. Android lets only the system
+  switch the hotspot, so the player brings a small **hotspot helper** of
+  its own that runs as the phone's debugging shell until the next
+  restart. It switches the phone's own hotspot, with its own name and
+  password, like the quick settings tile, and no other app is involved.
+  The player pairs with **wireless debugging** once, the code typed into
+  its notification while the pairing dialog stays open, and from then on
+  starts the helper by itself: at start, after a restart of the phone or
+  an update, switching wireless debugging on for the start and off again
+  (the phone has to be on Wi-Fi). A command for a computer with adb is
+  there for a phone that is not. The page shows the helper, the pairing,
+  the hotspot's real state and what the last command did, the start of
+  the app asks and the web view says so when the helper is needed and not
+  running, and the hotspot can be tried from the settings.
 - **Cache control**, a settings page of its own under Data, gathers what the
   player keeps on the device: Cache ahead, the songs stored with **Cache
   all** and **Clear song cache** (with its progress, the library itself

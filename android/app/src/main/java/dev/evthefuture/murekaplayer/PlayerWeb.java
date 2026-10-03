@@ -614,19 +614,33 @@ final class PlayerWeb {
             ChargeWatch.skip();
         }
 
-        // Shizuku, for the hotspot: missing, stopped, old, denied or ready,
-        // and what the last hotspot command said
+        // The hotspot helper: running, old or stopped, the hotspot's state
+        // as it reads it, what the last hotspot command said, the charger
+        // countdown, the pairing with wireless debugging and the helper's
+        // last start, and the command that starts it from a computer
         @JavascriptInterface
         public String hotspotStatus() {
 
             JSONObject o = new JSONObject();
 
+            if (appContext == null) {
+                return "{}";
+            }
+
             try {
 
-                o.put("shizuku", appContext == null ? "missing" : Hotspot.status(appContext));
-                o.put("write", appContext != null && Hotspot.canWrite(appContext));
+                String helper = Hotspot.helper(appContext);
+
+                o.put("helper", helper);
+                o.put("state", "stopped".equals(helper) ? "" : Hotspot.state());
                 o.put("last", Hotspot.lastResult());
                 o.put("countdown", ChargeWatch.left());
+                o.put("start", Hotspot.startCommand(appContext));
+                o.put("paired", HelperStart.paired(appContext));
+                o.put("pairing", HelperStart.pairText());
+                o.put("starting", HelperStart.starting());
+                o.put("startText", HelperStart.startText());
+                o.put("auto", HelperStart.canSwitchAdb(appContext));
             } catch (JSONException e) {
                 return "{}";
             }
@@ -634,49 +648,31 @@ final class PlayerWeb {
             return o.toString();
         }
 
-        // Shizuku's own question for its permission
+        // Pairing with wireless debugging begins, Developer options open
+        // and a notification asks for the code
         @JavascriptInterface
-        public void hotspotAsk() {
-            Hotspot.ask();
-        }
-
-        // Android's own screen to let the app modify system settings, which
-        // switching the hotspot needs
-        @JavascriptInterface
-        public void hotspotAllowWrite() {
+        public void hotspotPair() {
 
             if (appContext != null) {
-                Hotspot.askWrite(appContext);
+                HelperStart.pair(appContext);
             }
         }
 
-        // Shizuku itself, to start it, or its page in the Play Store when it
-        // is not installed
+        // The hotspot helper started now through wireless debugging
         @JavascriptInterface
-        public void hotspotOpen() {
+        public void hotspotStartHelper() {
 
-            if (appContext == null) {
-                return;
+            if (appContext != null) {
+                HelperStart.start(appContext);
             }
+        }
 
-            Intent open = appContext.getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
+        // The pairing forgotten, to pair again
+        @JavascriptInterface
+        public void hotspotUnpair() {
 
-            if (open == null) {
-                open = new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api"));
-            }
-
-            try {
-                appContext.startActivity(open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            } catch (ActivityNotFoundException e) {
-
-                // No Play Store, the web page instead
-                try {
-                    appContext.startActivity(new Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                } catch (ActivityNotFoundException e2) {
-                    // Nothing to open
-                }
+            if (appContext != null) {
+                HelperStart.unpair(appContext);
             }
         }
 

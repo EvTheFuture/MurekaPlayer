@@ -12,6 +12,14 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+
+        // Only the adb library comes from JitPack
+        maven {
+            url = "https://jitpack.io"
+            content {
+                includeGroup "com.github.osservatorionessuno"
+            }
+        }
     }
 }
 

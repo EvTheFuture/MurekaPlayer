@@ -23,6 +23,7 @@ package dev.evthefuture.murekaplayer;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.webkit.WebView;
 
 import java.lang.ref.WeakReference;
@@ -274,6 +275,12 @@ final class Hub {
     // and from where. Safe from any thread. The page drops it while the
     // overlay is off
     static void note(String kind, String text) {
+
+        // The hotspot helper's lines also go to Android's log, so adb
+        // logcat shows them with the adb library's own
+        if ("Helper".equals(kind) || "Hotspot".equals(kind)) {
+            Log.i("MurekaPlayer", kind + ": " + text);
+        }
 
         final String js = "window.__murekaDebugNote && window.__murekaDebugNote("
             + JSONObject.quote(text) + ", " + JSONObject.quote(kind) + ")";

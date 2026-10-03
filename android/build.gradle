@@ -1,5 +1,5 @@
-// Only the Android plugin, the app uses the plain framework and two small
-// libraries for switching the hotspot
+// Only the Android plugin, the app uses the plain framework and a small adb
+// library for starting the hotspot helper
 plugins {
     id "com.android.application" version "8.11.1" apply false
 }

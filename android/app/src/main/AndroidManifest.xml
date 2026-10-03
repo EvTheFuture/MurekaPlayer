@@ -18,18 +18,12 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Switching the hotspot: Android's tethering service lets an app do
-         it once the user has allowed it to modify system settings, on
-         Android's own screen -->
+    <!-- Lets the app switch wireless debugging on for a start of the
+         hotspot helper and off again. Only adb can give it, the helper's
+         first start through wireless debugging does -->
     <uses-permission
-        android:name="android.permission.WRITE_SETTINGS"
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
-
-    <!-- Shizuku, the helper app that can switch the hotspot, is looked for
-         by its package name -->
-    <queries>
-        <package android:name="moe.shizuku.privileged.api" />
-    </queries>
 
     <application
         android:allowBackup="false"
@@ -77,15 +71,10 @@
                 android:value="false" />
         </service>
 
-        <!-- How Shizuku hands the app its connection, as its documentation
-             asks. Only the system can use it -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:enabled="true"
-            android:exported="true"
-            android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <!-- The pairing code typed into the pairing notification -->
+        <receiver
+            android:name=".PairReply"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

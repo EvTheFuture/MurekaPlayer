@@ -812,8 +812,8 @@
         z-index: 61;
     }
 
-    /* The hotspot settings on the phone want Shizuku, which is not ready:
-       the phone has to be opened to fix it */
+    /* The hotspot settings on the phone want the hotspot helper, which is
+       not running: it has to be started again on the phone */
     #hotspotPop {
         position: fixed;
         left: 50%;
@@ -9916,11 +9916,7 @@
 
         const why = s && typeof s.hotspotWarn === "string" ? s.hotspotWarn : "";
         const words = {
-            nowrite: "Open Mureka Player on the phone and allow it to modify system settings, or the hotspot cannot be switched with the charger.",
-            denied: "Open Mureka Player on the phone and give Shizuku its permission, or the hotspot cannot be switched with the charger.",
-            stopped: "Shizuku is not running on the phone, so the hotspot cannot be switched with the charger. Start it on the phone.",
-            old: "Shizuku on the phone is too old to switch the hotspot. Update it on the phone.",
-            missing: "Switching the hotspot with the charger needs Shizuku on the phone, which is not installed."
+            nohelper: "The hotspot helper is not running on the phone, so the hotspot cannot be switched with the charger. Open Mureka Player on the phone and start it under Charger and power."
         };
 
         if (why !== hotspotClosed) {

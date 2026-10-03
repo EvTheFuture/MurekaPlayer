@@ -47,11 +47,9 @@ final class CarSettings {
     static final String UNPLUG_QUIET = "unplugQuiet";
     static final String PLUG_HOTSPOT = "plugHotspot";
 
-    // The hotspot the app switches on with Shizuku, best the same name and
-    // password as the phone's own, so other devices join it by themselves
-    static final String HOTSPOT_SSID = "hotspotSsid";
-    static final String HOTSPOT_PASS = "hotspotPass";
-    static final String HOTSPOT_BAND = "hotspotBand";
+    // Settings no longer used. The hotspot helper uses the phone's own
+    // hotspot name and password, so the ones typed for Shizuku are removed
+    private static final String[] RETIRED = {"hotspotSsid", "hotspotPass", "hotspotBand"};
 
     // Tesla's browser refuses private addresses, 3.3.3.3 is the one the
     // Android Auto in the browser apps have used for years
@@ -93,6 +91,27 @@ final class CarSettings {
         return "1".equals(prefs(c).getString(key, "0"));
     }
 
+    // Settings left from earlier versions removed, the hotspot password
+    // first of all, so it is not kept on the phone for nothing
+    static void dropRetired(Context c) {
+
+        SharedPreferences p = prefs(c);
+        SharedPreferences.Editor edit = null;
+
+        for (String key : RETIRED) {
+
+            if (p.contains(key)) {
+
+                edit = edit == null ? p.edit() : edit;
+                edit.remove(key);
+            }
+        }
+
+        if (edit != null) {
+            edit.apply();
+        }
+    }
+
     // Seconds to wait after the charger is pulled out, 60 unless changed
     static int chargeGrace(Context c) {
 
@@ -123,29 +142,6 @@ final class CarSettings {
         } else if (CHARGE_GRACE.equals(key)) {
 
             if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {
-                return false;
-            }
-        } else if (HOTSPOT_SSID.equals(key)) {
-
-            // A network name: 1 to 32 characters, no line breaks
-            if (v.isEmpty() || v.length() > 32 || v.matches(".*[\\r\\n].*")) {
-                return false;
-            }
-        } else if (HOTSPOT_PASS.equals(key)) {
-
-            // Kept as typed, an empty one means an open hotspot, otherwise
-            // WPA2 wants 8 to 63 characters
-            v = value == null ? "" : value;
-
-            if (!v.isEmpty() && (v.length() < 8 || v.length() > 63)) {
-                return false;
-            }
-
-            prefs(c).edit().putString(key, v).apply();
-            return true;
-        } else if (HOTSPOT_BAND.equals(key)) {
-
-            if (!"any".equals(v) && !"2".equals(v) && !"5".equals(v)) {
                 return false;
             }
         } else {

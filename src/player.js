@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.104";
+    const VERSION = "1.9.9.108";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16227,10 +16227,9 @@
         unplugEl.style.display = "flex";
     }
 
-    // Whether the hotspot settings are on without Shizuku being ready for
-    // them, the reason when so: denied, stopped, missing or old. Looked at
-    // every few seconds, for the settings, the question at start and the
-    // web view's notice
+    // Whether the hotspot settings are on without the hotspot helper
+    // running, nohelper when so. Looked at every few seconds, for the
+    // settings, the question at start and the web view's notice
     let hotspotWarnSeen = "";
     let hotspotWarnAt = 0;
 
@@ -16245,17 +16244,16 @@
         }
     }
 
-    // Ready when Android lets the player modify system settings, or else
-    // Shizuku is ready, nowrite when neither
-    function hotspotShizuku() {
+    // Ready when the hotspot helper answers, nohelper when it does not
+    function hotspotHelper() {
 
         try {
 
             const info = JSON.parse(window.MurekaHost.hotspotStatus() || "{}");
 
-            return info.write === true || info.shizuku === "ready" ? "ready" : "nowrite";
+            return info.helper === "running" || info.helper === "old" ? "ready" : "nohelper";
         } catch (e) {
-            return "nowrite";
+            return "nohelper";
         }
     }
 
@@ -16269,7 +16267,7 @@
 
             hotspotWarnAt = Date.now();
 
-            const status = hotspotWanted() ? hotspotShizuku() : "ready";
+            const status = hotspotWanted() ? hotspotHelper() : "ready";
 
             hotspotWarnSeen = status === "ready" ? "" : status;
         }
@@ -16277,50 +16275,44 @@
         return hotspotWarnSeen;
     }
 
-    // What to do about it, in words, and the button that does it
+    // What to do about it, in words, and the button that does it: start
+    // the helper when paired, else the page where pairing is
     function hotspotFix(status) {
 
-        if (status === "nowrite") {
-            return { text: "Android has to let the player modify system settings before it can switch the hotspot.", button: "Allow modifying system settings" };
+        let paired = false;
+
+        try {
+            paired = JSON.parse(window.MurekaHost.hotspotStatus() || "{}").paired === true;
+        } catch (e) {
+            paired = false;
         }
 
-        if (status === "denied") {
-            return { text: "Shizuku has not given the player its permission yet, so the hotspot cannot be switched.", button: "Give Shizuku permission" };
+        if (paired) {
+            return { text: "The hotspot helper is not running, so the hotspot cannot be switched. It is started through wireless debugging, which needs the phone on Wi-Fi.", button: "Start the helper", paired: true };
         }
 
-        if (status === "stopped") {
-            return { text: "Shizuku is installed but not running, so the hotspot cannot be switched. Start it in Shizuku with wireless debugging.", button: "Open Shizuku" };
-        }
-
-        if (status === "old") {
-            return { text: "This Shizuku is too old for the player. Update it in the Play Store.", button: "Open Shizuku" };
-        }
-
-        return { text: "Switching the hotspot needs Shizuku, which is not installed.", button: "Get Shizuku" };
+        return { text: "The hotspot helper is not running, so the hotspot cannot be switched. Pair the player with wireless debugging once, under Charger and power, and it starts the helper by itself.", button: "Show how to pair", paired: false };
     }
 
     function hotspotDoFix(status) {
 
-        try {
+        const fix = hotspotFix(status);
 
-            if (status === "nowrite") {
-                window.MurekaHost.hotspotAllowWrite();
-            } else if (status === "denied") {
-                window.MurekaHost.hotspotAsk();
-            } else {
-                window.MurekaHost.hotspotOpen();
-            }
-        } catch (e) {
-            // An app from before this
+        if (fix.paired) {
+
+            window.MurekaHost.hotspotStartHelper();
+            showToast("Starting the hotspot helper", "wait");
         }
 
-        // Looked at again soon after the answer
+        openSettings();
+        showSettingsPage("charger");
+
+        // Looked at again soon after
         hotspotWarnAt = 0;
     }
 
-    // At start, with the hotspot settings on and Shizuku not ready, the
-    // phone asks at once, so the permission is there before the charger is
-    // next pulled out
+    // At start, with the hotspot settings on and the helper not running,
+    // the phone says so at once, before the charger is next pulled out
     function checkHotspotAtStart() {
 
         setTimeout(function () {
@@ -22111,8 +22103,8 @@
         return row;
     }
 
-    // The Charger and car page: what happens when the charger is pulled out
-    // and plugged in, and the hotspot through Shizuku. The page helpers of
+    // The Charger and power page: what happens when the charger is pulled
+    // out and plugged in, and the hotspot helper. The page helpers of
     // the settings come along, they live where the pages are built
     function buildChargerPage(page, kit) {
 
@@ -22158,17 +22150,22 @@
             function () { return on("unplugPause"); },
             function (v) { put("unplugPause", v); });
 
-        // Switched on without a way to switch the hotspot, Android's own
-        // screen for the permission opens at once
+        // Switched on without the helper running: started at once when
+        // paired, else the phone says pairing is needed
         const wantHotspot = function (key, v) {
 
             put(key, v);
             hotspotWarnAt = 0;
 
-            if (v && hotspotShizuku() !== "ready") {
+            if (v && hotspotHelper() !== "ready") {
 
-                showToast(hotspotFix("nowrite").text, false);
-                host.hotspotAllowWrite();
+                if (hotspotInfo().paired === true) {
+
+                    host.hotspotStartHelper();
+                    showToast("Starting the hotspot helper", "wait");
+                } else {
+                    showToast("Pair the player with wireless debugging under Hotspot, so it can start its helper", false);
+                }
             }
 
             paintStatus();
@@ -22186,56 +22183,22 @@
             function () { return on("plugHotspot"); },
             function (v) { wantHotspot("plugHotspot", v); });
 
-        // The warning while a hotspot switch is on and Shizuku not ready
+        // The warning while a hotspot switch is on and the helper is not
+        // running
         const warnEl = document.createElement("div");
         const warnText = document.createElement("div");
-        let warnStatus = "";
 
         warnEl.style.cssText = "display:none;flex-direction:column;gap:8px;margin:6px 0 10px;padding:10px;border-radius:8px;border:1px solid #e57373;background:rgba(229,115,115,0.12)";
         warnText.style.cssText = "color:#ffb4b4;font-size:13px;line-height:1.4";
-
-        const warnBtn = makeButton("Give Shizuku permission", "#333", "#fff", function () {
-            hotspotDoFix(warnStatus);
-        });
-
         warnEl.appendChild(warnText);
-        warnEl.appendChild(warnBtn);
 
-        const nameRow = makeCarTextRow("Hotspot name for Shizuku", "hotspotSsid", "");
-        const passRow = makeCarTextRow("Hotspot password, empty for an open hotspot", "hotspotPass", "");
-
-        // The password stays on the phone, never in the web view's copy of
-        // the settings
-        passRow.querySelector("input").type = "password";
-        passRow.dataset.hostSkip = "1";
-
-        const bandRow = makeChoiceRow([
-            { label: "Any band", value: "any" },
-            { label: "2.4 GHz", value: "2" },
-            { label: "5 GHz", value: "5" }
-        ], function () { return host.getPref("hotspotBand", "any"); }, function (v) {
-            host.setPref("hotspotBand", v);
-        });
-
-        // Shizuku and the last hotspot command, a name and a value a row
+        // The helper, the hotspot and the last command, a name and a value
+        // a row
         const statusEl = document.createElement("div");
-        const askRow = document.createElement("div");
         const tryRow = document.createElement("div");
 
         statusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
-        askRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
         tryRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
-
-        const askBtn = makeButton("Give Shizuku permission", "#333", "#fff", function () {
-            host.hotspotAsk();
-        });
-
-        const writeRow = document.createElement("div");
-
-        writeRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
-        writeRow.appendChild(makeButton("Allow modifying system settings", "#333", "#fff", function () {
-            host.hotspotAllowWrite();
-        }));
 
         tryRow.appendChild(makeButton("Hotspot on now", "#333", "#fff", function () {
 
@@ -22247,42 +22210,101 @@
             host.hotspotSwitch(false);
             showToast("Switching the hotspot off", "wait");
         }));
-        askRow.appendChild(askBtn);
 
-        const words = {
-            ready: "Ready",
-            denied: "Running, permission needed",
-            stopped: "Installed, not running",
-            missing: "Not installed",
-            old: "Too old, update Shizuku"
+        // Pairing with wireless debugging and starting the helper
+        const pairRow = document.createElement("div");
+        const startRow = document.createElement("div");
+
+        pairRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        startRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+
+        const pairBtn = makeButton("Pair with wireless debugging", "#333", "#fff", function () {
+
+            host.hotspotPair();
+            showToast("Open Pair device with pairing code, then type the code in the player's notification", true);
+        });
+        const forgetBtn = makeButton("Forget pairing", "#333", "#fff", function () {
+
+            askYesNo("Forget the pairing?", "The player can then not start its helper until it is paired with wireless debugging again. Remove it from the paired devices under Wireless debugging as well.", "Forget", function () {
+
+                host.hotspotUnpair();
+                setTimeout(paintStatus, 300);
+            });
+        });
+        const startBtn = makeButton("Start the helper", "#333", "#fff", function () {
+
+            host.hotspotStartHelper();
+            showToast("Starting the hotspot helper", "wait");
+        });
+
+        pairRow.appendChild(pairBtn);
+        pairRow.appendChild(forgetBtn);
+        startRow.appendChild(startBtn);
+
+        // The command that starts the helper, to copy to a computer with adb
+        const commandEl = document.createElement("div");
+        const copyRow = document.createElement("div");
+        let command = "";
+
+        commandEl.style.cssText = "margin:4px 0 8px;padding:8px 10px;border-radius:8px;background:#1b1b20;color:rgb(232, 232, 232);font:12px/1.5 monospace;word-break:break-all;user-select:text;-webkit-user-select:text";
+        commandEl.textContent = "--";
+        copyRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+
+        const copyBtn = makeButton("Copy the command", "#333", "#fff", function () {
+
+            if (!command) {
+                return;
+            }
+
+            copyText(command).then(function (ok) {
+                showToast(ok ? "Copied the command to start the helper" : "Could not copy, select the command and copy it by hand", ok);
+            });
+        });
+
+        copyRow.appendChild(copyBtn);
+
+        const helperWords = {
+            running: "Running",
+            old: "Running, from an earlier version, start it again",
+            stopped: "Not running"
         };
         let lastSeen = null;
+        let lastStartSeen = null;
 
         const paintStatus = function () {
 
             const info = hotspotInfo();
+            const state = info.state ? info.state.charAt(0).toUpperCase() + info.state.slice(1) : "--";
             const rows = [
-                ["Android's way", info.write === true ? "Allowed" : "Not allowed yet"],
-                ["Shizuku", words[info.shizuku] || "Not known"],
+                ["Helper", helperWords[info.helper] || "Not known"],
+                ["Pairing", info.pairing ? info.pairing : info.paired === true ? "Paired with wireless debugging" : "Not paired"],
+                ["Helper start", info.startText || "--"],
+                ["Hotspot", state],
                 ["Last command", info.last || "--"],
                 ["Charger", typeof info.countdown === "number" && info.countdown >= 0
                     ? "Out, shutting down in " + info.countdown + " s" : "--"]
             ];
             const key = JSON.stringify(rows);
 
-            askRow.style.display = info.shizuku === "denied" ? "flex" : "none";
-            writeRow.style.display = info.write === true ? "none" : "flex";
+            // The warning for the hotspot switches
+            warnEl.style.display = hotspotWanted() && info.helper === "stopped" ? "flex" : "none";
 
-            // The warning for the hotspot switches, with what fixes it
-            warnStatus = hotspotWanted() && info.write !== true && info.shizuku !== "ready" ? "nowrite" : "";
-            warnEl.style.display = warnStatus ? "flex" : "none";
+            if (warnEl.style.display !== "none") {
+                warnText.textContent = hotspotFix("nohelper").text;
+            }
 
-            if (warnStatus) {
+            // Pair first, then start. Forget and start only once paired, start
+            // only while the helper is not running
+            pairBtn.textContent = info.paired === true ? "Pair again" : "Pair with wireless debugging";
+            forgetBtn.style.display = info.paired === true ? "" : "none";
+            startRow.style.display = info.paired === true && info.helper !== "running" ? "flex" : "none";
+            startBtn.disabled = info.starting === true;
+            startBtn.style.opacity = info.starting === true ? "0.5" : "1";
 
-                const fix = hotspotFix(warnStatus);
+            if (info.start && info.start !== command) {
 
-                warnText.textContent = fix.text;
-                warnBtn.textContent = fix.button;
+                command = info.start;
+                commandEl.textContent = command;
             }
 
             // A hotspot command answered, said with a note as well
@@ -22291,6 +22313,13 @@
             }
 
             lastSeen = info.last || "";
+
+            // A start of the helper finished, said with a note too
+            if (lastStartSeen !== null && info.starting !== true && info.startText && info.startText !== lastStartSeen) {
+                showToast(info.startText, info.startText === "The helper is running");
+            }
+
+            lastStartSeen = info.starting === true ? lastStartSeen : info.startText || "";
 
             if (statusEl.dataset.text === key) {
                 return;
@@ -22343,18 +22372,19 @@
         add(makeLabel("When the charger is plugged in"));
         add(withHint(hotspotOnRow, "Devices that use the phone's hotspot find it again without the phone being touched."));
         add(makeLabel("Hotspot"));
-        add(makeHint("The player switches the phone's own hotspot, with its own name and password, the way the quick settings tile does, once Android lets it modify system settings. Should the phone refuse, Shizuku, a free app, is used when it is installed and running."));
+        add(makeHint("Android lets only the system switch the hotspot, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It switches the phone's own hotspot, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(statusEl);
-        add(writeRow);
         add(tryRow);
-        add(makeHint("Hotspot on now and off now try it straight away. The last command says what Android answered."));
-        add(makeSubLabel("Through Shizuku, only if Android refuses"));
-        add(askRow);
-        add(nameRow);
-        add(passRow);
-        add(makeSubLabel("Band"));
-        add(bandRow);
-        add(makeHint("Shizuku sets up its own hotspot, so use the same name and password as the phone's own, and devices join it by themselves."));
+        add(makeHint("Hotspot on now and off now try it straight away. The last command says what happened."));
+        add(makeSubLabel("Starting the helper"));
+        add(pairRow);
+        add(startRow);
+        add(makeHint("Paired once, the player starts the helper by itself through wireless debugging: when it starts, after a restart of the phone or an update of the player, and when a hotspot setting above is switched on. Wireless debugging is switched on for the start and off again, and needs the phone on a Wi-Fi network."));
+        add(makeHint("To pair: Developer options have to be on (tap Build number in About phone seven times). Tap Pair with wireless debugging, switch Wireless debugging on in the screen that opens and tap Pair device with pairing code. Keep that dialog open, pull down the notification from the player, type the six digit code there and send it."));
+        add(makeSubLabel("From a computer instead"));
+        add(commandEl);
+        add(copyRow);
+        add(makeHint("For a phone that is not on Wi-Fi: run the command on a computer with adb connected to the phone."));
 
         paintSaveRows();
         settingsRefreshers.push(paintSaveRows);
@@ -24455,9 +24485,7 @@
         unplugPause: "0",
         unplugHotspot: "0",
         unplugQuiet: "0",
-        plugHotspot: "0",
-        hotspotSsid: "",
-        hotspotBand: "any"
+        plugHotspot: "0"
     };
 
     // Give the app back the settings it keeps itself. Only in the app, and
