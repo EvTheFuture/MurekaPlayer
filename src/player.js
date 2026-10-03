@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.96";
+    const VERSION = "1.9.9.98";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5261,6 +5261,55 @@
         setStatus((deep
             ? (pruneSkipped ? "Rescanned, " : "Rescan complete, ")
             : "Up to date, ") + parts.join(", "));
+    }
+
+    // Every stored song removed, one after the other, the settings counting.
+    // The library itself stays
+    let songClearing = null;
+    let songStatusPaint = null;
+
+    async function clearSongCache() {
+
+        if (songClearing) {
+            return;
+        }
+
+        try {
+
+            const store = await caches.open(AUDIO_CACHE);
+            const keys = await store.keys();
+
+            songClearing = { done: 0, total: keys.length };
+            showToast("Clearing the song cache", "wait");
+
+            if (songStatusPaint) {
+                songStatusPaint();
+            }
+
+            for (const key of keys) {
+
+                await store.delete(key);
+                songClearing.done += 1;
+            }
+
+            const total = songClearing.total;
+
+            cachedIds = new Set();
+            songAtHand.clear();
+            songClearing = null;
+            renderList();
+            publishHostSoon();
+            dbgLog("Cache", "song cache cleared, " + total + " songs");
+            showToast("Song cache cleared, " + total + (total === 1 ? " song" : " songs"), true);
+        } catch (e) {
+
+            songClearing = null;
+            showToast("Could not clear the song cache", false);
+        }
+
+        if (songStatusPaint) {
+            songStatusPaint();
+        }
     }
 
     // Wipe the cache and reset the view
@@ -16003,6 +16052,8 @@
             loadKind: running === true ? (runOwner || "load") : "",
             playsOn: settings.playsOn === true,
             songCache: hostSongCache(),
+            queueSig: hostQueueSig(),
+            listSig: hostListSig(),
             coverAhead: hostCoverAhead(),
             coverCacheMB: settings.coverCacheMB || 200,
             caching: cacheRunning === true,
@@ -16223,6 +16274,33 @@
         }, function () {
             hostReply(id, "");
         });
+    }
+
+    // Changes whenever the queue does, shuffled, rebuilt, moved along or
+    // edited, so the web view reads its queue again
+    function hostQueueSig() {
+
+        let h = 0;
+
+        for (const song of queue) {
+
+            const id = String(song && song.song_id);
+
+            for (let i = id.length - 4; i < id.length; i += 1) {
+                h = (h * 31 + (i >= 0 ? id.charCodeAt(i) : 7)) | 0;
+            }
+        }
+
+        return queue.length + ":" + queuePos + ":" + h;
+    }
+
+    // Changes when what the song list holds does: the filters, the source
+    // and the size of the library, so the web view reads its list again
+    function hostListSig() {
+
+        return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
+            creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
+            cache.songs.length].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -22026,6 +22104,7 @@
         const playbackPage = makePage();
         const nowPage = makePage();
         const publishPage = makePage();
+        const cachePage = makePage();
         const backupPage = makePage();
         const devPage = makePage();
         const aboutPage = makePage();
@@ -22041,6 +22120,7 @@
             playback: playbackPage,
             nowplaying: nowPage,
             publishing: publishPage,
+            cache: cachePage,
             backup: backupPage,
             developer: devPage,
             about: aboutPage
@@ -22241,7 +22321,134 @@
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
-        playbackPage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal. 0 downloads none ahead."));
+        // Cache control: the songs kept on this device, the details of
+        // songs, and in the app the covers for the web view
+        const songStatusEl = document.createElement("div");
+        const songButtonsRow = document.createElement("div");
+        let storageUsed = "";
+
+        songStatusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
+        songButtonsRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+
+        // How much room the player takes in this browser or app, all of it,
+        // asked for now and then since the answer takes a moment
+        const readStorage = function () {
+
+            if (!navigator.storage || !navigator.storage.estimate) {
+                return;
+            }
+
+            navigator.storage.estimate().then(function (est) {
+
+                const mb = (Number(est.usage) || 0) / (1024 * 1024);
+
+                storageUsed = (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + " MB";
+            }, function () {
+            });
+        };
+
+        const songCacheAll = makeButton("Cache all", "#333", "#fff", function () {
+            cacheAll();
+        });
+
+        const songClearBtn = makeButton("Clear song cache", "#333", "#fff", function () {
+
+            if (songClearing) {
+                return;
+            }
+
+            if (cacheRunning) {
+
+                showToast("Stop Cache all first", false);
+                return;
+            }
+
+            askYesNo("Clear the song cache?", "Every song stored on this device is removed. They are fetched from Mureka again when they play, the library itself stays.", "Clear", function () {
+                clearSongCache();
+            });
+        });
+
+        songButtonsRow.appendChild(songCacheAll);
+        songButtonsRow.appendChild(songClearBtn);
+
+        const paintSongStatus = function () {
+
+            let mine = 0;
+
+            for (const song of cache.songs) {
+
+                if (cachedIds.has(song.song_id)) {
+                    mine += 1;
+                }
+            }
+
+            const rows = [
+                ["Songs stored", mine + " of " + cache.songs.length],
+                ["Being cached", cacheRunning ? "Cache all, " + cachingIds.size + " now"
+                    : (cachingIds.size > 0 ? cachingIds.size + (cachingIds.size === 1 ? " song" : " songs") : "--")],
+                ["Clearing", songClearing ? songClearing.done + " of " + songClearing.total : "--"],
+                ["Room used", storageUsed ? storageUsed + " in all" : "--"]
+            ];
+            const key = JSON.stringify(rows);
+
+            songCacheAll.textContent = cacheRunning ? "Stop caching" : "Cache all";
+            songClearBtn.disabled = !!songClearing;
+            songClearBtn.style.opacity = songClearing ? "0.5" : "1";
+
+            if (songStatusEl.dataset.text === key) {
+                return;
+            }
+
+            songStatusEl.dataset.text = key;
+            songStatusEl.textContent = "";
+
+            for (const pair of rows) {
+
+                const row = document.createElement("div");
+                const name = document.createElement("div");
+                const value = document.createElement("div");
+
+                row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
+                name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
+                value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px";
+                name.textContent = pair[0];
+                value.textContent = pair[1];
+                row.appendChild(name);
+                row.appendChild(value);
+                songStatusEl.appendChild(row);
+            }
+
+            songStatusEl.lastChild.style.borderBottom = "none";
+        };
+
+        songStatusPaint = paintSongStatus;
+        readStorage();
+        paintSongStatus();
+        settingsRefreshers.push(function () {
+
+            readStorage();
+            paintSongStatus();
+        });
+
+        setInterval(function () {
+
+            if (songClearing || (settingsEl && cachePage.style.display !== "none" && settingsEl.offsetParent !== null)) {
+                paintSongStatus();
+            }
+        }, 1000);
+
+        setInterval(function () {
+
+            if (settingsEl && cachePage.style.display !== "none" && settingsEl.offsetParent !== null) {
+                readStorage();
+            }
+        }, 10000);
+
+        cachePage.appendChild(makeLabel("Songs"));
+        cachePage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal, and in the app so the web view plays them from the phone. 0 downloads none ahead."));
+        cachePage.appendChild(songStatusEl);
+        cachePage.appendChild(songButtonsRow);
+        cachePage.appendChild(makeHint("Cache all stores every song in the library, a second press stops it. Clear song cache removes the stored songs, the library itself stays. Room used is everything the player keeps here: songs, covers and song details."));
 
         // The seconds only matter with the switch on, so they are hidden
         // with it off, on the phone and in the web view alike
@@ -22455,6 +22662,10 @@
             function () { return settings.countsMaxMinutes; },
             function (v) { settings.countsMaxMinutes = v; }, 5, 1440, 5);
 
+        // The details of songs, plays, likes and lyrics, kept a while
+        cachePage.appendChild(makeLabel("Song details"));
+        cachePage.appendChild(withHint(countsAgeRow, "How long the plays, likes and lyrics of the songs coming up next are kept before they are fetched from Mureka again. The playing song's plays are fetched every time it starts."));
+
         const artStarsRow = makeBoolRow("Rating stars on the cover",
             function () { return settings.artStars; },
             function (v) {
@@ -22508,8 +22719,6 @@
             nowPage.appendChild(resendRow);
             nowPage.appendChild(makeHint("The cover goes out twice: first a loading picture, then the song's own two seconds later. Android only tells the car about a new cover when the song's text changes, so New title, the one to use, adds an invisible space to the title with the loading picture. New song changes only the song's id, Cover only just the picture. Used on resume, when Bluetooth connects and by the cover test under Developer."));
         }
-        libraryPage.appendChild(makeLabel("Counts"));
-        libraryPage.appendChild(withHint(countsAgeRow, "How long the plays and likes of the songs coming up next are kept before they are fetched from Mureka again. The playing song's are fetched every time it starts."));
 
         // Play counts: Mureka's lists carry none, each song is asked for
         // alone. On in the app, off by default in the bookmarklet and the
@@ -23207,20 +23416,20 @@
 
             coverClearRow.appendChild(clearBtn);
 
-            webPage.appendChild(makeLabel("Covers"));
-            webPage.appendChild(coverAheadRow);
-            webPage.appendChild(makeHint("The covers of the playing song and of as many songs coming up next are fetched to the phone ahead, whether or not a browser is open. The browser gets every cover from the phone, which keeps them."));
-            webPage.appendChild(coverSizeRow);
-            webPage.appendChild(makeHint("Once the covers take more room than this, those shown longest ago are removed first."));
-            webPage.appendChild(coverStatusEl);
-            webPage.appendChild(coverClearRow);
+            cachePage.appendChild(makeLabel("Covers for the web view"));
+            cachePage.appendChild(coverAheadRow);
+            cachePage.appendChild(makeHint("The covers of the playing song and of as many songs coming up next are fetched to the phone ahead, whether or not a browser is open. The browser gets every cover from the phone, which keeps them."));
+            cachePage.appendChild(coverSizeRow);
+            cachePage.appendChild(makeHint("Once the covers take more room than this, those shown longest ago are removed first."));
+            cachePage.appendChild(coverStatusEl);
+            cachePage.appendChild(coverClearRow);
 
             paintCoverStatus();
             settingsRefreshers.push(paintCoverStatus);
 
             setInterval(function () {
 
-                if (coverClearing || (settingsEl && webPage.style.display !== "none" && settingsEl.offsetParent !== null)) {
+                if (coverClearing || (settingsEl && cachePage.style.display !== "none" && settingsEl.offsetParent !== null)) {
                     paintCoverStatus();
                 }
             }, 1000);
@@ -23505,9 +23714,10 @@
             [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
             [connPage, "Connections", "How browsers on other devices reach the web view on this phone."],
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
-            [playbackPage, "Playback", "How the music plays and what is stored ahead of it."],
+            [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
+            [cachePage, "Cache control", "What the player keeps on this device so songs and covers are there without waiting for Mureka, and how much room it takes."],
             [backupPage, "Backup and restore", null],
             [devPage, "Developer", null],
             [aboutPage, "About", null]
@@ -23550,7 +23760,8 @@
         mainPage.appendChild(makeHint("What happens when you publish or change songs of your own."));
         mainPage.appendChild(makePageButton("Publishing", "publishing"));
         mainPage.appendChild(makeLabel("Data"));
-        mainPage.appendChild(makeHint("Save your ratings, song tweaks and settings, and bring them back."));
+        mainPage.appendChild(makeHint("What is stored on this device, and saving your ratings, song tweaks and settings to bring them back."));
+        mainPage.appendChild(makePageButton("Cache control", "cache"));
         mainPage.appendChild(makePageButton("Backup and restore", "backup"));
         mainPage.appendChild(makeLabel("Troubleshooting"));
         mainPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));

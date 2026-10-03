@@ -82,7 +82,8 @@ the new settings layout and a number of smaller improvements.
 - The small song list reaches from the stars down to the seek bar beside the
   cover. It is see through, hides the stars, Playing from and the lyrics
   while open, opens at the playing song, and keeps its cache dots, titles and
-  badges up to date. At its top: the number of songs, **Update**, **Rescan**,
+  badges up to date. At its top: the number of songs, **Mureka** or
+  **Queue** to switch between the songs and the queue, Sort, Update, Rescan,
   a button for the whole list and Close, and under them what the phone is
   loading with its turning ring and bar. A pull down at its top loads new
   songs as in the big list. As in the phone's list, a round button jumps to
@@ -128,6 +129,14 @@ the new settings layout and a number of smaller improvements.
   in, then fades in. **Cover cache in MB** (200 by default) sets how much
   room they may take, those shown longest ago go first, and the settings
   show how many there are, with **Clear cover cache** and its progress.
+- The song lists in the web view follow the phone: the queue is read again
+  when it is shuffled, rebuilt or moves on, and the song list when the
+  filters change.
+- **Cache control**, a settings page of its own under Data, gathers what the
+  player keeps on the device: Cache ahead, the songs stored with **Cache
+  all** and **Clear song cache** (with its progress, the library itself
+  stays), the room used, how long song details are kept, and in the app the
+  covers for the web view with their size and Clear.
 - Pull the song list down at its top and let go to load new songs from
   Mureka, as in the mobile player, with a finger or by dragging with a
   mouse. The list stays open with a turning ring until the phone has

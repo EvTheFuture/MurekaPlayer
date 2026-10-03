@@ -3207,9 +3207,10 @@
         <div id="mini">
             <div id="miniTop">
                 <span id="miniCount"></span>
+                <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs or the queue" title="Songs or the queue"><span class="lbl">Mureka</span></button>
                 <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
-                <button class="chip" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"><span class="lbl">Update</span></button>
-                <button class="chip" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"><span class="lbl">Rescan</span></button>
+                <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
+                <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
                 <button class="chip iconOnly" id="miniClose" type="button" data-icon="close" aria-label="Close the list" title="Close the list"></button>
             </div>
@@ -9584,6 +9585,42 @@
     // over the lists are read again in the new order
     let playsRound = false;
 
+    // The queue shuffled, rebuilt or moved along, or the song list's
+    // filters changed: the lists shown are read again, keeping their place
+    let queueSigSeen = null;
+    let listSigSeen = null;
+
+    function watchLists(s) {
+
+        const q = s && typeof s.queueSig === "string" ? s.queueSig : null;
+        const l = s && typeof s.listSig === "string" ? s.listSig : null;
+
+        if (q !== null && queueSigSeen !== null && q !== queueSigSeen) {
+
+            if ($("browse").style.display === "flex" && listView === "queue") {
+                loadQueue(false);
+            }
+
+            if (miniOpen && miniView === "queue") {
+                loadMini(false);
+            }
+        }
+
+        if (l !== null && listSigSeen !== null && l !== listSigSeen) {
+
+            if ($("browse").style.display === "flex" && listView !== "queue") {
+                loadList(true);
+            }
+
+            if (miniOpen && miniView !== "queue") {
+                loadMini(true);
+            }
+        }
+
+        queueSigSeen = q;
+        listSigSeen = l;
+    }
+
     let playsWasOn = true;
 
     function watchPlaysRound(s) {
@@ -9714,7 +9751,18 @@
         let loading = false;
         let tip = "";
 
-        if (here) {
+        const c = s && s.songCache ? s.songCache : null;
+
+        // The song comes from the phone when the phone has it, so its copy is
+        // what counts, in the browser too. Only a song the phone has nothing
+        // of yet shows the browser's own loading
+        if (c && (c.state === "stored" || c.state === "caching")) {
+
+            full = c.state === "stored";
+            loading = !full;
+            p = full ? 100 : (c.p >= 0 ? c.p : 100);
+            tip = full ? "The song is stored on the phone" : "The phone is fetching the song" + (c.p >= 0 ? ", " + c.p + "%" : "");
+        } else if (here) {
 
             const d = audio.duration;
             const b = audio.buffered;
@@ -9726,14 +9774,6 @@
             full = p >= 99;
             loading = !full;
             tip = full ? "The whole song is in this browser" : "Loading the song into this browser, " + p + "%";
-        } else if (s && s.songCache) {
-
-            const c = s.songCache;
-
-            full = c.state === "stored";
-            loading = c.state === "caching";
-            p = full ? 100 : (c.p >= 0 ? c.p : 100);
-            tip = full ? "The song is stored on the phone" : (loading ? "The phone is fetching the song" + (c.p >= 0 ? ", " + c.p + "%" : "") : "");
         }
 
         dot.classList.toggle("full", full);
@@ -10139,10 +10179,140 @@
     let miniPlayingAt = -1;
     let miniPlayingAtId = "";
 
+    // The small list shows Mureka's songs or the queue, switched with its
+    // button and kept for the next visit
+    let miniView = "mureka";
+
+    try {
+        miniView = localStorage.getItem("murekaMiniView") === "queue" ? "queue" : "mureka";
+    } catch (e) {
+        // Mureka's songs then
+    }
+
+    function paintMiniView() {
+
+        const queueShown = miniView === "queue";
+
+        setIcon($("miniView"), queueShown ? "queue" : "mureka");
+        setLabel($("miniView"), queueShown ? "Queue" : "Mureka");
+        $("miniView").classList.toggle("on", queueShown);
+    }
+
+    paintMiniView();
+
+    $("miniView").addEventListener("click", function () {
+
+        miniView = miniView === "queue" ? "mureka" : "queue";
+
+        try {
+            localStorage.setItem("murekaMiniView", miniView);
+        } catch (e) {
+            // Only for this visit then
+        }
+
+        paintMiniView();
+        loadMini(true);
+    });
+
+    // The queue in the small list, all of it, played songs dimmed, a tap
+    // goes to that song, opened at the playing one
+    function loadMiniQueue() {
+
+        const token = miniToken;
+
+        miniBusy = true;
+
+        fetch("/queue?q=", { cache: "no-store" }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            if (token !== miniToken) {
+                return;
+            }
+
+            miniBusy = false;
+
+            if (!data || !data.items) {
+                return;
+            }
+
+            const box = $("miniRows");
+            const keep = box.scrollTop;
+            const first = box.children.length === 0;
+            const items = listSort ? sortRows(data.items) : data.items;
+
+            rowMeta = data.meta || rowMeta;
+            box.textContent = "";
+
+            items.forEach(function (item, i) {
+
+                const row = makeRow(item, i + 1);
+
+                row.dataset.qi = String(item.index);
+                row.classList.toggle("playing", item.index === data.pos);
+                row.classList.toggle("past", item.index < data.pos);
+
+                // A tap goes to that place in the queue, not the song anew
+                row.addEventListener("click", function (ev) {
+
+                    ev.stopImmediatePropagation();
+                    send("queueJump", item.index);
+                }, true);
+
+                box.appendChild(row);
+
+                for (const thumb of row.querySelectorAll(".thumb")) {
+
+                    if (thumbObserver && miniThumbs) {
+
+                        thumbObserver.unobserve(thumb);
+                        miniThumbs.observe(thumb);
+                    }
+                }
+            });
+
+            miniTotal = items.length;
+            miniLoaded = items.length;
+            $("miniCount").textContent = "Queue, " + (data.pos + 1) + " of " + data.total;
+
+            if (first) {
+                showMiniPlaying();
+            } else {
+
+                miniQuietUntil = Date.now() + 400;
+                box.scrollTop = keep;
+            }
+
+            updateMiniLocate();
+        }).catch(function () {
+
+            if (token === miniToken) {
+                miniBusy = false;
+            }
+        });
+    }
+
     // A page of songs, the first one anew. Opened, it goes on to the
     // playing song and shows it in the middle. Done is called once the page
     // is in, a larger limit is for the jump to the end of the list
     function loadMini(reset, done, limit) {
+
+        if (miniView === "queue") {
+
+            if (reset) {
+
+                miniToken += 1;
+                miniBusy = false;
+                $("miniRows").textContent = "";
+                hideMiniEdge();
+            }
+
+            if (miniOpen && !miniBusy) {
+                loadMiniQueue();
+            }
+
+            return;
+        }
 
         if (reset) {
 
@@ -10433,6 +10603,12 @@
     // How many songs, what the phone is working on shows in the line
     // under it
     function paintMiniCount() {
+
+        // The queue's line is written as it is read
+        if (miniView === "queue") {
+            return;
+        }
+
         $("miniCount").textContent = miniTotal + " song" + (miniTotal === 1 ? "" : "s");
     }
 
@@ -10726,6 +10902,7 @@
         watchPlaysRound(s);
         paintCachingDots(s);
         paintSongDot(s);
+        watchLists(s);
         watchMini(s);
         watchToast(s);
         watchCarGone(s);
