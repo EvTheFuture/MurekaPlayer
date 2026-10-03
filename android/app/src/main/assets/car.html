@@ -1180,8 +1180,11 @@
         cursor: pointer;
     }
 
+    /* Songs of the queue already played are greyed out, cover and all, as
+       in the phone's list */
     .row.past {
         color: var(--muted);
+        opacity: 0.45;
     }
 
     .rowNum {
@@ -6260,7 +6263,7 @@
     // Mureka when it does not have them yet. The page loads each one itself,
     // counting what has come in, so a placeholder can show how far it is,
     // and only then shows the picture, which the browser has by then. At
-    // most six at a time, a list page of thumbnails asks in turn
+    // most three at a time, a list page of thumbnails asks in turn
     function coverAt(url) {
         return "/cover?u=" + encodeURIComponent(url);
     }
@@ -6278,7 +6281,9 @@
 
     function pumpCovers() {
 
-        while (coverBusy < 6 && coverQueue.length > 0) {
+        // Three at a time: a browser opens at most six connections to the
+        // phone, and the state, the song and the lists need theirs
+        while (coverBusy < 3 && coverQueue.length > 0) {
 
             const job = coverQueue.shift();
 
@@ -6293,11 +6298,34 @@
         }
     }
 
+    // A cover that stops coming is given up after a while, so it cannot
+    // hold its place in the six for good and stall every cover after it.
+    // It is tried again a little later like any failed one
+    const COVER_STALL_MS = 8000;
+
     async function readCover(job) {
+
+        const ctrl = window.AbortController ? new AbortController() : null;
+        let stall = 0;
+
+        const watch = function () {
+
+            clearTimeout(stall);
+
+            if (ctrl) {
+                stall = setTimeout(function () {
+
+                    dbgLog("Covers", "a cover stopped coming, asked again later");
+                    ctrl.abort();
+                }, COVER_STALL_MS);
+            }
+        };
 
         try {
 
-            const res = await fetch(coverAt(job.url));
+            watch();
+
+            const res = await fetch(coverAt(job.url), ctrl ? { signal: ctrl.signal } : {});
 
             if (!res.ok) {
                 return false;
@@ -6330,6 +6358,8 @@
                     parts.push(part.value);
                 }
 
+                // Still coming, the wait starts again
+                watch();
                 seen += part.value.byteLength;
                 job.progress(Math.min(100, Math.round(seen * 100 / total)));
             }
@@ -6341,6 +6371,8 @@
             return true;
         } catch (e) {
             return false;
+        } finally {
+            clearTimeout(stall);
         }
     }
 

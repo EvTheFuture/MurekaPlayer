@@ -126,7 +126,9 @@ the new settings layout and a number of smaller improvements.
   cache and fetches the covers of the playing song and of the next ones in
   the queue ahead (**Covers ahead**, 5 by default) whether or not a browser
   is open. A cover on its way pulses with a cyan pie filling as it comes
-  in, then fades in. **Cover cache in MB** (200 by default) sets how much
+  in, then fades in, three at a time, a cover that stops coming is asked
+  for again and in the end fetched straight from Mureka. **Cover cache in
+  MB** (200 by default) sets how much
   room they may take, those shown longest ago go first, and the settings
   show how many there are, with **Clear cover cache** and its progress.
 - The song lists in the web view follow the phone: the queue is read again

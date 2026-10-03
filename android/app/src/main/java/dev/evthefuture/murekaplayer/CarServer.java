@@ -553,12 +553,20 @@ final class CarServer {
             return;
         }
 
+        long asked = System.currentTimeMillis();
         java.io.File file = CoverCache.get(url);
+        long took = System.currentTimeMillis() - asked;
 
         if (file == null) {
 
+            Hub.note("Covers", "a cover could not be given to the web view, after " + took + " ms");
             send(out, 502, "text/plain", bytes("Mureka did not give the cover"));
             return;
+        }
+
+        // A slow one says so, to see where covers get stuck
+        if (took > 3000) {
+            Hub.note("Covers", "a cover took " + took + " ms to get from Mureka");
         }
 
         String head = "HTTP/1.1 200 OK\r\nContent-Type: " + CoverCache.type(file) + "\r\n"
