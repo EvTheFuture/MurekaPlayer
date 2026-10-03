@@ -8118,6 +8118,12 @@
             const first = row.firstElementChild;
             const control = first ? first.nextElementSibling : null;
 
+            // A name and its value, as in the play counts table, or a word at
+            // the right edge, has no switch beside it
+            if (row.classList.contains("kv") || row.classList.contains("spread")) {
+                continue;
+            }
+
             if (!control || !(first.classList.contains("pText") || first.classList.contains("pCol"))) {
                 continue;
             }
