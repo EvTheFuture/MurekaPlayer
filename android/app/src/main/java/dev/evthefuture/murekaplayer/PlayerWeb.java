@@ -608,6 +608,13 @@ final class PlayerWeb {
             return appContext != null && BootReceiver.takeUpdateRestart(appContext);
         }
 
+        // The answer to one of the app's slower questions, a piece of a song
+        // for the web view among them
+        @JavascriptInterface
+        public void reply(String id, String value) {
+            Hub.reply(id, value);
+        }
+
         // The covers kept for the web view: how many, how much room, and how
         // far a clearing has come
         @JavascriptInterface

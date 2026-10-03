@@ -67,7 +67,10 @@ the new settings layout and a number of smaller improvements.
   synced rolling lyrics beside or on the cover, half stars, like with the
   number of hearts (left out when the one heart is your own), plays, a
   Public or Draft badge, up next, **Playing from** with the source and
-  filters, the waveform seek bar and the status line.
+  filters, the waveform seek bar and the status line. A dot by the time
+  shows how much of the playing song is there, in the browser when the
+  music plays there, on the phone otherwise: a cyan pie fading in and out
+  while it fills, solid once all of it has come.
 - Transport bar with its own order, set with press and hold or the editor in
   the settings, and optional names under the buttons. **Songs** and **List**
   are among its buttons, to be placed or left out like the others, either
@@ -112,6 +115,12 @@ the new settings layout and a number of smaller improvements.
   The dot is about the song on the phone: cyan once it is stored, and
   while it is being cached it fades in and out and fills smoothly like a
   pie as the song comes in.
+- With the music in the browser, songs are played out of the phone's own
+  song cache, over the local network, seeking included. A song the phone
+  does not have yet comes from Mureka as before while the phone fetches it
+  for the next time, so with Cache ahead or Cache all the browser rarely
+  waits for Mureka. Should the phone fail to give a song, it is played
+  straight from Mureka.
 - Covers in the web view come from the phone, which keeps them in its own
   cache and fetches the covers of the playing song and of the next ones in
   the queue ahead (**Covers ahead**, 5 by default) whether or not a browser

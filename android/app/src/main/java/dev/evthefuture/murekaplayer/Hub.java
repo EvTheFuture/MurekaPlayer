@@ -361,6 +361,62 @@ final class Hub {
         }
     }
 
+    // The answers of the player's slower host functions, by request, the
+    // ones that read a file and come back through the bridge when done
+    private static final java.util.concurrent.ConcurrentHashMap<String, BlockingQueue<String>> REPLIES =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicLong REPLY_SEQ = new java.util.concurrent.atomic.AtomicLong();
+
+    // Call one of the player's host functions that answers later, with the
+    // request's name first, and wait for its answer through the bridge. An
+    // empty answer when the player is not there, does not have the
+    // function, or takes longer than the timeout
+    static String requestLater(String function, String argJson, long timeoutMs) {
+
+        final String id = "r" + REPLY_SEQ.incrementAndGet();
+        final BlockingQueue<String> answer = new ArrayBlockingQueue<>(1);
+        final String js = "window." + function + " ? window." + function + "(" + JSONObject.quote(id) + ", "
+            + argJson + ") : (window.MurekaHost && window.MurekaHost.reply(" + JSONObject.quote(id) + ", \"\"))";
+
+        REPLIES.put(id, answer);
+
+        MAIN.post(() -> {
+
+            WebView web = webRef.get();
+
+            if (web == null) {
+
+                answer.offer("");
+                return;
+            }
+
+            web.evaluateJavascript(js, null);
+        });
+
+        try {
+
+            String value = answer.poll(timeoutMs, TimeUnit.MILLISECONDS);
+
+            return value == null ? "" : value;
+        } catch (InterruptedException e) {
+
+            Thread.currentThread().interrupt();
+            return "";
+        } finally {
+            REPLIES.remove(id);
+        }
+    }
+
+    // The player's answer to a request made with requestLater
+    static void reply(String id, String value) {
+
+        BlockingQueue<String> answer = id == null ? null : REPLIES.get(id);
+
+        if (answer != null) {
+            answer.offer(value == null ? "" : value);
+        }
+    }
+
     static void quit() {
 
         MAIN.post(() -> {

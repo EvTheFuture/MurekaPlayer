@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.94";
+    const VERSION = "1.9.9.96";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16002,6 +16002,7 @@
             loading: running === true,
             loadKind: running === true ? (runOwner || "load") : "",
             playsOn: settings.playsOn === true,
+            songCache: hostSongCache(),
             coverAhead: hostCoverAhead(),
             coverCacheMB: settings.coverCacheMB || 200,
             caching: cacheRunning === true,
@@ -16106,6 +16107,144 @@
     }
 
     // The cache dot the phone shows in front of a song
+    // The web view plays songs out of the phone's own song cache, the app's
+    // web server asks for them here a piece at a time. The last few songs
+    // read are kept at hand, a song is asked for in many pieces
+    const songAtHand = new Map();
+
+    function hostReply(id, value) {
+
+        try {
+            window.MurekaHost.reply(id, value);
+        } catch (e) {
+            // The app has no way to hear it, it gives up after its wait
+        }
+    }
+
+    // The stored song behind a Mureka address, kept at hand, or null
+    async function storedSong(url) {
+
+        if (songAtHand.has(url)) {
+
+            const kept = songAtHand.get(url);
+
+            // Last used now
+            songAtHand.delete(url);
+            songAtHand.set(url, kept);
+
+            return kept;
+        }
+
+        const store = await caches.open(AUDIO_CACHE);
+        const resp = await store.match(url);
+
+        if (!resp) {
+            return null;
+        }
+
+        const blob = await resp.blob();
+        const kept = { blob: blob, type: blob.type || resp.headers.get("Content-Type") || "audio/mpeg" };
+
+        songAtHand.set(url, kept);
+
+        // Three songs at hand at most
+        while (songAtHand.size > 3) {
+            songAtHand.delete(songAtHand.keys().next().value);
+        }
+
+        return kept;
+    }
+
+    // The song with this address, from the library or the queue
+    function songForUrl(url) {
+
+        const match = function (s) {
+            return s && songUrl(s) === url;
+        };
+
+        return cache.songs.find(match) || queue.find(match) || null;
+    }
+
+    // How big the stored song is and its kind. A song not stored yet answers
+    // nothing, so the browser gets it from Mureka this time, and the phone
+    // starts fetching it for the next
+    function hostSongInfo(id, url) {
+
+        storedSong(String(url)).then(function (kept) {
+
+            if (kept) {
+
+                hostReply(id, JSON.stringify({ size: kept.blob.size, type: kept.type }));
+                return;
+            }
+
+            hostReply(id, "");
+
+            const song = songForUrl(String(url));
+
+            if (song && !cachingIds.has(song.song_id)) {
+                fetchToCache(song);
+            }
+        }, function () {
+            hostReply(id, "");
+        });
+    }
+
+    // One piece of a stored song, as base64, read straight from the file
+    function hostSongPart(id, ask) {
+
+        const url = ask && ask.u ? String(ask.u) : "";
+        const start = Math.max(0, Number(ask && ask.start) || 0);
+        const len = Math.max(0, Math.min(1048576, Number(ask && ask.len) || 0));
+
+        storedSong(url).then(function (kept) {
+
+            if (!kept || len === 0) {
+
+                hostReply(id, "");
+                return;
+            }
+
+            const reader = new FileReader();
+
+            reader.onload = function () {
+
+                const text = String(reader.result || "");
+                const comma = text.indexOf(",");
+
+                hostReply(id, comma >= 0 ? text.slice(comma + 1) : "");
+            };
+
+            reader.onerror = function () {
+                hostReply(id, "");
+            };
+
+            reader.readAsDataURL(kept.blob.slice(start, start + len));
+        }, function () {
+            hostReply(id, "");
+        });
+    }
+
+    // Whether the playing song is stored on the phone, or how far it has
+    // come while it is being fetched, for the dot on the web view's main page
+    function hostSongCache() {
+
+        if (!currentSong) {
+            return null;
+        }
+
+        const id = currentSong.song_id;
+
+        if (cachingIds.has(id)) {
+
+            const p = cachingProgress.has(id) ? cachingProgress.get(id) : 0;
+
+            return { state: "caching", p: p < 0 ? -1 : Math.round(p * 100) };
+        }
+
+        return { state: cachedIds.has(id) ? "stored" : "", p: cachedIds.has(id) ? 100 : 0 };
+    }
+
     // The covers the phone keeps ahead for the web view: the playing song's
     // and those of the songs coming up next in the queue, as many as the
     // settings say
@@ -17338,6 +17477,8 @@
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
         window.__murekaHostSongMenu = hostSongMenu;
+        window.__murekaHostSongInfo = hostSongInfo;
+        window.__murekaHostSongPart = hostSongPart;
 
         ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
             document.addEventListener(type, publishHostSoon, true);

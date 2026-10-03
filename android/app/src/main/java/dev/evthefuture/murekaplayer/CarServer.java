@@ -309,11 +309,17 @@ final class CarServer {
             }
 
             int length = 0;
+            String range = "";
             String line;
 
             while ((line = readLine(in)) != null && !line.isEmpty()) {
 
                 int colon = line.indexOf(':');
+
+                // The part of a song the browser asks for, to seek in it
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("range")) {
+                    range = line.substring(colon + 1).trim();
+                }
 
                 if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-length")) {
 
@@ -401,6 +407,8 @@ final class CarServer {
                 sendAudio(out, param(query, "url"));
             } else if ("GET".equals(method) && "/cover".equals(path)) {
                 sendCover(out, param(query, "u"));
+            } else if ("GET".equals(method) && "/song".equals(path)) {
+                sendSong(out, param(query, "u"), range);
             } else if ("POST".equals(method) && "/cmd".equals(path)) {
                 runCommand(out, body);
             } else {
@@ -567,6 +575,155 @@ final class CarServer {
             while ((n = in.read(buf)) != -1) {
                 out.write(buf, 0, n);
             }
+        }
+
+        out.flush();
+    }
+
+    // A song for the browser out of the phone's own song cache, read from
+    // the player a piece at a time, the part asked for when the browser
+    // seeks. A song the phone does not have yet sends the browser to Mureka
+    // for it, as before, while the phone fetches it for the next time
+    private static final int SONG_PIECE = 256 * 1024;
+
+    private void sendSong(OutputStream out, String url, String range) throws IOException {
+
+        lastPoll = System.currentTimeMillis();
+
+        if (!CoverCache.allowed(url)) {
+
+            send(out, 403, "text/plain", bytes("Not a Mureka song"));
+            return;
+        }
+
+        String info = Hub.requestLater("__murekaHostSongInfo", JSONObject.quote(url), 8000);
+        long size = 0;
+        String type = "audio/mpeg";
+
+        try {
+
+            if (!info.isEmpty()) {
+
+                JSONObject o = new JSONObject(info);
+
+                size = (long) o.optDouble("size", 0);
+                type = o.optString("type", type);
+            }
+        } catch (JSONException e) {
+            size = 0;
+        }
+
+        // Not on the phone, the browser gets it from Mureka itself
+        if (size <= 0) {
+
+            String head = "HTTP/1.1 302 Found\r\nLocation: " + url + "\r\n"
+                + "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+
+            out.write(head.getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            return;
+        }
+
+        long start = 0;
+        long end = size - 1;
+        boolean partial = false;
+
+        // bytes=start-end, bytes=start- or bytes=-last
+        if (range.startsWith("bytes=")) {
+
+            String spec = range.substring(6).split(",")[0].trim();
+            int dash = spec.indexOf('-');
+
+            try {
+
+                if (dash == 0) {
+
+                    long last = Long.parseLong(spec.substring(1).trim());
+
+                    start = Math.max(0, size - last);
+                } else if (dash > 0) {
+
+                    start = Long.parseLong(spec.substring(0, dash).trim());
+
+                    String rest = spec.substring(dash + 1).trim();
+
+                    if (!rest.isEmpty()) {
+                        end = Math.min(size - 1, Long.parseLong(rest));
+                    }
+                }
+
+                partial = true;
+            } catch (NumberFormatException e) {
+
+                start = 0;
+                end = size - 1;
+            }
+        }
+
+        if (start > end || start >= size) {
+
+            String head = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */" + size + "\r\n"
+                + "Content-Length: 0\r\nConnection: close\r\n\r\n";
+
+            out.write(head.getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            return;
+        }
+
+        StringBuilder head = new StringBuilder();
+
+        head.append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
+        head.append("Content-Type: ").append(type).append("\r\n");
+        head.append("Content-Length: ").append(end - start + 1).append("\r\n");
+
+        if (partial) {
+            head.append("Content-Range: bytes ").append(start).append('-').append(end).append('/').append(size).append("\r\n");
+        }
+
+        head.append("Accept-Ranges: bytes\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
+        out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
+
+        long pos = start;
+
+        while (pos <= end) {
+
+            int want = (int) Math.min(SONG_PIECE, end - pos + 1);
+            JSONObject ask = new JSONObject();
+
+            try {
+
+                ask.put("u", url);
+                ask.put("start", pos);
+                ask.put("len", want);
+            } catch (JSONException e) {
+                break;
+            }
+
+            String b64 = Hub.requestLater("__murekaHostSongPart", ask.toString(), 8000);
+
+            // The player could not read on, the connection just ends and the
+            // browser asks again from where it got to
+            if (b64.isEmpty()) {
+
+                Hub.note("Web view", "a song piece could not be read at " + pos + " of " + size);
+                break;
+            }
+
+            byte[] piece;
+
+            try {
+                piece = java.util.Base64.getDecoder().decode(b64);
+            } catch (IllegalArgumentException e) {
+                break;
+            }
+
+            if (piece.length == 0) {
+                break;
+            }
+
+            out.write(piece);
+            pos += piece.length;
+            lastPoll = System.currentTimeMillis();
         }
 
         out.flush();
