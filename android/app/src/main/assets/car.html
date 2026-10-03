@@ -792,18 +792,22 @@
 
     /* A short word about what just happened, over everything else */
     /* The charger pulled out on the phone, the countdown to the shutdown
-       with the button to skip it, above the notes */
+       above the notes, the text on one row and the button to skip it on
+       the row below */
     #unplugPop {
         position: fixed;
         left: 50%;
         bottom: 14vh;
         transform: translateX(-50%);
         display: none;
+        flex-direction: column;
         align-items: center;
-        gap: 1.2em;
+        gap: 0.7em;
         max-width: 90vw;
-        padding: 12px 14px 12px 20px;
-        border-radius: 30px;
+        box-sizing: border-box;
+        padding: 14px 20px;
+        border-radius: 20px;
+        text-align: center;
         border: 2px solid var(--accent);
         background: rgba(20, 20, 20, 0.95);
         color: var(--text);

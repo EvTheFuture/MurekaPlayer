@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.110";
+    const VERSION = "1.9.9.112";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16198,9 +16198,10 @@
 
         if (!unplugEl) {
 
+            // Two rows: the countdown text, and the button below it
             unplugEl = document.createElement("div");
             unplugEl.setAttribute("data-mureka-notice", "1");
-            unplugEl.style.cssText = "position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:2147483647;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:10px 12px 10px 16px;border-radius:22px;background:#26262c;border:2px solid #48e1eb;color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,0.5)";
+            unplugEl.style.cssText = "position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:2147483647;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:12px 16px;border-radius:16px;background:#26262c;border:2px solid #48e1eb;color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,0.5)";
 
             unplugTextEl = document.createElement("span");
 
@@ -22164,14 +22165,14 @@
                     host.hotspotStartHelper();
                     showToast("Starting the hotspot helper", "wait");
                 } else {
-                    showToast("Pair the player with wireless debugging under Hotspot, so it can start its helper", false);
+                    showToast("Pair the player with wireless debugging further down this page, so it can start its helper", false);
                 }
             }
 
             paintStatus();
         };
 
-        const hotspotOffRow = makeBoolRow("Switch the hotspot off",
+        const hotspotOffRow = makeBoolRow("Switch the hotspot off when unplugged",
             function () { return on("unplugHotspot"); },
             function (v) { wantHotspot("unplugHotspot", v); });
 
@@ -22179,7 +22180,7 @@
             function () { return on("unplugQuiet"); },
             function (v) { put("unplugQuiet", v); });
 
-        const hotspotOnRow = makeBoolRow("Switch the hotspot on",
+        const hotspotOnRow = makeBoolRow("Switch the hotspot on when plugged in",
             function () { return on("plugHotspot"); },
             function (v) { wantHotspot("plugHotspot", v); });
 
@@ -22200,16 +22201,20 @@
         statusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
         tryRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
 
-        tryRow.appendChild(makeButton("Hotspot on now", "#333", "#fff", function () {
+        // Disabled while the last known state already is what they ask for
+        const onNowBtn = makeButton("Hotspot on now", "#333", "#fff", function () {
 
             host.hotspotSwitch(true);
             showToast("Switching the hotspot on", "wait");
-        }));
-        tryRow.appendChild(makeButton("Hotspot off now", "#333", "#fff", function () {
+        });
+        const offNowBtn = makeButton("Hotspot off now", "#333", "#fff", function () {
 
             host.hotspotSwitch(false);
             showToast("Switching the hotspot off", "wait");
-        }));
+        });
+
+        tryRow.appendChild(onNowBtn);
+        tryRow.appendChild(offNowBtn);
 
         // Pairing with wireless debugging and starting the helper
         const pairRow = document.createElement("div");
@@ -22301,6 +22306,16 @@
             startBtn.disabled = info.starting === true;
             startBtn.style.opacity = info.starting === true ? "0.5" : "1";
 
+            // On now does nothing while the hotspot is on, off now while it
+            // is off. With the state not known, both stay usable
+            const isOn = info.state === "on";
+            const isOff = info.state === "off";
+
+            onNowBtn.disabled = isOn;
+            onNowBtn.style.opacity = isOn ? "0.5" : "1";
+            offNowBtn.disabled = isOff;
+            offNowBtn.style.opacity = isOff ? "0.5" : "1";
+
             if (info.start && info.start !== command) {
 
                 command = info.start;
@@ -22362,25 +22377,56 @@
             }
         };
 
+        // A numbered list of steps, each a hint of its own with its number
+        // in the text, so the web view's copy of the settings keeps the
+        // numbers. Wrapped lines start under the text, not the number
+        const makeSteps = function (steps) {
+
+            const list = document.createElement("div");
+
+            list.style.cssText = "margin:2px 0 4px";
+
+            steps.forEach(function (text, i) {
+
+                const item = makeHint((i + 1) + ". " + text);
+
+                item.style.marginTop = "2px";
+                item.style.paddingLeft = "14px";
+                item.style.textIndent = "-14px";
+                list.appendChild(item);
+            });
+
+            return list;
+        };
+
         page.appendChild(withHint(masterRow, "Turns everything below on or off together. Off, nothing happens when the charger is pulled out or plugged in."));
-        add(warnEl);
         add(makeLabel("When the charger is pulled out"));
         add(withHint(graceRow, "How long to wait before anything is stopped. Plugged in again in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once."));
         add(withHint(pauseRow, "The music stops, so it does not carry on from the phone's speaker after you have gone."));
-        add(withHint(hotspotOffRow, "The hotspot warms the phone the most, and with nothing connected it does no good."));
         add(withHint(quietRow, "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. Starts again by itself when the charger is plugged in."));
-        add(makeLabel("When the charger is plugged in"));
-        add(withHint(hotspotOnRow, "Devices that use the phone's hotspot find it again without the phone being touched."));
-        add(makeLabel("Hotspot"));
+
+        // The hotspot after the basic options, marked as experimental
+        add(makeLabel("Hotspot (experimental, advanced)"));
         add(makeHint("Android lets only the system switch the hotspot, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It switches the phone's own hotspot, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
+        add(warnEl);
+        add(withHint(hotspotOffRow, "After the grace time. The hotspot warms the phone the most, and with nothing connected it does no good."));
+        add(withHint(hotspotOnRow, "Devices that use the phone's hotspot find it again without the phone being touched."));
         add(statusEl);
         add(tryRow);
         add(makeHint("Hotspot on now and off now try it straight away. The last command says what happened."));
-        add(makeSubLabel("Starting the helper"));
+        add(makeSubLabel("Pairing with wireless debugging"));
         add(pairRow);
         add(startRow);
-        add(makeHint("Paired once, the player starts the helper by itself through wireless debugging: when it starts, after a restart of the phone or an update of the player, and when a hotspot setting above is switched on. Wireless debugging is switched on for the start and off again, and needs the phone on a Wi-Fi network."));
-        add(makeHint("To pair: Developer options have to be on (tap Build number in About phone seven times). Tap Pair with wireless debugging, switch Wireless debugging on in the screen that opens and tap Pair device with pairing code. Keep that dialog open, pull down the notification from the player, type the six digit code there and send it."));
+        add(makeHint("This is experimental and may not work on every phone. The player is paired with wireless debugging once:"));
+        add(makeSteps([
+            "Switch Developer options on: tap Build number in About phone seven times.",
+            "Tap Pair with wireless debugging above.",
+            "Switch Wireless debugging on in the screen that opens.",
+            "Open Pair device with pairing code.",
+            "Keep that dialog open.",
+            "Pull down the player's notification, type the six digit code there and send it."
+        ]));
+        add(makeHint("Afterwards the player switches the hotspot by itself through wireless debugging. Each switch needs the phone on Wi-Fi, and wireless debugging is switched on for it and off again afterwards."));
         add(makeSubLabel("From a computer instead"));
         add(commandEl);
         add(copyRow);

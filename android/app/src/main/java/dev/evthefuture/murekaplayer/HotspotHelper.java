@@ -26,34 +26,27 @@ import android.content.ContextWrapper;
 import android.os.IBinder;
 import android.os.Looper;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-// The hotspot helper. Not part of the running app: it is started as the
-// debugging shell with app_process, from the app's own APK, and keeps
-// running until the phone restarts. The shell may switch tethering, the
-// app may not, so the app asks the helper over a local socket that only
-// the app's own token may use. The hotspot is switched the way the quick
-// settings tile does it, with the phone's own name and password.
+// The hotspot helper. Not part of the running app: it runs as the
+// debugging shell with app_process, from the app's own APK. The shell may
+// switch tethering, the app may not. Each run takes one command, prints
+// one line with the answer and exits, so nothing is left running between
+// switches. The hotspot is switched the way the quick settings tile does
+// it, with the phone's own name and password.
 //
-// Started in the foreground over adb, one command, then it exits:
+// The app runs it over wireless debugging, in the foreground, and reads
+// the line it prints from the shell stream:
 // CLASSPATH=<the app's base.apk> app_process /system/bin
 //     dev.evthefuture.murekaplayer.HotspotHelper <app uid> <version> <command>
-// A backgrounded helper does not survive the adb session closing, and an
-// abstract socket is blocked (untrusted_app connectto shell). The answer
-// is the one line this process prints.
 //
 // ping -> ok <version code>
 // state -> on, off, switching on, switching off, failed or unknown
@@ -62,9 +55,6 @@ import java.util.function.Supplier;
 //
 // No lambdas, kept the same as the tested version run from a plain dex
 public final class HotspotHelper {
-
-    // The app binds this. The helper only connects out
-    static final int PORT = 39173;
 
     private static final String SHELL = "com.android.shell";
 
@@ -99,8 +89,8 @@ public final class HotspotHelper {
 
     public static void main(String[] args) {
 
-        // Foreground, one command, then exit. A backgrounded helper dies
-        // when the adb session closes, which is what the empty log was
+        // Foreground, one command, then exit. A helper left in the
+        // background would end when the adb session closes
         if (args.length < 3) {
 
             say("usage: HotspotHelper <app uid> <app version code> <ping|state|on|off>");
@@ -138,7 +128,7 @@ public final class HotspotHelper {
         System.exit(0);
     }
 
-    // A line to the log the start command sends the output to, written at
+    // The answer, one line on the shell stream the app reads, flushed at
     // once so it is there even if the helper ends right after
     private static void say(String text) {
 
