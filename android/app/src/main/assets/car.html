@@ -9899,14 +9899,15 @@
         });
     }
 
-    // The countdown after the charger was pulled out on the phone, with the
-    // button that skips the shutdown
+    // The countdown after the phone went on battery or its chosen Bluetooth
+    // devices disconnected, with the button that skips the shutdown
     function paintUnplug(s) {
 
         const left = s && typeof s.unplugLeft === "number" ? s.unplugLeft : -1;
+        const why = s && s.unplugWhy === "bluetooth" ? "Bluetooth disconnected" : "Running on battery";
 
         if (left > 0) {
-            $("unplugText").textContent = "Charger out, shutting down in " + left + " s";
+            $("unplugText").textContent = why + ", shutting down in " + left + " s";
         }
 
         $("unplugPop").style.display = left > 0 ? "flex" : "none";
@@ -9920,7 +9921,8 @@
 
         const why = s && typeof s.hotspotWarn === "string" ? s.hotspotWarn : "";
         const words = {
-            nohelper: "The hotspot helper is not running on the phone, so the hotspot cannot be turned on or off with the charger. Open Mureka Player on the phone and start it under Charger and power."
+            nohelper: "The hotspot helper is not running on the phone, so the hotspot cannot be turned on or off by the power saving. The phone tries to start it by itself, see Charger and power on the phone.",
+            starting: "Starting the hotspot helper on the phone."
         };
 
         if (why !== hotspotClosed) {

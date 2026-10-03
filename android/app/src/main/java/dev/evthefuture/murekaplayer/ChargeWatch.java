@@ -1,6 +1,7 @@
 /*
  * Mureka Player - load and play all your Mureka songs
- * Android host, what happens when the charger is pulled out or plugged in
+ * Android host, what happens when the phone goes on battery or the chosen
+ * Bluetooth devices go away, and when they come back
  *
  * Copyright (C) 2026 EvTheFuture
  * https://github.com/EvTheFuture/MurekaPlayer
@@ -29,23 +30,37 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
-// Power saving with the charger. Pulled out, after a grace time the player
-// can pause, the hotspot go off and the background work stop, so a phone
-// left somewhere warm stays cooler. Plugged in again, the hotspot can come
-// on and the work starts again. Nothing happens with the master switch
-// off. The player shows the countdown with a button to skip it
+// Power saving. What starts it is set in the settings: the charger pulled
+// out, or the last of the chosen Bluetooth devices going away. After a
+// grace time the player can pause, the hotspot go off and the background
+// work stop, so a phone left somewhere warm stays cooler. When the charger
+// or one of the devices comes back, the hotspot can come on and the work
+// starts again. Nothing happens with the master switch off. The player
+// shows the countdown with a button to skip it
 final class ChargeWatch {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    // One runnable for the countdown, so it can be taken off the queue
+    // without touching anything else posted there
+    private static final Runnable TICK = ChargeWatch::tick;
 
     private static Context ctx;
     private static BroadcastReceiver receiver;
     private static boolean counting = false;
     private static long deadline = 0;
 
-    // Whether the background work was stopped here, so plugging in starts
+    // Whether the background work was stopped here, so coming back starts
     // it again, and only then
     private static boolean quietHere = false;
+
+    // What started the countdown running now or the last one, charger or
+    // bluetooth, for the player's words
+    private static String reason = CarSettings.TRIGGER_CHARGER;
+
+    // Whether one of the chosen Bluetooth devices was connected at the last
+    // look, so only a change counts
+    private static boolean btHere = false;
 
     private ChargeWatch() {
     }
@@ -65,9 +80,9 @@ final class ChargeWatch {
                 String action = intent != null ? intent.getAction() : null;
 
                 if (Intent.ACTION_POWER_DISCONNECTED.equals(action)) {
-                    unplugged();
+                    powerChanged(false);
                 } else if (Intent.ACTION_POWER_CONNECTED.equals(action)) {
-                    plugged();
+                    powerChanged(true);
                 }
             }
         };
@@ -82,11 +97,14 @@ final class ChargeWatch {
         } else {
             ctx.registerReceiver(receiver, filter);
         }
+
+        startBluetooth();
     }
 
     static void stop() {
 
         cancel(0);
+        BtWatch.stop();
 
         if (receiver != null && ctx != null) {
 
@@ -100,6 +118,42 @@ final class ChargeWatch {
         receiver = null;
     }
 
+    // The Bluetooth watch, started again once the permission is given
+    static void startBluetooth() {
+
+        MAIN.post(() -> {
+
+            if (ctx == null) {
+                return;
+            }
+
+            BtWatch.start(ctx, ChargeWatch::bluetoothChanged);
+            btHere = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+        });
+    }
+
+    // What starts it or which devices count changed in the settings. A
+    // countdown running is stopped, and the devices there now are taken as
+    // the starting point, so ticking a device that is connected does not
+    // count as it coming back
+    static void settingsChanged() {
+
+        MAIN.post(() -> {
+
+            if (ctx == null) {
+                return;
+            }
+
+            if (counting) {
+
+                Hub.note("Power", "settings changed, the countdown stops");
+                cancel(-3);
+            }
+
+            btHere = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+        });
+    }
+
     // Skip shutdown, from the player's notice or the web view's
     static void skip() {
 
@@ -107,7 +161,7 @@ final class ChargeWatch {
 
             if (counting) {
 
-                Hub.note("Charger", "shutdown skipped");
+                Hub.note("Power", "shutdown skipped");
                 cancel(-2);
             }
         });
@@ -118,45 +172,110 @@ final class ChargeWatch {
         return counting ? (int) Math.max(0, (deadline - System.currentTimeMillis() + 999) / 1000) : -1;
     }
 
-    private static boolean anyUnplugAction() {
+    // What started the countdown, charger or bluetooth
+    static String reason() {
+        return reason;
+    }
+
+    // Whether the background work is stopped by the power saving now
+    static boolean quiet() {
+        return quietHere;
+    }
+
+    private static boolean byBluetooth() {
+        return CarSettings.TRIGGER_BLUETOOTH.equals(CarSettings.trigger(ctx));
+    }
+
+    private static void powerChanged(boolean plugged) {
+
+        if (byBluetooth()) {
+            return;
+        }
+
+        if (plugged) {
+            back(CarSettings.TRIGGER_CHARGER);
+        } else {
+            away(CarSettings.TRIGGER_CHARGER);
+        }
+    }
+
+    // A device came or went. Only the chosen ones count, and only when the
+    // first of them arrives or the last of them leaves
+    private static void bluetoothChanged() {
+
+        if (ctx == null) {
+            return;
+        }
+
+        boolean here = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+
+        if (here == btHere) {
+            return;
+        }
+
+        btHere = here;
+
+        if (!byBluetooth()) {
+            return;
+        }
+
+        if (here) {
+            back(CarSettings.TRIGGER_BLUETOOTH);
+        } else {
+            away(CarSettings.TRIGGER_BLUETOOTH);
+        }
+    }
+
+    private static boolean anyAwayAction() {
 
         return CarSettings.on(ctx, CarSettings.CHARGE_SAVE) && (CarSettings.on(ctx, CarSettings.UNPLUG_PAUSE)
             || CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)
             || CarSettings.on(ctx, CarSettings.UNPLUG_QUIET));
     }
 
-    private static void unplugged() {
+    // The charger pulled out, or the last chosen device gone: the
+    // countdown starts
+    private static void away(String why) {
 
-        if (!anyUnplugAction() || counting) {
+        if (!anyAwayAction() || counting) {
             return;
         }
 
         int grace = CarSettings.chargeGrace(ctx);
 
-        Hub.note("Charger", "pulled out, shutting down in " + grace + " s unless it comes back");
+        reason = why;
+        Hub.note("Power", (CarSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth devices gone" : "on battery")
+            + ", shutting down in " + grace + " s unless it changes back");
+        Hub.command("unplugReason", why);
         counting = true;
         deadline = System.currentTimeMillis() + grace * 1000L;
         tick();
     }
 
-    private static void plugged() {
+    // The charger plugged in, or a chosen device connected: a countdown
+    // stops, the background work starts again and the hotspot can come on
+    private static void back(String why) {
+
+        String what = CarSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth device back" : "on the charger";
 
         if (counting) {
 
-            Hub.note("Charger", "plugged in again, nothing was stopped");
+            Hub.note("Power", what + ", nothing was stopped");
+            reason = why;
+            Hub.command("unplugReason", why);
             cancel(-1);
         }
 
         if (quietHere) {
 
             quietHere = false;
-            Hub.note("Charger", "plugged in, the background work starts again");
+            Hub.note("Power", what + ", the background work starts again");
             PlayerService.setQuiet(false);
         }
 
         if (CarSettings.on(ctx, CarSettings.CHARGE_SAVE) && CarSettings.on(ctx, CarSettings.PLUG_HOTSPOT)) {
 
-            Hub.note("Charger", "plugged in, switching the hotspot on");
+            Hub.note("Power", what + ", turning the hotspot on");
             Hotspot.start(ctx);
         }
     }
@@ -177,38 +296,38 @@ final class ChargeWatch {
         }
 
         Hub.command("unplugCountdown", left);
-        MAIN.postDelayed(ChargeWatch::tick, 1000);
+        MAIN.postDelayed(TICK, 1000);
     }
 
-    // The countdown ended without the charger coming back
+    // The countdown ended without the charger or a device coming back
     private static void finish() {
 
         counting = false;
-        MAIN.removeCallbacksAndMessages(null);
+        MAIN.removeCallbacks(TICK);
         Hub.command("unplugCountdown", 0);
 
         if (CarSettings.on(ctx, CarSettings.UNPLUG_PAUSE)) {
 
-            Hub.note("Charger", "out, pausing the music");
+            Hub.note("Power", "pausing the music");
             Hub.command("pause", null);
         }
 
         if (CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)) {
 
-            Hub.note("Charger", "out, switching the hotspot off");
+            Hub.note("Power", "turning the hotspot off");
             Hotspot.stop(ctx);
         }
 
         if (CarSettings.on(ctx, CarSettings.UNPLUG_QUIET)) {
 
-            Hub.note("Charger", "out, stopping the background work");
+            Hub.note("Power", "stopping all background work");
             quietHere = true;
             PlayerService.setQuiet(true);
         }
     }
 
-    // The countdown stopped, why tells the player: -1 plugged in again, -2
-    // skipped
+    // The countdown stopped, why tells the player: -1 back again, -2
+    // skipped, -3 the settings changed
     private static void cancel(int why) {
 
         if (!counting) {
@@ -216,7 +335,7 @@ final class ChargeWatch {
         }
 
         counting = false;
-        MAIN.removeCallbacksAndMessages(null);
+        MAIN.removeCallbacks(TICK);
         Hub.command("unplugCountdown", why);
     }
 }

@@ -308,7 +308,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
         instance = this;
 
-        // The charger in the car coming and going
+        // Power saving, following the charger or chosen Bluetooth devices
         ChargeWatch.start(this);
 
         // The hotspot name and password once typed for Shizuku, not needed

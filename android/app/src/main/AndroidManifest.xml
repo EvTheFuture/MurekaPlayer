@@ -18,6 +18,14 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Power saving that follows chosen Bluetooth devices, a car's for
+         one: which devices are paired and which are connected. Android 12
+         and later ask for it as Nearby devices -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <!-- Lets the app switch wireless debugging on for a start of the
          hotspot helper and off again. Only adb can give it, the helper's
          first start through wireless debugging does -->

@@ -47,6 +47,16 @@ final class CarSettings {
     static final String UNPLUG_QUIET = "unplugQuiet";
     static final String PLUG_HOTSPOT = "plugHotspot";
 
+    // What starts the power saving: the charger pulled out, or the chosen
+    // Bluetooth devices all gone, stored as their addresses with commas
+    static final String SAVE_TRIGGER = "saveTrigger";
+    static final String SAVE_BT = "saveBtDevices";
+    static final String TRIGGER_CHARGER = "charger";
+    static final String TRIGGER_BLUETOOTH = "bluetooth";
+
+    // Up to 32 Bluetooth addresses, upper case, separated by commas
+    private static final String BT_LIST = "([0-9A-F]{2}(:[0-9A-F]{2}){5})(,[0-9A-F]{2}(:[0-9A-F]{2}){5}){0,31}";
+
     // Settings no longer used. The hotspot helper uses the phone's own
     // hotspot name and password, so the ones typed for Shizuku are removed
     private static final String[] RETIRED = {"hotspotSsid", "hotspotPass", "hotspotBand"};
@@ -112,6 +122,29 @@ final class CarSettings {
         }
     }
 
+    // What starts the power saving, the charger unless changed
+    static String trigger(Context c) {
+
+        return TRIGGER_BLUETOOTH.equals(prefs(c).getString(SAVE_TRIGGER, TRIGGER_CHARGER))
+            ? TRIGGER_BLUETOOTH : TRIGGER_CHARGER;
+    }
+
+    // The addresses of the Bluetooth devices chosen for the power saving
+    static java.util.Set<String> btDevices(Context c) {
+
+        java.util.Set<String> out = new java.util.HashSet<>();
+        String v = prefs(c).getString(SAVE_BT, "");
+
+        for (String a : v.split(",")) {
+
+            if (!a.trim().isEmpty()) {
+                out.add(a.trim().toUpperCase(java.util.Locale.ROOT));
+            }
+        }
+
+        return out;
+    }
+
     // Seconds to wait after the charger is pulled out, 60 unless changed
     static int chargeGrace(Context c) {
 
@@ -128,6 +161,21 @@ final class CarSettings {
 
         String v = value == null ? "" : value.trim();
 
+        // The chosen devices may be none at all, the only value that can
+        // be empty
+        if (SAVE_BT.equals(key)) {
+
+            v = v.toUpperCase(java.util.Locale.ROOT).replace(" ", "");
+
+            if (!v.isEmpty() && !v.matches(BT_LIST)) {
+                return false;
+            }
+
+            prefs(c).edit().putString(key, v).apply();
+
+            return true;
+        }
+
         if (VPN_ADDRESS.equals(key)) {
 
             v = v.isEmpty() ? DEFAULT_ADDRESS : cleanAddress(v);
@@ -139,6 +187,9 @@ final class CarSettings {
             || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";
+        } else if (SAVE_TRIGGER.equals(key)) {
+
+            v = TRIGGER_BLUETOOTH.equals(v) ? TRIGGER_BLUETOOTH : TRIGGER_CHARGER;
         } else if (CHARGE_GRACE.equals(key)) {
 
             if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {

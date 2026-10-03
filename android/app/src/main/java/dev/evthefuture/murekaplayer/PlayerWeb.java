@@ -104,6 +104,10 @@ final class PlayerWeb {
         // Hide or show Android's status and navigation bars, which only an
         // activity can do
         void applyFullscreen();
+
+        // Android's question whether the app may see Bluetooth devices,
+        // which only an activity can show
+        void askBluetoothPermission();
     }
 
     private static WebView web;
@@ -539,6 +543,13 @@ final class PlayerWeb {
                 MAIN.post(PlayerWeb::tellFullscreen);
             }
 
+            // What starts the power saving, the devices that count or the
+            // master switch: a countdown running stops
+            if (CarSettings.SAVE_TRIGGER.equals(key) || CarSettings.SAVE_BT.equals(key)
+                || CarSettings.CHARGE_SAVE.equals(key)) {
+                ChargeWatch.settingsChanged();
+            }
+
             PlayerService.settingsChanged();
 
             return true;
@@ -635,6 +646,8 @@ final class PlayerWeb {
                 o.put("state", "stopped".equals(helper) ? "" : Hotspot.state());
                 o.put("last", Hotspot.lastResult());
                 o.put("countdown", ChargeWatch.left());
+                o.put("reason", ChargeWatch.reason());
+                o.put("quiet", ChargeWatch.quiet());
                 o.put("start", Hotspot.startCommand(appContext));
                 o.put("paired", HelperStart.paired(appContext));
                 o.put("pairing", HelperStart.pairText());
@@ -646,6 +659,34 @@ final class PlayerWeb {
             }
 
             return o.toString();
+        }
+
+        // The paired Bluetooth devices, whether each is connected, and
+        // whether the app may see them at all
+        @JavascriptInterface
+        public String btDevices() {
+
+            if (appContext == null) {
+                return "{}";
+            }
+
+            return BtWatch.devices(appContext);
+        }
+
+        // Android's question whether the app may see Bluetooth devices,
+        // asked by the app on screen. False when it is not on screen
+        @JavascriptInterface
+        public boolean askBluetooth() {
+
+            Host host = hostRef.get();
+
+            if (host == null) {
+                return false;
+            }
+
+            MAIN.post(host::askBluetoothPermission);
+
+            return true;
         }
 
         // Pairing with wireless debugging begins, Developer options open

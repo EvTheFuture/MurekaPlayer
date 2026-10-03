@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.113";
+    const VERSION = "1.9.9.114";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16052,6 +16052,7 @@
             loadKind: running === true ? (runOwner || "load") : "",
             playsOn: settings.playsOn === true,
             unplugLeft: unplugLeft,
+            unplugWhy: unplugWhy,
             hotspotWarn: hostHotspotWarn(),
             songCache: hostSongCache(),
             queueSig: hostQueueSig(),
@@ -16160,12 +16161,19 @@
     }
 
     // The cache dot the phone shows in front of a song
-    // The charger pulled out: the app counts down before it stops what the
-    // settings say, and the player shows how long is left with a button to
-    // skip it. -1 when no countdown runs
+    // The phone on battery, or the chosen Bluetooth devices gone: the app
+    // counts down before it stops what the settings say, and the player
+    // shows how long is left with a button to skip it. -1 when no countdown
+    // runs. What started it, charger or bluetooth, picks the words
     let unplugLeft = -1;
+    let unplugWhy = "charger";
     let unplugEl = null;
     let unplugTextEl = null;
+
+    // What the countdown is about, in words
+    function unplugWords() {
+        return unplugWhy === "bluetooth" ? "Bluetooth disconnected" : "Running on battery";
+    }
 
     function noteUnplug(left) {
 
@@ -16175,9 +16183,9 @@
         publishHostSoon();
 
         if (left === 0) {
-            showToast("Charger out, shutting down", true);
+            showToast(unplugWords() + ", shutting down", true);
         } else if (left === -1 && was > 0) {
-            showToast("Charger back, nothing was stopped", true);
+            showToast(unplugWhy === "bluetooth" ? "Bluetooth back, nothing was stopped" : "Back on the charger, nothing was stopped", true);
         } else if (left === -2) {
             showToast("Shutdown skipped", true);
         }
@@ -16224,13 +16232,14 @@
             document.body.appendChild(unplugEl);
         }
 
-        unplugTextEl.textContent = "Charger out, shutting down in " + unplugLeft + " s";
+        unplugTextEl.textContent = unplugWords() + ", shutting down in " + unplugLeft + " s";
         unplugEl.style.display = "flex";
     }
 
     // Whether the hotspot settings are on without the hotspot helper
-    // running, nohelper when so. Looked at every few seconds, for the
-    // settings, the question at start and the web view's notice
+    // running, nohelper when so and starting while it is being started.
+    // Looked at every few seconds, for the settings and the web view's
+    // notice
     let hotspotWarnSeen = "";
     let hotspotWarnAt = 0;
 
@@ -16271,75 +16280,199 @@
             const status = hotspotWanted() ? hotspotHelper() : "ready";
 
             hotspotWarnSeen = status === "ready" ? "" : status;
+
+            // Needed and not running: started by itself, once the check at
+            // start has had its turn
+            if (hotspotWarnSeen === "nohelper" && helperStartChecked) {
+                startHotspotHelper(false);
+            }
         }
 
-        return hotspotWarnSeen;
+        return hotspotWarnSeen && helperTrying ? "starting" : hotspotWarnSeen;
     }
 
-    // What to do about it, in words, and the button that does it: start
-    // the helper when paired, else the page where pairing is
+    // What is wrong, in words, for the settings page. Paired, the player
+    // starts the helper by itself, else pairing comes first
     function hotspotFix(status) {
 
-        let paired = false;
+        if (hotspotInfoNow().paired === true) {
+            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. The player starts it through wireless debugging, which needs the phone on Wi-Fi.", paired: true };
+        }
+
+        return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. Pair the player with wireless debugging once, further down this page, and it starts the helper by itself.", paired: false };
+    }
+
+    // What the app says about the hotspot helper, or nothing outside it
+    function hotspotInfoNow() {
 
         try {
-            paired = JSON.parse(window.MurekaHost.hotspotStatus() || "{}").paired === true;
+            return JSON.parse(window.MurekaHost.hotspotStatus() || "{}");
         } catch (e) {
-            paired = false;
+            return {};
         }
-
-        if (paired) {
-            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. It is started through wireless debugging, which needs the phone on Wi-Fi.", button: "Start the helper", paired: true };
-        }
-
-        return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. Pair the player with wireless debugging once, under Charger and power, and it starts the helper by itself.", button: "Show how to pair", paired: false };
     }
 
-    function hotspotDoFix(status) {
+    // Starting the hotspot helper by itself whenever it is needed and not
+    // running: when it was last tried, whether a start is being followed,
+    // whether the check at start is done, and whether the missing pairing
+    // was already said
+    const HELPER_RETRY_MS = 10 * 60 * 1000;
+    let helperTryAt = 0;
+    let helperTrying = false;
+    let helperStartChecked = false;
+    let helperUnpairedSaid = false;
 
-        const fix = hotspotFix(status);
+    // Follows a start of the helper to its end and says how it went. Given
+    // up after a minute
+    function followHelperStart() {
 
-        if (fix.paired) {
+        const began = Date.now();
+        let seen = false;
 
-            window.MurekaHost.hotspotStartHelper();
-            showToast("Starting the hotspot helper", "wait");
-        }
-
-        openSettings();
-        showSettingsPage("charger");
-
-        // Looked at again soon after
+        helperTrying = true;
         hotspotWarnAt = 0;
-    }
 
-    // At start, with the hotspot settings on and the helper not running,
-    // the phone says so at once, before the charger is next pulled out
-    function checkHotspotAtStart() {
+        const watch = function () {
 
-        setTimeout(function () {
+            const info = hotspotInfoNow();
 
-            const status = hostHotspotWarn();
+            if (info.starting === true) {
+                seen = true;
+            }
 
-            if (!status) {
+            const settled = info.starting !== true && (seen || Date.now() - began > 4000);
+
+            if (!settled && Date.now() - began < 60000) {
+
+                setTimeout(watch, 500);
                 return;
             }
 
-            const fix = hotspotFix(status);
+            helperTrying = false;
+            hotspotWarnAt = 0;
 
-            askYesNo("The hotspot cannot be turned on or off", fix.text + " Save power when on battery is set to turn it on or off.", fix.button, function () {
-                hotspotDoFix(status);
-            });
+            if (info.helper === "running" || info.helper === "old") {
+
+                dbgLog("Hotspot", "the hotspot helper is running");
+                showToast("The hotspot helper is running", true);
+            } else {
+
+                const why = info.startText && info.startText !== "Starting the helper"
+                    ? info.startText : "The hotspot helper did not start";
+
+                dbgLog("Hotspot", why);
+                showToast(why, false);
+            }
+        };
+
+        setTimeout(watch, 500);
+    }
+
+    // Starts the helper, with a note that it is starting and one with how
+    // it went. Without a pairing it cannot start, which is said once unless
+    // asked for now. Now also skips the wait between tries
+    function startHotspotHelper(now) {
+
+        if (!isApkHost() || typeof window.MurekaHost.hotspotStartHelper !== "function" || helperTrying) {
+            return;
+        }
+
+        if (!now && Date.now() - helperTryAt < HELPER_RETRY_MS) {
+            return;
+        }
+
+        helperTryAt = Date.now();
+
+        if (hotspotInfoNow().paired !== true) {
+
+            if (now || !helperUnpairedSaid) {
+                showToast("The hotspot helper could not start, pair the player with wireless debugging under Charger and power", false);
+            }
+
+            helperUnpairedSaid = true;
+            return;
+        }
+
+        dbgLog("Hotspot", "starting the hotspot helper");
+        window.MurekaHost.hotspotStartHelper();
+        showToast("Starting the hotspot helper", "wait");
+        followHelperStart();
+    }
+
+    // At start, with a hotspot setting on and the helper not running. The
+    // app starts the helper by itself a moment after it starts, so that is
+    // followed when it comes, and the player starts it when it does not
+    function checkHotspotAtStart() {
+
+        // The background work may already be stopped, by an earlier page
+        if (hotspotInfoNow().quiet === true) {
+            setQuiet(true);
+        }
+
+        setTimeout(function () {
+
+            if (!hotspotWanted() || hotspotHelper() === "ready") {
+
+                helperStartChecked = true;
+                return;
+            }
+
+            if (hotspotInfoNow().paired !== true) {
+
+                helperStartChecked = true;
+                startHotspotHelper(false);
+                return;
+            }
+
+            const began = Date.now();
+
+            const wait = function () {
+
+                const info = hotspotInfoNow();
+
+                if (info.starting === true) {
+
+                    helperStartChecked = true;
+                    helperTryAt = Date.now();
+                    showToast("Starting the hotspot helper", "wait");
+                    followHelperStart();
+                    return;
+                }
+
+                if (hotspotHelper() === "ready") {
+
+                    helperStartChecked = true;
+                    return;
+                }
+
+                if (Date.now() - began < 20000) {
+
+                    setTimeout(wait, 500);
+                    return;
+                }
+
+                helperStartChecked = true;
+                startHotspotHelper(true);
+            };
+
+            wait();
         }, 8000);
     }
 
-    // While the charger is out the background work rests: the play counts
-    // are not read and Cache all stops. The music itself is left alone
+    // When the power saving has stopped the background work, the play
+    // counts are not read and Cache all stops. The music itself is left
+    // alone, and a small mark in the header says so
     let playerQuiet = false;
+    let quietBadgeEl = null;
 
     function setQuiet(on) {
 
         playerQuiet = on;
-        dbgLog("Charger", on ? "background work stopped" : "background work going again");
+        dbgLog("Power", on ? "all background work stopped" : "background work going again");
+
+        if (quietBadgeEl) {
+            quietBadgeEl.style.display = on ? "inline-block" : "none";
+        }
 
         if (on) {
 
@@ -17713,6 +17846,8 @@
             showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the phone", false);
         } else if (cmd === "unplugCountdown") {
             noteUnplug(Number(arg));
+        } else if (cmd === "unplugReason") {
+            unplugWhy = arg === "bluetooth" ? "bluetooth" : "charger";
         } else if (cmd === "skipUnplug") {
 
             try {
@@ -17831,6 +17966,33 @@
         versionEl.textContent = "v" + VERSION;
         versionEl.style.cssText = "margin-left:6px;font-weight:400;color:#888;font-size:11px";
         headerTitle.appendChild(versionEl);
+
+        // A small mark while the power saving has stopped the background
+        // work, a tap on it opens Charger and power. Only in the app
+        quietBadgeEl = document.createElement("span");
+        quietBadgeEl.textContent = "Power saving";
+        quietBadgeEl.title = "All background work is stopped to save power";
+        quietBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(224,176,80,0.5);border-radius:8px;color:#e0b050;font-weight:400;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+        // The header is dragged and folded from presses on it, a press on
+        // the mark is only the mark's
+        for (const kind of ["mousedown", "pointerdown", "touchstart"]) {
+
+            quietBadgeEl.addEventListener(kind, function (ev) {
+                ev.stopPropagation();
+            }, { passive: true });
+        }
+        quietBadgeEl.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            openSettings();
+            showSettingsPage("charger");
+        });
+
+        if (playerQuiet) {
+            quietBadgeEl.style.display = "inline-block";
+        }
+
+        headerTitle.appendChild(quietBadgeEl);
 
         // Sub line under the title, the logged in user name then the active
         // source separated by a dash, for example: EvTheFuture - All feed
@@ -22104,9 +22266,10 @@
         return row;
     }
 
-    // The Charger and power page: what happens when the charger is pulled
-    // out and plugged in, and the hotspot helper. The page helpers of
-    // the settings come along, they live where the pages are built
+    // The Charger and power page: what happens when the phone goes on
+    // battery or the chosen Bluetooth devices disconnect, and when they come
+    // back, and the hotspot helper. The page helpers of the settings come
+    // along, they live where the pages are built
     function buildChargerPage(page, kit) {
 
         const makeLabel = kit.makeLabel;
@@ -22132,6 +22295,43 @@
         // Everything on the page but the master switch, shown with it on
         const saveRows = [];
 
+        // What starts the power saving: the charger, or the chosen
+        // Bluetooth devices all disconnecting
+        const byBluetooth = function () {
+            return host.getPref("saveTrigger", "charger") === "bluetooth";
+        };
+
+        // The words that follow what starts it, the name and the hint of
+        // each setting they belong to
+        const WORDS = {
+            charger: {
+                master: ["Save power when on battery", "Turns everything below on or off together. Off, nothing changes when the phone goes on battery or back on the charger."],
+                away: "When the charger is pulled out",
+                grace: "How long the phone may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once.",
+                quiet: "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the phone is back on the charger.",
+                hotspotOff: ["Turn off hotspot when on battery", "After the grace time on battery. The hotspot warms the phone the most, and with nothing connected it does no good."],
+                hotspotOn: ["Turn on hotspot when charging", "As soon as the phone is back on the charger, so devices that use its hotspot find it again without the phone being touched."]
+            },
+            bluetooth: {
+                master: ["Save power when Bluetooth disconnects", "Turns everything below on or off together. Off, nothing changes when the chosen Bluetooth devices disconnect or connect again."],
+                away: "When the Bluetooth devices disconnect",
+                grace: "How long after the last chosen device disconnects before anything is stopped. Connected again in time, nothing happens, so a short drop does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once.",
+                quiet: "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
+                hotspotOff: ["Turn off hotspot when disconnected", "After the grace time once the last chosen device has disconnected. The hotspot warms the phone the most, and with nothing connected it does no good."],
+                hotspotOn: ["Turn on hotspot when connected", "As soon as one of the chosen devices connects, so devices that use the phone's hotspot find it again without the phone being touched."]
+            }
+        };
+
+        // A setting's name and hint changed in place, on a row that went
+        // through withHint
+        const setWords = function (row, label, hint) {
+
+            const col = row.firstElementChild;
+
+            col.firstElementChild.textContent = label;
+            col.lastElementChild.textContent = hint;
+        };
+
         const masterRow = makeBoolRow("Save power when on battery",
             function () { return on("chargeSave"); },
             function (v) {
@@ -22151,22 +22351,15 @@
             function () { return on("unplugPause"); },
             function (v) { put("unplugPause", v); });
 
-        // Switched on without the helper running: started at once when
-        // paired, else the phone says pairing is needed
+        // Switched on without the helper running: started at once, with a
+        // note on how it went
         const wantHotspot = function (key, v) {
 
             put(key, v);
             hotspotWarnAt = 0;
 
             if (v && hotspotHelper() !== "ready") {
-
-                if (hotspotInfo().paired === true) {
-
-                    host.hotspotStartHelper();
-                    showToast("Starting the hotspot helper", "wait");
-                } else {
-                    showToast("Pair the player with wireless debugging further down this page, so it can start its helper", false);
-                }
+                startHotspotHelper(true);
             }
 
             paintStatus();
@@ -22237,9 +22430,7 @@
             });
         });
         const startBtn = makeButton("Start the helper", "#333", "#fff", function () {
-
-            host.hotspotStartHelper();
-            showToast("Starting the hotspot helper", "wait");
+            startHotspotHelper(true);
         });
 
         pairRow.appendChild(pairBtn);
@@ -22276,6 +22467,16 @@
         let lastSeen = null;
         let lastStartSeen = null;
 
+        // Where the power saving stands, for the status table
+        const powerWords = function (info) {
+
+            if (typeof info.countdown === "number" && info.countdown >= 0) {
+                return (info.reason === "bluetooth" ? "Bluetooth disconnected" : "On battery") + ", shutting down in " + info.countdown + " s";
+            }
+
+            return info.quiet === true ? "All background work stopped" : "--";
+        };
+
         const paintStatus = function () {
 
             const info = hotspotInfo();
@@ -22286,8 +22487,7 @@
                 ["Helper start", info.startText || "--"],
                 ["Hotspot", state],
                 ["Last command", info.last || "--"],
-                ["Charger", typeof info.countdown === "number" && info.countdown >= 0
-                    ? "Out, shutting down in " + info.countdown + " s" : "--"]
+                ["Power saving", powerWords(info)]
             ];
             const key = JSON.stringify(rows);
 
@@ -22329,8 +22529,9 @@
 
             lastSeen = info.last || "";
 
-            // A start of the helper finished, said with a note too
-            if (lastStartSeen !== null && info.starting !== true && info.startText && info.startText !== lastStartSeen) {
+            // A start of the helper finished, said with a note too, unless
+            // the start being followed already says so
+            if (lastStartSeen !== null && !helperTrying && info.starting !== true && info.startText && info.startText !== lastStartSeen) {
                 showToast(info.startText, info.startText === "The helper is running");
             }
 
@@ -22372,9 +22573,170 @@
 
         const paintSaveRows = function () {
 
+            const shown = on("chargeSave");
+            const bt = byBluetooth();
+
             for (const el of saveRows) {
-                el.style.display = on("chargeSave") ? el.dataset.shownAs : "none";
+
+                const visible = shown && (el.dataset.btOnly !== "1" || bt);
+
+                el.style.display = visible ? el.dataset.shownAs : "none";
             }
+        };
+
+        // What starts it, the charger or Bluetooth
+        const triggerRow = makeChoiceRow([
+            { label: "On battery", value: "charger" },
+            { label: "Bluetooth disconnects", value: "bluetooth" }
+        ], function () {
+            return byBluetooth() ? "bluetooth" : "charger";
+        }, function (v) {
+
+            host.setPref("saveTrigger", v);
+            paintWords();
+            paintSaveRows();
+            paintDevices();
+        });
+
+        // The paired Bluetooth devices to tick, the button that asks for
+        // the permission to see them, and a line when there is nothing
+        const devAskRow = document.createElement("div");
+        const devList = document.createElement("div");
+        const devNote = makeHint("");
+
+        devAskRow.style.cssText = "display:flex;gap:6px";
+        devList.style.cssText = "display:flex;flex-direction:column;gap:12px";
+        devAskRow.appendChild(makeButton("Allow Bluetooth access", "#333", "#fff", function () {
+
+            if (host.askBluetooth && host.askBluetooth()) {
+                showToast("Android asks for the Nearby devices permission", true);
+            } else {
+                showToast("Open the player on the phone to allow Bluetooth access", false);
+            }
+        }));
+
+        const btInfo = function () {
+
+            try {
+                return JSON.parse(host.btDevices ? host.btDevices() || "{}" : "{}");
+            } catch (e) {
+                return {};
+            }
+        };
+
+        // The addresses ticked, from the app's setting
+        const chosenDevices = function () {
+
+            return String(host.getPref("saveBtDevices", "") || "").split(",").filter(function (a) {
+                return a !== "";
+            });
+        };
+
+        // One paired device with its switch, built here rather than with
+        // makeBoolRow, the list is built again as devices come and go
+        const makeDeviceRow = function (dev) {
+
+            const row = document.createElement("div");
+            const col = document.createElement("div");
+            const name = document.createElement("span");
+            const hint = makeHint(dev.connected ? "Connected now" : "Not connected");
+            const ticked = chosenDevices().indexOf(dev.address) >= 0;
+
+            row.style.cssText = "display:flex;align-items:flex-start;justify-content:space-between;gap:8px";
+            col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:3px";
+            col.dataset.hostCol = "1";
+            name.textContent = dev.name;
+            hint.style.marginTop = "0";
+
+            const btn = makeButton("Off", "#333", "#fff", function () {
+
+                const list = chosenDevices().filter(function (a) {
+                    return a !== dev.address;
+                });
+
+                if (chosenDevices().indexOf(dev.address) < 0) {
+                    list.push(dev.address);
+                }
+
+                host.setPref("saveBtDevices", list.join(","));
+                updateToggleButton(btn, list.indexOf(dev.address) >= 0);
+                devList.dataset.key = "";
+            });
+
+            btn.style.flex = "0 0 auto";
+            btn.style.minWidth = "56px";
+            btn.style.padding = "6px 12px";
+            updateToggleButton(btn, ticked);
+
+            col.appendChild(name);
+            col.appendChild(hint);
+            row.appendChild(col);
+            row.appendChild(btn);
+
+            return row;
+        };
+
+        const paintDevices = function () {
+
+            if (!byBluetooth()) {
+                return;
+            }
+
+            const info = btInfo();
+            const devices = Array.isArray(info.devices) ? info.devices : [];
+            const key = JSON.stringify([info.permission, info.enabled, devices, chosenDevices()]);
+
+            devAskRow.style.display = info.permission === false ? "flex" : "none";
+
+            if (info.permission === false) {
+                devNote.textContent = "The player needs the Nearby devices permission to see which Bluetooth devices are paired and connected.";
+            } else if (info.available === false) {
+                devNote.textContent = "This phone has no Bluetooth.";
+            } else if (info.enabled === false) {
+                devNote.textContent = "Bluetooth is off. The devices show once it is on.";
+            } else if (devices.length === 0) {
+                devNote.textContent = "No paired Bluetooth devices.";
+            } else {
+                devNote.textContent = "Tick the devices that count, a car's for one. Power saving starts when the last ticked device disconnects, and stops when one of them connects again.";
+            }
+
+            if (devList.dataset.key === key) {
+                return;
+            }
+
+            devList.dataset.key = key;
+            devList.textContent = "";
+
+            for (const dev of devices) {
+
+                if (dev && typeof dev.address === "string") {
+                    devList.appendChild(makeDeviceRow(dev));
+                }
+            }
+        };
+
+        const masterLabelRow = withHint(masterRow, WORDS.charger.master[1]);
+        const awayLabel = makeLabel(WORDS.charger.away);
+
+        // Names and hints follow what starts it
+        const paintWords = function () {
+
+            const w = byBluetooth() ? WORDS.bluetooth : WORDS.charger;
+
+            setWords(masterRow, w.master[0], w.master[1]);
+            awayLabel.textContent = w.away;
+            setWords(graceRow, "Grace time in seconds", w.grace);
+            setWords(quietRow, "Stop all background work", w.quiet);
+            setWords(hotspotOffRow, w.hotspotOff[0], w.hotspotOff[1]);
+            setWords(hotspotOnRow, w.hotspotOn[0], w.hotspotOn[1]);
+        };
+
+        // Marked to show only while Bluetooth starts it
+        const btOnly = function (el) {
+
+            el.dataset.btOnly = "1";
+
+            return el;
         };
 
         // A numbered list of steps, each a hint of its own with its number
@@ -22399,18 +22761,25 @@
             return list;
         };
 
-        page.appendChild(withHint(masterRow, "Turns everything below on or off together. Off, nothing changes when the phone goes on battery or back on the charger."));
-        add(makeLabel("When the charger is pulled out"));
-        add(withHint(graceRow, "How long the phone may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once."));
+        page.appendChild(masterLabelRow);
+        add(makeLabel("What starts it"));
+        add(triggerRow);
+        add(makeHint("On battery follows the charger. Bluetooth disconnects follows the devices ticked below, for a phone that stays on a charger."));
+        add(btOnly(makeSubLabel("Bluetooth devices")));
+        add(btOnly(devAskRow));
+        add(btOnly(devList));
+        add(btOnly(devNote));
+        add(awayLabel);
+        add(withHint(graceRow, WORDS.charger.grace));
         add(withHint(pauseRow, "The music stops, so it does not carry on from the phone's speaker after you have gone."));
-        add(withHint(quietRow, "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. Starts again by itself when the phone is back on the charger."));
+        add(withHint(quietRow, WORDS.charger.quiet));
 
         // The hotspot after the basic options, marked as experimental
         add(makeLabel("Hotspot (experimental, advanced)"));
         add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It turns the phone's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(warnEl);
-        add(withHint(hotspotOffRow, "After the grace time on battery. The hotspot warms the phone the most, and with nothing connected it does no good."));
-        add(withHint(hotspotOnRow, "As soon as the phone is back on the charger, so devices that use its hotspot find it again without the phone being touched."));
+        add(withHint(hotspotOffRow, WORDS.charger.hotspotOff[1]));
+        add(withHint(hotspotOnRow, WORDS.charger.hotspotOn[1]));
         add(statusEl);
         add(tryRow);
         add(makeHint("Turn on hotspot and Turn off hotspot try it straight away. The last command says what happened."));
@@ -22432,8 +22801,14 @@
         add(copyRow);
         add(makeHint("For a phone that is not on Wi-Fi: run the command on a computer with adb connected to the phone."));
 
+        paintWords();
+        settingsRefreshers.push(paintWords);
+
         paintSaveRows();
         settingsRefreshers.push(paintSaveRows);
+
+        paintDevices();
+        settingsRefreshers.push(paintDevices);
 
         paintStatus();
         settingsRefreshers.push(paintStatus);
@@ -22441,7 +22816,9 @@
         setInterval(function () {
 
             if (settingsEl && page.style.display !== "none" && settingsEl.offsetParent !== null) {
+
                 paintStatus();
+                paintDevices();
             }
         }, 1000);
     }
@@ -24291,7 +24668,7 @@
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
-            [chargerPage, "Charger and power", "What happens when the phone goes on battery and back on the charger. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
+            [chargerPage, "Charger and power", "What happens when the phone goes on battery, or chosen Bluetooth devices disconnect, and when that changes back. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
             [cachePage, "Cache control", "What the player keeps on this device so songs and covers are there without waiting for Mureka, and how much room it takes."],
             [backupPage, "Backup and restore", null],
             [devPage, "Developer", null],
@@ -24562,7 +24939,9 @@
         unplugPause: "0",
         unplugHotspot: "0",
         unplugQuiet: "0",
-        plugHotspot: "0"
+        plugHotspot: "0",
+        saveTrigger: "charger",
+        saveBtDevices: ""
     };
 
     // Give the app back the settings it keeps itself. Only in the app, and

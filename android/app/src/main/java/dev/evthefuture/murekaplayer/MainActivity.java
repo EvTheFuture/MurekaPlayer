@@ -54,6 +54,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
     private static final int PICK_FILE = 7;
     private static final int ASK_VPN = 8;
     private static final int SAVE_FILE = 9;
+    private static final int ASK_BLUETOOTH = 10;
 
     private FrameLayout root;
     private WebView web;
@@ -501,6 +502,32 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
             return insets;
         });
+    }
+
+    // The Nearby devices permission, so power saving can follow Bluetooth
+    // devices. Before Android 12 the app has it from the install
+    @Override
+    public void askBluetoothPermission() {
+
+        if (Build.VERSION.SDK_INT < 31) {
+
+            ChargeWatch.startBluetooth();
+            return;
+        }
+
+        requestPermissions(new String[] { Manifest.permission.BLUETOOTH_CONNECT }, ASK_BLUETOOTH);
+    }
+
+    // Given or not, the Bluetooth watch starts again, and the player's
+    // settings show the answer
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == ASK_BLUETOOTH) {
+            ChargeWatch.startBluetooth();
+        }
     }
 
     private void askForNotifications() {
