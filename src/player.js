@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.112";
+    const VERSION = "1.9.9.113";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16289,10 +16289,10 @@
         }
 
         if (paired) {
-            return { text: "The hotspot helper is not running, so the hotspot cannot be switched. It is started through wireless debugging, which needs the phone on Wi-Fi.", button: "Start the helper", paired: true };
+            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. It is started through wireless debugging, which needs the phone on Wi-Fi.", button: "Start the helper", paired: true };
         }
 
-        return { text: "The hotspot helper is not running, so the hotspot cannot be switched. Pair the player with wireless debugging once, under Charger and power, and it starts the helper by itself.", button: "Show how to pair", paired: false };
+        return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. Pair the player with wireless debugging once, under Charger and power, and it starts the helper by itself.", button: "Show how to pair", paired: false };
     }
 
     function hotspotDoFix(status) {
@@ -16326,7 +16326,7 @@
 
             const fix = hotspotFix(status);
 
-            askYesNo("The hotspot cannot be switched", fix.text + " Power saving with the charger is set to switch it.", fix.button, function () {
+            askYesNo("The hotspot cannot be turned on or off", fix.text + " Save power when on battery is set to turn it on or off.", fix.button, function () {
                 hotspotDoFix(status);
             });
         }, 8000);
@@ -22132,7 +22132,7 @@
         // Everything on the page but the master switch, shown with it on
         const saveRows = [];
 
-        const masterRow = makeBoolRow("Power saving with the charger",
+        const masterRow = makeBoolRow("Save power when on battery",
             function () { return on("chargeSave"); },
             function (v) {
 
@@ -22172,15 +22172,15 @@
             paintStatus();
         };
 
-        const hotspotOffRow = makeBoolRow("Switch the hotspot off when unplugged",
+        const hotspotOffRow = makeBoolRow("Turn off hotspot when on battery",
             function () { return on("unplugHotspot"); },
             function (v) { wantHotspot("unplugHotspot", v); });
 
-        const quietRow = makeBoolRow("Stop the background work",
+        const quietRow = makeBoolRow("Stop all background work",
             function () { return on("unplugQuiet"); },
             function (v) { put("unplugQuiet", v); });
 
-        const hotspotOnRow = makeBoolRow("Switch the hotspot on when plugged in",
+        const hotspotOnRow = makeBoolRow("Turn on hotspot when charging",
             function () { return on("plugHotspot"); },
             function (v) { wantHotspot("plugHotspot", v); });
 
@@ -22202,15 +22202,15 @@
         tryRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
 
         // Disabled while the last known state already is what they ask for
-        const onNowBtn = makeButton("Hotspot on now", "#333", "#fff", function () {
+        const onNowBtn = makeButton("Turn on hotspot", "#333", "#fff", function () {
 
             host.hotspotSwitch(true);
-            showToast("Switching the hotspot on", "wait");
+            showToast("Turning the hotspot on", "wait");
         });
-        const offNowBtn = makeButton("Hotspot off now", "#333", "#fff", function () {
+        const offNowBtn = makeButton("Turn off hotspot", "#333", "#fff", function () {
 
             host.hotspotSwitch(false);
-            showToast("Switching the hotspot off", "wait");
+            showToast("Turning the hotspot off", "wait");
         });
 
         tryRow.appendChild(onNowBtn);
@@ -22306,7 +22306,7 @@
             startBtn.disabled = info.starting === true;
             startBtn.style.opacity = info.starting === true ? "0.5" : "1";
 
-            // On now does nothing while the hotspot is on, off now while it
+            // Turn on does nothing while the hotspot is on, turn off while it
             // is off. With the state not known, both stay usable
             const isOn = info.state === "on";
             const isOff = info.state === "off";
@@ -22399,21 +22399,21 @@
             return list;
         };
 
-        page.appendChild(withHint(masterRow, "Turns everything below on or off together. Off, nothing happens when the charger is pulled out or plugged in."));
+        page.appendChild(withHint(masterRow, "Turns everything below on or off together. Off, nothing changes when the phone goes on battery or back on the charger."));
         add(makeLabel("When the charger is pulled out"));
-        add(withHint(graceRow, "How long to wait before anything is stopped. Plugged in again in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once."));
+        add(withHint(graceRow, "How long the phone may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once."));
         add(withHint(pauseRow, "The music stops, so it does not carry on from the phone's speaker after you have gone."));
-        add(withHint(quietRow, "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. Starts again by itself when the charger is plugged in."));
+        add(withHint(quietRow, "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. Starts again by itself when the phone is back on the charger."));
 
         // The hotspot after the basic options, marked as experimental
         add(makeLabel("Hotspot (experimental, advanced)"));
-        add(makeHint("Android lets only the system switch the hotspot, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It switches the phone's own hotspot, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
+        add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It turns the phone's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(warnEl);
-        add(withHint(hotspotOffRow, "After the grace time. The hotspot warms the phone the most, and with nothing connected it does no good."));
-        add(withHint(hotspotOnRow, "Devices that use the phone's hotspot find it again without the phone being touched."));
+        add(withHint(hotspotOffRow, "After the grace time on battery. The hotspot warms the phone the most, and with nothing connected it does no good."));
+        add(withHint(hotspotOnRow, "As soon as the phone is back on the charger, so devices that use its hotspot find it again without the phone being touched."));
         add(statusEl);
         add(tryRow);
-        add(makeHint("Hotspot on now and off now try it straight away. The last command says what happened."));
+        add(makeHint("Turn on hotspot and Turn off hotspot try it straight away. The last command says what happened."));
         add(makeSubLabel("Pairing with wireless debugging"));
         add(pairRow);
         add(startRow);
@@ -22426,7 +22426,7 @@
             "Keep that dialog open.",
             "Pull down the player's notification, type the six digit code there and send it."
         ]));
-        add(makeHint("Afterwards the player switches the hotspot by itself through wireless debugging. Each switch needs the phone on Wi-Fi, and wireless debugging is switched on for it and off again afterwards."));
+        add(makeHint("Afterwards the player turns the hotspot on and off by itself through wireless debugging. Each time it needs the phone on Wi-Fi, and wireless debugging is turned on for it and off again afterwards."));
         add(makeSubLabel("From a computer instead"));
         add(commandEl);
         add(copyRow);
@@ -23437,8 +23437,16 @@
         }, 1000);
 
         // Mobile: what is drawn on this screen
-        mobilePage.appendChild(makeBackRow("Mobile player"));
-        mobilePage.appendChild(makeHint("How the player looks on this screen. The web view has its own page of settings."));
+        // The way back and the word on what the page holds are its head
+        const mobileHead = [makeBackRow("Mobile player"),
+            makeHint("How the player looks on this screen. The web view has its own page of settings.")];
+
+        for (const el of mobileHead) {
+
+            el.dataset.pageHead = "1";
+            mobilePage.appendChild(el);
+        }
+
         mobilePage.appendChild(makeLabel("Main page"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
         mobilePage.appendChild(makeSubLabel("Waveform from"));
@@ -23828,8 +23836,16 @@
                 function () { return hostLyricLayout().sideShift; },
                 function (v) { settings.webLyricSideShift = v; publishHostSoon(); }, -40, 40, 1);
 
-            webPage.appendChild(makeBackRow("Web view"));
-            webPage.appendChild(makeHint("How the web view looks in a desktop or tablet browser, apart from the mobile player."));
+            // The way back and the word on what the page holds are its head
+            const webHead = [makeBackRow("Web view"),
+                makeHint("How the web view looks in a desktop or tablet browser, apart from the mobile player.")];
+
+            for (const el of webHead) {
+
+                el.dataset.pageHead = "1";
+                webPage.appendChild(el);
+            }
+
             webPage.appendChild(makeLabel("Main page"));
             webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
@@ -24275,21 +24291,30 @@
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
-            [chargerPage, "Charger and power", "What happens when the charger is pulled out and plugged in again. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
+            [chargerPage, "Charger and power", "What happens when the phone goes on battery and back on the charger. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
             [cachePage, "Cache control", "What the player keeps on this device so songs and covers are there without waiting for Mureka, and how much room it takes."],
             [backupPage, "Backup and restore", null],
             [devPage, "Developer", null],
             [aboutPage, "About", null]
         ];
 
+        // Both are marked as the page's head, so a section heading right
+        // under them needs no room above it
         for (const h of heads) {
             const first = h[0].firstChild;
 
             if (h[2]) {
-                h[0].insertBefore(makeHint(h[2]), first);
+
+                const intro = makeHint(h[2]);
+
+                intro.dataset.pageHead = "1";
+                h[0].insertBefore(intro, first);
             }
 
-            h[0].insertBefore(makeBackRow(h[1]), h[0].firstChild);
+            const back = makeBackRow(h[1]);
+
+            back.dataset.pageHead = "1";
+            h[0].insertBefore(back, h[0].firstChild);
         }
 
         // The main page is only a list of the others, grouped: the views,
@@ -24336,23 +24361,29 @@
         mainPage.appendChild(makePageButton("About Mureka Player", "about"));
 
         // Every section heading gets a thin, slightly lighter line right
-        // under it, with some room above so the sections stand apart. The
-        // web view draws the same line
+        // under it, with some room above so the sections stand apart. Only
+        // a heading with nothing above it but the page's head goes without
+        // the room. The web view draws the same line
         for (const key of Object.keys(settingsPages)) {
 
-            let first = true;
+            let content = false;
 
             for (const el of settingsPages[key].children) {
 
                 if (el.dataset.section !== "1") {
+
+                    if (el.dataset.pageHead !== "1") {
+                        content = true;
+                    }
+
                     continue;
                 }
 
                 el.dataset.sectionLine = "1";
                 el.style.borderBottom = "1px solid #3a3a42";
                 el.style.paddingBottom = "4px";
-                el.style.marginTop = first ? "0" : "22px";
-                first = false;
+                el.style.marginTop = content ? "22px" : "0";
+                content = true;
             }
 
             settingsEl.appendChild(settingsPages[key]);

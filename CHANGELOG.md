@@ -134,15 +134,16 @@ the new settings layout and a number of smaller improvements.
 - The song lists in the web view follow the phone: the queue is read again
   when it is shuffled, rebuilt or moves on, and the song list when the
   filters change.
-- **Charger and power**, a settings page in the app. With its master switch
-  on, when the charger is pulled out, after a grace time (60 seconds by
-  default) the music can pause and the background work stop, so a phone
-  left somewhere warm stays cooler. A note counts down on the phone and in
-  the web view with **Skip shutdown**, and plugging in again in time stops
-  it. Plugged in, the background work starts again.
+- **Charger and power**, a settings page in the app. With **Save power
+  when on battery** on, when the charger is pulled out, after a grace time
+  (60 seconds by default) the music can pause and all background work
+  stop, so a phone left somewhere warm stays cooler. A note counts down on
+  the phone and in the web view with **Skip shutdown**, and putting the
+  phone back on the charger in time stops it. Back on the charger, the
+  background work starts again.
 - **Hotspot**, an experimental and advanced section at the end of Charger
-  and power: the hotspot can go off when the charger is pulled out and come
-  on when it is plugged in. Android lets only the system switch the
+  and power: **Turn off hotspot when on battery** and **Turn on hotspot
+  when charging**. Android lets only the system switch the
   hotspot, so the player brings a small **hotspot helper** of its own. For
   each switch it runs once as the phone's debugging shell, gives one
   command and exits, so nothing is left running. It switches the phone's
@@ -154,10 +155,10 @@ the new settings layout and a number of smaller improvements.
   phone has to be on Wi-Fi). It may not work on every phone. A command for
   a computer with adb is there for a phone that is not on Wi-Fi. The page
   shows the pairing, the hotspot's last known state and what the last
-  command did, and **Hotspot on now** and **Hotspot off now** try it, each
-  greyed out while the hotspot already is that way. The start of the app
-  asks, and the web view says so, when the helper is needed and cannot
-  run.
+  command did, and **Turn on hotspot** and **Turn off hotspot** try it,
+  each greyed out while the hotspot already is that way. The start of the
+  app asks, and the web view says so, when one of the hotspot settings is
+  on and the helper cannot run.
 - **Cache control**, a settings page of its own under Data, gathers what the
   player keeps on the device: Cache ahead, the songs stored with **Cache
   all** and **Clear song cache** (with its progress, the library itself
