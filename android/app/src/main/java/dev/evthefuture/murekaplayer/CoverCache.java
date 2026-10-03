@@ -79,6 +79,9 @@ final class CoverCache {
     private static volatile int clearTotal = 0;
     private static volatile long trimmedAt = 0;
 
+    // Nothing fetched ahead while the background work is stopped
+    private static volatile boolean paused = false;
+
     private CoverCache() {
     }
 
@@ -256,11 +259,21 @@ final class CoverCache {
         });
     }
 
+    static void setPaused(boolean on) {
+
+        paused = on;
+
+        // Asked again in full once it may fetch again
+        if (!on) {
+            aheadKey = "";
+        }
+    }
+
     // From each state: the size allowed and the covers of the songs coming
     // up, the ones not here yet fetched in the background
     private static void onState(JSONObject state) {
 
-        if (state == null) {
+        if (state == null || paused) {
             return;
         }
 

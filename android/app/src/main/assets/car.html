@@ -791,6 +791,72 @@
     }
 
     /* A short word about what just happened, over everything else */
+    /* The charger pulled out on the phone, the countdown to the shutdown
+       with the button to skip it, above the notes */
+    #unplugPop {
+        position: fixed;
+        left: 50%;
+        bottom: 14vh;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 1.2em;
+        max-width: 90vw;
+        padding: 12px 14px 12px 20px;
+        border-radius: 30px;
+        border: 2px solid var(--accent);
+        background: rgba(20, 20, 20, 0.95);
+        color: var(--text);
+        font-size: clamp(16px, 1.6vw, 22px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        z-index: 61;
+    }
+
+    /* The hotspot settings on the phone want Shizuku, which is not ready:
+       the phone has to be opened to fix it */
+    #hotspotPop {
+        position: fixed;
+        left: 50%;
+        top: 3vh;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 1em;
+        max-width: 90vw;
+        padding: 12px 12px 12px 20px;
+        border-radius: 16px;
+        border: 2px solid #e57373;
+        background: rgba(40, 20, 20, 0.95);
+        color: #ffd0d0;
+        font-size: clamp(15px, 1.5vw, 20px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        z-index: 61;
+    }
+
+    #hotspotClose {
+        flex: 0 0 auto;
+        width: 2em;
+        height: 2em;
+        border: none;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+    }
+
+    #unplugSkip {
+        flex: 0 0 auto;
+        padding: 0.5em 1em;
+        border: none;
+        border-radius: 20px;
+        background: var(--accent);
+        color: #000;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
     #toast {
         position: fixed;
         left: 50%;
@@ -3325,6 +3391,8 @@
     </div>
 </div>
 <div id="toast"></div>
+<div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
+<div id="hotspotPop"><span id="hotspotText"></span><button id="hotspotClose" type="button" aria-label="Close" title="Close">&#x2715;</button></div>
 <div id="songMenu">
     <div id="menuBox">
         <div id="menuTitle"></div>
@@ -9827,6 +9895,57 @@
         });
     }
 
+    // The countdown after the charger was pulled out on the phone, with the
+    // button that skips the shutdown
+    function paintUnplug(s) {
+
+        const left = s && typeof s.unplugLeft === "number" ? s.unplugLeft : -1;
+
+        if (left > 0) {
+            $("unplugText").textContent = "Charger out, shutting down in " + left + " s";
+        }
+
+        $("unplugPop").style.display = left > 0 ? "flex" : "none";
+    }
+
+    // The phone cannot switch the hotspot as its settings want, said until
+    // closed, and again once the reason changes
+    let hotspotClosed = "";
+
+    function paintHotspotWarn(s) {
+
+        const why = s && typeof s.hotspotWarn === "string" ? s.hotspotWarn : "";
+        const words = {
+            nowrite: "Open Mureka Player on the phone and allow it to modify system settings, or the hotspot cannot be switched with the charger.",
+            denied: "Open Mureka Player on the phone and give Shizuku its permission, or the hotspot cannot be switched with the charger.",
+            stopped: "Shizuku is not running on the phone, so the hotspot cannot be switched with the charger. Start it on the phone.",
+            old: "Shizuku on the phone is too old to switch the hotspot. Update it on the phone.",
+            missing: "Switching the hotspot with the charger needs Shizuku on the phone, which is not installed."
+        };
+
+        if (why !== hotspotClosed) {
+            hotspotClosed = "";
+        }
+
+        if (why && words[why]) {
+            $("hotspotText").textContent = words[why];
+        }
+
+        $("hotspotPop").style.display = why && words[why] && !hotspotClosed ? "flex" : "none";
+    }
+
+    $("hotspotClose").addEventListener("click", function () {
+
+        hotspotClosed = state && state.hotspotWarn ? state.hotspotWarn : "";
+        $("hotspotPop").style.display = "none";
+    });
+
+    $("unplugSkip").addEventListener("click", function () {
+
+        send("skipUnplug");
+        $("unplugPop").style.display = "none";
+    });
+
     // The songs the phone is caching right now, with how far each has come,
     // painted on their rows at every state, so the pie grows without the
     // list being read again
@@ -10940,6 +11059,8 @@
         paintCachingDots(s);
         paintSongDot(s);
         watchLists(s);
+        paintUnplug(s);
+        paintHotspotWarn(s);
         watchMini(s);
         watchToast(s);
         watchCarGone(s);

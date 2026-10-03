@@ -308,6 +308,9 @@ public class PlayerService extends Service implements Hub.Listener {
 
         instance = this;
 
+        // The charger in the car coming and going
+        ChargeWatch.start(this);
+
         // The local name for other devices and the web view's fixed address
         applySettings();
 
@@ -328,6 +331,57 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         return intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+    }
+
+    // The background work stopped while the charger is out: the web view
+    // server, the covers fetched ahead, the player's own background reading
+    // and caching, and the locks keeping the CPU and Wi-Fi awake. Started
+    // again when the charger comes back. The music, playing or not, keeps
+    // its own lock
+    private boolean quiet = false;
+
+    static void setQuiet(boolean on) {
+
+        MAIN.post(() -> {
+
+            if (instance != null) {
+                instance.applyQuiet(on);
+            }
+        });
+    }
+
+    private void applyQuiet(boolean on) {
+
+        if (on == quiet) {
+            return;
+        }
+
+        quiet = on;
+        CoverCache.setPaused(on);
+        Hub.command("quiet", on);
+
+        if (on) {
+
+            if (server != null) {
+                server.stop();
+            }
+
+            if (!playing) {
+
+                wakeLock.release();
+                wifiLock.release();
+            }
+
+            if (clientLock != null) {
+                clientLock.release();
+            }
+        } else {
+
+            server = new CarServer(this, PORT);
+            server.start();
+        }
+
+        updateNotification();
     }
 
     // A web view setting changed in the player's settings panel
@@ -374,7 +428,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
         PlayerService s = instance;
 
-        if (s != null && s.clientLock != null) {
+        if (s != null && s.clientLock != null && !s.quiet) {
             s.clientLock.acquire(90 * 1000L);
         }
     }
@@ -513,6 +567,7 @@ public class PlayerService extends Service implements Hub.Listener {
     public void onDestroy() {
 
         Hub.removeListener(this);
+        ChargeWatch.stop();
         SysVolume.stop();
 
         if (deviceWatcher != null) {

@@ -608,6 +608,93 @@ final class PlayerWeb {
             return appContext != null && BootReceiver.takeUpdateRestart(appContext);
         }
 
+        // The charger countdown skipped from the player's notice
+        @JavascriptInterface
+        public void skipUnplug() {
+            ChargeWatch.skip();
+        }
+
+        // Shizuku, for the hotspot: missing, stopped, old, denied or ready,
+        // and what the last hotspot command said
+        @JavascriptInterface
+        public String hotspotStatus() {
+
+            JSONObject o = new JSONObject();
+
+            try {
+
+                o.put("shizuku", appContext == null ? "missing" : Hotspot.status(appContext));
+                o.put("write", appContext != null && Hotspot.canWrite(appContext));
+                o.put("last", Hotspot.lastResult());
+                o.put("countdown", ChargeWatch.left());
+            } catch (JSONException e) {
+                return "{}";
+            }
+
+            return o.toString();
+        }
+
+        // Shizuku's own question for its permission
+        @JavascriptInterface
+        public void hotspotAsk() {
+            Hotspot.ask();
+        }
+
+        // Android's own screen to let the app modify system settings, which
+        // switching the hotspot needs
+        @JavascriptInterface
+        public void hotspotAllowWrite() {
+
+            if (appContext != null) {
+                Hotspot.askWrite(appContext);
+            }
+        }
+
+        // Shizuku itself, to start it, or its page in the Play Store when it
+        // is not installed
+        @JavascriptInterface
+        public void hotspotOpen() {
+
+            if (appContext == null) {
+                return;
+            }
+
+            Intent open = appContext.getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
+
+            if (open == null) {
+                open = new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api"));
+            }
+
+            try {
+                appContext.startActivity(open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (ActivityNotFoundException e) {
+
+                // No Play Store, the web page instead
+                try {
+                    appContext.startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (ActivityNotFoundException e2) {
+                    // Nothing to open
+                }
+            }
+        }
+
+        // The hotspot switched by hand, to try the settings
+        @JavascriptInterface
+        public void hotspotSwitch(boolean on) {
+
+            if (appContext == null) {
+                return;
+            }
+
+            if (on) {
+                Hotspot.start(appContext);
+            } else {
+                Hotspot.stop(appContext);
+            }
+        }
+
         // The answer to one of the app's slower questions, a piece of a song
         // for the web view among them
         @JavascriptInterface

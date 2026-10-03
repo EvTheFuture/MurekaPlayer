@@ -134,6 +134,18 @@ the new settings layout and a number of smaller improvements.
 - The song lists in the web view follow the phone: the queue is read again
   when it is shuffled, rebuilt or moves on, and the song list when the
   filters change.
+- **Charger and power**, a settings page in the app. With its master switch
+  on, when the charger is pulled out, after a grace time (60 seconds by
+  default) the music can pause, the hotspot go off and the background
+  work stop, so a phone left somewhere warm stays cooler. A note counts
+  down on the phone and in the web view with **Skip shutdown**, and
+  plugging in again in time stops it. Plugged in, the hotspot can come on
+  and the background work starts again. The hotspot is switched through
+  Android's own tethering, with the phone's own name and password, once
+  Android lets the player modify system settings, and through Shizuku
+  only if the phone refuses that. The page and the start of the app ask
+  for the permission when it is missing, the web view says to open the
+  phone, and the hotspot can be tried from the settings.
 - **Cache control**, a settings page of its own under Data, gathers what the
   player keeps on the device: Cache ahead, the songs stored with **Cache
   all** and **Clear song cache** (with its progress, the library itself

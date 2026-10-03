@@ -38,6 +38,21 @@ final class CarSettings {
     static final String MDNS_NAME = "mdnsName";
     static final String FULLSCREEN = "appFullscreen";
 
+    // What happens when the charger is pulled out and plugged in again, a
+    // phone left somewhere warm stays cooler with less running
+    static final String CHARGE_SAVE = "chargeSave";
+    static final String CHARGE_GRACE = "chargeGrace";
+    static final String UNPLUG_PAUSE = "unplugPause";
+    static final String UNPLUG_HOTSPOT = "unplugHotspot";
+    static final String UNPLUG_QUIET = "unplugQuiet";
+    static final String PLUG_HOTSPOT = "plugHotspot";
+
+    // The hotspot the app switches on with Shizuku, best the same name and
+    // password as the phone's own, so other devices join it by themselves
+    static final String HOTSPOT_SSID = "hotspotSsid";
+    static final String HOTSPOT_PASS = "hotspotPass";
+    static final String HOTSPOT_BAND = "hotspotBand";
+
     // Tesla's browser refuses private addresses, 3.3.3.3 is the one the
     // Android Auto in the browser apps have used for years
     static final String DEFAULT_ADDRESS = "3.3.3.3";
@@ -74,6 +89,20 @@ final class CarSettings {
         return (clean.isEmpty() ? DEFAULT_NAME : clean) + ".local";
     }
 
+    static boolean on(Context c, String key) {
+        return "1".equals(prefs(c).getString(key, "0"));
+    }
+
+    // Seconds to wait after the charger is pulled out, 60 unless changed
+    static int chargeGrace(Context c) {
+
+        try {
+            return Math.max(0, Math.min(3600, Integer.parseInt(prefs(c).getString(CHARGE_GRACE, "60"))));
+        } catch (NumberFormatException e) {
+            return 60;
+        }
+    }
+
     // Store a value from the settings panel. A value that does not pass is
     // not stored, so the last good one stays, and false tells the caller
     static boolean store(Context c, String key, String value) {
@@ -87,9 +116,38 @@ final class CarSettings {
 
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
-            || FULLSCREEN.equals(key)) {
+            || FULLSCREEN.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
+            || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";
+        } else if (CHARGE_GRACE.equals(key)) {
+
+            if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {
+                return false;
+            }
+        } else if (HOTSPOT_SSID.equals(key)) {
+
+            // A network name: 1 to 32 characters, no line breaks
+            if (v.isEmpty() || v.length() > 32 || v.matches(".*[\\r\\n].*")) {
+                return false;
+            }
+        } else if (HOTSPOT_PASS.equals(key)) {
+
+            // Kept as typed, an empty one means an open hotspot, otherwise
+            // WPA2 wants 8 to 63 characters
+            v = value == null ? "" : value;
+
+            if (!v.isEmpty() && (v.length() < 8 || v.length() > 63)) {
+                return false;
+            }
+
+            prefs(c).edit().putString(key, v).apply();
+            return true;
+        } else if (HOTSPOT_BAND.equals(key)) {
+
+            if (!"any".equals(v) && !"2".equals(v) && !"5".equals(v)) {
+                return false;
+            }
         } else {
             return false;
         }

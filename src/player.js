@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.101";
+    const VERSION = "1.9.9.104";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -9253,7 +9253,7 @@
             }
 
             if (trickleHalted || trickleBusy || settings.playsTrickle === false || creatorSource
-                || playsJob || running || cacheRunning || progressKind) {
+                || playsJob || running || cacheRunning || progressKind || playerQuiet) {
                 return;
             }
         }
@@ -16051,6 +16051,8 @@
             loading: running === true,
             loadKind: running === true ? (runOwner || "load") : "",
             playsOn: settings.playsOn === true,
+            unplugLeft: unplugLeft,
+            hotspotWarn: hostHotspotWarn(),
             songCache: hostSongCache(),
             queueSig: hostQueueSig(),
             listSig: hostListSig(),
@@ -16158,6 +16160,204 @@
     }
 
     // The cache dot the phone shows in front of a song
+    // The charger pulled out: the app counts down before it stops what the
+    // settings say, and the player shows how long is left with a button to
+    // skip it. -1 when no countdown runs
+    let unplugLeft = -1;
+    let unplugEl = null;
+    let unplugTextEl = null;
+
+    function noteUnplug(left) {
+
+        const was = unplugLeft;
+
+        unplugLeft = left > 0 ? left : -1;
+        publishHostSoon();
+
+        if (left === 0) {
+            showToast("Charger out, shutting down", true);
+        } else if (left === -1 && was > 0) {
+            showToast("Charger back, nothing was stopped", true);
+        } else if (left === -2) {
+            showToast("Shutdown skipped", true);
+        }
+
+        paintUnplug();
+    }
+
+    function paintUnplug() {
+
+        if (unplugLeft <= 0) {
+
+            if (unplugEl) {
+                unplugEl.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!unplugEl) {
+
+            unplugEl = document.createElement("div");
+            unplugEl.setAttribute("data-mureka-notice", "1");
+            unplugEl.style.cssText = "position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:2147483647;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:10px 12px 10px 16px;border-radius:22px;background:#26262c;border:2px solid #48e1eb;color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,0.5)";
+
+            unplugTextEl = document.createElement("span");
+
+            const skip = document.createElement("button");
+
+            skip.type = "button";
+            skip.textContent = "Skip shutdown";
+            skip.style.cssText = "flex:0 0 auto;padding:6px 12px;border:none;border-radius:14px;background:#48e1eb;color:#000;font-weight:600;cursor:pointer";
+            skip.addEventListener("click", function () {
+
+                try {
+                    window.MurekaHost.skipUnplug();
+                } catch (e) {
+                    // Nothing to skip without the app
+                }
+            });
+
+            unplugEl.appendChild(unplugTextEl);
+            unplugEl.appendChild(skip);
+            document.body.appendChild(unplugEl);
+        }
+
+        unplugTextEl.textContent = "Charger out, shutting down in " + unplugLeft + " s";
+        unplugEl.style.display = "flex";
+    }
+
+    // Whether the hotspot settings are on without Shizuku being ready for
+    // them, the reason when so: denied, stopped, missing or old. Looked at
+    // every few seconds, for the settings, the question at start and the
+    // web view's notice
+    let hotspotWarnSeen = "";
+    let hotspotWarnAt = 0;
+
+    function hotspotWanted() {
+
+        try {
+            return window.MurekaHost.getPref("chargeSave", "0") === "1"
+                && (window.MurekaHost.getPref("unplugHotspot", "0") === "1"
+                || window.MurekaHost.getPref("plugHotspot", "0") === "1");
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Ready when Android lets the player modify system settings, or else
+    // Shizuku is ready, nowrite when neither
+    function hotspotShizuku() {
+
+        try {
+
+            const info = JSON.parse(window.MurekaHost.hotspotStatus() || "{}");
+
+            return info.write === true || info.shizuku === "ready" ? "ready" : "nowrite";
+        } catch (e) {
+            return "nowrite";
+        }
+    }
+
+    function hostHotspotWarn() {
+
+        if (!isApkHost() || typeof window.MurekaHost.hotspotStatus !== "function") {
+            return "";
+        }
+
+        if (Date.now() - hotspotWarnAt > 5000) {
+
+            hotspotWarnAt = Date.now();
+
+            const status = hotspotWanted() ? hotspotShizuku() : "ready";
+
+            hotspotWarnSeen = status === "ready" ? "" : status;
+        }
+
+        return hotspotWarnSeen;
+    }
+
+    // What to do about it, in words, and the button that does it
+    function hotspotFix(status) {
+
+        if (status === "nowrite") {
+            return { text: "Android has to let the player modify system settings before it can switch the hotspot.", button: "Allow modifying system settings" };
+        }
+
+        if (status === "denied") {
+            return { text: "Shizuku has not given the player its permission yet, so the hotspot cannot be switched.", button: "Give Shizuku permission" };
+        }
+
+        if (status === "stopped") {
+            return { text: "Shizuku is installed but not running, so the hotspot cannot be switched. Start it in Shizuku with wireless debugging.", button: "Open Shizuku" };
+        }
+
+        if (status === "old") {
+            return { text: "This Shizuku is too old for the player. Update it in the Play Store.", button: "Open Shizuku" };
+        }
+
+        return { text: "Switching the hotspot needs Shizuku, which is not installed.", button: "Get Shizuku" };
+    }
+
+    function hotspotDoFix(status) {
+
+        try {
+
+            if (status === "nowrite") {
+                window.MurekaHost.hotspotAllowWrite();
+            } else if (status === "denied") {
+                window.MurekaHost.hotspotAsk();
+            } else {
+                window.MurekaHost.hotspotOpen();
+            }
+        } catch (e) {
+            // An app from before this
+        }
+
+        // Looked at again soon after the answer
+        hotspotWarnAt = 0;
+    }
+
+    // At start, with the hotspot settings on and Shizuku not ready, the
+    // phone asks at once, so the permission is there before the charger is
+    // next pulled out
+    function checkHotspotAtStart() {
+
+        setTimeout(function () {
+
+            const status = hostHotspotWarn();
+
+            if (!status) {
+                return;
+            }
+
+            const fix = hotspotFix(status);
+
+            askYesNo("The hotspot cannot be switched", fix.text + " Power saving with the charger is set to switch it.", fix.button, function () {
+                hotspotDoFix(status);
+            });
+        }, 8000);
+    }
+
+    // While the charger is out the background work rests: the play counts
+    // are not read and Cache all stops. The music itself is left alone
+    let playerQuiet = false;
+
+    function setQuiet(on) {
+
+        playerQuiet = on;
+        dbgLog("Charger", on ? "background work stopped" : "background work going again");
+
+        if (on) {
+
+            stopPlaysJob();
+
+            if (cacheRunning) {
+                cacheAll();
+            }
+        }
+    }
+
     // The web view plays songs out of the phone's own song cache, the app's
     // web server asks for them here a piece at a time. The last few songs
     // read are kept at hand, a song is asked for in many pieces
@@ -17518,6 +17718,17 @@
             applyCarAudioVolume();
             setStatus("Music plays on the phone, the browser stopped answering");
             showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the phone", false);
+        } else if (cmd === "unplugCountdown") {
+            noteUnplug(Number(arg));
+        } else if (cmd === "skipUnplug") {
+
+            try {
+                window.MurekaHost.skipUnplug();
+            } catch (e) {
+                // An app from before the charger settings
+            }
+        } else if (cmd === "quiet") {
+            setQuiet(arg === true);
         } else if (cmd === "takeSound") {
 
             // Play, a skip or a seek from Bluetooth, the lock screen or a
@@ -19060,6 +19271,11 @@
         // The plays known for each song, for sorting the list by them, and
         // fresh ones, the first a little after starting up
         loadPlayCounts();
+
+        if (isApkHost()) {
+            checkHotspotAtStart();
+        }
+
         trickleNextAt = Date.now() + 30000;
         trickleTimer = setTimeout(trickleTick, 30000);
 
@@ -21895,6 +22111,265 @@
         return row;
     }
 
+    // The Charger and car page: what happens when the charger is pulled out
+    // and plugged in, and the hotspot through Shizuku. The page helpers of
+    // the settings come along, they live where the pages are built
+    function buildChargerPage(page, kit) {
+
+        const makeLabel = kit.makeLabel;
+        const makeSubLabel = kit.makeSubLabel;
+        const makeHint = kit.makeHint;
+        const withHint = kit.withHint;
+        const host = window.MurekaHost;
+        const on = function (key) {
+            return host.getPref(key, "0") === "1";
+        };
+        const put = function (key, v) {
+            host.setPref(key, v ? "1" : "0");
+        };
+        const hotspotInfo = function () {
+
+            try {
+                return JSON.parse(host.hotspotStatus() || "{}");
+            } catch (e) {
+                return {};
+            }
+        };
+
+        // Everything on the page but the master switch, shown with it on
+        const saveRows = [];
+
+        const masterRow = makeBoolRow("Power saving with the charger",
+            function () { return on("chargeSave"); },
+            function (v) {
+
+                put("chargeSave", v);
+                hotspotWarnAt = 0;
+                paintSaveRows();
+                paintStatus();
+            });
+
+        const graceRow = makeStepperRow("Grace time in seconds",
+            function () { return parseInt(host.getPref("chargeGrace", "60"), 10) || 0; },
+            function (v) { host.setPref("chargeGrace", String(v)); },
+            0, 600, 10);
+
+        const pauseRow = makeBoolRow("Pause the music",
+            function () { return on("unplugPause"); },
+            function (v) { put("unplugPause", v); });
+
+        // Switched on without a way to switch the hotspot, Android's own
+        // screen for the permission opens at once
+        const wantHotspot = function (key, v) {
+
+            put(key, v);
+            hotspotWarnAt = 0;
+
+            if (v && hotspotShizuku() !== "ready") {
+
+                showToast(hotspotFix("nowrite").text, false);
+                host.hotspotAllowWrite();
+            }
+
+            paintStatus();
+        };
+
+        const hotspotOffRow = makeBoolRow("Switch the hotspot off",
+            function () { return on("unplugHotspot"); },
+            function (v) { wantHotspot("unplugHotspot", v); });
+
+        const quietRow = makeBoolRow("Stop the background work",
+            function () { return on("unplugQuiet"); },
+            function (v) { put("unplugQuiet", v); });
+
+        const hotspotOnRow = makeBoolRow("Switch the hotspot on",
+            function () { return on("plugHotspot"); },
+            function (v) { wantHotspot("plugHotspot", v); });
+
+        // The warning while a hotspot switch is on and Shizuku not ready
+        const warnEl = document.createElement("div");
+        const warnText = document.createElement("div");
+        let warnStatus = "";
+
+        warnEl.style.cssText = "display:none;flex-direction:column;gap:8px;margin:6px 0 10px;padding:10px;border-radius:8px;border:1px solid #e57373;background:rgba(229,115,115,0.12)";
+        warnText.style.cssText = "color:#ffb4b4;font-size:13px;line-height:1.4";
+
+        const warnBtn = makeButton("Give Shizuku permission", "#333", "#fff", function () {
+            hotspotDoFix(warnStatus);
+        });
+
+        warnEl.appendChild(warnText);
+        warnEl.appendChild(warnBtn);
+
+        const nameRow = makeCarTextRow("Hotspot name for Shizuku", "hotspotSsid", "");
+        const passRow = makeCarTextRow("Hotspot password, empty for an open hotspot", "hotspotPass", "");
+
+        // The password stays on the phone, never in the web view's copy of
+        // the settings
+        passRow.querySelector("input").type = "password";
+        passRow.dataset.hostSkip = "1";
+
+        const bandRow = makeChoiceRow([
+            { label: "Any band", value: "any" },
+            { label: "2.4 GHz", value: "2" },
+            { label: "5 GHz", value: "5" }
+        ], function () { return host.getPref("hotspotBand", "any"); }, function (v) {
+            host.setPref("hotspotBand", v);
+        });
+
+        // Shizuku and the last hotspot command, a name and a value a row
+        const statusEl = document.createElement("div");
+        const askRow = document.createElement("div");
+        const tryRow = document.createElement("div");
+
+        statusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
+        askRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        tryRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+
+        const askBtn = makeButton("Give Shizuku permission", "#333", "#fff", function () {
+            host.hotspotAsk();
+        });
+
+        const writeRow = document.createElement("div");
+
+        writeRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        writeRow.appendChild(makeButton("Allow modifying system settings", "#333", "#fff", function () {
+            host.hotspotAllowWrite();
+        }));
+
+        tryRow.appendChild(makeButton("Hotspot on now", "#333", "#fff", function () {
+
+            host.hotspotSwitch(true);
+            showToast("Switching the hotspot on", "wait");
+        }));
+        tryRow.appendChild(makeButton("Hotspot off now", "#333", "#fff", function () {
+
+            host.hotspotSwitch(false);
+            showToast("Switching the hotspot off", "wait");
+        }));
+        askRow.appendChild(askBtn);
+
+        const words = {
+            ready: "Ready",
+            denied: "Running, permission needed",
+            stopped: "Installed, not running",
+            missing: "Not installed",
+            old: "Too old, update Shizuku"
+        };
+        let lastSeen = null;
+
+        const paintStatus = function () {
+
+            const info = hotspotInfo();
+            const rows = [
+                ["Android's way", info.write === true ? "Allowed" : "Not allowed yet"],
+                ["Shizuku", words[info.shizuku] || "Not known"],
+                ["Last command", info.last || "--"],
+                ["Charger", typeof info.countdown === "number" && info.countdown >= 0
+                    ? "Out, shutting down in " + info.countdown + " s" : "--"]
+            ];
+            const key = JSON.stringify(rows);
+
+            askRow.style.display = info.shizuku === "denied" ? "flex" : "none";
+            writeRow.style.display = info.write === true ? "none" : "flex";
+
+            // The warning for the hotspot switches, with what fixes it
+            warnStatus = hotspotWanted() && info.write !== true && info.shizuku !== "ready" ? "nowrite" : "";
+            warnEl.style.display = warnStatus ? "flex" : "none";
+
+            if (warnStatus) {
+
+                const fix = hotspotFix(warnStatus);
+
+                warnText.textContent = fix.text;
+                warnBtn.textContent = fix.button;
+            }
+
+            // A hotspot command answered, said with a note as well
+            if (lastSeen !== null && info.last && info.last !== lastSeen) {
+                showToast(info.last, info.last.indexOf("Switched") === 0);
+            }
+
+            lastSeen = info.last || "";
+
+            if (statusEl.dataset.text === key) {
+                return;
+            }
+
+            statusEl.dataset.text = key;
+            statusEl.textContent = "";
+
+            for (const pair of rows) {
+
+                const row = document.createElement("div");
+                const name = document.createElement("div");
+                const value = document.createElement("div");
+
+                row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
+                name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
+                value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px";
+                name.textContent = pair[0];
+                value.textContent = pair[1];
+                row.appendChild(name);
+                row.appendChild(value);
+                statusEl.appendChild(row);
+            }
+
+            statusEl.lastChild.style.borderBottom = "none";
+        };
+
+        const add = function (el) {
+
+            // The way it is laid out when shown, a row of buttons stays a row
+            el.dataset.shownAs = el.style.display || "";
+            saveRows.push(el);
+            page.appendChild(el);
+        };
+
+        const paintSaveRows = function () {
+
+            for (const el of saveRows) {
+                el.style.display = on("chargeSave") ? el.dataset.shownAs : "none";
+            }
+        };
+
+        page.appendChild(withHint(masterRow, "Turns everything below on or off together. Off, nothing happens when the charger is pulled out or plugged in."));
+        add(warnEl);
+        add(makeLabel("When the charger is pulled out"));
+        add(withHint(graceRow, "How long to wait before anything is stopped. Plugged in again in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once."));
+        add(withHint(pauseRow, "The music stops, so it does not carry on from the phone's speaker after you have gone."));
+        add(withHint(hotspotOffRow, "The hotspot warms the phone the most, and with nothing connected it does no good."));
+        add(withHint(quietRow, "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. Starts again by itself when the charger is plugged in."));
+        add(makeLabel("When the charger is plugged in"));
+        add(withHint(hotspotOnRow, "Devices that use the phone's hotspot find it again without the phone being touched."));
+        add(makeLabel("Hotspot"));
+        add(makeHint("The player switches the phone's own hotspot, with its own name and password, the way the quick settings tile does, once Android lets it modify system settings. Should the phone refuse, Shizuku, a free app, is used when it is installed and running."));
+        add(statusEl);
+        add(writeRow);
+        add(tryRow);
+        add(makeHint("Hotspot on now and off now try it straight away. The last command says what Android answered."));
+        add(makeSubLabel("Through Shizuku, only if Android refuses"));
+        add(askRow);
+        add(nameRow);
+        add(passRow);
+        add(makeSubLabel("Band"));
+        add(bandRow);
+        add(makeHint("Shizuku sets up its own hotspot, so use the same name and password as the phone's own, and devices join it by themselves."));
+
+        paintSaveRows();
+        settingsRefreshers.push(paintSaveRows);
+
+        paintStatus();
+        settingsRefreshers.push(paintStatus);
+
+        setInterval(function () {
+
+            if (settingsEl && page.style.display !== "none" && settingsEl.offsetParent !== null) {
+                paintStatus();
+            }
+        }, 1000);
+    }
+
     // Build a row of mutually exclusive choice buttons backed by getter / setter
     function makeChoiceRow(choices, get, set) {
 
@@ -22105,6 +22580,7 @@
         const nowPage = makePage();
         const publishPage = makePage();
         const cachePage = makePage();
+        const chargerPage = makePage();
         const backupPage = makePage();
         const devPage = makePage();
         const aboutPage = makePage();
@@ -22121,6 +22597,7 @@
             nowplaying: nowPage,
             publishing: publishPage,
             cache: cachePage,
+            charger: chargerPage,
             backup: backupPage,
             developer: devPage,
             about: aboutPage
@@ -23483,6 +23960,11 @@
             devicePage.appendChild(el);
         }
 
+        // The charger, the hotspot and the background work, only in the app
+        if (isApkHost() && typeof window.MurekaHost.getPref === "function") {
+            buildChargerPage(chargerPage, { makeLabel: makeLabel, makeSubLabel: makeSubLabel, makeHint: makeHint, withHint: withHint });
+        }
+
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         devPage.appendChild(debugRow);
         devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, "
@@ -23717,6 +24199,7 @@
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
+            [chargerPage, "Charger and power", "What happens when the charger is pulled out and plugged in again. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
             [cachePage, "Cache control", "What the player keeps on this device so songs and covers are there without waiting for Mureka, and how much room it takes."],
             [backupPage, "Backup and restore", null],
             [devPage, "Developer", null],
@@ -23751,6 +24234,10 @@
         }
 
         mainPage.appendChild(makePageButton("This device", "device"));
+
+        if (isApkHost()) {
+            mainPage.appendChild(makePageButton("Charger and power", "charger"));
+        }
         mainPage.appendChild(makeLabel("Music"));
         mainPage.appendChild(makeHint("Which songs load, how they play and what is shown while they play."));
         mainPage.appendChild(makePageButton("Library", "library"));
@@ -23962,7 +24449,15 @@
         carVpn: "0",
         vpnAddress: "3.3.3.3",
         mdnsName: "murekaplayer",
-        appFullscreen: "1"
+        appFullscreen: "1",
+        chargeSave: "0",
+        chargeGrace: "60",
+        unplugPause: "0",
+        unplugHotspot: "0",
+        unplugQuiet: "0",
+        plugHotspot: "0",
+        hotspotSsid: "",
+        hotspotBand: "any"
     };
 
     // Give the app back the settings it keeps itself. Only in the app, and

@@ -186,6 +186,15 @@ android {
     }
 }
 
+// Two small libraries for switching the phone's hotspot: one reaches the
+// call in Android's tethering service that is left out of its public API,
+// Shizuku is the way left when the phone refuses that one
+dependencies {
+    implementation "org.lsposed.hiddenapibypass:hiddenapibypass:6.1"
+    implementation "dev.rikka.shizuku:api:13.1.5"
+    implementation "dev.rikka.shizuku:provider:13.1.5"
+}
+
 // The player is the same file the extension and the bookmarklet use. It is
 // copied in from the repository at build time, so there is only one copy
 def copyPlayer = tasks.register("copyPlayer", Copy) {
