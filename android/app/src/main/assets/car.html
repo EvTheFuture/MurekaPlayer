@@ -1232,6 +1232,30 @@
         background: #2a2a31;
     }
 
+    /* Where a song is in the list shown, #1 at the top, small and faint in
+       the bottom left corner of its line */
+    .row {
+        position: relative;
+    }
+
+    .rowPlace {
+        position: absolute;
+        left: 8px;
+        bottom: 3px;
+        font-size: 0.5em;
+        font-weight: 400;
+        line-height: 1;
+        color: var(--muted);
+        opacity: 0.55;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+    }
+
+    #miniRows .rowPlace {
+        left: 6px;
+        bottom: 2px;
+    }
+
     #songMenu,
     #helpPop {
         position: fixed;
@@ -6436,14 +6460,16 @@
                 return;
             }
 
+            const first = typeof data.offset === "number" ? data.offset : listLoaded;
+
             listTotal = data.total;
             listLoaded += data.songs.length;
             listPlayingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
             rowMeta = data.meta || rowMeta;
 
-            for (const song of data.songs) {
-                $("rows").appendChild(makeRow(song));
-            }
+            data.songs.forEach(function (song, i) {
+                $("rows").appendChild(makeRow(song, first + i + 1));
+            });
 
             noteFilters(data.filters);
             $("counts").textContent = listTotal + " song" + (listTotal === 1 ? "" : "s")
@@ -7294,7 +7320,7 @@
         }, true);
     }
 
-    function makeRow(song) {
+    function makeRow(song, place) {
 
         // A div, since a button inside a button is not allowed
         const row = document.createElement("div");
@@ -7304,6 +7330,16 @@
         row.dataset.id = song.id;
         attachLongPress(row, song.id);
         songLine(song, row);
+
+        // Its place in the list as shown, sorted and searched
+        if (place > 0) {
+
+            const mark = document.createElement("span");
+
+            mark.className = "rowPlace";
+            mark.textContent = "#" + place;
+            row.appendChild(mark);
+        }
 
         // Play next, and a second press takes it out of play next again
         const nextBtn = lineButton(song.playNext ? "Remove from play next" : "Play next",
@@ -9766,13 +9802,17 @@
                 return;
             }
 
+            let place = typeof data.offset === "number" ? data.offset : miniLoaded;
+
             miniTotal = data.total;
             miniLoaded += data.songs.length;
             rowMeta = data.meta || rowMeta;
 
             for (const song of data.songs) {
 
-                const row = makeRow(song);
+                place += 1;
+
+                const row = makeRow(song, place);
 
                 $("miniRows").appendChild(row);
 

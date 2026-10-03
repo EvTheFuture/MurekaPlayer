@@ -101,7 +101,9 @@ the new settings layout and a number of smaller improvements.
   settings shows where it stands. Counts are kept on the device.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
-  and the phone's song menu on press and hold or right click.
+  and the phone's song menu on press and hold or right click. A small,
+  faint #1, #2 and so on in the corner of each line, in the big and the
+  small list, gives the song's place in the list as sorted and searched.
 - Pull the song list down at its top and let go to load new songs from
   Mureka, as in the mobile player, with a finger or by dragging with a
   mouse. The list stays open with a turning ring until the phone has
