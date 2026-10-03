@@ -6968,7 +6968,13 @@
         // An arrow shows the direction, up for fewest first, down for most
         setLabel($("viewStars"), "Stars" + (listSort === "starsUp" ? " \u2191" : (listSort === "starsDown" ? " \u2193" : "")));
         setLabel($("viewPlays"), "Plays" + (listSort === "playsUp" ? " \u2191" : (listSort === "playsDown" ? " \u2193" : "")));
+        $("viewPlays").style.display = playsOn() ? "" : "none";
         paintMiniSort();
+    }
+
+    // Whether the phone has play counts on, sorting by plays is offered then
+    function playsOn() {
+        return !state || state.playsOn !== false;
     }
 
     // The sortings offered in the small list, with the name its button shows
@@ -9071,7 +9077,9 @@
     // in use lit
     $("miniSort").addEventListener("click", function () {
 
-        const items = SORTS.map(function (item) {
+        const items = SORTS.filter(function (item) {
+            return playsOn() || item.sort.indexOf("plays") !== 0;
+        }).map(function (item) {
 
             return { icon: item.icon, label: item.label, sort: item.sort, fn: function () {
 
@@ -9081,12 +9089,16 @@
         });
 
         // Last, the plays Mureka's lists leave out, read when asked for
-        items.push({ icon: readingPlays() ? "stop" : "play",
+        items.push(playsOn() && { icon: readingPlays() ? "stop" : "play",
             label: readingPlays() ? "Stop reading play counts" : "Read play counts", sort: null, fn: function () {
 
                 closeSongMenu();
                 playsChoice();
             } });
+
+        if (!items[items.length - 1]) {
+            items.pop();
+        }
 
         openChoice("Sort the list", items);
 
@@ -9244,9 +9256,24 @@
     // over the lists are read again in the new order
     let playsRound = false;
 
+    let playsWasOn = true;
+
     function watchPlaysRound(s) {
 
         const now = !!(s && s.progress && s.progress.kind === "plays");
+        const on = !(s && s.playsOn === false);
+
+        // Play counts switched off on the phone: no sorting by them here
+        if (on !== playsWasOn) {
+
+            playsWasOn = on;
+
+            if (!on && (listSort === "playsUp" || listSort === "playsDown")) {
+                applySort("");
+            } else {
+                paintViews();
+            }
+        }
 
         if (playsRound && !now && (listSort === "playsUp" || listSort === "playsDown")) {
 
@@ -10109,12 +10136,12 @@
                     again();
                 });
             } },
-            { icon: "play", label: "Read play counts", fn: function () {
+            playsOn() && { icon: "play", label: "Read play counts", fn: function () {
 
                 closeSongMenu();
                 playsChoice();
             } }
-        ]);
+        ].filter(Boolean));
     });
 
     $("toCurrent").addEventListener("click", function () {

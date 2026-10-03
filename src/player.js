@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.86";
+    const VERSION = "1.9.9.87";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1323,6 +1323,22 @@
         return Math.round((low + Math.random() * (high - low)) * 1000);
     }
 
+    // The pace once every count is up to date, the shortest wait of a range
+    // in minutes: 1 to 3, 3 to 10 or 10 to 30, or 0 when it waits for counts
+    // to grow old instead
+    function playsKeepMs() {
+
+        const low = settings.playsKeepMins;
+
+        if (low !== 1 && low !== 3 && low !== 10) {
+            return 0;
+        }
+
+        const high = low === 1 ? 3 : (low === 3 ? 10 : 30);
+
+        return Math.round((low + Math.random() * (high - low)) * 60000);
+    }
+
     // How long the counts and lyrics of a song are kept, in minutes. Older
     // settings kept it in hours, 4 unless changed: a changed value carries
     // over, the old default becomes the new one of 30 minutes
@@ -1410,8 +1426,10 @@
             artOverlayMode: "all",
             copyLinkOnPublish: true,
             noRemixOnPublish: false,
+            playsOn: isApkHost(),
             playsTrickle: true,
             playsTrickleSecs: 10,
+            playsKeepMins: 3,
             playsMaxAgeHours: 24,
             directAudio: true,
             remoteArtwork: false,
@@ -1520,8 +1538,10 @@
                     ? parsed.vocalFilter
                     : "all";
 
-                // Remembered list view, one of mureka, queue or alpha
-                const view = (parsed.view === "queue" || parsed.view === "alpha" || parsed.view === "stars")
+                // Remembered list view, one of mureka, queue, alpha, stars or
+                // plays, the last only while play counts are on
+                const view = (parsed.view === "queue" || parsed.view === "alpha" || parsed.view === "stars"
+                    || parsed.view === "plays")
                     ? parsed.view
                     : "mureka";
 
@@ -1547,8 +1567,11 @@
                     reportPlays: parsed.reportPlays !== false,
                     copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
                     noRemixOnPublish: parsed.noRemixOnPublish === true,
+                    playsOn: typeof parsed.playsOn === "boolean" ? parsed.playsOn : isApkHost(),
                     playsTrickle: parsed.playsTrickle !== false,
                     playsTrickleSecs: playsPaceFrom(parsed.playsTrickleSecs),
+                    playsKeepMins: [0, 1, 3, 10].indexOf(parsed.playsKeepMins) !== -1
+                        ? parsed.playsKeepMins : 3,
                     playsMaxAgeHours: [6, 24, 72, 168].indexOf(parsed.playsMaxAgeHours) !== -1
                         ? parsed.playsMaxAgeHours : 24,
                     artOverlayMode: ["none", "info", "all"].indexOf(parsed.artOverlayMode) !== -1
@@ -7961,6 +7984,11 @@
 
             btn.style.background = active ? "#48e1eb" : "#333";
             btn.style.color = active ? "#000" : "#fff";
+
+            // Plays only with play counts on
+            if (name === "plays") {
+                btn.style.display = settings.playsOn === true ? "" : "none";
+            }
         });
     }
 
@@ -8097,7 +8125,8 @@
 
         const v = listView === "queue"
             ? "Queue"
-            : (listView === "alpha" ? "A-Z" : (listView === "stars" ? "Stars" : "Mureka"));
+            : (listView === "alpha" ? "A-Z" : (listView === "stars" ? "Stars"
+                : (listView === "plays" && settings.playsOn === true ? "Plays" : "Mureka")));
 
         const f = settings.vocalFilter === "vocal"
             ? "Vocals"
@@ -8226,6 +8255,10 @@
 
         if (listView === "stars") {
             return sortByStars(cache.songs);
+        }
+
+        if (listView === "plays" && settings.playsOn === true) {
+            return sortByPlays(cache.songs, false);
         }
 
         if (listView === "alpha") {
@@ -8874,6 +8907,7 @@
             playCounts.set(key, data.play_count);
             hostListStamp += 1;
             playCountStamp += 1;
+            repaintRowPlays(key);
         }
 
         savePlaysSoon();
@@ -8970,20 +9004,26 @@
     let playsJobDone = 0;
     let playsJobTotal = 0;
 
-    // The song whose count has most likely moved since it was read: how
-    // long ago, times how fast it gains plays. A still song counts as a play
-    // a day, so it is read about daily, a busy one far more often, but never
-    // within 15 minutes of the last read. A song read only once has no pace
-    // yet and counts as a play an hour until it is read again. Never read
-    // songs come first of all
+    // What the fresh counts would read next, and whether that is catching
+    // up or keeping up. Catching up: published songs never read come first,
+    // then counts older than the age in the settings, oldest first. Keeping
+    // up, once every count is younger than that: only songs that have most
+    // likely gained a play since they were read, how long ago times how fast
+    // they gain plays, never within 15 minutes of the last read. A song that
+    // barely moves waits until its count grows old and is caught up then
     const PLAYS_MIN_AGE = 15 * 60000;
-    const PLAYS_FLOOR = 1 / 24;
 
-    function nextPlaysSong() {
+    function playsPlan() {
 
         const now = Date.now();
-        let best = null;
-        let bestScore = 0;
+        const maxAge = (settings.playsMaxAgeHours || 24) * 3600000;
+        let unknown = null;
+        let unknownCount = 0;
+        let oldest = null;
+        let oldestAt = Infinity;
+        let staleCount = 0;
+        let mover = null;
+        let moverScore = 0;
 
         for (const song of cache.songs) {
 
@@ -8994,45 +9034,86 @@
             const key = String(song.song_id);
 
             if (!playCounts.has(key)) {
-                return song;
-            }
 
-            const age = now - (playCountAt.get(key) || 0);
-
-            if (age < PLAYS_MIN_AGE) {
+                unknownCount += 1;
+                unknown = unknown || song;
                 continue;
             }
 
-            const rate = playCountRate.has(key) ? playCountRate.get(key) : 1;
-            const score = (age / 3600000) * (rate + PLAYS_FLOOR);
+            const at = playCountAt.get(key) || 0;
+            const age = now - at;
 
-            if (score > bestScore) {
+            if (age > maxAge) {
+                staleCount += 1;
+            }
 
-                best = song;
-                bestScore = score;
+            if (at < oldestAt) {
+
+                oldest = song;
+                oldestAt = at;
+            }
+
+            const rate = playCountRate.get(key);
+
+            if (age < PLAYS_MIN_AGE || typeof rate !== "number") {
+                continue;
+            }
+
+            // How many plays it has most likely gained since it was read
+            const score = (age / 3600000) * rate;
+
+            if (score >= 1 && score > moverScore) {
+
+                mover = song;
+                moverScore = score;
             }
         }
 
-        return best;
+        if (unknown) {
+            return { mode: "catch", song: unknown, unknown: unknownCount, stale: staleCount };
+        }
+
+        if (staleCount > 0) {
+            return { mode: "catch", song: oldest, unknown: 0, stale: staleCount };
+        }
+
+        return { mode: "keep", song: mover, unknown: 0, stale: 0 };
     }
+
+    // The fresh counts, in every player with play counts on. The pace
+    // follows what there is to do: the catching up pace while counts are
+    // missing or old, the far slower keeping up pace once all are up to
+    // date, and nothing is asked while nothing has most likely changed
+    let trickleMode = "";
 
     async function trickleTick() {
 
-        const wait = playsPaceMs();
+        const plan = settings.playsOn === true ? playsPlan() : null;
+        const keepMs = playsKeepMs();
+        let wait = 60000;
+
+        trickleMode = plan ? plan.mode : "";
+
+        if (plan && plan.mode === "catch") {
+            wait = playsPaceMs();
+        } else if (plan && keepMs > 0) {
+            wait = keepMs;
+        }
 
         trickleNextAt = Date.now() + wait;
         setTimeout(trickleTick, wait);
 
-        if (!isApkHost() || trickleHalted || trickleBusy || settings.playsTrickle === false || creatorSource
+        // Keeping up switched off waits for the counts to grow old
+        if (!plan || !plan.song || (plan.mode === "keep" && keepMs === 0)) {
+            return;
+        }
+
+        if (trickleHalted || trickleBusy || settings.playsTrickle === false || creatorSource
             || playsJob || running || cacheRunning || progressKind) {
             return;
         }
 
-        const song = nextPlaysSong();
-
-        if (!song) {
-            return;
-        }
+        const song = plan.song;
 
         trickleBusy = true;
 
@@ -9045,7 +9126,7 @@
 
                 trickleHalted = true;
                 trickleHaltWhy = "Mureka asked to slow down";
-                dbgLog("Plays", "Mureka asked to slow down, fresh counts stopped until the app is opened again");
+                dbgLog("Plays", "Mureka asked to slow down, fresh counts stopped until the player is opened again");
             } else {
 
                 const json = res.ok ? await res.json() : null;
@@ -9069,7 +9150,7 @@
 
             trickleHalted = true;
             trickleHaltWhy = "3 requests in a row failed";
-            dbgLog("Plays", "3 failed requests, fresh counts stopped until the app is opened again");
+            dbgLog("Plays", "3 failed requests, fresh counts stopped until the player is opened again");
         }
     }
 
@@ -9093,14 +9174,29 @@
         return Math.round(secs / 86400) + " days";
     }
 
-    // Where the play counts stand, the lines of the status in the settings
-    function playsStatusLines() {
+    // A song's name for the status, kept short
+    function playsTitle(song) {
+
+        const t = (song && song.title) || "Untitled";
+
+        return t.length > 28 ? t.slice(0, 27) + "\u2026" : t;
+    }
+
+    // Where the play counts stand, the rows of the status in the settings,
+    // each a name and its value
+    function playsStatusRows() {
 
         const now = Date.now();
-        const lines = [];
+        const maxAge = (settings.playsMaxAgeHours || 24) * 3600000;
+        const rows = [];
         let published = 0;
         let known = 0;
+        let stale = 0;
         let oldest = Infinity;
+        let newest = 0;
+        let top = null;
+        let topRate = 0;
+        let moving = 0;
 
         for (const song of cache.songs) {
 
@@ -9112,18 +9208,43 @@
 
             const key = String(song.song_id);
 
-            if (playCounts.has(key)) {
+            if (!playCounts.has(key)) {
+                continue;
+            }
 
-                known += 1;
-                oldest = Math.min(oldest, playCountAt.get(key) || 0);
+            const at = playCountAt.get(key) || 0;
+            const rate = playCountRate.get(key);
+
+            known += 1;
+            oldest = Math.min(oldest, at);
+            newest = Math.max(newest, at);
+
+            if (now - at > maxAge) {
+                stale += 1;
+            }
+
+            if (typeof rate === "number" && rate * 24 >= 1) {
+                moving += 1;
+            }
+
+            if (typeof rate === "number" && rate > topRate) {
+
+                top = song;
+                topRate = rate;
             }
         }
 
-        lines.push(known + " of " + published + " published songs have a count"
-            + (known > 0 && oldest > 0 ? ", the oldest read " + playsAge(now - oldest) + " ago" : ""));
+        rows.push(["Published songs", String(published)]);
+        rows.push(["With a count", known + (published > 0 ? " (" + Math.round(known * 100 / published) + "%)" : "")]);
+
+        if (known > 0) {
+
+            rows.push(["Older than " + playsAgeName(), String(stale)]);
+            rows.push(["Counts read", playsAge(now - newest) + " to " + playsAge(now - oldest) + " ago"]);
+        }
 
         if (playsJob) {
-            lines.push("Read play counts: " + playsJobDone + " of " + playsJobTotal);
+            rows.push(["Read play counts", playsJobDone + " of " + playsJobTotal]);
         }
 
         let fresh = "";
@@ -9131,60 +9252,48 @@
         if (settings.playsTrickle === false) {
             fresh = "Off";
         } else if (trickleHalted) {
-            fresh = "Stopped, " + trickleHaltWhy + ". Switch it off and on to start again";
+            fresh = "Stopped, " + trickleHaltWhy;
         } else if (playsJob) {
-            fresh = "Waiting while Read play counts runs";
+            fresh = "Waiting for Read play counts";
         } else if (running) {
-            fresh = "Waiting while songs are loaded from Mureka";
+            fresh = "Waiting, songs are loading";
         } else if (cacheRunning) {
-            fresh = "Waiting while songs are cached";
+            fresh = "Waiting, songs are caching";
         } else if (creatorSource) {
-            fresh = "Waiting while an artist is shown";
+            fresh = "Waiting, an artist is shown";
         } else if (trickleBusy) {
-            fresh = "Reading a song now";
+            fresh = "Reading a song";
+        } else if (trickleMode === "keep" && playsKeepMs() === 0) {
+            fresh = "Up to date, waits for counts to grow old";
         } else if (trickleNextAt > now) {
-            fresh = "Next song in " + playsAge(trickleNextAt - now);
+            fresh = (trickleMode === "keep" ? "Keeping up" : "Catching up") + ", next in " + playsAge(trickleNextAt - now);
         } else {
             fresh = "Starting";
         }
 
-        lines.push("Fresh counts: " + fresh);
+        rows.push(["Fresh counts", fresh]);
 
         if (trickleLast) {
-            lines.push("Last read: " + trickleLast.title + ", " + trickleLast.plays + " plays, "
-                + playsAge(now - trickleLast.at) + " ago");
-        }
-
-        // The song gaining plays fastest, and how many songs move at all
-        let top = null;
-        let topRate = 0;
-        let moving = 0;
-
-        for (const song of cache.songs) {
-
-            const rate = playCountRate.get(String(song.song_id));
-
-            if (song.publish_state !== 1 || typeof rate !== "number") {
-                continue;
-            }
-
-            if (rate * 24 >= 1) {
-                moving += 1;
-            }
-
-            if (rate > topRate) {
-
-                top = song;
-                topRate = rate;
-            }
+            rows.push(["Last read", playsTitle(trickleLast) + ", " + trickleLast.plays + " plays, " + playsAge(now - trickleLast.at) + " ago"]);
         }
 
         if (top) {
-            lines.push("Fastest: " + (top.title || "Untitled") + ", about " + Math.round(topRate * 24)
-                + " plays a day. " + moving + " songs gain a play a day or more and are read more often");
+            rows.push(["Fastest", playsTitle(top) + ", about " + Math.round(topRate * 24) + " a day"]);
         }
 
-        return lines;
+        if (known > 0) {
+            rows.push(["Gaining daily", moving + (moving === 1 ? " song" : " songs")]);
+        }
+
+        return rows;
+    }
+
+    // The age setting in words
+    function playsAgeName() {
+
+        const h = settings.playsMaxAgeHours || 24;
+
+        return h === 6 ? "6 hours" : (h === 72 ? "3 days" : (h === 168 ? "1 week" : "1 day"));
     }
 
     async function runPlaysJob(job, todo) {
@@ -9284,6 +9393,40 @@
         const n = playCounts.get(String(song.song_id));
 
         return typeof n === "number" ? n : null;
+    }
+
+    // A song's plays in the list, exact up to 99999, a grey question mark
+    // while not known
+    function paintRowPlays(el, song) {
+
+        const n = songPlays(song);
+
+        if (n === null) {
+
+            el.textContent = "\u25B6 ?";
+            el.style.color = "#555";
+            return;
+        }
+
+        el.textContent = "\u25B6 " + (n >= 1000000 ? (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M"
+            : (n >= 100000 ? Math.round(n / 1000) + "k" : String(n)));
+        el.style.color = "#999";
+    }
+
+    // A new count shows in its row at once, the order follows the next time
+    // the list is drawn, so the list does not jump about while reading
+    function repaintRowPlays(id) {
+
+        if (!listEl || listView !== "plays") {
+            return;
+        }
+
+        const el = listEl.querySelector("[data-plays-for=\"" + String(id) + "\"]");
+        const song = el ? hostFindSong(String(id)) : null;
+
+        if (el && song) {
+            paintRowPlays(el, song);
+        }
     }
 
     // Read the plays of every stored detail once, in the background
@@ -15733,6 +15876,7 @@
             upNext2: hostNeighbor(2),
             loading: running === true,
             loadKind: running === true ? (runOwner || "load") : "",
+            playsOn: settings.playsOn === true,
             caching: cacheRunning === true,
             progress: hostProgress ? Object.assign({ elapsed: Date.now() - progressStarted }, hostProgress) : null,
             loadFail: loadFail ? { kind: loadFail.kind, why: loadFail.why } : null,
@@ -17064,13 +17208,7 @@
 
         // The position moves on its own, once a second is plenty
         setInterval(publishHostState, 1000);
-
-        // Fresh play counts, the first a little after starting up
-        setTimeout(trickleTick, 30000);
         publishHostState();
-
-        // The plays known for each song, for sorting the list by them
-        loadPlayCounts();
     }
 
     // Build the floating control panel
@@ -18083,10 +18221,17 @@
         });
         viewButtons.stars.title = "Most stars first";
 
+        // Most plays first, offered with play counts on
+        viewButtons.plays = makeActionButton(iconPlay(), "Plays", "#333", "#fff", function () {
+            setView("plays");
+        });
+        viewButtons.plays.title = "Most plays first";
+
         viewRow.appendChild(viewButtons.mureka);
         viewRow.appendChild(viewButtons.queue);
         viewRow.appendChild(viewButtons.alpha);
         viewRow.appendChild(viewButtons.stars);
+        viewRow.appendChild(viewButtons.plays);
 
         // Vocals filter row
         const filterRow = document.createElement("div");
@@ -18536,6 +18681,11 @@
 
         installShortcuts();
         installHostBridge();
+
+        // The plays known for each song, for sorting the list by them, and
+        // fresh ones, the first a little after starting up
+        loadPlayCounts();
+        setTimeout(trickleTick, 30000);
 
         // A mouse moving or a wheel turning is use too on a desktop. Checked
         // at most once a second, a moving mouse sends a stream of these
@@ -20764,10 +20914,21 @@
         item.appendChild(numEl);
         item.appendChild(titleEl);
 
-        // The rating, but only once any song has one, so a library nobody has
-        // rated keeps the full width for titles. A fixed column keeps the
-        // durations lined up, zero stars shows grey, not rated shows nothing
-        if (ratings.size > 0) {
+        // Sorted by plays, each song's plays take the place of the rating,
+        // filled in as counts come in
+        if (listView === "plays" && settings.playsOn === true) {
+
+            const playsEl = document.createElement("span");
+
+            playsEl.dataset.playsFor = String(song.song_id);
+            playsEl.style.cssText = "flex:0 0 auto;min-width:44px;margin-left:6px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap";
+            paintRowPlays(playsEl, song);
+            item.appendChild(playsEl);
+        } else if (ratings.size > 0) {
+
+            // The rating, but only once any song has one, so a library nobody
+            // has rated keeps the full width for titles. A fixed column keeps
+            // the durations lined up, zero stars shows grey, not rated nothing
 
             const r = getRating(song);
             const rateEl = document.createElement("span");
@@ -22052,91 +22213,157 @@
         libraryPage.appendChild(makeLabel("Counts"));
         libraryPage.appendChild(withHint(countsAgeRow, "How long the plays and likes of the songs coming up next are kept before they are fetched from Mureka again. The playing song's are fetched every time it starts."));
 
-        // The plays of the published songs for the web view's sorting by
-        // plays. Mureka's lists carry no counts, each song is asked for alone
-        if (isApkHost()) {
+        // Play counts: Mureka's lists carry none, each song is asked for
+        // alone. On in the app, off by default in the bookmarklet and the
+        // extension, where the requests come from that browser
+        const playsRows = [];
 
-            const trickleRow = makeBoolRow("Keep play counts fresh",
-                function () { return settings.playsTrickle !== false; },
-                function (v) {
+        const playsOnRow = makeBoolRow("Play counts and sorting by plays",
+            function () { return settings.playsOn === true; },
+            function (v) {
 
-                    settings.playsTrickle = v;
-                    trickleHalted = false;
-                    trickleHaltWhy = "";
-                    trickleFails = 0;
-                });
+                settings.playsOn = v;
 
-            const paceRow = makeChoiceRow([
-                { label: "5-10 s", value: 5 },
-                { label: "10-30 s", value: 10 },
-                { label: "30-60 s", value: 30 }
-            ], function () { return playsPaceFrom(settings.playsTrickleSecs); }, function (v) {
-                settings.playsTrickleSecs = v;
-            });
+                if (!v) {
 
-            const ageRow = makeChoiceRow([
-                { label: "6 hours", value: 6 },
-                { label: "1 day", value: 24 },
-                { label: "3 days", value: 72 },
-                { label: "1 week", value: 168 }
-            ], function () { return settings.playsMaxAgeHours || 24; }, function (v) {
-                settings.playsMaxAgeHours = v;
-            });
+                    stopPlaysJob();
 
-            const readRow = document.createElement("div");
-
-            readRow.style.cssText = "display:flex;gap:6px";
-            readRow.appendChild(makeButton("Read play counts", "#333", "#fff", startPlaysJob));
-            readRow.appendChild(makeButton("Stop", "#333", "#fff", stopPlaysJob));
-
-            // Where it stands, painted every second while the page is open
-            // here, and with every read of the panel from the web view
-            const playsStatusEl = document.createElement("div");
-
-            playsStatusEl.style.cssText = "margin:4px 0 8px;padding:8px 10px;border-radius:8px;background:#26262c;color:#ccc;font-size:12px;line-height:1.5";
-
-            const paintPlaysStatus = function () {
-
-                const lines = playsStatusLines();
-
-                // Only when something changed, so a reader keeps its place
-                if (playsStatusEl.dataset.text === lines.join("\n")) {
-                    return;
+                    if (listView === "plays") {
+                        setView("mureka");
+                    }
                 }
 
-                playsStatusEl.dataset.text = lines.join("\n");
-                playsStatusEl.textContent = "";
+                updateViewButtons();
+                paintPlaysRows();
+                publishHostSoon();
+            });
 
-                for (const text of lines) {
+        const trickleRow = makeBoolRow("Keep play counts fresh",
+            function () { return settings.playsTrickle !== false; },
+            function (v) {
 
-                    const line = document.createElement("div");
+                settings.playsTrickle = v;
+                trickleHalted = false;
+                trickleHaltWhy = "";
+                trickleFails = 0;
+            });
 
-                    line.textContent = text;
-                    playsStatusEl.appendChild(line);
-                }
-            };
+        const paceRow = makeChoiceRow([
+            { label: "5-10 s", value: 5 },
+            { label: "10-30 s", value: 10 },
+            { label: "30-60 s", value: 30 }
+        ], function () { return playsPaceFrom(settings.playsTrickleSecs); }, function (v) {
+            settings.playsTrickleSecs = v;
+        });
+
+        const keepRow = makeChoiceRow([
+            { label: "1-3 min", value: 1 },
+            { label: "3-10 min", value: 3 },
+            { label: "10-30 min", value: 10 },
+            { label: "Off", value: 0 }
+        ], function () { return [0, 1, 3, 10].indexOf(settings.playsKeepMins) !== -1 ? settings.playsKeepMins : 3; }, function (v) {
+            settings.playsKeepMins = v;
+        });
+
+        const ageRow = makeChoiceRow([
+            { label: "6 hours", value: 6 },
+            { label: "1 day", value: 24 },
+            { label: "3 days", value: 72 },
+            { label: "1 week", value: 168 }
+        ], function () { return settings.playsMaxAgeHours || 24; }, function (v) {
+            settings.playsMaxAgeHours = v;
+        });
+
+        const readRow = document.createElement("div");
+
+        readRow.style.cssText = "display:flex;gap:6px";
+        readRow.appendChild(makeButton("Read play counts", "#333", "#fff", startPlaysJob));
+        readRow.appendChild(makeButton("Stop", "#333", "#fff", stopPlaysJob));
+
+        // Where it stands, a name and a value a row, painted every second
+        // while the page is open here and with every read of the panel from
+        // the web view. Only what changed is painted, so a reader keeps
+        // their place
+        const playsStatusEl = document.createElement("div");
+
+        playsStatusEl.style.cssText = "margin:4px 0 10px;padding:6px 10px;border-radius:8px;background:#26262c";
+
+        const paintPlaysStatus = function () {
+
+            if (settings.playsOn !== true) {
+                return;
+            }
+
+            const rows = playsStatusRows();
+            const key = JSON.stringify(rows);
+
+            if (playsStatusEl.dataset.text === key) {
+                return;
+            }
+
+            playsStatusEl.dataset.text = key;
+            playsStatusEl.textContent = "";
+
+            for (const pair of rows) {
+
+                const row = document.createElement("div");
+                const name = document.createElement("div");
+                const value = document.createElement("div");
+
+                row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
+                name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
+                value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+                name.textContent = pair[0];
+                value.textContent = pair[1];
+                row.appendChild(name);
+                row.appendChild(value);
+                playsStatusEl.appendChild(row);
+            }
+
+            playsStatusEl.lastChild.style.borderBottom = "none";
+        };
+
+        // Everything but the switch shows only with play counts on
+        const paintPlaysRows = function () {
+
+            for (const el of playsRows) {
+                el.style.display = settings.playsOn === true ? el.dataset.shownAs : "none";
+            }
 
             paintPlaysStatus();
-            settingsRefreshers.push(paintPlaysStatus);
+        };
 
-            setInterval(function () {
+        const addPlays = function (el) {
 
-                if (settingsEl && libraryPage.style.display !== "none" && settingsEl.offsetParent !== null) {
-                    paintPlaysStatus();
-                }
-            }, 1000);
+            // The way it is laid out when shown, a row of buttons stays a row
+            el.dataset.shownAs = el.style.display || "";
+            playsRows.push(el);
+            libraryPage.appendChild(el);
+        };
 
-            libraryPage.appendChild(makeLabel("Play counts"));
-            libraryPage.appendChild(playsStatusEl);
-            libraryPage.appendChild(withHint(trickleRow, "While the app is open, the plays of one published song at a time are read from Mureka, so sorting by plays in the web view stays right. Songs gaining plays fast are read often, at most every 15 minutes, songs that barely move about once a day. A song's plays are also read every time it starts. It waits while songs are loaded or cached."));
-            libraryPage.appendChild(makeSubLabel("One song every"));
-            libraryPage.appendChild(paceRow);
-            libraryPage.appendChild(makeHint("Each wait is a random time in the range. With 1000 published songs, 10 to 30 seconds reads each one again about every 5 to 6 hours."));
-            libraryPage.appendChild(makeSubLabel("Read play counts reads counts older than"));
-            libraryPage.appendChild(ageRow);
-            libraryPage.appendChild(readRow);
-            libraryPage.appendChild(makeHint("Read play counts catches up at a song every 1 to 2 seconds: published songs never read first, then counts older than the age above. Also under Sort and Update in the web view."));
-        }
+        libraryPage.appendChild(makeLabel("Play counts"));
+        libraryPage.appendChild(withHint(playsOnRow, "Plays in the list's views, sorted by them, with each song's count. Mureka's song lists carry no plays, so each song is asked for on its own: every time it starts, and in the background below."));
+        addPlays(playsStatusEl);
+        addPlays(withHint(trickleRow, "While the player is open, play counts are read one song at a time. Catching up while counts are missing or older than the age below, then keeping up, far slower, with only the songs gaining plays. It waits while songs are loaded or cached."));
+        addPlays(makeSubLabel("Counts are up to date for"));
+        addPlays(ageRow);
+        addPlays(makeSubLabel("Catching up, one song every"));
+        addPlays(paceRow);
+        addPlays(makeSubLabel("Keeping up, one song every"));
+        addPlays(keepRow);
+        addPlays(makeHint("Each wait is a random time in the range. Keeping up reads a song only once it has most likely gained a play, at most every 15 minutes, a song that barely moves waits until its count is older than the age above. Off waits for that alone."));
+        addPlays(readRow);
+        addPlays(makeHint("Read play counts catches up at once, a song every 1 to 2 seconds, with its progress over the list and a Stop. Also under Sort and Update in the web view."));
+
+        paintPlaysRows();
+        settingsRefreshers.push(paintPlaysRows);
+
+        setInterval(function () {
+
+            if (settingsEl && libraryPage.style.display !== "none" && settingsEl.offsetParent !== null) {
+                paintPlaysStatus();
+            }
+        }, 1000);
 
         // Mobile: what is drawn on this screen
         mobilePage.appendChild(makeBackRow("Mobile player"));
