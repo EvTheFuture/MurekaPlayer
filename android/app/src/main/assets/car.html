@@ -1773,8 +1773,13 @@
     }
 
     /* The number of hearts the song has on Mureka, small beside the heart */
+    /* The heart sits a little closer to the stars than the gap of the row */
+    #like {
+        margin-left: -1vw;
+    }
+
     #likeCount {
-        margin-left: calc(-2vw - 6px);
+        margin-left: calc(-2vw + 2px);
         font-size: clamp(14px, 1.5vw, 22px);
         font-weight: 600;
         color: var(--heart);
@@ -1987,11 +1992,56 @@
     }
 
     .thumb {
+        position: relative;
         flex: 0 0 auto;
         width: calc(var(--ctl-h) * 0.85);
         height: calc(var(--ctl-h) * 0.85);
         border-radius: 8px;
         background: var(--card) center / cover no-repeat;
+    }
+
+    /* How much of a cover has come from the phone, grown smoothly between
+       the steps */
+    @property --cp {
+        syntax: "<number>";
+        inherits: false;
+        initial-value: 0;
+    }
+
+    /* A cover on its way: the placeholder fades in and out, and a cyan pie
+       in the middle fills as the picture comes in */
+    .coverWait {
+        animation: fadeDot 1.2s ease-in-out infinite;
+    }
+
+    .coverProg {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 46%;
+        aspect-ratio: 1;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: conic-gradient(rgba(72, 225, 235, 0.85) calc(var(--cp) * 1%), rgba(72, 225, 235, 0.18) 0);
+        transition: --cp 0.4s linear;
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    .tile .coverProg {
+        width: 16%;
+    }
+
+    /* The picture fades in once it is all there */
+    .coverIn {
+        animation: coverIn 0.35s ease-out;
+    }
+
+    @keyframes coverIn {
+
+        from {
+            opacity: 0;
+        }
     }
 
     /* Pull the list down at its top and let go to load new songs from
@@ -2160,20 +2210,41 @@
         background: #48e1eb;
     }
 
+    /* The dot is about the song on the phone only, cyan once it is stored,
+       the cover makes no difference here */
     .rowDot.audio {
         visibility: visible;
-        background: #b388ff;
+        background: #48e1eb;
     }
 
     .rowDot.art {
-        visibility: visible;
-        background: #f0a94a;
+        visibility: hidden;
     }
 
+    /* How much of a song has come in, grown smoothly between the phone's
+       updates */
+    @property --p {
+        syntax: "<number>";
+        inherits: false;
+        initial-value: 100;
+    }
+
+    /* A song on its way: purple like a cached song, fading in and out, and
+       filling like a pie as more of it has come in. --p is how much, in
+       percent, 100 while the size is not known */
     .rowDot.caching {
         visibility: visible;
-        background: #48e1eb;
-        animation: pulse 1s ease-in-out infinite;
+        transform: scale(1.25);
+        background: conic-gradient(#48e1eb calc(var(--p) * 1%), rgba(72, 225, 235, 0.25) 0);
+        animation: fadeDot 1.2s ease-in-out infinite;
+        transition: --p 1s linear;
+    }
+
+    @keyframes fadeDot {
+
+        50% {
+            opacity: 0.45;
+        }
     }
 
     @keyframes pulse {
@@ -2647,8 +2718,12 @@
         height: 20px;
     }
 
+    html.phone #like {
+        margin-left: -3px;
+    }
+
     html.phone #likeCount {
-        margin-left: -4px;
+        margin-left: 1px;
         font-size: 12px;
     }
 
@@ -5339,7 +5414,9 @@
         // How many hearts the song has on Mureka, once the phone knows
         const likes = s && typeof s.likes === "number" ? s.likes : null;
 
-        $("likeCount").textContent = likes === null ? "" : compactCount(likes);
+        const mine = !!(s && s.liked);
+
+        $("likeCount").textContent = likes === null || (likes === 1 && mine) ? "" : compactCount(likes);
 
         // Public or draft, only for your own songs, another creator's are all
         // public anyway
@@ -6127,13 +6204,166 @@
         }, { root: $("rows"), rootMargin: "600px 0px" })
         : null;
 
-    function loadThumb(el) {
+    // Covers come from the phone, which keeps them and fetches them from
+    // Mureka when it does not have them yet. The page loads each one itself,
+    // counting what has come in, so a placeholder can show how far it is,
+    // and only then shows the picture, which the browser has by then. At
+    // most six at a time, a list page of thumbnails asks in turn
+    function coverAt(url) {
+        return "/cover?u=" + encodeURIComponent(url);
+    }
+
+    const coverQueue = [];
+    let coverBusy = 0;
+
+    // Keep is for the few big covers: the picture itself is handed back,
+    // so it is never asked for twice. Thumbnails rely on the browser's cache
+    function fetchCover(url, progress, done, keep) {
+
+        coverQueue.push({ url: url, progress: progress, done: done, keep: keep === true, blob: null });
+        pumpCovers();
+    }
+
+    function pumpCovers() {
+
+        while (coverBusy < 6 && coverQueue.length > 0) {
+
+            const job = coverQueue.shift();
+
+            coverBusy += 1;
+
+            readCover(job).then(function (ok) {
+
+                coverBusy -= 1;
+                job.done(ok, job.blob);
+                pumpCovers();
+            });
+        }
+    }
+
+    async function readCover(job) {
+
+        try {
+
+            const res = await fetch(coverAt(job.url));
+
+            if (!res.ok) {
+                return false;
+            }
+
+            const total = Number(res.headers.get("Content-Length")) || 0;
+
+            // No way to count, it is simply waited for
+            if (!res.body || !res.body.getReader || total <= 0) {
+
+                const whole = await res.blob();
+
+                job.blob = job.keep ? whole : null;
+                return true;
+            }
+
+            const reader = res.body.getReader();
+            const parts = [];
+            let seen = 0;
+
+            for (;;) {
+
+                const part = await reader.read();
+
+                if (part.done) {
+                    break;
+                }
+
+                if (job.keep) {
+                    parts.push(part.value);
+                }
+
+                seen += part.value.byteLength;
+                job.progress(Math.min(100, Math.round(seen * 100 / total)));
+            }
+
+            if (job.keep) {
+                job.blob = new Blob(parts, { type: res.headers.get("Content-Type") || "image/jpeg" });
+            }
+
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // The pie in the middle of a cover on its way, made when first needed
+    function coverMark(el) {
+
+        let mark = el.querySelector(":scope > .coverProg");
+
+        if (!mark) {
+
+            mark = document.createElement("span");
+            mark.className = "coverProg";
+            el.appendChild(mark);
+        }
+
+        return mark;
+    }
+
+    function coverDone(el) {
+
+        const mark = el.querySelector(":scope > .coverProg");
+
+        if (mark) {
+            mark.remove();
+        }
+
+        el.classList.remove("coverWait");
+    }
+
+    // A thumbnail in a list: waits, fills, then fades in. Tried again twice
+    // when it fails, then straight from Mureka as a last resort
+    function loadThumb(el, tries) {
 
         const url = el.dataset.src || "";
+        const n = tries || 0;
 
-        if (url) {
-            el.style.backgroundImage = "url(\"" + url.replace(/"/g, "%22") + "\")";
+        if (!url) {
+            return;
         }
+
+        if (n >= 3) {
+
+            coverDone(el);
+            el.style.backgroundImage = "url(\"" + url.replace(/"/g, "%22") + "\")";
+            return;
+        }
+
+        el.classList.add("coverWait");
+        coverMark(el).style.setProperty("--cp", "0");
+
+        fetchCover(url, function (p) {
+
+            if (el.dataset.src === url) {
+                coverMark(el).style.setProperty("--cp", String(p));
+            }
+        }, function (ok) {
+
+            if (el.dataset.src !== url) {
+                return;
+            }
+
+            if (!ok) {
+
+                setTimeout(function () {
+                    loadThumb(el, n + 1);
+                }, 1500 * (n + 1));
+                return;
+            }
+
+            coverDone(el);
+            el.style.backgroundImage = "url(\"" + coverAt(url).replace(/"/g, "%22") + "\")";
+            el.classList.remove("coverIn");
+            void el.offsetWidth;
+            el.classList.add("coverIn");
+        });
     }
 
     function makeThumb(url) {
@@ -7121,6 +7351,11 @@
         const dot = document.createElement("span");
 
         dot.className = "rowDot" + (song.cached ? " " + song.cached : "");
+
+        if (song.cached === "caching") {
+            dot.style.setProperty("--p", "4");
+        }
+
         row.appendChild(dot);
 
         num.className = "rowNum";
@@ -9415,6 +9650,47 @@
         });
     }
 
+    // The songs the phone is caching right now, with how far each has come,
+    // painted on their rows at every state, so the pie grows without the
+    // list being read again
+    let cachingShown = [];
+
+    function paintCachingDots(s) {
+
+        const now = s && Array.isArray(s.cachingNow) ? s.cachingNow : [];
+        const ids = now.map(function (item) {
+            return item.id;
+        });
+
+        // A song done since the last state gets its solid dot from a fresh
+        // read of the rows
+        if (cachingShown.some(function (id) {
+            return ids.indexOf(id) === -1;
+        })) {
+
+            clearTimeout(cacheTimer);
+            cacheTimer = setTimeout(function () {
+
+                repaintDots();
+                repaintMini();
+            }, 300);
+        }
+
+        cachingShown = ids;
+
+        for (const item of now) {
+
+            for (const dot of document.querySelectorAll(".row[data-id=\"" + item.id + "\"] .rowDot")) {
+
+                if (!dot.classList.contains("caching")) {
+                    dot.className = "rowDot caching";
+                }
+
+                dot.style.setProperty("--p", String(item.p >= 0 ? Math.max(4, item.p) : 100));
+            }
+        }
+    }
+
     // The dots, titles and badges of the rows already drawn, from a fresh
     // read of the same list
     function refreshRows(box, found, queueView) {
@@ -10348,6 +10624,7 @@
         watchPull(s);
         watchCache(s);
         watchPlaysRound(s);
+        paintCachingDots(s);
         watchMini(s);
         watchToast(s);
         watchCarGone(s);
@@ -11689,23 +11966,33 @@
 
         if (!url) {
 
+            coverDone(tile);
             img.removeAttribute("src");
             img.style.visibility = "hidden";
             return;
         }
 
-        const src = tries > 0 ? url + (url.indexOf("?") === -1 ? "?" : "&") + "r=" + tries : url;
+        // From the phone, loaded and counted first with the pie on the
+        // tile, then shown and faded in. After three failures straight
+        // from Mureka, as before the phone kept covers
+        const direct = tries >= 3;
+        const src = direct ? url + (url.indexOf("?") === -1 ? "?" : "&") + "r=" + tries : coverAt(url);
 
         img.onload = function () {
 
             if (tile.dataset.src === url) {
+
+                coverDone(tile);
                 img.style.visibility = "visible";
+                img.classList.remove("coverIn");
+                void img.offsetWidth;
+                img.classList.add("coverIn");
             }
         };
 
         img.onerror = function () {
 
-            if (tile.dataset.src === url && tries < 3) {
+            if (tile.dataset.src === url && tries < 4) {
 
                 setTimeout(function () {
                     paintTile(tile, url, tries + 1);
@@ -11713,7 +12000,43 @@
             }
         };
 
-        img.src = src;
+        if (direct) {
+
+            img.src = src;
+            return;
+        }
+
+        img.style.visibility = "hidden";
+        tile.classList.add("coverWait");
+        coverMark(tile).style.setProperty("--cp", "0");
+
+        fetchCover(url, function (p) {
+
+            if (tile.dataset.src === url) {
+                coverMark(tile).style.setProperty("--cp", String(p));
+            }
+        }, function (ok, blob) {
+
+            if (tile.dataset.src !== url) {
+                return;
+            }
+
+            if (!ok) {
+
+                setTimeout(function () {
+                    paintTile(tile, url, tries + 1);
+                }, 1500 * (tries + 1));
+                return;
+            }
+
+            // The picture already here, the one before let go
+            if (tile.dataset.blob) {
+                URL.revokeObjectURL(tile.dataset.blob);
+            }
+
+            tile.dataset.blob = blob ? URL.createObjectURL(blob) : "";
+            img.src = tile.dataset.blob || src;
+        }, true);
     }
 
     // Move the tiles along by shift places, 1 when the next song became the

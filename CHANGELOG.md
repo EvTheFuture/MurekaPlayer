@@ -65,8 +65,9 @@ the new settings layout and a number of smaller improvements.
   name can be changed.
 - Now playing like the phone: sliding covers with the neighbours peeking out,
   synced rolling lyrics beside or on the cover, half stars, like with the
-  number of hearts, plays, a Public or Draft badge, up next, **Playing from**
-  with the source and filters, the waveform seek bar and the status line.
+  number of hearts (left out when the one heart is your own), plays, a
+  Public or Draft badge, up next, **Playing from** with the source and
+  filters, the waveform seek bar and the status line.
 - Transport bar with its own order, set with press and hold or the editor in
   the settings, and optional names under the buttons. **Songs** and **List**
   are among its buttons, to be placed or left out like the others, either
@@ -108,6 +109,16 @@ the new settings layout and a number of smaller improvements.
   and the phone's song menu on press and hold or right click. A small,
   faint #1, #2 and so on in the corner of each line, in the big and the
   small list, gives the song's place in the list as sorted and searched.
+  The dot is about the song on the phone: cyan once it is stored, and
+  while it is being cached it fades in and out and fills smoothly like a
+  pie as the song comes in.
+- Covers in the web view come from the phone, which keeps them in its own
+  cache and fetches the covers of the playing song and of the next ones in
+  the queue ahead (**Covers ahead**, 5 by default) whether or not a browser
+  is open. A cover on its way pulses with a cyan pie filling as it comes
+  in, then fades in. **Cover cache in MB** (200 by default) sets how much
+  room they may take, those shown longest ago go first, and the settings
+  show how many there are, with **Clear cover cache** and its progress.
 - Pull the song list down at its top and let go to load new songs from
   Mureka, as in the mobile player, with a finger or by dragging with a
   mouse. The list stays open with a turning ring until the phone has

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.92";
+    const VERSION = "1.9.9.94";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -901,6 +901,59 @@
     // Set of song_ids that are being cached right now, shown by a pulsing dot
     let cachingIds = new Set();
 
+    // How far each song being cached has come, 0 to 1, or -1 while its size
+    // is not known, for the growing dot in the web view's lists
+    const cachingProgress = new Map();
+
+    // The same answer, its body counted as it is read, so the progress of a
+    // download shows as it is stored. An answer that cannot be read this way
+    // is handed back as it is
+    function trackDownload(song, net) {
+
+        const id = song.song_id;
+        const total = Number(net && net.headers ? net.headers.get("Content-Length") : 0) || 0;
+
+        cachingProgress.set(id, total > 0 ? 0 : -1);
+
+        if (!net || !net.body || typeof ReadableStream === "undefined") {
+            return net;
+        }
+
+        try {
+
+            const reader = net.body.getReader();
+            let seen = 0;
+
+            const body = new ReadableStream({
+                pull: async function (controller) {
+
+                    const part = await reader.read();
+
+                    if (part.done) {
+
+                        controller.close();
+                        return;
+                    }
+
+                    seen += part.value.byteLength;
+
+                    if (total > 0) {
+                        cachingProgress.set(id, Math.min(1, seen / total));
+                    }
+
+                    controller.enqueue(part.value);
+                },
+                cancel: function (why) {
+                    reader.cancel(why);
+                }
+            });
+
+            return new Response(body, { status: net.status, statusText: net.statusText, headers: net.headers });
+        } catch (e) {
+            return net;
+        }
+    }
+
     // Current search box text, lowercased, empty means show all
     let searchQuery = "";
 
@@ -1323,6 +1376,19 @@
         return Math.round((low + Math.random() * (high - low)) * 1000);
     }
 
+    // A whole number from saved settings, kept inside its range, or the
+    // default when it is missing or not a number
+    function numberIn(v, min, max, fallback) {
+
+        const n = parseInt(v, 10);
+
+        if (!isFinite(n)) {
+            return fallback;
+        }
+
+        return Math.max(min, Math.min(max, n));
+    }
+
     // The pace once every count is up to date, the shortest wait of a range
     // in minutes: 1 to 3, 3 to 10 or 10 to 30, or 0 when it waits for counts
     // to grow old instead
@@ -1427,6 +1493,8 @@
             copyLinkOnPublish: true,
             noRemixOnPublish: false,
             playsOn: isApkHost(),
+            coverAhead: 5,
+            coverCacheMB: 200,
             playsTrickle: true,
             playsTrickleSecs: 10,
             playsKeepMins: 3,
@@ -1568,6 +1636,8 @@
                     copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
                     noRemixOnPublish: parsed.noRemixOnPublish === true,
                     playsOn: typeof parsed.playsOn === "boolean" ? parsed.playsOn : isApkHost(),
+                    coverAhead: numberIn(parsed.coverAhead, 0, 20, 5),
+                    coverCacheMB: numberIn(parsed.coverCacheMB, 50, 2000, 200),
                     playsTrickle: parsed.playsTrickle !== false,
                     playsTrickleSecs: playsPaceFrom(parsed.playsTrickleSecs),
                     playsKeepMins: [0, 1, 3, 10].indexOf(parsed.playsKeepMins) !== -1
@@ -5402,7 +5472,8 @@
                 // A longer deadline than the background work, this is the file
                 // being played, but it must still fail rather than hang, or
                 // playback dies silently with no error to recover from
-                const net = await timedFetch(direct, {}, 30000);
+                const got = await timedFetch(direct, {}, 30000);
+                const net = got && got.ok ? trackDownload(song, got) : got;
 
                 if (net && net.ok) {
                     await store.put(direct, net.clone());
@@ -5513,13 +5584,13 @@
             cachingIds.add(song.song_id);
             renderList();
 
-            const net = await timedFetch(url);
+            const got = await timedFetch(url);
 
-            if (!net || !net.ok) {
+            if (!got || !got.ok) {
                 return false;
             }
 
-            await store.put(url, net.clone());
+            await store.put(url, trackDownload(song, got));
             cachedIds.add(song.song_id);
             ownWaveOnStored(song);
 
@@ -6667,22 +6738,21 @@
                 cachingIds.add(song.song_id);
                 renderList();
 
-                const net = await timedFetch(direct);
-
-                cachingIds.delete(song.song_id);
-                renderList();
+                const got = await timedFetch(direct);
+                const net = got && got.ok ? trackDownload(song, got) : got;
 
                 // Only a 404 proves the file is gone. Anything else can be a
                 // dropped connection, a proxy error or an expired link
-                if (net.status === 404) {
-                    return "gone";
-                }
+                if (net.status === 404 || !net.ok) {
 
-                if (!net.ok) {
-                    return "failed";
+                    cachingIds.delete(song.song_id);
+                    renderList();
+                    return net.status === 404 ? "gone" : "failed";
                 }
 
                 await store.put(direct, net.clone());
+                cachingIds.delete(song.song_id);
+                renderList();
                 cachedIds.add(song.song_id);
                 ownWaveOnStored(song);
                 resp = net;
@@ -15827,6 +15897,14 @@
     // The state handed to the app, everything the web view shows
     function hostState() {
 
+        // Progress kept only for the songs still on their way
+        for (const id of Array.from(cachingProgress.keys())) {
+
+            if (!cachingIds.has(id)) {
+                cachingProgress.delete(id);
+            }
+        }
+
         const song = currentSong;
         const hasAudio = !!(audio && audio.src);
 
@@ -15860,6 +15938,13 @@
             // Changes whenever a song or a cover is stored or taken out, or a
             // song starts or stops downloading, so the web view knows to
             // paint the cache dots in its list again
+            cachingNow: Array.from(cachingIds).map(function (id) {
+
+                // Not answered yet counts as nothing come in
+                const p = cachingProgress.has(id) ? cachingProgress.get(id) : 0;
+
+                return { id: String(id), p: p < 0 ? -1 : Math.round(p * 100) };
+            }),
             cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(",") + "|" + playedMarks
                 + "|" + songEdits + "|" + playCountStamp,
             seekActions: settings.webSeekActions !== false,
@@ -15917,6 +16002,8 @@
             loading: running === true,
             loadKind: running === true ? (runOwner || "load") : "",
             playsOn: settings.playsOn === true,
+            coverAhead: hostCoverAhead(),
+            coverCacheMB: settings.coverCacheMB || 200,
             caching: cacheRunning === true,
             progress: hostProgress ? Object.assign({ elapsed: Date.now() - progressStarted }, hostProgress) : null,
             loadFail: loadFail ? { kind: loadFail.kind, why: loadFail.why } : null,
@@ -16019,6 +16106,35 @@
     }
 
     // The cache dot the phone shows in front of a song
+    // The covers the phone keeps ahead for the web view: the playing song's
+    // and those of the songs coming up next in the queue, as many as the
+    // settings say
+    function hostCoverAhead() {
+
+        const out = [];
+        const want = settings.coverAhead || 0;
+
+        if (currentSong && coverUrl(currentSong)) {
+            out.push(coverUrl(currentSong));
+        }
+
+        if (want <= 0 || queue.length === 0) {
+            return out;
+        }
+
+        for (let i = 1; i <= Math.min(want, queue.length - 1); i += 1) {
+
+            const song = queue[(queuePos + i) % queue.length];
+            const url = song ? coverUrl(song) : "";
+
+            if (url && out.indexOf(url) === -1) {
+                out.push(url);
+            }
+        }
+
+        return out;
+    }
+
     function hostCacheState(song) {
 
         if (cachingIds.has(song.song_id)) {
@@ -22852,6 +22968,121 @@
             }, publishHostSoon).forEach(function (el) {
                 webPage.appendChild(el);
             });
+
+            // The covers the web view shows, kept on the phone and served to
+            // the browser from there, the next ones fetched ahead
+            const coverAheadRow = makeStepperRow("Covers ahead",
+                function () { return settings.coverAhead; },
+                function (v) { settings.coverAhead = v; publishHostSoon(); },
+                0, 20);
+
+            const coverSizeRow = makeStepperRow("Cover cache in MB",
+                function () { return settings.coverCacheMB; },
+                function (v) { settings.coverCacheMB = v; publishHostSoon(); },
+                50, 2000, 50);
+
+            const coverStatusEl = document.createElement("div");
+            const coverClearRow = document.createElement("div");
+            let coverClearing = false;
+
+            coverStatusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
+            coverClearRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+
+            const coverInfo = function () {
+
+                try {
+                    return JSON.parse(window.MurekaHost.coverCacheInfo() || "{}");
+                } catch (e) {
+                    return {};
+                }
+            };
+
+            // How many covers, the room they take, and a clearing's progress,
+            // a name and a value a row like the play counts
+            const paintCoverStatus = function () {
+
+                const info = coverInfo();
+                const mb = (Number(info.bytes) || 0) / (1024 * 1024);
+                const rows = [
+                    ["Covers stored", String(Number(info.count) || 0)],
+                    ["Space used", (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + " MB of " + (settings.coverCacheMB || 200) + " MB"],
+                    ["Clearing", info.clearing ? (info.done || 0) + " of " + (info.total || 0) : "--"]
+                ];
+                const key = JSON.stringify(rows);
+
+                // The clearing just ended, said with a note
+                if (coverClearing && !info.clearing) {
+                    showToast("Cover cache cleared", true);
+                }
+
+                coverClearing = !!info.clearing;
+                clearBtn.disabled = coverClearing;
+                clearBtn.style.opacity = coverClearing ? "0.5" : "1";
+
+                if (coverStatusEl.dataset.text === key) {
+                    return;
+                }
+
+                coverStatusEl.dataset.text = key;
+                coverStatusEl.textContent = "";
+
+                for (const pair of rows) {
+
+                    const row = document.createElement("div");
+                    const name = document.createElement("div");
+                    const value = document.createElement("div");
+
+                    row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
+                    name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
+                    value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px";
+                    name.textContent = pair[0];
+                    value.textContent = pair[1];
+                    row.appendChild(name);
+                    row.appendChild(value);
+                    coverStatusEl.appendChild(row);
+                }
+
+                coverStatusEl.lastChild.style.borderBottom = "none";
+            };
+
+            const clearBtn = makeButton("Clear cover cache", "#333", "#fff", function () {
+
+                if (coverClearing) {
+                    return;
+                }
+
+                try {
+                    window.MurekaHost.clearCoverCache();
+                } catch (e) {
+
+                    showToast("Could not clear the cover cache", false);
+                    return;
+                }
+
+                coverClearing = true;
+                showToast("Clearing the cover cache", "wait");
+                setTimeout(paintCoverStatus, 200);
+            });
+
+            coverClearRow.appendChild(clearBtn);
+
+            webPage.appendChild(makeLabel("Covers"));
+            webPage.appendChild(coverAheadRow);
+            webPage.appendChild(makeHint("The covers of the playing song and of as many songs coming up next are fetched to the phone ahead, whether or not a browser is open. The browser gets every cover from the phone, which keeps them."));
+            webPage.appendChild(coverSizeRow);
+            webPage.appendChild(makeHint("Once the covers take more room than this, those shown longest ago are removed first."));
+            webPage.appendChild(coverStatusEl);
+            webPage.appendChild(coverClearRow);
+
+            paintCoverStatus();
+            settingsRefreshers.push(paintCoverStatus);
+
+            setInterval(function () {
+
+                if (coverClearing || (settingsEl && webPage.style.display !== "none" && settingsEl.offsetParent !== null)) {
+                    paintCoverStatus();
+                }
+            }, 1000);
 
             connPage.appendChild(netHint);
             connPage.appendChild(hotspotRow);

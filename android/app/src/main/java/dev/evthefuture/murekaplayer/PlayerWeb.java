@@ -608,6 +608,23 @@ final class PlayerWeb {
             return appContext != null && BootReceiver.takeUpdateRestart(appContext);
         }
 
+        // The covers kept for the web view: how many, how much room, and how
+        // far a clearing has come
+        @JavascriptInterface
+        public String coverCacheInfo() {
+
+            CoverCache.init(appContext);
+            return CoverCache.info();
+        }
+
+        // Every kept cover removed, in the background
+        @JavascriptInterface
+        public void clearCoverCache() {
+
+            CoverCache.init(appContext);
+            CoverCache.clear();
+        }
+
         // The debug buttons that send the car the loading cover, "loading",
         // or the song's own cover, "real"
         @JavascriptInterface

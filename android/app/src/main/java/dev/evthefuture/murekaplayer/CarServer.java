@@ -122,6 +122,7 @@ final class CarServer {
 
         this.context = context.getApplicationContext();
         this.port = port;
+        CoverCache.init(this.context);
     }
 
     boolean listening() {
@@ -398,6 +399,8 @@ final class CarServer {
                 sendCall(out, "__murekaHostSongMenu", JSONObject.quote(param(query, "id")));
             } else if ("GET".equals(method) && "/audio".equals(path)) {
                 sendAudio(out, param(query, "url"));
+            } else if ("GET".equals(method) && "/cover".equals(path)) {
+                sendCover(out, param(query, "u"));
             } else if ("POST".equals(method) && "/cmd".equals(path)) {
                 runCommand(out, body);
             } else {
@@ -529,6 +532,44 @@ final class CarServer {
                 c.disconnect();
             }
         }
+    }
+
+    // A cover kept on the phone, fetched from Mureka first when it is not
+    // there yet. The browser may keep it for good, a cover's address never
+    // shows another picture
+    private void sendCover(OutputStream out, String url) throws IOException {
+
+        if (!CoverCache.allowed(url)) {
+
+            send(out, 403, "text/plain", bytes("Not a Mureka cover"));
+            return;
+        }
+
+        java.io.File file = CoverCache.get(url);
+
+        if (file == null) {
+
+            send(out, 502, "text/plain", bytes("Mureka did not give the cover"));
+            return;
+        }
+
+        String head = "HTTP/1.1 200 OK\r\nContent-Type: " + CoverCache.type(file) + "\r\n"
+            + "Content-Length: " + file.length() + "\r\n"
+            + "Cache-Control: public, max-age=31536000, immutable\r\nConnection: close\r\n\r\n";
+
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+
+        try (InputStream in = new java.io.FileInputStream(file)) {
+
+            byte[] buf = new byte[32768];
+            int n;
+
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+            }
+        }
+
+        out.flush();
     }
 
     // Whatever one of the player's host functions returns
