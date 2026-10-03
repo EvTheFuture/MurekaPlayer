@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.91";
+    const VERSION = "1.9.9.92";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -9270,15 +9270,13 @@
         rows.push(["Published songs", String(published)]);
         rows.push(["With a count", known + (published > 0 ? " (" + Math.round(known * 100 / published) + "%)" : "")]);
 
-        if (known > 0) {
+        // Every row is always there, two hyphens where there is nothing to
+        // show, so the table keeps its shape and nothing moves about
+        const none = "--";
 
-            rows.push(["Older than " + playsAgeName(), String(stale)]);
-            rows.push(["Counts read", playsAge(now - newest) + " to " + playsAge(now - oldest) + " ago"]);
-        }
-
-        if (playsJob) {
-            rows.push(["Read play counts", playsJobDone + " of " + playsJobTotal]);
-        }
+        rows.push(["Older than " + playsAgeName(), known > 0 ? String(stale) : none]);
+        rows.push(["Counts read", known > 0 ? playsAge(now - newest) + " to " + playsAge(now - oldest) + " ago" : none]);
+        rows.push(["Read play counts", playsJob ? playsJobDone + " of " + playsJobTotal : none]);
 
         // What the background reading is doing right now, its mode, and
         // when it looks again
@@ -9313,28 +9311,19 @@
             ? "Keeping up" + (playsKeepMs() === 0 ? ", off" : "")
             : "Catching up, " + (plan.unknown > 0 ? plan.unknown + " without a count" : plan.stale + " older than " + playsAgeName())]);
 
-        if (trickleNextAt > now && !trickleBusy && settings.playsTrickle !== false && !trickleHalted) {
-            rows.push([due ? "Next fetch in" : "Next look in", playsAge(trickleNextAt - now)]);
-        }
+        const counting = due && trickleNextAt > now && !trickleBusy && !playsJob
+            && settings.playsTrickle !== false && !trickleHalted && !running && !cacheRunning && !creatorSource;
 
-        if (trickleLast) {
-            rows.push(["Last song", playsTitle(trickleLast) + ", " + trickleLast.plays + " plays, " + playsAge(now - trickleLast.at) + " ago"]);
-        }
+        rows.push(["Next fetch in", counting ? playsAge(trickleNextAt - now) : none]);
+        rows.push(["Last song", trickleLast
+            ? playsTitle(trickleLast) + ", " + trickleLast.plays + " plays, " + playsAge(now - trickleLast.at) + " ago"
+            : none]);
 
         // What it reads next, or with Fetch next now when nothing is due
-        if (plan.song) {
-            rows.push(["Next song", playsTitle(plan.song)]);
-        } else if (plan.oldest) {
-            rows.push(["Next song", "None due, Fetch next now reads " + playsTitle(plan.oldest)]);
-        }
-
-        if (top) {
-            rows.push(["Fastest", playsTitle(top) + ", about " + Math.round(topRate * 24) + " a day"]);
-        }
-
-        if (known > 0) {
-            rows.push(["Gaining daily", moving + (moving === 1 ? " song" : " songs")]);
-        }
+        rows.push(["Next song", plan.song ? playsTitle(plan.song)
+            : (plan.oldest ? "None due, Fetch next now reads " + playsTitle(plan.oldest) : none)]);
+        rows.push(["Fastest", top ? playsTitle(top) + ", about " + Math.round(topRate * 24) + " a day" : none]);
+        rows.push(["Gaining daily", known > 0 ? moving + (moving === 1 ? " song" : " songs") : none]);
 
         return rows;
     }
