@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.89";
+    const VERSION = "1.9.9.91";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -9070,14 +9070,14 @@
         }
 
         if (unknown) {
-            return { mode: "catch", song: unknown, unknown: unknownCount, stale: staleCount };
+            return { mode: "catch", song: unknown, oldest: unknown, unknown: unknownCount, stale: staleCount };
         }
 
         if (staleCount > 0) {
-            return { mode: "catch", song: oldest, unknown: 0, stale: staleCount };
+            return { mode: "catch", song: oldest, oldest: oldest, unknown: 0, stale: staleCount };
         }
 
-        return { mode: "keep", song: mover, unknown: 0, stale: 0 };
+        return { mode: "keep", song: mover, oldest: oldest, unknown: 0, stale: 0 };
     }
 
     // The fresh counts, in every player with play counts on. The pace
@@ -9085,9 +9085,26 @@
     // missing or old, the far slower keeping up pace once all are up to
     // date, and nothing is asked while nothing has most likely changed
     let trickleMode = "";
+    let trickleTimer = 0;
 
-    async function trickleTick() {
+    // The status table in the settings, painted again as a fetch starts and
+    // ends, so Fetching shows even for a quick answer
+    let playsStatusPaint = null;
 
+    function paintPlaysNow() {
+
+        if (playsStatusPaint) {
+            playsStatusPaint();
+        }
+    }
+
+    // Force is Fetch next now in the settings: the next song is read at once,
+    // whatever it would wait for, the oldest count when no song is due, and
+    // the next wait is drawn afresh. Only a song already being read, or Read
+    // play counts running, holds it back
+    async function trickleTick(force) {
+
+        const now = force === true;
         const plan = settings.playsOn === true ? playsPlan() : null;
         const keepMs = playsKeepMs();
         let wait = 60000;
@@ -9100,22 +9117,36 @@
             wait = keepMs;
         }
 
+        clearTimeout(trickleTimer);
         trickleNextAt = Date.now() + wait;
-        setTimeout(trickleTick, wait);
+        trickleTimer = setTimeout(trickleTick, wait);
 
-        // Keeping up switched off waits for the counts to grow old
-        if (!plan || !plan.song || (plan.mode === "keep" && keepMs === 0)) {
-            return;
+        if (now && plan && !trickleBusy && !playsJob) {
+
+            trickleHalted = false;
+            trickleHaltWhy = "";
+            trickleFails = 0;
+        } else {
+
+            // Keeping up switched off waits for the counts to grow old
+            if (!plan || !plan.song || (plan.mode === "keep" && keepMs === 0)) {
+                return;
+            }
+
+            if (trickleHalted || trickleBusy || settings.playsTrickle === false || creatorSource
+                || playsJob || running || cacheRunning || progressKind) {
+                return;
+            }
         }
 
-        if (trickleHalted || trickleBusy || settings.playsTrickle === false || creatorSource
-            || playsJob || running || cacheRunning || progressKind) {
+        const song = plan.song || plan.oldest;
+
+        if (!song) {
             return;
         }
-
-        const song = plan.song;
 
         trickleBusy = true;
+        paintPlaysNow();
 
         try {
 
@@ -9152,6 +9183,8 @@
             trickleHaltWhy = "3 requests in a row failed";
             dbgLog("Plays", "3 failed requests, fresh counts stopped until the player is opened again");
         }
+
+        paintPlaysNow();
     }
 
     // A time ago or ahead in words: seconds, minutes, hours or days
@@ -9247,34 +9280,52 @@
             rows.push(["Read play counts", playsJobDone + " of " + playsJobTotal]);
         }
 
-        let fresh = "";
+        // What the background reading is doing right now, its mode, and
+        // when it looks again
+        const plan = playsPlan();
+        const due = !!plan.song && !(plan.mode === "keep" && playsKeepMs() === 0);
+        let status = "";
 
-        if (settings.playsTrickle === false) {
-            fresh = "Off";
-        } else if (trickleHalted) {
-            fresh = "Stopped, " + trickleHaltWhy;
+        if (trickleBusy) {
+            status = "Fetching from Mureka";
         } else if (playsJob) {
-            fresh = "Waiting for Read play counts";
+            status = "Paused, Read play counts runs";
+        } else if (settings.playsTrickle === false) {
+            status = "Off";
+        } else if (trickleHalted) {
+            status = "Stopped, " + trickleHaltWhy;
         } else if (running) {
-            fresh = "Waiting, songs are loading";
+            status = "Paused, songs are loading";
         } else if (cacheRunning) {
-            fresh = "Waiting, songs are caching";
+            status = "Paused, songs are caching";
         } else if (creatorSource) {
-            fresh = "Waiting, an artist is shown";
-        } else if (trickleBusy) {
-            fresh = "Reading a song";
-        } else if (trickleMode === "keep" && playsKeepMs() === 0) {
-            fresh = "Up to date, waits for counts to grow old";
-        } else if (trickleNextAt > now) {
-            fresh = (trickleMode === "keep" ? "Keeping up" : "Catching up") + ", next in " + playsAge(trickleNextAt - now);
+            status = "Paused, an artist is shown";
+        } else if (!trickleNextAt) {
+            status = "Starting";
+        } else if (!due) {
+            status = "Idle, nothing due";
         } else {
-            fresh = "Starting";
+            status = "Waiting";
         }
 
-        rows.push(["Fresh counts", fresh]);
+        rows.push(["Status", status]);
+        rows.push(["Mode", plan.mode === "keep"
+            ? "Keeping up" + (playsKeepMs() === 0 ? ", off" : "")
+            : "Catching up, " + (plan.unknown > 0 ? plan.unknown + " without a count" : plan.stale + " older than " + playsAgeName())]);
+
+        if (trickleNextAt > now && !trickleBusy && settings.playsTrickle !== false && !trickleHalted) {
+            rows.push([due ? "Next fetch in" : "Next look in", playsAge(trickleNextAt - now)]);
+        }
 
         if (trickleLast) {
-            rows.push(["Last read", playsTitle(trickleLast) + ", " + trickleLast.plays + " plays, " + playsAge(now - trickleLast.at) + " ago"]);
+            rows.push(["Last song", playsTitle(trickleLast) + ", " + trickleLast.plays + " plays, " + playsAge(now - trickleLast.at) + " ago"]);
+        }
+
+        // What it reads next, or with Fetch next now when nothing is due
+        if (plan.song) {
+            rows.push(["Next song", playsTitle(plan.song)]);
+        } else if (plan.oldest) {
+            rows.push(["Next song", "None due, Fetch next now reads " + playsTitle(plan.oldest)]);
         }
 
         if (top) {
@@ -18685,7 +18736,8 @@
         // The plays known for each song, for sorting the list by them, and
         // fresh ones, the first a little after starting up
         loadPlayCounts();
-        setTimeout(trickleTick, 30000);
+        trickleNextAt = Date.now() + 30000;
+        trickleTimer = setTimeout(trickleTick, 30000);
 
         // A mouse moving or a wheel turning is use too on a desktop. Checked
         // at most once a second, a moving mouse sends a stream of these
@@ -22341,9 +22393,19 @@
             libraryPage.appendChild(el);
         };
 
+        // The next song read at once rather than when its wait is over
+        const fetchNowRow = document.createElement("div");
+
+        fetchNowRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        fetchNowRow.appendChild(makeButton("Fetch next now", "#333", "#fff", function () {
+
+            trickleTick(true);
+        }));
+
         libraryPage.appendChild(makeLabel("Play counts"));
         libraryPage.appendChild(withHint(playsOnRow, "Plays in the list's views, sorted by them, with each song's count. Mureka's song lists carry no plays, so each song is asked for on its own: every time it starts, and in the background below."));
         addPlays(playsStatusEl);
+        addPlays(fetchNowRow);
         addPlays(withHint(trickleRow, "While the player is open, play counts are read one song at a time. Catching up while counts are missing or older than the age below, then keeping up, far slower, with only the songs gaining plays. It waits while songs are loaded or cached."));
         addPlays(makeSubLabel("Counts are up to date for"));
         addPlays(ageRow);
@@ -22357,6 +22419,7 @@
 
         paintPlaysRows();
         settingsRefreshers.push(paintPlaysRows);
+        playsStatusPaint = paintPlaysStatus;
 
         setInterval(function () {
 

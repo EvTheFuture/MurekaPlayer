@@ -98,7 +98,11 @@ the new settings layout and a number of smaller improvements.
   minutes or off, with only the songs that have most likely gained a play
   since. **Read play counts** catches up at once, a song every 1 to 2
   seconds, with its progress over the lists and a Stop. A table in the
-  settings shows where it stands. Counts are kept on the device.
+  settings shows where it stands: its status (waiting, fetching, paused,
+  idle, off or stopped), catching or keeping up, the countdown, the last
+  and the next song, and
+  **Fetch next now** reads the next song at once. Counts are kept on the
+  device.
 - Song list with the Mureka, Queue and A-Z views, sorting by A to Z, stars
   and plays, search, play next (a second press takes it back out), likes,
   and the phone's song menu on press and hold or right click. A small,
