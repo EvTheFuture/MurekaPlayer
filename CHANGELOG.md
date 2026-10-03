@@ -64,7 +64,7 @@ the new settings layout and a number of smaller improvements.
   every time. Other devices can use `http://murekaplayer.local:8080`, and the
   name can be changed.
 - Now playing like the phone: sliding covers with the neighbours peeking out,
-  synced rolling lyrics beside or on the cover, half stars, like with the
+  synced rolling lyrics beside or on the cover, quarter stars, like with the
   number of hearts (left out when the one heart is your own), plays, a
   Public or Draft badge, up next, **Playing from** with the source and
   filters, the waveform seek bar and the status line. A dot by the time
@@ -355,6 +355,14 @@ the new settings layout and a number of smaller improvements.
 - The song menu, from a long press or a right click, shows the song's number
   and title at the top, so it is clear which song it opened on.
 - A **Stars** view sorts the list by rating.
+- **Quarter stars**: ratings go in quarters, 4, 4.25, 4.5 and 4.75, where
+  they went in halves. A tap on a star lights it in full, and a tap on the
+  star the rating already sits in takes a quarter off before it comes back
+  full, so star 5 runs 5, 4.75, 4.5, 4.25 and 5 again, while 3.5 with a tap
+  on star 5 becomes 5. The first star runs down to 0. The star shows the
+  part lit, the lists and texts the number, like 4.25★, and **Minimum
+  stars** steps in quarters. The same in the web view and with the 0 to 5
+  keys.
 - Play next can be taken back, and the song returns to where it was in the
   queue.
 - A queue saved under other filters is rebuilt from the current filters when
