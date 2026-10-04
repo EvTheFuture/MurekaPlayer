@@ -331,6 +331,9 @@ the new settings layout and a number of smaller improvements.
   Publishing copies the song's link to the clipboard, in the web view to
   that browser's, and a short note on the page says it is published and the
   link copied.
+- **Delete on Mureka** in the song menu for your own songs, in the web
+  view too, deletes the song from your library on Mureka for good after
+  asking first, and then from the list and the cache on the device.
 - **Publishing settings**, a page of their own under Your songs: **Copy the
   link when publishing**, on by default, and **Always disallow remixing
   first**, which tells Mureka to disallow remixing before every publish, and

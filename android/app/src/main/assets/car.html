@@ -12459,6 +12459,27 @@
                 });
             });
         }, "danger"));
+
+        // Gone for good on Mureka, only your own songs
+        if (m.mine) {
+
+            box.appendChild(menuItem("trash", "Delete on Mureka", function () {
+
+                close();
+                askConfirm("Delete \"" + m.title + "\" on Mureka? It is deleted from your library on Mureka for good, "
+                    + "and from the phone. This cannot be undone.", "Delete", true, function () {
+
+                    act("deleteMureka").then(function () {
+
+                        if ($("browse").style.display === "flex") {
+                            setTimeout(function () {
+                                loadList(true);
+                            }, 1500);
+                        }
+                    });
+                });
+            }, "danger"));
+        }
     }
 
     function showBpmField(m) {

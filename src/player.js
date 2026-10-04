@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.129";
+    const VERSION = "1.9.9.130";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6306,6 +6306,42 @@
         setStatus("Removed from the list: " + title);
     }
 
+    // Delete a song of your own on Mureka for good, asked first. Once
+    // Mureka has deleted it, it goes from the list and the cache here too
+    function confirmDeleteOnMureka(song) {
+
+        const title = song.title || "Untitled";
+
+        askYesNo("Delete on Mureka?", "\"" + title + "\" is deleted from your library on Mureka for good,"
+            + " and from this device. This cannot be undone.", "Delete", function () {
+            deleteSongOnMureka(song);
+        }, null, true);
+    }
+
+    async function deleteSongOnMureka(song) {
+
+        if (offlineMode()) {
+
+            showToast("No internet, songs cannot be deleted now", false);
+            return;
+        }
+
+        dbgLog("Mureka", "deleting " + song.song_id + " on Mureka");
+
+        const done = await deleteOnMureka(song);
+
+        if (!done.ok) {
+            return;
+        }
+
+        await forgetSong(song);
+        saveManualInstrumental();
+        saveCache();
+        renderList();
+        publishHostSoon();
+        setStatus("Deleted on Mureka: " + (song.title || "Untitled"));
+    }
+
     // Cache one song, then update its marker
     async function cacheOne(song) {
 
@@ -11210,8 +11246,9 @@
     }
 
     // A yes or no question in the panel. window.confirm would do, but it
-    // stops the page, and with it the state the web view lives on
-    function askYesNo(title, body, yesLabel, onYes, onNo) {
+    // stops the page, and with it the state the web view lives on. The yes
+    // button is cyan, or red for something that cannot be undone
+    function askYesNo(title, body, yesLabel, onYes, onNo, danger) {
 
         if (!panelEl) {
 
@@ -11271,7 +11308,7 @@
             close(onNo);
         });
 
-        const yes = makeButton(yesLabel, "#48e1eb", "#000", function () {
+        const yes = makeButton(yesLabel, danger ? "#ff6b6b" : "#48e1eb", "#000", function () {
             close(onYes);
         });
 
@@ -18608,6 +18645,10 @@
             removeOne(song);
         } else if (act === "delete") {
             deleteOne(song);
+        } else if (act === "deleteMureka") {
+
+            // Asked in the web view before it was sent
+            deleteSongOnMureka(song);
         } else if (act === "rate") {
 
             const n = Math.max(1, Math.min(5, Math.round(Number(a.value) || 0)));
@@ -31234,12 +31275,18 @@
             });
         }
 
-        // Supplying a tempo by hand, for songs the server left without one, and
-        // taking it away again. Only offered where it would do something, a
-        // song that already has a real bpm is left alone
+        // Off the list on this device only, the song stays on Mureka
         addMenuRow("Delete from list", "#ff8a8a", function () {
             deleteOne(song);
         });
+
+        // Gone for good on Mureka, only your own songs
+        if (!creatorSource) {
+
+            addMenuRow("Delete on Mureka", "#ff8a8a", function () {
+                confirmDeleteOnMureka(song);
+            });
+        }
 
         // Developer only, copy the full song JSON to the clipboard
         // Available on the bookmarklet too, where there is no console
