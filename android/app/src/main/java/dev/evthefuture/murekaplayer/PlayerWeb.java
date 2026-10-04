@@ -123,6 +123,10 @@ final class PlayerWeb {
     private static volatile boolean offlinePage = false;
     private static boolean watchingNetwork = false;
 
+    // The network the phone last used for the internet, so a switch to
+    // another one, Wi-Fi to mobile data say, has the player check Mureka
+    private static Network lastNetwork = null;
+
     // The page the player runs on when Mureka cannot be reached. It is
     // handed out at Mureka's own address, so the player has its library,
     // its stored songs and its covers, which are kept for that address
@@ -556,6 +560,20 @@ final class PlayerWeb {
             cm.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
 
                 @Override
+                public void onAvailable(Network network) {
+
+                    Network before = lastNetwork;
+
+                    lastNetwork = network;
+
+                    if (before != null && !before.equals(network)) {
+
+                        Hub.note("Network", "the phone switched to another network");
+                        Hub.command("netCheck", "the phone switched to another network");
+                    }
+                }
+
+                @Override
                 public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
 
                     setOnline(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -572,6 +590,12 @@ final class PlayerWeb {
         } catch (RuntimeException e) {
             Hub.note("Network", "the internet cannot be watched, " + e.getClass().getSimpleName());
         }
+    }
+
+    // Whether the phone has an internet connection, as Android last said.
+    // Any thread
+    static boolean hasNetwork() {
+        return online;
     }
 
     // Main thread only. Only a change is told

@@ -560,6 +560,38 @@
         text-align: right;
     }
 
+    /* Whether the phone is online: red while it is not, green for a few
+       seconds once it is back, or for as long as it is online */
+    #netBadge {
+        display: none;
+        flex: 0 0 auto;
+        padding: 0 0.5em;
+        border: 1px solid rgba(255, 138, 128, 0.5);
+        border-radius: 0.6em;
+        color: #ff8a80;
+        font-size: 0.75em;
+        font-weight: 400;
+        line-height: 1.5;
+        white-space: nowrap;
+        opacity: 1;
+    }
+
+    #netBadge.online {
+        border-color: rgba(95, 211, 141, 0.6);
+        color: #5fd38d;
+    }
+
+    #netBadge.fading {
+        opacity: 0;
+        transition: opacity 1.5s ease;
+    }
+
+    html.phone #netBadge {
+        margin-left: 6px;
+        font-size: 10px;
+        vertical-align: 1px;
+    }
+
     #browse {
         position: fixed;
         inset: 0;
@@ -887,6 +919,13 @@
 
     #toast.bad {
         background: #ff6b6b;
+        color: #000;
+        font-weight: 600;
+    }
+
+    /* Online again: green */
+    #toast.online {
+        background: #5fd38d;
         color: #000;
         font-weight: 600;
     }
@@ -3344,6 +3383,7 @@
             <button id="soundCar" type="button" data-icon="browser" data-name="This browser" aria-label="Music in this browser" title="Music in this browser"></button>
             <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
         </div>
+        <span id="netBadge"></span>
         <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
         <button class="chip iconOnly" id="actionsBtn" type="button" data-icon="menu" aria-label="Actions" title="Actions"></button>
@@ -3943,6 +3983,7 @@
             waveSource: s.webWaveSource === "song" ? "song" : "mureka",
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
+            onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
             size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26,
             sidePct: s.lyricLayout && typeof s.lyricLayout.side === "number" ? Math.round(s.lyricLayout.side * 100) : 80,
@@ -3962,6 +4003,10 @@
         s.showUpNext = look.upNext !== false;
         s.lyricsWhere = look.lyrics === "off" || look.lyrics === "cover" ? look.lyrics : "info";
         s.volUnit = look.volUnit === "steps" ? "steps" : "percent";
+
+        // A look kept before the badge could be set follows the phone
+        s.onlineBadge = look.onlineBadge === "always" || look.onlineBadge === "fade"
+            ? look.onlineBadge : (raw.onlineBadge === "always" ? "always" : "fade");
 
         // Our own waveform when chosen and the phone has it ready
         s.waveFine = false;
@@ -4051,6 +4096,8 @@
             names: { off: "Off", info: "Beside the cover", cover: "On the cover" } },
         { label: "Volume shown as", page: "Web view", key: "volUnit", kind: "cycle", values: ["percent", "steps"],
             names: { percent: "Percent", steps: "Steps" } },
+        { label: "Online badge", page: "Web view", key: "onlineBadge", kind: "choice", values: ["fade", "always"],
+            names: { fade: "Fade away", always: "Always" } },
         { label: "Lyric size", page: "Web view", key: "size", kind: "step", step: 1, min: 10, max: 60 },
         { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
         { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
@@ -5458,9 +5505,100 @@
         }
     }, 1000);
 
+    // The online and offline badge, in the bottom bar, or beside the name
+    // at the top on a phone. Offline shows as long as it lasts. Back online
+    // it says so in green and fades away, or stays with Always
+    let netBadgeState = "hidden";
+    let netBadgeTimer = 0;
+    let netBadgeHome = null;
+
+    function paintNetBadge(s) {
+
+        const el = $("netBadge");
+        const home = isPhone() ? $("phoneHead") : $("bottom");
+
+        if (!el || !s) {
+            return;
+        }
+
+        if (home !== netBadgeHome) {
+
+            netBadgeHome = home;
+
+            if (home === $("bottom")) {
+                home.insertBefore(el, $("status"));
+            } else {
+                home.appendChild(el);
+            }
+        }
+
+        if (s.offline === true) {
+
+            clearTimeout(netBadgeTimer);
+            netBadgeTimer = 0;
+            netBadgeState = "offline";
+            el.textContent = "Offline";
+            el.title = "The phone has no internet, only songs stored on it play";
+            el.classList.remove("online", "fading");
+            el.style.display = "inline-block";
+            return;
+        }
+
+        if (s.onlineBadge === "always") {
+
+            clearTimeout(netBadgeTimer);
+            netBadgeTimer = 0;
+            netBadgeState = "online";
+            showNetOnline(el);
+            return;
+        }
+
+        if (netBadgeState === "online" && !netBadgeTimer) {
+
+            // Switched from always to fade while it showed
+            fadeNetBadge(el, 0);
+        } else if (netBadgeState === "offline") {
+
+            netBadgeState = "online";
+            showNetOnline(el);
+            fadeNetBadge(el, 4000);
+        } else if (netBadgeState === "hidden") {
+            el.style.display = "none";
+        }
+    }
+
+    function showNetOnline(el) {
+
+        el.textContent = "Online";
+        el.title = "The phone is connected to the internet";
+        el.classList.add("online");
+        el.classList.remove("fading");
+        el.style.display = "inline-block";
+    }
+
+    function fadeNetBadge(el, hold) {
+
+        clearTimeout(netBadgeTimer);
+        netBadgeTimer = setTimeout(function () {
+
+            el.classList.add("fading");
+
+            netBadgeTimer = setTimeout(function () {
+
+                netBadgeTimer = 0;
+                netBadgeState = "hidden";
+                el.classList.remove("fading");
+                el.style.display = "none";
+            }, 1600);
+        }, hold);
+    }
+
     function render() {
 
         const s = state;
+
+        // Shown with or without a song
+        paintNetBadge(s);
 
         if (!s || !s.id) {
 
@@ -11888,7 +12026,7 @@
         }
 
         toastSeen = key;
-        toast(t.text, t.kind === "wait" ? "wait" : (t.ok === false ? "bad" : "ok"));
+        toast(t.text, t.kind === "wait" || t.kind === "online" ? t.kind : (t.ok === false ? "bad" : "ok"));
     }
 
     // A short word over the page, gone again after a few seconds
@@ -11902,6 +12040,7 @@
         el.classList.toggle("ok", kind === "ok");
         el.classList.toggle("bad", kind === "bad");
         el.classList.toggle("wait", kind === "wait");
+        el.classList.toggle("online", kind === "online");
 
         // While the phone waits for Mureka, a turning ring before the words,
         // and the note stays until the answer replaces it
@@ -14821,8 +14960,9 @@
         }
     }
 
-    // The song's file, fetched by the phone from Mureka and handed on, with
-    // the share that has arrived shown as it comes in
+    // The song's file, the phone's own copy when it is stored there,
+    // otherwise fetched by the phone from Mureka and handed on, with the
+    // share that has arrived shown as it comes in
     async function trimLoadBytes(m, token) {
 
         const t0 = Date.now();
@@ -14838,9 +14978,11 @@
         }
 
         const total = Number(res.headers.get("Content-Length")) || 0;
+        const stored = res.headers.get("X-Mureka-Stored") === "1";
+        const doing = stored ? "Reading the cached song" : "Downloading the song";
         let bytes = null;
 
-        trimLoading("Downloading the song");
+        trimLoading(doing);
 
         // Read in pieces, so the share downloaded can be shown
         if (res.body && res.body.getReader && total > 0) {
@@ -14861,7 +15003,7 @@
                 got += part.value.length;
 
                 if (token === trimToken) {
-                    trimLoading("Downloading the song, " + Math.min(100, Math.floor(got / total * 100)) + "%");
+                    trimLoading(doing + ", " + Math.min(100, Math.floor(got / total * 100)) + "%");
                 }
             }
 
@@ -14879,7 +15021,8 @@
             bytes = await res.arrayBuffer();
         }
 
-        dbgLog("Trim", "song file " + Math.round(bytes.byteLength / 1024) + " kB in " + (Date.now() - t0) + " ms");
+        dbgLog("Trim", (stored ? "cached" : "downloaded") + " song file " + Math.round(bytes.byteLength / 1024)
+            + " kB in " + (Date.now() - t0) + " ms");
 
         return bytes;
     }

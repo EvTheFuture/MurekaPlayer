@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.126";
+    const VERSION = "1.9.9.129";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1327,7 +1327,30 @@
             return offlineRefusal();
         }
 
-        return fetch(resource, options);
+        return watchMureka(resource, fetch(resource, options), options && options.signal);
+    }
+
+    // Every request to Mureka is watched: an answer of any kind shows Mureka
+    // can be reached, no answer at all makes the player check at once
+    // whether it is offline. A request its caller stopped says nothing
+    function watchMureka(resource, request, callerSignal) {
+
+        if (!isMurekaRequest(resource)) {
+            return request;
+        }
+
+        return request.then(function (res) {
+
+            murekaAnswered();
+            return res;
+        }, function (e) {
+
+            if (!(callerSignal && callerSignal.aborted)) {
+                murekaNoAnswer();
+            }
+
+            throw e;
+        });
     }
 
     // fetch with a deadline. A request with no signal can hang until the
@@ -1344,7 +1367,7 @@
         const limit = ms || 15000;
 
         if (typeof AbortController === "undefined") {
-            return fetch(resource, opts);
+            return watchMureka(resource, fetch(resource, opts));
         }
 
         const controller = new AbortController();
@@ -1355,9 +1378,9 @@
 
         const merged = Object.assign({}, opts, { signal: controller.signal });
 
-        return fetch(resource, merged).finally(function () {
+        return watchMureka(resource, fetch(resource, merged).finally(function () {
             clearTimeout(timer);
-        });
+        }));
     }
 
     // Read the cache from localStorage, return an empty cache on failure
@@ -1692,9 +1715,11 @@
             prevRestart: 3,
             waveSeek: true,
             waveSource: "mureka",
+            onlineBadge: "fade",
             webUpNext: true,
             webWave: true,
             webWaveSource: "mureka",
+            webOnlineBadge: "fade",
             webNames: false,
             webLyrics: "info",
             webControlOrder: "repeat,shuffle,stop,play,songs",
@@ -1869,9 +1894,11 @@
                         ? parsed.prevRestart : 3,
                     waveSeek: parsed.waveSeek !== false,
                     waveSource: parsed.waveSource === "song" ? "song" : "mureka",
+                    onlineBadge: parsed.onlineBadge === "always" ? "always" : "fade",
                     webUpNext: parsed.webUpNext !== false,
                     webWave: parsed.webWave !== false,
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
+                    webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
                     webNames: parsed.webNames === true,
                     webLyrics: (parsed.webLyrics === "off" || parsed.webLyrics === "cover")
                         ? parsed.webLyrics : "info",
@@ -5710,7 +5737,7 @@
 
                     // The full file is now stored, so light its cached marker
                     cachedIds.add(song.song_id);
-                    ownWaveOnStored(song);
+                    songStored(song);
                 }
 
                 cachingIds.delete(song.song_id);
@@ -5821,7 +5848,7 @@
 
             await store.put(url, trackDownload(song, got));
             cachedIds.add(song.song_id);
-            ownWaveOnStored(song);
+            songStored(song);
 
             return true;
         } catch (e) {
@@ -6087,7 +6114,7 @@
     async function refreshCachedIds() {
 
         // The covers are looked through at the same time, not after
-        refreshArtCachedIds();
+        const artScan = refreshArtCachedIds();
 
         try {
 
@@ -6121,6 +6148,10 @@
             logStartup("songs", "cached songs checked, " + ids.size + " of " + cache.songs.length);
         } catch (e) {
         }
+
+        // Both known now: stored songs without a kept cover get one
+        await artScan;
+        keepMissingCovers();
     }
 
     // Rebuild the set of cover cached song_ids by scanning the art store keys
@@ -6983,7 +7014,7 @@
                 cachingIds.delete(song.song_id);
                 renderList();
                 cachedIds.add(song.song_id);
-                ownWaveOnStored(song);
+                songStored(song);
                 resp = net;
             }
 
@@ -8805,11 +8836,17 @@
             return;
         }
 
-        if (song.is_played === false) {
-            await reportPlayed(song);
+        // Without an answer the report is kept as well, and the failed
+        // request has the player check whether it is offline
+        if (song.is_played === false && !(await reportPlayed(song))) {
+
+            queueReport(song.song_id, true);
+            return;
         }
 
-        await sendPlayReport(song.song_id);
+        if (!(await sendPlayReport(song.song_id))) {
+            queueReport(song.song_id, false);
+        }
     }
 
     // The play report itself. True when Mureka answered, whatever it said
@@ -8894,7 +8931,7 @@
         }
 
         savePendingReports(list);
-        dbgLog("Mureka", "offline, play report for " + id + " kept, " + list.length + " waiting");
+        dbgLog("Mureka", "play report for " + id + " kept for later, " + list.length + " waiting");
     }
 
     // The plays made offline go to Mureka, one at a time with a pause in
@@ -14516,8 +14553,9 @@
 
         // Three looks: "wait" while Mureka is asked, ringed with a turning
         // ring and staying until the answer replaces it, then filled cyan
-        // for done or red for what did not work, fading after a moment
-        const kind = ok === "wait" ? "wait" : (ok === false ? "bad" : "ok");
+        // for done or red for what did not work, fading after a moment.
+        // Green for being online
+        const kind = ok === "wait" || ok === "online" ? ok : (ok === false ? "bad" : "ok");
 
         toastSeq += 1;
         lastToast = { n: toastSeq, text: text, ok: kind !== "bad", kind: kind, at: Date.now() };
@@ -14566,7 +14604,7 @@
             panelToastEl.style.boxShadow = "inset 0 0 0 2px #48e1eb, 0 4px 14px rgba(0,0,0,0.5)";
         } else {
 
-            panelToastEl.style.background = kind === "bad" ? "#ff6b6b" : "#48e1eb";
+            panelToastEl.style.background = kind === "bad" ? "#ff6b6b" : (kind === "online" ? "#5fd38d" : "#48e1eb");
             panelToastEl.style.color = "#0c0c0f";
             panelToastEl.style.boxShadow = "0 4px 14px rgba(0,0,0,0.5)";
         }
@@ -15112,6 +15150,97 @@
                 makeOwnWaveSoon(song, (tries || 0) + 1);
             }
         }, now ? 200 : (tries ? 15000 : 2000));
+    }
+
+    // A song has just been stored on this device. Its cover is kept with
+    // it, so the song shows its cover offline too, wherever it was stored
+    // from and however few covers are fetched ahead
+    function songStored(song) {
+
+        ownWaveOnStored(song);
+        keepCover(song);
+    }
+
+    // Stored songs still without a kept cover, by id, filled in one after
+    // the other in the background while online
+    const coverKeepWaiting = new Map();
+    let coverKeepBusy = false;
+    let coverKeepTimer = 0;
+
+    function keepCover(song) {
+
+        if (!song || artCachedIds.has(String(song.song_id))) {
+            return;
+        }
+
+        coverKeepWaiting.set(String(song.song_id), song);
+        keepCoversSoon(500);
+    }
+
+    // Every stored song without a kept cover queued, at startup, back online
+    // and when the background work starts again
+    function keepMissingCovers() {
+
+        let added = 0;
+
+        for (const song of cache.songs) {
+
+            if (cachedIds.has(song.song_id) && !artCachedIds.has(String(song.song_id))
+                && !coverKeepWaiting.has(String(song.song_id))) {
+
+                coverKeepWaiting.set(String(song.song_id), song);
+                added += 1;
+            }
+        }
+
+        if (added > 0) {
+            dbgLog("Covers", added + " stored songs have no kept cover, fetching them");
+        }
+
+        keepCoversSoon(3000);
+    }
+
+    function keepCoversSoon(ms) {
+
+        if (coverKeepBusy || coverKeepTimer || coverKeepWaiting.size === 0) {
+            return;
+        }
+
+        coverKeepTimer = setTimeout(runCoverKeep, ms);
+    }
+
+    // Waits while offline or while the power saving has stopped the
+    // background work, what is left is taken up again after that
+    async function runCoverKeep() {
+
+        coverKeepTimer = 0;
+
+        if (coverKeepBusy) {
+            return;
+        }
+
+        coverKeepBusy = true;
+
+        try {
+
+            while (coverKeepWaiting.size > 0 && !offlineMode() && !playerQuiet) {
+
+                const next = coverKeepWaiting.entries().next().value;
+
+                coverKeepWaiting.delete(next[0]);
+
+                if (artCachedIds.has(next[0])) {
+                    continue;
+                }
+
+                await cacheArt(next[1]);
+
+                // Gently, a cover now and then beside the songs and the music
+                await sleep(800);
+            }
+        } finally {
+            coverKeepBusy = false;
+        }
     }
 
     // The playing song has just been stored: its own waveform can be worked
@@ -15891,8 +16020,8 @@
 
         const id = song.song_id;
 
-        // Already in memory for a recent song
-        if (artCache.has(id)) {
+        // Already in memory for a recent song, and kept
+        if (artCache.has(id) && artCachedIds.has(String(id))) {
             return;
         }
 
@@ -16463,6 +16592,8 @@
             trimFade: settings.trimFade !== false,
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
+            offline: offlineMode(),
+            onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
             names: settings.webNames === true,
             lyricsWhere: settings.webLyrics || "info",
@@ -16990,7 +17121,25 @@
     function watchBrowserNetwork() {
 
         window.addEventListener("offline", function () {
-            setNetOffline(true);
+
+            let up = false;
+
+            // In the app Android is asked, a connection that only changed
+            // over is checked instead
+            try {
+
+                if (isApkHost() && typeof window.MurekaHost.online === "function") {
+                    up = window.MurekaHost.online();
+                }
+            } catch (e) {
+                up = false;
+            }
+
+            setNetOffline(!up);
+
+            if (up) {
+                checkNet("the browser lost its connection", true);
+            }
         });
 
         window.addEventListener("online", function () {
@@ -17007,7 +17156,85 @@
             }
 
             setNetOffline(!up);
+            checkNet("the browser has a connection again", true);
         });
+    }
+
+    // When Mureka last answered anything, and the check run when something
+    // suggests the connection is gone: a request without an answer, the
+    // browser or Android saying the network changed, a browser of the web
+    // view going away, or nothing heard from Mureka for a while
+    let murekaAnsweredAt = Date.now();
+    let netCheckBusy = false;
+    let netCheckAt = 0;
+
+    // How long without a word from Mureka before it is asked, longer while
+    // the power saving has stopped the background work
+    const NET_IDLE_MS = 60000;
+    const NET_IDLE_QUIET_MS = 300000;
+
+    function murekaAnswered() {
+        murekaAnsweredAt = Date.now();
+    }
+
+    function murekaNoAnswer() {
+        checkNet("a request to Mureka got no answer", false);
+    }
+
+    // Whether Mureka answers, found out now. Unforced, a check made in the
+    // last 10 seconds is enough. Two checks a few seconds apart both
+    // without an answer take the player offline. Only in the app, and only
+    // while online, offline the 30 second checks take over
+    async function checkNet(why, force) {
+
+        if (!isApkHost() || offlineMode() || netCheckBusy) {
+            return;
+        }
+
+        if (!force && Date.now() - netCheckAt < 10000) {
+            return;
+        }
+
+        netCheckBusy = true;
+        netCheckAt = Date.now();
+
+        try {
+
+            dbgLog("Offline", "checking whether Mureka answers, " + why);
+
+            let ok = await murekaReachable();
+
+            if (!ok && !offlineMode()) {
+
+                await sleep(3000);
+                ok = offlineMode() || await murekaReachable();
+            }
+
+            if (ok) {
+
+                murekaAnswered();
+
+                // Reports kept after a request that got no answer go now
+                flushReports();
+            } else {
+                setNetTrouble(true);
+            }
+        } finally {
+
+            netCheckBusy = false;
+            netCheckAt = Date.now();
+        }
+    }
+
+    // Nothing heard from Mureka for a while, no background work running to
+    // find out: it is asked
+    function netIdleCheck() {
+
+        const limit = playerQuiet ? NET_IDLE_QUIET_MS : NET_IDLE_MS;
+
+        if (Date.now() - murekaAnsweredAt > limit && Date.now() - netCheckAt > limit) {
+            checkNet("nothing heard from Mureka for " + Math.round(limit / 1000) + " s", true);
+        }
     }
 
     // Whether Mureka answers at all, any answer counts. Asked straight,
@@ -17041,6 +17268,11 @@
         netTroubleTimer = setTimeout(function () {
 
             murekaReachable().then(function (ok) {
+
+                if (ok) {
+                    murekaAnswered();
+                }
+
                 setNetTrouble(!ok);
             });
         }, 30000);
@@ -17089,8 +17321,9 @@
             showToast("No internet, only stored songs play", false);
         } else {
 
-            showToast("Back online", true);
+            showToast("Back online", "online");
             setTimeout(flushReports, 3000);
+            keepMissingCovers();
             reloadWhenIdle();
         }
     }
@@ -17144,11 +17377,36 @@
         }
     }
 
-    // Every few seconds: a reload waiting for the music to stop
+    // Every few seconds: a reload waiting for the music to stop, and
+    // whether Mureka was heard from lately
     function offlineTick() {
 
         if (onlineReloadWaiting && (!audio || audio.paused)) {
             reloadWhenIdle();
+        }
+
+        netIdleCheck();
+    }
+
+    // A single tap on the header's online badge. With the internet back
+    // on the offline page it loads the real page at once, otherwise it
+    // says how things are
+    function offlineBadgeTapped() {
+
+        if (offlinePage() && !offlineMode()) {
+
+            onlineReloadWaiting = false;
+            saveQueue();
+
+            try {
+                window.MurekaHost.reloadOnline();
+            } catch (e) {
+                // An app without it stays on the offline page
+            }
+        } else if (offlineMode()) {
+            showToast("No internet, only songs stored on this device play", false);
+        } else {
+            showToast("Connected to the internet", "online");
         }
     }
 
@@ -17157,8 +17415,8 @@
     let badgeState = "hidden";
     let badgeFadeTimer = 0;
 
-    // Grey Offline while offline. Back online it turns green, stays a few
-    // seconds and fades away
+    // Red Offline while offline. Back online it turns green, stays a few
+    // seconds and fades away, or stays with the badge set to always
     function paintOfflineBadge() {
 
         if (!offlineBadgeEl) {
@@ -17170,14 +17428,25 @@
         if (offlineMode()) {
 
             clearTimeout(badgeFadeTimer);
+            badgeFadeTimer = 0;
             badgeState = "offline";
             el.textContent = "Offline";
             el.title = "No internet, only songs stored on this device play";
-            el.style.color = "#aaa";
-            el.style.borderColor = "rgba(170,170,180,0.5)";
+            el.style.color = "#ff8a80";
+            el.style.borderColor = "rgba(255,138,128,0.5)";
             el.style.transition = "none";
             el.style.opacity = "1";
             el.style.display = "inline-block";
+            return;
+        }
+
+        // Set to always show, the online mark stays while online
+        if (settings.onlineBadge === "always") {
+
+            clearTimeout(badgeFadeTimer);
+            badgeFadeTimer = 0;
+            badgeState = "online";
+            showOnlineBadge(el);
             return;
         }
 
@@ -17186,20 +17455,35 @@
 
             if (badgeState === "hidden") {
                 el.style.display = "none";
+            } else if (badgeState === "online" && !badgeFadeTimer) {
+
+                // Switched from always to fade while it showed
+                fadeOnlineBadge(el, 0);
             }
 
             return;
         }
 
         badgeState = "online";
+        showOnlineBadge(el);
+        fadeOnlineBadge(el, 4000);
+    }
+
+    function showOnlineBadge(el) {
+
         el.textContent = "Online";
-        el.title = "Back online";
+        el.title = "Connected to the internet";
         el.style.color = "#5fd38d";
         el.style.borderColor = "rgba(95,211,141,0.6)";
         el.style.transition = "none";
         el.style.opacity = "1";
         el.style.display = "inline-block";
+    }
 
+    // The online mark held for a while, then faded out and hidden
+    function fadeOnlineBadge(el, hold) {
+
+        clearTimeout(badgeFadeTimer);
         badgeFadeTimer = setTimeout(function () {
 
             el.style.transition = "opacity 1.5s ease";
@@ -17207,10 +17491,11 @@
 
             badgeFadeTimer = setTimeout(function () {
 
+                badgeFadeTimer = 0;
                 badgeState = "hidden";
                 el.style.display = "none";
             }, 1600);
-        }, 4000);
+        }, hold);
     }
 
     // When the power saving has stopped the background work, the play
@@ -17235,6 +17520,8 @@
             if (cacheRunning) {
                 cacheAll();
             }
+        } else {
+            keepCoversSoon(3000);
         }
     }
 
@@ -17316,6 +17603,40 @@
             if (song && !cachingIds.has(song.song_id)) {
                 fetchToCache(song);
             }
+        }, function () {
+            hostReply(id, "");
+        });
+    }
+
+    // The cover the player keeps with a stored song, as a data URL, for the
+    // app when Mureka cannot give it. Nothing when none is kept
+    function hostKeptCover(id, url) {
+
+        const wanted = String(url);
+        const match = function (x) {
+            return x && coverUrl(x) === wanted;
+        };
+        const song = cache.songs.find(match) || queue.find(match) || null;
+
+        if (!song) {
+
+            hostReply(id, "");
+            return;
+        }
+
+        loadArtFromStore(song.song_id).then(function (kept) {
+            hostReply(id, kept ? (kept.large || kept.small || "") : "");
+        }, function () {
+            hostReply(id, "");
+        });
+    }
+
+    // How big the stored song is and its kind, nothing when it is not
+    // stored. Asks nothing of Mureka, for a file the web view reads whole
+    function hostStoredInfo(id, url) {
+
+        storedSong(String(url)).then(function (kept) {
+            hostReply(id, kept ? JSON.stringify({ size: kept.blob.size, type: kept.type }) : "");
         }, function () {
             hostReply(id, "");
         });
@@ -17415,14 +17736,22 @@
             out.push(coverUrl(currentSong));
         }
 
-        if (want <= 0 || queue.length === 0) {
+        if (queue.length === 0) {
             return out;
         }
 
-        for (let i = 1; i <= Math.min(want, queue.length - 1); i += 1) {
+        // Beyond the covers asked for, those of the songs stored ahead too,
+        // so a song kept on the phone never comes up without its cover
+        const reach = Math.max(want, settings.prefetchCount || 0);
+
+        for (let i = 1; i <= Math.min(reach, queue.length - 1); i += 1) {
 
             const song = queue[(queuePos + i) % queue.length];
             const url = song ? coverUrl(song) : "";
+
+            if (i > want && !(song && cachedIds.has(song.song_id))) {
+                continue;
+            }
 
             if (url && out.indexOf(url) === -1) {
                 out.push(url);
@@ -18602,6 +18931,8 @@
             noteUnplug(Number(arg));
         } else if (cmd === "network") {
             setNetOffline(arg === false);
+        } else if (cmd === "netCheck") {
+            checkNet(String(arg || "asked by the app"), true);
         } else if (cmd === "hotspotAuto") {
             followHotspotSwitch(arg === "off" ? "off" : "on");
         } else if (cmd === "unplugReason") {
@@ -18654,6 +18985,8 @@
         window.__murekaHostSongMenu = hostSongMenu;
         window.__murekaHostSongInfo = hostSongInfo;
         window.__murekaHostSongPart = hostSongPart;
+        window.__murekaHostKeptCover = hostKeptCover;
+        window.__murekaHostStoredInfo = hostStoredInfo;
 
         ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
             document.addEventListener(type, publishHostSoon, true);
@@ -18755,32 +19088,29 @@
         // A small mark while offline. With the internet back on the offline
         // page, a tap loads the real page at once
         offlineBadgeEl = document.createElement("span");
-        offlineBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(170,170,180,0.5);border-radius:8px;color:#aaa;font-weight:400;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+        offlineBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(255,138,128,0.5);border-radius:8px;color:#ff8a80;font-weight:400;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
 
-        for (const kind of ["mousedown", "pointerdown", "touchstart"]) {
-
-            offlineBadgeEl.addEventListener(kind, function (ev) {
-                ev.stopPropagation();
-            }, { passive: true });
-        }
+        // Presses go on to the header, so a double tap on the badge folds or
+        // opens the player as one on the header does. Its own action waits
+        // to see whether a second tap comes, and is dropped when one does
+        let badgeTapTimer = 0;
 
         offlineBadgeEl.addEventListener("click", function (ev) {
 
             ev.stopPropagation();
 
-            if (offlinePage() && !offlineMode()) {
+            if (badgeTapTimer) {
 
-                onlineReloadWaiting = false;
-                saveQueue();
-
-                try {
-                    window.MurekaHost.reloadOnline();
-                } catch (e) {
-                    // An app without it stays on the offline page
-                }
-            } else {
-                showToast("No internet, only songs stored on this device play", false);
+                clearTimeout(badgeTapTimer);
+                badgeTapTimer = 0;
+                return;
             }
+
+            badgeTapTimer = setTimeout(function () {
+
+                badgeTapTimer = 0;
+                offlineBadgeTapped();
+            }, 400);
         });
 
         headerTitle.appendChild(offlineBadgeEl);
@@ -24444,6 +24774,15 @@
             }
         });
 
+        const onlineBadgeRow = makeChoiceRow([
+            { label: "Fade away", value: "fade" },
+            { label: "Always", value: "always" }
+        ], function () { return settings.onlineBadge || "fade"; }, function (v) {
+
+            settings.onlineBadge = v;
+            paintOfflineBadge();
+        });
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
             function (v) { settings.waveSeek = v; updateSeekMode(); });
@@ -24654,6 +24993,9 @@
         mobilePage.appendChild(waveSourceRow);
         mobilePage.appendChild(makeHint("Mureka's has a few points for the whole song. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
+        mobilePage.appendChild(makeSubLabel("Online badge"));
+        mobilePage.appendChild(onlineBadgeRow);
+        mobilePage.appendChild(makeHint("The red Offline badge in the header shows while there is no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the player is online."));
 
         // The screen stays on while music plays. This keeps it on when the
         // music is paused or stopped too, so the phone never locks
@@ -25064,6 +25406,19 @@
             webPage.appendChild(makeSubLabel("Waveform from"));
             webPage.appendChild(webWaveSourceRow);
             webPage.appendChild(makeHint("Mureka's has a few points for the whole song, From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+
+            const webOnlineBadgeRow = makeChoiceRow([
+                { label: "Fade away", value: "fade" },
+                { label: "Always", value: "always" }
+            ], function () { return settings.webOnlineBadge || "fade"; }, function (v) {
+
+                settings.webOnlineBadge = v;
+                publishHostSoon();
+            });
+
+            webPage.appendChild(makeSubLabel("Online badge"));
+            webPage.appendChild(webOnlineBadgeRow);
+            webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
             webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
             webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
             webPage.appendChild(webLyricSizeRow);

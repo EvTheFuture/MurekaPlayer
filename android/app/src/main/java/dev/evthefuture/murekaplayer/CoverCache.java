@@ -22,6 +22,7 @@
 package dev.evthefuture.murekaplayer;
 
 import android.content.Context;
+import android.util.Base64;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -149,7 +150,13 @@ final class CoverCache {
                     return file;
                 }
 
-                return download(url, file) ? file : null;
+                // Without internet Mureka is not tried, the player's copy
+                // is taken straight away
+                if (PlayerWeb.hasNetwork() && download(url, file)) {
+                    return file;
+                }
+
+                return fromPlayer(url, file) ? file : null;
             } finally {
                 LOCKS.remove(url);
             }
@@ -391,6 +398,53 @@ final class CoverCache {
 
             if (!got && part.exists() && !part.delete()) {
                 Hub.note("Covers", "could not remove a half fetched cover");
+            }
+        }
+
+        if (got) {
+            trimSoon();
+        }
+
+        return got;
+    }
+
+    // The cover the player keeps with a song stored on the phone, for when
+    // Mureka cannot give it, offline for one. Kept here too after that
+    private static boolean fromPlayer(String url, File file) {
+
+        String data = Hub.requestLater("__murekaHostKeptCover", JSONObject.quote(url), 5000);
+        int comma = data.indexOf(',');
+
+        if (!data.startsWith("data:image/") || comma < 0) {
+            return false;
+        }
+
+        byte[] picture;
+
+        try {
+            picture = Base64.decode(data.substring(comma + 1), Base64.DEFAULT);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+
+        if (picture.length == 0 || picture.length > MAX_FILE) {
+            return false;
+        }
+
+        File part = new File(dir, file.getName() + ".part");
+        boolean got = false;
+
+        try (OutputStream out = new FileOutputStream(part)) {
+
+            out.write(picture);
+            out.close();
+            got = part.renameTo(file);
+        } catch (IOException e) {
+            Hub.note("Covers", "could not keep the player's cover, " + e.getClass().getSimpleName());
+        } finally {
+
+            if (!got && part.exists() && !part.delete()) {
+                Hub.note("Covers", "could not remove a half written cover");
             }
         }
 

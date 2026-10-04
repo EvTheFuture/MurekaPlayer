@@ -252,16 +252,26 @@ final class CarServer {
         long now = System.currentTimeMillis();
         int here = 0;
 
+        boolean left = false;
+
         for (java.util.Map.Entry<String, Long> e : clients.entrySet()) {
 
             if (now - e.getValue() > CLIENT_GONE_MS) {
+
                 clients.remove(e.getKey());
+                left = true;
             } else {
                 here += 1;
             }
         }
 
         Hub.setClients(here);
+
+        // A browser that stops asking may have lost the network along with
+        // the phone, so the player checks whether Mureka still answers
+        if (left) {
+            Hub.command("netCheck", "a browser of the web view went away");
+        }
     }
 
     // One request per connection, then close. Plenty for one car browser
@@ -461,10 +471,11 @@ final class CarServer {
         send(out, 200, "application/json", bytes(json));
     }
 
-    // A song's file from Mureka, handed on to the web view, whose trimmer
-    // reads it in the browser. The browser may not fetch it from Mureka
-    // itself, the file comes from another address. Only Mureka's own files
-    // over https, never an address of the car's choosing
+    // A song's file for the web view, whose trimmer reads it in the
+    // browser. The phone's own copy when the song is stored there, from
+    // Mureka otherwise. The browser may not fetch it from Mureka itself, the
+    // file comes from another address. Only Mureka's own files over https,
+    // never an address of the browser's choosing
     private void sendAudio(OutputStream out, String url) throws IOException {
 
         lastPoll = System.currentTimeMillis();
@@ -483,6 +494,10 @@ final class CarServer {
             || !(host.equals("mureka.ai") || host.endsWith(".mureka.ai"))) {
 
             send(out, 403, "text/plain", bytes("Not a Mureka song"));
+            return;
+        }
+
+        if (sendStored(out, url)) {
             return;
         }
 
@@ -690,6 +705,49 @@ final class CarServer {
 
         head.append("Accept-Ranges: bytes\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
         out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
+
+        sendPieces(out, url, start, end, size);
+    }
+
+    // A stored song in full, read from the player a piece at a time. False
+    // when the phone does not have it, nothing is sent then
+    private boolean sendStored(OutputStream out, String url) throws IOException {
+
+        String info = Hub.requestLater("__murekaHostStoredInfo", JSONObject.quote(url), 8000);
+        long size = 0;
+        String type = "audio/mpeg";
+
+        try {
+
+            if (!info.isEmpty()) {
+
+                JSONObject o = new JSONObject(info);
+
+                size = (long) o.optDouble("size", 0);
+                type = o.optString("type", type);
+            }
+        } catch (JSONException e) {
+            size = 0;
+        }
+
+        if (size <= 0) {
+            return false;
+        }
+
+        // Marked, so the page can say the song is read from the phone
+        String head = "HTTP/1.1 200 OK\r\nContent-Type: " + type + "\r\n"
+            + "Content-Length: " + size + "\r\nX-Mureka-Stored: 1\r\n"
+            + "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
+
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        sendPieces(out, url, 0, size - 1, size);
+        return true;
+    }
+
+    // The bytes from start to end of a stored song, asked of the player a
+    // piece at a time. Should the player not read on, the connection just
+    // ends and the browser asks again from where it got to
+    private void sendPieces(OutputStream out, String url, long start, long end, long size) throws IOException {
 
         long pos = start;
 

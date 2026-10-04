@@ -66,13 +66,28 @@ the new settings layout and a number of smaller improvements.
   so does a connection the phone calls online but that does not reach
   Mureka: a song that will not load makes the player check whether Mureka
   answers, and without an answer it goes offline and plays on from the
-  next stored song, checking again every 30 seconds. The covers beside the
+  next stored song, checking again every 30 seconds. The same check runs
+  whenever any request to Mureka gets no answer, play reports and
+  background work included, when the connection drops or changes over,
+  when a browser of the web view goes away, and once a minute when
+  nothing has been heard from Mureka. A play report that gets no answer
+  is kept and sent later. The covers beside the
   playing one show the stored songs that play next and before. A small
-  grey **Offline** mark shows in the header. When the internet is back the
-  mark turns green, says **Online** for a few seconds and fades away, every
-  song plays again at once, and the app returns to Mureka's site as soon
-  as the music is paused. The stored songs are asked to be kept
+  red **Offline** mark shows in the header. When the internet is back the
+  mark turns green and says **Online**, then fades away after a few
+  seconds, or stays while online with **Online badge** set to Always.
+  A double tap on the badge folds or opens the player, as on the header.
+  The web view shows the same badge for the phone's connection, with an
+  **Online badge** setting of its own that each browser can also have
+  for itself.
+  Every song plays again at once, and the app returns to Mureka's site as
+  soon as the music is paused. The stored songs are asked to be kept
   for good, so they are not cleared when the phone runs low on space.
+- **Every stored song keeps its cover.** However a song gets stored,
+  played, cached ahead or cached one by one, its cover is kept with it,
+  and songs stored earlier without one get it in the background while
+  online. The web view gets the kept cover from the phone when Mureka
+  cannot give it, so stored songs show their covers offline there too.
 
 ### New: the web view
 
@@ -141,11 +156,12 @@ the new settings layout and a number of smaller improvements.
   does not have yet comes from Mureka as before while the phone fetches it
   for the next time, so with Cache ahead or Cache all the browser rarely
   waits for Mureka. Should the phone fail to give a song, it is played
-  straight from Mureka.
+  straight from Mureka. The trimmer and Save as read a stored song from
+  the phone too, instead of downloading it again.
 - Covers in the web view come from the phone, which keeps them in its own
   cache and fetches the covers of the playing song and of the next ones in
-  the queue ahead (**Covers ahead**, 5 by default) whether or not a browser
-  is open. A cover on its way pulses with a cyan pie filling as it comes
+  the queue ahead (**Covers ahead**, 5 by default), and those of every song
+  stored ahead even beyond that, whether or not a browser is open. A cover on its way pulses with a cyan pie filling as it comes
   in, then fades in, three at a time, a cover that stops coming is asked
   for again and in the end fetched straight from Mureka. **Cover cache in
   MB** (200 by default) sets how much
