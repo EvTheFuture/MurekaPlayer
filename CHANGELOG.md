@@ -331,6 +331,14 @@ the new settings layout and a number of smaller improvements.
   Publishing copies the song's link to the clipboard, in the web view to
   that browser's, and a short note on the page says it is published and the
   link copied.
+- **Set cover** in the song menu for your own songs, in the web view too:
+  pick a picture and choose the square in the cover editor, dragging to
+  move it and zooming with two fingers, the mouse wheel or the slider.
+  The picture is uploaded to Mureka as it is, and Mureka's storage cuts
+  out the square at 1408 by 1408 pixels, so nothing is lost to the browser
+  and privacy settings that scramble pictures read back from a page make
+  no difference. The new cover shows at once everywhere. A published song
+  Mureka refuses can be taken down and published again, as with Rename.
 - **Delete on Mureka** in the song menu for your own songs, in the web
   view too, deletes the song from your library on Mureka for good after
   asking first, and then from the list and the cache on the device.

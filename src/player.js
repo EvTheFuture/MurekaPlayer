@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.130";
+    const VERSION = "1.9.9.133";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6736,7 +6736,7 @@
 
     function askForce(kind, song, value) {
 
-        const what = kind === "rename" ? "rename" : "change remixing for";
+        const what = kind === "rename" ? "rename" : (kind === "cover" ? "change the cover of" : "change remixing for");
         const text = "Mureka would not " + what + " this published song."
             + " Take it off Mureka, change it and publish it again?";
 
@@ -6776,6 +6776,8 @@
 
         if (job.kind === "rename") {
             await renameSong(job.song, job.value, true);
+        } else if (job.kind === "cover") {
+            await setSongCover(job.song, job.value, true);
         } else {
             await setRemixAllowed(job.song, job.value, true);
         }
@@ -11247,8 +11249,9 @@
 
     // A yes or no question in the panel. window.confirm would do, but it
     // stops the page, and with it the state the web view lives on. The yes
-    // button is cyan, or red for something that cannot be undone
-    function askYesNo(title, body, yesLabel, onYes, onNo, danger) {
+    // button is cyan, or red for something that cannot be undone. extra is
+    // shown under the text, a picture for one
+    function askYesNo(title, body, yesLabel, onYes, onNo, danger, extra) {
 
         if (!panelEl) {
 
@@ -11318,6 +11321,11 @@
         row.appendChild(yes);
         card.appendChild(head);
         card.appendChild(text);
+
+        if (extra) {
+            card.appendChild(extra);
+        }
+
         card.appendChild(row);
         back.appendChild(card);
 
@@ -19028,6 +19036,7 @@
         window.__murekaHostSongPart = hostSongPart;
         window.__murekaHostKeptCover = hostKeptCover;
         window.__murekaHostStoredInfo = hostStoredInfo;
+        window.__murekaHostSetCover = hostSetCover;
 
         ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
             document.addEventListener(type, publishHostSoon, true);
@@ -29870,6 +29879,678 @@
         }
     }
 
+    // A new cover for a song of your own. The picture goes to Mureka's
+    // storage as it is, the way Mureka's own site sends it, and the song is
+    // told to use it with the square chosen in the editor cut out and made
+    // 1408 by 1408 pixels by the storage itself, as Mureka sizes its covers
+
+    // The side every new cover is made, and the largest file taken, which
+    // is what the storage can still work on
+    const COVER_SIDE = 1408;
+    const COVER_FILE_MAX = 20 * 1024 * 1024;
+
+    // The storage's own work on the picture: turned upright as a camera
+    // marked it, the square cut out and made exactly the cover's size,
+    // larger too when the square is smaller, as a JPEG
+    function coverProcess(crop) {
+
+        return "?x-oss-process=image/auto-orient,1/crop,x_" + crop.x + ",y_" + crop.y + ",w_" + crop.s + ",h_" + crop.s
+            + "/resize,m_fixed,w_" + COVER_SIDE + ",h_" + COVER_SIDE + ",limit_0/format,jpg";
+    }
+
+    // The file name ending and the type the storage is told, from the file
+    function coverFileType(file) {
+
+        const type = String(file && file.type || "").toLowerCase();
+        const ends = { "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/heic": "heic", "image/heif": "heif" };
+
+        return { type: ends[type] ? type : "image/jpeg", ext: ends[type] || "jpg" };
+    }
+
+    // The cover editor: the picture in a square, moved by dragging and
+    // zoomed with two fingers, the mouse wheel or the slider. Nothing is
+    // drawn on a canvas, which a browser guarding against fingerprinting
+    // hands back scrambled. The picture itself is shown moved and scaled,
+    // and the square is answered in the picture's own pixels, x, y and
+    // size, for Mureka's storage to cut out. done hears the square, or null
+    // when it was cancelled, and a reason when the picture could not be read
+    function openCoverEditor(file, title, host, big, done) {
+
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+
+        img.onload = function () {
+            buildCoverEditor(img, url, title, host, big, done);
+        };
+
+        img.onerror = function () {
+
+            URL.revokeObjectURL(url);
+            done(null, "this browser cannot read the picture");
+        };
+
+        img.src = url;
+    }
+
+    function buildCoverEditor(img, url, title, host, big, done) {
+
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+
+        if (W < 1 || H < 1) {
+
+            URL.revokeObjectURL(url);
+            done(null, "the picture is empty");
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const view = document.createElement("div");
+        const slider = document.createElement("input");
+        const hint = document.createElement("div");
+        const row = document.createElement("div");
+        const pts = new Map();
+
+        back.style.cssText = "position:" + (host === document.body ? "fixed" : "absolute") + ";inset:0;"
+            + "background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;"
+            + "z-index:300;font-size:" + (big ? "clamp(16px,1.8vw,24px)" : "14px");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:12px;padding:14px;"
+            + "display:flex;flex-direction:column;gap:10px;align-items:stretch;color:#fff";
+        head.textContent = "New cover for \"" + (title || "Untitled") + "\"";
+        head.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        view.style.cssText = "position:relative;overflow:hidden;touch-action:none;background:#000;"
+            + "border-radius:8px;cursor:grab;align-self:center;box-shadow:inset 0 0 0 1px #48e1eb";
+        img.draggable = false;
+        img.alt = "";
+        img.style.cssText = "position:absolute;left:0;top:0;max-width:none;max-height:none;"
+            + "transform-origin:0 0;pointer-events:none;user-select:none;width:" + W + "px;height:" + H + "px";
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "1000";
+        slider.value = "0";
+        slider.style.cssText = "width:100%;accent-color:#48e1eb";
+        hint.textContent = "Drag to move it. Pinch, scroll or slide to zoom.";
+        hint.style.cssText = "color:#aaa;font-size:0.85em";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const button = function (text, bg, fg, fn) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.textContent = text;
+            b.style.cssText = "flex:1;padding:0.6em 1em;border:none;border-radius:10px;font:inherit;"
+                + "font-weight:600;cursor:pointer;background:" + bg + ";color:" + fg;
+            b.addEventListener("click", fn);
+
+            return b;
+        };
+
+        // The square's side on screen, and the picture's scale and place in it
+        let side = 0;
+        let minScale = 1;
+        let maxScale = 8;
+        let scale = 1;
+        let tx = 0;
+        let ty = 0;
+        let pinch = null;
+        let placed = false;
+
+        const clamp = function () {
+
+            scale = Math.max(minScale, Math.min(maxScale, scale));
+            tx = Math.min(0, Math.max(side - W * scale, tx));
+            ty = Math.min(0, Math.max(side - H * scale, ty));
+        };
+
+        const paint = function () {
+
+            img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+            slider.value = String(Math.round(Math.log(scale / minScale) / Math.log(maxScale / minScale) * 1000));
+        };
+
+        // Zoomed around a point in the square, which stays where it is
+        const zoomAt = function (wanted, cx, cy) {
+
+            const next = Math.max(minScale, Math.min(maxScale, wanted));
+
+            tx = cx - (cx - tx) * next / scale;
+            ty = cy - (cy - ty) * next / scale;
+            scale = next;
+            clamp();
+            paint();
+        };
+
+        // The square as large as the room allows. A change of the room keeps
+        // the same part of the picture in it
+        const layout = function () {
+
+            const room = Math.min(back.clientWidth - 64, back.clientHeight - (big ? 260 : 210));
+            const next = Math.max(140, Math.min(big ? 560 : 420, room));
+
+            if (side > 0) {
+
+                const k = next / side;
+
+                tx *= k;
+                ty *= k;
+                scale *= k;
+            }
+
+            side = next;
+            view.style.width = side + "px";
+            view.style.height = side + "px";
+            minScale = side / Math.min(W, H);
+
+            // Down to a sixteenth of the shorter side, never below 64 pixels
+            maxScale = Math.max(minScale * 1.01, side / Math.max(64, Math.min(W, H) / 16));
+
+            // At first the whole shorter side fills the square, centred
+            if (!placed) {
+
+                placed = true;
+                scale = minScale;
+                tx = (side - W * scale) / 2;
+                ty = (side - H * scale) / 2;
+            }
+
+            clamp();
+            paint();
+        };
+
+        const at = function (ev) {
+
+            const r = view.getBoundingClientRect();
+
+            return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+        };
+
+        const twoFingers = function () {
+
+            const a = Array.from(pts.values());
+            const dx = a[1].x - a[0].x;
+            const dy = a[1].y - a[0].y;
+
+            return { d: Math.max(1, Math.sqrt(dx * dx + dy * dy)), x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 };
+        };
+
+        view.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            try {
+                view.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Moves are still heard while over the square
+            }
+
+            pts.set(ev.pointerId, at(ev));
+            pinch = pts.size === 2 ? twoFingers() : null;
+            view.style.cursor = "grabbing";
+        });
+
+        view.addEventListener("pointermove", function (ev) {
+
+            if (!pts.has(ev.pointerId)) {
+                return;
+            }
+
+            const was = pts.get(ev.pointerId);
+            const now = at(ev);
+
+            pts.set(ev.pointerId, now);
+
+            if (pts.size === 1) {
+
+                tx += now.x - was.x;
+                ty += now.y - was.y;
+                clamp();
+                paint();
+            } else if (pts.size === 2 && pinch) {
+
+                const p = twoFingers();
+
+                tx += p.x - pinch.x;
+                ty += p.y - pinch.y;
+                zoomAt(scale * p.d / pinch.d, p.x, p.y);
+                pinch = p;
+            }
+        });
+
+        const lift = function (ev) {
+
+            pts.delete(ev.pointerId);
+            pinch = pts.size === 2 ? twoFingers() : null;
+
+            if (pts.size === 0) {
+                view.style.cursor = "grab";
+            }
+        };
+
+        view.addEventListener("pointerup", lift);
+        view.addEventListener("pointercancel", lift);
+
+        view.addEventListener("wheel", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const p = at(ev);
+
+            zoomAt(scale * Math.exp(-ev.deltaY * 0.0015), p.x, p.y);
+        }, { passive: false });
+
+        slider.addEventListener("input", function () {
+            zoomAt(minScale * Math.pow(maxScale / minScale, Number(slider.value) / 1000), side / 2, side / 2);
+        });
+
+        const close = function (result) {
+
+            window.removeEventListener("resize", layout);
+            back.remove();
+            URL.revokeObjectURL(url);
+            done(result);
+        };
+
+        const finish = function () {
+
+            const s = Math.max(1, Math.min(Math.min(W, H), Math.round(side / scale)));
+            const x = Math.max(0, Math.min(W - s, Math.round(-tx / scale)));
+            const y = Math.max(0, Math.min(H - s, Math.round(-ty / scale)));
+
+            close({ x: x, y: y, s: s, w: W, h: H });
+        };
+
+        row.appendChild(button("Cancel", "#444", "#fff", function () {
+            close(null);
+        }));
+        row.appendChild(button("Set cover", "#48e1eb", "#000", finish));
+
+        // The page's own keys never hear what is pressed here
+        back.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Escape") {
+                close(null);
+            } else if (ev.key === "Enter" && ev.target !== slider) {
+                finish();
+            }
+        });
+
+        back.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.target === back) {
+                close(null);
+            }
+        });
+
+        view.appendChild(img);
+        card.appendChild(head);
+        card.appendChild(view);
+        card.appendChild(slider);
+        card.appendChild(hint);
+        card.appendChild(row);
+        back.appendChild(card);
+        host.appendChild(back);
+        window.addEventListener("resize", layout);
+        layout();
+        slider.focus();
+    }
+
+    // A random id for the file name, as Mureka's site names its uploads
+    function randomUuid() {
+
+        if (window.crypto && typeof window.crypto.randomUUID === "function") {
+            return window.crypto.randomUUID();
+        }
+
+        const b = new Uint8Array(16);
+
+        window.crypto.getRandomValues(b);
+        b[6] = (b[6] & 0x0f) | 0x40;
+        b[8] = (b[8] & 0x3f) | 0x80;
+
+        const hex = Array.from(b, function (x) {
+            return (x < 16 ? "0" : "") + x.toString(16);
+        }).join("");
+
+        return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-"
+            + hex.slice(16, 20) + "-" + hex.slice(20);
+    }
+
+    // HMAC-SHA1 of text with the key, in base64, what the storage signs with
+    async function hmacSha1Base64(secret, text) {
+
+        const enc = new TextEncoder();
+        const key = await crypto.subtle.importKey("raw", enc.encode(secret),
+            { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+        const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(text)));
+        let bin = "";
+
+        for (let i = 0; i < sig.length; i += 1) {
+            bin += String.fromCharCode(sig[i]);
+        }
+
+        return btoa(bin);
+    }
+
+    // One signed request to the storage. The signature covers the method,
+    // the type, the time, the storage headers in order and the file with
+    // the part of the query that names what is done, as the storage asks
+    async function ossRequest(token, method, key, query, signed, type, body) {
+
+        const date = new Date().toUTCString();
+        const canonical = [
+            method,
+            "",
+            type,
+            date,
+            "x-oss-date:" + date,
+            "x-oss-security-token:" + token.session_token,
+            "/" + token.bucket + "/" + key + signed
+        ].join("\n");
+        const sig = await hmacSha1Base64(token.tmp_secret_key, canonical);
+        const res = await timedFetch("https://" + token.bucket + "." + token.endpoint + "/" + key + query, {
+            method: method,
+            headers: {
+                "Content-Type": type,
+                "x-oss-date": date,
+                "x-oss-security-token": token.session_token,
+                "authorization": "OSS " + token.tmp_secret_id + ":" + sig
+            },
+            body: body
+        }, 60000);
+
+        if (!res.ok) {
+
+            let code = "";
+
+            try {
+
+                const m = (await res.text()).match(/<Code>([^<]+)<\/Code>/);
+
+                code = m ? m[1] : "";
+            } catch (e) {
+                code = "";
+            }
+
+            throw new Error("the storage answered " + res.status + (code ? " " + code : ""));
+        }
+
+        return res;
+    }
+
+    // The picture into Mureka's storage: a short lived key from Mureka, then
+    // an upload in one part. Answers the file's path
+    async function uploadCover(blob) {
+
+        const res = await timedFetch("/api/misc/cos-token?time=" + Date.now(), {
+            credentials: "include",
+            cache: "no-store"
+        });
+        const json = await res.json();
+        const token = json && json.code === 0 ? json.data : null;
+
+        if (!token || !token.session_token || !token.tmp_secret_id || !token.tmp_secret_key
+            || !token.bucket || !token.endpoint || !token.allow_prefix) {
+            throw new Error("Mureka gave no upload key" + (json && json.msg ? ", " + json.msg : ""));
+        }
+
+        const kind = coverFileType(blob);
+        const key = token.allow_prefix + randomUuid() + "." + kind.ext;
+
+        dbgLog("Mureka", "uploading a cover of " + Math.round(blob.size / 1024) + " kB to " + key);
+
+        const init = await ossRequest(token, "POST", key, "?uploads=", "?uploads", kind.type, null);
+        const found = (await init.text()).match(/<UploadId>([^<]+)<\/UploadId>/);
+
+        if (!found) {
+            throw new Error("the storage started no upload");
+        }
+
+        const uploadId = found[1];
+        const part = await ossRequest(token, "PUT", key, "?partNumber=1&uploadId=" + uploadId,
+            "?partNumber=1&uploadId=" + uploadId, kind.type, blob);
+        const etag = part.headers.get("ETag");
+
+        if (!etag) {
+            throw new Error("the storage did not confirm the picture");
+        }
+
+        const done = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<CompleteMultipartUpload>\n<Part>\n"
+            + "<PartNumber>1</PartNumber>\n<ETag>" + etag + "</ETag>\n</Part>\n</CompleteMultipartUpload>";
+
+        await ossRequest(token, "POST", key, "?uploadId=" + uploadId, "?uploadId=" + uploadId,
+            "application/xml", done);
+
+        return key;
+    }
+
+    // Pick a picture, choose the square in the editor, and on Set cover make
+    // it the song's cover
+    function pickCover(song) {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (!file) {
+                return;
+            }
+
+            if (file.size > COVER_FILE_MAX) {
+
+                showToast("The picture is too large, at most 20 MB", false);
+                return;
+            }
+
+            openCoverEditor(file, song.title, panelEl || document.body, false, function (crop, why) {
+
+                if (crop) {
+                    changeCover(song, file, crop);
+                } else if (why) {
+                    showToast("Could not use the picture, " + why, false);
+                }
+            });
+        });
+
+        input.click();
+    }
+
+    // Upload the picture and give it to the song, the square cut out by the
+    // storage. Answers whether it went and, when not, why
+    async function changeCover(song, blob, crop) {
+
+        if (offlineMode()) {
+
+            showToast("No internet, the cover cannot be changed now", false);
+            return { ok: false, why: "no internet" };
+        }
+
+        showToast("Uploading the cover", "wait");
+
+        let key;
+
+        try {
+            key = await uploadCover(blob);
+        } catch (e) {
+
+            const why = "Could not upload the cover, " + (e && e.message ? e.message : "no connection");
+
+            dbgLog("Mureka", why);
+            showToast(why, false);
+            return { ok: false, why: why };
+        }
+
+        dbgLog("Mureka", "cover square x " + crop.x + ", y " + crop.y + ", size " + crop.s
+            + " of " + crop.w + " x " + crop.h);
+
+        const ok = await setSongCover(song, key + coverProcess(crop));
+
+        return { ok: ok, why: ok ? "" : "Mureka did not take the cover" };
+    }
+
+    // Tell Mureka the song's cover is the uploaded file. The title and the
+    // published state go with it, the endpoint takes the whole song line.
+    // A published song Mureka refuses can be taken down and put up again
+    async function setSongCover(song, key, forced) {
+
+        showToast("Setting the cover", "wait");
+
+        try {
+
+            const res = await murekaFetch("/api/pgc/song/modify", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: song.song_id,
+                    title: song.title || "",
+                    type: song.publish_state === 1 ? 1 : 2,
+                    cover: key
+                })
+            });
+            const json = await res.json();
+
+            dbgLog("Mureka", "cover for " + song.song_id + ": HTTP " + res.status
+                + (json && json.code !== undefined ? ", code " + json.code : "")
+                + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+
+            if (!res.ok || !json || json.code !== 0) {
+                throw new Error("modify failed");
+            }
+        } catch (e) {
+
+            if (!forced && song.publish_state === 1) {
+
+                askForce("cover", song, key);
+                return false;
+            }
+
+            showToast("Mureka did not take the cover", false);
+            return false;
+        }
+
+        await coverChanged(song, key);
+        showToast("Cover changed");
+        setStatus("New cover: " + (song.title || "Untitled"));
+
+        return true;
+    }
+
+    // Every copy of the song takes the new cover, the old one kept here is
+    // thrown away, and the covers shown are drawn again
+    async function coverChanged(song, key) {
+
+        const id = song.song_id;
+
+        song.cover = key;
+
+        for (const x of cache.songs.concat(queue)) {
+
+            if (x && x.song_id === id) {
+                x.cover = key;
+            }
+        }
+
+        artCache.delete(id);
+        artCachedIds.delete(String(id));
+
+        try {
+
+            const store = await caches.open(ART_STORE);
+
+            await store.delete(artStoreKey(id));
+        } catch (e) {
+            // Nothing kept for it
+        }
+
+        songEdits += 1;
+        saveCache();
+        renderList();
+
+        if (artTiles.length > 0) {
+            setArtSources();
+        }
+
+        if (currentSong && currentSong.song_id === id) {
+            updatePlayerInfo(currentSong);
+        }
+
+        if (cachedIds.has(id)) {
+            keepCover(song);
+        }
+
+        publishHostSoon();
+    }
+
+    // The web view sends the picture as it is, as base64, with the square
+    // chosen there. The answer says whether it went and, when not, why
+    function hostSetCover(id, ask) {
+
+        const song = ask && ask.id !== undefined ? hostFindSong(ask.id) : null;
+
+        if (!song || creatorSource) {
+
+            hostReply(id, JSON.stringify({ ok: false, why: "Not a song of your own" }));
+            return;
+        }
+
+        let blob;
+
+        try {
+
+            const bin = atob(String(ask.data || ""));
+            const bytes = new Uint8Array(bin.length);
+
+            for (let i = 0; i < bin.length; i += 1) {
+                bytes[i] = bin.charCodeAt(i);
+            }
+
+            blob = new Blob([bytes], { type: String(ask.type || "image/jpeg") });
+        } catch (e) {
+
+            hostReply(id, JSON.stringify({ ok: false, why: "The picture did not arrive whole" }));
+            return;
+        }
+
+        const crop = {
+            x: Math.max(0, Math.round(Number(ask.x) || 0)),
+            y: Math.max(0, Math.round(Number(ask.y) || 0)),
+            s: Math.max(1, Math.round(Number(ask.s) || 0)),
+            w: Math.round(Number(ask.w) || 0),
+            h: Math.round(Number(ask.h) || 0)
+        };
+
+        if (!(Number(ask.s) > 0)) {
+
+            hostReply(id, JSON.stringify({ ok: false, why: "No square was chosen" }));
+            return;
+        }
+
+        changeCover(song, blob, crop).then(function (r) {
+            hostReply(id, JSON.stringify(r));
+        }, function () {
+            hostReply(id, JSON.stringify({ ok: false, why: "Something went wrong" }));
+        });
+    }
+
     // Trim a song on Mureka. The new song comes back finished and is put at
     // the top of the list, the original deleted when asked to, once the new
     // song is safely there. progress hears what is going on. Answers
@@ -31228,6 +31909,10 @@
                     openTrimmer(song);
                 });
             }
+
+            addMenuRow("Set cover", "#fff", function () {
+                pickCover(song);
+            });
 
             addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", "#fff", function () {
                 setPublished(song, song.publish_state !== 1, true);

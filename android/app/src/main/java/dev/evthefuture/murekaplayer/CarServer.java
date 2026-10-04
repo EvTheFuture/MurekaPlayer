@@ -79,6 +79,10 @@ final class CarServer {
     // Requests larger than this are refused, the API only needs a few bytes
     private static final int MAX_BODY = 16384;
 
+    // A cover picture from a web view, sent as it is, the largest the
+    // storage can still work on
+    private static final int MAX_COVER = 20 * 1024 * 1024;
+
     // The sortings of the song list the player knows, anything else is
     // Mureka's own order
     private static final String[] LIST_VIEWS = {
@@ -341,7 +345,7 @@ final class CarServer {
                 }
             }
 
-            if (length < 0 || length > MAX_BODY) {
+            if (length < 0 || length > ("/setCover".equals(path) ? MAX_COVER : MAX_BODY)) {
 
                 send(out, 413, "text/plain", bytes("Too large"));
                 return;
@@ -421,6 +425,8 @@ final class CarServer {
                 sendSong(out, param(query, "u"), range);
             } else if ("POST".equals(method) && "/cmd".equals(path)) {
                 runCommand(out, body);
+            } else if ("POST".equals(method) && "/setCover".equals(path)) {
+                setCover(out, query, body);
             } else {
                 send(out, 404, "text/plain", bytes("Not found"));
             }
@@ -1133,6 +1139,47 @@ final class CarServer {
         } catch (JSONException e) {
             send(out, 400, "application/json", bytes("{\"ok\":false}"));
         }
+    }
+
+    // A new cover for a song from a web view, the picture and the square
+    // chosen in it. The player uploads it to Mureka and answers whether it
+    // went, which takes a few seconds
+    private void setCover(OutputStream out, String query, byte[] body) throws IOException {
+
+        lastPoll = System.currentTimeMillis();
+
+        String id = param(query, "id");
+        String type = param(query, "type");
+
+        if (id.isEmpty() || body.length == 0) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false,\"why\":\"No picture\"}"));
+            return;
+        }
+
+        JSONObject ask = new JSONObject();
+
+        try {
+
+            ask.put("id", id);
+            ask.put("type", type.startsWith("image/") && type.length() < 40 ? type : "image/jpeg");
+
+            for (String k : new String[] { "x", "y", "s", "w", "h" }) {
+                ask.put(k, longNumber(param(query, k), 0));
+            }
+
+            ask.put("data", java.util.Base64.getEncoder().encodeToString(body));
+        } catch (JSONException e) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false}"));
+            return;
+        }
+
+        Hub.note("Command", "From a web view: a new cover for " + id + ", " + (body.length / 1024) + " kB");
+
+        String answer = Hub.requestLater("__murekaHostSetCover", ask.toString(), 90000);
+
+        send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
     }
 
     private static void send(OutputStream out, int code, String type, byte[] body) throws IOException {
