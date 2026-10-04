@@ -54,6 +54,14 @@ the new settings layout and a number of smaller improvements.
   takes the sound back from a browser to the phone, so a car that falls back
   to Bluetooth is never left silent.
 
+- The online checks, the Offline and Online badge and playing only the
+  stored songs while offline work in the bookmarklet and the add-on too,
+  following the browser's own word on its connection. In the background,
+  where Safari holds requests back, only a song that will not load can
+  take the player offline, and coming back into view checks the
+  connection at once. Offline only because of an earlier check, a like,
+  a song that is not stored or anything else tapped asks Mureka first and
+  goes ahead when it answers.
 - **Plays offline.** Without internet, or when Mureka cannot be reached,
   the app opens the player on a page of its own at Mureka's address, so
   the library, the stored songs, covers, waveforms and lyrics are all
@@ -80,7 +88,10 @@ the new settings layout and a number of smaller improvements.
   the player, as on the header.
   The web view shows the same badge for the phone's connection, with an
   **Online badge** setting of its own that each browser can also have
-  for itself.
+  for itself. It also checks its own browser's connection, once a minute,
+  when the browser says its connection came or went and when a song will
+  not load: **Browser offline** when that browser cannot reach Mureka,
+  and **No phone** when it has lost the phone.
   Every song plays again at once, and the app returns to Mureka's site as
   soon as the music is paused. The stored songs are asked to be kept
   for good, so they are not cleared when the phone runs low on space.
@@ -289,6 +300,7 @@ the new settings layout and a number of smaller improvements.
   other songs than the queue was made from, published only where it began
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
+- The search box has a clear button at its right end while it holds text.
 - **Back to the playing song**: a round target button shows over the list
   while the playing song is scrolled out of sight, and a tap brings it back
   to the middle. The status line says which song plays with its number in

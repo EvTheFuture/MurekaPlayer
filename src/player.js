@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.134";
+    const VERSION = "1.9.9.137";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1320,11 +1320,18 @@
         return Promise.reject(new Error("No internet, the player is offline"));
     }
 
-    // fetch for Mureka, refused at once while offline
-    function murekaFetch(resource, options) {
+    // fetch for Mureka, for what the user asked for. Refused at once while
+    // the device says it has no connection. When only an earlier check found
+    // Mureka unreachable, it is asked again first, and the request goes
+    // ahead when it answers: a check made in the background, where Safari
+    // holds requests back, must not keep a tap from working
+    async function murekaFetch(resource, options) {
 
         if (offlineMode() && isMurekaRequest(resource)) {
-            return offlineRefusal();
+
+            if (netOffline || !(await recheckMureka("a tap needs Mureka"))) {
+                return offlineRefusal();
+            }
         }
 
         return watchMureka(resource, fetch(resource, options), options && options.signal);
@@ -7315,6 +7322,21 @@
         }
 
         if (offlineMode() && !cachedIds.has(songId)) {
+
+            // Offline only by an earlier check, Mureka is asked first
+            if (!netOffline) {
+
+                showToast("Checking the connection", "wait");
+                recheckMureka("a song that is not stored was tapped").then(function (ok) {
+
+                    if (ok && !offlineMode()) {
+                        playFrom(songId);
+                    } else {
+                        showToast("This song is not stored on this device, it cannot play offline", false);
+                    }
+                });
+                return;
+            }
 
             showToast("This song is not stored on this device, it cannot play offline", false);
             return;
@@ -17109,18 +17131,16 @@
     let offlineBadgeEl = null;
     let onlineReloadWaiting = false;
 
-    // The app's view of the internet at start, kept from then on by what it
-    // tells. On the offline page the storage is asked to be kept for good,
-    // so the stored songs are not cleared when the phone runs low on space
+    // The internet at start, the app's view of it in the app and the
+    // browser's elsewhere, kept from then on by what they tell and by the
+    // player's own checks. The storage is asked to be kept for good, so the
+    // stored songs are not cleared when the device runs low on space, in
+    // the app
     function initOffline() {
-
-        if (!isApkHost()) {
-            return;
-        }
 
         try {
 
-            if (typeof window.MurekaHost.online === "function") {
+            if (isApkHost() && typeof window.MurekaHost.online === "function") {
                 netOffline = !window.MurekaHost.online();
             }
         } catch (e) {
@@ -17140,8 +17160,12 @@
         }
 
         watchBrowserNetwork();
+        document.addEventListener("visibilitychange", netBackInView);
+        window.addEventListener("pageshow", netBackInView);
 
-        if (navigator.storage && navigator.storage.persist) {
+        // Only in the app, where it is given without a word. Firefox would
+        // ask the user about it every time
+        if (isApkHost() && navigator.storage && navigator.storage.persist) {
 
             navigator.storage.persist().then(function (kept) {
                 dbgLog("Offline", kept ? "the stored songs are kept for good" : "the browser may clear the stored songs when space runs low");
@@ -17166,6 +17190,13 @@
     function watchBrowserNetwork() {
 
         window.addEventListener("offline", function () {
+
+            // In a browser in the background, looked at again once in view
+            if (inBackground()) {
+
+                dbgLog("Offline", "the browser says it is offline while in the background, checked once in view");
+                return;
+            }
 
             let up = false;
 
@@ -17222,17 +17253,80 @@
         murekaAnsweredAt = Date.now();
     }
 
+    // Whether the page is in the background in a browser. Safari holds
+    // requests back there, so what fails then says nothing about the
+    // connection. In the app the page keeps running and its checks count
+    function inBackground() {
+        return document.hidden === true && !isApkHost();
+    }
+
     function murekaNoAnswer() {
+
+        if (inBackground()) {
+            return;
+        }
+
         checkNet("a request to Mureka got no answer", false);
+    }
+
+    // Offline only because a check found Mureka unreachable: asked again
+    // now, twice a moment apart, as the network may be waking up. Online
+    // again when it answers. Answers whether Mureka can be reached
+    async function recheckMureka(why) {
+
+        if (netOffline) {
+            return false;
+        }
+
+        if (!netTrouble) {
+            return true;
+        }
+
+        dbgLog("Offline", "asking Mureka again, " + why);
+
+        let ok = await murekaReachable();
+
+        if (!ok) {
+
+            await sleep(2000);
+            ok = await murekaReachable();
+        }
+
+        if (ok) {
+
+            murekaAnswered();
+            setNetTrouble(false);
+        }
+
+        return ok;
+    }
+
+    // Back in view in a browser: the connection is found out at once. The
+    // browser's own word clears offline, then Mureka is asked
+    function netBackInView() {
+
+        if (document.hidden) {
+            return;
+        }
+
+        if (netOffline && !isApkHost() && navigator.onLine !== false) {
+            setNetOffline(false);
+        }
+
+        if (netTrouble) {
+            recheckMureka("back in view");
+        } else if (!netOffline) {
+            checkNet("back in view", true);
+        }
     }
 
     // Whether Mureka answers, found out now. Unforced, a check made in the
     // last 10 seconds is enough. Two checks a few seconds apart both
-    // without an answer take the player offline. Only in the app, and only
-    // while online, offline the 30 second checks take over
+    // without an answer take the player offline. Only while online, offline
+    // the 30 second checks take over
     async function checkNet(why, force) {
 
-        if (!isApkHost() || offlineMode() || netCheckBusy) {
+        if (offlineMode() || netCheckBusy) {
             return;
         }
 
@@ -17274,6 +17368,10 @@
     // Nothing heard from Mureka for a while, no background work running to
     // find out: it is asked
     function netIdleCheck() {
+
+        if (inBackground()) {
+            return;
+        }
 
         const limit = playerQuiet ? NET_IDLE_QUIET_MS : NET_IDLE_MS;
 
@@ -19440,6 +19538,10 @@
         const artBox = document.createElement("div");
         artBox.style.cssText = "position:relative;margin-bottom:8px";
 
+        // On a phone the gap under the cover's second line is kept small, so
+        // the list below gets the room
+        artBox.id = "mureka-player-art-box";
+
         // The album art is a coverflow strip, the center cover with side covers
         // that peek in and fade and blur toward the edges
         artWrapEl = document.createElement("div");
@@ -19930,13 +20032,44 @@
             "width:100%",
             "box-sizing:border-box",
             "margin-top:0",
-            "padding:6px 8px",
+            "padding:6px 30px 6px 8px",
             "border:1px solid #3a3a42",
             "border-radius:6px",
             "background:#26262c",
             "color:#fff",
             "font:" + INPUT_FONT
         ].join(";");
+
+        // A clear button inside the box at its right end, shown while there
+        // is something to clear. The browsers' own differ or are missing
+        const searchClear = document.createElement("button");
+
+        searchClear.type = "button";
+        searchClear.textContent = "\u2715";
+        searchClear.title = "Clear the search";
+        searchClear.setAttribute("aria-label", "Clear the search");
+        searchClear.style.cssText = "position:absolute;right:2px;top:50%;transform:translateY(-50%);display:none;"
+            + "width:26px;height:26px;padding:0;border:none;border-radius:50%;background:transparent;color:#aaa;"
+            + "font-size:14px;line-height:26px;text-align:center;cursor:pointer";
+
+        const paintSearchClear = function () {
+            searchClear.style.display = searchInput.value ? "block" : "none";
+        };
+
+        // Pressed without taking the focus from the box, so a keyboard that
+        // is up stays up for the next search
+        searchClear.addEventListener("pointerdown", function (ev) {
+            ev.preventDefault();
+        });
+
+        searchClear.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            searchInput.value = "";
+            searchQuery = "";
+            paintSearchClear();
+            renderList();
+        });
 
         // Inline styles cannot target the placeholder, so inject a rule for it
         // important is needed to beat the site own placeholder styling
@@ -19952,6 +20085,7 @@
             + ":fullscreen{background:" + PANEL_BACKGROUND + "}"
             + ":-webkit-full-screen{background:" + PANEL_BACKGROUND + "}"
             + "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
+            + "#mureka-search-input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}"
             + "#mureka-seek-bar::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#555}"
@@ -20001,6 +20135,7 @@
             // what starts the bounce that drags the panel off its own edges
             + "#mureka-player-panel{top:0 !important;left:0 !important;right:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;max-width:none !important;border-radius:0 !important;padding:" + PANEL_PAD_MOBILE + " !important;box-sizing:border-box !important;font-size:12px !important;gap:7px !important;overflow:hidden !important;overscroll-behavior:none !important}"
             + "#mureka-player-art-wrap{max-width:none !important}"
+            + "#mureka-player-art-box{margin-bottom:0 !important}"
             + ".mureka-resize-handle{display:none !important}"
             + "#mureka-player-body{display:flex !important;flex-direction:column !important;flex:1 1 auto !important;min-height:0 !important}"
             + "#mureka-player-list-wrap{flex:1 1 auto !important;min-height:0 !important;display:flex !important;flex-direction:column !important}"
@@ -20011,7 +20146,9 @@
 
         // Filter the list as the user types
         searchInput.addEventListener("input", function () {
+
             searchQuery = searchInput.value.trim().toLowerCase();
+            paintSearchClear();
             renderList();
         });
 
@@ -20133,8 +20270,9 @@
 
         // Search box on its own row
         const searchRow = document.createElement("div");
-        searchRow.style.cssText = "margin-top:4px";
+        searchRow.style.cssText = "margin-top:4px;position:relative";
         searchRow.appendChild(searchInput);
+        searchRow.appendChild(searchClear);
 
         // View selector, three segments sharing one row
         const viewRow = document.createElement("div");

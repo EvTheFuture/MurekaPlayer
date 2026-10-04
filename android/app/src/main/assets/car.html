@@ -4431,6 +4431,9 @@
 
         const direct = audio.dataset.src || "";
 
+        // A song that would not load may mean this browser lost the internet
+        checkBrowserNet("a song would not load", false);
+
         if (direct && audio.src.indexOf("/song?") !== -1 && audio.dataset.direct !== direct) {
 
             audio.dataset.direct = direct;
@@ -5190,11 +5193,16 @@
         });
 
         window.addEventListener("online", function () {
+
             dbgLog("Net", "online");
+            checkBrowserNet("the browser has a connection again", true);
         });
 
         window.addEventListener("offline", function () {
+
             dbgLog("Net", "offline");
+            browserNet = false;
+            render();
         });
 
         window.addEventListener("error", function (ev) {
@@ -5517,12 +5525,101 @@
     let netBadgeTimer = 0;
     let netBadgeHome = null;
 
+    // Whether this browser itself reaches Mureka: null until checked. A
+    // song the phone has not stored comes to the browser from Mureka, and
+    // a cover too in the end, so this browser's own internet matters
+    let browserNet = null;
+
+    // Whether the phone was reached since the page opened. Until then the
+    // page says it is connecting, and the badge waits
+    let phoneSeen = false;
+    let browserNetBusy = false;
+    let browserNetAt = 0;
+    let browserNetOkAt = 0;
+
+    // Asked with a request the browser may not read, which is all it takes:
+    // any answer means Mureka was reached, no answer at all means it was not.
+    // Unforced, a check in the last 10 seconds is enough
+    function checkBrowserNet(why, force) {
+
+        if (browserNetBusy || (!force && Date.now() - browserNetAt < 10000)) {
+            return;
+        }
+
+        browserNetBusy = true;
+        browserNetAt = Date.now();
+
+        const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        const timer = setTimeout(function () {
+
+            if (ctrl) {
+                ctrl.abort();
+            }
+        }, 8000);
+
+        fetch("https://www.mureka.ai/favicon.ico?t=" + Date.now(), {
+            mode: "no-cors",
+            cache: "no-store",
+            signal: ctrl ? ctrl.signal : undefined
+        }).then(function () {
+            return true;
+        }, function () {
+            return false;
+        }).then(function (ok) {
+
+            clearTimeout(timer);
+            browserNetBusy = false;
+            browserNetAt = Date.now();
+
+            if (ok) {
+                browserNetOkAt = Date.now();
+            }
+
+            if (ok !== browserNet) {
+
+                dbgLog("Net", ok ? "this browser reaches Mureka" : "this browser cannot reach Mureka, " + why);
+                browserNet = ok;
+                render();
+            }
+        });
+    }
+
+    // Once a minute, and every 30 seconds while it cannot reach Mureka
+    setInterval(function () {
+
+        const every = browserNet === false ? 30000 : 60000;
+
+        if (Date.now() - browserNetAt >= every) {
+            checkBrowserNet(browserNet === false ? "checking again" : "the minute check", true);
+        }
+    }, 5000);
+
+    setTimeout(function () {
+        checkBrowserNet("the page opened", true);
+    }, 3000);
+
     function paintNetBadge(s) {
 
         const el = $("netBadge");
         const home = isPhone() ? $("phoneHead") : $("bottom");
 
-        if (!el || !s) {
+        if (!el) {
+            return;
+        }
+
+        // What is wrong, the phone first: gone, offline, or this browser
+        // without the internet. Nothing when all is well
+        let bad = null;
+
+        if (!online && phoneSeen) {
+            bad = { text: "No phone", title: "This browser cannot reach the phone" };
+        } else if (s && s.offline === true) {
+            bad = { text: "Offline", title: "The phone has no internet, only songs stored on it play" };
+        } else if (browserNet === false) {
+            bad = { text: "Browser offline", title: "This browser cannot reach Mureka, only songs stored on the phone play here" };
+        }
+
+        if (!s && !bad) {
             return;
         }
 
@@ -5537,13 +5634,13 @@
             }
         }
 
-        if (s.offline === true) {
+        if (bad) {
 
             clearTimeout(netBadgeTimer);
             netBadgeTimer = 0;
             netBadgeState = "offline";
-            el.textContent = "Offline";
-            el.title = "The phone has no internet, only songs stored on it play";
+            el.textContent = bad.text;
+            el.title = bad.title;
             el.classList.remove("online", "fading");
             el.style.display = "inline-block";
             return;
@@ -5575,7 +5672,7 @@
     function showNetOnline(el) {
 
         el.textContent = "Online";
-        el.title = "The phone is connected to the internet";
+        el.title = "The phone and this browser are connected to the internet";
         el.classList.add("online");
         el.classList.remove("fading");
         el.style.display = "inline-block";
@@ -11308,6 +11405,7 @@
         state = s;
         stateAt = Date.now();
         online = true;
+        phoneSeen = true;
         debugHide = Array.isArray(s.debugHide) ? s.debugHide : [];
 
         // Clear debug log on the phone clears this log too
