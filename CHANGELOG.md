@@ -76,7 +76,8 @@ the new settings layout and a number of smaller improvements.
   red **Offline** mark shows in the header. When the internet is back the
   mark turns green and says **Online**, then fades away after a few
   seconds, or stays while online with **Online badge** set to Always.
-  A double tap on the badge folds or opens the player, as on the header.
+  A double tap on the badge, or on the Power saving mark, folds or opens
+  the player, as on the header.
   The web view shows the same badge for the phone's connection, with an
   **Online badge** setting of its own that each browser can also have
   for itself.

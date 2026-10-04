@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.133";
+    const VERSION = "1.9.9.134";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19114,19 +19114,29 @@
         quietBadgeEl.textContent = "Power saving";
         quietBadgeEl.title = "All background work is stopped to save power";
         quietBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(224,176,80,0.5);border-radius:8px;color:#e0b050;font-weight:400;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
-        // The header is dragged and folded from presses on it, a press on
-        // the mark is only the mark's
-        for (const kind of ["mousedown", "pointerdown", "touchstart"]) {
 
-            quietBadgeEl.addEventListener(kind, function (ev) {
-                ev.stopPropagation();
-            }, { passive: true });
-        }
+        // Presses go on to the header, so a double tap on the mark folds or
+        // opens the player as one on the header does. A single tap opens the
+        // power settings, once it is clear no second tap comes
+        let quietTapTimer = 0;
+
         quietBadgeEl.addEventListener("click", function (ev) {
 
             ev.stopPropagation();
-            openSettings();
-            showSettingsPage("charger");
+
+            if (quietTapTimer) {
+
+                clearTimeout(quietTapTimer);
+                quietTapTimer = 0;
+                return;
+            }
+
+            quietTapTimer = setTimeout(function () {
+
+                quietTapTimer = 0;
+                openSettings();
+                showSettingsPage("charger");
+            }, 400);
         });
 
         if (playerQuiet) {
