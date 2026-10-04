@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.122";
+    const VERSION = "1.9.9.125";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1282,10 +1282,60 @@
         });
     }
 
+    // Offline. The app opens the player on a page of its own when Mureka
+    // cannot be reached, marked on the page, and tells the player whenever
+    // the internet comes or goes. Offline only songs stored on this device
+    // play and nothing is asked of Mureka, so nothing waits on a request
+    // that cannot succeed
+    let netOffline = false;
+
+    // Whether the player runs on the app's offline page
+    function offlinePage() {
+        return document.documentElement.getAttribute("data-mureka-offline") === "1";
+    }
+
+    // Mureka found unreachable by the player itself, a song that would not
+    // load and a check that got no answer, while the phone still claims to
+    // be online. Asked again every 30 seconds until Mureka answers
+    let netTrouble = false;
+    let netTroubleTimer = 0;
+
+    function offlineMode() {
+        return netOffline || netTrouble || offlinePage();
+    }
+
+    // Whether a request goes to Mureka: its site, its api and its files
+    function isMurekaRequest(resource) {
+
+        const url = typeof resource === "string" ? resource : (resource && resource.url ? String(resource.url) : "");
+
+        return url.charAt(0) === "/" || /^https?:\/\/([^/]*\.)?mureka\.ai(\/|$)/i.test(url);
+    }
+
+    // A request to Mureka refused at once while offline
+    function offlineRefusal() {
+        return Promise.reject(new Error("No internet, the player is offline"));
+    }
+
+    // fetch for Mureka, refused at once while offline
+    function murekaFetch(resource, options) {
+
+        if (offlineMode() && isMurekaRequest(resource)) {
+            return offlineRefusal();
+        }
+
+        return fetch(resource, options);
+    }
+
     // fetch with a deadline. A request with no signal can hang until the
     // network stack finally gives up, which ties up the connection pool and
-    // stalls the audio stream, so every background request uses this
+    // stalls the audio stream, so every background request uses this.
+    // Offline, a request to Mureka is refused at once
     function timedFetch(resource, options, ms) {
+
+        if (offlineMode() && isMurekaRequest(resource)) {
+            return offlineRefusal();
+        }
 
         const opts = options || {};
         const limit = ms || 15000;
@@ -2328,7 +2378,7 @@
     // This only checks the top for new songs, it never re-pages the library
     function maybeAutoRefresh() {
 
-        if (settings.refreshOnStart) {
+        if (settings.refreshOnStart && !offlineMode()) {
             run(true);
         }
     }
@@ -4821,6 +4871,12 @@
     // Once everything is cached it only checks the top for new songs
     async function run(light) {
 
+        if (!running && offlineMode()) {
+
+            showToast("No internet, new songs cannot be loaded now", false);
+            return;
+        }
+
         if (running) {
 
             // A second press stops the load, invalidate the active run
@@ -4900,6 +4956,12 @@
     // state on songs already cached, so a late published older song appears
     // and every field is brought up to date in place
     async function rescan() {
+
+        if (!running && offlineMode()) {
+
+            showToast("No internet, the library cannot be rescanned now", false);
+            return;
+        }
 
         if (running) {
 
@@ -5829,7 +5891,7 @@
         for (const item of items) {
 
             try {
-                const res = await fetch(item.url);
+                const res = await murekaFetch(item.url);
 
                 if (!res.ok) {
                     throw new Error("HTTP " + res.status);
@@ -6399,7 +6461,7 @@
 
         try {
 
-            const res = await fetch("/api/pgc/song/publish", {
+            const res = await murekaFetch("/api/pgc/song/publish", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -6473,7 +6535,7 @@
 
         try {
 
-            const res = await fetch("/api/pgc/song/modify", {
+            const res = await murekaFetch("/api/pgc/song/modify", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -6555,7 +6617,7 @@
 
         try {
 
-            const res = await fetch("/api/pgc/song/remix/allow", {
+            const res = await murekaFetch("/api/pgc/song/remix/allow", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -6986,6 +7048,29 @@
         if (outcome === "failed") {
 
             updatePlayPause();
+
+            // Without a connection to Mureka every song that is not stored
+            // fails the same way. Once that is clear the player goes offline,
+            // and the queue moves on to the next stored song by itself
+            if (!offlineMode() && !(await murekaReachable())) {
+
+                if (token !== playToken) {
+                    return;
+                }
+
+                setNetTrouble(true);
+                queueMoveDir = 1;
+                playNext();
+                return;
+            }
+
+            if (offlineMode()) {
+
+                queueMoveDir = 1;
+                playNext();
+                return;
+            }
+
             playFailStreak += 1;
 
             // With no signal and no stored copy a song cannot start, so move
@@ -7154,6 +7239,12 @@
         });
 
         if (!exists) {
+            return;
+        }
+
+        if (offlineMode() && !cachedIds.has(songId)) {
+
+            showToast("This song is not stored on this device, it cannot play offline", false);
             return;
         }
 
@@ -7369,6 +7460,8 @@
 
     function playNext() {
 
+        queueMoveDir = 1;
+
         if (queuePos < queue.length - 1) {
             queuePos += 1;
             playCurrent();
@@ -7414,6 +7507,8 @@
             publishHostSoon();
             return;
         }
+
+        queueMoveDir = -1;
 
         if (queuePos > 0) {
             queuePos -= 1;
@@ -8514,6 +8609,38 @@
     }
 
     // Play whatever song the queue currently points at
+    // Which way the queue last moved, 1 forward and -1 back, so offline the
+    // songs that are not stored are passed over in that direction
+    let queueMoveDir = 1;
+
+    // The next place in the queue with a stored song, from pos in the
+    // direction given, round past the end when repeating all. -1 for none
+    function storedQueuePos(pos, dir) {
+
+        const step = dir < 0 ? -1 : 1;
+        let at = pos;
+
+        for (let i = 0; i < queue.length; i += 1) {
+
+            at += step;
+
+            if (at < 0 || at >= queue.length) {
+
+                if (repeatMode !== "all") {
+                    return -1;
+                }
+
+                at = at < 0 ? queue.length - 1 : 0;
+            }
+
+            if (queue[at] && cachedIds.has(queue[at].song_id)) {
+                return at;
+            }
+        }
+
+        return -1;
+    }
+
     async function playCurrent() {
 
         if (queuePos < 0 || queuePos >= queue.length) {
@@ -8532,6 +8659,28 @@
             playCurrent();
             return;
         }
+
+        // Offline only songs stored on this device can play. The others in
+        // the queue are passed over, the way the queue was moving
+        if (offlineMode() && !cachedIds.has(song.song_id)) {
+
+            const at = storedQueuePos(queuePos, queueMoveDir);
+
+            queueMoveDir = 1;
+
+            if (at < 0) {
+
+                setStatus("Offline, no stored song left to play");
+                showToast("No internet and no stored song left to play", false);
+                return;
+            }
+
+            queuePos = at;
+            playCurrent();
+            return;
+        }
+
+        queueMoveDir = 1;
 
         ensureAudio();
         currentSong = song;
@@ -8566,7 +8715,7 @@
             setCurrentSrc(ready);
             startAudioPlayback();
 
-        } else if (settings.directAudio && (navigator.onLine !== false || document.hidden)) {
+        } else if (settings.directAudio && !offlineMode() && (navigator.onLine !== false || document.hidden)) {
 
             // songUrl is synchronous, so the source is set and play is called
             // with the user activation still valid. iOS drops that token across
@@ -8646,21 +8795,34 @@
     // away. Mureka's page sends that one many times over, once is enough
     async function reportPlay(song) {
 
+        // Offline the report waits, and goes to Mureka once it can be reached
+        if (offlineMode()) {
+
+            queueReport(song.song_id, song.is_played === false);
+            return;
+        }
+
         if (song.is_played === false) {
             await reportPlayed(song);
         }
 
-        const what = "play report for " + song.song_id;
+        await sendPlayReport(song.song_id);
+    }
+
+    // The play report itself. True when Mureka answered, whatever it said
+    async function sendPlayReport(id) {
+
+        const what = "play report for " + id;
 
         try {
 
-            const res = await fetch("/api/pgc/song/play/report", {
+            const res = await murekaFetch("/api/pgc/song/play/report", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     time: Date.now(),
-                    song_id: song.song_id,
+                    song_id: id,
                     play_type: 1,
                     playlist_id: 0
                 })
@@ -8677,20 +8839,112 @@
             dbgLog("Mureka", what + ": HTTP " + res.status
                 + (json && json.code !== undefined ? ", code " + json.code : ", no answer")
                 + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+
+            return true;
         } catch (e) {
+
             dbgLog("Mureka", what + " failed, " + (e && e.message ? e.message : "no connection"));
+            return false;
+        }
+    }
+
+    // Plays made offline, kept until Mureka can be reached: the song's id,
+    // whether it was still new and when it played
+    const PENDING_REPORTS_KEY = "mureka_pending_reports_v1";
+    const PENDING_REPORTS_MAX = 1000;
+    let flushingReports = false;
+
+    function loadPendingReports() {
+
+        try {
+
+            const list = JSON.parse(localStorage.getItem(PENDING_REPORTS_KEY) || "[]");
+
+            return Array.isArray(list) ? list : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function savePendingReports(list) {
+
+        try {
+
+            if (list.length === 0) {
+                localStorage.removeItem(PENDING_REPORTS_KEY);
+            } else {
+                localStorage.setItem(PENDING_REPORTS_KEY, JSON.stringify(list));
+            }
+        } catch (e) {
+            // Full storage, the reports are lost rather than the player
+        }
+    }
+
+    function queueReport(id, wasNew) {
+
+        const list = loadPendingReports();
+
+        list.push({ id: id, wasNew: wasNew === true, at: Date.now() });
+
+        while (list.length > PENDING_REPORTS_MAX) {
+            list.shift();
+        }
+
+        savePendingReports(list);
+        dbgLog("Mureka", "offline, play report for " + id + " kept, " + list.length + " waiting");
+    }
+
+    // The plays made offline go to Mureka, one at a time with a pause in
+    // between. Stops when the connection goes again, the rest wait
+    async function flushReports() {
+
+        if (flushingReports || offlineMode()) {
+            return;
+        }
+
+        const list = loadPendingReports();
+
+        if (list.length === 0) {
+            return;
+        }
+
+        flushingReports = true;
+        dbgLog("Mureka", "sending " + list.length + " play reports kept while offline");
+
+        try {
+
+            while (list.length > 0 && !offlineMode()) {
+
+                const item = list[0];
+                const song = hostFindSong(String(item.id)) || { song_id: item.id, is_played: false };
+
+                if (item.wasNew && song.is_played === false && !(await reportPlayed(song))) {
+                    break;
+                }
+
+                if (!(await sendPlayReport(song.song_id))) {
+                    break;
+                }
+
+                list.shift();
+                savePendingReports(list);
+                await sleep(1500);
+            }
+        } finally {
+            flushingReports = false;
         }
     }
 
     // Tell Mureka a song has been played, so it is no longer marked as new,
-    // and remember it here too once Mureka took it
+    // and remember it here too once Mureka took it. True when Mureka
+    // answered, whatever it said
     async function reportPlayed(song) {
 
         const what = "played report for " + song.song_id;
 
         try {
 
-            const res = await fetch("/api/pgc/song/palyed/report", {
+            const res = await murekaFetch("/api/pgc/song/palyed/report", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -8732,8 +8986,12 @@
                 renderList();
                 publishHostSoon();
             }
+
+            return true;
         } catch (e) {
+
             dbgLog("Mureka", what + " failed, " + (e && e.message ? e.message : "no connection"));
+            return false;
         }
     }
 
@@ -9354,6 +9612,11 @@
         clearTimeout(trickleTimer);
         trickleNextAt = Date.now() + wait;
         trickleTimer = setTimeout(trickleTick, wait);
+
+        // Offline the counts cannot be read, the next turn tries again
+        if (offlineMode()) {
+            return;
+        }
 
         if (now && plan && !trickleBusy && !playsJob) {
 
@@ -16619,6 +16882,226 @@
         }, 8000);
     }
 
+    // The mark in the header while offline, and whether the real page is to
+    // be loaded once the music stops, the internet being back
+    let offlineBadgeEl = null;
+    let onlineReloadWaiting = false;
+
+    // The app's view of the internet at start, kept from then on by what it
+    // tells. On the offline page the storage is asked to be kept for good,
+    // so the stored songs are not cleared when the phone runs low on space
+    function initOffline() {
+
+        if (!isApkHost()) {
+            return;
+        }
+
+        try {
+
+            if (typeof window.MurekaHost.online === "function") {
+                netOffline = !window.MurekaHost.online();
+            }
+        } catch (e) {
+            netOffline = false;
+        }
+
+        if (navigator.onLine === false) {
+            netOffline = true;
+        }
+
+        watchBrowserNetwork();
+
+        if (navigator.storage && navigator.storage.persist) {
+
+            navigator.storage.persist().then(function (kept) {
+                dbgLog("Offline", kept ? "the stored songs are kept for good" : "the browser may clear the stored songs when space runs low");
+            }).catch(function () {
+            });
+        }
+
+        if (offlineMode()) {
+            dbgLog("Offline", offlinePage() ? "started on the offline page" : "started without internet");
+        } else {
+            setTimeout(flushReports, 20000);
+        }
+
+        setInterval(offlineTick, 2000);
+        paintOfflineBadge();
+        renderList();
+    }
+
+    // The browser says the connection went or came back. In the app it is
+    // taken as a hint and Android's word is asked, elsewhere it is all
+    // there is
+    function watchBrowserNetwork() {
+
+        window.addEventListener("offline", function () {
+            setNetOffline(true);
+        });
+
+        window.addEventListener("online", function () {
+
+            let up = true;
+
+            try {
+
+                if (isApkHost() && typeof window.MurekaHost.online === "function") {
+                    up = window.MurekaHost.online();
+                }
+            } catch (e) {
+                up = true;
+            }
+
+            setNetOffline(!up);
+        });
+    }
+
+    // Whether Mureka answers at all, any answer counts. Asked straight,
+    // past the offline refusal, with a short deadline
+    async function murekaReachable() {
+
+        const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(function () {
+            ctrl.abort();
+        }, 6000) : 0;
+
+        try {
+
+            await fetch("/api/pgc/profile?time=" + Date.now(), {
+                credentials: "include",
+                cache: "no-store",
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            return true;
+        } catch (e) {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    // Mureka could not be reached by the player itself. Offline until a
+    // check gets an answer, tried every 30 seconds
+    function setNetTrouble(on) {
+
+        clearTimeout(netTroubleTimer);
+
+        if (on) {
+
+            netTroubleTimer = setTimeout(function () {
+
+                murekaReachable().then(function (ok) {
+                    setNetTrouble(!ok);
+                });
+            }, 30000);
+        }
+
+        if (on === netTrouble) {
+            return;
+        }
+
+        const wasOffline = offlineMode();
+
+        netTrouble = on;
+        dbgLog("Offline", on ? "Mureka cannot be reached" : "Mureka answers again");
+        offlineChanged(wasOffline);
+    }
+
+    // What follows going offline or coming back, whichever told it
+    function offlineChanged(wasOffline) {
+
+        const now = offlineMode();
+
+        renderList();
+        publishHostSoon();
+        paintOfflineBadge();
+
+        if (now === wasOffline) {
+            return;
+        }
+
+        if (now) {
+            showToast("No internet, only stored songs play", false);
+        } else {
+
+            showToast("Back online", true);
+            setTimeout(flushReports, 3000);
+            reloadWhenIdle();
+        }
+    }
+
+    // The internet came or went
+    function setNetOffline(off) {
+
+        if (off === netOffline) {
+            return;
+        }
+
+        const wasOffline = offlineMode();
+
+        netOffline = off;
+        dbgLog("Offline", off ? "the internet is gone" : "the internet is back");
+
+        // Back, so whether Mureka answers is found out again at once
+        if (!off && netTrouble) {
+
+            murekaReachable().then(function (ok) {
+                setNetTrouble(!ok);
+            });
+        }
+
+        offlineChanged(wasOffline);
+    }
+
+    // Back online on the offline page: the real page is loaded again once
+    // nothing plays, so Mureka's own site and every request work again. The
+    // queue is saved first and comes back with the page
+    function reloadWhenIdle() {
+
+        if (!offlinePage() || netOffline || netTrouble) {
+            return;
+        }
+
+        if (audio && audio.src && !audio.paused) {
+
+            onlineReloadWaiting = true;
+            paintOfflineBadge();
+            return;
+        }
+
+        onlineReloadWaiting = false;
+        saveQueue();
+
+        try {
+            window.MurekaHost.reloadOnline();
+        } catch (e) {
+            // An app without it stays on the offline page
+        }
+    }
+
+    // Every few seconds: a reload waiting for the music to stop
+    function offlineTick() {
+
+        if (onlineReloadWaiting && (!audio || audio.paused)) {
+            reloadWhenIdle();
+        }
+    }
+
+    function paintOfflineBadge() {
+
+        if (!offlineBadgeEl) {
+            return;
+        }
+
+        const waiting = offlinePage() && !netOffline && !netTrouble;
+
+        offlineBadgeEl.style.display = offlineMode() ? "inline-block" : "none";
+        offlineBadgeEl.textContent = waiting ? "Online" : "Offline";
+        offlineBadgeEl.title = waiting
+            ? "The internet is back, the player reloads when the music is paused. Tap to reload now"
+            : "No internet, only songs stored on this device play";
+    }
+
     // When the power saving has stopped the background work, the play
     // counts are not read and Cache all stops. The music itself is left
     // alone, and a small mark in the header says so
@@ -18006,6 +18489,8 @@
             showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the phone", false);
         } else if (cmd === "unplugCountdown") {
             noteUnplug(Number(arg));
+        } else if (cmd === "network") {
+            setNetOffline(arg === false);
         } else if (cmd === "hotspotAuto") {
             followHotspotSwitch(arg === "off" ? "off" : "on");
         } else if (cmd === "unplugReason") {
@@ -18155,6 +18640,40 @@
         }
 
         headerTitle.appendChild(quietBadgeEl);
+
+        // A small mark while offline. With the internet back on the offline
+        // page, a tap loads the real page at once
+        offlineBadgeEl = document.createElement("span");
+        offlineBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(170,170,180,0.5);border-radius:8px;color:#aaa;font-weight:400;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+
+        for (const kind of ["mousedown", "pointerdown", "touchstart"]) {
+
+            offlineBadgeEl.addEventListener(kind, function (ev) {
+                ev.stopPropagation();
+            }, { passive: true });
+        }
+
+        offlineBadgeEl.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+
+            if (offlinePage() && !netOffline && !netTrouble) {
+
+                onlineReloadWaiting = false;
+                saveQueue();
+
+                try {
+                    window.MurekaHost.reloadOnline();
+                } catch (e) {
+                    // An app without it stays on the offline page
+                }
+            } else {
+                showToast("No internet, only songs stored on this device play", false);
+            }
+        });
+
+        headerTitle.appendChild(offlineBadgeEl);
+        paintOfflineBadge();
 
         // Sub line under the title, the logged in user name then the active
         // source separated by a dash, for example: EvTheFuture - All feed
@@ -18969,6 +19488,7 @@
             + "#mureka-player-panel button,[data-mureka-press] button{transition:filter 0.08s ease,transform 0.08s ease}"
             + "#mureka-player-panel button:not(:disabled):active,[data-mureka-press] button:not(:disabled):active"
             + "{filter:brightness(1.45);transform:scale(0.96)}"
+            + "#mureka-player-panel button.mureka-pressed{filter:brightness(1.45);transform:scale(0.96)}"
             + ".mureka-menu-row:active{background:#4a4a54 !important}"
             + ".mureka-press-icon{transition:filter 0.08s ease,transform 0.08s ease}"
             + ".mureka-press-icon:active{filter:brightness(1.6);transform:scale(0.88)}"
@@ -19483,10 +20003,14 @@
 
         setMinimized(startMinimized);
 
+        // Whether the app has internet now, before anything asks Mureka
+        initOffline();
+
         // The add on injects into every mureka.ai page, including sign in. A
         // panel that opens over the login form leaves no way to log in, so
-        // probe the API and collapse out of the way when it is not usable
-        if (!startMinimized) {
+        // probe the API and collapse out of the way when it is not usable.
+        // Offline there is nothing to probe
+        if (!startMinimized && !offlineMode()) {
 
             fetchPage(null).catch(function () {
 
@@ -21743,7 +22267,7 @@
         showToast(makeLiked ? "Liking" : "Removing the like", "wait");
 
         try {
-            const res = await fetch("/api/pgc/user/song/favorite", {
+            const res = await murekaFetch("/api/pgc/user/song/favorite", {
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -21789,7 +22313,7 @@
         item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;user-select:none;-moz-user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
         item.title = "Play; long press or right-click for options";
 
-        if (dimmed) {
+        if (dimmed || (offlineMode() && !cachedIds.has(song.song_id))) {
             item.style.opacity = "0.45";
         }
 
@@ -26810,7 +27334,7 @@
 
         detailError = "";
 
-        return fetch(url, { credentials: "include" }).then(function (res) {
+        return murekaFetch(url, { credentials: "include" }).then(function (res) {
 
             if (!res.ok) {
 
@@ -27478,6 +28002,8 @@
         zoomRow.appendChild(ui.zoomLabel);
         zoomRow.appendChild(zoomIn);
         ui.zoomBy = zoomBy;
+        ui.zoomOutBtn = zoomOut;
+        ui.zoomInBtn = zoomIn;
 
         // Fine steps for the chosen end
         const nudgeRow = document.createElement("div");
@@ -27503,25 +28029,29 @@
         const playRow = document.createElement("div");
 
         playRow.style.cssText = "display:flex;gap:6px";
-        playRow.appendChild(makeButton("Play start", "#333", "#fff", function () {
+        // Each play button is ringed while what it started plays
+        ui.playStartBtn = makeButton("Play start", "#333", "#fff", function () {
 
             if (tr) {
-                trimPlay(tr.start, Math.min(tr.end, tr.start + trimPreviewLen()));
+                trimPlay(tr.start, Math.min(tr.end, tr.start + trimPreviewLen()), "start");
             }
-        }));
-        playRow.appendChild(makeButton("Play end", "#333", "#fff", function () {
+        });
+        ui.playEndBtn = makeButton("Play end", "#333", "#fff", function () {
             trimPlayEnd();
-        }));
-        playRow.appendChild(makeButton("Play all", "#333", "#fff", function () {
+        });
+        ui.playAllBtn = makeButton("Play all", "#333", "#fff", function () {
 
             if (tr) {
-                trimPlay(tr.start, tr.end);
+                trimPlay(tr.start, tr.end, "all");
             }
-        }));
+        });
+        playRow.appendChild(ui.playStartBtn);
+        playRow.appendChild(ui.playEndBtn);
+        playRow.appendChild(ui.playAllBtn);
         ui.pauseBtn = makeButton("Play", "#333", "#fff", function () {
 
             if (tr && !tr.src && !tr.paused) {
-                trimPlay(tr.start, tr.end);
+                trimPlay(tr.start, tr.end, "kept");
             } else {
                 trimPauseResume();
             }
@@ -27659,6 +28189,32 @@
         trimEl.appendChild(ui.loopRow);
         trimEl.appendChild(titleRow);
         trimEl.appendChild(hint);
+        // Every button lights up while pressed and a moment after, so even a
+        // quick tap is seen to land
+        trimEl.addEventListener("pointerdown", function (ev) {
+
+            const btn = ev.target && ev.target.closest ? ev.target.closest("button") : null;
+
+            if (!btn || btn.disabled) {
+                return;
+            }
+
+            btn.classList.add("mureka-pressed");
+            clearTimeout(btn.pressTimer);
+
+            const release = function () {
+
+                btn.pressTimer = setTimeout(function () {
+                    btn.classList.remove("mureka-pressed");
+                }, 160);
+                window.removeEventListener("pointerup", release, true);
+                window.removeEventListener("pointercancel", release, true);
+            };
+
+            window.addEventListener("pointerup", release, true);
+            window.addEventListener("pointercancel", release, true);
+        }, true);
+
         panelEl.appendChild(trimEl);
 
         // Over the panel, not inside the trimmer, so it shows wherever the
@@ -28057,7 +28613,9 @@
     // goes, and with the fade on the last second fades out as Mureka's
     // trimmed song will. Each piece is stopped at its time as well, in case
     // a browser plays on past the length it was given
-    function trimPlay(from, to) {
+    // What started it, for the button that is ringed while it plays: start,
+    // end, all, or kept for Play and a tap on a waveform
+    function trimPlay(from, to, mode) {
 
         trimStop();
 
@@ -28125,7 +28683,9 @@
         tr.playFrom = from;
         tr.playTo = to;
         tr.playAt = at;
+        tr.playMode = mode || "kept";
         trimAnimate();
+        trimPaint();
     }
 
     // Whether the preview fades out the last second: with the switch on and
@@ -28146,9 +28706,10 @@
 
             const at = trimPlayhead();
             const to = tr.playTo;
+            const mode = tr.playMode;
 
             trimStop();
-            tr.paused = { at: at, to: to };
+            tr.paused = { at: at, to: to, mode: mode };
             trimPaint();
             return;
         }
@@ -28161,7 +28722,7 @@
             if (p.at >= tr.end - 0.02) {
                 trimPlayEnd();
             } else {
-                trimPlay(p.at, Math.min(p.to, tr.end));
+                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
             }
         }
     }
@@ -28175,7 +28736,7 @@
     function trimPlayEnd() {
 
         if (tr) {
-            trimPlay(Math.max(tr.start, tr.end - trimPreviewLen()), tr.end);
+            trimPlay(Math.max(tr.start, tr.end - trimPreviewLen()), tr.end, "end");
         }
     }
 
@@ -28366,6 +28927,19 @@
         trimUi.info.textContent = "ID " + tr.song.song_id + " \u00b7 Original " + trimTimeText(tr.duration)
             + " \u00b7 New " + trimTimeText(tr.end - tr.start);
         trimUi.pauseBtn.textContent = tr.src ? "Pause" : "Play";
+
+        // The button of what plays is ringed, the others plain. The zoom
+        // buttons dim at the ends of the zoom
+        const playing = tr.src ? tr.playMode : "";
+
+        paintCtrl(trimUi.playStartBtn, playing === "start" ? "ring" : "plain");
+        paintCtrl(trimUi.playEndBtn, playing === "end" ? "ring" : "plain");
+        paintCtrl(trimUi.playAllBtn, playing === "all" ? "ring" : "plain");
+        paintCtrl(trimUi.pauseBtn, playing === "kept" ? "ring" : "plain");
+        trimUi.zoomOutBtn.disabled = tr.zoom <= 0;
+        trimUi.zoomOutBtn.style.opacity = tr.zoom <= 0 ? "0.5" : "1";
+        trimUi.zoomInBtn.disabled = tr.zoom >= TRIM_ZOOMS.length - 1;
+        trimUi.zoomInBtn.style.opacity = tr.zoom >= TRIM_ZOOMS.length - 1 ? "0.5" : "1";
         trimUi.zoomLabel.textContent = TRIM_ZOOMS[tr.zoom] >= 1
             ? TRIM_ZOOMS[tr.zoom] + " s wide"
             : Math.round(TRIM_ZOOMS[tr.zoom] * 1000) + " ms wide";
@@ -28523,7 +29097,7 @@
                 const t = overviewTime(ev);
 
                 if (t < tr.end - 0.05) {
-                    trimPlay(Math.max(t, 0), tr.end);
+                    trimPlay(Math.max(t, 0), tr.end, "kept");
                 }
             }
         };
@@ -28591,7 +29165,7 @@
             const t = tr.viewC - TRIM_ZOOMS[tr.zoom] / 2 + (ev.clientX - r.left) / r.width * TRIM_ZOOMS[tr.zoom];
 
             if (t < tr.end - 0.02) {
-                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end);
+                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end, "kept");
             }
         });
 

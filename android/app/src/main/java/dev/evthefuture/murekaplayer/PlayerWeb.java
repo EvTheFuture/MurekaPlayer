@@ -23,19 +23,23 @@ package dev.evthefuture.murekaplayer;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.MutableContextWrapper;
 import android.graphics.Color;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.VpnService;
+import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.os.Build;
-import android.os.SystemClock;
-import android.os.Environment;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.ViewGroup;
@@ -44,13 +48,14 @@ import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import android.content.ContentValues;
-
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -59,7 +64,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -110,6 +117,21 @@ final class PlayerWeb {
         void askBluetoothPermission();
     }
 
+    // Whether the phone has a working internet connection, as Android last
+    // said, and whether the player runs on the app's offline page
+    private static volatile boolean online = true;
+    private static volatile boolean offlinePage = false;
+    private static boolean watchingNetwork = false;
+
+    // The page the player runs on when Mureka cannot be reached. It is
+    // handed out at Mureka's own address, so the player has its library,
+    // its stored songs and its covers, which are kept for that address
+    private static final String OFFLINE_PAGE = "<!doctype html><html><head><meta charset=\"utf-8\">"
+        + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
+        + "<title>Mureka Player</title>"
+        + "<style>html,body{margin:0;height:100%;overflow:hidden;background:#000}</style>"
+        + "</head><body></body></html>";
+
     private static WebView web;
     private static MutableContextWrapper context;
     private static Context appContext;
@@ -150,6 +172,12 @@ final class PlayerWeb {
         cookies.setAcceptThirdPartyCookies(web, true);
 
         Hub.attach(web, PlayerWeb::quitAll);
+
+        // Without internet the offline page is opened at once, rather than
+        // waiting for Mureka's site to fail
+        online = hasInternet(appContext);
+        offlinePage = !online;
+        watchNetwork(appContext);
         web.loadUrl(HOME);
 
         return web;
@@ -494,6 +522,85 @@ final class PlayerWeb {
         }
     }
 
+    // Whether the network Android uses now reaches the internet
+    private static boolean hasInternet(Context c) {
+
+        ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
+
+        if (cm == null) {
+            return true;
+        }
+
+        NetworkCapabilities caps = cm.getNetworkCapabilities(cm.getActiveNetwork());
+
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
+    // The internet coming and going, told to the player. Watched once, for
+    // as long as the app runs
+    private static void watchNetwork(Context c) {
+
+        if (watchingNetwork) {
+            return;
+        }
+
+        ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
+
+        if (cm == null) {
+            return;
+        }
+
+        try {
+
+            cm.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
+
+                @Override
+                public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+
+                    setOnline(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+                }
+
+                @Override
+                public void onLost(Network network) {
+                    setOnline(false);
+                }
+            }, MAIN);
+
+            watchingNetwork = true;
+        } catch (RuntimeException e) {
+            Hub.note("Network", "the internet cannot be watched, " + e.getClass().getSimpleName());
+        }
+    }
+
+    // Main thread only. Only a change is told
+    private static void setOnline(boolean now) {
+
+        if (now == online) {
+            return;
+        }
+
+        online = now;
+        Hub.note("Network", now ? "the internet is back" : "the internet is gone");
+
+        if (web != null) {
+            web.evaluateJavascript("window.__murekaHostCommand && window.__murekaHostCommand(\"network\", " + now + ")", null);
+        }
+    }
+
+    // Mureka's site loaded again, from the offline page once the internet
+    // is back. Should it still fail, the offline page comes back
+    private static void loadOnline() {
+
+        if (web == null) {
+            return;
+        }
+
+        offlinePage = false;
+        web.loadUrl(HOME);
+    }
+
     // The player's way out to the app
     private static final class Bridge {
 
@@ -732,6 +839,18 @@ final class PlayerWeb {
             }
         }
 
+        // Whether the phone reaches the internet now
+        @JavascriptInterface
+        public boolean online() {
+            return online;
+        }
+
+        // The internet is back: Mureka's site in place of the offline page
+        @JavascriptInterface
+        public void reloadOnline() {
+            MAIN.post(PlayerWeb::loadOnline);
+        }
+
         // The answer to one of the app's slower questions, a piece of a song
         // for the web view among them
         @JavascriptInterface
@@ -848,16 +967,64 @@ final class PlayerWeb {
             return openOutside(request);
         }
 
-        // Tag the page as the app and run the player. The player guards
-        // itself against a second run on the same page
+        // The offline page, handed out for Mureka's address while it cannot
+        // be reached. Called off the main thread
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+
+            if (!offlinePage || !request.isForMainFrame() || !isMureka(request.getUrl().toString())) {
+                return null;
+            }
+
+            Map<String, String> headers = new HashMap<>();
+
+            headers.put("Cache-Control", "no-store");
+
+            return new WebResourceResponse("text/html", "utf-8", 200, "OK", headers,
+                new ByteArrayInputStream(OFFLINE_PAGE.getBytes(StandardCharsets.UTF_8)));
+        }
+
+        // Mureka's site did not load, no internet after all or Mureka down:
+        // the offline page takes its place
+        @Override
+        public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+
+            if (view != web || offlinePage || !request.isForMainFrame() || !isMureka(request.getUrl().toString())) {
+                return;
+            }
+
+            offlinePage = true;
+            Hub.note("Network", "Mureka could not be reached, the player opens offline");
+            view.stopLoading();
+            view.loadUrl(HOME);
+        }
+
+        // Tag the page as the app, and as offline on the offline page, and
+        // run the player. Only on a page that really is Mureka's, not the
+        // error page a failed load leaves. The player guards itself against
+        // a second run on the same page
         @Override
         public void onPageFinished(WebView view, String url) {
 
-            if (isMureka(url) && playerJs != null) {
-
-                view.evaluateJavascript("document.documentElement.setAttribute('data-mureka-host','apk');", null);
-                view.evaluateJavascript(playerJs, null);
+            if (!isMureka(url) || playerJs == null) {
+                return;
             }
+
+            final String tags = "document.documentElement.setAttribute('data-mureka-host','apk');"
+                + (offlinePage ? "document.documentElement.setAttribute('data-mureka-offline','1');"
+                    : "document.documentElement.removeAttribute('data-mureka-offline');");
+
+            view.evaluateJavascript("location.hostname", host -> {
+
+                String h = host == null ? "" : host.replace("\"", "");
+
+                if (!(h.equals("mureka.ai") || h.endsWith(".mureka.ai"))) {
+                    return;
+                }
+
+                view.evaluateJavascript(tags, null);
+                view.evaluateJavascript(playerJs, null);
+            });
         }
     }
 

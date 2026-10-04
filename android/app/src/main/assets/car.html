@@ -3249,9 +3249,17 @@
         transition: filter 0.08s ease, transform 0.08s ease;
     }
 
-    button:not(:disabled):not(.holding):active {
+    button:not(:disabled):not(.holding):active,
+    button.pressed {
         filter: brightness(1.45);
         transform: scale(0.96);
+    }
+
+    /* A trimmer play button while what it started plays, ringed like the
+       transport buttons */
+    #trimBox .pBtn.playing {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 3px var(--accent);
     }
 
 </style>
@@ -14264,11 +14272,36 @@
     function trimButton(label, fn, cls) {
 
         const b = document.createElement("button");
+        let pressTimer = 0;
 
         b.type = "button";
         b.className = "pBtn" + (cls ? " " + cls : "");
         b.textContent = label;
         b.addEventListener("click", fn);
+
+        // Lit while pressed and a moment after, so even a quick tap is
+        // seen to land
+        b.addEventListener("pointerdown", function () {
+
+            if (b.disabled) {
+                return;
+            }
+
+            clearTimeout(pressTimer);
+            b.classList.add("pressed");
+
+            const release = function () {
+
+                pressTimer = setTimeout(function () {
+                    b.classList.remove("pressed");
+                }, 160);
+                window.removeEventListener("pointerup", release, true);
+                window.removeEventListener("pointercancel", release, true);
+            };
+
+            window.addEventListener("pointerup", release, true);
+            window.addEventListener("pointercancel", release, true);
+        });
 
         return b;
     }
@@ -14450,13 +14483,15 @@
             trimEndMoved("end");
         };
 
-        zoomRow.appendChild(trimButton("Zoom out", function () {
+        ui.zoomOutBtn = trimButton("Zoom out", function () {
             ui.zoomBy(-1);
-        }));
-        zoomRow.appendChild(ui.zoomLabel);
-        zoomRow.appendChild(trimButton("Zoom in", function () {
+        });
+        ui.zoomInBtn = trimButton("Zoom in", function () {
             ui.zoomBy(1);
-        }));
+        });
+        zoomRow.appendChild(ui.zoomOutBtn);
+        zoomRow.appendChild(ui.zoomLabel);
+        zoomRow.appendChild(ui.zoomInBtn);
 
         // Fine steps for the chosen end
         const nudgeRow = document.createElement("div");
@@ -14476,25 +14511,29 @@
         const playRow = document.createElement("div");
 
         playRow.className = "trimRow trimPlays";
-        playRow.appendChild(trimButton("Play start", function () {
+        // Each play button is ringed while what it started plays
+        ui.playStartBtn = trimButton("Play start", function () {
 
             if (tr) {
-                trimPlay(tr.start, Math.min(tr.end, tr.start + trimPreviewLen()));
+                trimPlay(tr.start, Math.min(tr.end, tr.start + trimPreviewLen()), "start");
             }
-        }, "trimFill"));
-        playRow.appendChild(trimButton("Play end", function () {
+        }, "trimFill");
+        ui.playEndBtn = trimButton("Play end", function () {
             trimPlayEnd();
-        }, "trimFill"));
-        playRow.appendChild(trimButton("Play all", function () {
+        }, "trimFill");
+        ui.playAllBtn = trimButton("Play all", function () {
 
             if (tr) {
-                trimPlay(tr.start, tr.end);
+                trimPlay(tr.start, tr.end, "all");
             }
-        }, "trimFill"));
+        }, "trimFill");
+        playRow.appendChild(ui.playStartBtn);
+        playRow.appendChild(ui.playEndBtn);
+        playRow.appendChild(ui.playAllBtn);
         ui.pauseBtn = trimButton("Play", function () {
 
             if (tr && !tr.src && !tr.paused) {
-                trimPlay(tr.start, tr.end);
+                trimPlay(tr.start, tr.end, "kept");
             } else {
                 trimPauseResume();
             }
@@ -14971,7 +15010,9 @@
     // Play a stretch of the song. Past the end of the kept part it never
     // goes, and with the fade on the last second fades out as Mureka's
     // trimmed song will
-    function trimPlay(from, to) {
+    // What started it, for the button that is ringed while it plays: start,
+    // end, all, or kept for Play and a tap on a waveform
+    function trimPlay(from, to, mode) {
 
         trimStop();
 
@@ -15039,7 +15080,9 @@
         tr.playFrom = from;
         tr.playTo = to;
         tr.playAt = at;
+        tr.playMode = mode || "kept";
         trimAnimate();
+        trimPaint();
     }
 
     // Whether the preview fades out the last second: with the switch on and
@@ -15059,9 +15102,10 @@
 
             const at = trimPlayhead();
             const to = tr.playTo;
+            const mode = tr.playMode;
 
             trimStop();
-            tr.paused = { at: at, to: to };
+            tr.paused = { at: at, to: to, mode: mode };
             trimPaint();
             return;
         }
@@ -15073,7 +15117,7 @@
             if (p.at >= tr.end - 0.02) {
                 trimPlayEnd();
             } else {
-                trimPlay(p.at, Math.min(p.to, tr.end));
+                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
             }
         }
     }
@@ -15087,7 +15131,7 @@
     function trimPlayEnd() {
 
         if (tr) {
-            trimPlay(Math.max(tr.start, tr.end - trimPreviewLen()), tr.end);
+            trimPlay(Math.max(tr.start, tr.end - trimPreviewLen()), tr.end, "end");
         }
     }
 
@@ -15277,6 +15321,17 @@
         trimUi.info.textContent = "ID " + tr.song.id + " · Original " + trimTimeText(tr.duration)
             + " · New " + trimTimeText(tr.end - tr.start);
         trimUi.pauseBtn.textContent = tr.src ? "Pause" : "Play";
+
+        // The button of what plays is ringed. The zoom buttons dim at the
+        // ends of the zoom
+        const playing = tr.src ? tr.playMode : "";
+
+        trimUi.playStartBtn.classList.toggle("playing", playing === "start");
+        trimUi.playEndBtn.classList.toggle("playing", playing === "end");
+        trimUi.playAllBtn.classList.toggle("playing", playing === "all");
+        trimUi.pauseBtn.classList.toggle("playing", playing === "kept");
+        trimUi.zoomOutBtn.disabled = tr.zoom <= 0;
+        trimUi.zoomInBtn.disabled = tr.zoom >= TRIM_ZOOMS.length - 1;
         trimUi.zoomLabel.textContent = TRIM_ZOOMS[tr.zoom] >= 1
             ? TRIM_ZOOMS[tr.zoom] + " s wide"
             : Math.round(TRIM_ZOOMS[tr.zoom] * 1000) + " ms wide";
@@ -15434,7 +15489,7 @@
                 const t = overviewTime(ev);
 
                 if (t < tr.end - 0.05) {
-                    trimPlay(Math.max(t, 0), tr.end);
+                    trimPlay(Math.max(t, 0), tr.end, "kept");
                 }
             }
         });
@@ -15501,7 +15556,7 @@
             const t = tr.viewC - TRIM_ZOOMS[tr.zoom] / 2 + (ev.clientX - r.left) / r.width * TRIM_ZOOMS[tr.zoom];
 
             if (t < tr.end - 0.02) {
-                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end);
+                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end, "kept");
             }
         });
 
