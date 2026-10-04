@@ -54,6 +54,26 @@ the new settings layout and a number of smaller improvements.
   takes the sound back from a browser to the phone, so a car that falls back
   to Bluetooth is never left silent.
 
+- **Plays offline.** Without internet, or when Mureka cannot be reached,
+  the app opens the player on a page of its own at Mureka's address, so
+  the library, the stored songs, covers, waveforms and lyrics are all
+  there. Only songs stored on the device play: the others are dimmed in
+  the list, a tap on one says it is not stored, and next and previous pass
+  over them. Nothing is asked of Mureka while offline, so nothing waits for
+  a request that cannot succeed, and Load and Rescan say they need the
+  internet. Plays are kept and reported to Mureka once it can be reached
+  again. The internet going while the player runs works the same way, and
+  so does a connection the phone calls online but that does not reach
+  Mureka: a song that will not load makes the player check whether Mureka
+  answers, and without an answer it goes offline and plays on from the
+  next stored song, checking again every 30 seconds. The covers beside the
+  playing one show the stored songs that play next and before. A small
+  grey **Offline** mark shows in the header. When the internet is back the
+  mark turns green, says **Online** for a few seconds and fades away, every
+  song plays again at once, and the app returns to Mureka's site as soon
+  as the music is paused. The stored songs are asked to be kept
+  for good, so they are not cleared when the phone runs low on space.
+
 ### New: the web view
 
 - Served by the app on port 8080. Only the phone's hotspot and Wi-Fi networks
