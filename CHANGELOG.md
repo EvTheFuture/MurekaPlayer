@@ -165,7 +165,9 @@ the new settings layout and a number of smaller improvements.
   a computer with adb is there for a phone that is not on Wi-Fi. The page
   shows the pairing, the hotspot's last known state and what the last
   command did, and **Turn on hotspot** and **Turn off hotspot** try it,
-  each greyed out while the hotspot already is that way. When one of the
+  each greyed out while the hotspot already is that way. When the power
+  saving turns the hotspot on or off by itself, a note on the phone says so
+  while it switches and then whether it worked. When one of the
   hotspot settings is on and the helper is not running, the player starts
   it by itself, with a note that it is starting and one saying whether it
   started, and the web view shows the same. Without a pairing it says

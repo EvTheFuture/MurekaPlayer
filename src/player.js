@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.119";
+    const VERSION = "1.9.9.122";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16417,6 +16417,51 @@
         return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. Pair the player with wireless debugging once, further down this page, and it starts the helper by itself.", paired: false };
     }
 
+    // A hotspot switch by the power saving being followed: which way and
+    // the timer that gives up on it. The settings page leaves its own note
+    // out meanwhile
+    let hotspotAutoFollowing = false;
+    let hotspotAutoWant = "";
+    let hotspotAutoTimer = 0;
+
+    // The power saving turns the hotspot on or off by itself: a note while
+    // it switches, and one with how it went when the app tells the result.
+    // Given up after 40 seconds
+    function followHotspotSwitch(want) {
+
+        clearTimeout(hotspotAutoTimer);
+        hotspotAutoFollowing = true;
+        hotspotAutoWant = want;
+        showToast(want === "on" ? "Turning the hotspot on" : "Turning the hotspot off", "wait");
+        dbgLog("Hotspot", "power saving turns the hotspot " + want);
+
+        hotspotAutoTimer = setTimeout(function () {
+
+            if (hotspotAutoFollowing) {
+
+                hotspotAutoFollowing = false;
+                showToast("The hotspot did not answer in time", false);
+            }
+        }, 40000);
+    }
+
+    // What a hotspot command said, as the app tells it with each result
+    function hotspotResult(text) {
+
+        if (!hotspotAutoFollowing) {
+            return;
+        }
+
+        hotspotAutoFollowing = false;
+        clearTimeout(hotspotAutoTimer);
+
+        if (String(text).indexOf("Switched") === 0) {
+            showToast(hotspotAutoWant === "on" ? "Hotspot turned on" : "Hotspot turned off", true);
+        } else {
+            showToast(String(text), false);
+        }
+    }
+
     // What the app says about the hotspot helper, or nothing outside it
     function hotspotInfoNow() {
 
@@ -17961,6 +18006,8 @@
             showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the phone", false);
         } else if (cmd === "unplugCountdown") {
             noteUnplug(Number(arg));
+        } else if (cmd === "hotspotAuto") {
+            followHotspotSwitch(arg === "off" ? "off" : "on");
         } else if (cmd === "unplugReason") {
             unplugWhy = arg === "bluetooth" ? "bluetooth" : "charger";
         } else if (cmd === "skipUnplug") {
@@ -20493,6 +20540,13 @@
         // The app says what kind of line it is, Media, Bluetooth, Cover or
         // Command, so it can be switched off with its group
         window.__murekaDebugNote = function (text, kind) {
+
+            // The result of a hotspot command comes this way too, for the
+            // note after a switch by the power saving
+            if (kind === "Hotspot") {
+                hotspotResult(text);
+            }
+
             dbgLog(typeof kind === "string" && kind ? kind : "App", String(text).slice(0, 200));
         };
     }
@@ -22656,8 +22710,9 @@
                 commandEl.textContent = command;
             }
 
-            // A hotspot command answered, said with a note as well
-            if (lastSeen !== null && info.last && info.last !== lastSeen) {
+            // A hotspot command answered, said with a note as well, unless a
+            // switch by the power saving already says so
+            if (lastSeen !== null && !hotspotAutoFollowing && info.last && info.last !== lastSeen) {
                 showToast(info.last, info.last.indexOf("Switched") === 0);
             }
 

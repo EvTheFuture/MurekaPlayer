@@ -35,8 +35,12 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.SparseArray;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -47,23 +51,55 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 // Which Bluetooth devices are connected right now, so power saving can
-// follow chosen devices, a car's for one, coming and going. The devices
-// already connected are read from the audio, phone and LE audio profiles
-// when the watch starts, and Android tells about every connection after
-// that. From Android 12 this needs the Nearby devices permission, without
-// it no device is known. Every call is checked against that permission
-// first, which is why the lint check for it is turned off here
+// follow chosen devices, a car's for one, coming and going. Two sources
+// together: the audio, phone and LE audio profiles, which are asked for
+// their connected devices when anything changes and every 15 seconds, and
+// Android's broadcasts for any link coming and going. The broadcasts come
+// from the Bluetooth stack's own process, not from the system, so the
+// receiver has to be exported to get them. From Android 12 all of this
+// needs the Nearby devices permission, without it no device is known.
+// Every call is checked against that permission first, which is why the
+// lint check for it is turned off here
 @SuppressLint("MissingPermission")
 final class BtWatch {
 
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    // How often the profiles are asked again, for a change no broadcast told
+    private static final long POLL_MS = 15000;
+
+    // How long the first answers from the profiles are waited for before
+    // the devices found so far count as the starting point
+    private static final long FIRST_READ_MS = 3000;
+
     private static Context ctx;
     private static Runnable onChange;
+    private static Runnable onReady;
     private static BroadcastReceiver receiver;
+    private static boolean ready = false;
 
-    // The addresses of the devices connected now. Changed on the main
-    // thread, where Android delivers the broadcasts and the profiles, and
-    // read from the settings as well
+    // The profiles kept open, by profile number, to ask again and again
+    private static final SparseArray<BluetoothProfile> PROXIES = new SparseArray<>();
+
+    // Devices with a link up, from the broadcasts, and devices a profile
+    // says are connected. Changed on the main thread
+    private static final Set<String> LINKED = new HashSet<>();
+    private static final Set<String> PROFILED = new HashSet<>();
+
+    // Both together, the devices connected now. Read from the settings too
     private static final Set<String> CONNECTED = ConcurrentHashMap.newKeySet();
+
+    private static final Runnable POLL = new Runnable() {
+
+        @Override
+        public void run() {
+
+            readProfiles();
+            MAIN.postDelayed(this, POLL_MS);
+        }
+    };
+
+    private static final Runnable FIRST_READ_DONE = BtWatch::becomeReady;
 
     private BtWatch() {
     }
@@ -87,22 +123,21 @@ final class BtWatch {
     }
 
     // Started with the service, and again once the permission is given.
-    // The callback runs on the main thread whenever a device comes or goes.
-    // Main thread only
-    static void start(Context c, Runnable changed) {
+    // Ready runs once, when the devices connected already are known, and
+    // changed after that whenever a device comes or goes, both on the main
+    // thread. Main thread only
+    static void start(Context c, Runnable changed, Runnable whenReady) {
 
+        stop();
         ctx = c.getApplicationContext();
         onChange = changed;
-        stopReceiver();
-        CONNECTED.clear();
+        onReady = whenReady;
 
-        if (!permitted(ctx)) {
-            return;
-        }
-
-        BluetoothAdapter ba = adapter(ctx);
+        BluetoothAdapter ba = permitted(ctx) ? adapter(ctx) : null;
 
         if (ba == null) {
+
+            becomeReady();
             return;
         }
 
@@ -122,28 +157,30 @@ final class BtWatch {
         filter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
         filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
 
+        // Exported: these come from the Bluetooth stack's process, which a
+        // receiver that is not exported does not hear. They are protected
+        // broadcasts, no other app can send them
         if (Build.VERSION.SDK_INT >= 33) {
-            ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            ctx.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             ctx.registerReceiver(receiver, filter);
         }
 
-        readProfile(ba, BluetoothProfile.A2DP);
-        readProfile(ba, BluetoothProfile.HEADSET);
+        openProfile(ba, BluetoothProfile.A2DP);
+        openProfile(ba, BluetoothProfile.HEADSET);
 
         if (Build.VERSION.SDK_INT >= 33) {
-            readProfile(ba, BluetoothProfile.LE_AUDIO);
+            openProfile(ba, BluetoothProfile.LE_AUDIO);
         }
+
+        MAIN.postDelayed(FIRST_READ_DONE, FIRST_READ_MS);
+        MAIN.postDelayed(POLL, POLL_MS);
     }
 
     static void stop() {
 
-        stopReceiver();
-        CONNECTED.clear();
-        onChange = null;
-    }
-
-    private static void stopReceiver() {
+        MAIN.removeCallbacks(POLL);
+        MAIN.removeCallbacks(FIRST_READ_DONE);
 
         if (receiver != null && ctx != null) {
 
@@ -155,10 +192,51 @@ final class BtWatch {
         }
 
         receiver = null;
+
+        BluetoothAdapter ba = ctx != null ? adapter(ctx) : null;
+
+        for (int i = 0; i < PROXIES.size(); i++) {
+
+            if (ba != null) {
+
+                try {
+                    ba.closeProfileProxy(PROXIES.keyAt(i), PROXIES.valueAt(i));
+                } catch (RuntimeException e) {
+                    // Already closed
+                }
+            }
+        }
+
+        PROXIES.clear();
+        LINKED.clear();
+        PROFILED.clear();
+        CONNECTED.clear();
+        ready = false;
+        onChange = null;
+        onReady = null;
     }
 
-    // The devices one profile has connected now, read once and let go
-    private static void readProfile(final BluetoothAdapter ba, int profile) {
+    // The first answers are in, or long enough was waited: what is known now
+    // is the starting point, and changes count from here on
+    private static void becomeReady() {
+
+        MAIN.removeCallbacks(FIRST_READ_DONE);
+
+        if (ready) {
+            return;
+        }
+
+        ready = true;
+
+        Runnable r = onReady;
+
+        if (r != null) {
+            r.run();
+        }
+    }
+
+    // One profile opened and kept, to be asked for its devices
+    private static void openProfile(BluetoothAdapter ba, int profile) {
 
         try {
 
@@ -167,35 +245,47 @@ final class BtWatch {
                 @Override
                 public void onServiceConnected(int which, BluetoothProfile proxy) {
 
-                    boolean changed = false;
+                    PROXIES.put(which, proxy);
+                    readProfiles();
 
-                    try {
-
-                        for (BluetoothDevice d : proxy.getConnectedDevices()) {
-
-                            if (CONNECTED.add(key(d))) {
-                                changed = true;
-                            }
-                        }
-                    } catch (RuntimeException e) {
-                        // Nothing known from this profile
-                    }
-
-                    ba.closeProfileProxy(which, proxy);
-
-                    if (changed) {
-                        notifyChange();
+                    // Every profile asked has answered
+                    if (PROXIES.size() >= (Build.VERSION.SDK_INT >= 33 ? 3 : 2)) {
+                        becomeReady();
                     }
                 }
 
                 @Override
                 public void onServiceDisconnected(int which) {
-                    // Read once only, nothing kept to drop
+
+                    PROXIES.remove(which);
+                    readProfiles();
                 }
             }, profile);
         } catch (RuntimeException e) {
             // The profile is not there on this phone
         }
+    }
+
+    // Every open profile asked which devices it has connected now
+    private static void readProfiles() {
+
+        Set<String> now = new HashSet<>();
+
+        for (int i = 0; i < PROXIES.size(); i++) {
+
+            try {
+
+                for (BluetoothDevice d : PROXIES.valueAt(i).getConnectedDevices()) {
+                    now.add(key(d));
+                }
+            } catch (RuntimeException e) {
+                // Nothing known from this profile right now
+            }
+        }
+
+        PROFILED.clear();
+        PROFILED.addAll(now);
+        update();
     }
 
     private static void handle(Intent intent) {
@@ -211,11 +301,11 @@ final class BtWatch {
             int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1);
 
             // Bluetooth switched off, every device is gone with it
-            if ((state == BluetoothAdapter.STATE_OFF || state == BluetoothAdapter.STATE_TURNING_OFF)
-                && !CONNECTED.isEmpty()) {
+            if (state == BluetoothAdapter.STATE_OFF || state == BluetoothAdapter.STATE_TURNING_OFF) {
 
-                CONNECTED.clear();
-                notifyChange();
+                LINKED.clear();
+                PROFILED.clear();
+                update();
             }
 
             return;
@@ -223,36 +313,34 @@ final class BtWatch {
 
         BluetoothDevice device = deviceOf(intent);
 
-        if (device == null) {
+        if (device != null && BluetoothDevice.ACTION_ACL_CONNECTED.equals(action)) {
+            LINKED.add(key(device));
+        } else if (device != null && BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(action)) {
+            LINKED.remove(key(device));
+        }
+
+        // A profile coming or going, or a link: the profiles are asked again
+        readProfiles();
+    }
+
+    // Connected now is a link up or a profile connected. Told only when it
+    // changed, and only once the starting point is known
+    private static void update() {
+
+        Set<String> now = new HashSet<>(LINKED);
+
+        now.addAll(PROFILED);
+
+        if (now.equals(CONNECTED)) {
             return;
         }
 
-        String key = key(device);
-        boolean changed;
-
-        if (BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(action)) {
-            changed = CONNECTED.remove(key);
-        } else if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(action)) {
-            changed = CONNECTED.add(key);
-        } else {
-
-            // A profile connecting means the device is there. A profile
-            // going away alone does not, the link may still carry another
-            int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
-
-            changed = state == BluetoothProfile.STATE_CONNECTED && CONNECTED.add(key);
-        }
-
-        if (changed) {
-            notifyChange();
-        }
-    }
-
-    private static void notifyChange() {
+        CONNECTED.retainAll(now);
+        CONNECTED.addAll(now);
 
         Runnable r = onChange;
 
-        if (r != null) {
+        if (ready && r != null) {
             r.run();
         }
     }

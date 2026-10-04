@@ -6330,6 +6330,11 @@
         return encodeURIComponent(text);
     }
 
+    // Which list a thumbnail is watched in: its observer, the scrolling box
+    // and how far outside it counts as near, so a thumbnail that is not
+    // fetched after all can be watched again and come back when near
+    const thumbWatch = new WeakMap();
+
     // Covers are only fetched for rows about to scroll into sight, a list
     // of a thousand songs must not pull a thousand images at once
     const thumbObserver = window.IntersectionObserver
@@ -6339,12 +6344,51 @@
 
                 if (entry.isIntersecting) {
 
-                    loadThumb(entry.target);
+                    thumbWatch.set(entry.target, { obs: thumbObserver, root: $("rows"), margin: 600 });
                     thumbObserver.unobserve(entry.target);
+                    loadThumb(entry.target);
                 }
             }
         }, { root: $("rows"), rootMargin: "600px 0px" })
         : null;
+
+    // Whether a thumbnail is still in its list and within reach of what is
+    // shown, margin 0 for on screen right now
+    function thumbNear(el, margin) {
+
+        if (!el.isConnected) {
+            return false;
+        }
+
+        const w = thumbWatch.get(el);
+
+        if (!w || !w.root) {
+            return true;
+        }
+
+        const box = w.root.getBoundingClientRect();
+
+        // A list that is closed shows nothing
+        if (box.height === 0) {
+            return false;
+        }
+
+        const r = el.getBoundingClientRect();
+        const m = typeof margin === "number" ? margin : w.margin;
+
+        return r.bottom >= box.top - m && r.top <= box.bottom + m;
+    }
+
+    // A thumbnail that was not fetched after all is watched again, so it is
+    // asked for once it comes near
+    function rewatchThumb(el) {
+
+        const w = thumbWatch.get(el);
+
+        if (el.isConnected && w && w.obs) {
+            w.obs.observe(el);
+        }
+    }
 
     // Covers come from the phone, which keeps them and fetches them from
     // Mureka when it does not have them yet. The page loads each one itself,
@@ -6359,11 +6403,41 @@
     let coverBusy = 0;
 
     // Keep is for the few big covers: the picture itself is handed back,
-    // so it is never asked for twice. Thumbnails rely on the browser's cache
-    function fetchCover(url, progress, done, keep) {
+    // so it is never asked for twice. Thumbnails rely on the browser's cache.
+    // Wanted, when given, says whether the cover is still needed when its
+    // turn comes, and near whether it is on screen right now. One no longer
+    // wanted is not fetched and done hears null
+    function fetchCover(url, progress, done, keep, wanted, near) {
 
-        coverQueue.push({ url: url, progress: progress, done: done, keep: keep === true, blob: null });
+        coverQueue.push({
+            url: url, progress: progress, done: done, keep: keep === true, blob: null,
+            wanted: wanted || null, near: near || null
+        });
         pumpCovers();
+    }
+
+    // Which cover goes next: a big cover first, then a thumbnail on screen
+    // in the order asked, then the one asked for last, the latest scrolled
+    // to. A fast scroll through a long list leaves many behind, and those
+    // must not hold up the ones in sight
+    function nextCoverJob() {
+
+        let at = coverQueue.findIndex(function (j) {
+            return j.keep;
+        });
+
+        if (at < 0) {
+
+            at = coverQueue.findIndex(function (j) {
+                return j.near && j.near();
+            });
+        }
+
+        if (at < 0) {
+            at = coverQueue.length - 1;
+        }
+
+        return coverQueue.splice(at, 1)[0];
     }
 
     function pumpCovers() {
@@ -6372,7 +6446,15 @@
         // phone, and the state, the song and the lists need theirs
         while (coverBusy < 3 && coverQueue.length > 0) {
 
-            const job = coverQueue.shift();
+            const job = nextCoverJob();
+
+            // Gone from the list or scrolled far away meanwhile: not
+            // fetched, it is asked for again when it comes near
+            if (job.wanted && !job.wanted()) {
+
+                job.done(null, null);
+                continue;
+            }
 
             coverBusy += 1;
 
@@ -6521,10 +6603,31 @@
                 return;
             }
 
+            // Not fetched, it was no longer near. The pie goes, and the
+            // thumbnail waits to come near again
+            if (ok === null) {
+
+                coverDone(el);
+                rewatchThumb(el);
+                return;
+            }
+
             if (!ok) {
 
                 setTimeout(function () {
-                    loadThumb(el, n + 1);
+
+                    // Tried again only while it is still in a list
+                    if (!el.isConnected) {
+                        return;
+                    }
+
+                    if (thumbNear(el)) {
+                        loadThumb(el, n + 1);
+                    } else {
+
+                        coverDone(el);
+                        rewatchThumb(el);
+                    }
                 }, 1500 * (n + 1));
                 return;
             }
@@ -6534,6 +6637,10 @@
             el.classList.remove("coverIn");
             void el.offsetWidth;
             el.classList.add("coverIn");
+        }, false, function () {
+            return el.dataset.src === url && thumbNear(el);
+        }, function () {
+            return thumbNear(el, 0);
         });
     }
 
@@ -10235,8 +10342,9 @@
 
                 if (entry.isIntersecting) {
 
-                    loadThumb(entry.target);
+                    thumbWatch.set(entry.target, { obs: miniThumbs, root: $("miniRows"), margin: 400 });
                     miniThumbs.unobserve(entry.target);
+                    loadThumb(entry.target);
                 }
             }
         }, { root: $("miniRows"), rootMargin: "400px 0px" })

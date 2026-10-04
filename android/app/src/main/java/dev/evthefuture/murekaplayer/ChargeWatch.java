@@ -118,7 +118,9 @@ final class ChargeWatch {
         receiver = null;
     }
 
-    // The Bluetooth watch, started again once the permission is given
+    // The Bluetooth watch, started again once the permission is given. The
+    // devices connected when it starts are the starting point, not a device
+    // coming back
     static void startBluetooth() {
 
         MAIN.post(() -> {
@@ -127,8 +129,11 @@ final class ChargeWatch {
                 return;
             }
 
-            BtWatch.start(ctx, ChargeWatch::bluetoothChanged);
-            btHere = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+            BtWatch.start(ctx, ChargeWatch::bluetoothChanged, () -> {
+
+                btHere = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+                Hub.note("Power", btHere ? "a chosen Bluetooth device is connected" : "no chosen Bluetooth device is connected");
+            });
         });
     }
 
@@ -276,6 +281,9 @@ final class ChargeWatch {
         if (CarSettings.on(ctx, CarSettings.CHARGE_SAVE) && CarSettings.on(ctx, CarSettings.PLUG_HOTSPOT)) {
 
             Hub.note("Power", what + ", turning the hotspot on");
+
+            // The player shows a note while it switches and how it went
+            Hub.command("hotspotAuto", "on");
             Hotspot.start(ctx);
         }
     }
@@ -315,6 +323,7 @@ final class ChargeWatch {
         if (CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)) {
 
             Hub.note("Power", "turning the hotspot off");
+            Hub.command("hotspotAuto", "off");
             Hotspot.stop(ctx);
         }
 
