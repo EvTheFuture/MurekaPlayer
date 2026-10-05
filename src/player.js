@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.137";
+    const VERSION = "1.9.9.138";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1320,21 +1320,27 @@
         return Promise.reject(new Error("No internet, the player is offline"));
     }
 
-    // fetch for Mureka, for what the user asked for. Refused at once while
-    // the device says it has no connection. When only an earlier check found
-    // Mureka unreachable, it is asked again first, and the request goes
-    // ahead when it answers: a check made in the background, where Safari
-    // holds requests back, must not keep a tap from working
-    async function murekaFetch(resource, options) {
-
-        if (offlineMode() && isMurekaRequest(resource)) {
-
-            if (netOffline || !(await recheckMureka("a tap needs Mureka"))) {
-                return offlineRefusal();
-            }
-        }
-
+    // fetch for Mureka, for what the user asked for: a like, a rename, a
+    // publish. Always tried, offline too, since the offline mark may be
+    // wrong, and an answer puts the player back online
+    function murekaFetch(resource, options) {
         return watchMureka(resource, fetch(resource, options), options && options.signal);
+    }
+
+    // Until when the background requests go ahead offline too, because the
+    // user asked for something that needs them, a load or a refresh
+    let netTryUntil = 0;
+
+    // The user asked for something that needs Mureka. Tried even offline:
+    // its requests go ahead for a while, and the first answer puts the
+    // player back online
+    function userTry(what) {
+
+        if (offlineMode()) {
+
+            dbgLog("Offline", what + " asked for while offline, trying anyway");
+            netTryUntil = Date.now() + 30000;
+        }
     }
 
     // Every request to Mureka is watched: an answer of any kind shows Mureka
@@ -1352,7 +1358,11 @@
             return res;
         }, function (e) {
 
-            if (!(callerSignal && callerSignal.aborted)) {
+            // A request its caller stopped says nothing. In a browser one
+            // that only ran out of time says the network is slow, not gone
+            const timedOut = e && e.name === "AbortError";
+
+            if (!(callerSignal && callerSignal.aborted) && !(timedOut && !isApkHost())) {
                 murekaNoAnswer();
             }
 
@@ -1366,7 +1376,7 @@
     // Offline, a request to Mureka is refused at once
     function timedFetch(resource, options, ms) {
 
-        if (offlineMode() && isMurekaRequest(resource)) {
+        if (offlineMode() && isMurekaRequest(resource) && Date.now() > netTryUntil) {
             return offlineRefusal();
         }
 
@@ -4908,10 +4918,8 @@
     // Once everything is cached it only checks the top for new songs
     async function run(light) {
 
-        if (!running && offlineMode()) {
-
-            showToast("No internet, new songs cannot be loaded now", false);
-            return;
+        if (!running) {
+            userTry("loading");
         }
 
         if (running) {
@@ -4994,10 +5002,8 @@
     // and every field is brought up to date in place
     async function rescan() {
 
-        if (!running && offlineMode()) {
-
-            showToast("No internet, the library cannot be rescanned now", false);
-            return;
+        if (!running) {
+            userTry("a rescan");
         }
 
         if (running) {
@@ -6327,11 +6333,7 @@
 
     async function deleteSongOnMureka(song) {
 
-        if (offlineMode()) {
-
-            showToast("No internet, songs cannot be deleted now", false);
-            return;
-        }
+        userTry("a delete");
 
         dbgLog("Mureka", "deleting " + song.song_id + " on Mureka");
 
@@ -6351,6 +6353,8 @@
 
     // Cache one song, then update its marker
     async function cacheOne(song) {
+
+        userTry("caching a song");
 
         setStatus("Caching: " + (song.title || "Untitled"));
 
@@ -6409,6 +6413,10 @@
 
     // Re-fetch one song from the detail endpoint to pick up a changed title etc
     async function refreshOne(song, quiet) {
+
+        if (!quiet) {
+            userTry("a refresh");
+        }
 
         // A note for the result when asked for from the song menu, not when
         // read again after another change, which has its own note
@@ -7131,7 +7139,7 @@
             // Without a connection to Mureka every song that is not stored
             // fails the same way. Once that is clear the player goes offline,
             // and the queue moves on to the next stored song by itself
-            if (!offlineMode() && !(await murekaReachable())) {
+            if (!offlineMode() && await murekaGone()) {
 
                 if (token !== playToken) {
                     return;
@@ -17249,8 +17257,19 @@
     const NET_IDLE_MS = 60000;
     const NET_IDLE_QUIET_MS = 300000;
 
+    // Mureka answered something: online, whatever a check said before. In
+    // the app Android's own word on the connection is left to Android
     function murekaAnswered() {
+
         murekaAnsweredAt = Date.now();
+
+        if (netOffline && !isApkHost()) {
+            setNetOffline(false);
+        }
+
+        if (netTrouble) {
+            setNetTrouble(false);
+        }
     }
 
     // Whether the page is in the background in a browser. Safari holds
@@ -17341,13 +17360,7 @@
 
             dbgLog("Offline", "checking whether Mureka answers, " + why);
 
-            let ok = await murekaReachable();
-
-            if (!ok && !offlineMode()) {
-
-                await sleep(3000);
-                ok = offlineMode() || await murekaReachable();
-            }
+            const ok = offlineMode() || !(await murekaGone());
 
             if (ok) {
 
@@ -17380,14 +17393,36 @@
         }
     }
 
+    // Whether Mureka is gone: asked twice, three times in a browser, a few
+    // seconds apart, and gone only when none of them got an answer. A phone
+    // waking up or a slow mobile network often misses one
+    async function murekaGone() {
+
+        const tries = isApkHost() ? 2 : 3;
+
+        for (let i = 0; i < tries; i += 1) {
+
+            if (i > 0) {
+                await sleep(3000);
+            }
+
+            if (await murekaReachable()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // Whether Mureka answers at all, any answer counts. Asked straight,
-    // past the offline refusal, with a short deadline
+    // past the offline refusal, with a short deadline, longer in a browser
+    // on a phone, whose network may be slow
     async function murekaReachable() {
 
         const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
         const timer = ctrl ? setTimeout(function () {
             ctrl.abort();
-        }, 6000) : 0;
+        }, isApkHost() ? 6000 : 10000) : 0;
 
         try {
 
@@ -30524,11 +30559,7 @@
     // storage. Answers whether it went and, when not, why
     async function changeCover(song, blob, crop) {
 
-        if (offlineMode()) {
-
-            showToast("No internet, the cover cannot be changed now", false);
-            return { ok: false, why: "no internet" };
-        }
+        userTry("a new cover");
 
         showToast("Uploading the cover", "wait");
 

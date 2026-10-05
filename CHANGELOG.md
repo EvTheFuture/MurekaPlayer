@@ -59,17 +59,19 @@ the new settings layout and a number of smaller improvements.
   following the browser's own word on its connection. In the background,
   where Safari holds requests back, only a song that will not load can
   take the player offline, and coming back into view checks the
-  connection at once. Offline only because of an earlier check, a like,
-  a song that is not stored or anything else tapped asks Mureka first and
-  goes ahead when it answers.
+  connection at once. Offline, everything asked for is still tried, Load,
+  Rescan, Refresh, a like and the rest, and any answer from Mureka puts
+  the player back online at once. Only songs that are not stored stay
+  blocked, after a quick check whether Mureka answers after all. A browser
+  goes offline only when three checks in a row get no answer, and a
+  request that only ran slow there no longer counts.
 - **Plays offline.** Without internet, or when Mureka cannot be reached,
   the app opens the player on a page of its own at Mureka's address, so
   the library, the stored songs, covers, waveforms and lyrics are all
   there. Only songs stored on the device play: the others are dimmed in
   the list, a tap on one says it is not stored, and next and previous pass
   over them. Nothing is asked of Mureka while offline, so nothing waits for
-  a request that cannot succeed, and Load and Rescan say they need the
-  internet. Plays are kept and reported to Mureka once it can be reached
+  a request that cannot succeed. Plays are kept and reported to Mureka once it can be reached
   again. The internet going while the player runs works the same way, and
   so does a connection the phone calls online but that does not reach
   Mureka: a song that will not load makes the player check whether Mureka
