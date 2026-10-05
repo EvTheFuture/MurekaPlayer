@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.140";
+    const VERSION = "1.9.9.142";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6395,8 +6395,114 @@
             return;
         }
 
+        // Where the browser can hand a song to another app, Share sits
+        // beside Download. The song is made ready while the name is typed,
+        // since the share sheet only opens straight from the tap
+        let ready = null;
+        let shareBtn = null;
+
+        const paintShare = function () {
+
+            if (shareBtn) {
+
+                shareBtn.disabled = !ready;
+                shareBtn.style.opacity = ready ? "1" : "0.5";
+                shareBtn.title = ready ? "Hand the song to another app" : "Getting the song ready";
+            }
+        };
+
+        const extra = canShareAudio() ? {
+            label: "Share",
+            setup: function (b) {
+
+                shareBtn = b;
+                paintShare();
+            },
+            onTap: function (typed, close) {
+
+                if (!ready) {
+                    return;
+                }
+
+                close();
+                shareSong(song, ready, cleanFileName(typed) || fileName(song));
+            }
+        } : null;
+
+        if (extra) {
+
+            songFile(url).then(function (blob) {
+
+                ready = blob;
+                paintShare();
+            }, function () {
+
+                if (shareBtn) {
+                    shareBtn.title = "The song could not be had to share";
+                }
+            });
+        }
+
         askText("File name", fileName(song), "Download", function (typed) {
             saveOne(song, url, cleanFileName(typed) || fileName(song));
+        }, extra);
+    }
+
+    // Whether this browser can hand a song to another app, the share sheet
+    // of a phone, which is where it is offered
+    function canShareAudio() {
+
+        if (!navigator.share || !navigator.canShare) {
+            return false;
+        }
+
+        try {
+            return navigator.canShare({ files: [new File([""], "test.mp3", { type: "audio/mpeg" })] });
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // The song's file, the copy kept here when there is one, from Mureka
+    // otherwise
+    async function songFile(url) {
+
+        try {
+
+            const kept = await storedSong(url);
+
+            if (kept && kept.blob) {
+                return kept.blob;
+            }
+        } catch (e) {
+            // Not kept, fetched below
+        }
+
+        const res = await murekaFetch(url);
+
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
+
+        return await res.blob();
+    }
+
+    // The share sheet with the song under its chosen name, to save it in
+    // Files, put it in Drive or send it in a message
+    function shareSong(song, blob, name) {
+
+        const file = new File([blob], name, { type: blob.type || "audio/mpeg" });
+
+        navigator.share({ files: [file] }).then(function () {
+            setStatus("Shared: " + (song.title || "Untitled"));
+        }).catch(function (e) {
+
+            if (e && e.name === "AbortError") {
+                setStatus("Share cancelled");
+                return;
+            }
+
+            showToast("Could not share the song" + (e && e.message ? ", " + e.message : ""), false);
         });
     }
 
@@ -11149,7 +11255,10 @@
     // value, Cancel and a button to accept. window.prompt would do, but the
     // Android app's page does not show it, and it stops the page, and with
     // it the state the web view lives on
-    function askText(title, value, okLabel, onOk) {
+    // extra is an optional third button between the two: its label, what a
+    // tap does, handed the text and a way to close, and a setup that gets
+    // the button, to dim it until it can be used
+    function askText(title, value, okLabel, onOk, extra) {
 
         if (!panelEl) {
             return;
@@ -11232,6 +11341,22 @@
         no.style.flex = "1";
         yes.style.flex = "1";
 
+        let third = null;
+
+        if (extra) {
+
+            third = makeButton(extra.label, "#333", "#fff", function () {
+                extra.onTap(field.value, function () {
+                    close(false);
+                });
+            });
+            third.style.flex = "1";
+
+            if (extra.setup) {
+                extra.setup(third);
+            }
+        }
+
         // Enter accepts and Escape cancels, and no key typed here reaches
         // the player's own shortcuts
         field.addEventListener("keydown", function (ev) {
@@ -11256,6 +11381,11 @@
         });
 
         row.appendChild(no);
+
+        if (third) {
+            row.appendChild(third);
+        }
+
         row.appendChild(yes);
         card.appendChild(head);
         card.appendChild(field);
@@ -19169,6 +19299,8 @@
             wakeFromCover("app opened");
         };
         window.__murekaHostExport = hostExport;
+        window.__murekaHostExportName = hostExportName;
+        window.__murekaHostExportText = hostExportText;
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
@@ -27178,6 +27310,24 @@
         const data = collectUserData(kind === "songs" || kind === "library" ? kind : "settings");
 
         return { name: exportBaseName(data) + ".json", data: data };
+    }
+
+    // Only the name an export would get, for the web view to offer before
+    // the file is made
+    function hostExportName(kind) {
+
+        const k = kind === "songs" || kind === "library" ? kind : "settings";
+
+        return { name: exportBaseName({ kind: k, exported: new Date().toISOString() }) + ".json" };
+    }
+
+    // The export as the text of the file, written the same way as on the
+    // phone, for the app to hand the browser as a download
+    function hostExportText(kind) {
+
+        const data = collectUserData(kind === "songs" || kind === "library" ? kind : "settings");
+
+        return { name: exportBaseName(data) + ".json", text: exportJson(data) };
     }
 
     // A file the share sheet accepts. Chromium only shares a short list of

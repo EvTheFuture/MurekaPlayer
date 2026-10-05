@@ -459,6 +459,14 @@ final class CarServer {
                 // longer to put together
                 sendCall(out, "__murekaHostExport", JSONObject.quote(kind),
                     "library".equals(kind) ? 30000 : 4000);
+            } else if ("GET".equals(method) && "/exportName".equals(path)) {
+
+                String asked = param(query, "kind");
+                String kind = "songs".equals(asked) || "library".equals(asked) ? asked : "settings";
+
+                sendCall(out, "__murekaHostExportName", JSONObject.quote(kind));
+            } else if ("GET".equals(method) && "/download".equals(path)) {
+                sendDownload(out, param(query, "kind"), param(query, "name"));
             } else if ("GET".equals(method) && "/menu".equals(path)) {
 
                 // What the long press menu offers for one song, the id goes
@@ -845,6 +853,49 @@ final class CarServer {
             lastPoll = System.currentTimeMillis();
         }
 
+        out.flush();
+    }
+
+    // An export as a real download, under the name asked for. A browser
+    // takes the name from the answer's headers, which a page cannot give a
+    // file made in the page, some then call it Unknown. Where it is saved
+    // is the browser's own choice, or its question
+    private void sendDownload(OutputStream out, String asked, String wantedName) throws IOException {
+
+        lastPoll = System.currentTimeMillis();
+
+        String kind = "songs".equals(asked) || "library".equals(asked) ? asked : "settings";
+        String json = Hub.request("__murekaHostExportText", JSONObject.quote(kind), "library".equals(kind) ? 30000 : 4000);
+        String text;
+        String name;
+
+        try {
+
+            JSONObject o = new JSONObject(json);
+
+            text = o.getString("text");
+            name = o.optString("name", "mureka-player.json");
+        } catch (JSONException e) {
+
+            send(out, 503, "text/plain", bytes("The phone did not give the file"));
+            return;
+        }
+
+        String clean = wantedName == null ? "" : wantedName.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+
+        if (!clean.isEmpty()) {
+            name = clean.toLowerCase(Locale.ROOT).endsWith(".json") ? clean : clean + ".json";
+        }
+
+        byte[] body = text.getBytes(StandardCharsets.UTF_8);
+        String ascii = name.replaceAll("[^\\x20-\\x7e]", "_").replace("\"", "_");
+        String head = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+            + "Content-Disposition: attachment; filename=\"" + ascii + "\"; filename*=UTF-8''"
+            + java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20") + "\r\n"
+            + "Content-Length: " + body.length + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        out.write(body);
         out.flush();
     }
 

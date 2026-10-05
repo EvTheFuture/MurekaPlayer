@@ -268,6 +268,9 @@ the new settings layout and a number of smaller improvements.
   the start of the song and Shift with right to a second before its end.
   The browser gets a media session, so media keys, MPRIS and playerctl work.
 - Export asks whether the file should be saved in the browser or on the phone.
+  Saved in the browser, the file name is asked first, filled in with the
+  phone's, and the phone hands the file over as a real download under that
+  name, so a browser on another phone no longer saves it as Unknown.json.
 - A phone opening the web view gets the mobile player's look: the header
   at the top, the covers with the lyrics, title, meta and stars laid over
   them, the seek bar, the transport and the song list under it on one
@@ -346,6 +349,9 @@ the new settings layout and a number of smaller improvements.
   the phone fetching the song and sending the trim to Mureka.
 - **Download** in the song menu asks for the file name first, filled in
   with the song's title followed by its id in brackets, ready to change.
+  Where the browser can hand files to other apps, on a phone for one,
+  **Share** sits beside Download and opens the share sheet with the song
+  under that name, to keep it in Files, put it in Drive or send it on.
   In the web view the song is saved under that name too, the phone
   fetching it for the browser.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own

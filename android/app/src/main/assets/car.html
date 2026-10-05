@@ -12208,40 +12208,45 @@
         ]);
     }
 
-    // Ask the phone for the data and let this browser save the file
+    // Save an export in this browser: the name is asked first, filled in
+    // with the phone's, then the phone hands the file over as a real
+    // download under that name. Where it goes is the browser's choice, or
+    // its question when it is set to ask
     function exportHere(kind) {
 
-        toast("Getting the file...");
+        const fallback = "mureka-player-" + kind + ".json";
 
-        fetch("/export?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
+        fetch("/exportName?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (out) {
+            return out && out.name ? out.name : fallback;
+        }, function () {
+            return fallback;
+        }).then(function (suggested) {
 
-            if (!out || !out.data) {
-                throw new Error("no data");
-            }
+            askText("File name", suggested, "Download", function (typed) {
 
-            // The song library is kept compact, it holds thousands of songs
-            const text = out.data.kind === "library"
-                ? JSON.stringify(out.data)
-                : JSON.stringify(out.data, null, 2);
-            const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
-            const link = document.createElement("a");
+                const name = cleanJsonName(typed) || suggested;
+                const link = document.createElement("a");
 
-            link.href = url;
-            link.download = out.name || "mureka-player.json";
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            setTimeout(function () {
-                URL.revokeObjectURL(url);
-            }, 10000);
-
-            toast("Saved " + (out.name || "the file"));
-        }).catch(function () {
-            toast("Could not get the file from the phone");
+                // Straight from the tap, so the browser lets the download start
+                link.href = "/download?kind=" + esc(kind) + "&name=" + encodeURIComponent(name);
+                link.download = name;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                toast("Downloading " + name);
+            });
         });
+    }
+
+    // A typed file name made safe to save, ending in .json. Empty when
+    // nothing usable is left
+    function cleanJsonName(typed) {
+
+        const base = String(typed || "").replace(/[\\/:*?"<>|]+/g, "_").trim().replace(/\.json$/i, "").trim();
+
+        return base ? base + ".json" : "";
     }
 
     function menuItem(iconName, label, action, cls, disabled) {
