@@ -65,6 +65,9 @@ the new settings layout and a number of smaller improvements.
   blocked, after a quick check whether Mureka answers after all. A browser
   goes offline only when three checks in a row get no answer, and a
   request that only ran slow there no longer counts.
+- A song stored on the device plays from the stored copy once a song has
+  played, even with Stream direct URL on, so a slow or patchy connection
+  no longer holds up changing songs.
 - **Plays offline.** Without internet, or when Mureka cannot be reached,
   the app opens the player on a page of its own at Mureka's address, so
   the library, the stored songs, covers, waveforms and lyrics are all
@@ -267,6 +270,10 @@ the new settings layout and a number of smaller improvements.
   left or right skips to the previous or next song, Shift with left goes to
   the start of the song and Shift with right to a second before its end.
   The browser gets a media session, so media keys, MPRIS and playerctl work.
+- **Import** offers **Paste** besides a file: an export copied as text is
+  pasted into a box, with a Paste button where the page may read the
+  clipboard. The web view offers **Paste here**, **A file here** or **The
+  phone**, asks before importing and imports it on the phone.
 - Export asks whether the file should be saved in the browser or on the phone.
   Saved in the browser, the file name is asked first, filled in with the
   phone's, and the phone hands the file over as a real download under that
@@ -352,6 +359,7 @@ the new settings layout and a number of smaller improvements.
   Where the browser can hand files to other apps, on a phone for one,
   **Share** sits beside Download and opens the share sheet with the song
   under that name, to keep it in Files, put it in Drive or send it on.
+  Tapped before the song is ready, it asks again once it is.
   In the web view the song is saved under that name too, the phone
   fetching it for the browser.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.142";
+    const VERSION = "1.9.9.146";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6397,35 +6397,35 @@
 
         // Where the browser can hand a song to another app, Share sits
         // beside Download. The song is made ready while the name is typed,
-        // since the share sheet only opens straight from the tap
+        // since the share sheet only opens straight from a tap. Tapped
+        // before it is ready, a second question asks once it is, and its
+        // button is the tap that opens the share sheet
         let ready = null;
-        let shareBtn = null;
-
-        const paintShare = function () {
-
-            if (shareBtn) {
-
-                shareBtn.disabled = !ready;
-                shareBtn.style.opacity = ready ? "1" : "0.5";
-                shareBtn.title = ready ? "Hand the song to another app" : "Getting the song ready";
-            }
-        };
+        let failed = "";
+        let waiting = null;
 
         const extra = canShareAudio() ? {
             label: "Share",
-            setup: function (b) {
-
-                shareBtn = b;
-                paintShare();
-            },
             onTap: function (typed, close) {
 
-                if (!ready) {
+                const name = cleanFileName(typed) || fileName(song);
+
+                close();
+
+                if (ready) {
+
+                    shareSong(song, ready, name);
                     return;
                 }
 
-                close();
-                shareSong(song, ready, cleanFileName(typed) || fileName(song));
+                if (failed) {
+
+                    showToast("Could not get the song to share, " + failed, false);
+                    return;
+                }
+
+                showToast("Getting the song ready to share", "wait");
+                waiting = name;
             }
         } : null;
 
@@ -6434,11 +6434,26 @@
             songFile(url).then(function (blob) {
 
                 ready = blob;
-                paintShare();
-            }, function () {
 
-                if (shareBtn) {
-                    shareBtn.title = "The song could not be had to share";
+                if (waiting) {
+
+                    const name = waiting;
+
+                    waiting = null;
+                    showToast("Ready to share");
+                    askYesNo("Share the song", "\"" + name + "\" is ready to hand to another app.", "Share", function () {
+                        shareSong(song, ready, name);
+                    });
+                }
+            }, function (e) {
+
+                failed = e && e.message ? e.message : "no connection";
+                dbgLog("Audio", "the song for sharing could not be had, " + failed);
+
+                if (waiting) {
+
+                    waiting = null;
+                    showToast("Could not get the song to share, " + failed, false);
                 }
             });
         }
@@ -8925,7 +8940,8 @@
             setCurrentSrc(ready);
             startAudioPlayback();
 
-        } else if (settings.directAudio && !offlineMode() && (navigator.onLine !== false || document.hidden)) {
+        } else if (settings.directAudio && !offlineMode() && !playStoredFirst(song)
+            && (navigator.onLine !== false || document.hidden)) {
 
             // songUrl is synchronous, so the source is set and play is called
             // with the user activation still valid. iOS drops that token across
@@ -8994,6 +9010,15 @@
 
         // The current song is cached now, get upcoming songs ready in the background
         prefetchNext();
+    }
+
+    // A stored song plays from the copy here, also with the direct stream on,
+    // so a slow or patchy connection does not hold it up. Only once a song
+    // has played in this page, or in the app, since before that a browser
+    // may still need the tap itself to start the sound, which the wait for
+    // the stored copy would lose
+    function playStoredFirst(song) {
+        return cachedIds.has(song.song_id) && (isApkHost() || playbackWorks);
     }
 
     // Report a play to Mureka, fire and forget so it never blocks playback
@@ -18516,6 +18541,7 @@
                 on: hostOn(el),
                 off: el.disabled === true,
                 exp: el.dataset.hostExport || "",
+                imp: el.dataset.hostImport === "1",
                 wide: el.style.textAlign === "left"
             });
             return;
@@ -19301,6 +19327,7 @@
         window.__murekaHostExport = hostExport;
         window.__murekaHostExportName = hostExportName;
         window.__murekaHostExportText = hostExportText;
+        window.__murekaHostImportText = hostImportText;
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
@@ -25476,7 +25503,12 @@
         const importRow = document.createElement("div");
         importRow.style.cssText = "display:flex;gap:6px";
 
-        importRow.appendChild(makeButton("Import", "#333", "#fff", chooseImport));
+        const importBtn = makeButton("Import", "#333", "#fff", chooseImport);
+
+        // The web view takes this over, so a file or text from the browser
+        // it runs in can be imported on the phone
+        importBtn.dataset.hostImport = "1";
+        importRow.appendChild(importBtn);
 
         // Where an export goes or an import comes from, asked in place
         dataChoiceEl = document.createElement("div");
@@ -27092,7 +27124,7 @@
     // Import a parsed set. Settings replace the current ones after a
     // question. Song tweaks merge, nothing held here is overwritten
     // without asking, so importing never loses data
-    function importParsed(p, sourceName, donePrefix) {
+    function importParsed(p, sourceName, donePrefix, asked) {
 
         if (p.kind === "library") {
 
@@ -27110,7 +27142,7 @@
                 question += "\n\nThe file is from another Mureka account.";
             }
 
-            if (!window.confirm(question)) {
+            if (!asked && !window.confirm(question)) {
 
                 dataStatus("Import cancelled");
                 return;
@@ -27126,7 +27158,7 @@
 
         if (p.kind === "settings") {
 
-            if (!confirmImport(p, sourceName)) {
+            if (!asked && !confirmImport(p, sourceName)) {
 
                 dataStatus("Import cancelled");
                 return;
@@ -27153,8 +27185,9 @@
 
             let settingsDone = false;
 
-            // An older combined file also holds settings, asked about apart
-            if (p.settings && window.confirm("The " + sourceName
+            // An older combined file also holds settings, asked about apart.
+            // Agreed to in the web view, they are left as they are
+            if (p.settings && !asked && window.confirm("The " + sourceName
                 + " also holds settings. Replace your current settings with them?")) {
 
                 settingsDone = applyImportedSettings(p.settings);
@@ -27482,14 +27515,18 @@
     // Drive and Files apps too, so without Drive sign in it opens at once
     function chooseImport() {
 
+        const options = [
+            { label: "File", fn: chooseImportFile },
+            { label: "Paste", fn: pasteImport }
+        ];
+
         if (!GOOGLE_CLIENT_ID) {
 
-            chooseImportFile();
+            showDataChoice("Import from", options);
             return;
         }
 
-        showDataChoice("Import from", [
-            { label: "File", fn: chooseImportFile },
+        showDataChoice("Import from", options.concat([
             { label: "Google Drive", fn: function () {
 
                 showDataChoice("Load from Google Drive", [
@@ -27501,7 +27538,130 @@
                     } }
                 ]);
             } }
-        ]);
+        ]));
+    }
+
+    // An export pasted as text, for when the file only got as far as the
+    // clipboard. The browser's own Paste works in the box, and where the
+    // page may read the clipboard a Paste button fills it in one tap
+    function pasteImport() {
+
+        if (!panelEl) {
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const area = document.createElement("textarea");
+        const row = document.createElement("div");
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:420px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = "Paste an export here";
+        head.style.cssText = "font-weight:600";
+
+        // At least 16 pixels, below that iOS zooms the page in on focus
+        area.placeholder = "Settings, song tweaks or a song library, as exported";
+        area.setAttribute("autocomplete", "off");
+        area.setAttribute("spellcheck", "false");
+        area.style.cssText = "width:100%;height:180px;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;"
+            + "border-radius:6px;background:#1b1b20;color:#fff;font:16px monospace;resize:vertical;outline:none";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = function () {
+            back.remove();
+        };
+
+        // The page's own keys never hear what is typed here
+        for (const kind of ["keydown", "keyup", "keypress"]) {
+
+            area.addEventListener(kind, function (ev) {
+                ev.stopPropagation();
+            });
+        }
+
+        const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
+        const importBtn = makeButton("Import", "#48e1eb", "#000", function () {
+
+            const text = area.value;
+
+            close();
+            importText(text, "pasted text", false);
+        });
+
+        cancelBtn.style.flex = "1";
+        importBtn.style.flex = "1";
+        row.appendChild(cancelBtn);
+
+        if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+
+            const pasteBtn = makeButton("Paste", "#333", "#fff", function () {
+
+                navigator.clipboard.readText().then(function (text) {
+                    area.value = text;
+                }, function () {
+                    showToast("The clipboard could not be read, paste into the box instead", false);
+                });
+            });
+
+            pasteBtn.style.flex = "1";
+            row.appendChild(pasteBtn);
+        }
+
+        row.appendChild(importBtn);
+        card.appendChild(head);
+        card.appendChild(area);
+        card.appendChild(row);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        panelEl.appendChild(back);
+        area.focus();
+    }
+
+    // An export as text, pasted or from the web view, merged in. asked when
+    // the import was agreed to already, in the web view, so nothing is
+    // asked on the phone, where nobody may be. Answers why it could not be
+    // read, or empty when it goes ahead
+    function importText(text, sourceName, asked) {
+
+        let data = null;
+
+        try {
+            data = JSON.parse(String(text || "").trim());
+        } catch (e) {
+            data = null;
+        }
+
+        const p = parseUserData(data);
+
+        if (!p) {
+
+            dataStatus("That is not a Mureka Player export");
+            return "That is not a Mureka Player export";
+        }
+
+        importParsed(p, sourceName, "Imported", asked);
+
+        return "";
+    }
+
+    // The web view sends a pasted export or a file it read. The answer says
+    // whether it could be read, what follows shows on the settings page
+    function hostImportText(id, ask) {
+
+        const why = importText(ask && ask.text, ask && ask.from === "file" ? "file" : "pasted text", true);
+
+        hostReply(id, JSON.stringify({ ok: why === "", why: why }));
     }
 
     // Open the file picker for an import

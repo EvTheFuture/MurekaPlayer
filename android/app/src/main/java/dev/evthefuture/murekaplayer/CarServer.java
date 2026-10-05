@@ -392,7 +392,9 @@ final class CarServer {
                 }
             }
 
-            if (length < 0 || length > ("/setCover".equals(path) ? MAX_COVER : MAX_BODY)) {
+            boolean big = "/setCover".equals(path) || "/importText".equals(path);
+
+            if (length < 0 || length > (big ? MAX_COVER : MAX_BODY)) {
 
                 send(out, 413, "text/plain", bytes("Too large"));
                 return;
@@ -467,6 +469,20 @@ final class CarServer {
                 sendCall(out, "__murekaHostExportName", JSONObject.quote(kind));
             } else if ("GET".equals(method) && "/download".equals(path)) {
                 sendDownload(out, param(query, "kind"), param(query, "name"));
+            } else if ("GET".equals(method) && path.startsWith("/download/")) {
+
+                // The name as the last part of the address too, for browsers
+                // that name a download after its address rather than after
+                // the answer's headers
+                String named;
+
+                try {
+                    named = java.net.URLDecoder.decode(path.substring("/download/".length()), "UTF-8");
+                } catch (IllegalArgumentException e) {
+                    named = "";
+                }
+
+                sendDownload(out, param(query, "kind"), named);
             } else if ("GET".equals(method) && "/menu".equals(path)) {
 
                 // What the long press menu offers for one song, the id goes
@@ -480,6 +496,8 @@ final class CarServer {
                 sendSong(out, param(query, "u"), range);
             } else if ("POST".equals(method) && "/cmd".equals(path)) {
                 runCommand(out, body);
+            } else if ("POST".equals(method) && "/importText".equals(path)) {
+                importText(out, query, body);
             } else if ("POST".equals(method) && "/setCover".equals(path)) {
                 setCover(out, query, body);
             } else {
@@ -889,9 +907,9 @@ final class CarServer {
 
         byte[] body = text.getBytes(StandardCharsets.UTF_8);
         String ascii = name.replaceAll("[^\\x20-\\x7e]", "_").replace("\"", "_");
+        // The plain form of the name only, which every browser reads
         String head = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
-            + "Content-Disposition: attachment; filename=\"" + ascii + "\"; filename*=UTF-8''"
-            + java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20") + "\r\n"
+            + "Content-Disposition: attachment; filename=\"" + ascii + "\"\r\n"
             + "Content-Length: " + body.length + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
 
         out.write(head.getBytes(StandardCharsets.US_ASCII));
@@ -1237,6 +1255,32 @@ final class CarServer {
         } catch (JSONException e) {
             send(out, 400, "application/json", bytes("{\"ok\":false}"));
         }
+    }
+
+    // An export from a web view, pasted there or read from a file there,
+    // imported on the phone. Agreed to in the browser already, so the phone
+    // asks nothing, what follows shows on the settings page
+    private void importText(OutputStream out, String query, byte[] body) throws IOException {
+
+        lastPoll = System.currentTimeMillis();
+
+        JSONObject ask = new JSONObject();
+
+        try {
+
+            ask.put("text", new String(body, StandardCharsets.UTF_8));
+            ask.put("from", "file".equals(param(query, "from")) ? "file" : "paste");
+        } catch (JSONException e) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false}"));
+            return;
+        }
+
+        Hub.note("Command", "From a web view: an import, " + (body.length / 1024) + " kB");
+
+        String answer = Hub.requestLater("__murekaHostImportText", ask.toString(), 30000);
+
+        send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
     }
 
     // A new cover for a song from a web view, the picture and the square

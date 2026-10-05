@@ -9116,6 +9116,13 @@
                     return;
                 }
 
+                // An import can come from this browser too, pasted or a file
+                if (node.imp) {
+
+                    importChoice(node.id);
+                    return;
+                }
+
                 // A switch shows its new state at once, the reading from the
                 // phone follows
                 if (node.s === "On" || node.s === "Off") {
@@ -12208,6 +12215,164 @@
         ]);
     }
 
+    // Import from this browser, pasted or a file picked here, or on the
+    // phone as before
+    function importChoice(buttonId) {
+
+        openChoice("Import from", [
+            { icon: "listPlus", label: "Paste here", fn: function () {
+
+                closeSongMenu();
+                pasteImportHere();
+            } },
+            { icon: "download", label: "A file here", fn: function () {
+
+                closeSongMenu();
+                fileImportHere();
+            } },
+            { icon: "speaker", label: "The phone", fn: function () {
+
+                closeSongMenu();
+                panelAction("hclick", buttonId);
+            } }
+        ]);
+    }
+
+    // A box to paste an export into, the browser's own Paste works there.
+    // Reading the clipboard straight needs a secure page, which this is not
+    function pasteImportHere() {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const area = document.createElement("textarea");
+        const row = document.createElement("div");
+
+        back.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;"
+            + "justify-content:center;z-index:300;font-size:clamp(16px,1.8vw,24px)";
+        card.style.cssText = "background:var(--card);border:1px solid var(--line);border-radius:18px;padding:3vh 3vw;"
+            + "width:min(640px,92vw);display:flex;flex-direction:column;gap:2vh;color:var(--text)";
+        head.textContent = "Paste an export here";
+        area.placeholder = "Settings, song tweaks or a song library, as exported";
+        area.setAttribute("autocomplete", "off");
+        area.setAttribute("spellcheck", "false");
+        area.style.cssText = "width:100%;height:30vh;box-sizing:border-box;padding:10px;border-radius:10px;"
+            + "border:1px solid var(--line);background:#111;color:var(--text);font:16px monospace;resize:vertical";
+        row.style.cssText = "display:flex;gap:2vw";
+
+        const button = function (text, cls, fn) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip" + (cls ? " " + cls : "");
+            b.textContent = text;
+            b.style.flex = "1";
+            b.style.justifyContent = "center";
+            b.addEventListener("click", fn);
+
+            return b;
+        };
+
+        const close = function () {
+            back.remove();
+        };
+
+        // The page's own keys never hear what is typed here
+        for (const kind of ["keydown", "keyup", "keypress"]) {
+
+            area.addEventListener(kind, function (ev) {
+                ev.stopPropagation();
+            });
+        }
+
+        row.appendChild(button("Cancel", "", close));
+        row.appendChild(button("Import", "on", function () {
+
+            const text = area.value;
+
+            close();
+            sendImport(text, "paste");
+        }));
+        card.appendChild(head);
+        card.appendChild(area);
+        card.appendChild(row);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+        document.body.appendChild(back);
+        area.focus();
+    }
+
+    // A file picked in this browser, read here and sent to the phone
+    function fileImportHere() {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (!file) {
+                return;
+            }
+
+            file.text().then(function (text) {
+                sendImport(text, "file");
+            }, function () {
+                toast("The file could not be read", "bad");
+            });
+        });
+
+        input.click();
+    }
+
+    // Asked here, since nobody may be at the phone, then imported there.
+    // Settings are replaced, song tweaks merged with any differences asked
+    // about on the settings page, a song library added to
+    function sendImport(text, from) {
+
+        if (!String(text || "").trim()) {
+
+            toast("Nothing to import", "bad");
+            return;
+        }
+
+        askConfirm("Import this on the phone? Settings in it replace the phone's, song tweaks are merged and any differences are asked about, songs of a library are added.",
+            "Import", false, function () {
+
+                toast("Importing on the phone", "wait");
+
+                fetch("/importText?from=" + from, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: text,
+                    cache: "no-store"
+                }).then(function (res) {
+                    return res.json();
+                }).then(function (r) {
+
+                    if (r && r.ok) {
+                        toast("Sent to the phone, see the settings page", "ok");
+                    } else {
+                        toast(r && r.why ? r.why : "The phone could not import it", "bad");
+                    }
+                }).catch(function () {
+                    toast("The phone could not be reached", "bad");
+                });
+            });
+    }
+
     // Save an export in this browser: the name is asked first, filled in
     // with the phone's, then the phone hands the file over as a real
     // download under that name. Where it goes is the browser's choice, or
@@ -12227,15 +12392,13 @@
             askText("File name", suggested, "Download", function (typed) {
 
                 const name = cleanJsonName(typed) || suggested;
-                const link = document.createElement("a");
 
-                // Straight from the tap, so the browser lets the download start
-                link.href = "/download?kind=" + esc(kind) + "&name=" + encodeURIComponent(name);
-                link.download = name;
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
+                // Straight from the tap, opened as an address of its own,
+                // which the answer marks as a file to save, so the page stays.
+                // The browser takes the name from the answer, or from the end
+                // of the address
                 toast("Downloading " + name);
+                window.location.href = "/download/" + encodeURIComponent(name) + "?kind=" + esc(kind);
             });
         });
     }
