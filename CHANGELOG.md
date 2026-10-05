@@ -270,6 +270,9 @@ the new settings layout and a number of smaller improvements.
   left or right skips to the previous or next song, Shift with left goes to
   the start of the song and Shift with right to a second before its end.
   The browser gets a media session, so media keys, MPRIS and playerctl work.
+- **Export** offers **Copy to clipboard** too, the export as text, for
+  devices where a file is hard to hand on. In the web view it copies once
+  the phone has sent it over.
 - **Import** offers **Paste** besides a file: an export copied as text is
   pasted into a box, with a Paste button where the page may read the
   clipboard. The web view offers **Paste here**, **A file here** or **The

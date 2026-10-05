@@ -12207,12 +12207,46 @@
                 closeSongMenu();
                 exportHere(kind);
             } },
+            { icon: "link", label: "Copy to clipboard", fn: function () {
+
+                closeSongMenu();
+                copyExportHere(kind);
+            } },
             { icon: "speaker", label: "The phone", fn: function () {
 
                 closeSongMenu();
                 panelAction("hclick", buttonId);
             } }
         ]);
+    }
+
+    // An export onto this browser's clipboard as text. Getting it from the
+    // phone takes a moment, and a browser copies only straight from a tap,
+    // so a second tap copies it once it is here
+    function copyExportHere(kind) {
+
+        toast("Getting the export from the phone", "wait");
+
+        fetch("/download/export.json?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
+
+            if (!res.ok) {
+                throw new Error("HTTP " + res.status);
+            }
+
+            return res.text();
+        }).then(function (text) {
+
+            const kb = Math.max(1, Math.round(text.length / 1024));
+
+            toast("Ready to copy", "ok");
+            askConfirm("The export is here, " + kb + " kB of text. Copy it to the clipboard?", "Copy", false, function () {
+                const ok = copyText(text);
+
+                toast(ok ? "Copied, paste it under Import" : "This browser could not copy it", ok ? "ok" : "bad");
+            });
+        }).catch(function () {
+            toast("Could not get the export from the phone", "bad");
+        });
     }
 
     // Import from this browser, pasted or a file picked here, or on the

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.146";
+    const VERSION = "1.9.9.148";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -27480,6 +27480,17 @@
         }
     }
 
+    // An export onto the clipboard as text, straight from the tap. Paste
+    // under Import reads it back in
+    function copyUserData(kind) {
+
+        const data = collectUserData(kind);
+
+        copyText(exportJson(data)).then(function (ok) {
+            dataStatus(ok ? "Copied " + exportedText(data) + " to the clipboard" : "Could not copy to the clipboard");
+        });
+    }
+
     // Ask where an export goes. With a single way it is used at once
     function chooseExport(kind) {
 
@@ -27493,6 +27504,11 @@
 
         options.push({ label: "Download file", fn: function () {
             downloadUserData(kind);
+        } });
+
+        // As text, to paste into Import on another device or into a note
+        options.push({ label: "Copy to clipboard", fn: function () {
+            copyUserData(kind);
         } });
 
         // The library is a file of its own, Drive keeps only the other two
