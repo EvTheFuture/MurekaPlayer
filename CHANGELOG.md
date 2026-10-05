@@ -276,7 +276,10 @@ the new settings layout and a number of smaller improvements.
 - **Import** offers **Paste** besides a file: an export copied as text is
   pasted into a box, with a Paste button where the page may read the
   clipboard. The web view offers **Paste here**, **A file here** or **The
-  phone**, asks before importing and imports it on the phone.
+  phone**. The phone reads it and the web view asks everything: what it
+  holds, and for song tweaks which value to keep for every song that
+  differs, one by one or for all that are left, before the phone imports
+  it.
 - Export asks whether the file should be saved in the browser or on the phone.
   Saved in the browser, the file name is asked first, filled in with the
   phone's, and the phone hands the file over as a real download under that

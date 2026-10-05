@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.149";
+    const VERSION = "1.9.9.150";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19360,6 +19360,7 @@
         window.__murekaHostExportName = hostExportName;
         window.__murekaHostExportText = hostExportText;
         window.__murekaHostImportText = hostImportText;
+        window.__murekaHostImportApply = hostImportApply;
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
@@ -26440,8 +26441,12 @@
 
     // Report a data action both on the cover status line and inside the
     // settings, where the cover cannot be seen
+    // The last line said about an import or export, for the web view
+    let lastDataStatus = "";
+
     function dataStatus(text) {
 
+        lastDataStatus = text;
         setStatus(text);
 
         if (dataMsgEl) {
@@ -27693,13 +27698,105 @@
         return "";
     }
 
+    // Imports from the web view, read and planned here and finished once
+    // the web view has asked everything it needs, by a key of their own.
+    // Nothing is asked on the phone, where nobody may be
+    const webImports = new Map();
+    let webImportSeq = 0;
+
     // The web view sends a pasted export or a file it read. The answer says
-    // whether it could be read, what follows shows on the settings page
+    // what it holds and, for song tweaks, every song that differs, for the
+    // web view to ask about
     function hostImportText(id, ask) {
 
-        const why = importText(ask && ask.text, ask && ask.from === "file" ? "file" : "pasted text", true);
+        let data = null;
 
-        hostReply(id, JSON.stringify({ ok: why === "", why: why }));
+        try {
+            data = JSON.parse(String(ask && ask.text || "").trim());
+        } catch (e) {
+            data = null;
+        }
+
+        const p = parseUserData(data);
+
+        if (!p) {
+
+            hostReply(id, JSON.stringify({ ok: false, why: "That is not a Mureka Player export" }));
+            return;
+        }
+
+        // An import left waiting is dropped after ten minutes
+        for (const [k, v] of webImports) {
+
+            if (Date.now() - v.at > 600000) {
+                webImports.delete(k);
+            }
+        }
+
+        const key = "i" + (++webImportSeq);
+        const entry = { p: p, at: Date.now(), source: ask && ask.from === "file" ? "file" : "pasted text" };
+        const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
+        const out = { ok: true, key: key, kind: p.kind };
+
+        if (p.kind === "settings") {
+            out.what = "Settings saved " + when;
+        } else if (p.kind === "library") {
+
+            const here = ownLibrary();
+
+            out.what = "The song library saved " + when + ", " + p.library.songs.length + " songs";
+            out.here = Array.isArray(here.songs) ? here.songs.length : 0;
+            out.otherAccount = !!(p.user && selfUserId !== null && p.user !== String(selfUserId));
+        } else {
+
+            const plan = planSongMerge(p);
+            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental" };
+
+            entry.plan = plan;
+            out.what = "Song tweaks saved " + when + ", " + parsedSummary(p);
+            out.conflicts = plan.conflicts.map(function (c) {
+                return {
+                    title: songTitleById(c.id),
+                    what: names[c.type] || c.type,
+                    mine: conflictValue(c, c.mine),
+                    file: conflictValue(c, c.theirs)
+                };
+            });
+        }
+
+        webImports.set(key, entry);
+        hostReply(id, JSON.stringify(out));
+    }
+
+    // The web view has asked everything: the import is put into effect,
+    // with its answers to the songs that differ. The answer is the line
+    // the settings page shows about it
+    function hostImportApply(id, ask) {
+
+        const entry = ask && ask.key ? webImports.get(String(ask.key)) : null;
+
+        if (!entry) {
+
+            hostReply(id, JSON.stringify({ ok: false, why: "The import is no longer waiting, start it again" }));
+            return;
+        }
+
+        webImports.delete(String(ask.key));
+
+        if (entry.plan) {
+
+            const given = Array.isArray(ask.answers) ? ask.answers : [];
+            const answers = entry.plan.conflicts.map(function (c, i) {
+                return given[i] === true;
+            });
+
+            applySongMerge(entry.plan, answers);
+            dataStatus("Imported song tweaks, " + mergeSummary(entry.plan, answers));
+        } else {
+            importParsed(entry.p, entry.source, "Imported", true);
+        }
+
+        hostReply(id, JSON.stringify({ ok: true, text: lastDataStatus }));
     }
 
     // Open the file picker for an import

@@ -392,7 +392,7 @@ final class CarServer {
                 }
             }
 
-            boolean big = "/setCover".equals(path) || "/importText".equals(path);
+            boolean big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path);
 
             if (length < 0 || length > (big ? MAX_COVER : MAX_BODY)) {
 
@@ -498,6 +498,8 @@ final class CarServer {
                 runCommand(out, body);
             } else if ("POST".equals(method) && "/importText".equals(path)) {
                 importText(out, query, body);
+            } else if ("POST".equals(method) && "/importApply".equals(path)) {
+                importApply(out, body);
             } else if ("POST".equals(method) && "/setCover".equals(path)) {
                 setCover(out, query, body);
             } else {
@@ -1258,8 +1260,8 @@ final class CarServer {
     }
 
     // An export from a web view, pasted there or read from a file there,
-    // imported on the phone. Agreed to in the browser already, so the phone
-    // asks nothing, what follows shows on the settings page
+    // read on the phone. The answer says what it holds and what differs,
+    // for the browser to ask about before importApply
     private void importText(OutputStream out, String query, byte[] body) throws IOException {
 
         lastPoll = System.currentTimeMillis();
@@ -1279,6 +1281,27 @@ final class CarServer {
         Hub.note("Command", "From a web view: an import, " + (body.length / 1024) + " kB");
 
         String answer = Hub.requestLater("__murekaHostImportText", ask.toString(), 30000);
+
+        send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
+    }
+
+    // An import the browser has asked everything about, put into effect on
+    // the phone with its answers
+    private void importApply(OutputStream out, byte[] body) throws IOException {
+
+        lastPoll = System.currentTimeMillis();
+
+        String json = new String(body, StandardCharsets.UTF_8);
+
+        try {
+            new JSONObject(json);
+        } catch (JSONException e) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false}"));
+            return;
+        }
+
+        String answer = Hub.requestLater("__murekaHostImportApply", json, 30000);
 
         send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
     }

@@ -8961,6 +8961,19 @@
         box.textContent = "";
 
         for (const node of panelClean(items, true)) {
+
+            // A button on its own line on the phone keeps a line of its own,
+            // lined up with the rows of buttons around it
+            if (node.t === "button" && !node.wide) {
+
+                const line = document.createElement("div");
+
+                line.className = "pRow";
+                line.appendChild(panelNode(node, true));
+                box.appendChild(line);
+                continue;
+            }
+
             box.appendChild(panelNode(node, false, true));
         }
 
@@ -12371,9 +12384,9 @@
         input.click();
     }
 
-    // Asked here, since nobody may be at the phone, then imported there.
-    // Settings are replaced, song tweaks merged with any differences asked
-    // about on the settings page, a song library added to
+    // The phone reads the export and says what it holds and which songs
+    // differ. Everything is asked here, since nobody may be at the phone,
+    // then the phone puts it into effect
     function sendImport(text, from) {
 
         if (!String(text || "").trim()) {
@@ -12382,29 +12395,123 @@
             return;
         }
 
-        askConfirm("Import this on the phone? Settings in it replace the phone's, song tweaks are merged and any differences are asked about, songs of a library are added.",
-            "Import", false, function () {
+        toast("Reading it on the phone", "wait");
 
-                toast("Importing on the phone", "wait");
+        fetch("/importText?from=" + from, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: text,
+            cache: "no-store"
+        }).then(function (res) {
+            return res.json();
+        }).then(function (r) {
 
-                fetch("/importText?from=" + from, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: text,
-                    cache: "no-store"
-                }).then(function (res) {
-                    return res.json();
-                }).then(function (r) {
+            if (!r || !r.ok) {
 
-                    if (r && r.ok) {
-                        toast("Sent to the phone, see the settings page", "ok");
-                    } else {
-                        toast(r && r.why ? r.why : "The phone could not import it", "bad");
-                    }
-                }).catch(function () {
-                    toast("The phone could not be reached", "bad");
+                toast(r && r.why ? r.why : "The phone could not read it", "bad");
+                return;
+            }
+
+            toast("Read, waiting for you", "ok");
+
+            if (r.kind === "settings") {
+
+                askConfirm(r.what + ". Import them? The phone's settings are replaced.", "Import", false, function () {
+                    applyImport(r.key, []);
+                });
+                return;
+            }
+
+            if (r.kind === "library") {
+
+                askConfirm(r.what + ". Import it?"
+                    + (r.here > 0 ? " The " + r.here + " songs on the phone are kept, songs only in the file are added." : "")
+                    + (r.otherAccount ? " The file is from another Mureka account." : ""), "Import", false, function () {
+                    applyImport(r.key, []);
+                });
+                return;
+            }
+
+            const conflicts = Array.isArray(r.conflicts) ? r.conflicts : [];
+
+            askConfirm(r.what + ". Merge them into the phone's?"
+                + (conflicts.length > 0 ? " " + conflicts.length + (conflicts.length === 1 ? " song differs" : " songs differ")
+                    + ", you choose which to keep." : ""), conflicts.length > 0 ? "Continue" : "Import", false, function () {
+
+                askConflicts(conflicts, function (answers) {
+                    applyImport(r.key, answers);
                 });
             });
+        }).catch(function () {
+            toast("The phone could not be reached", "bad");
+        });
+    }
+
+    // One question per song that differs, with the choice for all that are
+    // left. done hears true for every song where the file is used
+    function askConflicts(conflicts, done) {
+
+        const answers = [];
+
+        const ask = function (i) {
+
+            if (i >= conflicts.length) {
+
+                done(answers);
+                return;
+            }
+
+            const c = conflicts[i];
+            const left = conflicts.length - i;
+
+            const answer = function (useFile, all) {
+
+                return function () {
+
+                    const upTo = all ? conflicts.length : i + 1;
+
+                    for (let k = i; k < upTo; k++) {
+                        answers[k] = useFile;
+                    }
+
+                    closeSongMenu();
+                    ask(upTo);
+                };
+            };
+
+            const items = [
+                { icon: "check", label: "Keep mine, " + c.mine, fn: answer(false, false) },
+                { icon: "download", label: "Use the file's, " + c.file, fn: answer(true, false) }
+            ];
+
+            if (left > 1) {
+
+                items.push({ icon: "check", label: "Keep mine for all " + left, fn: answer(false, true) });
+                items.push({ icon: "download", label: "Use the file's for all " + left, fn: answer(true, true) });
+            }
+
+            openChoice((i + 1) + " of " + conflicts.length + ": " + c.title + ", " + c.what.toLowerCase(), items);
+        };
+
+        ask(0);
+    }
+
+    function applyImport(key, answers) {
+
+        toast("Importing on the phone", "wait");
+
+        fetch("/importApply", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: key, answers: answers }),
+            cache: "no-store"
+        }).then(function (res) {
+            return res.json();
+        }).then(function (r) {
+            toast(r && r.ok ? (r.text || "Imported") : (r && r.why ? r.why : "The phone could not import it"), r && r.ok ? "ok" : "bad");
+        }).catch(function () {
+            toast("The phone could not be reached", "bad");
+        });
     }
 
     // Save an export in this browser: the name is asked first, filled in
