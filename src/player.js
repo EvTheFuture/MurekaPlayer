@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.148";
+    const VERSION = "1.9.9.149";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3223,8 +3223,35 @@
         }
     }
 
-    // Songs made by trimming in the player, kept across restarts
+    // Songs made by trimming in the player, until Mureka's own data marks
+    // them trimmed too. Mureka marks trimmed songs in the song list, so a
+    // mark here only bridges the time from a trim to the next Load or
+    // Rescan, and is dropped once Mureka's mark is seen
     let trimmedIds = loadTrimmed();
+
+    dropConfirmedTrimMarks(cache.songs);
+
+    function dropConfirmedTrimMarks(songs) {
+
+        let dropped = 0;
+
+        for (const song of songs || []) {
+
+            if (song && hasTrimField(song) && trimmedIds.delete(String(song.song_id))) {
+                dropped += 1;
+            }
+        }
+
+        if (dropped > 0) {
+
+            saveTrimmed();
+
+            // Also run while the page starts, before the log is set up
+            setTimeout(function () {
+                dbgLog("Feed", dropped + " trim marks kept here are now in Mureka's data, dropped here");
+            }, 0);
+        }
+    }
 
     function loadTrimmed() {
 
@@ -4792,6 +4819,11 @@
         // What the page says about Mureka's new mark, under Mureka requests,
         // so it can be seen whether the feed carries the flag at all
         logFeedFields(json);
+
+        // Songs Mureka now marks trimmed need no mark of ours
+        if (!feed().creator) {
+            dropConfirmedTrimMarks(extractSongs(json));
+        }
 
         if (!feed().creator) {
 
@@ -25463,7 +25495,7 @@
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
         const dataHint = document.createElement("div");
-        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks, trim marks and saved creators."
+        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks and saved creators."
             + " Share saves to the Google Drive or Files app, Import can pick the file"
             + " from there. Import sees what a file holds. Song tweaks are merged, and"
             + " when a song has a different value here and in the file you are asked"
@@ -26637,7 +26669,6 @@
             ratings: {},
             manualBpm: {},
             manualInstrumental: Array.from(manualInstrumental),
-            trimmed: Array.from(trimmedIds),
             creators: savedCreators.slice(),
             cleared: {
                 rating: Object.keys(clearedMarks.rating),
@@ -26777,17 +26808,8 @@
             }
         }
 
-        // Songs made by trimming, files from before 1.9.9.55 have none
-        if (Array.isArray(data.trimmed)) {
-
-            for (const id of data.trimmed) {
-
-                if (id !== null && id !== undefined && id !== "") {
-                    out.trimmed.push(String(id));
-                }
-            }
-        }
-
+        // Trim marks in files from 1.9.9.55 to 1.9.9.148 are left out, Mureka
+        // marks trimmed songs itself
         return out;
     }
 
@@ -27220,7 +27242,7 @@
 
         return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
             Object.keys(data.manualBpm).length, data.manualInstrumental.length,
-            data.creators.length, data.trimmed.length);
+            data.creators.length, 0);
     }
 
     // The file name of an export, without its extension

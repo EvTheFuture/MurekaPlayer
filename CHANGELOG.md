@@ -350,7 +350,8 @@ the new settings layout and a number of smaller improvements.
   moved. The new song gets a title of its own and is put at the top of the
   list, marked new. A small gold T on the public or draft badge marks every
   trimmed song, from Mureka's own mark, so also songs trimmed on Mureka's
-  site or another device, once a Load or Rescan has read them. It shows
+  site or another device, once a Load or Rescan has read them. A song
+  trimmed here counts as trimmed straight away until then. It shows
   wherever that badge shows: the lists, and the playing song in the web
   view. **Delete original**, ticked when confirming, deletes
   the original on Mureka and from the lists here once the new song has
