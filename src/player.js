@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.138";
+    const VERSION = "1.9.9.140";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -294,7 +294,9 @@
             hint: "The screen, fullscreen, the page showing or hiding, and its size." },
         { id: "settings", name: "Setting changes", kinds: ["Setting"],
             hint: "Each setting changed, from what to what." },
-        { id: "network", name: "Network", kinds: ["Net"],
+        { id: "power", name: "Power saving", kinds: ["Power", "Hotspot"], app: true,
+            hint: "The charger and the chosen Bluetooth devices coming and going, the countdown, the hotspot and the background work stopping and starting." },
+        { id: "network", name: "Network", kinds: ["Net", "Offline"],
             hint: "Going online and offline, and the phone not answering the web view.",
             plainHint: "Going online and offline." },
         { id: "errors", name: "Errors", kinds: ["Error"],
@@ -19117,6 +19119,12 @@
             checkNet(String(arg || "asked by the app"), true);
         } else if (cmd === "hotspotAuto") {
             followHotspotSwitch(arg === "off" ? "off" : "on");
+        } else if (cmd === "hotspotWaiting") {
+
+            const n = Number(arg) || 0;
+
+            dbgLog("Hotspot", "power saving waits for " + n + " browser" + (n === 1 ? "" : "s") + " on the hotspot");
+            showToast("The hotspot stays on until the " + (n === 1 ? "browser on it has" : "browsers on it have") + " gone", true);
         } else if (cmd === "unplugReason") {
             unplugWhy = arg === "bluetooth" ? "bluetooth" : "charger";
         } else if (cmd === "skipUnplug") {
@@ -23694,7 +23702,7 @@
                 master: ["Save power when on battery", "Turns everything below on or off together. Off, nothing changes when the phone goes on battery or back on the charger."],
                 away: "When the charger is pulled out",
                 grace: "How long the phone may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once.",
-                quiet: "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the phone is back on the charger.",
+                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the phone is back on the charger.",
                 hotspotOff: ["Turn off hotspot when on battery", "After the grace time on battery. The hotspot warms the phone the most, and with nothing connected it does no good."],
                 hotspotOn: ["Turn on hotspot when charging", "As soon as the phone is back on the charger, so devices that use its hotspot find it again without the phone being touched."]
             },
@@ -23702,7 +23710,7 @@
                 master: ["Save power when Bluetooth disconnects", "Turns everything below on or off together. Off, nothing changes when the chosen Bluetooth devices disconnect or connect again."],
                 away: "When the Bluetooth devices disconnect",
                 grace: "How long after the last chosen device disconnects before anything is stopped. Connected again in time, nothing happens, so a short drop does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once.",
-                quiet: "The web view stops, and so do the play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake, so it can rest and cool down. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
+                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
                 hotspotOff: ["Turn off hotspot when disconnected", "After the grace time once the last chosen device has disconnected. The hotspot warms the phone the most, and with nothing connected it does no good."],
                 hotspotOn: ["Turn on hotspot when connected", "As soon as one of the chosen devices connects, so devices that use the phone's hotspot find it again without the phone being touched."]
             }
@@ -23754,6 +23762,17 @@
         const hotspotOffRow = makeBoolRow("Turn off hotspot when on battery",
             function () { return on("unplugHotspot"); },
             function (v) { wantHotspot("unplugHotspot", v); });
+
+        // With browsers of the web view on the hotspot: off anyway, which cuts
+        // them off, or once they have all gone
+        const hotspotWaitRow = makeChoiceRow([
+            { label: "Turn off anyway", value: "force" },
+            { label: "Wait for them", value: "wait" }
+        ], function () {
+            return host.getPref("hotspotOffMode", "force") === "wait" ? "wait" : "force";
+        }, function (v) {
+            host.setPref("hotspotOffMode", v);
+        });
 
         const quietRow = makeBoolRow("Stop all background work",
             function () { return on("unplugQuiet"); },
@@ -24166,6 +24185,9 @@
         add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It turns the phone's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(warnEl);
         add(withHint(hotspotOffRow, WORDS.charger.hotspotOff[1]));
+        add(makeSubLabel("Browsers on the hotspot"));
+        add(hotspotWaitRow);
+        add(makeHint("When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the phone's Wi-Fi never count."));
         add(withHint(hotspotOnRow, WORDS.charger.hotspotOn[1]));
         add(statusEl);
         add(tryRow);
@@ -26350,6 +26372,7 @@
         chargeGrace: "60",
         unplugPause: "0",
         unplugHotspot: "0",
+        hotspotOffMode: "force",
         unplugQuiet: "0",
         plugHotspot: "0",
         saveTrigger: "charger",

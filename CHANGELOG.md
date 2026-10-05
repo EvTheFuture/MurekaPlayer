@@ -196,6 +196,13 @@ the new settings layout and a number of smaller improvements.
   the web view, saying "Running on battery" or "Bluetooth disconnected",
   with **Skip shutdown**, and the charger or a ticked device coming back in
   time stops it. When it comes back, the background work starts again.
+  The web view stays reachable all along, and while a browser is
+  connected to it, from a computer at home say, nothing is stopped.
+  **Browsers on the hotspot** chooses what happens when the hotspot is to
+  go off while browsers of the web view use it: **Turn off anyway**, the
+  default, or **Wait for them**, which turns it off once the last of them
+  has gone. **Power saving** under What the debug overlays log shows all
+  of it as it happens.
   While the background work is stopped, a small **Power saving** mark
   shows in the player's header, and a tap on it opens the page. The names
   and explanations of the settings follow what starts it.

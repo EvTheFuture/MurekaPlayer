@@ -341,11 +341,14 @@ public class PlayerService extends Service implements Hub.Listener {
         return intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
     }
 
-    // The background work stopped while the charger is out: the web view
-    // server, the covers fetched ahead, the player's own background reading
-    // and caching, and the locks keeping the CPU and Wi-Fi awake. Started
-    // again when the charger comes back. The music, playing or not, keeps
-    // its own lock
+    // The background work stopped by the power saving: the covers fetched
+    // ahead, the player's own background reading and caching, and the locks
+    // keeping the CPU and Wi-Fi awake. The web view's server keeps running,
+    // so a browser can still connect, at home on a computer say, and while
+    // one is connected nothing is stopped. The music, playing or not, keeps
+    // its own lock. quietWanted is what the power saving asks for, quiet
+    // what is in force
+    private boolean quietWanted = false;
     private boolean quiet = false;
 
     static void setQuiet(boolean on) {
@@ -353,15 +356,36 @@ public class PlayerService extends Service implements Hub.Listener {
         MAIN.post(() -> {
 
             if (instance != null) {
-                instance.applyQuiet(on);
+
+                instance.quietWanted = on;
+                instance.applyQuiet();
             }
         });
     }
 
-    private void applyQuiet(boolean on) {
+    // A browser of the web view came or went
+    static void clientsChanged() {
+
+        MAIN.post(() -> {
+
+            if (instance != null && instance.quietWanted) {
+                instance.applyQuiet();
+            }
+        });
+    }
+
+    private void applyQuiet() {
+
+        int browsers = Hub.clients();
+        boolean on = quietWanted && browsers == 0;
 
         if (on == quiet) {
             return;
+        }
+
+        if (quietWanted) {
+            Hub.note("Power", on ? "no browser connected, the background work stops"
+                : "a browser connected, the background work goes on");
         }
 
         quiet = on;
@@ -369,10 +393,6 @@ public class PlayerService extends Service implements Hub.Listener {
         Hub.command("quiet", on);
 
         if (on) {
-
-            if (server != null) {
-                server.stop();
-            }
 
             if (!playing) {
 
@@ -383,10 +403,6 @@ public class PlayerService extends Service implements Hub.Listener {
             if (clientLock != null) {
                 clientLock.release();
             }
-        } else {
-
-            server = new CarServer(this, PORT);
-            server.start();
         }
 
         updateNotification();
@@ -436,7 +452,9 @@ public class PlayerService extends Service implements Hub.Listener {
 
         PlayerService s = instance;
 
-        if (s != null && s.clientLock != null && !s.quiet) {
+        // Even with the power saving on: a browser connecting ends it, and
+        // the phone must stay awake long enough to see that
+        if (s != null && s.clientLock != null) {
             s.clientLock.acquire(90 * 1000L);
         }
     }

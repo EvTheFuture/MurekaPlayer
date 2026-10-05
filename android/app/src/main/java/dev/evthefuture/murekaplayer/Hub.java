@@ -219,6 +219,18 @@ final class Hub {
             seq += 1;
             LOCK.notifyAll();
         }
+
+        // With a browser connected the power saving leaves the background
+        // work running
+        PlayerService.clientsChanged();
+    }
+
+    // How many browsers of the web view are connected now
+    static int clients() {
+
+        synchronized (LOCK) {
+            return clients;
+        }
     }
 
     // The player's state with the app's own fields in it. Called with LOCK

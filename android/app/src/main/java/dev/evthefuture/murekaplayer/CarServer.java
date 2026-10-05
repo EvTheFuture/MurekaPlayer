@@ -106,6 +106,11 @@ final class CarServer {
     // Every browser that asked for the state lately, by the id it sends with
     // the request. Two browsers on one page each count once
     private final java.util.Map<String, Long> clients = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // Those of them that came over the phone's hotspot, and how many of them
+    // are here now, for the power saving that may wait for them to go
+    private final java.util.Set<String> hotspotIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static volatile int hotspotBrowsers = 0;
     private volatile boolean running = false;
 
     // What the server is doing, shown in the notification so a server that
@@ -239,14 +244,43 @@ final class CarServer {
 
     // A browser asked for the state, so it is here. Its own id keeps two
     // pages on one machine apart
-    private void noteClient(String id) {
+    private void noteClient(String id, boolean viaHotspot) {
 
         if (id == null || id.isEmpty() || id.length() > 64) {
             return;
         }
 
         clients.put(id, System.currentTimeMillis());
+
+        if (viaHotspot) {
+            hotspotIds.add(id);
+        } else {
+            hotspotIds.remove(id);
+        }
+
         countClients();
+    }
+
+    // How many browsers of the web view are on the phone's hotspot now
+    static int hotspotBrowsers() {
+        return hotspotBrowsers;
+    }
+
+    // A sender on a network the phone hands out itself: not its Wi-Fi, not
+    // the mobile network and not the phone itself. The car on the VPN comes
+    // over the hotspot too
+    private boolean onHotspot(InetAddress remote) {
+
+        InetAddress r = plainV4(remote);
+
+        if (r == null || r.isLoopbackAddress()) {
+            return false;
+        }
+
+        NetworkInterface ni = interfaceFor(r);
+        String name = ni != null && ni.getName() != null ? ni.getName() : "";
+
+        return !name.isEmpty() && !wifiInterfaces.contains(name) && !isCell(name);
     }
 
     // How many browsers are here now, into the state so each of them can
@@ -258,16 +292,26 @@ final class CarServer {
 
         boolean left = false;
 
+        int onHotspot = 0;
+
         for (java.util.Map.Entry<String, Long> e : clients.entrySet()) {
 
             if (now - e.getValue() > CLIENT_GONE_MS) {
 
                 clients.remove(e.getKey());
+                hotspotIds.remove(e.getKey());
                 left = true;
             } else {
+
                 here += 1;
+
+                if (hotspotIds.contains(e.getKey())) {
+                    onHotspot += 1;
+                }
             }
         }
+
+        hotspotBrowsers = onHotspot;
 
         Hub.setClients(here);
 
@@ -293,6 +337,9 @@ final class CarServer {
 
             // A request from a web view keeps the phone awake a while
             PlayerService.webViewActive();
+
+            // Whether it came over the hotspot rather than the phone's Wi-Fi
+            boolean viaHotspot = onHotspot(c.getInetAddress());
 
             InputStream in = c.getInputStream();
             OutputStream out = c.getOutputStream();
@@ -365,7 +412,7 @@ final class CarServer {
                 String json;
 
                 lastPoll = System.currentTimeMillis();
-                noteClient(param(query, "cid"));
+                noteClient(param(query, "cid"), viaHotspot);
 
                 if (since.isEmpty()) {
                     json = Hub.awaitState(-1, 0);

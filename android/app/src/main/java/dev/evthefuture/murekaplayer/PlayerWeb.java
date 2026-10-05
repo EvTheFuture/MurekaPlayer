@@ -681,6 +681,11 @@ final class PlayerWeb {
                 ChargeWatch.settingsChanged();
             }
 
+            // Turning the hotspot off, or how: a wait for browsers follows it
+            if (CarSettings.UNPLUG_HOTSPOT.equals(key) || CarSettings.HOTSPOT_OFF_MODE.equals(key)) {
+                ChargeWatch.hotspotSettingChanged();
+            }
+
             PlayerService.settingsChanged();
 
             return true;

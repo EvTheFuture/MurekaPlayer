@@ -62,6 +62,12 @@ final class ChargeWatch {
     // look, so only a change counts
     private static boolean btHere = false;
 
+    // The hotspot is due to go off and waits for the browsers on it to go,
+    // looked at every few seconds
+    private static boolean hotspotWaiting = false;
+    private static final long HOTSPOT_LOOK_MS = 5000;
+    private static final Runnable HOTSPOT_LOOK = ChargeWatch::hotspotLook;
+
     private ChargeWatch() {
     }
 
@@ -104,6 +110,7 @@ final class ChargeWatch {
     static void stop() {
 
         cancel(0);
+        stopHotspotWait();
         BtWatch.stop();
 
         if (receiver != null && ctx != null) {
@@ -263,6 +270,12 @@ final class ChargeWatch {
 
         String what = CarSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth device back" : "on the charger";
 
+        if (hotspotWaiting) {
+
+            Hub.note("Power", what + ", the hotspot stays on");
+            stopHotspotWait();
+        }
+
         if (counting) {
 
             Hub.note("Power", what + ", nothing was stopped");
@@ -322,9 +335,19 @@ final class ChargeWatch {
 
         if (CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)) {
 
-            Hub.note("Power", "turning the hotspot off");
-            Hub.command("hotspotAuto", "off");
-            Hotspot.stop(ctx);
+            int browsers = CarServer.hotspotBrowsers();
+
+            if (CarSettings.hotspotWaits(ctx) && browsers > 0) {
+
+                Hub.note("Power", browsers + (browsers == 1 ? " browser is" : " browsers are")
+                    + " on the hotspot, it goes off once they are gone");
+                Hub.command("hotspotWaiting", browsers);
+                hotspotWaiting = true;
+                MAIN.removeCallbacks(HOTSPOT_LOOK);
+                MAIN.postDelayed(HOTSPOT_LOOK, HOTSPOT_LOOK_MS);
+            } else {
+                hotspotOff(browsers > 0 ? "the browsers on it are cut off" : "nothing on it");
+            }
         }
 
         if (CarSettings.on(ctx, CarSettings.UNPLUG_QUIET)) {
@@ -333,6 +356,60 @@ final class ChargeWatch {
             quietHere = true;
             PlayerService.setQuiet(true);
         }
+    }
+
+    // The hotspot off, the player told so it can say how it went
+    private static void hotspotOff(String why) {
+
+        Hub.note("Power", "turning the hotspot off, " + why);
+        Hub.command("hotspotAuto", "off");
+        Hotspot.stop(ctx);
+    }
+
+    // Waiting for the browsers on the hotspot: off once the last has gone,
+    // a browser counting as gone a while after its last word
+    private static void hotspotLook() {
+
+        if (!hotspotWaiting) {
+            return;
+        }
+
+        if (CarServer.hotspotBrowsers() > 0) {
+
+            MAIN.postDelayed(HOTSPOT_LOOK, HOTSPOT_LOOK_MS);
+            return;
+        }
+
+        stopHotspotWait();
+        hotspotOff("the last browser on it has gone");
+    }
+
+    private static void stopHotspotWait() {
+
+        hotspotWaiting = false;
+        MAIN.removeCallbacks(HOTSPOT_LOOK);
+    }
+
+    // Turning the hotspot off was switched off, or set not to wait, while it
+    // waited for browsers
+    static void hotspotSettingChanged() {
+
+        MAIN.post(() -> {
+
+            if (!hotspotWaiting || ctx == null) {
+                return;
+            }
+
+            if (!CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)) {
+
+                Hub.note("Power", "turning the hotspot off was switched off, it stays on");
+                stopHotspotWait();
+            } else if (!CarSettings.hotspotWaits(ctx)) {
+
+                stopHotspotWait();
+                hotspotOff("set not to wait for the browsers");
+            }
+        });
     }
 
     // The countdown stopped, why tells the player: -1 back again, -2

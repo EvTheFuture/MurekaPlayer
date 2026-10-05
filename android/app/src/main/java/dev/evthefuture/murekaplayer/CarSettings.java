@@ -47,6 +47,12 @@ final class CarSettings {
     static final String UNPLUG_QUIET = "unplugQuiet";
     static final String PLUG_HOTSPOT = "plugHotspot";
 
+    // When the hotspot is to go off and browsers of the web view are on it:
+    // off anyway, or once they have all gone
+    static final String HOTSPOT_OFF_MODE = "hotspotOffMode";
+    static final String HOTSPOT_OFF_FORCE = "force";
+    static final String HOTSPOT_OFF_WAIT = "wait";
+
     // What starts the power saving: the charger pulled out, or the chosen
     // Bluetooth devices all gone, stored as their addresses with commas
     static final String SAVE_TRIGGER = "saveTrigger";
@@ -123,6 +129,11 @@ final class CarSettings {
     }
 
     // What starts the power saving, the charger unless changed
+    // Whether turning the hotspot off waits for the browsers on it
+    static boolean hotspotWaits(Context c) {
+        return HOTSPOT_OFF_WAIT.equals(prefs(c).getString(HOTSPOT_OFF_MODE, HOTSPOT_OFF_FORCE));
+    }
+
     static String trigger(Context c) {
 
         return TRIGGER_BLUETOOTH.equals(prefs(c).getString(SAVE_TRIGGER, TRIGGER_CHARGER))
@@ -190,6 +201,9 @@ final class CarSettings {
         } else if (SAVE_TRIGGER.equals(key)) {
 
             v = TRIGGER_BLUETOOTH.equals(v) ? TRIGGER_BLUETOOTH : TRIGGER_CHARGER;
+        } else if (HOTSPOT_OFF_MODE.equals(key)) {
+
+            v = HOTSPOT_OFF_WAIT.equals(v) ? HOTSPOT_OFF_WAIT : HOTSPOT_OFF_FORCE;
         } else if (CHARGE_GRACE.equals(key)) {
 
             if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {
