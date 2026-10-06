@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.158";
+    const VERSION = "1.9.9.159";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -32999,21 +32999,30 @@
         } catch (e) {
         }
 
-        // Fallback, an off screen textarea and execCommand
+        // Fallback, an off screen textarea and execCommand. Safari on iOS
+        // copies only a range selected in an editable box, from end to end
         try {
             const area = document.createElement("textarea");
 
             area.value = text;
-            area.style.position = "fixed";
-            area.style.top = "-1000px";
-            area.style.left = "-1000px";
+            area.contentEditable = "true";
+            area.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0";
             document.body.appendChild(area);
-            area.focus();
+            area.focus({ preventScroll: true });
+
+            const range = document.createRange();
+            const sel = window.getSelection();
+
+            range.selectNodeContents(area);
+            sel.removeAllRanges();
+            sel.addRange(range);
             area.select();
+            area.setSelectionRange(0, text.length);
 
             const ok = document.execCommand("copy");
 
             area.remove();
+            sel.removeAllRanges();
 
             return ok;
         } catch (e) {

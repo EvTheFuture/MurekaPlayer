@@ -12752,12 +12752,29 @@
 
         const area = document.createElement("textarea");
 
+        // Safari on iOS selects nothing in a read only box, and then copies
+        // nothing while still saying it did, leaving the old clipboard. An
+        // editable box selected as a range and from end to end works there,
+        // 16 pixels keeps the page from zooming in
         area.value = text;
-        area.setAttribute("readonly", "");
-        area.style.position = "fixed";
-        area.style.opacity = "0";
+        area.contentEditable = "true";
+        area.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0";
         document.body.appendChild(area);
-        area.select();
+
+        try {
+
+            const range = document.createRange();
+            const sel = window.getSelection();
+
+            area.focus({ preventScroll: true });
+            range.selectNodeContents(area);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            area.select();
+            area.setSelectionRange(0, text.length);
+        } catch (e) {
+            area.select();
+        }
 
         let ok = false;
 
@@ -12768,6 +12785,12 @@
         }
 
         area.remove();
+
+        try {
+            window.getSelection().removeAllRanges();
+        } catch (e) {
+            // Nothing selected then
+        }
 
         return ok;
     }
@@ -15024,14 +15047,19 @@
     // once: a browser copies only straight from a tap, not once a fetch
     // from the phone has come back
     const exportsHere = {};
+    let exportsRound = 0;
 
     function fetchExports() {
+
+        // Only the latest round counts, an older answer coming in late
+        // would otherwise put back what was there before a change
+        const round = ++exportsRound;
 
         for (const kind of ["songs", "library"]) {
 
             exportsHere[kind] = null;
 
-            fetch("/download/export.json?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
+            fetch("/download/export.json?kind=" + esc(kind) + "&t=" + Date.now(), { cache: "no-store" }).then(function (res) {
 
                 if (!res.ok) {
                     throw new Error("HTTP " + res.status);
@@ -15039,9 +15067,15 @@
 
                 return res.text();
             }).then(function (text) {
-                exportsHere[kind] = text;
+
+                if (round === exportsRound) {
+                    exportsHere[kind] = text;
+                }
             }).catch(function () {
-                exportsHere[kind] = null;
+
+                if (round === exportsRound) {
+                    exportsHere[kind] = null;
+                }
             });
         }
     }
