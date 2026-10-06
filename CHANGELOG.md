@@ -326,6 +326,11 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **Play last** in the song menu, in the player and in the web view, beside
+  Play next. With the player stopped, Play next and Play last put a queue
+  together by hand: it holds only the songs put in, Play starts it, Repeat
+  all goes round those songs and the list does not fill it up. A tap on one
+  of its songs plays from there.
 - **Copy tweaks, Copy songs and Import** at the foot of the menu under the
   three lines, in the player and in the web view. Copy puts the song tweaks
   or the song library on the clipboard at once and says so, and Import opens

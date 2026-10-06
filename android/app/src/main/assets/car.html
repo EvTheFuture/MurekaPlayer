@@ -7435,7 +7435,8 @@
                 box.appendChild(row);
             }
 
-            $("counts").textContent = "Queue, " + (data.pos + 1) + " of " + data.total
+            $("counts").textContent = (data.pos < 0 ? "Queue, " + data.total + " to play"
+                : "Queue, " + (data.pos + 1) + " of " + data.total)
                 + (listQuery ? ", " + data.items.length + " matching " + listQuery : "");
 
             quietScroll();
@@ -10906,7 +10907,8 @@
 
             miniTotal = items.length;
             miniLoaded = items.length;
-            $("miniCount").textContent = "Queue, " + (data.pos + 1) + " of " + data.total;
+            $("miniCount").textContent = data.pos < 0 ? "Queue, " + data.total + " to play"
+                : "Queue, " + (data.pos + 1) + " of " + data.total;
 
             if (first && stayTop) {
 
@@ -12726,7 +12728,7 @@
             closeSongMenu();
         }));
 
-        box.appendChild(menuItem("queueAdd", "Add to queue", function () {
+        box.appendChild(menuItem("queueAdd", "Play last", function () {
 
             songAction("addQueue");
             closeSongMenu();

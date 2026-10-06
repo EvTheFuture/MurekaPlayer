@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.156";
+    const VERSION = "1.9.9.157";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -618,6 +618,14 @@
     // queue view can show what is coming up
     let queue = [];
     let queuePos = -1;
+
+    // True while the queue is one put together by hand, with Play next and
+    // Play last from a stopped player. It then holds only those songs: the
+    // list does not fill it up, and Repeat all goes round those songs
+    let queueOwn = false;
+
+    // Counts merges of song tweaks, so the web view reads its list again
+    let songDataStamp = 0;
 
     // When true the queue is built and rebuilt in random order
     // Starts from the default play mode chosen in settings
@@ -2311,11 +2319,21 @@
                 time = resumeState.time;
             }
 
+            let own = queueOwn;
+
             // After Stop the live queue is empty, persist the resume point instead
             if ((pos < 0 || q.length === 0) && resumeState && resumeState.queue.length) {
                 q = resumeState.queue;
                 pos = resumeState.queuePos;
                 time = resumeState.time || 0;
+                own = resumeState.own === true;
+            }
+
+            // A queue put together by hand and not started yet starts at
+            // its first song
+            if (own && pos < 0 && q.length > 0) {
+                pos = 0;
+                time = 0;
             }
 
             if (pos < 0 || pos >= q.length || q.length === 0) {
@@ -2332,7 +2350,8 @@
                 currentId: cur ? cur.song_id : null,
                 pos: pos,
                 time: time,
-                shuffle: shuffleMode
+                shuffle: shuffleMode,
+                own: own
             }));
         } catch (e) {
         }
@@ -2400,6 +2419,7 @@
         }
 
         queuePos = pos;
+        queueOwn = saved.own === true;
 
         // Restore the shuffle state the queue was built with
         if (typeof saved.shuffle === "boolean" && saved.shuffle !== shuffleMode) {
@@ -2414,7 +2434,7 @@
         const queued = new Set(queue.map(function (s) {
             return s.song_id;
         }));
-        const stale = queue.some(function (s, i) {
+        const stale = !queueOwn && queue.some(function (s, i) {
             return i > queuePos && !passesFilters(s);
         }) || orderedSongs().some(function (s) {
             return passesFilters(s) && !queued.has(s.song_id);
@@ -2426,7 +2446,7 @@
 
         // Show the song as loaded and paused, Play resumes it at the saved time
         currentSong = queue[queuePos];
-        resumeState = { queue: queue, queuePos: queuePos, time: saved.time || 0 };
+        resumeState = { queue: queue, queuePos: queuePos, time: saved.time || 0, own: queueOwn };
 
         updatePlayerInfo(currentSong);
         renderList();
@@ -7841,6 +7861,9 @@
         // A new queue has no songs put in to play next
         playNextMarks.clear();
 
+        // Made from the list, so no longer a queue put together by hand
+        queueOwn = false;
+
         let songs = orderedSongs().filter(passesFilters);
 
         // If the chosen start song is hidden by the filter, fall back to the full
@@ -7905,8 +7928,22 @@
 
             queue = resumeState.queue;
             queuePos = resumeState.queuePos;
+            queueOwn = resumeState.own === true;
             pendingSeek = resumeState.time || 0;
             resumeState = null;
+            playCurrent();
+            return;
+        }
+
+        // A queue put together by hand while stopped starts at its first
+        // song, shuffled first with shuffle on
+        if (queueOwn && queue.length && queuePos < 0) {
+
+            if (shuffleMode) {
+                queue = shuffleCopy(queue);
+            }
+
+            queuePos = 0;
             playCurrent();
             return;
         }
@@ -7993,6 +8030,23 @@
             return;
         }
 
+        // In a queue put together by hand, a song of it plays from its place
+        // there, the queue stays as it is
+        if (queueOwn) {
+
+            const at = queue.findIndex(function (s) {
+                return s.song_id === songId;
+            });
+
+            if (at !== -1) {
+
+                resumeState = null;
+                queuePos = at;
+                playCurrent();
+                return;
+            }
+        }
+
         buildQueue(songId);
         playCurrent();
     }
@@ -8038,7 +8092,7 @@
     // one and what is cached ahead all brought up to date
     function requeueAroundCurrent(songId) {
 
-        if (!queueOutOfStep()) {
+        if (queueOwn || !queueOutOfStep()) {
             return;
         }
 
@@ -8054,12 +8108,88 @@
         dbgLog("Song", "queue made again from the list around the playing song, " + queue.length + " songs");
     }
 
-    // Insert a song to play right after the current one
-    // With nothing playing yet, just start from that song
+    // Whether no song is playing or loaded, after Stop or before the first
+    // Play, so Play next and Play last put a queue together by hand
+    function queueIdle() {
+        return queuePos < 0 || queuePos >= queue.length;
+    }
+
+    // A song put in the queue while nothing plays. The first one starts a
+    // queue of its own, which then holds only the songs put in, and Play
+    // starts it. What Stop left to resume is let go
+    function addWhileIdle(song, first) {
+
+        if (!queueOwn || queuePos >= queue.length) {
+
+            dropNextReady();
+            playNextMarks.clear();
+            queue = [];
+            queueOwn = true;
+        }
+
+        queuePos = -1;
+        resumeState = null;
+
+        queue = queue.filter(function (s) {
+            return s.song_id !== song.song_id;
+        });
+
+        if (first) {
+
+            queue.unshift(song);
+            playNextMarks.set(String(song.song_id), -1);
+        } else {
+            queue.push(song);
+        }
+
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        saveQueue();
+        publishHostSoon();
+
+        const what = (song.title || "Untitled") + (first ? " first" : " last");
+
+        setStatus("In the queue: " + what + ", " + queue.length + (queue.length === 1 ? " song" : " songs"));
+        showToast(queue.length === 1 ? "In the queue, Play starts it" : "In the queue, " + queue.length + " songs", true);
+    }
+
+    // Put a song at the end of the queue. Already coming up, it moves there
+    function addLast(song) {
+
+        if (queueIdle()) {
+
+            addWhileIdle(song, false);
+            return;
+        }
+
+        for (let i = queue.length - 1; i > queuePos; i -= 1) {
+
+            if (queue[i].song_id === song.song_id) {
+                queue.splice(i, 1);
+            }
+        }
+
+        queue.push(song);
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        saveQueue();
+        publishHostSoon();
+        setStatus("Playing last: " + (song.title || "Untitled"));
+        showToast("Playing last", true);
+    }
+
+    // Insert a song to play right after the current one. With nothing
+    // playing it goes first in a queue put together by hand
     function addNext(song) {
 
-        if (queuePos < 0 || queuePos >= queue.length) {
-            playFrom(song.song_id);
+        if (queueIdle()) {
+
+            addWhileIdle(song, true);
             return;
         }
 
@@ -8175,6 +8305,19 @@
             return;
         }
 
+        // A queue put together by hand goes round its own songs, shuffled
+        // again with shuffle on
+        if (repeatMode === "all" && queueOwn && queue.length > 0) {
+
+            if (shuffleMode) {
+                queue = shuffleCopy(queue);
+            }
+
+            queuePos = 0;
+            playCurrent();
+            return;
+        }
+
         // At the end, rebuild the whole queue and start over when repeating all
         // Rebuilding respects the active vocal filter and reshuffles, instead of
         // replaying earlier songs that no longer match the current filter
@@ -8238,7 +8381,7 @@
 
         try {
 
-            if (queuePos < 0 || queue.length === 0) {
+            if (queueOwn || queuePos < 0 || queue.length === 0) {
 
                 return;
             }
@@ -8289,7 +8432,26 @@
     // Rebuild the upcoming part of the queue, keeping the current song and history
     // Applies the vocals filter and shuffle mode, then refreshes caching and art
     // Does nothing when nothing is playing, the next play picks up the changes
-    function rebuildUpcoming() {
+    function rebuildUpcoming(fromShuffle) {
+
+        // A queue put together by hand keeps its songs. Shuffle switched on
+        // only mixes the ones still to come
+        if (queueOwn) {
+
+            if (fromShuffle === true && shuffleMode && queuePos >= 0 && queuePos < queue.length) {
+
+                dropNextReady();
+                queue = queue.slice(0, queuePos + 1).concat(shuffleCopy(queue.slice(queuePos + 1)));
+                renderList();
+                saveQueue();
+                setArtTransition("none");
+                setArtSources();
+                positionArt(0);
+                prefetchNext();
+            }
+
+            return;
+        }
 
         dropNextReady();
 
@@ -8335,7 +8497,7 @@
 
         shuffleMode = !shuffleMode;
         updateShuffleButton();
-        rebuildUpcoming();
+        rebuildUpcoming(true);
         setStatus(modeStatusText());
 
         // Remember the choice for the next session
@@ -11112,6 +11274,7 @@
             resumeState = {
                 queue: queue,
                 queuePos: queuePos,
+                own: queueOwn,
                 time: (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0
             };
         }
@@ -11134,6 +11297,7 @@
         currentSong = null;
         queue = [];
         queuePos = -1;
+        queueOwn = false;
         renderList();
         updatePlayerInfo(null);
         updatePlayPause();
@@ -18520,7 +18684,7 @@
 
         return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
             creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
-            cache.songs.length].join("|");
+            cache.songs.length, songDataStamp].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -19391,18 +19555,7 @@
         } else if (act === "playNext") {
             addNext(song);
         } else if (act === "addQueue") {
-
-            // At the end of the queue, or playing it when nothing plays yet
-            if (queuePos < 0 || queuePos >= queue.length) {
-
-                playFrom(song.song_id);
-                return;
-            }
-
-            queue.push(song);
-            renderList();
-            setArtSources();
-            setStatus("Added to the queue: " + (song.title || "Untitled"));
+            addLast(song);
         } else if (act === "refresh") {
             refreshOne(song);
         } else if (act === "info") {
@@ -27611,11 +27764,11 @@
         saveTrimmed();
         refreshSongDataViews();
 
-        // The T on the badges of songs that came in trimmed
-        if (plan.trimmed.length > 0) {
-            renderList();
-            publishHostSoon();
-        }
+        // The stars, tempos and marks on the rows shown, here and, read again,
+        // in the web view
+        songDataStamp += 1;
+        renderList();
+        publishHostSoon();
     }
 
     // Everything that shows song tweaks is brought up to date
@@ -33034,6 +33187,10 @@
 
         addMenuRow("Play next", "#fff", function () {
             addNext(song);
+        });
+
+        addMenuRow("Play last", "#fff", function () {
+            addLast(song);
         });
 
         addMenuRow("Refresh", "#fff", function () {
