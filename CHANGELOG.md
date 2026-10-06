@@ -326,6 +326,13 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **Songs deleted on Mureka** are noticed by Load and by Refresh on a song:
+  a song missing between the songs of a list page is looked up on Mureka,
+  and only when Mureka no longer has it is it removed here, with its stored
+  audio and cover. Ratings and tempos are kept. Under Library, **Ask** shows
+  which songs first, **Remove** takes them away at once, and **Rescan only**
+  leaves it to a full Rescan. Refresh on a song also reads the list page the
+  song is on and brings the songs on it up to date.
 - **Back to the playing song**: a round target button shows over the list
   while the playing song is scrolled out of sight, and a tap brings it back
   to the middle. The status line says which song plays with its number in

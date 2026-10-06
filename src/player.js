@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.150";
+    const VERSION = "1.9.9.152";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -127,6 +127,19 @@
     // Number of already cached songs that must appear in a row before we stop
     // A single republished song keeps its id, so one match is not enough
     const KNOWN_STREAK_STOP = 5;
+
+    // Songs deleted on Mureka are found as gaps in the list pages read. A
+    // gap wider than this is taken as songs moved around, not deleted
+    const GONE_GAP_MAX = 10;
+
+    // Songs made or added here this recently may not be in Mureka's list yet
+    const GONE_GRACE_MS = 10 * 60 * 1000;
+
+    // More songs gone at once than this are always asked about
+    const GONE_ASK_OVER = 3;
+
+    // At most this many songs are looked up on Mureka in one go
+    const GONE_CHECK_MAX = 20;
 
     // Host that serves the audio files, the song mp3_url path is appended to it
     const AUDIO_BASE = "https://static-cos.mureka.ai/";
@@ -1735,6 +1748,7 @@
             waveSeek: true,
             waveSource: "mureka",
             onlineBadge: "fade",
+            goneOnMureka: "ask",
             webUpNext: true,
             webWave: true,
             webWaveSource: "mureka",
@@ -1914,6 +1928,8 @@
                     waveSeek: parsed.waveSeek !== false,
                     waveSource: parsed.waveSource === "song" ? "song" : "mureka",
                     onlineBadge: parsed.onlineBadge === "always" ? "always" : "fade",
+                    goneOnMureka: (parsed.goneOnMureka === "remove" || parsed.goneOnMureka === "rescan")
+                        ? parsed.goneOnMureka : "ask",
                     webUpNext: parsed.webUpNext !== false,
                     webWave: parsed.webWave !== false,
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
@@ -2509,6 +2525,9 @@
             generation_method: s.generation_method,
             allow_remix: s.allow_remix,
             trimmed: hasTrimField(s) || undefined,
+
+            // The list page the song was last read on, "" for the first page
+            page_cursor: s.page_cursor,
 
             // False until the song has been played, Mureka's "new" mark. Only
             // songs of your own library carry it, others leave it out
@@ -4424,7 +4443,7 @@
                 newCovers.push(old);
             }
 
-            Object.assign(old, x);
+            mergeSong(old, x);
 
             return old;
         });
@@ -4473,6 +4492,401 @@
         if (currentSong && songs.indexOf(currentSong) !== -1) {
             updatePlayerInfo(currentSong);
         }
+    }
+
+    // Copy a newer reply onto a kept song. Mureka marks a trimmed song only
+    // in the song list, not in the reply for one song, and a song never
+    // stops being trimmed, so the mark is kept when the newer copy lacks it
+    function mergeSong(old, fresh) {
+
+        const wasTrimmed = old.trimmed === true;
+        const pageCursor = old.page_cursor;
+
+        Object.assign(old, fresh);
+
+        if (wasTrimmed) {
+            old.trimmed = true;
+        }
+
+        // The reply for one song has no list page
+        if (old.page_cursor === undefined) {
+            old.page_cursor = pageCursor;
+        }
+
+        return old;
+    }
+
+    // Note on each song which list page it came from, so a refresh of one
+    // song can read that page again
+    function tagPage(songs, cursor) {
+
+        const tag = (cursor === null || cursor === undefined) ? "" : String(cursor);
+
+        for (const s of songs) {
+
+            if (s && typeof s === "object") {
+                s.page_cursor = tag;
+            }
+        }
+    }
+
+    // A list page complete enough to tell which songs are missing from it:
+    // a good reply with a full page of songs, or the last page
+    function pageTrusted(page, songs) {
+
+        if (!page || songs.length === 0) {
+            return false;
+        }
+
+        if (page.code !== undefined && page.code !== 0) {
+            return false;
+        }
+
+        return songs.length >= PAGE_SIZE || hasMore(page) === false;
+    }
+
+    // Songs kept here that sit between two songs of a list page, in the
+    // order the list had before, but are not on the page any more. Before
+    // the first song of the first page and after the last song of the last
+    // page count as well. These may have been deleted on Mureka and are
+    // looked up one by one before anything is removed
+    function pageGaps(order, songs, page, cursor) {
+
+        if (!pageTrusted(page, songs)) {
+            return [];
+        }
+
+        const onPage = new Set(songs.map(function (s) {
+            return String(s.song_id);
+        }));
+        const at = new Map();
+
+        order.forEach(function (s, i) {
+            at.set(String(s.song_id), i);
+        });
+
+        const spots = [];
+
+        for (const s of songs) {
+
+            const i = at.get(String(s.song_id));
+
+            if (i !== undefined) {
+                spots.push(i);
+            }
+        }
+
+        if (spots.length === 0) {
+            return [];
+        }
+
+        if (cursor === null || cursor === undefined) {
+            spots.unshift(-1);
+        }
+
+        if (hasMore(page) === false) {
+            spots.push(order.length);
+        }
+
+        const out = [];
+
+        for (let k = 1; k < spots.length; k++) {
+
+            const width = spots[k] - spots[k - 1] - 1;
+
+            if (width < 1 || width > GONE_GAP_MAX) {
+                continue;
+            }
+
+            for (let i = spots[k - 1] + 1; i < spots[k]; i++) {
+
+                if (!onPage.has(String(order[i].song_id))) {
+                    out.push(order[i]);
+                }
+            }
+        }
+
+        return out;
+    }
+
+    // Songs made here, by id, with the time, so they are not taken as
+    // deleted before Mureka's list has them
+    const addedHere = new Map();
+
+    // Whether the song is still on Mureka: true, false when Mureka's reply
+    // for it has no song, null when that could not be told
+    async function songOnMureka(song) {
+
+        let res;
+        let json;
+
+        try {
+            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+
+            res = await timedFetch(url, { credentials: "include" });
+        } catch (e) {
+            return null;
+        }
+
+        if (res.status === 404) {
+
+            dbgLog("Feed", "gone check: " + song.song_id + " HTTP 404");
+            return false;
+        }
+
+        if (!res.ok) {
+            return null;
+        }
+
+        try {
+            json = await res.json();
+        } catch (e) {
+            return null;
+        }
+
+        if (!json || typeof json !== "object") {
+            return null;
+        }
+
+        const fresh = json.data && json.data.song;
+
+        if (fresh && String(fresh.song_id) === String(song.song_id)) {
+
+            mergeSong(song, trim(fresh));
+            return true;
+        }
+
+        dbgLog("Feed", "gone check: " + song.song_id + " code " + json.code
+            + (json.msg ? ", " + String(json.msg) : ""));
+
+        return false;
+    }
+
+    // Songs to look up, gathered while a look up runs
+    let goneWaiting = [];
+    let goneBusy = false;
+
+    // Look up songs that may have been deleted on Mureka, then remove the
+    // ones Mureka no longer has, asked first unless set otherwise
+    async function handleGone(list) {
+
+        if (settings.goneOnMureka === "rescan" || !list || list.length === 0) {
+            return;
+        }
+
+        goneWaiting = goneWaiting.concat(list);
+
+        if (goneBusy) {
+            return;
+        }
+
+        goneBusy = true;
+
+        try {
+
+            while (goneWaiting.length > 0) {
+
+                const batch = goneWaiting;
+
+                goneWaiting = [];
+                await checkGone(batch);
+            }
+        } finally {
+            goneBusy = false;
+        }
+    }
+
+    async function checkGone(list) {
+
+        const now = Date.now();
+        const seen = new Set();
+        const look = [];
+
+        for (const s of list) {
+
+            const id = String(s.song_id);
+
+            if (seen.has(id)) {
+                continue;
+            }
+
+            seen.add(id);
+
+            // Only songs still in the list, and none just made
+            const kept = cache.songs.find(function (x) {
+                return String(x.song_id) === id;
+            });
+
+            if (!kept) {
+                continue;
+            }
+
+            if (now - (addedHere.get(id) || 0) < GONE_GRACE_MS) {
+                continue;
+            }
+
+            if (kept.generate_at && now - kept.generate_at * 1000 < GONE_GRACE_MS) {
+                continue;
+            }
+
+            look.push(kept);
+        }
+
+        if (look.length === 0) {
+            return;
+        }
+
+        // Logged out, drafts are missing from the list and the detail reply
+        if (!creatorSource && (await checkAuth()) !== true) {
+
+            dbgLog("Feed", look.length + " songs missing from the list, not checked while signed out");
+            return;
+        }
+
+        dbgLog("Feed", look.length + " songs missing from the list, asking Mureka about them");
+
+        const gone = [];
+
+        for (const s of look.slice(0, GONE_CHECK_MAX)) {
+
+            if ((await songOnMureka(s)) === false) {
+                gone.push(s);
+            }
+
+            await sleep(PAGE_DELAY);
+        }
+
+        saveCache();
+        renderList();
+
+        if (gone.length === 0) {
+            return;
+        }
+
+        dbgLog("Feed", gone.length + " songs are no longer on Mureka");
+
+        const playing = currentSong ? String(currentSong.song_id) : null;
+
+        // Removed without asking, all but the playing song, which is
+        // checked again the next time
+        if (settings.goneOnMureka === "remove" && gone.length <= GONE_ASK_OVER) {
+
+            await removeGone(gone.filter(function (s) {
+                return String(s.song_id) !== playing;
+            }));
+            return;
+        }
+
+        askGone(gone);
+    }
+
+    function askGone(gone) {
+
+        const names = gone.slice(0, 5).map(function (s) {
+            return "\"" + (s.title || "Untitled") + "\"";
+        });
+        const more = gone.length - names.length;
+        const which = names.join(", ") + (more > 0 ? " and " + more + " more" : "");
+        const are = gone.length === 1 ? " is" : " are";
+
+        askYesNo(gone.length === 1 ? "Deleted on Mureka?" : gone.length + " songs deleted on Mureka?",
+            which + are + " no longer on Mureka. Remove " + (gone.length === 1 ? "it" : "them")
+            + " from this device too? Ratings and tempos are kept.", "Remove", function () {
+            removeGone(gone);
+        });
+    }
+
+    async function removeGone(gone) {
+
+        let removed = 0;
+
+        for (const s of gone) {
+
+            if (cache.songs.indexOf(s) === -1) {
+                continue;
+            }
+
+            await forgetSong(s, true);
+            removed += 1;
+        }
+
+        if (removed === 0) {
+            return;
+        }
+
+        saveCache();
+        renderList();
+        setStatus("Removed " + removed + (removed === 1 ? " song" : " songs") + " deleted on Mureka");
+        showToast(removed === 1 ? "Removed a song deleted on Mureka"
+            : "Removed " + removed + " songs deleted on Mureka", true);
+    }
+
+    // Read the list page a song was last seen on again, update the songs on
+    // it and look for songs deleted around it. Reads one more page if newer
+    // songs pushed the song past the end of that page
+    async function refreshAround(song) {
+
+        const tag = song.page_cursor;
+
+        if (tag === undefined || tag === null) {
+            return;
+        }
+
+        const order = cache.songs.slice();
+        const byId = new Map(order.map(function (s) {
+            return [String(s.song_id), s];
+        }));
+        const gaps = [];
+
+        let cursor = tag === "" ? null : tag;
+
+        for (let n = 0; n < 2; n++) {
+
+            let page;
+
+            try {
+                page = await fetchPage(cursor);
+            } catch (e) {
+                break;
+            }
+
+            const songs = extractSongs(page);
+
+            tagPage(songs, cursor);
+
+            for (const s of songs) {
+
+                const old = byId.get(String(s.song_id));
+
+                if (old && isUsableSong(s)) {
+                    mergeSong(old, trim(s));
+                }
+            }
+
+            Array.prototype.push.apply(gaps, pageGaps(order, songs, page, cursor));
+
+            const found = songs.some(function (s) {
+                return String(s.song_id) === String(song.song_id);
+            });
+
+            const next = getCursor(page, songs);
+
+            if (found || hasMore(page) === false || next === null || next === cursor) {
+                break;
+            }
+
+            cursor = next;
+            await sleep(PAGE_DELAY);
+        }
+
+        saveCache();
+        renderList();
+
+        if (currentSong) {
+            updatePlayerInfo(currentSong);
+        }
+
+        handleGone(gaps);
     }
 
     function dedupe(list) {
@@ -5097,6 +5511,10 @@
 
         let cursor = cache.lastCursor || null;
 
+        // The list as it was, to find songs missing from the pages read
+        const order = cache.songs.slice();
+        const goneMaybe = [];
+
         while (running && myToken === loadToken) {
 
             let page;
@@ -5122,6 +5540,9 @@
             }
 
             const songs = extractSongs(page);
+
+            tagPage(songs, cursor);
+            Array.prototype.push.apply(goneMaybe, pageGaps(order, songs, page, cursor));
 
             // An empty page means the whole library has been loaded
             if (songs.length === 0) {
@@ -5149,8 +5570,8 @@
 
                 } else {
 
-                    // Keep the like flag current on a song we already cached
-                    existing.is_liked = s.is_liked === true;
+                    // Bring a song already kept up to date with the page
+                    mergeSong(existing, trim(s));
                 }
             }
 
@@ -5202,6 +5623,10 @@
         } else {
             setStatus("Paused at " + cache.songs.length + " songs, Load again to continue");
         }
+
+        if (myToken === loadToken) {
+            handleGone(goneMaybe);
+        }
     }
 
     // Walk the newest pages and add new or republished songs to the front
@@ -5222,6 +5647,9 @@
         // that are not added to the list. A rescan prunes what it did not see,
         // and an unfinished song is very much still there
         const seen = new Set();
+
+        // Songs kept here but missing from the pages read
+        const goneMaybe = [];
 
         let cursor = null;
         let knownStreak = 0;
@@ -5259,6 +5687,9 @@
             }
 
             const songs = extractSongs(page);
+
+            tagPage(songs, cursor);
+            Array.prototype.push.apply(goneMaybe, pageGaps(baseSongs, songs, page, cursor));
 
             if (songs.length === 0) {
                 reachedEnd = true;
@@ -5473,6 +5904,8 @@
 
         // Grow the active queue with any songs the refresh brought in
         extendQueueWithNew();
+
+        handleGone(goneMaybe);
 
         // Only the counts that are not zero, so an ordinary refresh stays
         // short and a rescan that actually changed something says what
@@ -6274,7 +6707,7 @@
 
     // Drop a song from the library list and throw away everything cached for
     // it. Used both by the delete menu row and by the rescan prune
-    async function forgetSong(song) {
+    async function forgetSong(song, keepTweaks) {
 
         // A song got ready to follow is no use once it is gone
         if (nextReady && nextReady.song_id === song.song_id) {
@@ -6333,11 +6766,17 @@
             publishHostSoon();
         }
 
-        manualInstrumental.delete(String(song.song_id));
+        // Ratings and tempos are small and kept when asked, in case the
+        // song comes back
+        if (!keepTweaks) {
 
-        if (ratings.delete(String(song.song_id))) {
-            saveRatings();
+            manualInstrumental.delete(String(song.song_id));
+
+            if (ratings.delete(String(song.song_id))) {
+                saveRatings();
+            }
         }
+
         await purgeSongData(song);
     }
 
@@ -6607,6 +7046,11 @@
 
                 setStatus("Refresh returned no matching song");
                 say("Mureka did not return the song", false);
+
+                if (!quiet) {
+                    handleGone([song]);
+                }
+
                 return;
             }
 
@@ -6619,7 +7063,7 @@
             }
 
             // Mutate in place so the queue and current song see the update too
-            Object.assign(cache.songs[idx], trim(fresh));
+            mergeSong(cache.songs[idx], trim(fresh));
             saveCache();
             renderList();
 
@@ -6629,6 +7073,12 @@
 
             setStatus("Refreshed: " + (cache.songs[idx].title || "Untitled"));
             say("Refreshed");
+
+            // The list page has what the reply for one song leaves out, such
+            // as the trimmed mark, and shows songs deleted around it
+            if (!quiet) {
+                refreshAround(cache.songs[idx]);
+            }
 
         } catch (e) {
 
@@ -24783,6 +25233,14 @@
             function () { return settings.refreshOnStart; },
             function (v) { settings.refreshOnStart = v; });
 
+        const goneRow = makeChoiceRow([
+            { label: "Ask", value: "ask" },
+            { label: "Remove", value: "remove" },
+            { label: "Rescan only", value: "rescan" }
+        ], function () { return settings.goneOnMureka || "ask"; }, function (v) {
+            settings.goneOnMureka = v;
+        });
+
         const allRow = makeBoolRow("Number across the whole library",
             function () { return settings.absoluteNumbers; },
             function (v) { settings.absoluteNumbers = v; renderList(); });
@@ -24851,6 +25309,9 @@
         libraryPage.appendChild(makeLabel("Updates and numbers"));
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
+        libraryPage.appendChild(makeSubLabel("Songs deleted on Mureka"));
+        libraryPage.appendChild(goneRow);
+        libraryPage.appendChild(makeHint("Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
         // Cache control: the songs kept on this device, the details of
         // songs, and in the app the covers for the web view
@@ -31259,6 +31720,7 @@
             }
 
             trimmedIds.add(String(s.song_id));
+            addedHere.set(String(s.song_id), Date.now());
 
             if (!known.has(s.song_id)) {
                 cache.songs.unshift(trim(s));
