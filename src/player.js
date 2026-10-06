@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.166";
+    const VERSION = "1.9.9.167";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2343,7 +2343,17 @@
 
             const cur = q[pos];
 
+            // Songs not in the library here, from an imported queue, are
+            // kept whole, so they are still there after a restart
+            const lib = new Set(cache.songs.map(function (s) {
+                return s.song_id;
+            }));
+            const extra = own ? q.filter(function (s) {
+                return !lib.has(s.song_id);
+            }) : [];
+
             localStorage.setItem(QUEUE_KEY, JSON.stringify({
+                extra: extra,
                 ids: q.map(function (s) {
                     return s.song_id;
                 }),
@@ -2375,6 +2385,17 @@
         const byId = new Map(cache.songs.map(function (s) {
             return [s.song_id, s];
         }));
+
+        // Songs of an imported queue that are not in the library here
+        if (saved.own === true && Array.isArray(saved.extra)) {
+
+            for (const s of saved.extra) {
+
+                if (s && s.song_id !== undefined && !byId.has(s.song_id)) {
+                    byId.set(s.song_id, s);
+                }
+            }
+        }
 
         const rebuilt = [];
 
@@ -7963,9 +7984,13 @@
     // Play a single song and continue from it per the current mode
     function playFrom(songId) {
 
+        // A song of a queue put together by hand may come from another
+        // library, it plays from its place in the queue
         const exists = cache.songs.some(function (s) {
             return s.song_id === songId;
-        });
+        }) || (queueOwn && queue.some(function (s) {
+            return s.song_id === songId;
+        }));
 
         if (!exists) {
             return;
@@ -27353,7 +27378,22 @@
                 titles: q.map(function (s) {
                     return s.title || "";
                 }),
-                pos: live ? queuePos : (resumeState ? resumeState.queuePos : -1)
+                pos: live ? queuePos : (resumeState ? resumeState.queuePos : -1),
+
+                // Each song with full links to its audio and cover, so a
+                // player of another account plays it without having it in
+                // its library
+                songs: q.map(function (s) {
+
+                    const out = trim(s);
+
+                    out.mp3_url = songUrl(s) || s.mp3_url || "";
+                    out.cover = coverUrl(s) || "";
+                    delete out.page_cursor;
+                    delete out.is_played;
+
+                    return out;
+                })
             };
 
             return base;
@@ -27455,7 +27495,13 @@
             out.queue = {
                 ids: Array.isArray(q.ids) ? q.ids.filter(function (id) {
                     return id !== null && id !== undefined && id !== "";
-                }).map(String) : []
+                }).map(String) : [],
+
+                // Songs with a full link to their audio, from 1.9.9.167 on
+                songs: Array.isArray(q.songs) ? q.songs.filter(function (x) {
+                    return x && typeof x === "object" && x.song_id !== null && x.song_id !== undefined
+                        && typeof x.mp3_url === "string" && x.mp3_url.indexOf("http") === 0;
+                }).map(trim) : []
             };
 
             return out;
@@ -28044,8 +28090,12 @@
         const byId = new Map(cache.songs.map(function (s) {
             return [String(s.song_id), s];
         }));
+        const fromFile = new Map((p.queue.songs || []).map(function (s) {
+            return [String(s.song_id), s];
+        }));
         const songs = [];
         let missing = 0;
+        let foreign = 0;
 
         for (const id of p.queue.ids) {
 
@@ -28053,12 +28103,24 @@
 
             if (s) {
                 songs.push(s);
+            } else if (fromFile.has(id)) {
+
+                // Not in the library here, played from its link
+                songs.push(fromFile.get(id));
+                foreign += 1;
             } else {
                 missing += 1;
             }
         }
 
-        return { songs: songs, missing: missing };
+        return { songs: songs, missing: missing, foreign: foreign };
+    }
+
+    // The songs of an imported queue that are not in the library here, in
+    // words, or nothing
+    function queueForeignText(found) {
+
+        return found.foreign > 0 ? ", " + found.foreign + " of them from another library, played from their links" : "";
     }
 
     // What an imported play queue holds and what it does, in words
@@ -28068,7 +28130,7 @@
         const busy = soundingNow();
 
         return "From the " + sourceName + " saved " + when + ": " + found.songs.length
-            + (found.songs.length === 1 ? " song" : " songs")
+            + (found.songs.length === 1 ? " song" : " songs") + queueForeignText(found)
             + (found.missing > 0 ? ", " + found.missing + " not in the library here "
                 + (found.missing === 1 ? "is" : "are") + " left out" : "")
             + ". " + (busy ? "A song is playing: keep it, with the queue after it, or stop it and play the"
@@ -28807,7 +28869,7 @@
             const found = queueImportSongs(p);
 
             out.what = "A play queue saved " + when + ", " + found.songs.length
-                + (found.songs.length === 1 ? " song" : " songs")
+                + (found.songs.length === 1 ? " song" : " songs") + queueForeignText(found)
                 + (found.missing > 0 ? ", " + found.missing + " not on the phone "
                     + (found.missing === 1 ? "is" : "are") + " left out" : "");
             out.songs = found.songs.length;

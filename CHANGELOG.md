@@ -346,7 +346,9 @@ the new settings layout and a number of smaller improvements.
   one put together by hand. With a song playing it asks whether to keep it,
   with the imported songs after it, or to stop it and play the imported
   queue at once. A paused song goes and Play starts the imported queue.
-  Songs not in the library here are left out.
+  The export carries each song's full links to its audio and cover, so a
+  player signed in to another account plays the songs too, from their
+  links, and keeps them in the queue across a restart.
 - **Songs deleted on Mureka** are noticed by Load and by Refresh on a song:
   a song missing between the songs of a list page is looked up on Mureka,
   and only when Mureka no longer has it is it removed here, with its stored
