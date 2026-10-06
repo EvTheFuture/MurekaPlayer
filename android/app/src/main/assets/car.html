@@ -1093,6 +1093,11 @@
         border-radius: 6px;
     }
 
+    #miniRows .rowGrip {
+        margin: -8px 0 -8px -4px;
+        padding: 0 0 0 4px;
+    }
+
     #miniRows .rowNext {
         width: 2.3em;
         height: 2.3em;
@@ -1578,6 +1583,11 @@
 
     .menuItem.accent {
         color: var(--accent);
+    }
+
+    /* Taken out of the queue only, the song itself stays */
+    .menuItem.warn {
+        color: var(--gold);
     }
 
     /* Ringed, keeping what is here, apart from taking the file's */
@@ -7622,12 +7632,25 @@
     // On letting go the phone moves the song
     let qDrag = null;
 
-    function queueRows() {
+    function queueRows(box) {
 
-        return Array.prototype.slice.call($("rows").querySelectorAll(".row"));
+        return Array.prototype.slice.call((box || $("rows")).querySelectorAll(".row"));
     }
 
-    function startQueueDrag(row, ev, moving) {
+    // The queue as shown, read again wherever it is open
+    function reloadQueues() {
+
+        if ($("browse").style.display === "flex" && listView === "queue") {
+            loadQueue(false);
+        }
+
+        if (miniOpen && miniView === "queue") {
+            loadMini(false);
+        }
+    }
+
+    // box is the list the row is in, the song list or the small one
+    function startQueueDrag(row, ev, moving, box) {
 
         // A press with another button is not a drag. A drag begun by moving
         // the mouse comes with a move, which carries no button
@@ -7649,6 +7672,7 @@
         row.classList.add("dragging");
 
         qDrag = {
+            box: box || $("rows"),
             row: row,
             ghost: ghost,
             from: Number(row.dataset.qi),
@@ -7671,7 +7695,7 @@
             return;
         }
 
-        const box = $("rows");
+        const box = qDrag.box;
         const r = box.getBoundingClientRect();
         const zone = Math.min(90, r.height / 5);
 
@@ -7703,7 +7727,7 @@
     // Put the dragged row where the finger is, the others sliding aside
     function placeQueueDrag() {
 
-        const rows = queueRows();
+        const rows = queueRows(qDrag.box);
         const others = rows.filter(function (r) {
             return r !== qDrag.row;
         });
@@ -7732,7 +7756,7 @@
         }
 
         slideAside(rows, function () {
-            $("rows").insertBefore(qDrag.row, target);
+            qDrag.box.insertBefore(qDrag.row, target);
         });
     }
 
@@ -7759,14 +7783,12 @@
             rowSwallow = false;
         }, 400);
 
-        const to = queueRows().indexOf(d.row);
+        const to = queueRows(d.box).indexOf(d.row);
 
         if (to !== d.from) {
 
             send("queueMove", { from: d.from, to: to }).then(function () {
-                setTimeout(function () {
-                    loadQueue(false);
-                }, 200);
+                setTimeout(reloadQueues, 200);
             });
         }
     }
@@ -10900,8 +10922,57 @@
                 row.classList.toggle("playing", item.index === data.pos);
                 row.classList.toggle("past", item.index < data.pos);
 
-                // A tap goes to that place in the queue, not the song anew
+                // A handle to drag the song to another place, in the
+                // queue's own order only
+                const grip = document.createElement("span");
+                const movable = !listSort;
+
+                grip.className = "rowGrip" + (movable ? "" : " off");
+                grip.appendChild(icon("grip"));
+
+                if (movable) {
+
+                    grip.title = "Drag to move";
+                    grip.addEventListener("pointerdown", function (ev) {
+                        startQueueDrag(row, ev, false, box);
+                    });
+                } else {
+                    grip.title = "Turn sorting off to move songs";
+                }
+
+                row.insertBefore(grip, row.firstChild);
+
+                // Play next makes no sense on a row of the queue itself, the
+                // cross takes a song still to come out instead
+                const next = row.querySelector(".rowNext");
+
+                if (next) {
+                    next.remove();
+                }
+
+                if (item.index > data.pos) {
+
+                    row.appendChild(lineButton("Remove from the queue", "close", function () {
+                        send("queueRemove", item.index).then(function () {
+                            setTimeout(reloadQueues, 150);
+                        });
+                    }));
+                } else {
+
+                    const spacer = document.createElement("span");
+
+                    spacer.className = "rowNext spacer";
+                    row.appendChild(spacer);
+                }
+
+                // A tap goes to that place in the queue, not the song anew.
+                // The row's own buttons, the heart and the cross, do their
+                // own thing
                 row.addEventListener("click", function (ev) {
+
+                    if (ev.target.closest && ev.target.closest("button")) {
+                        return;
+                    }
 
                     ev.stopImmediatePropagation();
                     send("queueJump", item.index);
@@ -12865,6 +12936,20 @@
             closeSongMenu();
         }));
 
+        // Coming up in the queue, it can be taken out again
+        if (typeof m.queueAt === "number" && m.queueAt >= 0) {
+
+            box.appendChild(menuItem("close", "Remove from queue", function () {
+
+                closeSongMenu();
+                send("queueRemove", m.queueAt).then(function () {
+
+                    toast("Taken out of the queue", "ok");
+                    setTimeout(reloadQueues, 200);
+                });
+            }, "warn"));
+        }
+
         songMenuItems(m, box, closeSongMenu, false);
     }
 
@@ -14371,6 +14456,12 @@
     $("main").addEventListener("contextmenu", function (ev) {
 
         ev.preventDefault();
+
+        // The small list lies over the main page. A row there opens its own
+        // song's menu, a gap between rows opens nothing
+        if (ev.target.closest && ev.target.closest("#mini")) {
+            return;
+        }
 
         // A swipe under way is left alone
         if (flowDrag && flowDrag.moved) {

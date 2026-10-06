@@ -326,6 +326,10 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **Remove from queue** in the song menu, in the player and in the web view,
+  for a song still to come in the queue. The small list over the web view's
+  main page shows the queue with the same handles as the big list: drag a
+  song to another place, and a cross takes one still to come out.
 - **Play last** in the song menu, in the player and in the web view, beside
   Play next. With the player stopped, Play next and Play last put a queue
   together by hand: it holds only the songs put in, Play starts it, Repeat

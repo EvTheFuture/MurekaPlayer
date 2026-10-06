@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.163";
+    const VERSION = "1.9.9.166";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8153,6 +8153,41 @@
 
         setStatus("In the queue: " + what + ", " + queue.length + (queue.length === 1 ? " song" : " songs"));
         showToast(queue.length === 1 ? "In the queue, Play starts it" : "In the queue, " + queue.length + " songs", true);
+    }
+
+    // Where a song comes up in the queue, after the playing one, or -1
+    function upcomingIndex(song) {
+
+        for (let i = Math.max(0, queuePos + 1); i < queue.length; i += 1) {
+
+            if (queue[i].song_id === song.song_id) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    // Take a song still to come out of the queue. The playing song and the
+    // ones played stay
+    function removeFromQueue(i) {
+
+        if (!Number.isInteger(i) || i <= queuePos || i >= queue.length) {
+            return;
+        }
+
+        const song = queue.splice(i, 1)[0];
+
+        playNextMarks.delete(String(song.song_id));
+        dropNextReady();
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        saveQueue();
+        publishHostSoon();
+        setStatus("Taken out of the queue: " + (song.title || "Untitled"));
     }
 
     // Put a song at the end of the queue. Already coming up, it moves there
@@ -17589,7 +17624,10 @@
 
             // What the web view's trimmer needs: your own song with a file
             canTrim: !creatorSource && !!songUrl(song),
-            durationMs: Number(song.duration_milliseconds) || 0
+            durationMs: Number(song.duration_milliseconds) || 0,
+
+            // Where it comes up in the queue, for Remove from queue
+            queueAt: upcomingIndex(song)
         };
     }
 
@@ -19830,16 +19868,7 @@
                 prefetchNext();
             }
         } else if (cmd === "queueRemove") {
-
-            const i = Number(arg);
-
-            // Only what is still to come, the current song stays
-            if (i > queuePos && i < queue.length) {
-
-                queue.splice(i, 1);
-                renderList();
-                setArtSources();
-            }
+            removeFromQueue(Number(arg));
         } else if (cmd === "hclick") {
 
             const el = hostElement(arg);
@@ -33587,6 +33616,15 @@
         addMenuRow("Play last", "#fff", function () {
             addLast(song);
         });
+
+        if (upcomingIndex(song) >= 0) {
+
+            addMenuRow("Remove from queue", STAR_GOLD, function () {
+
+                removeFromQueue(upcomingIndex(song));
+                showToast("Taken out of the queue", true);
+            });
+        }
 
         addMenuRow("Refresh", "#fff", function () {
             refreshOne(song);
