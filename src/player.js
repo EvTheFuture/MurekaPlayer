@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.154";
+    const VERSION = "1.9.9.156";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20138,6 +20138,26 @@
         rowStorage.appendChild(cacheButton);
         rowStorage.appendChild(downloadButton);
 
+        // Song tweaks and the song library onto the clipboard, and an export
+        // pasted back in, to move them between devices as text
+        const rowData = makeActionRow();
+
+        rowData.appendChild(makeActionButton(iconCopy(), "Copy tweaks", "#444", "#fff", function () {
+
+            closeActions();
+            copyUserData("songs");
+        }));
+        rowData.appendChild(makeActionButton(iconCopy(), "Copy songs", "#444", "#fff", function () {
+
+            closeActions();
+            copyUserData("library");
+        }));
+        rowData.appendChild(makeActionButton(iconPaste(), "Import", "#444", "#fff", function () {
+
+            closeActions();
+            pasteImport();
+        }));
+
         // How the panel itself is shown, all three change the display and
         // nothing else, which is why they sit together
         const rowDisplay = makeActionRow();
@@ -20199,6 +20219,7 @@
         actionsWrapEl.appendChild(rowSource);
         actionsWrapEl.appendChild(rowStorage);
         actionsWrapEl.appendChild(rowDisplay);
+        actionsWrapEl.appendChild(rowData);
 
         // Keep clicks inside the dropdown from closing it
         actionsWrapEl.addEventListener("mousedown", function (ev) {
@@ -23362,6 +23383,22 @@
             ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }],
             ["polyline", { points: "7 10 12 15 17 10" }],
             ["line", { x1: "12", y1: "15", x2: "12", y2: "3" }]
+        ]);
+    }
+
+    function iconCopy() {
+
+        return makeSvgIcon([
+            ["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }],
+            ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }]
+        ]);
+    }
+
+    function iconPaste() {
+
+        return makeSvgIcon([
+            ["path", { d: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" }],
+            ["rect", { x: "8", y: "2", width: "8", height: "4", rx: "1", ry: "1" }]
         ]);
     }
 
@@ -27985,7 +28022,9 @@
         const data = collectUserData(kind);
 
         copyText(exportJson(data)).then(function (ok) {
+
             dataStatus(ok ? "Copied " + exportedText(data) + " to the clipboard" : "Could not copy to the clipboard");
+            showToast(ok ? "Copied " + dataKindName(kind) + " to the clipboard" : "Could not copy to the clipboard", ok);
         });
     }
 

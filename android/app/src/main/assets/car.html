@@ -1489,6 +1489,43 @@
         padding: 0;
     }
 
+    /* Copy and paste at the foot of the actions, buttons side by side */
+    .copyRow {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+    }
+
+    .copyTile {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 4px;
+        border: none;
+        border-radius: 12px;
+        background: #2c2c34;
+        color: var(--text);
+        font: inherit;
+        font-size: clamp(14px, 1.5vw, 20px);
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    .copyTile:hover {
+        background: #36363f;
+    }
+
+    .copyTile .ico {
+        width: 1.4em;
+        height: 1.4em;
+    }
+
     /* The player's version, small at the foot of the actions and the help */
     .versionLine {
         padding: 1.4vh 6px 0;
@@ -3800,6 +3837,14 @@
             ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }],
             ["polyline", { points: "7 10 12 15 17 10" }],
             ["line", { x1: "12", y1: "15", x2: "12", y2: "3" }]
+        ],
+        copy: [
+            ["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }],
+            ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }]
+        ],
+        paste: [
+            ["path", { d: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" }],
+            ["rect", { x: "8", y: "2", width: "8", height: "4", rx: "1", ry: "1" }]
         ],
         link: [
             ["path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" }],
@@ -14843,6 +14888,38 @@
             }));
         }
 
+        // Copy and paste at the very foot, below the playing song's choices
+        const tiles = document.createElement("div");
+        const tile = function (iconName, label, fn) {
+
+            const b = document.createElement("button");
+            const text = document.createElement("span");
+
+            b.type = "button";
+            b.className = "copyTile";
+            b.appendChild(icon(iconName));
+            text.textContent = label;
+            b.appendChild(text);
+            b.addEventListener("click", function () {
+
+                $("actionsPop").style.display = "none";
+                fn();
+            });
+
+            return b;
+        };
+
+        tiles.className = "copyRow";
+        tiles.appendChild(tile("copy", "Copy tweaks", function () {
+            copyExportNow("songs");
+        }));
+        tiles.appendChild(tile("copy", "Copy songs", function () {
+            copyExportNow("library");
+        }));
+        tiles.appendChild(tile("paste", "Import", pasteImportHere));
+        box.appendChild(tiles);
+        fetchExports();
+
         // The long press choices for the playing song, under its title
         if (!s.id) {
             return;
@@ -14852,7 +14929,7 @@
 
         song.className = "actionsSong";
         song.appendChild(loadingNode("Loading"));
-        box.appendChild(song);
+        box.insertBefore(song, tiles);
 
         fetch("/menu?id=" + esc(s.id), { cache: "no-store" }).then(function (res) {
             return res.json();
@@ -14866,9 +14943,55 @@
             songMenuItems(m, box, function () {
                 $("actionsPop").style.display = "none";
             }, true);
+
+            // Back to the foot, after the song's choices
+            box.appendChild(tiles);
         }).catch(function () {
             song.remove();
         });
+    }
+
+    // The exports fetched as the actions open, so a tap on Copy copies at
+    // once: a browser copies only straight from a tap, not once a fetch
+    // from the phone has come back
+    const exportsHere = {};
+
+    function fetchExports() {
+
+        for (const kind of ["songs", "library"]) {
+
+            exportsHere[kind] = null;
+
+            fetch("/download/export.json?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
+
+                if (!res.ok) {
+                    throw new Error("HTTP " + res.status);
+                }
+
+                return res.text();
+            }).then(function (text) {
+                exportsHere[kind] = text;
+            }).catch(function () {
+                exportsHere[kind] = null;
+            });
+        }
+    }
+
+    function copyExportNow(kind) {
+
+        const text = exportsHere[kind];
+
+        // Not here yet, got now and copied with a second tap
+        if (!text) {
+
+            copyExportHere(kind);
+            return;
+        }
+
+        const ok = copyText(text);
+        const what = kind === "library" ? "the song library" : "song tweaks";
+
+        toast(ok ? "Copied " + what + " to the clipboard" : "This browser could not copy it", ok ? "ok" : "bad");
     }
 
     // The version the phone runs, the web view comes from the same build

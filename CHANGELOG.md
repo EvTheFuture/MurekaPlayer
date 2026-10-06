@@ -326,6 +326,11 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **Copy tweaks, Copy songs and Import** at the foot of the menu under the
+  three lines, in the player and in the web view. Copy puts the song tweaks
+  or the song library on the clipboard at once and says so, and Import opens
+  the box to paste an export into, with any differences asked about as in
+  Import.
 - **Songs deleted on Mureka** are noticed by Load and by Refresh on a song:
   a song missing between the songs of a list page is looked up on Mureka,
   and only when Mureka no longer has it is it removed here, with its stored
