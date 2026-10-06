@@ -331,11 +331,16 @@ the new settings layout and a number of smaller improvements.
   together by hand: it holds only the songs put in, Play starts it, Repeat
   all goes round those songs and the list does not fill it up. A tap on one
   of its songs plays from there.
-- **Copy tweaks, Copy songs and Import** at the foot of the menu under the
+- **Copy tweaks, Copy songs, Copy queue and Import** at the foot of the menu under the
   three lines, in the player and in the web view. Copy puts the song tweaks
   or the song library on the clipboard at once and says so, and Import opens
   the box to paste an export into, with any differences asked about as in
   Import.
+- **The play queue exported and imported**: Copy queue at the foot of the
+  menu under the three lines, and Export play queue under Backup and restore,
+  in the player and in the web view. Imported, it replaces the queue here as
+  one put together by hand. A song playing plays on with the imported songs
+  after it, songs not in the library here are left out.
 - **Songs deleted on Mureka** are noticed by Load and by Refresh on a song:
   a song missing between the songs of a list page is looked up on Mureka,
   and only when Mureka no longer has it is it removed here, with its stored

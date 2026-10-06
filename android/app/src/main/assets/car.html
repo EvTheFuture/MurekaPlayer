@@ -1512,9 +1512,16 @@
         background: #2c2c34;
         color: var(--text);
         font: inherit;
-        font-size: clamp(14px, 1.5vw, 20px);
+        font-size: clamp(13px, 1.4vw, 20px);
         white-space: nowrap;
+        overflow: hidden;
         cursor: pointer;
+    }
+
+    .copyTile span {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .copyTile:hover {
@@ -1571,6 +1578,12 @@
 
     .menuItem.accent {
         color: var(--accent);
+    }
+
+    /* Ringed, keeping what is here, apart from taking the file's */
+    .menuItem.inset {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 2px var(--accent);
     }
 
     .menuItem:disabled {
@@ -12375,7 +12388,7 @@
         $("menuCaption").style.display = "none";
 
         for (const item of items) {
-            box.appendChild(menuItem(item.icon, item.label, item.fn));
+            box.appendChild(menuItem(item.icon, item.label, item.fn, item.cls));
         }
 
         $("songMenu").style.display = "flex";
@@ -12388,6 +12401,7 @@
         const titles = {
             songs: "Export song tweaks to",
             library: "Export the song library to",
+            queue: "Export the play queue to",
             settings: "Export settings to"
         };
 
@@ -12599,6 +12613,15 @@
                 return;
             }
 
+            if (r.kind === "queue") {
+
+                askConfirm(r.what + ". Replace the play queue with it?"
+                    + (r.playing ? " The playing song plays on and the queue follows it." : " Play starts it."), "Replace", false, function () {
+                    applyImport(r.key, []);
+                });
+                return;
+            }
+
             if (r.kind === "library") {
 
                 askConfirm(r.what + ". Import it?"
@@ -12657,13 +12680,13 @@
             };
 
             const items = [
-                { icon: "check", label: "Keep mine, " + c.mine, fn: answer(false, false) },
+                { icon: "check", label: "Keep mine, " + c.mine, fn: answer(false, false), cls: "inset" },
                 { icon: "download", label: "Use the file's, " + c.file, fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
-                items.push({ icon: "check", label: "Keep mine for all " + left, fn: answer(false, true) });
+                items.push({ icon: "check", label: "Keep mine for all " + left, fn: answer(false, true), cls: "inset" });
                 items.push({ icon: "download", label: "Use the file's for all " + left, fn: answer(true, true) });
             }
 
@@ -15008,6 +15031,9 @@
         tiles.appendChild(tile("copy", "Copy songs", function () {
             copyExportNow("library");
         }));
+        tiles.appendChild(tile("copy", "Copy queue", function () {
+            copyExportNow("queue");
+        }));
         tiles.appendChild(tile("paste", "Import", pasteImportHere));
         box.appendChild(tiles);
         fetchExports();
@@ -15055,7 +15081,7 @@
         // would otherwise put back what was there before a change
         const round = ++exportsRound;
 
-        for (const kind of ["songs", "library"]) {
+        for (const kind of ["songs", "library", "queue"]) {
 
             exportsHere[kind] = null;
 
@@ -15092,7 +15118,7 @@
         }
 
         const ok = copyText(text);
-        const what = kind === "library" ? "the song library" : "song tweaks";
+        const what = { library: "the song library", queue: "the play queue" }[kind] || "song tweaks";
 
         toast(ok ? "Copied " + what + " to the clipboard" : "This browser could not copy it", ok ? "ok" : "bad");
     }

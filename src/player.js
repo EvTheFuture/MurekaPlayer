@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.159";
+    const VERSION = "1.9.9.161";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20305,6 +20305,11 @@
             closeActions();
             copyUserData("library");
         }));
+        rowData.appendChild(makeActionButton(iconCopy(), "Copy queue", "#444", "#fff", function () {
+
+            closeActions();
+            copyUserData("queue");
+        }));
         rowData.appendChild(makeActionButton(iconPaste(), "Import", "#444", "#fff", function () {
 
             closeActions();
@@ -26163,7 +26168,9 @@
             + " when a song has a different value here and in the file you are asked"
             + " which to keep. The song library is every song as kept here, so a new"
             + " or cleared device imports it instead of reading the whole library from"
-            + " Mureka again. Songs already here are kept, missing ones are added.";
+            + " Mureka again. Songs already here are kept, missing ones are added."
+            + " The play queue holds the songs it plays in their order, an import of it"
+            + " replaces the queue here.";
         dataHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
 
         const exportRow = document.createElement("div");
@@ -26190,9 +26197,16 @@
             chooseExport("library");
         });
 
+        // The play queue, to carry on with the same songs elsewhere
+        const queueExport = makeButton("Export play queue", "#333", "#fff", function () {
+            chooseExport("queue");
+        });
+
         libraryRow.style.cssText = "display:flex;gap:6px";
         libraryExport.dataset.hostExport = "library";
+        queueExport.dataset.hostExport = "queue";
         libraryRow.appendChild(libraryExport);
+        libraryRow.appendChild(queueExport);
 
         const importRow = document.createElement("div");
         importRow.style.cssText = "display:flex;gap:6px";
@@ -27143,6 +27157,10 @@
             return "the song library";
         }
 
+        if (kind === "queue") {
+            return "the play queue";
+        }
+
         return kind === "settings" ? "settings" : "song tweaks";
     }
 
@@ -27284,13 +27302,33 @@
 
         const base = {
             app: "mureka-player",
-            kind: kind === "settings" ? "settings" : (kind === "library" ? "library" : "song-data"),
+            kind: kind === "settings" || kind === "library" || kind === "queue" ? kind : "song-data",
             // 2 since ratings come in steps finer than whole stars, now
             // quarters. A build that knows only halves rounds them
             format: 2,
             version: VERSION,
             exported: new Date().toISOString()
         };
+
+        // The play queue as it plays, or as Stop left it to resume, with the
+        // titles so the file can be read by eye
+        if (kind === "queue") {
+
+            const live = queue.length > 0;
+            const q = live ? queue : (resumeState && Array.isArray(resumeState.queue) ? resumeState.queue : []);
+
+            base.queue = {
+                ids: q.map(function (s) {
+                    return String(s.song_id);
+                }),
+                titles: q.map(function (s) {
+                    return s.title || "";
+                }),
+                pos: live ? queuePos : (resumeState ? resumeState.queuePos : -1)
+            };
+
+            return base;
+        }
 
         // Every song as the player keeps it, so a new device or a cleared
         // one needs no full scan of Mureka. Covers, audio and waveforms are
@@ -27359,7 +27397,7 @@
     // understood. Returns null when it is not a Mureka Player export at all
     function parseUserData(data) {
 
-        const kinds = ["song-data", "settings", "user-data", "library"];
+        const kinds = ["song-data", "settings", "user-data", "library", "queue"];
 
         if (!data || data.app !== "mureka-player" || kinds.indexOf(data.kind) < 0) {
             return null;
@@ -27379,6 +27417,20 @@
             library: null,
             user: typeof data.user === "string" ? data.user : ""
         };
+
+        // A play queue, its song ids in order
+        if (data.kind === "queue") {
+
+            const q = data.queue && typeof data.queue === "object" ? data.queue : {};
+
+            out.queue = {
+                ids: Array.isArray(q.ids) ? q.ids.filter(function (id) {
+                    return id !== null && id !== undefined && id !== "";
+                }).map(String) : []
+            };
+
+            return out;
+        }
 
         // A song library keeps only songs that can be played
         if (data.kind === "library") {
@@ -27682,13 +27734,13 @@
             };
 
             const options = [
-                { label: "Keep mine", fn: answer(false, false) },
+                { label: "Keep mine", fn: answer(false, false), ring: true },
                 { label: "Use file", fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
-                options.push({ label: "Keep mine for all " + left, fn: answer(false, true) });
+                options.push({ label: "Keep mine for all " + left, fn: answer(false, true), ring: true });
                 options.push({ label: "Use file for all " + left, fn: answer(true, true) });
             }
 
@@ -27814,6 +27866,38 @@
     // without asking, so importing never loses data
     function importParsed(p, sourceName, donePrefix, asked) {
 
+        if (p.kind === "queue") {
+
+            const found = queueImportSongs(p);
+
+            if (found.songs.length === 0) {
+
+                importDone("None of the songs in the play queue are in the library here", false, asked);
+                return;
+            }
+
+            const done = function () {
+
+                applyQueueImport(found.songs);
+                importDone(donePrefix + " the play queue, " + found.songs.length
+                    + (found.songs.length === 1 ? " song" : " songs")
+                    + (found.missing > 0 ? ", " + found.missing + " not in the library here left out" : ""), true, asked);
+            };
+
+            if (asked) {
+
+                done();
+                return;
+            }
+
+            askChoices("Replace the play queue?\n" + queueImportText(p, found, sourceName), [
+                { label: "Replace", fn: done }
+            ], function () {
+                importDone("Import cancelled, nothing changed", false, false);
+            });
+            return;
+        }
+
         if (p.kind === "library") {
 
             const here = ownLibrary();
@@ -27902,6 +27986,76 @@
         mergeSongImport(p, plan, sourceName, donePrefix, asked);
     }
 
+    // The songs of an imported play queue that are in the library here, in
+    // its order, and how many are not
+    function queueImportSongs(p) {
+
+        const byId = new Map(cache.songs.map(function (s) {
+            return [String(s.song_id), s];
+        }));
+        const songs = [];
+        let missing = 0;
+
+        for (const id of p.queue.ids) {
+
+            const s = byId.get(id);
+
+            if (s) {
+                songs.push(s);
+            } else {
+                missing += 1;
+            }
+        }
+
+        return { songs: songs, missing: missing };
+    }
+
+    // What an imported play queue holds and what it does, in words
+    function queueImportText(p, found, sourceName) {
+
+        const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
+        const busy = !queueIdle() && currentSong;
+
+        return "From the " + sourceName + " saved " + when + ": " + found.songs.length
+            + (found.songs.length === 1 ? " song" : " songs")
+            + (found.missing > 0 ? ", " + found.missing + " not in the library here "
+                + (found.missing === 1 ? "is" : "are") + " left out" : "")
+            + ". " + (busy ? "The playing song plays on and the queue follows it." : "Play starts it.");
+    }
+
+    // An imported play queue in place of the one here. It is then one put
+    // together by hand, so the list does not fill it up. A song playing
+    // goes on, with the imported songs after it
+    function applyQueueImport(songs) {
+
+        dropNextReady();
+        playNextMarks.clear();
+        resumeState = null;
+
+        if (!queueIdle() && currentSong) {
+
+            const cur = queue[queuePos];
+
+            queue = [cur].concat(songs.filter(function (s) {
+                return s.song_id !== cur.song_id;
+            }));
+            queuePos = 0;
+        } else {
+
+            queue = songs.slice();
+            queuePos = -1;
+        }
+
+        queueOwn = true;
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        saveQueue();
+        publishHostSoon();
+    }
+
     // The result of an import: on the settings page, and, asked from the
     // player itself, in a box so it is seen wherever the import began
     function importDone(text, ok, asked) {
@@ -27969,6 +28123,10 @@
             return "the song library, " + data.library.songs.length + " songs";
         }
 
+        if (data.kind === "queue") {
+            return "the play queue, " + data.queue.ids.length + (data.queue.ids.length === 1 ? " song" : " songs");
+        }
+
         return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
             Object.keys(data.manualBpm).length, data.manualInstrumental.length,
             data.creators.length, 0);
@@ -27983,6 +28141,10 @@
 
         if (data.kind === "library") {
             return "mureka-player-library-" + data.exported.slice(0, 10);
+        }
+
+        if (data.kind === "queue") {
+            return "mureka-player-queue-" + data.exported.slice(0, 10);
         }
 
         return "mureka-player-songs-" + data.exported.slice(0, 10);
@@ -28091,7 +28253,7 @@
     // with it so both hosts name the file the same way
     function hostExport(kind) {
 
-        const data = collectUserData(kind === "songs" || kind === "library" ? kind : "settings");
+        const data = collectUserData(kind === "songs" || kind === "library" || kind === "queue" ? kind : "settings");
 
         return { name: exportBaseName(data) + ".json", data: data };
     }
@@ -28100,7 +28262,7 @@
     // the file is made
     function hostExportName(kind) {
 
-        const k = kind === "songs" || kind === "library" ? kind : "settings";
+        const k = kind === "songs" || kind === "library" || kind === "queue" ? kind : "settings";
 
         return { name: exportBaseName({ kind: k, exported: new Date().toISOString() }) + ".json" };
     }
@@ -28109,7 +28271,7 @@
     // phone, for the app to hand the browser as a download
     function hostExportText(kind) {
 
-        const data = collectUserData(kind === "songs" || kind === "library" ? kind : "settings");
+        const data = collectUserData(kind === "songs" || kind === "library" || kind === "queue" ? kind : "settings");
 
         return { name: exportBaseName(data) + ".json", text: exportJson(data) };
     }
@@ -28210,11 +28372,21 @@
 
         for (const opt of options) {
 
-            row.appendChild(makeButton(opt.label, "#48e1eb", "#000", function () {
+            const b = makeButton(opt.label, "#48e1eb", "#000", function () {
 
                 hideDataChoice();
                 opt.fn();
-            }));
+            });
+
+            // Ringed rather than filled, so it stands apart from the others
+            if (opt.ring) {
+
+                b.style.background = "transparent";
+                b.style.color = "#48e1eb";
+                b.style.boxShadow = CTRL_RING + "#48e1eb";
+            }
+
+            row.appendChild(b);
         }
 
         row.appendChild(makeButton("Cancel", "#444", "#fff", function () {
@@ -28276,6 +28448,14 @@
             const b = makeButton(opt.label, "#48e1eb", "#000", function () {
                 close(opt.fn);
             });
+
+            // Ringed rather than filled, so it stands apart from the others
+            if (opt.ring) {
+
+                b.style.background = "transparent";
+                b.style.color = "#48e1eb";
+                b.style.boxShadow = CTRL_RING + "#48e1eb";
+            }
 
             b.style.width = "100%";
             col.appendChild(b);
@@ -28346,7 +28526,7 @@
         } });
 
         // The library is a file of its own, Drive keeps only the other two
-        if (GOOGLE_CLIENT_ID && kind !== "library") {
+        if (GOOGLE_CLIENT_ID && kind !== "library" && kind !== "queue") {
             options.push({ label: "Google Drive", fn: function () {
                 saveToDrive(kind);
             } });
@@ -28547,6 +28727,16 @@
 
         if (p.kind === "settings") {
             out.what = "Settings saved " + when;
+        } else if (p.kind === "queue") {
+
+            const found = queueImportSongs(p);
+
+            out.what = "A play queue saved " + when + ", " + found.songs.length
+                + (found.songs.length === 1 ? " song" : " songs")
+                + (found.missing > 0 ? ", " + found.missing + " not on the phone "
+                    + (found.missing === 1 ? "is" : "are") + " left out" : "");
+            out.songs = found.songs.length;
+            out.playing = !queueIdle() && !!currentSong;
         } else if (p.kind === "library") {
 
             const here = ownLibrary();

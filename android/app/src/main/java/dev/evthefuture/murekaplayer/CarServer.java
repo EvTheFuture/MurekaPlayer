@@ -455,7 +455,7 @@ final class CarServer {
                 // The data behind an export, so the browser showing the web
                 // view can save the file itself
                 String asked = param(query, "kind");
-                String kind = "songs".equals(asked) || "library".equals(asked) ? asked : "settings";
+                String kind = "songs".equals(asked) || "library".equals(asked) || "queue".equals(asked) ? asked : "settings";
 
                 // The song library is thousands of songs and takes the page
                 // longer to put together
@@ -464,7 +464,7 @@ final class CarServer {
             } else if ("GET".equals(method) && "/exportName".equals(path)) {
 
                 String asked = param(query, "kind");
-                String kind = "songs".equals(asked) || "library".equals(asked) ? asked : "settings";
+                String kind = "songs".equals(asked) || "library".equals(asked) || "queue".equals(asked) ? asked : "settings";
 
                 sendCall(out, "__murekaHostExportName", JSONObject.quote(kind));
             } else if ("GET".equals(method) && "/download".equals(path)) {
@@ -884,7 +884,7 @@ final class CarServer {
 
         lastPoll = System.currentTimeMillis();
 
-        String kind = "songs".equals(asked) || "library".equals(asked) ? asked : "settings";
+        String kind = "songs".equals(asked) || "library".equals(asked) || "queue".equals(asked) ? asked : "settings";
         String json = Hub.request("__murekaHostExportText", JSONObject.quote(kind), "library".equals(kind) ? 30000 : 4000);
         String text;
         String name;
