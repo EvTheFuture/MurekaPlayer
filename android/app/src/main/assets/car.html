@@ -957,6 +957,25 @@
     }
 
     /* The handle to drag a song to another place in the queue */
+    /* A song still being generated, greyed, its cover unknown */
+    .row.pending {
+        opacity: 0.45;
+    }
+
+    .row.pending .rowTime {
+        width: auto;
+        white-space: nowrap;
+        font-size: 0.8em;
+    }
+
+    .thumb.unknown {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-weight: 600;
+    }
+
     .rowGrip {
         flex: 0 0 auto;
         display: flex;
@@ -8205,7 +8224,70 @@
         }, true);
     }
 
+    // A song Mureka is still generating: greyed, an unknown cover, and a
+    // tap says so and offers to play it as soon as it is ready
+    function makePendingRow(song) {
+
+        const row = document.createElement("div");
+
+        row.setAttribute("role", "button");
+        row.className = "row pending";
+        row.dataset.id = song.id;
+        songLine(song, row);
+
+        const thumb = row.querySelector(".thumb");
+
+        if (thumb && !song.cover) {
+
+            thumb.classList.add("unknown");
+            thumb.textContent = "?";
+        }
+
+        const time = row.querySelector(".rowTime");
+        const heart = row.querySelector(".rowHeart");
+
+        if (time) {
+            time.textContent = song.playWhenReady ? "Plays when ready" : "Generating";
+        }
+
+        // Nothing to like before it exists
+        if (heart) {
+            heart.remove();
+        }
+
+        const tap = function (ev) {
+
+            ev.preventDefault();
+
+            if (song.playWhenReady) {
+
+                toast("Not ready yet, it plays as soon as it is", "wait");
+                return;
+            }
+
+            toast("Not finished generating yet", "bad");
+            openChoice("Still generating: " + song.title, [
+                { icon: "play", label: "Play when ready", fn: function () {
+
+                    closeSongMenu();
+                    send("playWhenReady", song.id).then(function () {
+                        toast("Plays as soon as it is ready", "ok");
+                    });
+                } }
+            ]);
+        };
+
+        row.addEventListener("click", tap);
+        row.addEventListener("contextmenu", tap);
+
+        return row;
+    }
+
     function makeRow(song, place) {
+
+        if (song.pending) {
+            return makePendingRow(song);
+        }
 
         // A div, since a button inside a button is not allowed
         const row = document.createElement("div");

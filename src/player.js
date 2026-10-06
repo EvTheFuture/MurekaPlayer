@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.167";
+    const VERSION = "1.9.9.168";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -626,6 +626,18 @@
 
     // Counts merges of song tweaks, so the web view reads its list again
     let songDataStamp = 0;
+
+    // Songs Mureka is still generating, seen on your own list pages, by id.
+    // Only kept while the player runs. They show greyed at the top of the
+    // list, and the first list page is read every few seconds until they
+    // are ready. Those asked to play when ready are in pendingPlay
+    const pendingSongs = new Map();
+    const pendingPlay = new Set();
+    const PENDING_POLL_MS = 5000;
+
+    let pendingTimer = 0;
+    let pendingBusy = false;
+    let pendingStamp = 0;
 
     // When true the queue is built and rebuilt in random order
     // Starts from the default play mode chosen in settings
@@ -5596,8 +5608,10 @@
             for (const s of songs) {
 
                 // Still generating, so it has no audio to play and its details
-                // are not final. A later load picks it up once it is finished
+                // are not final. Shown as such until it is ready
                 if (!isUsableSong(s)) {
+
+                    notePending(s);
                     continue;
                 }
 
@@ -5666,7 +5680,9 @@
         }
 
         if (myToken === loadToken) {
+
             handleGone(goneMaybe);
+            settlePending();
         }
     }
 
@@ -5739,11 +5755,13 @@
 
             for (const s of songs) {
 
-                // Still generating, so leave it out of the list. It is added to
-                // seen anyway, otherwise a rescan would treat it as deleted
+                // Still generating, so leave it out of the library, shown as
+                // such until it is ready. It is added to seen anyway,
+                // otherwise a rescan would treat it as deleted
                 if (!isUsableSong(s)) {
 
                     seen.add(s.song_id);
+                    notePending(s);
                     continue;
                 }
 
@@ -5947,6 +5965,7 @@
         extendQueueWithNew();
 
         handleGone(goneMaybe);
+        settlePending();
 
         // Only the counts that are not zero, so an ordinary refresh stays
         // short and a rescan that actually changed something says what
@@ -6602,7 +6621,10 @@
         const shown = displaySongs();
 
         for (let i = 0; i < Math.min(shown.length, 60); i++) {
-            seen.push(shown[i]);
+
+            if (!isPendingSong(shown[i])) {
+                seen.push(shown[i]);
+            }
         }
 
         let found = 0;
@@ -9533,9 +9555,248 @@
             return queue.slice();
         }
 
-        // Default Mureka view, the canonical order for the current source
-        return orderedSongs();
+        // Default Mureka view, the canonical order for the current source,
+        // with the songs still being generated first, being the newest
+        const ordered = orderedSongs();
+
+        return pendingSongs.size > 0 && !creatorSource ? pendingList().concat(ordered) : ordered;
     }
+
+    // Whether a song is one Mureka is still generating
+    function isPendingSong(song) {
+        return !!(song && song.__pending === true);
+    }
+
+    function pendingList() {
+
+        return Array.from(pendingSongs.values()).map(function (e) {
+            return e.song;
+        });
+    }
+
+    // A song on a list page that is not finished yet. Your own songs only,
+    // and only while it is not in the library already
+    function notePending(s) {
+
+        if (creatorSource || !s || s.song_id === undefined || s.song_id === null) {
+            return;
+        }
+
+        const id = String(s.song_id);
+        const known = cache.songs.some(function (x) {
+            return String(x.song_id) === id;
+        });
+
+        if (known) {
+            return;
+        }
+
+        const copy = trim(s);
+
+        copy.__pending = true;
+
+        const entry = pendingSongs.get(id);
+
+        if (entry) {
+
+            if (entry.song.title !== copy.title || entry.song.cover !== copy.cover) {
+                pendingStamp += 1;
+            }
+
+            entry.song = copy;
+            entry.misses = 0;
+        } else {
+
+            pendingSongs.set(id, { song: copy, misses: 0 });
+            pendingStamp += 1;
+            dbgLog("Feed", "still generating: " + (copy.title || "Untitled") + " (" + id + ")");
+        }
+
+        if (!pendingTimer) {
+            pendingTimer = setInterval(pollPending, PENDING_POLL_MS);
+        }
+    }
+
+    // Songs that were being generated and are in the library now: no longer
+    // shown as such, and played when that was asked for
+    function settlePending() {
+
+        if (pendingSongs.size === 0) {
+            return;
+        }
+
+        const byId = new Map(cache.songs.map(function (s) {
+            return [String(s.song_id), s];
+        }));
+        let playId = null;
+        let settled = 0;
+
+        for (const id of Array.from(pendingSongs.keys())) {
+
+            const song = byId.get(id);
+
+            if (!song) {
+                continue;
+            }
+
+            pendingSongs.delete(id);
+            pendingStamp += 1;
+            settled += 1;
+
+            if (pendingPlay.delete(id)) {
+
+                playId = song.song_id;
+                showToast("Ready, playing " + (song.title || "Untitled"), true);
+            } else {
+                showToast("Ready to play: " + (song.title || "Untitled"), true);
+            }
+        }
+
+        if (settled === 0) {
+            return;
+        }
+
+        renderList();
+        publishHostSoon();
+
+        // As if it was tapped just now
+        if (playId !== null) {
+            playFrom(playId);
+        }
+    }
+
+    // Every few seconds while songs are being generated: the first list page
+    // is read, finished songs go into the library at the front, and the
+    // others are brought up to date. One no longer on the page for three
+    // reads in a row was dropped by Mureka and is let go
+    async function pollPending() {
+
+        if (pendingSongs.size === 0) {
+
+            clearInterval(pendingTimer);
+            pendingTimer = 0;
+            return;
+        }
+
+        if (pendingBusy || creatorSource || offlineMode()) {
+            return;
+        }
+
+        pendingBusy = true;
+
+        const stampBefore = pendingStamp;
+
+        try {
+
+            const page = await fetchPage(null);
+            const songs = extractSongs(page);
+            const onPage = new Set();
+            const ready = [];
+
+            tagPage(songs, null);
+
+            for (const s of songs) {
+
+                const id = String(s.song_id);
+
+                onPage.add(id);
+
+                if (!pendingSongs.has(id)) {
+                    continue;
+                }
+
+                if (isUsableSong(s)) {
+                    ready.push(trim(s));
+                } else {
+                    notePending(s);
+                }
+            }
+
+            for (const [id, entry] of Array.from(pendingSongs.entries())) {
+
+                if (onPage.has(id)) {
+                    continue;
+                }
+
+                entry.misses += 1;
+
+                if (entry.misses >= 3) {
+
+                    pendingSongs.delete(id);
+                    pendingPlay.delete(id);
+                    pendingStamp += 1;
+                    dbgLog("Feed", "no longer generating, not on the list: " + id);
+                }
+            }
+
+            if (ready.length > 0 && !creatorSource) {
+
+                cache.songs = dedupe(ready.concat(cache.songs));
+                cache.updated = Date.now();
+                saveCache();
+                extendQueueWithNew();
+            }
+
+            settlePending();
+
+            // A song let go, or new details, are shown too
+            if (pendingStamp !== stampBefore && ready.length === 0) {
+
+                renderList();
+                publishHostSoon();
+            }
+        } catch (e) {
+            // Tried again on the next round
+        } finally {
+            pendingBusy = false;
+        }
+    }
+
+    // A tap on a song still being generated: said so, with the offer to play
+    // it as soon as it is ready
+    function pendingTap(song) {
+
+        const id = String(song.song_id);
+        const title = (song.title || "").trim() || "Untitled";
+
+        if (pendingPlay.has(id)) {
+
+            showToast("Not ready yet, it plays as soon as it is", "wait");
+            return;
+        }
+
+        showToast("Not finished generating yet", false);
+        askYesNo("Still generating", "\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
+            + " as it is ready.", "Play when ready", function () {
+            playWhenReady(id);
+        });
+    }
+
+    // Play a song once it is ready, at once when it is already
+    function playWhenReady(id) {
+
+        const key = String(id);
+        const song = cache.songs.find(function (s) {
+            return String(s.song_id) === key;
+        });
+
+        if (song) {
+
+            playFrom(song.song_id);
+            return;
+        }
+
+        if (!pendingSongs.has(key)) {
+            return;
+        }
+
+        pendingPlay.add(key);
+        pendingStamp += 1;
+        renderList();
+        publishHostSoon();
+        showToast("Plays as soon as it is ready", true);
+    }
+
 
     // Play whatever song the queue currently points at
     // Which way the queue last moved, 1 forward and -1 back, so offline the
@@ -18747,7 +19008,7 @@
 
         return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
             creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
-            cache.songs.length, songDataStamp].join("|");
+            cache.songs.length, songDataStamp, pendingStamp].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -19108,7 +19369,10 @@
         const prepared = hostPrepared(view);
         const numbers = prepared.numbers;
 
-        for (const song of prepared.songs) {
+        // Songs still being generated first, in the list's own order only
+        const pending = view === "mureka" && !creatorSource ? pendingList() : [];
+
+        for (const song of pending.concat(prepared.songs)) {
 
             const title = (song.title || "").trim() || "Untitled";
 
@@ -19123,6 +19387,20 @@
             }
 
             if (total - 1 < offset || songs.length >= limit) {
+                continue;
+            }
+
+            if (isPendingSong(song)) {
+
+                songs.push({
+                    id: String(song.song_id),
+                    title: title,
+                    pending: true,
+                    playWhenReady: pendingPlay.has(String(song.song_id)),
+                    cover: song.cover ? coverUrl(song) : "",
+                    rating: null,
+                    duration: 0
+                });
                 continue;
             }
 
@@ -19833,6 +20111,8 @@
             if (song) {
                 playFrom(song.song_id);
             }
+        } else if (cmd === "playWhenReady") {
+            playWhenReady(arg);
         } else if (cmd === "playNext") {
 
             const wanted = String(arg);
@@ -23880,7 +24160,49 @@
         }
     }
 
+    // A song still being generated, greyed, saying so, and a tap tells
+    function buildPendingRow(song) {
+
+        const item = document.createElement("div");
+        const dot = document.createElement("span");
+        const numEl = document.createElement("span");
+        const titleEl = document.createElement("span");
+        const stateEl = document.createElement("span");
+
+        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;opacity:0.45;"
+            + "user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
+        item.title = "Still generating on Mureka";
+        dot.textContent = "\u25CF";
+        dot.style.cssText = "margin-right:6px;flex:0 0 auto;visibility:hidden";
+        numEl.style.cssText = "flex:0 0 auto;width:42px;margin-right:8px";
+        titleEl.textContent = (song.title || "").trim() || "Untitled";
+        titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        stateEl.textContent = pendingPlay.has(String(song.song_id)) ? "Plays when ready" : "Generating";
+        stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap";
+
+        item.appendChild(dot);
+        item.appendChild(numEl);
+        item.appendChild(titleEl);
+        item.appendChild(stateEl);
+
+        item.addEventListener("click", function () {
+            pendingTap(song);
+        });
+
+        item.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+            pendingTap(song);
+        });
+
+        return item;
+    }
+
     function buildSongRow(song, number, isPlaying, dimmed) {
+
+        if (isPendingSong(song)) {
+            return buildPendingRow(song);
+        }
 
         const title = (song.title || "").trim() || "Untitled";
 
@@ -24199,7 +24521,7 @@
 
             // Skip rows hidden by the vocals or playlist filter
             // The queue view always shows the real queue, so it is never filtered
-            if (listView !== "queue" && !passesFilters(song)) {
+            if (listView !== "queue" && !isPendingSong(song) && !passesFilters(song)) {
                 return;
             }
 
@@ -32388,6 +32710,16 @@
 
         // The new song, straight into the library, marked new as Mureka has it
         const made = extractSongs(json.data || json).filter(isUsableSong);
+
+        // A new song Mureka is still making shows as such until it is ready
+        for (const s of extractSongs(json.data || json)) {
+
+            if (!isUsableSong(s)) {
+
+                addedHere.set(String(s.song_id), Date.now());
+                notePending(s);
+            }
+        }
         const known = new Set(cache.songs.map(function (x) {
             return x.song_id;
         }));

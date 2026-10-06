@@ -326,6 +326,12 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **Songs still being generated** show greyed at the top of your own list,
+  in the player and in the web view, with an unknown cover where covers are
+  shown. A tap says the song is not finished yet and offers **Play when
+  ready**. Mureka's list is read every five seconds until they are done,
+  then they join the library with everything brought up to date, and a song
+  asked for starts playing at once. Nothing of this is kept over a restart.
 - **Remove from queue** in the song menu, in the player and in the web view,
   for a song still to come in the queue. The small list over the web view's
   main page shows the queue with the same handles as the big list: drag a
