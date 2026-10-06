@@ -483,6 +483,11 @@ final class CarServer {
                 }
 
                 sendDownload(out, param(query, "kind"), named);
+            } else if ("GET".equals(method) && "/parts".equals(path)) {
+
+                // The playing song's waveforms and lyrics, read apart from
+                // the state, which goes out every second without them
+                sendCall(out, "__murekaHostStateParts", "null");
             } else if ("GET".equals(method) && "/menu".equals(path)) {
 
                 // What the long press menu offers for one song, the id goes
@@ -507,6 +512,11 @@ final class CarServer {
             }
         } catch (IOException e) {
             // The car dropped the connection, nothing to answer
+        } catch (RuntimeException e) {
+
+            // A request the code did not expect, broken escapes in the
+            // address say. The connection is closed, the app runs on
+            Hub.note("Server", "A request could not be read: " + e.getClass().getSimpleName());
         }
     }
 
@@ -735,7 +745,9 @@ final class CarServer {
         // bytes=start-end, bytes=start- or bytes=-last
         if (range.startsWith("bytes=")) {
 
-            String spec = range.substring(6).split(",")[0].trim();
+            // Only the first range is served. "bytes=," has none at all
+            String[] specs = range.substring(6).split(",");
+            String spec = specs.length > 0 ? specs[0].trim() : "";
             int dash = spec.indexOf('-');
 
             try {
@@ -1191,6 +1203,10 @@ final class CarServer {
                     return java.net.URLDecoder.decode(value, "UTF-8");
                 } catch (java.io.UnsupportedEncodingException e) {
                     return value;
+                } catch (IllegalArgumentException e) {
+
+                    // A broken escape such as %zz, taken as no value
+                    return "";
                 }
             }
         }
@@ -1292,16 +1308,20 @@ final class CarServer {
         lastPoll = System.currentTimeMillis();
 
         String json = new String(body, StandardCharsets.UTF_8);
+        String clean;
 
+        // Written out again from what was parsed, never passed on as it came:
+        // the parser accepts more than JSON, and the text goes into the
+        // player as script
         try {
-            new JSONObject(json);
+            clean = new JSONObject(json).toString();
         } catch (JSONException e) {
 
             send(out, 400, "application/json", bytes("{\"ok\":false}"));
             return;
         }
 
-        String answer = Hub.requestLater("__murekaHostImportApply", json, 30000);
+        String answer = Hub.requestLater("__murekaHostImportApply", clean, 30000);
 
         send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
     }
@@ -1353,7 +1373,9 @@ final class CarServer {
 
         String head = String.format(Locale.ROOT,
             "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n"
-            + "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+            + "Cache-Control: no-store\r\nX-Frame-Options: DENY\r\n"
+            + "Content-Security-Policy: frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\n"
+            + "Connection: close\r\n\r\n",
             code, reason, type, body.length);
 
         out.write(head.getBytes(StandardCharsets.US_ASCII));

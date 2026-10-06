@@ -70,7 +70,9 @@
         }
     }
 
-    // Relay download requests coming from the injected player
+    // Relay download requests coming from the injected player. Any script on
+    // the page can post these, so the background script checks every item:
+    // only Mureka's songs, saved as mp3 files in the Mureka folder
     window.addEventListener("message", async function (ev) {
 
         if (ev.source !== window) {
@@ -83,7 +85,7 @@
             return;
         }
 
-        if (data.type === "downloadMany") {
+        if (data.type === "downloadMany" && Array.isArray(data.items)) {
 
             const result = await relayDownload(data.items);
 

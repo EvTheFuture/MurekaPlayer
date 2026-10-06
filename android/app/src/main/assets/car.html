@@ -4162,6 +4162,64 @@
         return s;
     }
 
+    // The waveforms and lyrics of the playing song come apart from the
+    // state, read once each time the phone's key for them changes. Until
+    // the new ones are here, those of the same song stay. A phone app from
+    // before sends them in the state itself, then nothing is read
+    let parts = { key: "", data: null };
+    let partsAsked = "";
+
+    function withParts(s) {
+
+        if (!s || typeof s.partsKey !== "string") {
+            return s;
+        }
+
+        const sameSong = parts.data && parts.key.split(":")[0] === s.partsKey.split(":")[0];
+
+        if (parts.key === s.partsKey || sameSong) {
+
+            s.wave = parts.data.wave;
+            s.waveOwn = parts.data.waveOwn;
+            s.waveOwnLoud = parts.data.waveOwnLoud;
+            s.lyrics = parts.data.lyrics;
+        }
+
+        if (parts.key !== s.partsKey && partsAsked !== s.partsKey) {
+            askParts(s.partsKey);
+        }
+
+        return s;
+    }
+
+    function askParts(key) {
+
+        partsAsked = key;
+
+        fetchJson("/parts", 15000).then(function (data) {
+
+            if (!data || typeof data.key !== "string") {
+
+                partsAsked = "";
+                return;
+            }
+
+            parts = { key: data.key, data: data };
+
+            // Shown at once for the state at hand when they belong to it
+            if (rawState && rawState.partsKey === data.key) {
+
+                withParts(rawState);
+                state = applyLocalLook(rawState);
+                render();
+            } else {
+                partsAsked = "";
+            }
+        }).catch(function () {
+            partsAsked = "";
+        });
+    }
+
     // Show a change of this browser's settings at once
     function relook() {
 
@@ -4689,6 +4747,31 @@
         }
 
         return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
+    }
+
+    // A reading from the phone as JSON, given up after a while so a phone
+    // that does not answer cannot leave a list or panel waiting for good
+    function fetchJson(url, ms) {
+
+        const ctl = window.AbortController ? new AbortController() : null;
+        const timer = setTimeout(function () {
+
+            if (ctl) {
+                ctl.abort();
+            }
+        }, ms || 15000);
+
+        return fetch(url, { cache: "no-store", signal: ctl ? ctl.signal : undefined }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+
+            clearTimeout(timer);
+            return data;
+        }, function (e) {
+
+            clearTimeout(timer);
+            throw e;
+        });
     }
 
     function send(cmd, arg) {
@@ -7311,10 +7394,8 @@
         listBusy = true;
         showListLoading(true);
 
-        fetch("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=" + listLoaded
-            + "&limit=" + (done ? 200 : PAGE), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
+        fetchJson("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=" + listLoaded
+            + "&limit=" + (done ? 200 : PAGE)).then(function (data) {
 
             if (token !== listToken) {
                 return;
@@ -7393,7 +7474,14 @@
 
     // Load pages until the row at this place is in the list, then go on.
     // A page still on its way is waited for rather than skipped
-    function ensureLoaded(index, then) {
+    function ensureLoaded(index, then, token) {
+
+        // The list was read anew meanwhile, its own reading goes on from there
+        const round = token === undefined ? listToken : token;
+
+        if (round !== listToken) {
+            return;
+        }
 
         if (listView === "queue" || index < 0 || index < listLoaded || listLoaded >= listTotal) {
 
@@ -7404,7 +7492,7 @@
         if (listBusy) {
 
             setTimeout(function () {
-                ensureLoaded(index, then);
+                ensureLoaded(index, then, round);
             }, 150);
             return;
         }
@@ -7414,7 +7502,7 @@
         loadList(false, function () {
 
             if (listLoaded > before) {
-                ensureLoaded(index, then);
+                ensureLoaded(index, then, round);
             } else {
                 then();
             }
@@ -7459,9 +7547,7 @@
             box.appendChild(loadingNode("Loading the queue"));
         }
 
-        fetch("/queue?q=" + esc(listQuery), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
+        fetchJson("/queue?q=" + esc(listQuery)).then(function (data) {
 
             if (token !== listToken || !data || !data.items) {
                 return;
@@ -9058,29 +9144,30 @@
         panelAgain = false;
 
         const acts = panelActs;
+        const name = panelName;
 
-        // Once this reading is in, another if a change came in meanwhile
+        // Once this reading is in, another if a change came in meanwhile,
+        // or another panel was opened while this one was being read
         const next = function () {
 
             panelBusy = false;
 
-            if (panelAgain || acts !== panelActs) {
+            if (panelAgain || acts !== panelActs || name !== panelName) {
 
                 panelAgain = false;
                 setTimeout(loadPanel, 150);
             }
         };
 
-        return fetch("/panel?name=" + esc(panelName), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
+        return fetchJson("/panel?name=" + esc(name), 20000).then(function (data) {
 
             // Never redrawn under a finger typing in one of its fields, or
             // moving a button in the transport bar editor, nor from a
-            // reading older than the last change
+            // reading older than the last change, nor into another panel
+            // than the one it was read for
             const typing = document.activeElement && document.activeElement.classList.contains("pField");
 
-            if (data && data.items && panelOpen() && !typing && !editorBusy && acts === panelActs) {
+            if (data && data.items && panelOpen() && !typing && !editorBusy && acts === panelActs && name === panelName) {
                 renderPanel(data.items);
             }
 
@@ -9886,10 +9973,25 @@
         let timer = null;
 
         field.className = "pField";
-        field.type = node.type === "search" ? "search" : "text";
         field.value = node.value || "";
         field.placeholder = node.placeholder || "";
         field.autocomplete = "off";
+
+        // A date or a colour is picked, not typed, and sent once it is
+        // picked. Sent while typing, a half written date would be taken as
+        // none and clear the filter it belongs to
+        if (node.type === "date" || node.type === "color") {
+
+            field.type = node.type;
+            field.value = node.value || (node.type === "color" ? "#000000" : "");
+            field.addEventListener("change", function () {
+                panelAction("hset", { id: node.id, value: field.value });
+            });
+
+            return field;
+        }
+
+        field.type = node.type === "search" ? "search" : "text";
 
         field.addEventListener("input", function () {
 
@@ -10440,10 +10542,8 @@
             return;
         }
 
-        fetch("/list?q=&view=" + (listSort || "mureka") + "&offset=0&limit="
-            + Math.min(200, Math.max(PAGE, miniLoaded)), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
+        fetchJson("/list?q=&view=" + (listSort || "mureka") + "&offset=0&limit="
+            + Math.min(200, Math.max(PAGE, miniLoaded))).then(function (data) {
 
             const found = new Map();
 
@@ -10848,6 +10948,18 @@
         }, { root: $("miniRows"), rootMargin: "400px 0px" })
         : null;
 
+    // Empty the small list. Its covers' watcher lets go of every row it
+    // still waited for, the rows that come next are watched anew as they
+    // are added
+    function clearMiniRows() {
+
+        if (miniThumbs) {
+            miniThumbs.disconnect();
+        }
+
+        $("miniRows").textContent = "";
+    }
+
     // From the top of the stars to just above the seek bar, as wide as the
     // song's text beside the cover
     function placeMini() {
@@ -10898,7 +11010,7 @@
         $("browseBtn").classList.remove("on");
         $("miniBtn").classList.remove("on");
         $("mini").style.display = "none";
-        $("miniRows").textContent = "";
+        clearMiniRows();
         hideMiniEdge();
         updateMiniLocate();
     }
@@ -10996,9 +11108,7 @@
 
         miniBusy = true;
 
-        fetch("/queue?q=", { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
+        fetchJson("/queue?q=").then(function (data) {
 
             if (token !== miniToken) {
                 return;
@@ -11016,7 +11126,7 @@
             const items = listSort ? sortRows(data.items) : data.items;
 
             rowMeta = data.meta || rowMeta;
-            box.textContent = "";
+            clearMiniRows();
 
             items.forEach(function (item, i) {
 
@@ -11138,7 +11248,7 @@
 
                 miniToken += 1;
                 miniBusy = false;
-                $("miniRows").textContent = "";
+                clearMiniRows();
                 hideMiniEdge();
             }
 
@@ -11154,7 +11264,7 @@
             miniToken += 1;
             miniLoaded = 0;
             miniBusy = false;
-            $("miniRows").textContent = "";
+            clearMiniRows();
             $("miniRows").scrollTop = 0;
             hideMiniEdge();
         }
@@ -11168,10 +11278,9 @@
 
         miniBusy = true;
 
-        fetch("/list?q=&view=" + (listSort || "mureka") + "&offset=" + miniLoaded + "&limit=" + (limit || PAGE),
-            { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
+        const miniUrl = "/list?q=&view=" + (listSort || "mureka") + "&offset=" + miniLoaded + "&limit=" + (limit || PAGE);
+
+        fetchJson(miniUrl).then(function (data) {
 
             if (token !== miniToken) {
                 return;
@@ -11716,9 +11825,11 @@
 
         notePhoneClock(s);
 
-        // The phone's own values kept, what this browser shows may differ
-        rawState = s;
-        s = applyLocalLook(s);
+        // The phone's own values kept, what this browser shows may differ,
+        // with the song's waveforms and lyrics put in from where they are
+        // kept, read apart from the state
+        rawState = withParts(s);
+        s = applyLocalLook(rawState);
 
         logStateChanges(state, s);
 
@@ -13717,9 +13828,7 @@
             return;
         }
 
-        fetch("/menu?id=" + esc(menuSong.id), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (m) {
+        fetchJson("/menu?id=" + esc(menuSong.id)).then(function (m) {
 
             if (m && menuSong && m.id === menuSong.id) {
 
@@ -13733,9 +13842,7 @@
 
     function openSongMenu(id, bpm, title) {
 
-        fetch("/menu?id=" + esc(id), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (m) {
+        fetchJson("/menu?id=" + esc(id)).then(function (m) {
 
             if (!m || !m.id) {
                 return;
@@ -14737,9 +14844,7 @@
             return;
         }
 
-        fetch("/menu?id=" + esc(state.id), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (m) {
+        fetchJson("/menu?id=" + esc(state.id)).then(function (m) {
 
             if (m && m.id) {
                 then(m);
@@ -15263,9 +15368,7 @@
         song.appendChild(loadingNode("Loading"));
         box.insertBefore(song, tiles);
 
-        fetch("/menu?id=" + esc(s.id), { cache: "no-store" }).then(function (res) {
-            return res.json();
-        }).then(function (m) {
+        fetchJson("/menu?id=" + esc(s.id)).then(function (m) {
 
             if (!m || !m.id || !song.isConnected) {
                 return;
@@ -16295,6 +16398,9 @@
     // The song's file, the phone's own copy when it is stored there,
     // otherwise fetched by the phone from Mureka and handed on, with the
     // share that has arrived shown as it comes in
+    // The trimmer's download under way, stopped when the trimmer closes
+    let trimFetch = null;
+
     async function trimLoadBytes(m, token) {
 
         const t0 = Date.now();
@@ -16303,7 +16409,11 @@
             throw new Error("no link to the song");
         }
 
-        const res = await fetch("/audio?url=" + encodeURIComponent(m.src), { cache: "no-store" });
+        const ctl = window.AbortController ? new AbortController() : null;
+
+        trimFetch = ctl;
+
+        const res = await fetch("/audio?url=" + encodeURIComponent(m.src), { cache: "no-store", signal: ctl ? ctl.signal : undefined });
 
         if (!res.ok) {
             throw new Error(res.status === 403 ? "not a Mureka song" : "the phone could not get it, " + res.status);
@@ -16329,6 +16439,15 @@
 
                 if (part.done) {
                     break;
+                }
+
+                // Closed meanwhile, the rest is not read
+                if (token !== trimToken) {
+
+                    reader.cancel().catch(function () {
+                        // Already gone
+                    });
+                    throw new Error("closed");
                 }
 
                 parts.push(part.value);
@@ -16364,6 +16483,13 @@
         trimToken += 1;
         trimStop();
         tr = null;
+
+        // A song still coming in is not wanted any more
+        if (trimFetch) {
+
+            trimFetch.abort();
+            trimFetch = null;
+        }
 
         if (trimUi) {
 

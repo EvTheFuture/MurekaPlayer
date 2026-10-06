@@ -551,8 +551,10 @@ the new settings layout and a number of smaller improvements.
   finds in `~/.android`, checks its password and keeps the answers in
   `android/keystore.properties`, which git ignores. `make signing` asks
   again. `make release` saves the APK as `mureka-player-<version>.apk` with
-  a SHA-256 file and shows who signed it. Debug builds use the same key, so
-  both install over each other.
+  a SHA-256 file and shows who signed it. It signs with the release key
+  only: without one set, or with a debug signed result, it stops and
+  publishes nothing. Debug builds use the same key, so both install over
+  each other.
 - `adb-reconnect.sh` reconnects adb to a phone over the network.
 
 ### Known limits

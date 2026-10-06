@@ -111,12 +111,23 @@ apk: android/local.properties $(SIGNING)
 	@echo "APK: $(APK_DEBUG)"
 
 # Also copied to the name it is published with, next to its SHA-256, and
-# the signer is shown, so a debug signed APK is noticed before it goes out
+# the signer is shown. Only ever signed with the release key: without one
+# set, or with a debug signed result, it stops and nothing is published
 release: android/local.properties $(SIGNING)
 	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
+	@store=$$(sed -n 's/^storeFile=//p' $(SIGNING) | head -1); \
+	if [ -z "$$store" ] || [ ! -f "$$store" ]; then \
+	    echo "make release signs with the release key only, and none is set. Run make signing"; \
+	    exit 1; \
+	fi
 	cd android && JAVA_HOME="$(JAVA_HOME)" ./gradlew assembleRelease
+	@if [ -n "$(APKSIGNER)" ] && JAVA_HOME="$(JAVA_HOME)" $(APKSIGNER) verify --print-certs $(APK_RELEASE) \
+	    | grep -q "CN=Android Debug"; then \
+	    echo "The release APK came out signed with the debug key, not published"; \
+	    exit 1; \
+	fi
 	cp $(APK_RELEASE) $(DIST_APK)
-	sha256sum $(DIST_APK) > $(DIST_APK).sha256
+	{ sha256sum $(DIST_APK) 2>/dev/null || shasum -a 256 $(DIST_APK); } > $(DIST_APK).sha256
 	@if [ -n "$(APKSIGNER)" ]; then \
 	    JAVA_HOME="$(JAVA_HOME)" $(APKSIGNER) verify --print-certs $(DIST_APK) | grep -E "DN:|SHA-256"; \
 	fi

@@ -31,12 +31,44 @@
 // Firefox exposes the promise based browser namespace, Chromium only has chrome
 const api = globalThis.browser || globalThis.chrome;
 
+// The most files one request may ask for, more than any library holds
+const MAX_ITEMS = 10000;
+
 // Small promise based delay helper
 function sleep(ms) {
 
     return new Promise(function (resolve) {
         setTimeout(resolve, ms);
     });
+}
+
+// Whether an address is Mureka's own, over https
+function murekaHost(value) {
+
+    try {
+
+        const u = new URL(String(value));
+
+        return u.protocol === "https:" && (u.hostname === "mureka.ai" || u.hostname.endsWith(".mureka.ai"));
+    } catch (e) {
+        return false;
+    }
+}
+
+// Only songs from Mureka, saved as mp3 files straight in the Mureka folder.
+// Any script on the page can post to the content script, so nothing else is
+// downloaded however it is asked for
+function allowedItem(item) {
+
+    if (!item || typeof item !== "object" || typeof item.url !== "string" || typeof item.filename !== "string") {
+        return false;
+    }
+
+    if (!murekaHost(item.url)) {
+        return false;
+    }
+
+    return /^Mureka\/[^\/\\]+\.mp3$/i.test(item.filename) && item.filename.indexOf("..") === -1;
 }
 
 // Chromium stops a service worker after roughly thirty seconds of inactivity,
@@ -71,7 +103,8 @@ function stopKeepAlive() {
     keepAliveTimer = null;
 }
 
-// Download a list of files one at a time into their given relative paths
+// Download a list of files one at a time into their given relative paths.
+// Items that are not Mureka songs count as failed
 async function downloadMany(items) {
 
     let ok = 0;
@@ -82,6 +115,12 @@ async function downloadMany(items) {
     try {
 
         for (const item of items) {
+
+            if (!allowedItem(item)) {
+
+                fail += 1;
+                continue;
+            }
 
             try {
 
@@ -111,15 +150,26 @@ async function downloadMany(items) {
 
 // Chromium does not accept a promise returned from a message listener, it wants
 // sendResponse with a truthy return to keep the channel open. Firefox supports
-// that form too, so this one shape works in both
+// that form too, so this one shape works in both. Only this extension's own
+// content script on a Mureka page is listened to
 api.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
-    if (msg && msg.type === "downloadMany") {
-
-        downloadMany(msg.items).then(sendResponse, function () {
-            sendResponse({ ok: 0, fail: msg.items.length });
-        });
-
-        return true;
+    if (!msg || msg.type !== "downloadMany") {
+        return;
     }
+
+    const items = Array.isArray(msg.items) ? msg.items : [];
+    const fromMureka = sender && sender.id === api.runtime.id && sender.tab && murekaHost(sender.url || sender.tab.url);
+
+    if (!fromMureka || items.length === 0 || items.length > MAX_ITEMS) {
+
+        sendResponse({ ok: 0, fail: items.length });
+        return;
+    }
+
+    downloadMany(items).then(sendResponse, function () {
+        sendResponse({ ok: 0, fail: items.length });
+    });
+
+    return true;
 });

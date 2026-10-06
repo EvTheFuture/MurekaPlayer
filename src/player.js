@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.169";
+    const VERSION = "1.9.9.170";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -438,6 +438,10 @@
             return "Mureka answered " + msg;
         }
 
+        if (/^Mureka code /.test(msg)) {
+            return "Mureka answered with an error (" + msg.slice(12) + ")";
+        }
+
         return "could not reach mureka.ai, check the connection";
     }
 
@@ -589,10 +593,6 @@
 
     // Incremented on each play, lets a slow blob fetch know it is now stale
     let playToken = 0;
-
-    // Base URL for audio files, defaults to the known host
-    // Falls back to detection from the site player only if this stops working
-    let audioBase = AUDIO_BASE;
 
     // The song object currently playing, null when nothing plays
     let currentSong = null;
@@ -4674,7 +4674,7 @@
         let json;
 
         try {
-            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id);
 
             res = await timedFetch(url, { credentials: "include" });
         } catch (e) {
@@ -5277,6 +5277,16 @@
         }
 
         const json = await res.json();
+
+        // Mureka can answer 200 with an error code and no songs. Taken as an
+        // empty page that would read as the end of the library, and a
+        // rescan would then remove every song it had not reached yet
+        if (!json || typeof json !== "object" || (typeof json.code === "number" && json.code !== 0)) {
+
+            lastFeedResponse = json;
+            throw new Error("Mureka code " + (json && json.code !== undefined ? json.code : "none")
+                + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+        }
 
         apiOk = true;
 
@@ -6189,25 +6199,6 @@
         updateSourceLabel();
     }
 
-    // Try to learn the audio base URL from the site own audio element
-    function detectBase() {
-
-        const audios = document.querySelectorAll("audio");
-
-        for (const a of audios) {
-
-            const src = a.currentSrc || a.src || "";
-
-            const idx = src.indexOf("cos-prod/");
-
-            if (idx !== -1) {
-                return src.slice(0, idx);
-            }
-        }
-
-        return null;
-    }
-
     // Build a playable URL for a song
     function songUrl(song) {
 
@@ -6217,15 +6208,8 @@
             return path;
         }
 
-        if (!audioBase) {
-            audioBase = detectBase();
-        }
-
-        if (!audioBase) {
-            return null;
-        }
-
-        return audioBase + path;
+        // A path on Mureka's file host, as the song list gives it
+        return AUDIO_BASE + path;
     }
 
     // Build the album art URL for a song, served from the same host
@@ -6313,8 +6297,13 @@
     // Prepare a URL for the song that plays next, from the cache when it is
     // there. Done ahead of time so the moment the current song ends the next
     // can be started synchronously, which the background requires
+    // Counts the preparations, so one overtaken by a newer one while it
+    // read the stored song lets its copy go instead of keeping it
+    let nextReadyRound = 0;
+
     async function prepareNextReady() {
 
+        const round = ++nextReadyRound;
         const pos = queuePos + 1;
 
         if (pos >= queue.length || !queue[pos]) {
@@ -6347,16 +6336,19 @@
 
             const blob = await resp.blob();
 
-            // The queue may have moved on while the blob was being read
-            if (queuePos + 1 < queue.length && queue[queuePos + 1]
-                && queue[queuePos + 1].song_id === song.song_id) {
-
-                nextReady = { song_id: song.song_id, url: URL.createObjectURL(blob) };
-
-            } else {
-                URL.revokeObjectURL(URL.createObjectURL(blob));
+            // A newer preparation took over, or the queue moved on, while
+            // the blob was being read. The blob is let go without an
+            // address ever made for it, which would hold the whole song
+            if (round !== nextReadyRound || !(queuePos + 1 < queue.length && queue[queuePos + 1]
+                && queue[queuePos + 1].song_id === song.song_id)) {
+                return;
             }
+
+            // One made by an earlier round is released first
+            dropNextReady();
+            nextReady = { song_id: song.song_id, url: URL.createObjectURL(blob) };
         } catch (e) {
+            // Not stored after all, the song is fetched when it starts
         }
     }
 
@@ -7088,7 +7080,7 @@
         say("Refreshing", "wait");
 
         try {
-            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id);
             const res = await timedFetch(url, { credentials: "include" });
 
             if (!res.ok) {
@@ -9888,7 +9880,6 @@
         }
     }
 
-
     // Play whatever song the queue currently points at
     // Which way the queue last moved, 1 forward and -1 back, so offline the
     // songs that are not stored are passed over in that direction
@@ -10944,7 +10935,7 @@
 
         try {
 
-            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
+            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id),
                 { credentials: "include" });
 
             if (res.status === 429) {
@@ -11157,7 +11148,7 @@
 
             try {
 
-                const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
+                const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id),
                     { credentials: "include" });
 
                 // Asked too often, the rest is left for another time
@@ -11368,7 +11359,7 @@
 
         try {
             const url = "/api/pgc/song/detail?time=" + Date.now()
-                + "&song_id=" + song.song_id;
+                + "&song_id=" + encodeURIComponent(song.song_id);
 
             const res = await timedFetch(url, { credentials: "include" });
 
@@ -15775,7 +15766,7 @@
 
         try {
 
-            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id,
+            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id),
                 { credentials: "include" });
             const json = res.ok ? await res.json() : null;
             const fresh = json && json.data && json.data.song;
@@ -17873,11 +17864,10 @@
             signedIn: authState,
             status: statusText || "",
             showUpNext: settings.webUpNext !== false,
-            // Sent even with the waveform switched off here, a browser with
-            // its own settings may show it
-            wave: hostWave(),
-            waveOwn: hostWaveOf(waveOwn, HOST_WAVE_POINTS * 2),
-            waveOwnLoud: hostWaveOf(waveOwnLoud, HOST_WAVE_POINTS * 2),
+            // The waveforms and the lyrics are read apart, by /parts, since
+            // the state goes out every second and they change once a song.
+            // The key says when to read them again
+            partsKey: hostPartsKey(),
             trimJob: hostTrimJob,
             trimFade: settings.trimFade !== false,
             waveOn: settings.webWave !== false,
@@ -17887,7 +17877,6 @@
             controls: hostControls("web"),
             names: settings.webNames === true,
             lyricsWhere: settings.webLyrics || "info",
-            lyrics: hostLyrics(),
             lyricLayout: hostLyricLayout(),
             prevSong: hostNeighbor(-1),
             upNext: hostNeighbor(1),
@@ -17911,6 +17900,43 @@
             published: publishFilter,
             browsing: !!creatorSource
         };
+    }
+
+    // The playing song's waveforms and synced lyrics, for the web view to
+    // read when partsKey in the state changes. Sent even with the waveform
+    // switched off here, a browser with its own settings may show it
+    function hostParts() {
+
+        return {
+            wave: hostWave(),
+            waveOwn: hostWaveOf(waveOwn, HOST_WAVE_POINTS * 2),
+            waveOwnLoud: hostWaveOf(waveOwnLoud, HOST_WAVE_POINTS * 2),
+            lyrics: hostLyrics()
+        };
+    }
+
+    // A short fingerprint of the parts, the song's id first, so the state
+    // only says whether they changed
+    function hostPartsKey() {
+
+        const text = JSON.stringify(hostParts());
+        let h = 0;
+
+        for (let i = 0; i < text.length; i++) {
+            h = (h * 31 + text.charCodeAt(i)) | 0;
+        }
+
+        return (currentSong ? String(currentSong.song_id) : "-") + ":" + text.length + ":" + (h >>> 0).toString(36);
+    }
+
+    // What /parts hands the web view, with the key it belongs to
+    function hostStateParts() {
+
+        const out = hostParts();
+
+        out.key = hostPartsKey();
+
+        return out;
     }
 
     // The synced lyrics of the playing song, when the phone shows them on
@@ -20395,6 +20421,7 @@
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
         window.__murekaHostSongMenu = hostSongMenu;
+        window.__murekaHostStateParts = hostStateParts;
         window.__murekaHostSongInfo = hostSongInfo;
         window.__murekaHostSongPart = hostSongPart;
         window.__murekaHostKeptCover = hostKeptCover;
@@ -22406,7 +22433,6 @@
 
         applyPosition(left, top);
     }
-
 
     // The most recent sizing passes, newest last. A few are shown, all of
     // them go out with a copy
@@ -25543,7 +25569,7 @@
         paintStatus();
         settingsRefreshers.push(paintStatus);
 
-        setInterval(function () {
+        settingsEvery(function () {
 
             if (settingsEl && page.style.display !== "none" && settingsEl.offsetParent !== null) {
 
@@ -26101,14 +26127,14 @@
             paintSongStatus();
         });
 
-        setInterval(function () {
+        settingsEvery(function () {
 
             if (songClearing || (settingsEl && cachePage.style.display !== "none" && settingsEl.offsetParent !== null)) {
                 paintSongStatus();
             }
         }, 1000);
 
-        setInterval(function () {
+        settingsEvery(function () {
 
             if (settingsEl && cachePage.style.display !== "none" && settingsEl.offsetParent !== null) {
                 readStorage();
@@ -26556,7 +26582,7 @@
         settingsRefreshers.push(paintPlaysRows);
         playsStatusPaint = paintPlaysStatus;
 
-        setInterval(function () {
+        settingsEvery(function () {
 
             if (settingsEl && libraryPage.style.display !== "none" && settingsEl.offsetParent !== null) {
                 paintPlaysStatus();
@@ -26870,7 +26896,7 @@
 
             // The VPN comes up, or the permission question is answered, a
             // moment after the switch, so the lines follow while shown
-            setInterval(function () {
+            settingsEvery(function () {
 
                 if (settingsEl && settingsEl.offsetParent !== null) {
                     renderCarStatus();
@@ -27153,7 +27179,7 @@
             paintCoverStatus();
             settingsRefreshers.push(paintCoverStatus);
 
-            setInterval(function () {
+            settingsEvery(function () {
 
                 if (coverClearing || (settingsEl && cachePage.style.display !== "none" && settingsEl.offsetParent !== null)) {
                     paintCoverStatus();
@@ -27416,7 +27442,7 @@
             renderAddresses();
             settingsRefreshers.push(renderAddresses);
 
-            setInterval(function () {
+            settingsEvery(function () {
 
                 if (settingsEl && aboutPage.style.display !== "none" && settingsEl.offsetParent !== null) {
                     renderAddresses();
@@ -27884,6 +27910,44 @@
     // Check a set of user data and keep only its well formed entries.
     // Song tweaks, settings and the combined files of 1.5.0.20 are all
     // understood. Returns null when it is not a Mureka Player export at all
+    // Whether a link from an imported file points at Mureka: a path on
+    // Mureka's file host as the library keeps them, or https on mureka.ai.
+    // A shared file must not make the player fetch from anywhere else
+    function murekaLink(value) {
+
+        const link = String(value || "");
+
+        if (link === "") {
+            return true;
+        }
+
+        if (!/^[a-z][a-z0-9+.-]*:/i.test(link) && link.indexOf("//") !== 0) {
+            return true;
+        }
+
+        try {
+
+            const u = new URL(link);
+
+            return u.protocol === "https:" && (u.hostname === "mureka.ai" || u.hostname.endsWith(".mureka.ai"));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // A song from an imported file as the player keeps it, its cover left
+    // out when it points elsewhere than Mureka
+    function importedSong(x) {
+
+        const s = trim(x);
+
+        if (!murekaLink(s.cover)) {
+            s.cover = "";
+        }
+
+        return s;
+    }
+
     function parseUserData(data) {
 
         const kinds = ["song-data", "settings", "user-data", "library", "queue"];
@@ -27920,8 +27984,9 @@
                 // Songs with a full link to their audio, from 1.9.9.167 on
                 songs: Array.isArray(q.songs) ? q.songs.filter(function (x) {
                     return x && typeof x === "object" && x.song_id !== null && x.song_id !== undefined
-                        && typeof x.mp3_url === "string" && x.mp3_url.indexOf("http") === 0;
-                }).map(trim) : []
+                        && typeof x.mp3_url === "string" && x.mp3_url.indexOf("https://") === 0
+                        && murekaLink(x.mp3_url);
+                }).map(importedSong) : []
             };
 
             return out;
@@ -27932,8 +27997,8 @@
 
             const lib = data.library && typeof data.library === "object" ? data.library : {};
             const songs = Array.isArray(lib.songs) ? lib.songs.filter(function (x) {
-                return x && typeof x === "object" && isUsableSong(x);
-            }).map(trim) : [];
+                return x && typeof x === "object" && isUsableSong(x) && murekaLink(x.mp3_url);
+            }).map(importedSong) : [];
 
             out.library = {
                 songs: songs,
@@ -28664,9 +28729,45 @@
     function confirmImport(p, sourceName) {
 
         const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
+        const net = appPrefChanges(p.appSettings);
 
         return window.confirm("Import the settings from the " + sourceName + " saved "
-            + when + "?\n\nYour current settings are replaced.");
+            + when + "?\n\nYour current settings are replaced."
+            + (net ? "\n\nIt also changes who can reach the web view: " + net + "." : ""));
+    }
+
+    // The app's own network settings a settings file would change, in
+    // words, or empty. Who can reach the web view should never change
+    // without it being said
+    function appPrefChanges(app) {
+
+        const host = window.MurekaHost;
+
+        if (!app || typeof app !== "object" || !isApkHost() || !host || typeof host.getPref !== "function") {
+            return "";
+        }
+
+        const names = {
+            allowHotspot: "allow from the phone's hotspot",
+            allowWifi: "allow from Wi-Fi networks",
+            carVpn: "public address (VPN)",
+            vpnAddress: "public address",
+            mdnsName: "local name"
+        };
+        const parts = [];
+
+        for (const key of Object.keys(names)) {
+
+            if (typeof app[key] !== "string" || String(host.getPref(key, APP_PREF_DEFAULTS[key])) === app[key]) {
+                continue;
+            }
+
+            const onOff = key === "vpnAddress" || key === "mdnsName" ? app[key] : (app[key] === "1" ? "on" : "off");
+
+            parts.push(names[key] + " " + onOff);
+        }
+
+        return parts.join(", ");
     }
 
     // What an export holds, for the result line
@@ -29283,7 +29384,9 @@
         const out = { ok: true, key: key, kind: p.kind };
 
         if (p.kind === "settings") {
-            out.what = "Settings saved " + when;
+            const net = appPrefChanges(p.appSettings);
+
+            out.what = "Settings saved " + when + (net ? ". It also changes who can reach the web view: " + net : "");
         } else if (p.kind === "queue") {
 
             const found = queueImportSongs(p);
@@ -29883,6 +29986,43 @@
     }
 
     // Show the settings overlay, expanding the panel first if it is minimized
+    // Timers of the settings pages, repainting what the open page shows.
+    // One ticker runs them, only while the settings are open. The web view
+    // reads the pages through the refreshers, it needs none of these
+    const settingsTimers = [];
+    let settingsTicker = 0;
+
+    function settingsEvery(fn, ms) {
+        settingsTimers.push({ fn: fn, ms: ms, at: 0 });
+    }
+
+    function settingsTick() {
+
+        if (!settingsOpen) {
+
+            clearInterval(settingsTicker);
+            settingsTicker = 0;
+            return;
+        }
+
+        const now = Date.now();
+
+        for (const timer of settingsTimers) {
+
+            if (now - timer.at < timer.ms) {
+                continue;
+            }
+
+            timer.at = now;
+
+            try {
+                timer.fn();
+            } catch (e) {
+                // One page failing to paint leaves the others running
+            }
+        }
+    }
+
     function openSettings() {
 
         closeDropdowns();
@@ -29899,6 +30039,10 @@
         if (settingsEl) {
             settingsOpen = true;
             gateMenuOpened();
+
+            if (!settingsTicker) {
+                settingsTicker = setInterval(settingsTick, 500);
+            }
 
             // Re-read from storage first. Another copy of the player in the
             // same browser writes the same keys, and the rows were drawn when
@@ -29924,6 +30068,8 @@
 
         if (settingsEl) {
             settingsOpen = false;
+            clearInterval(settingsTicker);
+            settingsTicker = 0;
             endControlDrag();
             settingsEl.style.display = "none";
             gateMenuClosed();
@@ -30057,7 +30203,7 @@
 
     function fetchSongDetail(songId) {
 
-        const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + songId;
+        const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(songId);
 
         detailError = "";
 
@@ -30964,7 +31110,6 @@
         trimUi = ui;
 
         installTrimPointers();
-
 
         window.addEventListener("resize", function () {
 
@@ -33059,7 +33204,7 @@
                 let url = "/api/pgc/playlists?time=" + Date.now() + "&size=24&sort_type=2";
 
                 if (lastId) {
-                    url += "&last_id=" + lastId;
+                    url += "&last_id=" + encodeURIComponent(lastId);
                 }
 
                 const res = await timedFetch(url, { credentials: "include" });
@@ -33485,7 +33630,7 @@
             let url = baseUrl + (baseUrl.indexOf("?") === -1 ? "?" : "&") + "time=" + Date.now();
 
             if (lastId) {
-                url += "&last_id=" + lastId;
+                url += "&last_id=" + encodeURIComponent(lastId);
             }
 
             const res = await timedFetch(url, { credentials: "include" });
@@ -33546,8 +33691,8 @@
 
             // The follow lists round out the pool once the self id is known
             if (selfUserId !== null) {
-                await collectCreatorUsers("/api/user/followings?user_id=" + selfUserId, addUser);
-                await collectCreatorUsers("/api/user/followers?user_id=" + selfUserId, addUser);
+                await collectCreatorUsers("/api/user/followings?user_id=" + encodeURIComponent(selfUserId), addUser);
+                await collectCreatorUsers("/api/user/followers?user_id=" + encodeURIComponent(selfUserId), addUser);
             }
 
         } catch (e) {
@@ -33710,7 +33855,7 @@
 
         try {
 
-            const url = "/api/pgc/personal/profile?time=" + Date.now() + "&user_id=" + id;
+            const url = "/api/pgc/personal/profile?time=" + Date.now() + "&user_id=" + encodeURIComponent(id);
             const res = await timedFetch(url, { credentials: "include" });
             const json = await res.json();
 
@@ -33848,7 +33993,7 @@
         let payload = song;
 
         try {
-            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+            const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id);
             const res = await timedFetch(url, { credentials: "include" });
 
             if (res.ok) {
@@ -33883,7 +34028,7 @@
         if (!key) {
 
             try {
-                const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + song.song_id;
+                const url = "/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(song.song_id);
                 const res = await timedFetch(url, { credentials: "include" });
 
                 if (res.ok) {

@@ -27,6 +27,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.MutableContextWrapper;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -626,10 +627,20 @@ final class PlayerWeb {
     }
 
     // The player's way out to the app
+    // Whether the page shown is Mureka's own. The bridge below is offered to
+    // every page and frame the WebView loads, so it answers nothing on any
+    // other page, a site a link led to or a sign in page
+    private static volatile boolean onMureka = false;
+
     private static final class Bridge {
 
         @JavascriptInterface
         public void publish(String json) {
+
+            if (!onMureka) {
+                return;
+            }
+
             Hub.publish(json);
         }
 
@@ -637,6 +648,10 @@ final class PlayerWeb {
         // fixed public address and the local name
         @JavascriptInterface
         public String getPref(String key, String fallback) {
+
+            if (!onMureka) {
+                return fallback;
+            }
 
             if (appContext == null) {
                 return fallback;
@@ -661,6 +676,10 @@ final class PlayerWeb {
         // the first time, which needs the app on screen
         @JavascriptInterface
         public boolean setPref(String key, String value) {
+
+            if (!onMureka) {
+                return false;
+            }
 
             if (appContext == null || !CarSettings.store(appContext, key, value)) {
                 return false;
@@ -696,6 +715,10 @@ final class PlayerWeb {
         @JavascriptInterface
         public String batteryFree() {
 
+            if (!onMureka) {
+                return "";
+            }
+
             if (appContext == null) {
                 return "0";
             }
@@ -709,6 +732,10 @@ final class PlayerWeb {
         // question Android shows itself
         @JavascriptInterface
         public void askBatteryFree() {
+
+            if (!onMureka) {
+                return;
+            }
 
             if (appContext == null) {
                 return;
@@ -738,6 +765,10 @@ final class PlayerWeb {
         @JavascriptInterface
         public void saveFile(String name, String text) {
 
+            if (!onMureka) {
+                return;
+            }
+
             String clean = name == null ? "" : name.replaceAll("[^A-Za-z0-9._-]", "_");
 
             if (clean.isEmpty()) {
@@ -752,12 +783,21 @@ final class PlayerWeb {
         @JavascriptInterface
         public boolean takeUpdateRestart() {
 
+            if (!onMureka) {
+                return false;
+            }
+
             return appContext != null && BootReceiver.takeUpdateRestart(appContext);
         }
 
         // The charger countdown skipped from the player's notice
         @JavascriptInterface
         public void skipUnplug() {
+
+            if (!onMureka) {
+                return;
+            }
+
             ChargeWatch.skip();
         }
 
@@ -767,6 +807,10 @@ final class PlayerWeb {
         // last start, and the command that starts it from a computer
         @JavascriptInterface
         public String hotspotStatus() {
+
+            if (!onMureka) {
+                return "";
+            }
 
             JSONObject o = new JSONObject();
 
@@ -802,6 +846,10 @@ final class PlayerWeb {
         @JavascriptInterface
         public String btDevices() {
 
+            if (!onMureka) {
+                return "";
+            }
+
             if (appContext == null) {
                 return "{}";
             }
@@ -813,6 +861,10 @@ final class PlayerWeb {
         // asked by the app on screen. False when it is not on screen
         @JavascriptInterface
         public boolean askBluetooth() {
+
+            if (!onMureka) {
+                return false;
+            }
 
             Host host = hostRef.get();
 
@@ -830,6 +882,10 @@ final class PlayerWeb {
         @JavascriptInterface
         public void hotspotPair() {
 
+            if (!onMureka) {
+                return;
+            }
+
             if (appContext != null) {
                 HelperStart.pair(appContext);
             }
@@ -838,6 +894,10 @@ final class PlayerWeb {
         // The hotspot helper started now through wireless debugging
         @JavascriptInterface
         public void hotspotStartHelper() {
+
+            if (!onMureka) {
+                return;
+            }
 
             if (appContext != null) {
                 HelperStart.start(appContext);
@@ -848,6 +908,10 @@ final class PlayerWeb {
         @JavascriptInterface
         public void hotspotUnpair() {
 
+            if (!onMureka) {
+                return;
+            }
+
             if (appContext != null) {
                 HelperStart.unpair(appContext);
             }
@@ -856,6 +920,10 @@ final class PlayerWeb {
         // The hotspot switched by hand, to try the settings
         @JavascriptInterface
         public void hotspotSwitch(boolean on) {
+
+            if (!onMureka) {
+                return;
+            }
 
             if (appContext == null) {
                 return;
@@ -871,12 +939,22 @@ final class PlayerWeb {
         // Whether the phone reaches the internet now
         @JavascriptInterface
         public boolean online() {
+
+            if (!onMureka) {
+                return false;
+            }
+
             return online;
         }
 
         // The internet is back: Mureka's site in place of the offline page
         @JavascriptInterface
         public void reloadOnline() {
+
+            if (!onMureka) {
+                return;
+            }
+
             MAIN.post(PlayerWeb::loadOnline);
         }
 
@@ -884,6 +962,11 @@ final class PlayerWeb {
         // for the web view among them
         @JavascriptInterface
         public void reply(String id, String value) {
+
+            if (!onMureka) {
+                return;
+            }
+
             Hub.reply(id, value);
         }
 
@@ -892,6 +975,10 @@ final class PlayerWeb {
         @JavascriptInterface
         public String coverCacheInfo() {
 
+            if (!onMureka) {
+                return "";
+            }
+
             CoverCache.init(appContext);
             return CoverCache.info();
         }
@@ -899,6 +986,10 @@ final class PlayerWeb {
         // Every kept cover removed, in the background
         @JavascriptInterface
         public void clearCoverCache() {
+
+            if (!onMureka) {
+                return;
+            }
 
             CoverCache.init(appContext);
             CoverCache.clear();
@@ -909,11 +1000,19 @@ final class PlayerWeb {
         @JavascriptInterface
         public void testArt(String which) {
 
+            if (!onMureka) {
+                return;
+            }
+
             PlayerService.testArt(which == null ? "" : which);
         }
 
         @JavascriptInterface
         public String carStatus() {
+
+            if (!onMureka) {
+                return "";
+            }
 
             JSONObject o = new JSONObject();
 
@@ -979,6 +1078,18 @@ final class PlayerWeb {
     }
 
     private static final class MainClient extends WebViewClient {
+
+        // Every page the main view starts loading, so the bridge knows
+        // whether it is Mureka's
+        @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+
+            if (view == web) {
+                onMureka = isMureka(url);
+            }
+
+            super.onPageStarted(view, url, favicon);
+        }
 
         // Without this the whole app would be ended with the page
         @Override
