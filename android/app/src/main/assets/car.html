@@ -869,6 +869,13 @@
         z-index: 61;
     }
 
+    /* The helper being started is no fault, said in cyan */
+    #hotspotPop.starting {
+        border-color: var(--accent);
+        background: rgba(16, 36, 40, 0.95);
+        color: var(--accent);
+    }
+
     #hotspotClose {
         flex: 0 0 auto;
         width: 2em;
@@ -7175,9 +7182,15 @@
 
     function loadList(reset, done) {
 
+        const stayTop = reset === true && listStayTop;
+
+        if (reset) {
+            listStayTop = false;
+        }
+
         if (listView === "queue") {
 
-            loadQueue(reset);
+            loadQueue(reset, stayTop);
             return;
         }
 
@@ -7234,6 +7247,11 @@
 
             if (done) {
                 done();
+            } else if (reset && stayTop) {
+
+                quietScroll();
+                $("rows").scrollTop = 0;
+
             } else if (reset) {
 
                 // Opened or changed: down to the playing song and show it,
@@ -7252,6 +7270,28 @@
 
     // Where the playing song is in the whole list, as the phone last said
     let listPlayingAt = -1;
+
+    // A list read again because songs may have come in stays at its top
+    // when it was there, where the new songs are. Opened, searched, sorted
+    // or read again from further down, it goes to the playing song
+    let listStayTop = false;
+    let miniStayTop = false;
+
+    function atListTop(box) {
+        return box.scrollTop <= 4;
+    }
+
+    function refreshList() {
+
+        listStayTop = atListTop($("rows"));
+        loadList(true);
+    }
+
+    function refreshMini() {
+
+        miniStayTop = atListTop($("miniRows"));
+        loadMini(true);
+    }
 
     // Load pages until the row at this place is in the list, then go on.
     // A page still on its way is waited for rather than skipped
@@ -7307,7 +7347,7 @@
 
     // The queue, all of it as on the phone. Played songs are dimmed, a tap
     // plays that song, the cross takes an upcoming one out
-    function loadQueue(reset) {
+    function loadQueue(reset, stayTop) {
 
         listToken += 1;
 
@@ -7355,7 +7395,9 @@
 
             quietScroll();
 
-            if (reset && current) {
+            if (reset && stayTop) {
+                box.scrollTop = 0;
+            } else if (reset && current) {
                 box.scrollTop = Math.max(0, current.offsetTop - box.clientHeight / 3);
             } else {
                 box.scrollTop = keep;
@@ -9958,7 +10000,7 @@
             if (typeof reload === "function") {
                 reload();
             } else {
-                loadList(true);
+                refreshList();
             }
         }, 1500);
     }
@@ -10103,11 +10145,11 @@
         if (l !== null && listSigSeen !== null && l !== listSigSeen) {
 
             if ($("browse").style.display === "flex" && listView !== "queue") {
-                loadList(true);
+                refreshList();
             }
 
             if (miniOpen && miniView !== "queue") {
-                loadMini(true);
+                refreshMini();
             }
         }
 
@@ -10137,11 +10179,11 @@
         if (playsRound && !now && (listSort === "playsUp" || listSort === "playsDown")) {
 
             if ($("browse").style.display === "flex" && listView !== "queue") {
-                loadList(true);
+                refreshList();
             }
 
             if (miniOpen) {
-                loadMini(true);
+                refreshMini();
             }
         }
 
@@ -10315,7 +10357,9 @@
         }
 
         if (why && words[why]) {
+
             $("hotspotText").textContent = words[why];
+            $("hotspotPop").classList.toggle("starting", why === "starting");
         }
 
         $("hotspotPop").style.display = why && words[why] && !hotspotClosed ? "flex" : "none";
@@ -10584,7 +10628,7 @@
     }
 
     installPull({ rows: $("rows"), ring: $("pullIcon"), reload: function () {
-        loadList(true);
+        refreshList();
     } });
 
     // The small list over the main page, opened by List among the buttons.
@@ -10599,7 +10643,7 @@
     let miniPlaying = "";
 
     installPull({ rows: $("miniRows"), ring: $("miniPull"), reload: function () {
-        loadMini(true);
+        refreshMini();
     } });
 
     // The covers of the small list, loaded as they come near
@@ -10699,7 +10743,7 @@
         }
 
         loadNewSongs(function () {
-            loadMini(true);
+            refreshMini();
         });
     });
 
@@ -10760,7 +10804,7 @@
 
     // The queue in the small list, all of it, played songs dimmed, a tap
     // goes to that song, opened at the playing one
-    function loadMiniQueue() {
+    function loadMiniQueue(stayTop) {
 
         const token = miniToken;
 
@@ -10819,7 +10863,12 @@
             miniLoaded = items.length;
             $("miniCount").textContent = "Queue, " + (data.pos + 1) + " of " + data.total;
 
-            if (first) {
+            if (first && stayTop) {
+
+                miniQuietUntil = Date.now() + 400;
+                box.scrollTop = 0;
+
+            } else if (first) {
                 showMiniPlaying();
             } else {
 
@@ -10841,6 +10890,12 @@
     // is in, a larger limit is for the jump to the end of the list
     function loadMini(reset, done, limit) {
 
+        const stayTop = reset === true && miniStayTop;
+
+        if (reset) {
+            miniStayTop = false;
+        }
+
         if (miniView === "queue") {
 
             if (reset) {
@@ -10852,7 +10907,7 @@
             }
 
             if (miniOpen && !miniBusy) {
-                loadMiniQueue();
+                loadMiniQueue(stayTop);
             }
 
             return;
@@ -10925,9 +10980,18 @@
             miniPlayingAt = playingAt;
             miniPlayingAtId = askedFor;
 
-            // Down to the playing song first, a page at a time, then shown,
-            // eased there when asked for with the playing song button
-            if (reset || seeking) {
+            // Read again at the top, it stays there
+            if (reset && stayTop) {
+
+                miniQuietUntil = Date.now() + 400;
+                $("miniRows").dataset.seeking = "";
+                $("miniRows").scrollTop = 0;
+
+            } else if (reset || seeking) {
+
+                // Down to the playing song first, a page at a time, then
+                // shown, eased there when asked for with the playing song
+                // button
 
                 if (playingAt >= miniLoaded && miniLoaded < miniTotal && miniLoaded < 3000) {
 
@@ -11187,7 +11251,7 @@
         const loading = !!(s && s.loading);
 
         if (miniWasLoading && !loading && !pullHeld) {
-            loadMini(true);
+            refreshMini();
         }
 
         miniWasLoading = loading;
@@ -11240,7 +11304,7 @@
         const again = function () {
 
             setTimeout(function () {
-                loadList(true);
+                refreshList();
             }, 1500);
         };
 
@@ -12871,7 +12935,7 @@
 
                     if ($("browse").style.display === "flex") {
                         setTimeout(function () {
-                            loadList(true);
+                            refreshList();
                         }, 300);
                     }
                 });
@@ -12891,7 +12955,7 @@
 
                         if ($("browse").style.display === "flex") {
                             setTimeout(function () {
-                                loadList(true);
+                                refreshList();
                             }, 1500);
                         }
                     });
@@ -16725,7 +16789,7 @@
             // The new song shows in the list that is open
             if ($("browse").style.display === "flex") {
                 setTimeout(function () {
-                    loadList(true);
+                    refreshList();
                 }, 300);
             }
 

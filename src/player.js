@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.152";
+    const VERSION = "1.9.9.154";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -17557,7 +17557,9 @@
             }
         }
 
-        return hotspotWarnSeen && helperTrying ? "starting" : hotspotWarnSeen;
+        // Starting is not a fault, the app may be starting it by itself too
+        return hotspotWarnSeen && (helperTrying || hotspotInfoNow().starting === true)
+            ? "starting" : hotspotWarnSeen;
     }
 
     // What is wrong, in words, for the settings page. Paired, the player
@@ -24538,11 +24540,18 @@
             ];
             const key = JSON.stringify(rows);
 
-            // The warning for the hotspot switches
+            // The warning for the hotspot switches, cyan while the helper is
+            // being started, as that is no fault
             warnEl.style.display = hotspotWanted() && info.helper === "stopped" ? "flex" : "none";
 
             if (warnEl.style.display !== "none") {
-                warnText.textContent = hotspotFix("nohelper").text;
+
+                const starting = info.starting === true || helperTrying;
+
+                warnEl.style.borderColor = starting ? CTRL_ACCENT : "#e57373";
+                warnEl.style.background = starting ? "rgba(72,225,235,0.10)" : "rgba(229,115,115,0.12)";
+                warnText.style.color = starting ? CTRL_ACCENT : "#ffb4b4";
+                warnText.textContent = starting ? "Starting the hotspot helper" : hotspotFix("nohelper").text;
             }
 
             // Pair first, then start. Forget and start only once paired, start
@@ -24580,7 +24589,8 @@
             // A start of the helper finished, said with a note too, unless
             // the start being followed already says so
             if (lastStartSeen !== null && !helperTrying && info.starting !== true && info.startText && info.startText !== lastStartSeen) {
-                showToast(info.startText, info.startText === "The helper is running");
+                showToast(info.startText, info.startText === "The helper is running"
+                    ? true : (info.startText === "Starting the helper" ? "wait" : false));
             }
 
             lastStartSeen = info.starting === true ? lastStartSeen : info.startText || "";
