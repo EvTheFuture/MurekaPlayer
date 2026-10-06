@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.170";
+    const VERSION = "1.9.9.171";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20485,7 +20485,7 @@
         // Header bar, drag to move the panel, click to minimize or expand
         const header = document.createElement("div");
         headerEl = header;
-        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:move;user-select:none;-moz-user-select:none";
+        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:move;user-select:none;-moz-user-select:none;touch-action:none";
         header.title = "Drag to move, click to minimize or expand";
 
         const headerTitle = document.createElement("div");
@@ -23262,6 +23262,20 @@
     // buttons on the right keep their own taps
     function startMiniDrag(ev) {
 
+        // A finger on a wider screen, a tablet say, drags the floating panel
+        // the way the mouse does. A touch that moves sends no mouse events,
+        // so without this the panel could not be moved off what it covers,
+        // Mureka's sign in button among them
+        if (panelEl && window.innerWidth > 640 && ev.pointerType && ev.pointerType !== "mouse") {
+
+            if (headerRightEl && headerRightEl.contains(ev.target)) {
+                return;
+            }
+
+            startDrag(ev);
+            return;
+        }
+
         if (!minimized || window.innerWidth > 640 || !panelEl) {
             return;
         }
@@ -23365,7 +23379,12 @@
     // Drag the panel by its header, a click without movement toggles minimize
     function startDrag(ev) {
 
-        if (ev.button !== 0) {
+        // The mouse, or a finger through pointer events
+        const touch = ev.type === "pointerdown";
+        const moveName = touch ? "pointermove" : "mousemove";
+        const upName = touch ? "pointerup" : "mouseup";
+
+        if (!touch && ev.button !== 0) {
             return;
         }
 
@@ -23397,8 +23416,9 @@
 
         const onUp = function () {
 
-            document.removeEventListener("mousemove", onMove);
-            document.removeEventListener("mouseup", onUp);
+            document.removeEventListener(moveName, onMove);
+            document.removeEventListener(upName, onUp);
+            document.removeEventListener("pointercancel", onUp);
 
             if (moved) {
 
@@ -23435,8 +23455,13 @@
             }
         };
 
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
+        document.addEventListener(moveName, onMove);
+        document.addEventListener(upName, onUp);
+
+        // The browser taking the finger over ends the drag where it is
+        if (touch) {
+            document.addEventListener("pointercancel", onUp);
+        }
     }
 
     // Collapse or expand the panel body and remember the choice
