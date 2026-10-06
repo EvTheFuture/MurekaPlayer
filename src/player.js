@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.157";
+    const VERSION = "1.9.9.158";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -27838,9 +27838,9 @@
 
             const added = applyLibraryImport(p.library);
 
-            dataStatus(added < 0
+            importDone(added < 0
                 ? "Could not store the imported song library, the device is out of room"
-                : donePrefix + " song library, " + added + " songs added. Load picks up anything newer.");
+                : donePrefix + " song library, " + added + " songs added. Load picks up anything newer.", added >= 0, asked);
             return;
         }
 
@@ -27853,19 +27853,82 @@
             }
 
             applyImportedAppPrefs(p.appSettings);
-            dataStatus(applyImportedSettings(p.settings)
-                ? donePrefix + " settings"
-                : "Could not store the imported settings");
+
+            const stored = applyImportedSettings(p.settings);
+
+            importDone(stored ? donePrefix + " settings" : "Could not store the imported settings", stored, asked);
             return;
         }
 
         const plan = planSongMerge(p);
 
+        // Asked first, with what the file holds and how much of it differs
+        // from what is here, unless the web view asked already
+        if (!asked) {
+
+            const fresh = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.trimmed.length
+                + plan.creators.length;
+            const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
+
+            if (fresh === 0 && plan.conflicts.length === 0 && !p.settings) {
+
+                importDone("Nothing to import, the " + sourceName + " holds nothing new", true, false);
+                return;
+            }
+
+            const parts = [];
+
+            if (fresh > 0) {
+                parts.push(fresh + " new " + (fresh === 1 ? "value" : "values"));
+            }
+
+            if (plan.conflicts.length === 1) {
+                parts.push("1 that differs from yours, asked about next");
+            } else if (plan.conflicts.length > 1) {
+                parts.push(plan.conflicts.length + " that differ from yours, each asked about next");
+            }
+
+            askChoices("Import song tweaks?\nFrom the " + sourceName + " saved " + when + ": "
+                + (parts.length ? parts.join(", ") : "nothing new") + ".", [
+                { label: "Import", fn: function () {
+                    mergeSongImport(p, plan, sourceName, donePrefix, asked);
+                } }
+            ], function () {
+                importDone("Import cancelled, nothing changed", false, false);
+            });
+            return;
+        }
+
+        mergeSongImport(p, plan, sourceName, donePrefix, asked);
+    }
+
+    // The result of an import: on the settings page, and, asked from the
+    // player itself, in a box so it is seen wherever the import began
+    function importDone(text, ok, asked) {
+
+        dataStatus(text);
+
+        if (asked) {
+            return;
+        }
+
+        if (settingsOpen && dataMsgEl && dataMsgEl.offsetParent !== null) {
+
+            showToast(text, ok);
+            return;
+        }
+
+        showNotice(ok ? "Import" : "Import not done", text);
+    }
+
+    // Song tweaks merged in, each value that differs asked about first
+    function mergeSongImport(p, plan, sourceName, donePrefix, asked) {
+
         resolveConflicts(plan.conflicts, function (answers) {
 
             if (!answers) {
 
-                dataStatus("Import cancelled, nothing changed");
+                importDone("Import cancelled, nothing changed", false, asked);
                 return;
             }
 
@@ -27881,8 +27944,8 @@
                 settingsDone = applyImportedSettings(p.settings);
             }
 
-            dataStatus(donePrefix + " song tweaks, " + mergeSummary(plan, answers)
-                + (settingsDone ? ", settings replaced" : ""));
+            importDone(donePrefix + " song tweaks, " + mergeSummary(plan, answers)
+                + (settingsDone ? ", settings replaced" : ""), true, asked);
         });
     }
 
@@ -28123,7 +28186,14 @@
     // window is still allowed to open
     function showDataChoice(title, options, onCancel) {
 
-        if (!dataChoiceEl) {
+        // Asked from elsewhere, the menu under the three lines say, the
+        // settings page is not in sight, so the choice comes up over the
+        // player instead
+        const parent = dataChoiceEl ? dataChoiceEl.parentElement : null;
+
+        if (!settingsOpen || !parent || parent.offsetParent === null) {
+
+            askChoices(title, options, onCancel);
             return;
         }
 
@@ -28159,6 +28229,80 @@
         dataChoiceEl.appendChild(caption);
         dataChoiceEl.appendChild(row);
         dataChoiceEl.style.display = "flex";
+    }
+
+    // Choices in a box over the player, one button each and Cancel. The
+    // first line of the title is its heading, the rest the text under it
+    function askChoices(title, options, onCancel) {
+
+        if (!panelEl) {
+
+            if (onCancel) {
+                onCancel();
+            }
+
+            return;
+        }
+
+        const lines = String(title).split("\n");
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const text = document.createElement("div");
+        const col = document.createElement("div");
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:360px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = lines[0];
+        head.style.cssText = "font-weight:600";
+        text.textContent = lines.slice(1).join("\n").trim();
+        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
+        col.style.cssText = "display:flex;flex-direction:column;gap:6px";
+
+        const close = function (fn) {
+
+            back.remove();
+
+            if (fn) {
+                fn();
+            }
+        };
+
+        for (const opt of options) {
+
+            const b = makeButton(opt.label, "#48e1eb", "#000", function () {
+                close(opt.fn);
+            });
+
+            b.style.width = "100%";
+            col.appendChild(b);
+        }
+
+        const cancel = makeButton("Cancel", "#444", "#fff", function () {
+            close(onCancel);
+        });
+
+        cancel.style.width = "100%";
+        col.appendChild(cancel);
+        card.appendChild(head);
+
+        if (text.textContent) {
+            card.appendChild(text);
+        }
+
+        card.appendChild(col);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close(onCancel);
+            }
+        });
+
+        panelEl.appendChild(back);
     }
 
     function hideDataChoice() {
@@ -28352,7 +28496,7 @@
 
         if (!p) {
 
-            dataStatus("That is not a Mureka Player export");
+            importDone("That is not a Mureka Player export", false, asked);
             return "That is not a Mureka Player export";
         }
 

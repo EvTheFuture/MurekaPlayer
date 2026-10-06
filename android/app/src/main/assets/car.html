@@ -7489,6 +7489,7 @@
         row.className = "row" + (item.index === pos ? " playing" : "")
             + (item.index < pos ? " past" : "");
         row.dataset.qi = String(item.index);
+        row.dataset.id = String(item.id);
         attachLongPress(row, item.id);
 
         // A handle to drag any song, played, playing or to come, to another
@@ -11537,6 +11538,7 @@
         stateAt = Date.now();
         online = true;
         phoneSeen = true;
+        paintPlayingRating(s);
         debugHide = Array.isArray(s.debugHide) ? s.debugHide : [];
 
         // Clear debug log on the phone clears this log too
@@ -12196,6 +12198,70 @@
             }, 300);
         }
     });
+
+    // The playing song's rating on its rows in the lists as soon as it
+    // changes, rated with the stars over the cover or anywhere else
+    let ratingSeen = { id: "", rating: null };
+
+    function paintPlayingRating(s) {
+
+        const id = s && s.id ? String(s.id) : "";
+        const rating = s && s.rating !== undefined ? s.rating : null;
+
+        if (id === ratingSeen.id && rating === ratingSeen.rating) {
+            return;
+        }
+
+        const sameSong = id !== "" && id === ratingSeen.id;
+
+        ratingSeen = { id: id, rating: rating };
+
+        if (sameSong) {
+            paintRowRating(id, rating);
+        }
+    }
+
+    // A song's rating on every row of it, in the song list, the queue and
+    // the small list. The first song rated has no column for it yet, then
+    // the lists are read again
+    function paintRowRating(id, rating) {
+
+        const rated = rating !== null && rating !== undefined;
+        let missing = false;
+
+        for (const box of [$("rows"), $("miniRows")]) {
+
+            for (const row of box.querySelectorAll(".row")) {
+
+                if (row.dataset.id !== String(id)) {
+                    continue;
+                }
+
+                const rate = row.querySelector(".rowRate");
+
+                if (!rate) {
+
+                    missing = missing || rated;
+                    continue;
+                }
+
+                rate.className = "rowRate" + (rated && !rating ? " zero" : "");
+                rate.textContent = rated ? rating + "\u2605" : "";
+            }
+        }
+
+        if (!missing) {
+            return;
+        }
+
+        if ($("browse").style.display === "flex") {
+            refreshList();
+        }
+
+        if (miniOpen) {
+            refreshMini();
+        }
+    }
 
     function songAction(action, value) {
 
@@ -13405,6 +13471,7 @@
 
                 paintMenuStars(m.rating);
                 $("menuCaption").textContent = m.rating === null || m.rating === undefined ? "Not rated" : m.rating + " of 5";
+                paintRowRating(m.id, m.rating);
             }
         }).catch(function () {
         });
