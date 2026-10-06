@@ -91,7 +91,7 @@ final class HelperStart {
     }
 
     static boolean paired(Context c) {
-        return CarSettings.on(c, PAIRED);
+        return WebViewSettings.on(c, PAIRED);
     }
 
     // What pairing is doing, empty when it is not
@@ -198,7 +198,7 @@ final class HelperStart {
             try {
 
                 AdbLink.get(c).pair("127.0.0.1", port, digits);
-                CarSettings.prefs(c).edit().putString(PAIRED, "1").apply();
+                WebViewSettings.prefs(c).edit().putString(PAIRED, "1").apply();
                 Hub.note("Helper", "paired with wireless debugging");
 
                 MAIN.post(() -> {
@@ -226,7 +226,7 @@ final class HelperStart {
 
         RUN.execute(() -> {
 
-            CarSettings.prefs(c).edit().putString(PAIRED, "0").apply();
+            WebViewSettings.prefs(c).edit().putString(PAIRED, "0").apply();
             AdbLink.forget(c);
             startText = "";
             Hub.note("Helper", "pairing forgotten");
@@ -240,8 +240,8 @@ final class HelperStart {
 
         final Context c = context.getApplicationContext();
 
-        if (!paired(c) || !CarSettings.on(c, CarSettings.CHARGE_SAVE)
-            || !(CarSettings.on(c, CarSettings.UNPLUG_HOTSPOT) || CarSettings.on(c, CarSettings.PLUG_HOTSPOT))) {
+        if (!paired(c) || !WebViewSettings.on(c, WebViewSettings.CHARGE_SAVE)
+            || !(WebViewSettings.on(c, WebViewSettings.UNPLUG_HOTSPOT) || WebViewSettings.on(c, WebViewSettings.PLUG_HOTSPOT))) {
             return;
         }
 
@@ -318,7 +318,7 @@ final class HelperStart {
             return run(link, Hotspot.shellCommand(c, what)).replaceAll("\\s+", " ").trim();
         } catch (AdbPairingRequiredException e) {
 
-            CarSettings.prefs(c).edit().putString(PAIRED, "0").apply();
+            WebViewSettings.prefs(c).edit().putString(PAIRED, "0").apply();
             return "Wireless debugging does not know the player any more, pair again";
         } catch (InterruptedException e) {
             return "Wireless debugging was not found, is the phone on Wi-Fi?";

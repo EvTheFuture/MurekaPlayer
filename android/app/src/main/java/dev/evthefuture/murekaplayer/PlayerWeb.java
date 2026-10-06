@@ -673,18 +673,18 @@ final class PlayerWeb {
                 return fallback;
             }
 
-            if (CarSettings.VPN_ADDRESS.equals(key)) {
-                return CarSettings.vpnAddress(appContext);
+            if (WebViewSettings.VPN_ADDRESS.equals(key)) {
+                return WebViewSettings.vpnAddress(appContext);
             }
 
-            if (CarSettings.MDNS_NAME.equals(key)) {
+            if (WebViewSettings.MDNS_NAME.equals(key)) {
 
-                String name = CarSettings.mdnsName(appContext);
+                String name = WebViewSettings.mdnsName(appContext);
 
                 return name.substring(0, name.length() - ".local".length());
             }
 
-            return CarSettings.prefs(appContext).getString(key, fallback);
+            return WebViewSettings.prefs(appContext).getString(key, fallback);
         }
 
         // Stores the value when it is valid, and brings the name and the VPN
@@ -697,31 +697,31 @@ final class PlayerWeb {
                 return false;
             }
 
-            if (appContext == null || !CarSettings.store(appContext, key, value)) {
+            if (appContext == null || !WebViewSettings.store(appContext, key, value)) {
                 return false;
             }
 
-            if (CarSettings.VPN.equals(key) && "1".equals(value)) {
+            if (WebViewSettings.VPN.equals(key) && "1".equals(value)) {
                 MAIN.post(PlayerWeb::askVpnIfNeeded);
             }
 
-            if (CarSettings.FULLSCREEN.equals(key)) {
+            if (WebViewSettings.FULLSCREEN.equals(key)) {
                 MAIN.post(PlayerWeb::tellFullscreen);
             }
 
-            if (CarSettings.TABLET_VIEW.equals(key)) {
+            if (WebViewSettings.TABLET_VIEW.equals(key)) {
                 MAIN.post(PlayerWeb::tellScreen);
             }
 
             // What starts the power saving, the devices that count or the
             // master switch: a countdown running stops
-            if (CarSettings.SAVE_TRIGGER.equals(key) || CarSettings.SAVE_BT.equals(key)
-                || CarSettings.CHARGE_SAVE.equals(key)) {
+            if (WebViewSettings.SAVE_TRIGGER.equals(key) || WebViewSettings.SAVE_BT.equals(key)
+                || WebViewSettings.CHARGE_SAVE.equals(key)) {
                 ChargeWatch.settingsChanged();
             }
 
             // Turning the hotspot off, or how: a wait for browsers follows it
-            if (CarSettings.UNPLUG_HOTSPOT.equals(key) || CarSettings.HOTSPOT_OFF_MODE.equals(key)) {
+            if (WebViewSettings.UNPLUG_HOTSPOT.equals(key) || WebViewSettings.HOTSPOT_OFF_MODE.equals(key)) {
                 ChargeWatch.hotspotSettingChanged();
             }
 
@@ -1073,10 +1073,10 @@ final class PlayerWeb {
             try {
 
                 String publicAddr = CarVpn.activeAddress();
-                String name = CarSettings.mdnsName(appContext);
-                List<String> addresses = CarServer.addresses(PlayerService.PORT);
+                String name = WebViewSettings.mdnsName(appContext);
+                List<String> addresses = WebViewServer.addresses(PlayerService.PORT);
 
-                o.put("vpnEnabled", CarSettings.vpnEnabled(appContext));
+                o.put("vpnEnabled", WebViewSettings.vpnEnabled(appContext));
                 o.put("vpn", CarVpn.status());
                 o.put("carUrl", publicAddr != null ? "http://" + publicAddr + ":" + PlayerService.PORT : "");
                 o.put("name", name);

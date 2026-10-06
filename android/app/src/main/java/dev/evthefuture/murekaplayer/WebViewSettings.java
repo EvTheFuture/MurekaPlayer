@@ -27,7 +27,7 @@ import android.content.SharedPreferences;
 // The app's own settings for the web view, stored apart from the player's.
 // The player's settings panel reads and writes them through the bridge, and
 // every value is checked here, so a typo can never break the web view
-final class CarSettings {
+final class WebViewSettings {
 
     static final String PREFS = "car";
 
@@ -79,7 +79,7 @@ final class CarSettings {
     static final String DEFAULT_ADDRESS = "3.3.3.3";
     static final String DEFAULT_NAME = "murekaplayer";
 
-    private CarSettings() {
+    private WebViewSettings() {
     }
 
     static SharedPreferences prefs(Context c) {

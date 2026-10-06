@@ -4161,6 +4161,12 @@
         };
     }
 
+    // A look of this browser's own, started from the phone's. The phone's
+    // bar already says whether Songs is on it, so it is taken as it is
+    function freshLook() {
+        return Object.assign(phoneLook(rawState), { controlsV2: true });
+    }
+
     // The phone's state with this browser's own look laid over it
     function applyLocalLook(raw) {
 
@@ -4201,8 +4207,9 @@
             s.controls = look.controls.slice();
 
             // A bar kept here before Songs could be placed always had Songs
-            // at its end, so it keeps it there
-            if (look.controlsV2 !== true && s.controls.indexOf("songs") < 0) {
+            // at its end, so it keeps it there. The phone's own bar says
+            // itself whether Songs is on it
+            if (local && local.look && look.controlsV2 !== true && s.controls.indexOf("songs") < 0) {
                 s.controls.push("songs");
             }
         }
@@ -4297,7 +4304,7 @@
             return;
         }
 
-        local.look = Object.assign(phoneLook(rawState), local.look || {});
+        local.look = local.look ? Object.assign(phoneLook(rawState), local.look) : freshLook();
         local.look[key] = value;
 
         // A bar set here since Songs became a button of its own says itself
@@ -4430,7 +4437,7 @@
                         // Nothing could be stored either
                     }
                 } else {
-                    saveLocal({ look: phoneLook(rawState), screen: screenSaverPhone() });
+                    saveLocal({ look: freshLook(), screen: screenSaverPhone() });
                 }
 
                 relook();

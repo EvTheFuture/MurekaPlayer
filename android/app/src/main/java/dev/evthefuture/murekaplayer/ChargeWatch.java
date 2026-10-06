@@ -56,7 +56,7 @@ final class ChargeWatch {
 
     // What started the countdown running now or the last one, charger or
     // bluetooth, for the player's words
-    private static String reason = CarSettings.TRIGGER_CHARGER;
+    private static String reason = WebViewSettings.TRIGGER_CHARGER;
 
     // Whether one of the chosen Bluetooth devices was connected at the last
     // look, so only a change counts
@@ -138,7 +138,7 @@ final class ChargeWatch {
 
             BtWatch.start(ctx, ChargeWatch::bluetoothChanged, () -> {
 
-                btHere = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+                btHere = BtWatch.anyConnected(WebViewSettings.btDevices(ctx));
                 Hub.note("Power", btHere ? "a chosen Bluetooth device is connected" : "no chosen Bluetooth device is connected");
             });
         });
@@ -162,7 +162,7 @@ final class ChargeWatch {
                 cancel(-3);
             }
 
-            btHere = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+            btHere = BtWatch.anyConnected(WebViewSettings.btDevices(ctx));
         });
     }
 
@@ -195,7 +195,7 @@ final class ChargeWatch {
     }
 
     private static boolean byBluetooth() {
-        return CarSettings.TRIGGER_BLUETOOTH.equals(CarSettings.trigger(ctx));
+        return WebViewSettings.TRIGGER_BLUETOOTH.equals(WebViewSettings.trigger(ctx));
     }
 
     private static void powerChanged(boolean plugged) {
@@ -205,9 +205,9 @@ final class ChargeWatch {
         }
 
         if (plugged) {
-            back(CarSettings.TRIGGER_CHARGER);
+            back(WebViewSettings.TRIGGER_CHARGER);
         } else {
-            away(CarSettings.TRIGGER_CHARGER);
+            away(WebViewSettings.TRIGGER_CHARGER);
         }
     }
 
@@ -219,7 +219,7 @@ final class ChargeWatch {
             return;
         }
 
-        boolean here = BtWatch.anyConnected(CarSettings.btDevices(ctx));
+        boolean here = BtWatch.anyConnected(WebViewSettings.btDevices(ctx));
 
         if (here == btHere) {
             return;
@@ -232,17 +232,17 @@ final class ChargeWatch {
         }
 
         if (here) {
-            back(CarSettings.TRIGGER_BLUETOOTH);
+            back(WebViewSettings.TRIGGER_BLUETOOTH);
         } else {
-            away(CarSettings.TRIGGER_BLUETOOTH);
+            away(WebViewSettings.TRIGGER_BLUETOOTH);
         }
     }
 
     private static boolean anyAwayAction() {
 
-        return CarSettings.on(ctx, CarSettings.CHARGE_SAVE) && (CarSettings.on(ctx, CarSettings.UNPLUG_PAUSE)
-            || CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)
-            || CarSettings.on(ctx, CarSettings.UNPLUG_QUIET));
+        return WebViewSettings.on(ctx, WebViewSettings.CHARGE_SAVE) && (WebViewSettings.on(ctx, WebViewSettings.UNPLUG_PAUSE)
+            || WebViewSettings.on(ctx, WebViewSettings.UNPLUG_HOTSPOT)
+            || WebViewSettings.on(ctx, WebViewSettings.UNPLUG_QUIET));
     }
 
     // The charger pulled out, or the last chosen device gone: the
@@ -253,10 +253,10 @@ final class ChargeWatch {
             return;
         }
 
-        int grace = CarSettings.chargeGrace(ctx);
+        int grace = WebViewSettings.chargeGrace(ctx);
 
         reason = why;
-        Hub.note("Power", (CarSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth devices gone" : "on battery")
+        Hub.note("Power", (WebViewSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth devices gone" : "on battery")
             + ", shutting down in " + grace + " s unless it changes back");
         Hub.command("unplugReason", why);
         counting = true;
@@ -268,7 +268,7 @@ final class ChargeWatch {
     // stops, the background work starts again and the hotspot can come on
     private static void back(String why) {
 
-        String what = CarSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth device back" : "on the charger";
+        String what = WebViewSettings.TRIGGER_BLUETOOTH.equals(why) ? "Bluetooth device back" : "on the charger";
 
         if (hotspotWaiting) {
 
@@ -291,7 +291,7 @@ final class ChargeWatch {
             PlayerService.setQuiet(false);
         }
 
-        if (CarSettings.on(ctx, CarSettings.CHARGE_SAVE) && CarSettings.on(ctx, CarSettings.PLUG_HOTSPOT)) {
+        if (WebViewSettings.on(ctx, WebViewSettings.CHARGE_SAVE) && WebViewSettings.on(ctx, WebViewSettings.PLUG_HOTSPOT)) {
 
             Hub.note("Power", what + ", turning the hotspot on");
 
@@ -327,17 +327,17 @@ final class ChargeWatch {
         MAIN.removeCallbacks(TICK);
         Hub.command("unplugCountdown", 0);
 
-        if (CarSettings.on(ctx, CarSettings.UNPLUG_PAUSE)) {
+        if (WebViewSettings.on(ctx, WebViewSettings.UNPLUG_PAUSE)) {
 
             Hub.note("Power", "pausing the music");
             Hub.command("pause", null);
         }
 
-        if (CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)) {
+        if (WebViewSettings.on(ctx, WebViewSettings.UNPLUG_HOTSPOT)) {
 
-            int browsers = CarServer.hotspotBrowsers();
+            int browsers = WebViewServer.hotspotBrowsers();
 
-            if (CarSettings.hotspotWaits(ctx) && browsers > 0) {
+            if (WebViewSettings.hotspotWaits(ctx) && browsers > 0) {
 
                 Hub.note("Power", browsers + (browsers == 1 ? " browser is" : " browsers are")
                     + " on the hotspot, it goes off once they are gone");
@@ -350,7 +350,7 @@ final class ChargeWatch {
             }
         }
 
-        if (CarSettings.on(ctx, CarSettings.UNPLUG_QUIET)) {
+        if (WebViewSettings.on(ctx, WebViewSettings.UNPLUG_QUIET)) {
 
             Hub.note("Power", "stopping all background work");
             quietHere = true;
@@ -374,7 +374,7 @@ final class ChargeWatch {
             return;
         }
 
-        if (CarServer.hotspotBrowsers() > 0) {
+        if (WebViewServer.hotspotBrowsers() > 0) {
 
             MAIN.postDelayed(HOTSPOT_LOOK, HOTSPOT_LOOK_MS);
             return;
@@ -400,11 +400,11 @@ final class ChargeWatch {
                 return;
             }
 
-            if (!CarSettings.on(ctx, CarSettings.UNPLUG_HOTSPOT)) {
+            if (!WebViewSettings.on(ctx, WebViewSettings.UNPLUG_HOTSPOT)) {
 
                 Hub.note("Power", "turning the hotspot off was switched off, it stays on");
                 stopHotspotWait();
-            } else if (!CarSettings.hotspotWaits(ctx)) {
+            } else if (!WebViewSettings.hotspotWaits(ctx)) {
 
                 stopHotspotWait();
                 hotspotOff("set not to wait for the browsers");

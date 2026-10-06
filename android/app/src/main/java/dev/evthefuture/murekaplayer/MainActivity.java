@@ -143,7 +143,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
     @Override
     public void applyScreen() {
 
-        boolean want = AppScreen.tablet && CarSettings.tabletView(this);
+        boolean want = AppScreen.tablet && WebViewSettings.tabletView(this);
 
         if (want && screen == null) {
 
@@ -338,7 +338,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
 
         if (!yes) {
 
-            CarSettings.store(this, CarSettings.VPN, "0");
+            WebViewSettings.store(this, WebViewSettings.VPN, "0");
             CarVpn.setStatus("permission refused");
         }
 
@@ -554,7 +554,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
             try {
 
                 conn = (HttpURLConnection) new URL(AppScreen.BASE + path.substring(1)).openConnection();
-                conn.setRequestProperty("User-Agent", CarServer.APP_AGENT + "1");
+                conn.setRequestProperty("User-Agent", WebViewServer.APP_AGENT + "1");
                 conn.setConnectTimeout(5000);
                 conn.setReadTimeout(60000);
 
@@ -655,7 +655,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
             return;
         }
 
-        boolean full = CarSettings.fullscreen(this);
+        boolean full = WebViewSettings.fullscreen(this);
 
         if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
 
@@ -710,7 +710,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
                 // Fullscreen means the whole screen, the strip beside a
                 // camera cutout included. The keyboard is still kept clear,
                 // or it would cover what is being typed
-                int types = CarSettings.fullscreen(this)
+                int types = WebViewSettings.fullscreen(this)
                     ? WindowInsets.Type.ime()
                     : (WindowInsets.Type.systemBars() | WindowInsets.Type.ime()
                         | WindowInsets.Type.displayCutout());

@@ -83,7 +83,7 @@ final class AppScreen {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setSupportMultipleWindows(false);
-        s.setUserAgentString(s.getUserAgentString() + " " + CarServer.APP_AGENT + "1");
+        s.setUserAgentString(s.getUserAgentString() + " " + WebViewServer.APP_AGENT + "1");
         w.setBackgroundColor(Color.BLACK);
 
         Bridge bridge = new Bridge(owner);
@@ -127,7 +127,7 @@ final class AppScreen {
             h = dm.heightPixels;
         }
 
-        tablet = density > 0 && Math.min(w, h) / density >= CarSettings.TABLET_DP;
+        tablet = density > 0 && Math.min(w, h) / density >= WebViewSettings.TABLET_DP;
 
         return tablet;
     }

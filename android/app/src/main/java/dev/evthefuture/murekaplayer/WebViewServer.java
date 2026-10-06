@@ -64,7 +64,7 @@ import org.json.JSONObject;
 // Serves the web view and a tiny JSON API on the local network, the phone's
 // hotspot in the web view. GET / is the page, GET /state the now playing state,
 // POST /cmd with {"cmd": "...", "arg": ...} runs a command in the player
-final class CarServer {
+final class WebViewServer {
 
     // With the sound in the browser, the phone plays muted. If the web view
     // stops asking for the state for this long, it is gone, and the phone
@@ -132,9 +132,9 @@ final class CarServer {
     private Set<String> cellInterfaces = new HashSet<>();
     private long interfacesAt = 0;
 
-    static final String PREFS = CarSettings.PREFS;
+    static final String PREFS = WebViewSettings.PREFS;
 
-    CarServer(Context context, int port) {
+    WebViewServer(Context context, int port) {
 
         this.context = context.getApplicationContext();
         this.port = port;
@@ -1052,8 +1052,8 @@ final class CarServer {
         // Not the phone's Wi-Fi and not the mobile network, so a network the
         // phone hands out itself, the hotspot, or USB tethering
         return wifi
-            ? "1".equals(prefs.getString(CarSettings.ALLOW_WIFI, "1"))
-            : "1".equals(prefs.getString(CarSettings.ALLOW_HOTSPOT, "1"));
+            ? "1".equals(prefs.getString(WebViewSettings.ALLOW_WIFI, "1"))
+            : "1".equals(prefs.getString(WebViewSettings.ALLOW_HOTSPOT, "1"));
     }
 
     // The mobile network, whatever Android or the chip maker calls it
@@ -1496,8 +1496,8 @@ final class CarServer {
 
         JSONArray out = new JSONArray();
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        boolean allowWifi = "1".equals(prefs.getString(CarSettings.ALLOW_WIFI, "1"));
-        boolean allowHotspot = "1".equals(prefs.getString(CarSettings.ALLOW_HOTSPOT, "1"));
+        boolean allowWifi = "1".equals(prefs.getString(WebViewSettings.ALLOW_WIFI, "1"));
+        boolean allowHotspot = "1".equals(prefs.getString(WebViewSettings.ALLOW_HOTSPOT, "1"));
 
         try {
 

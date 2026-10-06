@@ -96,7 +96,7 @@ public class PlayerService extends Service implements Hub.Listener {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
     private MediaSession session;
-    private CarServer server;
+    private WebViewServer server;
     private MdnsResponder mdns;
     private WifiManager.MulticastLock multicastLock;
     private PowerManager.WakeLock wakeLock;
@@ -303,7 +303,7 @@ public class PlayerService extends Service implements Hub.Listener {
             // Without it the name only works on the hotspot
         }
 
-        server = new CarServer(this, PORT);
+        server = new WebViewServer(this, PORT);
         server.start();
 
         instance = this;
@@ -313,7 +313,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
         // The hotspot name and password once typed for Shizuku, not needed
         // any more
-        CarSettings.dropRetired(this);
+        WebViewSettings.dropRetired(this);
 
         // The hotspot helper started through wireless debugging when the
         // hotspot settings need it, after a restart of the phone too
@@ -478,7 +478,7 @@ public class PlayerService extends Service implements Hub.Listener {
     // changed is restarted
     private void applySettings() {
 
-        String name = CarSettings.mdnsName(this);
+        String name = WebViewSettings.mdnsName(this);
 
         if (mdns == null || !mdns.name().equals(name)) {
 
@@ -490,7 +490,7 @@ public class PlayerService extends Service implements Hub.Listener {
             mdns.start();
         }
 
-        if (CarSettings.vpnEnabled(this)) {
+        if (WebViewSettings.vpnEnabled(this)) {
 
             // Without the permission the settings panel asks for it, a
             // service cannot show the question itself
@@ -1133,7 +1133,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
         if (addresses == null || now - addressesAt > 10000) {
 
-            addresses = CarServer.addresses(PORT);
+            addresses = WebViewServer.addresses(PORT);
             addressesAt = now;
         }
 
@@ -1146,14 +1146,14 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         String publicAddr = CarVpn.activeAddress();
-        String name = "http://" + CarSettings.mdnsName(this) + ":" + PORT;
+        String name = "http://" + WebViewSettings.mdnsName(this) + ":" + PORT;
         String local = name + (addresses.isEmpty() ? "" : "  or  " + String.join("  ", addresses));
 
         if (publicAddr != null) {
             return "Web view: http://" + publicAddr + ":" + PORT + "  Local: " + local;
         }
 
-        if (CarSettings.vpnEnabled(this)) {
+        if (WebViewSettings.vpnEnabled(this)) {
             return "Public address " + CarVpn.status() + "  Local: " + local;
         }
 

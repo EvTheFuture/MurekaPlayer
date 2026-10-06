@@ -81,7 +81,7 @@ public class CarVpn extends VpnService {
             return START_NOT_STICKY;
         }
 
-        open(CarSettings.vpnAddress(this));
+        open(WebViewSettings.vpnAddress(this));
 
         // The service that owns the player starts this again when needed
         return START_NOT_STICKY;
