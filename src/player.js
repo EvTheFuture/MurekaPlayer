@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.168";
+    const VERSION = "1.9.9.169";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -9628,8 +9628,8 @@
         const byId = new Map(cache.songs.map(function (s) {
             return [String(s.song_id), s];
         }));
-        let playId = null;
-        let settled = 0;
+        const done = [];
+        let wanted = null;
 
         for (const id of Array.from(pendingSongs.keys())) {
 
@@ -9641,28 +9641,43 @@
 
             pendingSongs.delete(id);
             pendingStamp += 1;
-            settled += 1;
+            done.push(song);
 
-            if (pendingPlay.delete(id)) {
-
-                playId = song.song_id;
-                showToast("Ready, playing " + (song.title || "Untitled"), true);
-            } else {
-                showToast("Ready to play: " + (song.title || "Untitled"), true);
+            if (pendingPlay.delete(id) && wanted === null) {
+                wanted = song;
             }
         }
 
-        if (settled === 0) {
+        if (done.length === 0) {
             return;
         }
 
         renderList();
         publishHostSoon();
 
-        // As if it was tapped just now
-        if (playId !== null) {
-            playFrom(playId);
+        // One note, about the song asked for when there is one, since
+        // Mureka makes two at a time and the second would hide the first
+        if (wanted === null) {
+
+            showToast(done.length === 1 ? "Ready to play: " + (done[0].title || "Untitled")
+                : done.length + " new songs are ready to play", true);
+            return;
         }
+
+        showToast("Ready, playing " + (wanted.title || "Untitled"), true);
+        dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
+
+        // As if it was tapped just now: a song playing stops for it
+        playFrom(wanted.song_id);
+
+        // A browser that does not let a page start sound by itself keeps it
+        // loaded and paused, then a tap on Play starts it
+        setTimeout(function () {
+
+            if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
+                showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), "wait");
+            }
+        }, 2500);
     }
 
     // Every few seconds while songs are being generated: the first list page
@@ -9792,9 +9807,85 @@
 
         pendingPlay.add(key);
         pendingStamp += 1;
+        primeAudio();
         renderList();
         publishHostSoon();
         showToast("Plays as soon as it is ready", true);
+    }
+
+    // Safari on iOS lets a page start sound only from a tap, unless the
+    // audio element has played once before. With nothing loaded yet, a
+    // moment of silence is played on the tap that asks for a song to play
+    // later, so that song can start by itself once it is ready
+    function primeAudio() {
+
+        // The app's WebView plays without a tap
+        if (isApkHost()) {
+            return;
+        }
+
+        ensureAudio();
+
+        if (audio.src) {
+            return;
+        }
+
+        const n = 800;
+        const buf = new ArrayBuffer(44 + n);
+        const v = new DataView(buf);
+        const text = function (at, s) {
+
+            for (let i = 0; i < s.length; i++) {
+                v.setUint8(at + i, s.charCodeAt(i));
+            }
+        };
+
+        // A plain WAV header, 8 kHz, 8 bit, one channel, then silence
+        text(0, "RIFF");
+        v.setUint32(4, 36 + n, true);
+        text(8, "WAVEfmt ");
+        v.setUint32(16, 16, true);
+        v.setUint16(20, 1, true);
+        v.setUint16(22, 1, true);
+        v.setUint32(24, 8000, true);
+        v.setUint32(28, 8000, true);
+        v.setUint16(32, 1, true);
+        v.setUint16(34, 8, true);
+        text(36, "data");
+        v.setUint32(40, n, true);
+
+        for (let i = 0; i < n; i++) {
+            v.setUint8(44 + i, 128);
+        }
+
+        const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+        const done = function () {
+
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+            URL.revokeObjectURL(url);
+            switchingTrack = false;
+            updatePlayPause();
+        };
+
+        // Not a song, so the pause and play listeners leave it alone
+        userPaused = true;
+        switchingTrack = true;
+        audio.src = url;
+
+        try {
+
+            const started = audio.play();
+
+            if (started && typeof started.then === "function") {
+                started.then(done, done);
+            } else {
+                done();
+            }
+        } catch (e) {
+            done();
+        }
     }
 
 
@@ -24169,16 +24260,23 @@
         const titleEl = document.createElement("span");
         const stateEl = document.createElement("span");
 
-        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;opacity:0.45;"
+        const ring = document.createElement("span");
+
+        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;"
             + "user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
         item.title = "Still generating on Mureka";
         dot.textContent = "\u25CF";
         dot.style.cssText = "margin-right:6px;flex:0 0 auto;visibility:hidden";
-        numEl.style.cssText = "flex:0 0 auto;width:42px;margin-right:8px";
+
+        // A ring turning where the number goes, while Mureka is asked
+        numEl.style.cssText = "flex:0 0 auto;width:42px;margin-right:8px;display:flex;justify-content:flex-end";
+        ring.style.cssText = "display:inline-block;width:11px;height:11px;border:2px solid rgba(72,225,235,0.3);"
+            + "border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        numEl.appendChild(ring);
         titleEl.textContent = (song.title || "").trim() || "Untitled";
-        titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.45";
         stateEl.textContent = pendingPlay.has(String(song.song_id)) ? "Plays when ready" : "Generating";
-        stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap";
+        stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap;opacity:0.7";
 
         item.appendChild(dot);
         item.appendChild(numEl);

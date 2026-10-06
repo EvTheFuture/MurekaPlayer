@@ -957,9 +957,20 @@
     }
 
     /* The handle to drag a song to another place in the queue */
-    /* A song still being generated, greyed, its cover unknown */
-    .row.pending {
+    /* A song still being generated, greyed, its cover unknown, with a ring
+       turning in front of it */
+    .row.pending > :not(.rowNum) {
         opacity: 0.45;
+    }
+
+    .pendRing {
+        display: inline-block;
+        width: 0.8em;
+        height: 0.8em;
+        border: 2px solid rgba(72, 225, 235, 0.3);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spinTurn 0.8s linear infinite;
     }
 
     .row.pending .rowTime {
@@ -8245,6 +8256,17 @@
 
         const time = row.querySelector(".rowTime");
         const heart = row.querySelector(".rowHeart");
+        const num = row.querySelector(".rowNum");
+
+        // A ring turning where the number goes, while the phone asks Mureka
+        if (num) {
+
+            const ring = document.createElement("span");
+
+            ring.className = "pendRing";
+            num.textContent = "";
+            num.appendChild(ring);
+        }
 
         if (time) {
             time.textContent = song.playWhenReady ? "Plays when ready" : "Generating";
