@@ -2788,6 +2788,24 @@
         grid-column: 4;
     }
 
+    /* The app's own screen on a tablet is the phone itself, so where the
+       music plays is no choice there */
+    html.appScreen #sound {
+        display: none !important;
+    }
+
+    #signin button {
+        margin-left: 12px;
+        padding: 6px 14px;
+        border: none;
+        border-radius: 8px;
+        background: #fff;
+        color: #5a1f2b;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
     html.phone #settingsBtn {
         grid-column: 5;
     }
@@ -3663,6 +3681,47 @@
     function isPhone() {
 
         return document.documentElement.classList.contains("phone");
+    }
+
+    // The app's own screen on a tablet: this page in the app, over the
+    // device itself, with the app's bridge
+    const appScreen = location.hostname === "127.0.0.1"
+        && navigator.userAgent.indexOf("MurekaPlayerApp/") >= 0
+        && typeof window.MurekaApp === "object" && window.MurekaApp !== null;
+
+    document.documentElement.classList.toggle("appScreen", appScreen);
+
+    // Signed out, the app's own screen has the Mureka page a tap away
+    if (appScreen) {
+
+        const signBtn = document.createElement("button");
+
+        signBtn.type = "button";
+        signBtn.textContent = "Sign in";
+        signBtn.addEventListener("click", function () {
+            window.MurekaApp.showMureka();
+        });
+
+        $("signin").textContent = "Not signed in to Mureka.";
+        $("signin").appendChild(signBtn);
+    }
+
+    // Close functions of the dialogs built on the fly, the newest last, so
+    // the app's Back button closes the newest first
+    const backClosers = [];
+
+    function onBack(fn) {
+
+        backClosers.push(fn);
+
+        return function () {
+
+            const i = backClosers.indexOf(fn);
+
+            if (i >= 0) {
+                backClosers.splice(i, 1);
+            }
+        };
     }
 
     applyPhoneLayout();
@@ -10078,7 +10137,7 @@
 
     // Where the browser cannot go fullscreen, a Tesla among them, or where
     // it said it could but did not the last time
-    let fullscreenOffered = !teslaBrowser && !fullscreenFailedBefore()
+    let fullscreenOffered = !teslaBrowser && !appScreen && !fullscreenFailedBefore()
         && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 
     if (!fullscreenOffered) {
@@ -11896,6 +11955,30 @@
         }
     }
 
+    // The app's own screen asks nothing while it is out of sight, the app in
+    // the background or the Mureka page in front, and starts again on return
+    let pollParked = false;
+
+    function nextPoll(ms) {
+
+        if (appScreen && document.hidden) {
+
+            pollParked = true;
+            return;
+        }
+
+        setTimeout(poll, ms);
+    }
+
+    document.addEventListener("visibilitychange", function () {
+
+        if (!document.hidden && pollParked) {
+
+            pollParked = false;
+            poll();
+        }
+    });
+
     function poll() {
 
         // A request the network swallowed is given up, and the next asked
@@ -11914,7 +11997,7 @@
             clearTimeout(timer);
             seq = typeof s.seq === "number" ? s.seq : -1;
             accept(s);
-            setTimeout(poll, 0);
+            nextPoll(0);
         }).catch(function () {
 
             clearTimeout(timer);
@@ -11926,7 +12009,7 @@
             seq = -1;
             online = false;
             render();
-            setTimeout(poll, 1000);
+            nextPoll(1000);
         });
     }
 
@@ -12691,8 +12774,8 @@
             settings: "Export settings to"
         };
 
-        openChoice(titles[kind] || titles.settings, [
-            { icon: "download", label: "This browser", fn: function () {
+        const choices = [
+            { icon: "download", label: appScreen ? "A file" : "This browser", fn: function () {
 
                 closeSongMenu();
                 exportHere(kind);
@@ -12701,13 +12784,20 @@
 
                 closeSongMenu();
                 copyExportHere(kind);
-            } },
-            { icon: "speaker", label: "The phone", fn: function () {
+            } }
+        ];
+
+        // On the app's own screen this browser is the phone
+        if (!appScreen) {
+
+            choices.push({ icon: "speaker", label: "The phone", fn: function () {
 
                 closeSongMenu();
                 panelAction("hclick", buttonId);
-            } }
-        ]);
+            } });
+        }
+
+        openChoice(titles[kind] || titles.settings, choices);
     }
 
     // An export onto this browser's clipboard as text. Getting it from the
@@ -12743,7 +12833,7 @@
     // phone as before
     function importChoice(buttonId) {
 
-        openChoice("Import from", [
+        const choices = [
             { icon: "listPlus", label: "Paste here", fn: function () {
 
                 closeSongMenu();
@@ -12753,13 +12843,20 @@
 
                 closeSongMenu();
                 fileImportHere();
-            } },
-            { icon: "speaker", label: "The phone", fn: function () {
+            } }
+        ];
+
+        // On the app's own screen this browser is the phone
+        if (!appScreen) {
+
+            choices.push({ icon: "speaker", label: "The phone", fn: function () {
 
                 closeSongMenu();
                 panelAction("hclick", buttonId);
-            } }
-        ]);
+            } });
+        }
+
+        openChoice("Import from", choices);
     }
 
     // A box to paste an export into, the browser's own Paste works there.
@@ -12798,9 +12895,18 @@
             return b;
         };
 
+        let offBack = null;
+
         const close = function () {
+
             back.remove();
+
+            if (offBack) {
+                offBack();
+            }
         };
+
+        offBack = onBack(close);
 
         // The page's own keys never hear what is typed here
         for (const kind of ["keydown", "keyup", "keypress"]) {
@@ -13027,6 +13133,22 @@
 
         const fallback = "mureka-player-" + kind + ".json";
 
+        // The app asks for the name and the place itself
+        if (appScreen) {
+
+            fetch("/exportName?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
+                return res.json();
+            }).then(function (out) {
+                return out && out.name ? out.name : fallback;
+            }, function () {
+                return fallback;
+            }).then(function (name) {
+                window.MurekaApp.saveFrom(name, "/download/" + encodeURIComponent(name) + "?kind=" + esc(kind), "application/json");
+            });
+
+            return;
+        }
+
         fetch("/exportName?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
             return res.json();
         }).then(function (out) {
@@ -13209,6 +13331,13 @@
     // Mureka for the browser, which could not name a file from another
     // address. Where that fails the song opens as before, under Mureka's name
     function saveSong(m, name) {
+
+        // The app saves it itself, a page in the app cannot save a file
+        if (appScreen) {
+
+            window.MurekaApp.saveFrom(name, "/audio?url=" + encodeURIComponent(m.src), "audio/mpeg");
+            return;
+        }
 
         statusLine.setText("Downloading: " + name);
 
@@ -13723,13 +13852,24 @@
             zoomAt(minScale * Math.pow(maxScale / minScale, Number(slider.value) / 1000), side / 2, side / 2);
         });
 
+        let offBack = null;
+
         const close = function (result) {
 
             window.removeEventListener("resize", layout);
             back.remove();
             URL.revokeObjectURL(url);
+
+            if (offBack) {
+                offBack();
+            }
+
             done(result);
         };
+
+        offBack = onBack(function () {
+            close(null);
+        });
 
         const finish = function () {
 
@@ -14749,6 +14889,35 @@
     }
 
     // Close whatever is on top, the same order the phone uses
+    // The app's Back button: the newest dialog, the trimmer, then what
+    // closeTop closes. True when something was closed
+    window.__murekaAppBack = function () {
+
+        if (backClosers.length > 0) {
+
+            backClosers[backClosers.length - 1]();
+            return true;
+        }
+
+        if (trimOpen()) {
+
+            closeTrimmer();
+            return true;
+        }
+
+        return closeTop();
+    };
+
+    // How a save through the app went
+    window.__murekaAppSaved = function (ok, text) {
+
+        if (ok) {
+            toast("Saved " + text, "ok");
+        } else if (text) {
+            toast(text, "bad");
+        }
+    };
+
     function closeTop() {
 
         if (isShown("blackout")) {
@@ -15302,6 +15471,16 @@
 
                 $("actionsPop").style.display = "none";
                 $("fullBtn").click();
+            }));
+        }
+
+        // The Mureka page with the player, behind this screen in the app
+        if (appScreen) {
+
+            box.appendChild(menuItem("mureka", "Mureka page", function () {
+
+                $("actionsPop").style.display = "none";
+                window.MurekaApp.showMureka();
             }));
         }
 

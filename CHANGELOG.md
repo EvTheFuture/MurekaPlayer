@@ -19,6 +19,11 @@ the new settings layout and a number of smaller improvements.
 - Starts by itself when the phone starts and after an update, so the web view
   is there without opening the app. Posts a "Sign in to Mureka" notification
   when Mureka turns the session down.
+- On a tablet the app shows the web view as its screen, the same page other
+  browsers get, so it gains whatever the web view gains. The Mureka page with
+  the player stays behind it, a tap away in the actions menu for signing in,
+  and Back or Web view in the player's menu return. Exports and song
+  downloads use Android's save dialog. Can be turned off under Mobile player.
 - Fullscreen by default: Android's status and navigation bars are hidden
   while the player is on screen, using the whole screen including the strip
   beside a camera cutout. Can be turned off under Mobile player.
@@ -326,6 +331,11 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **On a tablet or a computer, a double tap or double click on the header**
+  fills the whole window, the next one folds the player, and a tap on the
+  folded header brings back your own size. On a phone it folds and unfolds
+  as before. A finger drags the floating player by its header, and on touch
+  screens the bottom corners are large, marked grips to resize it with.
 - **Songs still being generated** show greyed at the top of your own list,
   in the player and in the web view, with an unknown cover where covers are
   shown. A tap says the song is not finished yet and offers **Play when

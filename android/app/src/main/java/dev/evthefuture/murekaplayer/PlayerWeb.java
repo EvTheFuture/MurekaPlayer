@@ -116,6 +116,13 @@ final class PlayerWeb {
         // Android's question whether the app may see Bluetooth devices,
         // which only an activity can show
         void askBluetoothPermission();
+
+        // The web view as the screen on a tablet, or the Mureka page, as
+        // the settings now say
+        void applyScreen();
+
+        // Back from the Mureka page to the web view on a tablet
+        void showWebView();
     }
 
     // Whether the phone has a working internet connection, as Android last
@@ -474,6 +481,15 @@ final class PlayerWeb {
         }
     }
 
+    private static void tellScreen() {
+
+        Host host = hostRef.get();
+
+        if (host != null) {
+            host.applyScreen();
+        }
+    }
+
     // The permission is given once and stays until another VPN app takes
     // over. When it is missing and the app is not on screen, the setting
     // says so and switching it on again asks
@@ -693,6 +709,10 @@ final class PlayerWeb {
                 MAIN.post(PlayerWeb::tellFullscreen);
             }
 
+            if (CarSettings.TABLET_VIEW.equals(key)) {
+                MAIN.post(PlayerWeb::tellScreen);
+            }
+
             // What starts the power saving, the devices that count or the
             // master switch: a countdown running stops
             if (CarSettings.SAVE_TRIGGER.equals(key) || CarSettings.SAVE_BT.equals(key)
@@ -708,6 +728,36 @@ final class PlayerWeb {
             PlayerService.settingsChanged();
 
             return true;
+        }
+
+        // Whether the device is a tablet, "1" when it is, where the app can
+        // show the web view as its screen
+        @JavascriptInterface
+        public String isTablet() {
+
+            if (!onMureka) {
+                return "";
+            }
+
+            return AppScreen.tablet ? "1" : "0";
+        }
+
+        // From the Mureka page back to the web view, on a tablet showing it
+        @JavascriptInterface
+        public void showWebView() {
+
+            if (!onMureka) {
+                return;
+            }
+
+            MAIN.post(() -> {
+
+                Host host = hostRef.get();
+
+                if (host != null) {
+                    host.showWebView();
+                }
+            });
         }
 
         // Whether Android lets the app run freely in the background, "1" when

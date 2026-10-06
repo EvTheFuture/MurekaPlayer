@@ -26,6 +26,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.net.Uri;
@@ -34,6 +35,7 @@ import android.os.Bundle;
 import android.os.Message;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.window.OnBackInvokedDispatcher;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -41,15 +43,19 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 // Only a window onto the player. The WebView belongs to PlayerWeb and keeps
 // running when this screen closes, so leaving the app never stops the music
 // or the web view. Quit in the notification ends everything
-public class MainActivity extends Activity implements PlayerWeb.Host {
+public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.Owner {
 
     private static final int PICK_FILE = 7;
     private static final int ASK_VPN = 8;
@@ -61,6 +67,14 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
     // A window the page opened, the Google sign in for one, shown on top
     private WebView popup;
+
+    // The web view as the screen on a tablet, over the Mureka page. Null
+    // when the Mureka page is the screen
+    private WebView screen;
+
+    // The file waiting to be fetched from the server once the user has
+    // said where it goes, for the web view on a tablet
+    private String savePath;
 
     // The page waiting for the file picker to answer
     private ValueCallback<Uri[]> fileCallback;
@@ -109,6 +123,80 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
         root.addView(web, 0, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        AppScreen.measure(this);
+        applyScreen();
+        listenForBack();
+    }
+
+    // A foldable opened or closed may turn a phone into a tablet
+    @Override
+    public void onConfigurationChanged(Configuration config) {
+
+        super.onConfigurationChanged(config);
+        AppScreen.measure(this);
+        applyScreen();
+    }
+
+    // On a tablet with the setting on, the web view is the screen and the
+    // Mureka page with the player sits behind it. Otherwise the Mureka page
+    @Override
+    public void applyScreen() {
+
+        boolean want = AppScreen.tablet && CarSettings.tabletView(this);
+
+        if (want && screen == null) {
+
+            screen = AppScreen.make(this, this);
+            root.addView(screen, root.indexOfChild(web) + 1, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        } else if (!want && screen != null) {
+            dropScreen();
+        }
+    }
+
+    private void dropScreen() {
+
+        if (screen == null) {
+            return;
+        }
+
+        root.removeView(screen);
+        screen.destroy();
+        screen = null;
+    }
+
+    @Override
+    public void showWebView() {
+
+        if (screen != null) {
+            screen.setVisibility(android.view.View.VISIBLE);
+        }
+    }
+
+    @Override
+    public void showMurekaPage() {
+
+        if (screen == null) {
+            return;
+        }
+
+        screen.setVisibility(android.view.View.GONE);
+        Toast.makeText(this, "Back goes to the web view", Toast.LENGTH_SHORT).show();
+    }
+
+    // The screen's page process died, a fresh one takes its place
+    @Override
+    public void screenGone() {
+
+        boolean shown = screen != null && screen.getVisibility() == android.view.View.VISIBLE;
+
+        dropScreen();
+        applyScreen();
+
+        if (!shown && screen != null) {
+            screen.setVisibility(android.view.View.GONE);
+        }
     }
 
     // The WebView is deliberately never paused or destroyed here. It is only
@@ -118,17 +206,32 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
         leaveFullscreen();
         closePopup();
+        dropScreen();
         PlayerWeb.detachHost(this);
         web = null;
 
         super.onDestroy();
     }
 
-    // Back closes a popup, then goes back in the page, and finally only hides
-    // the app so the music keeps playing
+    // Android 16 no longer calls onBackPressed for an app built for it, Back
+    // reaches the app only through a callback, which older versions use too
+    private void listenForBack() {
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
+        }
+    }
+
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        handleBack();
+    }
+
+    // Back closes a popup, then goes back in the page, and finally only hides
+    // the app so the music keeps playing
+    private void handleBack() {
 
         if (fullView != null) {
 
@@ -139,6 +242,26 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         if (popup != null) {
 
             closePopup();
+            return;
+        }
+
+        // The web view as the screen: Back closes what is open on it first
+        if (screen != null && screen.getVisibility() == android.view.View.VISIBLE) {
+
+            screen.evaluateJavascript("window.__murekaAppBack ? String(window.__murekaAppBack()) : 'false'", value -> {
+
+                if (!"\"true\"".equals(value)) {
+                    moveTaskToBack(true);
+                }
+            });
+
+            return;
+        }
+
+        // The Mureka page over the web view goes back to the web view
+        if (screen != null) {
+
+            showWebView();
             return;
         }
 
@@ -370,6 +493,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
 
         saveName = name;
         saveText = text;
+        savePath = null;
 
         Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
 
@@ -387,8 +511,107 @@ public class MainActivity extends Activity implements PlayerWeb.Host {
         }
     }
 
+    // The web view on a tablet has a file to save: an export or a song, which
+    // the server hands out. The user picks the place, then it is fetched
+    @Override
+    @SuppressWarnings("deprecation")
+    public void saveFrom(String name, String path, String mime) {
+
+        saveText = null;
+        saveName = name;
+        savePath = path;
+
+        Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType(mime);
+        pick.putExtra(Intent.EXTRA_TITLE, name);
+
+        try {
+            startActivityForResult(pick, SAVE_FILE);
+        } catch (ActivityNotFoundException e) {
+
+            savePath = null;
+            screenSaved(false, "This device has no app to save files with");
+        }
+    }
+
+    // Fetch the file from the server into the place the user picked, off
+    // the main thread, a song can take a while
+    private void fetchSaved(Uri where, String path, String name) {
+
+        if (where == null) {
+
+            screenSaved(false, "");
+            return;
+        }
+
+        new Thread(() -> {
+
+            boolean ok = false;
+            HttpURLConnection conn = null;
+
+            try {
+
+                conn = (HttpURLConnection) new URL(AppScreen.BASE + path.substring(1)).openConnection();
+                conn.setRequestProperty("User-Agent", CarServer.APP_AGENT + "1");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(60000);
+
+                if (conn.getResponseCode() == 200) {
+
+                    try (InputStream in = conn.getInputStream();
+                         OutputStream out = getContentResolver().openOutputStream(where)) {
+
+                        if (out != null) {
+
+                            byte[] buf = new byte[65536];
+                            int n;
+
+                            while ((n = in.read(buf)) > 0) {
+                                out.write(buf, 0, n);
+                            }
+
+                            ok = true;
+                        }
+                    }
+                }
+            } catch (IOException | SecurityException e) {
+                ok = false;
+            } finally {
+
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+
+            final boolean done = ok;
+
+            runOnUiThread(() -> screenSaved(done, done ? name : "Could not save the file"));
+        }, "screen-save").start();
+    }
+
+    // The web view on the screen hears how the save went
+    private void screenSaved(boolean ok, String text) {
+
+        if (screen != null) {
+            screen.evaluateJavascript("window.__murekaAppSaved && window.__murekaAppSaved("
+                + ok + ", " + org.json.JSONObject.quote(text) + ")", null);
+        }
+    }
+
     // Write what is waiting to the place the user picked, or say it was left
     private void writeSaved(Uri where) {
+
+        if (savePath != null) {
+
+            String path = savePath;
+
+            savePath = null;
+            fetchSaved(where, path, saveName);
+            saveName = null;
+            return;
+        }
 
         String text = saveText;
         String name = saveName;

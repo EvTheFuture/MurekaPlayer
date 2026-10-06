@@ -38,6 +38,13 @@ final class CarSettings {
     static final String MDNS_NAME = "mdnsName";
     static final String FULLSCREEN = "appFullscreen";
 
+    // Whether a tablet shows the web view as the app's screen, with the
+    // Mureka page a tap away, rather than the Mureka page with the player
+    static final String TABLET_VIEW = "tabletView";
+
+    // Screens at least this wide on their short side count as a tablet
+    static final int TABLET_DP = 600;
+
     // What happens when the charger is pulled out and plugged in again, a
     // phone left somewhere warm stays cooler with less running
     static final String CHARGE_SAVE = "chargeSave";
@@ -82,6 +89,10 @@ final class CarSettings {
     // Whether the app hides Android's bars while it is on screen
     static boolean fullscreen(Context c) {
         return !"0".equals(prefs(c).getString(FULLSCREEN, "1"));
+    }
+
+    static boolean tabletView(Context c) {
+        return !"0".equals(prefs(c).getString(TABLET_VIEW, "1"));
     }
 
     static boolean vpnEnabled(Context c) {
@@ -194,7 +205,7 @@ final class CarSettings {
 
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
-            || FULLSCREEN.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
+            || FULLSCREEN.equals(key) || TABLET_VIEW.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
             || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";

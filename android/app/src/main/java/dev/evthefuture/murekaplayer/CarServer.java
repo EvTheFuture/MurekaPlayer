@@ -103,6 +103,13 @@ final class CarServer {
     private static final long START_GRACE_MS = 20000;
     private volatile long lastPoll = System.currentTimeMillis() + START_GRACE_MS;
 
+    // The app's own screen on a tablet shows the web view too. It asks over
+    // the device itself and names itself in its user agent. It is not a
+    // browser that comes and goes, so it never counts as one: not for the
+    // music coming back, not for the browsers here, not for power saving
+    static final String APP_AGENT = "MurekaPlayerApp/";
+    private static final ThreadLocal<Boolean> APP_REQUEST = new ThreadLocal<>();
+
     // Every browser that asked for the state lately, by the id it sends with
     // the request. Two browsers on one page each count once
     private final java.util.Map<String, Long> clients = new java.util.concurrent.ConcurrentHashMap<>();
@@ -144,7 +151,7 @@ final class CarServer {
 
     void start() {
 
-        page = readAsset("car.html");
+        page = readAsset("webview.html");
         running = true;
 
         Thread accept = new Thread(this::acceptLoop, "car-server");
@@ -242,6 +249,15 @@ final class CarServer {
         countClients();
     }
 
+    // A browser of the web view was heard from. The app's own screen does
+    // not count, it is there while the app is on screen anyway
+    private void markPoll() {
+
+        if (!Boolean.TRUE.equals(APP_REQUEST.get())) {
+            lastPoll = System.currentTimeMillis();
+        }
+    }
+
     // A browser asked for the state, so it is here. Its own id keeps two
     // pages on one machine apart
     private void noteClient(String id, boolean viaHotspot) {
@@ -334,9 +350,7 @@ final class CarServer {
             }
 
             c.setSoTimeout(10000);
-
-            // A request from a web view keeps the phone awake a while
-            PlayerService.webViewActive();
+            APP_REQUEST.set(Boolean.FALSE);
 
             // Whether it came over the hotspot rather than the phone's Wi-Fi
             boolean viaHotspot = onHotspot(c.getInetAddress());
@@ -371,6 +385,7 @@ final class CarServer {
 
             int length = 0;
             String range = "";
+            String agent = "";
             String line;
 
             while ((line = readLine(in)) != null && !line.isEmpty()) {
@@ -382,6 +397,10 @@ final class CarServer {
                     range = line.substring(colon + 1).trim();
                 }
 
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("user-agent")) {
+                    agent = line.substring(colon + 1);
+                }
+
                 if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-length")) {
 
                     try {
@@ -390,6 +409,17 @@ final class CarServer {
                         length = 0;
                     }
                 }
+            }
+
+            // The app's own screen, from the device itself and named so
+            boolean appScreen = c.getInetAddress() != null && plainV4(c.getInetAddress()).isLoopbackAddress()
+                && agent.contains(APP_AGENT);
+
+            APP_REQUEST.set(appScreen);
+
+            // A request from a web view keeps the phone awake a while
+            if (!appScreen) {
+                PlayerService.webViewActive();
             }
 
             boolean big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path);
@@ -403,7 +433,7 @@ final class CarServer {
             byte[] body = readBody(in, length);
 
             if ("GET".equals(method) && ("/".equals(path) || "/index.html".equals(path))) {
-                send(out, 200, "text/html; charset=utf-8", page != null ? page : bytes("car.html missing"));
+                send(out, 200, "text/html; charset=utf-8", page != null ? page : bytes("webview.html missing"));
             } else if ("GET".equals(method) && "/state".equals(path)) {
 
                 // With since, the answer waits for the next state, so a tap
@@ -413,8 +443,10 @@ final class CarServer {
                 String since = param(query, "since");
                 String json;
 
-                lastPoll = System.currentTimeMillis();
-                noteClient(param(query, "cid"), viaHotspot);
+                markPoll();
+                if (!appScreen) {
+                    noteClient(param(query, "cid"), viaHotspot);
+                }
 
                 if (since.isEmpty()) {
                     json = Hub.awaitState(-1, 0);
@@ -422,7 +454,7 @@ final class CarServer {
                     json = Hub.awaitState(longNumber(since, -1), 5000);
                 }
 
-                lastPoll = System.currentTimeMillis();
+                markPoll();
                 send(out, 200, "application/json", bytes(json));
             } else if ("GET".equals(method) && "/list".equals(path)) {
                 sendList(out, query);
@@ -517,6 +549,8 @@ final class CarServer {
             // A request the code did not expect, broken escapes in the
             // address say. The connection is closed, the app runs on
             Hub.note("Server", "A request could not be read: " + e.getClass().getSimpleName());
+        } finally {
+            APP_REQUEST.remove();
         }
     }
 
@@ -537,7 +571,7 @@ final class CarServer {
     // the paging come in as query parameters
     private void sendList(OutputStream out, String query) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         JSONObject req = new JSONObject();
 
@@ -569,7 +603,7 @@ final class CarServer {
     // never an address of the browser's choosing
     private void sendAudio(OutputStream out, String url) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         URL parsed;
 
@@ -702,7 +736,7 @@ final class CarServer {
 
     private void sendSong(OutputStream out, String url, String range) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         if (!CoverCache.allowed(url)) {
 
@@ -882,7 +916,7 @@ final class CarServer {
 
             out.write(piece);
             pos += piece.length;
-            lastPoll = System.currentTimeMillis();
+            markPoll();
         }
 
         out.flush();
@@ -894,7 +928,7 @@ final class CarServer {
     // is the browser's own choice, or its question
     private void sendDownload(OutputStream out, String asked, String wantedName) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         String kind = "songs".equals(asked) || "library".equals(asked) || "queue".equals(asked) ? asked : "settings";
         String json = Hub.request("__murekaHostExportText", JSONObject.quote(kind), "library".equals(kind) ? 30000 : 4000);
@@ -940,7 +974,7 @@ final class CarServer {
     private void sendCall(OutputStream out, String function, String argJson, long timeoutMs)
         throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         String json = Hub.request(function, argJson, timeoutMs);
 
@@ -1251,7 +1285,7 @@ final class CarServer {
             }
 
             // Asking for the sound counts as the web view being there
-            lastPoll = System.currentTimeMillis();
+            markPoll();
 
             // The phone's own media volume is the app's business, not the
             // player's, so it never goes into the page
@@ -1280,7 +1314,7 @@ final class CarServer {
     // for the browser to ask about before importApply
     private void importText(OutputStream out, String query, byte[] body) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         JSONObject ask = new JSONObject();
 
@@ -1305,7 +1339,7 @@ final class CarServer {
     // the phone with its answers
     private void importApply(OutputStream out, byte[] body) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         String json = new String(body, StandardCharsets.UTF_8);
         String clean;
@@ -1331,7 +1365,7 @@ final class CarServer {
     // went, which takes a few seconds
     private void setCover(OutputStream out, String query, byte[] body) throws IOException {
 
-        lastPoll = System.currentTimeMillis();
+        markPoll();
 
         String id = param(query, "id");
         String type = param(query, "type");

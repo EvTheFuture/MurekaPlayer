@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.171";
+    const VERSION = "1.9.9.175";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -870,6 +870,7 @@
     // The actions menu entry that folds and unfolds the panel, kept so its
     // label and icon can follow the state rather than always saying Hide
     let foldButton = null;
+    let webViewButton = null;
 
     // The menu entry that enters and leaves fullscreen, kept so its label and
     // icon can follow the state
@@ -11903,6 +11904,10 @@
         closeViewMenu();
         actionsOpen = true;
 
+        if (webViewButton) {
+            webViewButton.style.display = tabletWebView() ? "" : "none";
+        }
+
         if (actionsWrapEl) {
             actionsWrapEl.style.display = "flex";
             placePopupUnder(actionsWrapEl, actionsToggleBtn);
@@ -12904,27 +12909,7 @@
         // Back to the user's own size
         if (fillRestore && (fillStage === 2 || (fillStage === 1 && twoSteps))) {
 
-            const r = fillRestore;
-
-            fillRestore = null;
-            fillStage = 0;
-            setArtCap(null);
-            applySize(r.w, r.listH);
-            anchorLeft = r.left;
-            anchorSide = r.side;
-            anchorOffset = r.offset;
-            panelEl.style.left = r.left + "px";
-
-            if (r.side === "top") {
-
-                panelEl.style.top = r.offset + "px";
-                panelEl.style.bottom = "auto";
-            } else {
-
-                panelEl.style.top = "auto";
-                panelEl.style.bottom = r.offset + "px";
-            }
-
+            restoreFill();
             setStatus("Back to your own size");
             return;
         }
@@ -12984,6 +12969,60 @@
         }
 
         applyPosition(left, 0, false);
+    }
+
+    // The size and place the user had before the window was filled
+    function restoreFill() {
+
+        const r = fillRestore;
+
+        if (!r) {
+            return;
+        }
+
+        fillRestore = null;
+        fillStage = 0;
+        setArtCap(null);
+        applySize(r.w, r.listH);
+        anchorLeft = r.left;
+        anchorSide = r.side;
+        anchorOffset = r.offset;
+        panelEl.style.left = r.left + "px";
+
+        if (r.side === "top") {
+
+            panelEl.style.top = r.offset + "px";
+            panelEl.style.bottom = "auto";
+        } else {
+
+            panelEl.style.top = "auto";
+            panelEl.style.bottom = r.offset + "px";
+        }
+    }
+
+    // A double tap or double click on the header. On a wider screen it
+    // steps from your own size to the whole window, and from there to
+    // folded, the way back being one tap on the folded header. On a phone,
+    // where the player fills the screen anyway, it folds and unfolds
+    function headerDoubleTap() {
+
+        if (minimized || window.innerWidth <= 640 || !panelEl || !listEl) {
+
+            toggleMinimize();
+            return;
+        }
+
+        if (fillRestore) {
+
+            restoreFill();
+            toggleMinimize();
+            setStatus("Folded, a tap on the header opens it at your own size");
+            return;
+        }
+
+        fillStage = 0;
+        toggleFillWindow();
+        setStatus("Whole window, a double tap on the header folds it");
     }
 
     // Rate the playing song from a digit, the same way the stars do
@@ -17740,6 +17779,26 @@
             && typeof window.MurekaHost === "object" && window.MurekaHost !== null;
     }
 
+    // The app on a tablet, where it can show the web view as its screen
+    function isAppTablet() {
+
+        if (!isApkHost() || typeof window.MurekaHost.isTablet !== "function") {
+            return false;
+        }
+
+        try {
+            return window.MurekaHost.isTablet() === "1";
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Whether the app shows the web view as its screen, with this page behind
+    function tabletWebView() {
+        return isAppTablet() && typeof window.MurekaHost.showWebView === "function"
+            && window.MurekaHost.getPref("tabletView", "1") === "1";
+    }
+
     // Whether Mureka accepted the session, unknown until the first check
     let authState = "unknown";
 
@@ -20814,11 +20873,21 @@
             }
         });
 
+        // On a tablet showing the web view as the app's screen, the way back
+        // to it from the Mureka page
+        webViewButton = makeActionButton(iconWebView(), "Web view", "#444", "#fff", function () {
+
+            closeActions();
+            window.MurekaHost.showWebView();
+        });
+        webViewButton.style.display = "none";
+
         if (fullscreenOffered()) {
             rowDisplay.appendChild(fullscreenButton);
         }
         rowDisplay.appendChild(blackoutButton);
         rowDisplay.appendChild(foldButton);
+        rowDisplay.appendChild(webViewButton);
 
         // Floating dropdown for the action buttons, opens over the player
         // It lives on the body and is fixed positioned, so toggling it does not
@@ -21423,6 +21492,20 @@
             + "#mureka-player-list.mureka-hand-scroll{touch-action:none !important;-webkit-overflow-scrolling:auto !important}"
             + ".mureka-resize-handle{background:transparent;transition:background 0.12s ease}"
             + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
+
+            // A finger on a wider screen, a tablet say, cannot hit a few
+            // pixels it cannot see. The sides and the bottom grow a little,
+            // and the bottom corners become large grips with a visible mark.
+            // The top stays thin, the header's buttons and its drag are there
+            + "@media (pointer:coarse) and (min-width:641px){"
+            + ".mureka-resize-handle[data-edge=l],.mureka-resize-handle[data-edge=r]{width:14px !important}"
+            + ".mureka-resize-handle[data-edge=b]{height:12px !important;left:36px !important;right:36px !important}"
+            + ".mureka-resize-handle[data-edge=bl],.mureka-resize-handle[data-edge=br]{width:34px !important;height:34px !important}"
+            + ".mureka-resize-handle[data-edge=br]{background:linear-gradient(135deg,transparent 52%,rgba(72,225,235,0.75) 52%,"
+            + "rgba(72,225,235,0.75) 58%,transparent 58%,transparent 68%,rgba(72,225,235,0.75) 68%,rgba(72,225,235,0.75) 74%,transparent 74%) !important}"
+            + ".mureka-resize-handle[data-edge=bl]{background:linear-gradient(225deg,transparent 52%,rgba(72,225,235,0.75) 52%,"
+            + "rgba(72,225,235,0.75) 58%,transparent 58%,transparent 68%,rgba(72,225,235,0.75) 68%,rgba(72,225,235,0.75) 74%,transparent 74%) !important}"
+            + "}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
 
             // A cyan pie filling as more of a song has come in, as in the web
@@ -22270,14 +22353,14 @@
     // changes the width and dragging a top or bottom edge only changes the
     // list height. The phone layout is full screen, so the media rules hide them
     const RESIZE_HANDLES = [
-        { x: 0, y: -1, css: "top:0;left:12px;right:12px;height:6px;cursor:ns-resize" },
-        { x: 0, y: 1, css: "bottom:0;left:12px;right:12px;height:6px;cursor:ns-resize" },
-        { x: -1, y: 0, css: "left:0;top:12px;bottom:12px;width:6px;cursor:ew-resize" },
-        { x: 1, y: 0, css: "right:0;top:12px;bottom:12px;width:6px;cursor:ew-resize" },
-        { x: -1, y: -1, css: "top:0;left:0;width:12px;height:12px;cursor:nwse-resize;z-index:6" },
-        { x: 1, y: -1, css: "top:0;right:0;width:12px;height:12px;cursor:nesw-resize;z-index:6" },
-        { x: -1, y: 1, css: "bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize;z-index:6" },
-        { x: 1, y: 1, css: "bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize;z-index:6" }
+        { x: 0, y: -1, edge: "t", css: "top:0;left:12px;right:12px;height:6px;cursor:ns-resize" },
+        { x: 0, y: 1, edge: "b", css: "bottom:0;left:12px;right:12px;height:6px;cursor:ns-resize" },
+        { x: -1, y: 0, edge: "l", css: "left:0;top:12px;bottom:12px;width:6px;cursor:ew-resize" },
+        { x: 1, y: 0, edge: "r", css: "right:0;top:12px;bottom:12px;width:6px;cursor:ew-resize" },
+        { x: -1, y: -1, edge: "tl", css: "top:0;left:0;width:12px;height:12px;cursor:nwse-resize;z-index:6" },
+        { x: 1, y: -1, edge: "tr", css: "top:0;right:0;width:12px;height:12px;cursor:nesw-resize;z-index:6" },
+        { x: -1, y: 1, edge: "bl", css: "bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize;z-index:6" },
+        { x: 1, y: 1, edge: "br", css: "bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize;z-index:6" }
     ];
 
     // Drag one handle. The edge under the pointer is the one that moves, the
@@ -22371,6 +22454,7 @@
         const el = document.createElement("div");
 
         el.className = "mureka-resize-handle";
+        el.dataset.edge = spec.edge;
         el.title = "Drag to resize";
         el.style.cssText = "position:absolute;z-index:5;touch-action:none;" + spec.css;
 
@@ -23092,6 +23176,13 @@
             panelEl.style.removeProperty("height");
             panelEl.style.removeProperty("right");
             panelEl.style.removeProperty("left");
+
+            // What the folded phone bar set goes too. A tablet that started
+            // upright, narrow enough for the phone layout, and was then
+            // turned kept the bar's width limit, so the player could never
+            // grow wider than the upright screen again
+            panelEl.style.removeProperty("max-width");
+            panelEl.style.removeProperty("border-radius");
             panelEl.style.setProperty("width", "300px");
             restoreSize();
             restorePosition();
@@ -23226,8 +23317,10 @@
 
         const folded = minimized && window.innerWidth <= 640;
 
+        // The header is dragged by finger and pen too, which the browser
+        // must not take over for scrolling
         if (headerEl) {
-            headerEl.style.touchAction = folded ? "none" : "";
+            headerEl.style.touchAction = "none";
         }
 
         if (!folded) {
@@ -23447,7 +23540,7 @@
                 if (now - lastHeaderClickT < 400) {
 
                     lastHeaderClickT = 0;
-                    toggleMinimize();
+                    headerDoubleTap();
 
                 } else {
                     lastHeaderClickT = now;
@@ -23994,6 +24087,15 @@
 
         return makeSvgIcon([
             ["polyline", { points: "6 9 12 15 18 9" }]
+        ]);
+    }
+
+    function iconWebView() {
+
+        return makeSvgIcon([
+            ["rect", { x: "2", y: "3", width: "20", height: "14", rx: "2" }],
+            ["line", { x1: "8", y1: "21", x2: "16", y2: "21" }],
+            ["line", { x1: "12", y1: "17", x2: "12", y2: "21" }]
         ]);
     }
 
@@ -26667,6 +26769,20 @@
 
             mobilePage.appendChild(withHint(appFullRow, "The app hides Android's status and navigation bars while it is on screen. A swipe from the edge brings them back for a moment."));
         }
+
+        // A tablet can show the web view as the app's screen
+        if (isAppTablet()) {
+
+            const tabletRow = makeBoolRow("Web view on the tablet",
+                function () { return window.MurekaHost.getPref("tabletView", "1") === "1"; },
+                function (v) {
+
+                    dbgLog("Setting", "web view on the tablet -> " + (v ? "on" : "off"));
+                    window.MurekaHost.setPref("tabletView", v ? "1" : "0");
+                });
+
+            mobilePage.appendChild(withHint(tabletRow, "The app shows the web view as its screen, the same page other browsers get. The Mureka page with this player is in its actions menu, for signing in, and Back or Web view in the menu goes back."));
+        }
         mobilePage.appendChild(withHint(carGateRow, "The browser only allows fullscreen after a tap, so the first tap on the player switches to fullscreen."));
 
         mobileScreenOff.forEach(function (el) {
@@ -27765,7 +27881,7 @@
 
     // The settings the Android app keeps itself, with what they are when
     // never changed, as the app reads them
-    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName", "appFullscreen"];
+    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName", "appFullscreen", "tabletView"];
     const APP_PREF_DEFAULTS = {
         allowHotspot: "1",
         allowWifi: "1",
@@ -27773,6 +27889,7 @@
         vpnAddress: "3.3.3.3",
         mdnsName: "murekaplayer",
         appFullscreen: "1",
+        tabletView: "1",
         chargeSave: "0",
         chargeGrace: "60",
         unplugPause: "0",
