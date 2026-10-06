@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.161";
+    const VERSION = "1.9.9.163";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -27876,25 +27876,47 @@
                 return;
             }
 
-            const done = function () {
+            // keep: the song playing now plays on, with the queue after it.
+            // Otherwise it stops and the imported queue plays at once
+            const done = function (keep) {
 
-                applyQueueImport(found.songs);
+                const sounding = soundingNow();
+
+                applyQueueImport(found.songs, keep);
                 importDone(donePrefix + " the play queue, " + found.songs.length
                     + (found.songs.length === 1 ? " song" : " songs")
-                    + (found.missing > 0 ? ", " + found.missing + " not in the library here left out" : ""), true, asked);
+                    + (found.missing > 0 ? ", " + found.missing + " not in the library here left out" : "")
+                    + (sounding && !keep ? ", playing it now" : ""), true, asked);
             };
 
             if (asked) {
 
-                done();
+                done(p.keepPlaying === true);
+                return;
+            }
+
+            const cancel = function () {
+                importDone("Import cancelled, nothing changed", false, false);
+            };
+
+            if (soundingNow()) {
+
+                askChoices("Replace the play queue?\n" + queueImportText(p, found, sourceName), [
+                    { label: "Keep the playing song", ring: true, fn: function () {
+                        done(true);
+                    } },
+                    { label: "Play the imported queue now", fn: function () {
+                        done(false);
+                    } }
+                ], cancel);
                 return;
             }
 
             askChoices("Replace the play queue?\n" + queueImportText(p, found, sourceName), [
-                { label: "Replace", fn: done }
-            ], function () {
-                importDone("Import cancelled, nothing changed", false, false);
-            });
+                { label: "Replace", fn: function () {
+                    done(false);
+                } }
+            ], cancel);
             return;
         }
 
@@ -28014,25 +28036,39 @@
     function queueImportText(p, found, sourceName) {
 
         const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
-        const busy = !queueIdle() && currentSong;
+        const busy = soundingNow();
 
         return "From the " + sourceName + " saved " + when + ": " + found.songs.length
             + (found.songs.length === 1 ? " song" : " songs")
             + (found.missing > 0 ? ", " + found.missing + " not in the library here "
                 + (found.missing === 1 ? "is" : "are") + " left out" : "")
-            + ". " + (busy ? "The playing song plays on and the queue follows it." : "Play starts it.");
+            + ". " + (busy ? "A song is playing: keep it, with the queue after it, or stop it and play the"
+                + " imported queue from its first song." : "Play starts it.");
+    }
+
+    // Whether a song is sounding right now, not paused or only loaded
+    function soundingNow() {
+        return !!(currentSong && audio && audio.src && !audio.paused);
     }
 
     // An imported play queue in place of the one here. It is then one put
     // together by hand, so the list does not fill it up. A song playing
-    // goes on, with the imported songs after it
-    function applyQueueImport(songs) {
+    // goes on, with the imported songs after it. A paused or only loaded
+    // song goes, like after Stop, and Play starts the imported queue
+    function applyQueueImport(songs, keep) {
+
+        const sounding = soundingNow();
+        const keepIt = sounding && keep === true;
+
+        if (!keepIt && currentSong) {
+            stopPlay();
+        }
 
         dropNextReady();
         playNextMarks.clear();
         resumeState = null;
 
-        if (!queueIdle() && currentSong) {
+        if (keepIt) {
 
             const cur = queue[queuePos];
 
@@ -28047,6 +28083,16 @@
         }
 
         queueOwn = true;
+
+        // The song playing was stopped for it, so the imported queue plays
+        if (sounding && !keepIt) {
+
+            queuePos = 0;
+            playCurrent();
+            publishHostSoon();
+            return;
+        }
+
         renderList();
         setArtTransition("none");
         setArtSources();
@@ -28736,7 +28782,7 @@
                 + (found.missing > 0 ? ", " + found.missing + " not on the phone "
                     + (found.missing === 1 ? "is" : "are") + " left out" : "");
             out.songs = found.songs.length;
-            out.playing = !queueIdle() && !!currentSong;
+            out.playing = soundingNow();
         } else if (p.kind === "library") {
 
             const here = ownLibrary();
@@ -28790,6 +28836,12 @@
             applySongMerge(entry.plan, answers);
             dataStatus("Imported song tweaks, " + mergeSummary(entry.plan, answers));
         } else {
+
+            // For a play queue, whether the song playing plays on
+            if (entry.p.kind === "queue") {
+                entry.p.keepPlaying = Array.isArray(ask.answers) && ask.answers[0] === true;
+            }
+
             importParsed(entry.p, entry.source, "Imported", true);
         }
 

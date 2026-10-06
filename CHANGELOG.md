@@ -339,8 +339,10 @@ the new settings layout and a number of smaller improvements.
 - **The play queue exported and imported**: Copy queue at the foot of the
   menu under the three lines, and Export play queue under Backup and restore,
   in the player and in the web view. Imported, it replaces the queue here as
-  one put together by hand. A song playing plays on with the imported songs
-  after it, songs not in the library here are left out.
+  one put together by hand. With a song playing it asks whether to keep it,
+  with the imported songs after it, or to stop it and play the imported
+  queue at once. A paused song goes and Play starts the imported queue.
+  Songs not in the library here are left out.
 - **Songs deleted on Mureka** are noticed by Load and by Refresh on a song:
   a song missing between the songs of a list page is looked up on Mureka,
   and only when Mureka no longer has it is it removed here, with its stored

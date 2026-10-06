@@ -12615,9 +12615,28 @@
 
             if (r.kind === "queue") {
 
-                askConfirm(r.what + ". Replace the play queue with it?"
-                    + (r.playing ? " The playing song plays on and the queue follows it." : " Play starts it."), "Replace", false, function () {
-                    applyImport(r.key, []);
+                askConfirm(r.what + ". Replace the play queue with it?" + (r.playing ? "" : " Play starts it."), "Replace", false, function () {
+
+                    // A song playing: it plays on with the queue after it,
+                    // or stops and the imported queue plays at once
+                    if (!r.playing) {
+
+                        applyImport(r.key, []);
+                        return;
+                    }
+
+                    openChoice("A song is playing", [
+                        { icon: "check", label: "Keep the playing song", cls: "inset", fn: function () {
+
+                            closeSongMenu();
+                            applyImport(r.key, [true]);
+                        } },
+                        { icon: "play", label: "Play the imported queue now", fn: function () {
+
+                            closeSongMenu();
+                            applyImport(r.key, [false]);
+                        } }
+                    ]);
                 });
                 return;
             }
