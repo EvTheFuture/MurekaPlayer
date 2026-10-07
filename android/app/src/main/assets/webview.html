@@ -11112,6 +11112,73 @@
     $("miniBtn").addEventListener("click", toggleMini);
 
     $("miniClose").addEventListener("click", closeMini);
+
+    // A tap on the main page outside the small list closes it. Not a drag,
+    // a swipe of the covers, a long press, a button or anything else that
+    // does something of its own, and not a tap in a dialog over the page
+    let miniOutside = null;
+
+    document.addEventListener("pointerdown", function (ev) {
+
+        miniOutside = null;
+
+        if (!miniOpen || (ev.button !== undefined && ev.button !== 0)) {
+            return;
+        }
+
+        const at = ev.target;
+
+        if (!at || !at.closest || !at.closest("#app") || at.closest("#mini")) {
+            return;
+        }
+
+        if (at.closest("button, input, select, textarea, a, label, [role='button'], #seek, #stars")) {
+            return;
+        }
+
+        // A side cover is tapped to go to its song
+        const tile = at.closest(".tile");
+
+        if (tile && tile.id !== "cover" && !tile.classList.contains("empty")) {
+            return;
+        }
+
+        miniOutside = { x: ev.clientX, y: ev.clientY, t: Date.now(), id: ev.pointerId };
+    }, true);
+
+    document.addEventListener("pointermove", function (ev) {
+
+        if (miniOutside && miniOutside.id === ev.pointerId
+            && Math.abs(ev.clientX - miniOutside.x) + Math.abs(ev.clientY - miniOutside.y) > 10) {
+            miniOutside = null;
+        }
+    }, true);
+
+    document.addEventListener("pointercancel", function () {
+        miniOutside = null;
+    }, true);
+
+    document.addEventListener("pointerup", function (ev) {
+
+        const down = miniOutside;
+
+        miniOutside = null;
+
+        if (!down || down.id !== ev.pointerId || !miniOpen) {
+            return;
+        }
+
+        // Held long enough to open a song menu
+        if (Date.now() - down.t > 500) {
+            return;
+        }
+
+        if (Math.abs(ev.clientX - down.x) + Math.abs(ev.clientY - down.y) > 10) {
+            return;
+        }
+
+        closeMini();
+    }, true);
     $("miniExpand").addEventListener("click", openFullList);
 
     $("miniUpdate").addEventListener("click", function () {
