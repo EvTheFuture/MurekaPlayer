@@ -13455,10 +13455,31 @@
         }
 
         songMenuItems(m, box, closeSongMenu, false);
+        tidyMenuLines(box);
     }
 
     // A line before the next group of a menu, only when something of this
     // part of the menu comes before it
+    // Lines that ended up with nothing between them and the next line, a
+    // heading or the edge of the menu go, a group with all its choices
+    // left out leaves no trace
+    function tidyMenuLines(box) {
+
+        const isLine = function (el) {
+            return !!el && el.classList.contains("menuLine");
+        };
+        const isEdge = function (el) {
+            return !el || isLine(el) || el.classList.contains("actionsSong") || el.classList.contains("copyRow");
+        };
+
+        for (const line of Array.from(box.querySelectorAll(".menuLine"))) {
+
+            if (isEdge(line.previousElementSibling) || isEdge(line.nextElementSibling)) {
+                line.remove();
+            }
+        }
+    }
+
     function menuLine(box) {
 
         const last = box.lastElementChild;
@@ -15762,12 +15783,15 @@
             }
 
             song.textContent = m.title;
+
+            // The copy row waits outside while the song's choices go in under
+            // its title, then goes back to the foot after them
+            tiles.remove();
             songMenuItems(m, box, function () {
                 $("actionsPop").style.display = "none";
             }, true);
-
-            // Back to the foot, after the song's choices
             box.appendChild(tiles);
+            tidyMenuLines(box);
         }).catch(function () {
             song.remove();
         });

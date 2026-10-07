@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.186";
+    const VERSION = "1.9.9.188";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -7933,6 +7933,13 @@
                 return;
             }
 
+            if (trackStartAt) {
+
+                dbgLog("Song", "heard " + Math.round(performance.now() - trackStartAt) + " ms after it was asked for, "
+                    + (trackSource || "source not known"));
+                trackStartAt = 0;
+            }
+
             playbackWorks = true;
             userPaused = false;
             switchingTrack = false;
@@ -10504,6 +10511,11 @@
     // element's listeners leave it alone, it is not a song
     let primingUrl = null;
 
+    // When the song now loading was asked for, and where its sound comes
+    // from, for the debug log line once it is heard
+    let trackStartAt = 0;
+    let trackSource = "";
+
     // Whether the element has played anything in this page, after which a
     // browser lets it start without a tap
     let audioUnlocked = false;
@@ -10691,20 +10703,22 @@
         // Drop counts from the previous song until the detail call returns
         nowPlayingCounts = null;
 
-        // Show art and title right away, even while the audio is still loading
-        updatePlayerInfo(song);
-        renderList();
-        scrollToPlaying();
-
         // Mark this as the current play, a newer play makes this one stale
         const token = playToken + 1;
         playToken = token;
 
-        // A song that has to come from Mureka gets the whole connection, the
-        // songs being stored in the background are let go
-        if (!cachedIds.has(song.song_id) && !(nextReady && nextReady.song_id === song.song_id)) {
-            stopBackgroundFetches("the song asked for comes from Mureka");
-        }
+        // How long it takes to be heard, for the debug log
+        trackStartAt = performance.now();
+
+        // Songs being stored in the background are let go, so their
+        // downloads and the writing of them to the device do not hold up
+        // this one. They are taken up again once it plays
+        stopBackgroundFetches("another song was asked for");
+
+        // The sound comes first, the screen after it: a source that is
+        // ready is set and started before the list is drawn again, and a
+        // stored copy is read while the screen is being brought up to date
+        let stored = null;
 
         // Offline the direct stream cannot work, so fall through to the cache
         // path below, which serves the stored copy and keeps playback going
@@ -10716,6 +10730,7 @@
             const ready = nextReady.url;
 
             nextReady = null;
+            trackSource = "made ready ahead";
             setCurrentSrc(ready);
             startAudioPlayback();
 
@@ -10732,10 +10747,14 @@
             const direct = songUrl(song);
 
             if (!direct) {
+
+                updatePlayerInfo(song);
+                renderList();
                 setStatus("Could not build a URL for this song");
                 return;
             }
 
+            trackSource = "streamed from Mureka";
             setCurrentSrc(direct);
             startAudioPlayback();
 
@@ -10752,7 +10771,18 @@
                 primeAudio();
             }
 
-            const url = await getPlayableUrl(song);
+            stored = getPlayableUrl(song);
+        }
+
+        // Art and title right away, even while the audio is still loading
+        updatePlayerInfo(song);
+
+        if (stored) {
+
+            const url = await storedOrStream(song, stored, token);
+
+            trackSource = (url && url.indexOf("blob:") === 0 ? "stored copy read in " : "streamed after ")
+                + Math.round(performance.now() - trackStartAt) + " ms";
 
             // A newer play started while fetching, drop this one
             if (token !== playToken) {
@@ -10765,6 +10795,8 @@
             }
 
             if (!url) {
+
+                renderList();
                 setStatus("Could not build a URL for this song");
                 return;
             }
@@ -10772,6 +10804,19 @@
             setCurrentSrc(url);
             startAudioPlayback();
         }
+
+        // The list marks the new song once the sound is on its way, drawing
+        // it again is the slowest part of a song change. A moment later,
+        // so the element has started loading the song before the page is
+        // busy with the list
+        setTimeout(function () {
+
+            if (token === playToken) {
+
+                renderList();
+                scrollToPlaying();
+            }
+        }, 60);
 
         // Remember the queue and position so a restart can resume here
         saveQueue();
@@ -10799,6 +10844,67 @@
             loadWaveForSong(song);
             fetchNowPlayingCounts(song);
             prefetchNext();
+        });
+    }
+
+    // Reading the stored copy is normally quick, but the browser can hold it
+    // up behind other storage work, saving covers or a song stored a moment
+    // ago. With the direct stream on, a copy that has not come within a
+    // moment is not waited for, the song streams from Mureka instead and
+    // the copy is let go when it does come
+    const STORED_WAIT_MS = 900;
+
+    function storedOrStream(song, stored, token) {
+
+        const direct = songUrl(song);
+
+        if (!direct || !settings.directAudio || offlineMode() || navigator.onLine === false) {
+            return stored;
+        }
+
+        return new Promise(function (resolve) {
+
+            let settled = false;
+
+            const timer = setTimeout(function () {
+
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+
+                if (token === playToken) {
+                    dbgLog("Song", "the stored copy took longer than " + STORED_WAIT_MS
+                        + " ms, streamed from Mureka: " + (song.title || "Untitled"));
+                }
+
+                resolve(direct);
+            }, STORED_WAIT_MS);
+
+            stored.then(function (url) {
+
+                if (!settled) {
+
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve(url);
+                    return;
+                }
+
+                // Too late, the song already streams
+                if (url && url.indexOf("blob:") === 0) {
+                    URL.revokeObjectURL(url);
+                }
+            }, function () {
+
+                if (!settled) {
+
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve(direct);
+                }
+            });
         });
     }
 
@@ -29737,8 +29843,10 @@
         { key: "creators", label: "Saved creators" }
     ];
 
-    // Each kind the file brings something of, with how much: new values,
-    // values removed there, and values that differ from the ones here
+    // Every kind, with how much the file brings of it: new values, values
+    // removed there, and values that differ from the ones here. All kinds
+    // are listed each time, also those with nothing new, so the choice
+    // from last time is always there to see and change
     function planTypes(plan) {
 
         const out = [];
@@ -29759,10 +29867,6 @@
                 return c.type === type.key;
             }).length;
 
-            if (fresh + removed + differ === 0) {
-                continue;
-            }
-
             const parts = [];
 
             if (fresh > 0) {
@@ -29780,7 +29884,7 @@
             out.push({
                 key: type.key,
                 label: type.label,
-                count: parts.join(", "),
+                count: parts.length > 0 ? parts.join(", ") : "nothing new",
                 on: settings.importSkip.indexOf(type.key) < 0
             });
         }
@@ -30081,25 +30185,14 @@
         if (!asked) {
 
             const fresh = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.trimmed.length
-                + plan.creators.length;
+                + plan.creators.length + plan.clears.length;
             const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
-
-            if (fresh === 0 && plan.conflicts.length === 0 && !p.settings) {
-
-                importDone("Nothing to import, the " + sourceName + " holds nothing new", true, false);
-                return;
-            }
-
             const types = planTypes(plan);
 
-            // An older combined file with only settings in it besides
-            if (types.length === 0) {
-
-                mergeSongImport(p, plan, sourceName, donePrefix, asked);
-                return;
-            }
-
+            // Asked also when nothing differs, so the kinds chosen can be
+            // seen and changed every time
             askImportTypes("Import song tweaks?", "From the " + sourceName + " saved " + when
+                + (fresh === 0 && plan.conflicts.length === 0 ? ". Nothing in it differs from what is here" : "")
                 + ". Untick what should stay as it is here. Values that differ from yours are asked about one by one.",
                 types, function (skip) {
 
