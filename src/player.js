@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.196";
+    const VERSION = "1.9.9.197";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -35002,6 +35002,78 @@
         return any;
     }
 
+    // Wait for a song Mureka is making until it can be played, asking every
+    // few seconds. Answers whether it got there in time
+    async function waitSongReady(id, limitMs) {
+
+        const until = Date.now() + limitMs;
+
+        while (Date.now() < until) {
+
+            try {
+
+                const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(id),
+                    { credentials: "include" });
+                const json = res.ok ? await res.json() : null;
+
+                if (json && json.code === 0 && json.data && isUsableSong(json.data)) {
+                    return true;
+                }
+            } catch (e) {
+                // Asked again a moment later
+            }
+
+            await sleep(4000);
+        }
+
+        return false;
+    }
+
+    // After Mureka said the song is deleted, it is looked up once more. Should
+    // Mureka still give it out, the delete is sent again, at most twice. What
+    // Mureka answers goes to the debug log
+    async function confirmDeleted(song) {
+
+        const id = String(song.song_id);
+
+        for (let round = 0; round < 3; round += 1) {
+
+            await sleep(2000);
+
+            let json = null;
+
+            try {
+
+                const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(id),
+                    { credentials: "include" });
+
+                json = res.ok ? await res.json() : null;
+            } catch (e) {
+                json = null;
+            }
+
+            const still = !!(json && json.code === 0 && json.data && String(json.data.song_id) === id);
+
+            dbgLog("Trim", "after the delete Mureka answers for " + id + ": "
+                + (json ? "code " + json.code + (json.msg ? ", " + String(json.msg).slice(0, 60) : "")
+                    + (json.data && json.data.status !== undefined ? ", status " + json.data.status : "") : "nothing"));
+
+            if (!still) {
+                return true;
+            }
+
+            if (round < 2) {
+
+                dbgLog("Trim", "the original is still there, deleted again");
+                await deleteOnMurekaOnce(song);
+            }
+        }
+
+        dbgLog("Trim", "Mureka still gives out the original after deleting it three times");
+
+        return false;
+    }
+
     // Trim a song on Mureka. The new song comes back finished and is put at
     // the top of the list, the original deleted when asked to, once the new
     // song is safely there. progress hears what is going on. Answers
@@ -35111,12 +35183,38 @@
 
         if (deleteOriginal) {
 
+            // A new song Mureka is still making is waited for first, the
+            // original goes only once the new one can be played
+            const newIds = extractSongs(json.data || json).map(function (s) {
+                return String(s.song_id);
+            }).filter(function (id) {
+                return id !== String(song.song_id);
+            });
+            let ready = made.length > 0;
+
+            if (!ready && newIds.length > 0) {
+
+                say("Waiting for the new song before deleting the original");
+                ready = await waitSongReady(newIds[0], 120000);
+                dbgLog("Trim", ready ? "the new song " + newIds[0] + " is ready"
+                    : "the new song " + newIds[0] + " was not ready after two minutes");
+            }
+
+            if (!ready && newIds.length > 0) {
+
+                note += ". The original is kept, the new song was not ready yet";
+                setStatus(note);
+
+                return { ok: true, text: note };
+            }
+
             say("Deleting the original");
 
             const gone = await deleteOnMureka(song);
 
             if (gone.ok) {
 
+                await confirmDeleted(song);
                 await forgetSong(song);
                 saveManualInstrumental();
                 saveCache();
