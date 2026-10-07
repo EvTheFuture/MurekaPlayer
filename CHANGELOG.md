@@ -343,6 +343,16 @@ the new settings layout and a number of smaller improvements.
   every five seconds. Once done they join the library with everything
   brought up to date, and a song asked for starts playing at once, in place
   of a song playing meanwhile. Nothing of this is kept over a restart.
+- **Play only this** in the song menu, in the player and in the web view:
+  the song plays on its own, to hear it before it goes in the queue. With
+  nothing playing, the queue being put together waits and is back as it was
+  once the song ends. While a queue plays, it carries on after the song.
+- **Remove this and all after** and **Remove this and all before** in the
+  song menu of a queue row, in the player and in the web view. On the
+  playing song they take away the others, and it keeps playing.
+- **Moving songs in the queue** in the player's queue view: a handle on each
+  row to drag the song to another place, with a finger, a pen or the mouse,
+  as in the web view.
 - **Remove from queue** in the song menu, in the player and in the web view,
   for a song still to come in the queue. The small list over the web view's
   main page shows the queue with the same handles as the big list: drag a

@@ -8321,6 +8321,14 @@
     let rowPress = null;
     let rowSwallow = false;
 
+    // A row of a queue list knows its place in the queue, any other -1
+    function rowQueueIndex(row) {
+
+        const qi = row && row.dataset.qi !== undefined ? Number(row.dataset.qi) : -1;
+
+        return Number.isInteger(qi) && qi >= 0 ? qi : -1;
+    }
+
     function attachLongPress(row, id) {
 
         row.addEventListener("pointerdown", function (ev) {
@@ -8347,7 +8355,7 @@
                     rowSwallow = false;
                 }, 700);
 
-                openSongMenu(id);
+                openSongMenu(id, false, false, rowQueueIndex(row));
             }, 550);
         });
 
@@ -8373,7 +8381,7 @@
 
             ev.preventDefault();
             cancel();
-            openSongMenu(id);
+            openSongMenu(id, false, false, rowQueueIndex(row));
         });
 
         row.addEventListener("click", function (ev) {
@@ -13258,7 +13266,7 @@
         return ok;
     }
 
-    function drawMenu(m) {
+    function drawMenu(m, queueIndex) {
 
         const box = $("menuItems");
 
@@ -13271,6 +13279,13 @@
         box.appendChild(menuItem("play", "Play", function () {
 
             songAction("play");
+            closeSongMenu();
+        }));
+
+        // Heard on its own, the queue left as it is
+        box.appendChild(menuItem("play", "Play only this", function () {
+
+            songAction("playOnly");
             closeSongMenu();
         }));
 
@@ -13298,6 +13313,41 @@
                     setTimeout(reloadQueues, 200);
                 });
             }, "warn"));
+        }
+
+        // Opened on a row of a queue, a part of the queue can go. On the
+        // playing song it is the others that go, it keeps playing
+        const qi = typeof queueIndex === "number" ? queueIndex : -1;
+        const pos = typeof m.queuePos === "number" ? m.queuePos : -1;
+        const len = typeof m.queueLength === "number" ? m.queueLength : 0;
+
+        if (qi >= 0 && qi < len) {
+
+            const playing = qi === pos;
+            const playingHere = pos >= 0 && pos < len;
+            const after = len - qi - (playingHere && pos >= qi ? 1 : 0);
+            const before = qi + 1 - (playingHere && pos <= qi ? 1 : 0);
+            const cut = function (dir) {
+
+                closeSongMenu();
+                send("queueCut", { index: qi, id: m.id, dir: dir }).then(function () {
+                    setTimeout(reloadQueues, 200);
+                });
+            };
+
+            if (after > 0) {
+
+                box.appendChild(menuItem("close", playing ? "Remove all after this" : "Remove this and all after", function () {
+                    cut("after");
+                }, "warn"));
+            }
+
+            if (before > 0) {
+
+                box.appendChild(menuItem("close", playing ? "Remove all before this" : "Remove this and all before", function () {
+                    cut("before");
+                }, "warn"));
+            }
         }
 
         songMenuItems(m, box, closeSongMenu, false);
@@ -13993,7 +14043,7 @@
         });
     }
 
-    function openSongMenu(id, bpm, title) {
+    function openSongMenu(id, bpm, title, queueIndex) {
 
         fetchJson("/menu?id=" + esc(id)).then(function (m) {
 
@@ -14001,7 +14051,7 @@
                 return;
             }
 
-            drawMenu(m);
+            drawMenu(m, typeof queueIndex === "number" ? queueIndex : -1);
             $("bpmRow").style.display = "none";
             $("songMenu").style.display = "flex";
 

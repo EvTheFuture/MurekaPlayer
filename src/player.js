@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.181";
+    const VERSION = "1.9.9.182";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -635,6 +635,12 @@
     // Play last from a stopped player. It then holds only those songs: the
     // list does not fill it up, and Repeat all goes round those songs
     let queueOwn = false;
+
+    // A song played on its own with Play only this, to hear it before it is
+    // put in the queue. It sits in the queue as a marked copy only while it
+    // plays. Started with nothing playing, the queue goes back to how it was
+    // once it ends, otherwise the queue carries on after it
+    let previewFromIdle = false;
 
     // Counts merges of song tweaks, so the web view reads its list again
     let songDataStamp = 0;
@@ -2435,6 +2441,23 @@
             }
 
             let own = queueOwn;
+
+            // A song played on its own is not part of the queue kept
+            const pi = q.findIndex(isPreviewEntry);
+
+            if (pi >= 0) {
+
+                q = q.slice();
+                q.splice(pi, 1);
+
+                if (pos === pi) {
+
+                    pos = previewFromIdle ? -1 : pi;
+                    time = 0;
+                } else if (pos > pi) {
+                    pos -= 1;
+                }
+            }
 
             // After Stop the live queue is empty, persist the resume point instead
             if ((pos < 0 || q.length === 0) && resumeState && resumeState.queue.length) {
@@ -8352,6 +8375,245 @@
         showToast(queue.length === 1 ? "In the queue, Play starts it" : "In the queue, " + queue.length + " songs", true);
     }
 
+    // Whether a queue entry is the song played with Play only this
+    function isPreviewEntry(s) {
+        return !!(s && s.__murekaPreview === true);
+    }
+
+    // Play one song on its own. Nothing playing, the queue being put
+    // together is left as it is and comes back once the song ends. While a
+    // queue plays, the song plays now and the queue carries on after it
+    function playOnlyThis(song) {
+
+        if (!song) {
+            return;
+        }
+
+        // Already playing, it simply goes on
+        if (currentSong && currentSong.song_id === song.song_id && audio && audio.src) {
+
+            if (audio.paused) {
+                startAudioPlayback();
+            }
+
+            return;
+        }
+
+        const entry = Object.assign({}, song);
+
+        Object.defineProperty(entry, "__murekaPreview", { value: true, enumerable: false });
+
+        dropNextReady();
+        dropPreviewEntries();
+        resumeState = null;
+
+        if (queueIdle()) {
+
+            // A queue that played to its end is over, as with Play next
+            if (queuePos >= queue.length) {
+
+                queue = [];
+                queueOwn = false;
+                playNextMarks.clear();
+            }
+
+            previewFromIdle = true;
+            queue.unshift(entry);
+            queuePos = 0;
+        } else {
+
+            previewFromIdle = false;
+            queue.splice(queuePos + 1, 0, entry);
+            queuePos += 1;
+        }
+
+        dbgLog("Song", "playing only " + (song.title || "Untitled") + (previewFromIdle ? ", the queue waits" : ", the queue carries on after it"));
+        setStatus("Playing only this: " + (song.title || "Untitled"));
+        playCurrent();
+    }
+
+    // Take marked copies out of the queue, except the one playing now
+    function dropPreviewEntries() {
+
+        for (let i = queue.length - 1; i >= 0; i -= 1) {
+
+            if (!isPreviewEntry(queue[i]) || i === queuePos) {
+                continue;
+            }
+
+            queue.splice(i, 1);
+
+            if (i < queuePos) {
+                queuePos -= 1;
+            }
+        }
+    }
+
+    // The song played on its own came to its end. Started from a stopped
+    // player, everything goes back to how it was: nothing loaded and the
+    // queue being put together waiting for Play. Otherwise the queue
+    // carries on with the song after it
+    function endPreview() {
+
+        const at = queuePos;
+
+        queue.splice(at, 1);
+
+        if (!previewFromIdle) {
+
+            queuePos = at;
+            playCurrent();
+            return;
+        }
+
+        previewFromIdle = false;
+        userPaused = true;
+
+        if (audio) {
+            audio.pause();
+        }
+
+        if (currentObjectUrl) {
+            URL.revokeObjectURL(currentObjectUrl);
+            currentObjectUrl = null;
+        }
+
+        if (audio) {
+            audio.removeAttribute("src");
+            audio.load();
+        }
+
+        currentSong = null;
+        queuePos = -1;
+
+        if (queue.length === 0) {
+            queueOwn = false;
+        }
+
+        renderList();
+        updatePlayerInfo(null);
+        updatePlayPause();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        saveQueue();
+        publishHostSoon();
+        setStatus(queue.length > 0 ? "Played on its own, the queue is as it was, " + queue.length
+            + (queue.length === 1 ? " song" : " songs") : "Played on its own");
+    }
+
+    // The queue entries a cut would take out: from the song on, or up to
+    // it, never the playing song
+    function cutRange(i, dir) {
+
+        const out = [];
+
+        for (let k = 0; k < queue.length; k += 1) {
+
+            if (k === queuePos && queuePos >= 0) {
+                continue;
+            }
+
+            if ((dir === "after" && k >= i) || (dir === "before" && k <= i)) {
+                out.push(k);
+            }
+        }
+
+        return out;
+    }
+
+    // Take a song and everything after it, or before it, out of the queue.
+    // The playing song stays, so on it this takes the others away
+    function cutQueue(i, dir) {
+
+        if (!Number.isInteger(i) || i < 0 || i >= queue.length || (dir !== "after" && dir !== "before")) {
+            return 0;
+        }
+
+        const drop = new Set(cutRange(i, dir));
+
+        if (drop.size === 0) {
+            return 0;
+        }
+
+        const playing = queuePos >= 0 && queuePos < queue.length ? queue[queuePos] : null;
+        const finished = queuePos >= queue.length;
+
+        queue.forEach(function (s, k) {
+
+            if (drop.has(k) && s) {
+                playNextMarks.delete(String(s.song_id));
+            }
+        });
+
+        queue = queue.filter(function (s, k) {
+            return !drop.has(k);
+        });
+
+        if (playing) {
+            queuePos = queue.indexOf(playing);
+        } else if (finished) {
+            queuePos = queue.length;
+        }
+
+        if (queue.length === 0) {
+            queueOwn = false;
+        }
+
+        dropNextReady();
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        saveQueue();
+        publishHostSoon();
+        setStatus("Taken out of the queue: " + drop.size + (drop.size === 1 ? " song" : " songs"));
+        showToast("Taken out of the queue, " + drop.size + (drop.size === 1 ? " song" : " songs"), true);
+
+        return drop.size;
+    }
+
+    // Move a song to another place anywhere in the queue, played, playing
+    // or still to come. The playing song stays the playing one, only its
+    // place may change
+    function moveInQueue(from, to) {
+
+        const valid = Number.isInteger(from) && Number.isInteger(to);
+
+        if (!valid || from < 0 || from >= queue.length || to < 0 || to >= queue.length || from === to) {
+            return;
+        }
+
+        const oldNext = queue[queuePos + 1] || null;
+        const moved = queue.splice(from, 1)[0];
+
+        queue.splice(to, 0, moved);
+
+        // Follow the playing song to where it is now
+        if (from === queuePos) {
+            queuePos = to;
+        } else if (from < queuePos && to >= queuePos) {
+            queuePos -= 1;
+        } else if (from > queuePos && to <= queuePos) {
+            queuePos += 1;
+        }
+
+        // What plays next may have changed, anything readied for the old
+        // next song is let go
+        if ((queue[queuePos + 1] || null) !== oldNext) {
+            dropNextReady();
+        }
+
+        renderList();
+        saveQueue();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        publishHostSoon();
+    }
+
     // Where a song comes up in the queue, after the playing one, or -1
     function upcomingIndex(song) {
 
@@ -8518,6 +8780,13 @@
     // Advance to the next song in the queue
     // Called when a song finishes on its own, repeat one replays the same song
     function handleSongEnded() {
+
+        // Played on its own, once, whatever the repeat says
+        if (isPreviewEntry(queue[queuePos])) {
+
+            endPreview();
+            return;
+        }
 
         if (repeatMode === "one") {
             playCurrent();
@@ -10072,6 +10341,14 @@
     }
 
     async function playCurrent() {
+
+        // A song played on its own that something else took over from, Next
+        // or a tap, leaves the queue
+        dropPreviewEntries();
+
+        if (!isPreviewEntry(queue[queuePos])) {
+            previewFromIdle = false;
+        }
 
         if (queuePos < 0 || queuePos >= queue.length) {
             currentSong = null;
@@ -11840,6 +12117,26 @@
 
         dropNextReady();
 
+        // Stop on a song played on its own from a stopped player puts back
+        // the queue being put together, as its end does
+        if (isPreviewEntry(queue[queuePos]) && previewFromIdle) {
+
+            endPreview();
+            setStatus("Stopped");
+            return;
+        }
+
+        // While a queue played, the song played on its own leaves it, and a
+        // later Play goes on with the song after it, from its start
+        let fromStart = false;
+
+        if (isPreviewEntry(queue[queuePos])) {
+
+            queue.splice(queuePos, 1);
+            previewFromIdle = false;
+            fromStart = true;
+        }
+
         // This pause is deliberate, so the pause listener must not take the
         // interruption path and re-send now playing for a song being stopped
         userPaused = true;
@@ -11855,7 +12152,7 @@
                 queue: queue,
                 queuePos: queuePos,
                 own: queueOwn,
-                time: (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0
+                time: !fromStart && audio && isFinite(audio.currentTime) ? audio.currentTime : 0
             };
         }
 
@@ -18292,8 +18589,11 @@
             canTrim: !creatorSource && !!songUrl(song),
             durationMs: Number(song.duration_milliseconds) || 0,
 
-            // Where it comes up in the queue, for Remove from queue
-            queueAt: upcomingIndex(song)
+            // Where it comes up in the queue, for Remove from queue, and
+            // where the queue is, for taking a part of it out
+            queueAt: upcomingIndex(song),
+            queuePos: queuePos,
+            queueLength: queue.length
         };
     }
 
@@ -20273,6 +20573,8 @@
 
         if (act === "play") {
             playFrom(song.song_id);
+        } else if (act === "playOnly") {
+            playOnlyThis(song);
         } else if (act === "playNext") {
             addNext(song);
         } else if (act === "addQueue") {
@@ -20515,42 +20817,24 @@
                 playCurrent();
             }
         } else if (cmd === "queueMove") {
+            moveInQueue(Number(arg && arg.from), Number(arg && arg.to));
+        } else if (cmd === "queueCut") {
 
-            // A song dragged to another place anywhere in the queue, played,
-            // playing or still to come. The playing song stays the playing
-            // one, only its place may change
-            const from = Number(arg && arg.from);
-            const to = Number(arg && arg.to);
-            const valid = Number.isInteger(from) && Number.isInteger(to);
+            // A song and everything after or before it, from the web view's
+            // queue. The place is checked against the song, the queue may
+            // have moved on since the menu opened
+            const id = String(arg && arg.id);
+            let at = Number(arg && arg.index);
 
-            if (valid && from >= 0 && from < queue.length && to >= 0 && to < queue.length && from !== to) {
+            if (!Number.isInteger(at) || !queue[at] || String(queue[at].song_id) !== id) {
 
-                const oldNext = queue[queuePos + 1] || null;
-                const moved = queue.splice(from, 1)[0];
+                at = queue.findIndex(function (s) {
+                    return s && String(s.song_id) === id;
+                });
+            }
 
-                queue.splice(to, 0, moved);
-
-                // Follow the playing song to where it is now
-                if (from === queuePos) {
-                    queuePos = to;
-                } else if (from < queuePos && to >= queuePos) {
-                    queuePos -= 1;
-                } else if (from > queuePos && to <= queuePos) {
-                    queuePos += 1;
-                }
-
-                // What plays next may have changed, anything readied for the
-                // old next song is let go
-                if ((queue[queuePos + 1] || null) !== oldNext) {
-                    dropNextReady();
-                }
-
-                renderList();
-                saveQueue();
-                setArtTransition("none");
-                setArtSources();
-                positionArt(0);
-                prefetchNext();
+            if (at >= 0) {
+                cutQueue(at, arg && arg.dir === "before" ? "before" : "after");
             }
         } else if (cmd === "queueRemove") {
             removeFromQueue(Number(arg));
@@ -24747,6 +25031,173 @@
         }
     }
 
+    // The handle on a queue row. Dragged with a finger, a pen or the mouse,
+    // the row follows, the row it would land on is marked, and the list
+    // scrolls along near its edges. Let go, the song moves there
+    function buildQueueGrip(item, from) {
+
+        const grip = document.createElement("span");
+
+        grip.textContent = "\u2261";
+        grip.title = "Drag to move";
+        grip.style.cssText = "flex:0 0 auto;width:22px;margin-right:2px;text-align:center;color:#888;"
+            + "font-size:16px;line-height:16px;cursor:grab;touch-action:none";
+
+        // The row's own tap, long press and menu stay off the handle
+        for (const kind of ["click", "touchstart", "contextmenu"]) {
+
+            grip.addEventListener(kind, function (ev) {
+
+                ev.stopPropagation();
+
+                if (kind !== "touchstart") {
+                    ev.preventDefault();
+                }
+            }, kind === "touchstart" ? { passive: true } : false);
+        }
+
+        grip.addEventListener("pointerdown", function (ev) {
+
+            if (ev.button !== undefined && ev.button !== 0) {
+                return;
+            }
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            startQueueDrag(ev, grip, item, from);
+        });
+
+        return grip;
+    }
+
+    function startQueueDrag(ev, grip, item, from) {
+
+        const startY = ev.clientY;
+        const startScroll = listEl.scrollTop;
+        let lastY = ev.clientY;
+        let to = from;
+        let marked = null;
+
+        try {
+            grip.setPointerCapture(ev.pointerId);
+        } catch (e) {
+            // Followed on the document all the same
+        }
+
+        item.style.position = "relative";
+        item.style.zIndex = "5";
+        item.style.background = "#2c2c34";
+        item.style.boxShadow = "0 4px 12px rgba(0,0,0,0.5)";
+        grip.style.cursor = "grabbing";
+
+        const mark = function (row, below) {
+
+            if (marked) {
+                marked.style.boxShadow = "";
+            }
+
+            marked = row;
+
+            if (row) {
+                row.style.boxShadow = below ? "inset 0 -2px 0 #48e1eb" : "inset 0 2px 0 #48e1eb";
+            }
+        };
+
+        const place = function () {
+
+            const dy = lastY - startY + (listEl.scrollTop - startScroll);
+
+            item.style.transform = "translateY(" + dy + "px)";
+
+            // The row under the pointer, the dragged one left out
+            const rows = Array.from(listEl.querySelectorAll("[data-queue-index]")).filter(function (r) {
+                return r !== item;
+            });
+
+            to = from;
+            let hit = null;
+
+            for (const r of rows) {
+
+                const box = r.getBoundingClientRect();
+
+                if (lastY >= box.top && lastY < box.bottom) {
+                    hit = r;
+                    break;
+                }
+            }
+
+            if (!hit && rows.length > 0) {
+
+                const first = rows[0].getBoundingClientRect();
+                const last = rows[rows.length - 1].getBoundingClientRect();
+
+                if (lastY < first.top) {
+                    hit = rows[0];
+                } else if (lastY >= last.bottom) {
+                    hit = rows[rows.length - 1];
+                }
+            }
+
+            if (hit) {
+                to = Number(hit.dataset.queueIndex);
+            }
+
+            mark(hit && to !== from ? hit : null, to > from);
+        };
+
+        // Near the top or bottom of the list it scrolls, the row staying
+        // under the pointer
+        const scroller = setInterval(function () {
+
+            const box = listEl.getBoundingClientRect();
+            const edge = 28;
+            let step = 0;
+
+            if (lastY < box.top + edge) {
+                step = -8;
+            } else if (lastY > box.bottom - edge) {
+                step = 8;
+            }
+
+            if (step !== 0) {
+
+                listEl.scrollTop += step;
+                place();
+            }
+        }, 30);
+
+        const onMove = function (e) {
+
+            lastY = e.clientY;
+            place();
+        };
+
+        const onUp = function () {
+
+            clearInterval(scroller);
+            document.removeEventListener("pointermove", onMove, true);
+            document.removeEventListener("pointerup", onUp, true);
+            document.removeEventListener("pointercancel", onUp, true);
+            mark(null, false);
+            item.style.transform = "";
+            item.style.zIndex = "";
+            item.style.background = "";
+            item.style.boxShadow = "";
+            grip.style.cursor = "grab";
+
+            if (to !== from) {
+
+                dbgLog("Press", "queue song moved from " + (from + 1) + " to " + (to + 1));
+                moveInQueue(from, to);
+            }
+        };
+
+        document.addEventListener("pointermove", onMove, true);
+        document.addEventListener("pointerup", onUp, true);
+        document.addEventListener("pointercancel", onUp, true);
+    }
+
     // A song still being generated, greyed, saying so, and a tap tells
     function buildPendingRow(song) {
 
@@ -24792,7 +25243,7 @@
         return item;
     }
 
-    function buildSongRow(song, number, isPlaying, dimmed) {
+    function buildSongRow(song, number, isPlaying, dimmed, queueIndex) {
 
         if (isPendingSong(song)) {
             return buildPendingRow(song);
@@ -24936,6 +25387,20 @@
 
         item.appendChild(heart);
 
+        // A row of the queue view: its place in the queue, for the menu, and
+        // a handle to drag it to another place. Searched, the rows are not
+        // the queue's order, so there is nothing to drag
+        const inQueue = typeof queueIndex === "number" && queueIndex >= 0 ? queueIndex : -1;
+
+        if (inQueue >= 0) {
+
+            item.dataset.queueIndex = String(inQueue);
+
+            if (!searchQuery) {
+                item.insertBefore(buildQueueGrip(item, inQueue), item.firstChild);
+            }
+        }
+
         // Long press on touch opens the same menu as right-click on desktop
         let pressTimer = null;
         let longPressed = false;
@@ -24963,7 +25428,7 @@
 
         item.addEventListener("contextmenu", function (ev) {
             ev.preventDefault();
-            showContextMenu(ev.clientX, ev.clientY, song);
+            showContextMenu(ev.clientX, ev.clientY, song, inQueue);
         });
 
         item.addEventListener("touchstart", function (ev) {
@@ -24981,7 +25446,7 @@
 
             pressTimer = setTimeout(function () {
                 longPressed = true;
-                showContextMenu(x, y, song);
+                showContextMenu(x, y, song, inQueue);
             }, 500);
         }, { passive: true });
 
@@ -25031,7 +25496,8 @@
                 dimmed = false;
             }
 
-            const item = buildSongRow(song, lazyState.numberById.get(song.song_id), isPlaying, dimmed);
+            const item = buildSongRow(song, lazyState.numberById.get(song.song_id), isPlaying, dimmed,
+                lazyState.byQueueIndex ? entry.index : -1);
 
             if (isPlaying) {
                 playingItemEl = item;
@@ -34710,7 +35176,7 @@
     }
 
     // Show the options popup for a song at the given screen position
-    function showContextMenu(x, y, song) {
+    function showContextMenu(x, y, song, queueIndex) {
 
         if (!contextMenuEl) {
             return;
@@ -34724,6 +35190,10 @@
 
         addMenuRow("Play", "#fff", function () {
             playFrom(song.song_id);
+        });
+
+        addMenuRow("Play only this", "#fff", function () {
+            playOnlyThis(song);
         });
 
         addMenuRow("Play next", "#fff", function () {
@@ -34740,6 +35210,25 @@
 
                 removeFromQueue(upcomingIndex(song));
                 showToast("Taken out of the queue", true);
+            });
+        }
+
+        // Opened on a row of the queue view, a part of the queue can go.
+        // On the playing song it is the others that go, it keeps playing
+        const qi = typeof queueIndex === "number" && queueIndex >= 0 && queue[queueIndex]
+            && queue[queueIndex].song_id === song.song_id ? queueIndex : -1;
+
+        if (qi >= 0 && cutRange(qi, "after").length > 0) {
+
+            addMenuRow(qi === queuePos ? "Remove all after this" : "Remove this and all after", STAR_GOLD, function () {
+                cutQueue(qi, "after");
+            });
+        }
+
+        if (qi >= 0 && cutRange(qi, "before").length > 0) {
+
+            addMenuRow(qi === queuePos ? "Remove all before this" : "Remove this and all before", STAR_GOLD, function () {
+                cutQueue(qi, "before");
             });
         }
 
