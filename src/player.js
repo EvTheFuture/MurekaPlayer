@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.179";
+    const VERSION = "1.9.9.181";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -355,6 +355,18 @@
     // in its temporal dead zone, making feed() throw and the cache load come up
     // empty, which forced a full reload on every startup
     let creatorSource = null;
+
+    // Counts every save of what the exports hold, the song list and the
+    // song tweaks, so the web view fetches them again only once they changed
+    let exportsVersion = 0;
+
+    // Saving the song list failed since then, and when it was last said
+    const STORAGE_WARN_MS = 3 * 60 * 1000;
+    let storageProblemAt = 0;
+    let storageWarnedAt = 0;
+
+    // What to say about a stored song list that could not be read
+    let brokenLibraryNote = "";
 
     // Cached data, loaded once on startup
     let cache = loadCache();
@@ -1439,8 +1451,10 @@
     // Read the cache from localStorage, return an empty cache on failure
     function loadCache() {
 
+        let raw = null;
+
         try {
-            const raw = localStorage.getItem(feed().cacheKey);
+            raw = localStorage.getItem(feed().cacheKey);
 
             if (raw) {
 
@@ -1470,6 +1484,12 @@
                 return parsed;
             }
         } catch (e) {
+
+            // A stored list that cannot be read is kept aside before an
+            // empty one takes its place, so it is not lost with the next save
+            if (raw) {
+                keepBrokenLibrary(feed().cacheKey, raw);
+            }
         }
 
         const empty = { songs: [], updated: 0, complete: false, lastCursor: null };
@@ -1558,11 +1578,14 @@
     // active library always saves and survives a restart
     function saveCache() {
 
+        exportsVersion += 1;
+
         const key = feed().cacheKey;
         const payload = JSON.stringify(cache);
 
         try {
             localStorage.setItem(key, payload);
+            storageSaved();
             return;
         } catch (e) {
         }
@@ -1571,8 +1594,83 @@
 
         try {
             localStorage.setItem(key, payload);
+            storageSaved();
         } catch (e) {
+            storageFailed();
         }
+    }
+
+    // Saving the song list failed: the browser's storage is full or turned
+    // off. Said at once and again every few minutes while it lasts, since
+    // changes made meanwhile are gone with the next start
+    function storageFailed() {
+
+        const now = Date.now();
+
+        storageProblemAt = storageProblemAt || now;
+        dbgLog("Storage", "the song list could not be saved");
+
+        if (now - storageWarnedAt < STORAGE_WARN_MS) {
+            return;
+        }
+
+        storageWarnedAt = now;
+        setStatus("The song list could not be saved, the browser's storage is full or turned off");
+        showToast("Could not save the song list, storage is full", false);
+    }
+
+    function storageSaved() {
+
+        if (!storageProblemAt) {
+            return;
+        }
+
+        storageProblemAt = 0;
+        storageWarnedAt = 0;
+        dbgLog("Storage", "the song list is saved again");
+        showToast("The song list is saved again");
+    }
+
+    // A stored song list that could not be read, kept under a key of its
+    // own for a look later, and said once the player is up
+    function keepBrokenLibrary(key, raw) {
+
+        let kept = false;
+
+        try {
+            localStorage.setItem(key + "_broken", raw);
+            kept = true;
+        } catch (e) {
+            // No room for a copy either
+        }
+
+        brokenLibraryNote = kept
+            ? "The stored song list could not be read. A copy was kept, Load brings the songs back from Mureka"
+            : "The stored song list could not be read. Load brings the songs back from Mureka";
+        dbgLog("Storage", "the stored song list under " + key + " could not be read" + (kept ? ", a copy was kept" : ""));
+    }
+
+    // Another tab on this site saved the song list. It is taken over here,
+    // the same songs kept as the same copies, so the next save here does
+    // not throw away what the other tab did
+    function followOtherTabs() {
+
+        window.addEventListener("storage", function (ev) {
+
+            if (ev.storageArea !== localStorage || ev.key !== feed().cacheKey || !ev.newValue) {
+                return;
+            }
+
+            const other = loadCache();
+
+            cache.songs = keepSongCopies(other.songs, cache.songs);
+            cache.updated = other.updated;
+            cache.complete = other.complete;
+            cache.lastCursor = other.lastCursor;
+            dbgLog("Storage", "the song list was changed in another tab, " + cache.songs.length + " songs");
+            renderList();
+            publishHostSoon();
+        });
     }
 
     // The pace of the fresh play counts, the shortest wait of a range: 5 to
@@ -1793,6 +1891,7 @@
             metaSubtitle: "${genre}",
             debugOverlay: false,
             webDebugOverlay: false,
+            debugLog: false,
             debugHide: [],
             webSeekActions: true
         };
@@ -1990,6 +2089,7 @@
                         : "${genre}",
                     debugOverlay: parsed.debugOverlay === true || parsed.debugLine === true,
                     webDebugOverlay: parsed.webDebugOverlay === true,
+                    debugLog: parsed.debugLog === true,
                     debugHide: Array.isArray(parsed.debugHide)
                         ? parsed.debugHide.filter(function (id) { return typeof id === "string"; })
                         : [],
@@ -2100,6 +2200,8 @@
 
     // Persist the hand added creators list
     function saveSavedCreators() {
+
+        exportsVersion += 1;
 
         try {
             localStorage.setItem(CREATORS_KEY, JSON.stringify(savedCreators));
@@ -2629,6 +2731,8 @@
 
     function saveClearedMarks() {
 
+        exportsVersion += 1;
+
         try {
             localStorage.setItem(CLEARED_KEY, JSON.stringify(clearedMarks));
         } catch (e) {
@@ -2689,6 +2793,8 @@
     }
 
     function saveManualBpm() {
+
+        exportsVersion += 1;
 
         try {
 
@@ -2822,6 +2928,8 @@
     }
 
     function saveRatings() {
+
+        exportsVersion += 1;
 
         try {
 
@@ -3288,6 +3396,8 @@
     }
 
     function saveManualInstrumental() {
+
+        exportsVersion += 1;
 
         try {
             localStorage.setItem(MANUAL_INSTRUMENTAL_KEY,
@@ -5568,10 +5678,7 @@
     // Progress and the cursor are saved each page, so it can resume after a stop
     async function continueLoad(myToken) {
 
-        // Map of cached songs by id, so we can update fields on ones we already have
-        const known = new Map(cache.songs.map(function (s) {
-            return [s.song_id, s];
-        }));
+        const loadStart = Date.now();
 
         let cursor = cache.lastCursor || null;
 
@@ -5616,6 +5723,12 @@
                 break;
             }
 
+            // The songs kept as they are now, read again for every page, so
+            // a song added meanwhile is not added twice
+            const known = new Map(cache.songs.map(function (s) {
+                return [s.song_id, s];
+            }));
+
             for (const s of songs) {
 
                 // Still generating, so it has no audio to play and its details
@@ -5623,6 +5736,12 @@
                 if (!isUsableSong(s)) {
 
                     notePending(s);
+                    continue;
+                }
+
+                // Changed here since the load began, taken off the list or
+                // edited, so the page read before that is left out
+                if (changedSince(s.song_id, loadStart)) {
                     continue;
                 }
 
@@ -5697,17 +5816,55 @@
         }
     }
 
+    // Songs changed here, renamed, published, liked, given a cover, or taken
+    // off the list, by id, with the time. A Load or a Rescan running at that
+    // moment read those songs from Mureka before the change, so it leaves
+    // them as they are here rather than putting the old copy back
+    const changedHere = new Map();
+
+    function noteChangedHere(song) {
+
+        if (song && song.song_id !== undefined && song.song_id !== null) {
+            changedHere.set(String(song.song_id), Date.now());
+        }
+    }
+
+    function changedSince(id, since) {
+
+        const at = changedHere.get(String(id));
+
+        return at !== undefined && at >= since;
+    }
+
     // Walk the newest pages and add new or republished songs to the front
     // Stops after a run of cached songs, which marks the old data boundary
     async function refreshNew(myToken, deep) {
+
+        const loadStart = Date.now();
 
         const known = new Set(cache.songs.map(function (s) {
             return s.song_id;
         }));
 
-        // Snapshot the original list so each progress merge concatenates the
-        // fresh pages with the unchanged base, not with a previous merge
+        // The list as it was, for the gaps a page shows and the songs that
+        // changed between published and draft. The list itself is merged
+        // into as it is now, so what changes during the load stays
         const baseSongs = cache.songs.slice();
+        const wasPublished = new Map(baseSongs.map(function (s) {
+            return [s.song_id, s.publish_state === 1];
+        }));
+
+        // The pages read so far, without the songs changed here meanwhile,
+        // merged into the copies the list holds now. Songs added meanwhile,
+        // a trim or one done generating, stay, and one taken off stays off
+        const mergeNow = function () {
+
+            const kept = fresh.filter(function (s) {
+                return !changedSince(s.song_id, loadStart);
+            });
+
+            return keepSongCopies(dedupe(kept.concat(cache.songs)), dedupe(cache.songs.concat(baseSongs)));
+        };
 
         const fresh = [];
 
@@ -5809,7 +5966,7 @@
             // sorted exactly as it will be after a restart, not a raw concat.
             // The token guard skips this if the feed was switched mid scan
             if (myToken === loadToken) {
-                cache.songs = dedupe(fresh.concat(baseSongs));
+                cache.songs = mergeNow();
                 renderList();
             }
 
@@ -5853,10 +6010,6 @@
         // round, is easy to miss in a total that only moved by a few. Count
         // the crossings in both directions against the copies held before the
         // scan, while those copies still carry the old publish state
-        const wasById = new Map(baseSongs.map(function (s) {
-            return [s.song_id, s];
-        }));
-
         const counted = new Set();
 
         let nowPublished = 0;
@@ -5864,20 +6017,17 @@
 
         for (const s of fresh) {
 
-            const before = wasById.get(s.song_id);
-
             // Shifting pagination can hand the same song back twice, and a
             // song with no cached copy is simply new, not a change
-            if (!before || counted.has(s.song_id)) {
+            if (!wasPublished.has(s.song_id) || counted.has(s.song_id)) {
                 continue;
             }
 
             counted.add(s.song_id);
 
-            const wasPublished = before.publish_state === 1;
             const isPublished = s.publish_state === 1;
 
-            if (wasPublished === isPublished) {
+            if (wasPublished.get(s.song_id) === isPublished) {
                 continue;
             }
 
@@ -5896,7 +6046,7 @@
         // open menus hold those same copies, and swapped out they went stale,
         // a rename then changed the list but not the playing song or the
         // other way round
-        cache.songs = keepSongCopies(dedupe(fresh.concat(baseSongs)), baseSongs);
+        cache.songs = mergeNow();
         cache.updated = Date.now();
 
         // A deep rescan that ran to the end has now seen the entire library
@@ -6248,7 +6398,7 @@
 
                 // Mark as caching so its dot pulses while the file downloads
                 cachingIds.add(song.song_id);
-                renderList();
+                repaintCacheDot(song);
 
                 // A longer deadline than the background work, this is the file
                 // being played, but it must still fail rather than hang, or
@@ -6278,7 +6428,7 @@
 
             // Make sure a failed fetch does not leave the dot pulsing
             if (cachingIds.delete(song.song_id)) {
-                renderList();
+                repaintCacheDot(song);
             }
         }
 
@@ -6371,7 +6521,7 @@
 
             // Mark as caching so its dot pulses while the file downloads
             cachingIds.add(song.song_id);
-            renderList();
+            repaintCacheDot(song);
 
             const got = await timedFetch(url);
 
@@ -6389,7 +6539,7 @@
         } finally {
 
             if (cachingIds.delete(song.song_id)) {
-                renderList();
+                repaintCacheDot(song);
             }
         }
     }
@@ -6778,6 +6928,8 @@
         const idx = cache.songs.findIndex(function (s) {
             return s.song_id === song.song_id;
         });
+
+        noteChangedHere(song);
 
         if (idx !== -1) {
             cache.songs.splice(idx, 1);
@@ -7200,6 +7352,7 @@
 
         // Shown at once, put back if Mureka refuses
         song.publish_state = publish ? 1 : 2;
+        noteChangedHere(song);
         renderList();
         publishHostSoon();
         setStatus((publish ? "Publishing: " : "Unpublishing: ") + name);
@@ -7268,6 +7421,7 @@
         }
 
         song.title = clean;
+        noteChangedHere(song);
         songEdits += 1;
         renderList();
 
@@ -7358,6 +7512,7 @@
         const before = song.allow_remix;
 
         song.allow_remix = allow ? 1 : 2;
+        noteChangedHere(song);
         publishHostSoon();
         showToast(allow ? "Allowing remixing" : "Disallowing remixing", "wait");
 
@@ -7710,7 +7865,7 @@
 
                 // Pulse the dot while the file downloads, like fetchToCache
                 cachingIds.add(song.song_id);
-                renderList();
+                repaintCacheDot(song);
 
                 const got = await timedFetch(direct);
                 const net = got && got.ok ? trackDownload(song, got) : got;
@@ -7746,7 +7901,7 @@
         } catch (e) {
 
             if (cachingIds.delete(song.song_id)) {
-                renderList();
+                repaintCacheDot(song);
             }
 
             return "failed";
@@ -7847,6 +8002,8 @@
         });
 
         if (idx !== -1) {
+
+            noteChangedHere(failed);
             cache.songs.splice(idx, 1);
             saveCache();
         }
@@ -10299,6 +10456,17 @@
 
         const reads = new Map();
 
+        // What could let someone act as the user is blanked before it is
+        // logged: values of keys that look like tokens, passwords or
+        // signatures, in JSON and in queries
+        const SECRET = "(?:token|auth|passw|secret|sign|cred|cookie|session|ticket|key)";
+        const secretJson = new RegExp("(\"[^\"]*" + SECRET + "[^\"]*\"\\s*:\\s*)(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]\\s]+)", "gi");
+        const secretQuery = new RegExp("([?&][^=&]*" + SECRET + "[^=&]*=)[^&#]*", "gi");
+
+        const redact = function (text) {
+            return String(text || "").replace(secretJson, "$1\"***\"").replace(secretQuery, "$1***");
+        };
+
         const note = function (method, url, body) {
 
             let path = "";
@@ -10335,12 +10503,12 @@
             let sent = "";
 
             if (typeof body === "string" && body) {
-                sent = " " + body.slice(0, 300);
+                sent = " " + redact(body).slice(0, 300);
             } else if (body && typeof body === "object") {
                 sent = " [" + (body.constructor && body.constructor.name ? body.constructor.name : "data") + "]";
             }
 
-            dbgLog("Mureka", key + (query ? query.slice(0, 160) : "") + sent);
+            dbgLog("Mureka", key + (query ? redact(query).slice(0, 160) : "") + sent);
         };
 
         // A song list Mureka's own site reads, the page it shows new marks
@@ -10392,7 +10560,7 @@
 
         const logAnswer = function (what, status, text) {
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
-                + String(text || "").replace(/\s+/g, " ").slice(0, 800));
+                + redact(text).replace(/\s+/g, " ").slice(0, 800));
         };
 
         const sumUp = function (kind, json) {
@@ -10407,6 +10575,11 @@
         if (typeof plainFetch === "function") {
 
             window.fetch = function (input, init) {
+
+                // Logging switched off again, nothing is watched
+                if (!loggingOn()) {
+                    return plainFetch.apply(window, arguments);
+                }
 
                 try {
 
@@ -10464,7 +10637,10 @@
             navigator.sendBeacon = function (url, data) {
 
                 try {
-                    note("BEACON", url, data);
+
+                    if (loggingOn()) {
+                        note("BEACON", url, data);
+                    }
                 } catch (e) {
                     // Never in the way of the beacon itself
                 }
@@ -10490,7 +10666,7 @@
 
                 try {
 
-                    if (this.__murekaRequest) {
+                    if (this.__murekaRequest && loggingOn()) {
 
                         note(this.__murekaRequest[0], this.__murekaRequest[1], body);
 
@@ -11744,7 +11920,7 @@
             if (success) {
                 ok += 1;
                 cachedIds.add(song.song_id);
-                renderList();
+                repaintCacheDot(song);
             } else {
                 fail += 1;
             }
@@ -11756,6 +11932,7 @@
         cacheRunning = false;
         setProgress(null);
         updateCacheButton();
+        renderList();
         refreshCachedIds();
 
         if (ok === 0 && fail > 0) {
@@ -17927,6 +18104,7 @@
             // the state goes out every second and they change once a song.
             // The key says when to read them again
             partsKey: hostPartsKey(),
+            exportsKey: hostExportsKey(),
             trimJob: hostTrimJob,
             trimFade: settings.trimFade !== false,
             waveOn: settings.webWave !== false,
@@ -18032,6 +18210,32 @@
                 ? settings.webLyricSideShift
                 : Math.round((settings.lyricSideShift || 0) * size / mobileSize)
         };
+    }
+
+    // Changes whenever an export would come out different: a save of the
+    // song list or the tweaks, or the queue changed, its songs, their order
+    // or where it is. The queue is summed up each time, it is saved for the
+    // playing position too often to count its saves
+    function hostExportsKey() {
+
+        const live = queue.length > 0;
+        const q = live ? queue : (resumeState && Array.isArray(resumeState.queue) ? resumeState.queue : []);
+        let h = 0;
+
+        for (const s of q) {
+
+            const id = String(s && s.song_id);
+
+            for (let i = 0; i < id.length; i++) {
+                h = (h * 31 + id.charCodeAt(i)) | 0;
+            }
+
+            h = (h * 31 + 7) | 0;
+        }
+
+        const pos = live ? queuePos : (resumeState ? resumeState.queuePos : -1);
+
+        return exportsVersion + ":" + q.length + ":" + pos + ":" + h;
     }
 
     // The transport row as the phone lays it out, for the web view to copy
@@ -22624,6 +22828,19 @@
         return settings.debugOverlay === true;
     }
 
+    // Whether anything is logged: the Debug log switch, or an overlay that
+    // shows the log, the phone's or the web view's. Off, nothing is kept.
+    // Lines from before the settings are read are kept, they tell how the
+    // player started
+    function loggingOn() {
+
+        try {
+            return settings.debugLog === true || settings.debugOverlay === true || settings.webDebugOverlay === true;
+        } catch (e) {
+            return true;
+        }
+    }
+
     // Which kind of window the browser says it is, the way a web app can
     // tell a fullscreen launch from a normal tab
     function dbgDisplayMode() {
@@ -22703,7 +22920,7 @@
     // and the copy of it hold only what is being looked at
     function dbgLog(kind, text) {
 
-        if (debugHiddenKinds().indexOf(kind) >= 0) {
+        if (!loggingOn() || debugHiddenKinds().indexOf(kind) >= 0) {
             return;
         }
 
@@ -22872,6 +23089,8 @@
             buildDebugOverlay();
         }
 
+        installRequestLog();
+
         // On the root element, after everything else, so it is above the
         // page and the player, fullscreen included
         if (debugOverlayEl.parentNode !== document.documentElement
@@ -22925,6 +23144,11 @@
         const lines = debugStateLines();
 
         lines.push("");
+
+        if (!loggingOn()) {
+            lines.push("Debug log is off, switch it on under Developer and try again");
+        }
+
         Array.prototype.push.apply(lines, debugLog);
         lines.push("");
 
@@ -22973,7 +23197,11 @@
         }
 
         debugWatching = true;
-        installRequestLog();
+
+        // Mureka's requests are only watched while something is logged
+        if (loggingOn()) {
+            installRequestLog();
+        }
 
         const opts = { capture: true, passive: true };
 
@@ -24323,6 +24551,70 @@
         paint(rescanButton, "rescan", "Rescan");
     }
 
+    // A row's dot: whether the song is stored, hidden keeps the text
+    // aligned. A pie filling while it is being cached, solid once cached.
+    // A cover stored without the song gets no dot. Drawn again on its own
+    // while songs are being cached, so the whole list is not
+    function paintCacheDot(dot, song) {
+
+        const caching = cachingIds.has(song.song_id);
+        const audioCached = cachedIds.has(song.song_id);
+        const artCached = artCachedIds.has(String(song.song_id));
+
+        // Cyan when both the song and its cover are stored, violet while the
+        // cover is not yet
+        const dotColor = audioCached && !artCached ? "#b388ff" : "#48e1eb";
+
+        dot.textContent = "\u25CF";
+        dot.title = "";
+        dot.dataset.murekaDot = String(song.song_id);
+        delete dot.dataset.murekaPie;
+        pieSongIds.delete(dot);
+        dot.style.cssText = "color:" + dotColor + ";margin-right:6px;flex:0 0 auto;visibility:"
+            + ((caching || audioCached) ? "visible" : "hidden");
+
+        if (caching) {
+
+            // The glyph keeps its room in the row, unseen, and a pie over it
+            // fills as the song comes in, kept up to date by paintCachePies
+            const pie = document.createElement("span");
+
+            pie.className = "mureka-pie mureka-pie-loading";
+            pie.style.cssText = "position:absolute;left:50%;top:50%;width:0.7em;height:0.7em;transform:translate(-50%,-50%)";
+            dot.style.color = "transparent";
+            dot.style.position = "relative";
+            dot.dataset.murekaPie = "1";
+            pieSongIds.set(dot, song.song_id);
+            dot.appendChild(pie);
+            paintListPie(dot);
+        } else if (audioCached && artCached) {
+            dot.title = "Song and cover cached";
+        } else if (audioCached) {
+            dot.title = "Song cached, cover not yet";
+        }
+    }
+
+    // One song's dots drawn again where its rows are, after it started or
+    // finished being cached. The web view's copy of the list is made again
+    // on its next request
+    function repaintCacheDot(song) {
+
+        hostListStamp += 1;
+
+        if (!listEl) {
+            return;
+        }
+
+        const id = String(song.song_id);
+
+        for (const dot of listEl.querySelectorAll("[data-mureka-dot]")) {
+
+            if (dot.dataset.murekaDot === id) {
+                paintCacheDot(dot, song);
+            }
+        }
+    }
+
     // Render the cached song list
     function renderList() {
 
@@ -24401,6 +24693,7 @@
 
         // Optimistic update so the heart responds without waiting on the network
         song.is_liked = makeLiked;
+        noteChangedHere(song);
         paintHeart(heartEl, makeLiked);
         shiftLikes(song, makeLiked ? 1 : -1);
         showToast(makeLiked ? "Liking" : "Removing the like", "wait");
@@ -24515,41 +24808,10 @@
             item.style.opacity = "0.45";
         }
 
-        // The dot marks whether the song is stored, hidden keeps the text
-        // aligned. A pie filling while it is being cached, solid once cached.
-        // A cover stored without the song gets no dot
-        const caching = cachingIds.has(song.song_id);
-        const audioCached = cachedIds.has(song.song_id);
-        const artCached = artCachedIds.has(String(song.song_id));
-
-        // Cyan when both the song and its cover are stored, violet while the
-        // cover is not yet
-        const dotColor = audioCached && !artCached ? "#b388ff" : "#48e1eb";
-
+        // The dot marks whether the song is stored
         const dot = document.createElement("span");
-        dot.textContent = "\u25CF";
-        dot.style.cssText = "color:" + dotColor + ";margin-right:6px;flex:0 0 auto;visibility:"
-            + ((caching || audioCached) ? "visible" : "hidden");
 
-        if (caching) {
-
-            // The glyph keeps its room in the row, unseen, and a pie over it
-            // fills as the song comes in, kept up to date by paintCachePies
-            const pie = document.createElement("span");
-
-            pie.className = "mureka-pie mureka-pie-loading";
-            pie.style.cssText = "position:absolute;left:50%;top:50%;width:0.7em;height:0.7em;transform:translate(-50%,-50%)";
-            dot.style.color = "transparent";
-            dot.style.position = "relative";
-            dot.dataset.murekaPie = "1";
-            pieSongIds.set(dot, song.song_id);
-            dot.appendChild(pie);
-            paintListPie(dot);
-        } else if (audioCached && artCached) {
-            dot.title = "Song and cover cached";
-        } else if (audioCached) {
-            dot.title = "Song cached, cover not yet";
-        }
+        paintCacheDot(dot, song);
 
         // Number column, right aligned and fixed width so titles line up
         const numEl = document.createElement("span");
@@ -26167,6 +26429,21 @@
             function () { return settings.debugOverlay === true; },
             function (v) { settings.debugOverlay = v; updateDebugOverlay(); });
 
+        // The master switch of the log, apart from the overlays, so a log can
+        // be kept while the player is used as usual
+        const debugLogRow = makeBoolRow("Debug log",
+            function () { return settings.debugLog === true; },
+            function (v) {
+
+                settings.debugLog = v;
+
+                if (v) {
+                    installRequestLog();
+                }
+
+                publishHostSoon();
+            });
+
         const copyLogBtn = makeButton("Copy debug log", "#333", "#fff", copyDebugLog);
 
         // Beside it, starting the log again. From the web view's copy of the
@@ -27433,6 +27710,7 @@
 
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
         devPage.appendChild(debugRow);
+        devPage.appendChild(withHint(debugLogRow, "Keeps a log of what the player does, for Copy debug log, while the player is used as usual. Mureka's requests are in it too, with anything that looks like a token, password or signature blanked out. Off, nothing is logged, except while a debug overlay is shown."));
         devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, "
             + (isApkHost() ? "commands " : "") + "and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
         devPage.appendChild(logRow);
@@ -27441,7 +27719,16 @@
 
             const webDebugRow = makeBoolRow("Debug overlay in the web view",
                 function () { return settings.webDebugOverlay === true; },
-                function (v) { settings.webDebugOverlay = v; publishHostSoon(); });
+                function (v) {
+
+                    settings.webDebugOverlay = v;
+
+                    if (v) {
+                        installRequestLog();
+                    }
+
+                    publishHostSoon();
+                });
 
             devPage.appendChild(withHint(webDebugRow, "The same layer in every browser showing the web view, with what that browser receives from its keys, media buttons and steering wheel, and how the page was opened."));
 
@@ -33005,6 +33292,7 @@
         const id = song.song_id;
 
         song.cover = key;
+        noteChangedHere(song);
 
         for (const x of cache.songs.concat(queue)) {
 
@@ -34595,6 +34883,13 @@
         installTrimKeys();
         buildPanel();
         syncWakeLock();
+        followOtherTabs();
+
+        if (brokenLibraryNote) {
+
+            setStatus(brokenLibraryNote);
+            showToast("The stored song list could not be read", false);
+        }
     }
 
     // The bookmarklet runs after load, so build now, otherwise wait for the body

@@ -11904,6 +11904,12 @@
         online = true;
         phoneSeen = true;
         paintPlayingRating(s);
+
+        // The exports changed on the phone while the actions are open, so
+        // the copies made ready for Copy are fetched again
+        if (isShown("actionsPop") && typeof s.exportsKey === "string" && s.exportsKey !== exportsKeyHere) {
+            fetchExports();
+        }
         debugHide = Array.isArray(s.debugHide) ? s.debugHide : [];
 
         // Clear debug log on the phone clears this log too
@@ -13373,7 +13379,7 @@
         }).catch(function (e) {
 
             dbgLog("Download", "through the phone failed, " + (e && e.message ? e.message : e) + ", opening the link");
-            window.open(m.src, "_blank");
+            window.open(m.src, "_blank", "noopener,noreferrer");
         });
     }
 
@@ -15254,7 +15260,7 @@
             withCurrentMenu(function (m) {
 
                 if (m.src) {
-                    window.open(m.src, "_blank");
+                    window.open(m.src, "_blank", "noopener,noreferrer");
                 }
             });
         } else if (key === "r") {
@@ -15578,7 +15584,22 @@
     const exportsHere = {};
     let exportsRound = 0;
 
+    // The phone's exports key the copies here were fetched for. The same
+    // key means the same exports, so they are not fetched again
+    let exportsKeyHere = null;
+
     function fetchExports() {
+
+        const key = state && typeof state.exportsKey === "string" ? state.exportsKey : null;
+        const have = ["songs", "library", "queue"].every(function (kind) {
+            return !!exportsHere[kind];
+        });
+
+        if (key !== null && key === exportsKeyHere && have) {
+            return;
+        }
+
+        exportsKeyHere = key;
 
         // Only the latest round counts, an older answer coming in late
         // would otherwise put back what was there before a change

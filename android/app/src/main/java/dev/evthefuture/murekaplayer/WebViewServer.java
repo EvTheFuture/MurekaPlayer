@@ -54,7 +54,10 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.json.JSONArray;
@@ -83,6 +86,19 @@ final class WebViewServer {
     // storage can still work on
     private static final int MAX_COVER = 20 * 1024 * 1024;
 
+    // Requests served at once. A browser holds two or three, the state it
+    // waits for and a song or a cover, so this is plenty for several of
+    // them. Anything over it is closed at once rather than queued
+    private static final int MAX_REQUESTS = 32;
+
+    // The most header lines one request may send, and how long it may take
+    // to send them. A browser sends a dozen in an instant
+    private static final int MAX_HEADERS = 100;
+    private static final long HEAD_MS = 15000;
+
+    // How long an upload may take as a whole, a cover over a slow hotspot
+    private static final long BODY_MS = 60000;
+
     // The sortings of the song list the player knows, anything else is
     // Mureka's own order
     private static final String[] LIST_VIEWS = {
@@ -91,7 +107,8 @@ final class WebViewServer {
 
     private final Context context;
     private final int port;
-    private final ExecutorService pool = Executors.newCachedThreadPool();
+    private final ExecutorService pool = new ThreadPoolExecutor(2, MAX_REQUESTS, 30, TimeUnit.SECONDS,
+        new SynchronousQueue<>(), new ThreadPoolExecutor.AbortPolicy());
     private final ScheduledExecutorService watch = Executors.newSingleThreadScheduledExecutor();
 
     private volatile ServerSocket socket;
@@ -200,7 +217,13 @@ final class WebViewServer {
 
                     final Socket client = s.accept();
 
-                    pool.execute(() -> handle(client));
+                    try {
+                        pool.execute(() -> handle(client));
+                    } catch (RejectedExecutionException e) {
+
+                        // Too many at once, this one is turned away
+                        closeQuietly(client);
+                    }
                 }
             } catch (IOException e) {
 
@@ -220,6 +243,15 @@ final class WebViewServer {
 
         if (!running) {
             status = "stopped";
+        }
+    }
+
+    private static void closeQuietly(Socket s) {
+
+        try {
+            s.close();
+        } catch (IOException e) {
+            // Gone already
         }
     }
 
@@ -366,7 +398,10 @@ final class WebViewServer {
 
             String[] parts = requestLine.split(" ");
 
-            if (parts.length < 2) {
+            // Only what a browser of the web view sends: GET or POST of a
+            // path on this server
+            if (parts.length < 2 || !("GET".equals(parts[0]) || "POST".equals(parts[0]))
+                || !parts[1].startsWith("/")) {
 
                 send(out, 400, "text/plain", bytes("Bad request"));
                 return;
@@ -387,8 +422,20 @@ final class WebViewServer {
             String range = "";
             String agent = "";
             String line;
+            int headers = 0;
+            long headUntil = System.currentTimeMillis() + HEAD_MS;
 
             while ((line = readLine(in)) != null && !line.isEmpty()) {
+
+                // A request that sends headers without end, or one slowly
+                // enough to hold the connection, is closed
+                headers += 1;
+
+                if (headers > MAX_HEADERS || System.currentTimeMillis() > headUntil) {
+
+                    send(out, 431, "text/plain", bytes("Too many headers"));
+                    return;
+                }
 
                 int colon = line.indexOf(':');
 
@@ -430,7 +477,7 @@ final class WebViewServer {
                 return;
             }
 
-            byte[] body = readBody(in, length);
+            byte[] body = readBody(in, length, System.currentTimeMillis() + BODY_MS);
 
             if ("GET".equals(method) && ("/".equals(path) || "/index.html".equals(path))) {
                 send(out, 200, "text/html; charset=utf-8", page != null ? page : bytes("webview.html missing"));
@@ -643,7 +690,7 @@ final class WebViewServer {
                 return;
             }
 
-            String type = c.getContentType() != null ? c.getContentType() : "audio/mpeg";
+            String type = headerValue(c.getContentType(), "audio/mpeg");
             long length = c.getContentLengthLong();
             StringBuilder head = new StringBuilder();
 
@@ -709,7 +756,7 @@ final class WebViewServer {
             Hub.note("Covers", "a cover took " + took + " ms to get from Mureka");
         }
 
-        String head = "HTTP/1.1 200 OK\r\nContent-Type: " + CoverCache.type(file) + "\r\n"
+        String head = "HTTP/1.1 200 OK\r\nContent-Type: " + headerValue(CoverCache.type(file), "image/jpeg") + "\r\n"
             + "Content-Length: " + file.length() + "\r\n"
             + "Cache-Control: public, max-age=31536000, immutable\r\nConnection: close\r\n\r\n";
 
@@ -755,7 +802,7 @@ final class WebViewServer {
                 JSONObject o = new JSONObject(info);
 
                 size = (long) o.optDouble("size", 0);
-                type = o.optString("type", type);
+                type = headerValue(o.optString("type", type), "audio/mpeg");
             }
         } catch (JSONException e) {
             size = 0;
@@ -764,7 +811,16 @@ final class WebViewServer {
         // Not on the phone, the browser gets it from Mureka itself
         if (size <= 0) {
 
-            String head = "HTTP/1.1 302 Found\r\nLocation: " + url + "\r\n"
+            // The address as plain ASCII, nothing in it may break the line
+            String where = headerValue(asciiUrl(url), null);
+
+            if (where == null) {
+
+                send(out, 400, "text/plain", bytes("Bad address"));
+                return;
+            }
+
+            String head = "HTTP/1.1 302 Found\r\nLocation: " + where + "\r\n"
                 + "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
 
             out.write(head.getBytes(StandardCharsets.US_ASCII));
@@ -851,7 +907,7 @@ final class WebViewServer {
                 JSONObject o = new JSONObject(info);
 
                 size = (long) o.optDouble("size", 0);
-                type = o.optString("type", type);
+                type = headerValue(o.optString("type", type), "audio/mpeg");
             }
         } catch (JSONException e) {
             size = 0;
@@ -1410,7 +1466,7 @@ final class WebViewServer {
             + "Cache-Control: no-store\r\nX-Frame-Options: DENY\r\n"
             + "Content-Security-Policy: frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\n"
             + "Connection: close\r\n\r\n",
-            code, reason, type, body.length);
+            code, reason, headerValue(type, "application/octet-stream"), body.length);
 
         out.write(head.getBytes(StandardCharsets.US_ASCII));
         out.write(body);
@@ -1445,23 +1501,82 @@ final class WebViewServer {
         return buf.toString(StandardCharsets.ISO_8859_1.name());
     }
 
-    private static byte[] readBody(InputStream in, int length) throws IOException {
+    // The body as it arrives, never more than it says it has, and grown as
+    // the bytes come, so a request claiming a large body without sending it
+    // takes no memory. Given up once the time is over
+    private static byte[] readBody(InputStream in, int length, long until) throws IOException {
 
-        byte[] body = new byte[length];
+        if (length <= 0) {
+            return new byte[0];
+        }
+
+        ByteArrayOutputStream body = new ByteArrayOutputStream(Math.min(length, 65536));
+        byte[] buf = new byte[65536];
         int got = 0;
 
         while (got < length) {
 
-            int n = in.read(body, got, length - got);
+            if (System.currentTimeMillis() > until) {
+                throw new IOException("Body too slow");
+            }
+
+            int n = in.read(buf, 0, Math.min(buf.length, length - got));
 
             if (n < 0) {
                 break;
             }
 
+            body.write(buf, 0, n);
             got += n;
         }
 
-        return body;
+        return body.toByteArray();
+    }
+
+    // An address with everything outside plain printable ASCII written as
+    // escapes, spaces and line breaks among them. Escapes already in it
+    // stay as they are
+    private static String asciiUrl(String url) {
+
+        if (url == null) {
+            return null;
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        for (byte b : url.getBytes(StandardCharsets.UTF_8)) {
+
+            int v = b & 0xff;
+
+            if (v > 0x20 && v < 0x7f) {
+                sb.append((char) v);
+            } else {
+                sb.append('%').append(String.format(Locale.ROOT, "%02X", v));
+            }
+        }
+
+        return sb.toString();
+    }
+
+    // A value safe to put in a header: printable ASCII only, so nothing in
+    // it can end the line and start a header of its own. Anything else
+    // gives the fallback
+    static String headerValue(String value, String fallback) {
+
+        if (value == null || value.isEmpty()) {
+            return fallback;
+        }
+
+        for (int i = 0; i < value.length(); i++) {
+
+            char ch = value.charAt(i);
+
+            if (ch < 0x20 || ch > 0x7e) {
+                return fallback;
+            }
+        }
+
+        return value;
     }
 
     private static byte[] bytes(String s) {

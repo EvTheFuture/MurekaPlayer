@@ -1205,6 +1205,55 @@ public class PlayerService extends Service implements Hub.Listener {
         return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
+    // The largest cover file taken, far more than any real cover
+    private static final int MAX_ART_BYTES = 16 * 1024 * 1024;
+
+    // The whole stream, or null once it grows past the limit
+    private static byte[] readCapped(InputStream in, int max) throws java.io.IOException {
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[32768];
+        int n;
+
+        while ((n = in.read(buf)) != -1) {
+
+            if (out.size() + n > max) {
+                return null;
+            }
+
+            out.write(buf, 0, n);
+        }
+
+        return out.toByteArray();
+    }
+
+    // A picture decoded no larger than needed. Its size is read first, and
+    // a huge one is decoded at a fraction of it, so it never needs the
+    // memory of the full picture
+    private static Bitmap decodeSmall(byte[] data, int side) {
+
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null;
+        }
+
+        int sample = 1;
+
+        while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= side) {
+            sample *= 2;
+        }
+
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+
+        opts.inSampleSize = sample;
+
+        return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+    }
+
     // Download and shrink the cover off the main thread. A newer song that
     // arrives meanwhile wins, the late one is dropped
     @SuppressWarnings("deprecation")
@@ -1225,11 +1274,15 @@ public class PlayerService extends Service implements Hub.Listener {
                 c.setConnectTimeout(10000);
                 c.setReadTimeout(15000);
 
+                byte[] data;
+
                 try (InputStream in = c.getInputStream()) {
-                    bmp = BitmapFactory.decodeStream(in);
+                    data = readCapped(in, MAX_ART_BYTES);
                 } finally {
                     c.disconnect();
                 }
+
+                bmp = data == null ? null : decodeSmall(data, 512);
 
                 if (bmp == null) {
                     Hub.note("Cover", "downloaded but could not be read");
@@ -1244,7 +1297,7 @@ public class PlayerService extends Service implements Hub.Listener {
                     bmp = Bitmap.createScaledBitmap(bmp, Math.round(bmp.getWidth() * f),
                         Math.round(bmp.getHeight() * f), true);
                 }
-            } catch (Exception e) {
+            } catch (Exception | OutOfMemoryError e) {
 
                 bmp = null;
                 Hub.note("Cover", "could not load, " + e.getClass().getSimpleName()

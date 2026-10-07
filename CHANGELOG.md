@@ -533,6 +533,10 @@ the new settings layout and a number of smaller improvements.
   with the layout numbers at the top. It never takes a tap. **Copy debug
   log** copies it all, **Clear debug log** starts it again, in the web views
   too.
+- **Debug log** under Developer: the log is kept only while it is switched
+  on or a debug overlay is shown, so a log can be made while the player is
+  used as usual. Mureka requests in it have anything that looks like a
+  token, password or signature blanked out.
 - **What the debug overlays log**: a switch for each kind of line, Keys and
   taps, Media buttons, Bluetooth, Cover, Playback, Commands, Screen and
   page, Setting changes, Network, Errors and Mureka requests (Bluetooth and
