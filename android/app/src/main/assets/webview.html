@@ -1271,6 +1271,11 @@
         text-overflow: ellipsis;
     }
 
+    /* The title of an ignored song is grey, unless it is the one playing */
+    .row:not(.playing) .rowTitle.ignored {
+        color: #9a9aa2;
+    }
+
     /* The crossed circle before the title of an ignored song */
     .rowIgnored {
         display: inline-block;
@@ -8226,6 +8231,7 @@
             const mark = icon("ignore");
 
             mark.classList.add("rowIgnored");
+            title.classList.add("ignored");
             mark.setAttribute("title", "Ignored, queues made from the list leave it out");
             title.prepend(mark);
         }

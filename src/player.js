@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.193";
+    const VERSION = "1.9.9.194";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25915,10 +25915,15 @@
         item.appendChild(dot);
         item.appendChild(numEl);
 
-        // An ignored song carries a small crossed circle before its title
+        // An ignored song carries a small crossed circle before its title,
+        // which is grey rather than white, unless it is the one playing
         if (isIgnored(song)) {
 
             const mark = document.createElement("span");
+
+            if (!isPlaying) {
+                titleEl.style.color = "#9a9aa2";
+            }
 
             mark.textContent = "\u2298";
             mark.title = "Ignored, queues made from the list leave it out";
