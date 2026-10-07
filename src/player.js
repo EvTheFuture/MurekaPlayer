@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.178";
+    const VERSION = "1.9.9.179";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24353,16 +24353,56 @@
         heartEl.style.color = liked ? "#ff6b8a" : "#777";
     }
 
+    // The likes shown for the playing song follow a heart tapped here, so
+    // the number moves with it rather than waiting for the next fetch
+    function shiftLikes(song, by) {
+
+        const c = nowPlayingCounts;
+
+        if (!c || c.song_id !== song.song_id || typeof c.fav_count !== "number") {
+            return;
+        }
+
+        c.fav_count = Math.max(0, c.fav_count + by);
+        refreshNowPlayingMeta();
+        publishHostSoon();
+    }
+
+    // The stored details keep the new number too, so the song does not show
+    // the old one the next time it starts. Its age stays as it was
+    async function shiftStoredLikes(id, by) {
+
+        const entry = await loadDetailFromStore(id);
+
+        if (!entry || typeof entry.fav_count !== "number") {
+            return;
+        }
+
+        entry.fav_count = Math.max(0, entry.fav_count + by);
+
+        try {
+
+            const store = await caches.open(DETAIL_STORE);
+
+            await store.put(detailStoreKey(id), new Response(JSON.stringify(entry), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        } catch (e) {
+        }
+    }
+
     // Like or unlike a song through the Mureka favorite endpoint
     // The heart flips immediately and reverts if the request fails
     // state 1 likes the song, state 2 removes the like
     async function toggleLike(song, heartEl) {
 
-        const makeLiked = !song.is_liked;
+        const wasLiked = song.is_liked === true;
+        const makeLiked = !wasLiked;
 
         // Optimistic update so the heart responds without waiting on the network
         song.is_liked = makeLiked;
         paintHeart(heartEl, makeLiked);
+        shiftLikes(song, makeLiked ? 1 : -1);
         showToast(makeLiked ? "Liking" : "Removing the like", "wait");
 
         try {
@@ -24388,9 +24428,18 @@
             // The server echoes the new state, 1 liked and 2 not liked
             const liked = json.data && json.data.state === 1;
 
+            // Mureka may answer with another state than the one asked for
+            if (liked !== makeLiked) {
+                shiftLikes(song, liked ? 1 : -1);
+            }
+
             song.is_liked = liked;
             paintHeart(heartEl, liked);
             saveCache();
+
+            if (liked !== wasLiked) {
+                shiftStoredLikes(song.song_id, liked ? 1 : -1);
+            }
             setStatus((liked ? "Liked: " : "Unliked: ") + (song.title || "Untitled"));
             showToast(liked ? "Liked" : "Like removed");
 
@@ -24399,6 +24448,7 @@
             // Revert the optimistic change on any failure
             song.is_liked = !makeLiked;
             paintHeart(heartEl, song.is_liked);
+            shiftLikes(song, makeLiked ? -1 : 1);
             setStatus("Could not update like, try again");
             showToast("Could not " + (makeLiked ? "like" : "remove the like") + ", try again", false);
         }
