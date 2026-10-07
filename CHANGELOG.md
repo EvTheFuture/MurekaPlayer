@@ -343,6 +343,15 @@ the new settings layout and a number of smaller improvements.
   every five seconds. Once done they join the library with everything
   brought up to date, and a song asked for starts playing at once, in place
   of a song playing meanwhile. Nothing of this is kept over a restart.
+- **Choose what an import of song tweaks brings**: ratings, tempos,
+  instrumental marks, trim marks and saved creators each have a switch, with
+  how many are new or differ. What was left out is left out again next time,
+  so two people can share tempos without touching each other's ratings. In
+  the player and in the web view.
+- **Retry or Cancel** when a change on Mureka does not go through: rename,
+  publish and unpublish, remixing, like, a new cover and delete on Mureka.
+  The change stays shown while the player asks, on the phone and in every
+  web view, and the first answer anywhere counts. Only Cancel puts it back.
 - **Play only this** in the song menu, in the player and in the web view:
   the song plays on its own, to hear it before it goes in the queue. With
   nothing playing, the queue being put together waits and is back as it was

@@ -11959,6 +11959,7 @@
         paintVolIcon();
         render();
         paintForceAsk();
+        paintRetryAsk();
         theaterSound();
 
         if (volOpen()) {
@@ -13073,18 +13074,103 @@
             }
 
             const conflicts = Array.isArray(r.conflicts) ? r.conflicts : [];
+            const types = Array.isArray(r.types) ? r.types : [];
 
-            askConfirm(r.what + ". Merge them into the phone's?"
-                + (conflicts.length > 0 ? " " + conflicts.length + (conflicts.length === 1 ? " song differs" : " songs differ")
-                    + ", you choose which to keep." : ""), conflicts.length > 0 ? "Continue" : "Import", false, function () {
+            // The values that differ of the kinds kept, asked one by one,
+            // the answers put back in their places in the whole list
+            const merge = function (skip) {
 
-                askConflicts(conflicts, function (answers) {
-                    applyImport(r.key, answers);
+                const asked = [];
+
+                conflicts.forEach(function (c, i) {
+
+                    if (skip.indexOf(c.type) < 0) {
+                        asked.push(i);
+                    }
                 });
-            });
+
+                askConflicts(asked.map(function (i) {
+                    return conflicts[i];
+                }), function (answers) {
+
+                    const all = conflicts.map(function () {
+                        return false;
+                    });
+
+                    asked.forEach(function (i, k) {
+                        all[i] = answers[k] === true;
+                    });
+
+                    applyImport(r.key, all, skip);
+                });
+            };
+
+            if (types.length === 0) {
+
+                askConfirm(r.what + ". Merge them into the phone's?", "Import", false, function () {
+                    merge([]);
+                });
+                return;
+            }
+
+            askImportTypes(r.what, types, merge);
         }).catch(function () {
             toast("The phone could not be reached", "bad");
         });
+    }
+
+    // Which kinds of song tweaks to bring in, a switch each, set the way
+    // the phone remembers from last time. Import hands on the kinds left out
+    function askImportTypes(what, types, then) {
+
+        const on = {};
+
+        for (const type of types) {
+            on[type.key] = type.on !== false;
+        }
+
+        const draw = function () {
+
+            const items = types.map(function (type) {
+
+                return {
+                    icon: on[type.key] ? "check" : "circle",
+                    label: type.label + ", " + type.count,
+                    cls: on[type.key] ? "inset" : "",
+                    fn: function () {
+
+                        on[type.key] = !on[type.key];
+                        draw();
+                    }
+                };
+            });
+
+            const any = types.some(function (type) {
+                return on[type.key];
+            });
+
+            items.push({ icon: "download", label: any ? "Import" : "Import, nothing chosen", cls: any ? "accent" : "", fn: function () {
+
+                if (!any) {
+
+                    toast("Choose at least one kind to import", "bad");
+                    return;
+                }
+
+                closeSongMenu();
+                then(types.filter(function (type) {
+                    return !on[type.key];
+                }).map(function (type) {
+                    return type.key;
+                }));
+            } });
+
+            // Short enough for the one line the title has, the kinds below
+            // say what the file holds
+            openChoice("What to import, tap to leave one out", items);
+        };
+
+        draw();
     }
 
     // One question per song that differs, with the choice for all that are
@@ -13136,14 +13222,21 @@
         ask(0);
     }
 
-    function applyImport(key, answers) {
+    function applyImport(key, answers, skip) {
 
         toast("Importing on the phone", "wait");
+
+        const ask = { key: key, answers: answers };
+
+        // The kinds of song tweaks left out, which the phone remembers
+        if (Array.isArray(skip)) {
+            ask.skip = skip;
+        }
 
         fetch("/importApply", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: key, answers: answers }),
+            body: JSON.stringify(ask),
             cache: "no-store"
         }).then(function (res) {
             return res.json();
@@ -15382,6 +15475,46 @@
 
             forceAsking = false;
             send("forceAnswer", false);
+        });
+    }
+
+    // A change on Mureka that did not go through: Retry or Cancel. The phone
+    // asks too, and the first answer anywhere closes the question everywhere
+    let retryShown = 0;
+    let retryAsking = false;
+
+    function paintRetryAsk() {
+
+        const ask = state && state.retryAsk ? state.retryAsk : null;
+        const n = ask ? Number(ask.n) : 0;
+
+        if (n === retryShown) {
+            return;
+        }
+
+        retryShown = n;
+
+        if (!ask) {
+
+            // Answered elsewhere, so this one goes away by itself
+            if (retryAsking) {
+
+                retryAsking = false;
+                closeConfirm();
+            }
+
+            return;
+        }
+
+        retryAsking = true;
+        askConfirm(ask.title + ". " + ask.text, "Retry", false, function () {
+
+            retryAsking = false;
+            send("retryAnswer", { n: n, retry: true });
+        }, function () {
+
+            retryAsking = false;
+            send("retryAnswer", { n: n, retry: false });
         });
     }
 

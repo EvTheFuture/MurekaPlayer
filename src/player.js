@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.183";
+    const VERSION = "1.9.9.186";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -146,6 +146,10 @@
 
     // Cache API bucket name where downloaded mp3 files are stored for replay
     const AUDIO_CACHE = "mureka_audio_cache_v1";
+
+    // The kinds of song tweaks an import can leave out, read with the
+    // settings, which remember what was left out last time
+    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "trimmed", "creators"];
 
     // Cache API bucket for re-encoded cover art data urls, so a cover downloads
     // and re-encodes only once and then persists across sessions, like the audio
@@ -1911,6 +1915,7 @@
             debugOverlay: false,
             webDebugOverlay: false,
             debugLog: false,
+            importSkip: [],
             debugHide: [],
             webSeekActions: true
         };
@@ -2109,6 +2114,9 @@
                     debugOverlay: parsed.debugOverlay === true || parsed.debugLine === true,
                     webDebugOverlay: parsed.webDebugOverlay === true,
                     debugLog: parsed.debugLog === true,
+                    importSkip: Array.isArray(parsed.importSkip)
+                        ? parsed.importSkip.filter(function (k) { return IMPORT_TYPE_KEYS.indexOf(k) >= 0; })
+                        : [],
                     debugHide: Array.isArray(parsed.debugHide)
                         ? parsed.debugHide.filter(function (id) { return typeof id === "string"; })
                         : [],
@@ -7382,6 +7390,8 @@
     // after, so what shows is what Mureka really has
     async function setPublished(song, publish, copy, again) {
 
+        await dropRetry("publish:" + song.song_id);
+
         const name = (song.title || "").trim() || "Untitled";
 
         // Published from the song menu, the link goes to the clipboard when
@@ -7439,60 +7449,76 @@
         setStatus((publish ? "Publishing: " : "Unpublishing: ") + name);
         showToast(publish ? "Publishing" : "Unpublishing", "wait");
 
-        try {
+        for (;;) {
 
-            const res = await murekaFetch("/api/pgc/song/publish", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
+            try {
 
-            const json = await res.json();
+                const res = await murekaFetch("/api/pgc/song/publish", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
 
-            if (!res.ok || !json || json.code !== 0) {
-                throw new Error("publish failed");
+                const json = await res.json().catch(function () {
+                    return null;
+                });
+
+                if (!res.ok || !json || json.code !== 0) {
+                    throw refusedError(res, json);
+                }
+
+                break;
+            } catch (e) {
+
+                if (await askRetry(publish ? "Could not publish" : "Could not unpublish", "\"" + name + "\" was not "
+                    + (publish ? "published" : "taken off") + " on Mureka. " + failText(e)
+                    + " Try again, or cancel and leave it as it was?", "publish:" + song.song_id)) {
+
+                    showToast(publish ? "Publishing" : "Unpublishing", "wait");
+                    continue;
+                }
+
+                song.publish_state = before;
+                renderList();
+                publishHostSoon();
+                setStatus((publish ? "Not published: " : "Not unpublished: ") + name);
+                showToast(publish ? "Not published" : "Not unpublished", false);
+
+                return false;
             }
-
-            saveCache();
-            setStatus((publish ? "Published: " : "Unpublished: ") + name);
-
-            // The server decides the state and the publish date, so take its
-            // word for it rather than ours
-            await refreshOne(song, true);
-            publishHostSoon();
-
-            if (copied) {
-
-                const done = await copied;
-
-                setStatus("Published: " + name + (done ? ", link copied" : ", the link could not be copied"));
-                showToast(done ? "Published, link copied" : "Published, the link could not be copied", done);
-            } else if (publish && copy) {
-
-                showToast("Published");
-                copyLink(song, true);
-            } else {
-                showToast(publish ? "Published" : "Unpublished");
-            }
-
-            return true;
-
-        } catch (e) {
-
-            song.publish_state = before;
-            renderList();
-            publishHostSoon();
-            setStatus("Could not " + (publish ? "publish" : "unpublish") + " " + name + ", try again");
-            showToast("Could not " + (publish ? "publish" : "unpublish") + ", try again", false);
-
-            return false;
         }
+
+        saveCache();
+        setStatus((publish ? "Published: " : "Unpublished: ") + name);
+
+        // The server decides the state and the publish date, so take its
+        // word for it rather than ours
+        await refreshOne(song, true);
+        publishHostSoon();
+
+        if (copied) {
+
+            const done = await copied;
+
+            setStatus("Published: " + name + (done ? ", link copied" : ", the link could not be copied"));
+            showToast(done ? "Published, link copied" : "Published, the link could not be copied", done);
+        } else if (publish && copy) {
+
+            showToast("Published");
+            copyLink(song, true);
+        } else {
+            showToast(publish ? "Published" : "Unpublished");
+        }
+
+        return true;
     }
 
     // Give a song another title on Mureka. The cover and the published state
     // go with it, since the endpoint takes the whole song line
     async function renameSong(song, title, forced) {
+
+        await dropRetry("rename:" + song.song_id);
 
         const clean = String(title == null ? "" : title).trim();
         const was = (song.title || "").trim();
@@ -7512,59 +7538,81 @@
 
         publishHostSoon();
         setStatus("Renaming: " + clean);
-        showToast("Renaming", "wait");
 
-        try {
+        let failed = null;
 
-            const res = await murekaFetch("/api/pgc/song/modify", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    time: Date.now(),
-                    song_id: song.song_id,
-                    title: clean,
-                    type: song.publish_state === 1 ? 1 : 2,
-                    cover: song.cover || ""
-                })
-            });
+        for (;;) {
 
-            const json = await res.json();
+            showToast("Renaming", "wait");
 
-            if (!res.ok || !json || json.code !== 0) {
-                throw new Error("modify failed");
+            try {
+
+                const res = await murekaFetch("/api/pgc/song/modify", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        time: Date.now(),
+                        song_id: song.song_id,
+                        title: clean,
+                        type: song.publish_state === 1 ? 1 : 2,
+                        cover: song.cover || ""
+                    })
+                });
+
+                const json = await res.json().catch(function () {
+                    return null;
+                });
+
+                if (!res.ok || !json || json.code !== 0) {
+                    throw refusedError(res, json);
+                }
+
+                saveCache();
+                setStatus("Renamed: " + clean);
+                showToast("Renamed");
+                publishHostSoon();
+
+                return true;
+
+            } catch (e) {
+
+                failed = e;
+
+                // A published song Mureka refuses is asked about on its own
+                // below. Anything else may go through on a second try
+                if (e && e.refused && !forced && song.publish_state === 1) {
+                    break;
+                }
+
+                if (!await askRetry("Could not rename", "\"" + clean + "\" was not saved on Mureka. "
+                    + failText(e) + " Try again, or cancel and keep the old title?", "rename:" + song.song_id)) {
+                    break;
+                }
             }
+        }
 
-            saveCache();
-            setStatus("Renamed: " + clean);
-            showToast("Renamed");
-            publishHostSoon();
+        // Given up, the old title comes back
+        song.title = was;
+        songEdits += 1;
+        renderList();
 
-            return true;
+        if (currentSong && currentSong.song_id === song.song_id) {
+            updatePlayerInfo(currentSong);
+        }
 
-        } catch (e) {
+        publishHostSoon();
 
-            song.title = was;
-            songEdits += 1;
-            renderList();
+        if (failed && failed.refused && !forced && song.publish_state === 1) {
 
-            if (currentSong && currentSong.song_id === song.song_id) {
-                updatePlayerInfo(currentSong);
-            }
-
-            publishHostSoon();
-
-            if (!forced && song.publish_state === 1) {
-
-                askForce("rename", song, clean);
-                return false;
-            }
-
-            setStatus("Could not rename the song, try again");
-            showToast("Could not rename, try again", false);
-
+            askForce("rename", song, clean);
             return false;
         }
+
+        setStatus("Not renamed, the old title is kept");
+        showToast("Not renamed", false);
+
+        return false;
     }
 
     // Whether Mureka lets other people remix this song. 1 allows it, 2 does
@@ -7589,62 +7637,183 @@
     // taking the song down and publishing it again
     async function setRemixAllowed(song, allow, forced) {
 
+        await dropRetry("remix:" + song.song_id);
+
         const name = (song.title || "").trim() || "Untitled";
         const before = song.allow_remix;
 
         song.allow_remix = allow ? 1 : 2;
         noteChangedHere(song);
         publishHostSoon();
-        showToast(allow ? "Allowing remixing" : "Disallowing remixing", "wait");
 
-        try {
+        let failed = null;
 
-            const res = await murekaFetch("/api/pgc/song/remix/allow", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    time: Date.now(),
-                    song_id: song.song_id,
-                    allow_remix: allow ? 1 : 2
-                })
-            });
+        for (;;) {
 
-            const json = await res.json();
+            showToast(allow ? "Allowing remixing" : "Disallowing remixing", "wait");
 
-            if (!res.ok || !json || json.code !== 0) {
-                throw new Error("remix failed");
+            try {
+
+                const res = await murekaFetch("/api/pgc/song/remix/allow", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        time: Date.now(),
+                        song_id: song.song_id,
+                        allow_remix: allow ? 1 : 2
+                    })
+                });
+
+                const json = await res.json().catch(function () {
+                    return null;
+                });
+
+                if (!res.ok || !json || json.code !== 0) {
+                    throw refusedError(res, json);
+                }
+
+                saveCache();
+                setStatus((allow ? "Remixing allowed: " : "Remixing turned off: ") + name);
+                showToast(allow ? "Remixing allowed" : "Remixing disallowed");
+                publishHostSoon();
+
+                return true;
+
+            } catch (e) {
+
+                failed = e;
+
+                // A published song Mureka refuses is asked about on its own
+                if (e && e.refused && !forced && song.publish_state === 1) {
+                    break;
+                }
+
+                if (!await askRetry("Could not change remixing", "Remixing for \"" + name + "\" was not "
+                    + (allow ? "allowed" : "turned off") + " on Mureka. " + failText(e)
+                    + " Try again, or cancel and leave it as it was?", "remix:" + song.song_id)) {
+                    break;
+                }
             }
+        }
 
-            saveCache();
-            setStatus((allow ? "Remixing allowed: " : "Remixing turned off: ") + name);
-            showToast(allow ? "Remixing allowed" : "Remixing disallowed");
-            publishHostSoon();
+        song.allow_remix = before;
+        publishHostSoon();
 
-            return true;
+        if (failed && failed.refused && !forced && song.publish_state === 1) {
 
-        } catch (e) {
-
-            song.allow_remix = before;
-            publishHostSoon();
-
-            if (!forced && song.publish_state === 1) {
-
-                askForce("remix", song, allow);
-                return false;
-            }
-
-            setStatus("Could not change remixing for " + name);
-            showToast("Could not change remixing", false);
-
+            askForce("remix", song, allow);
             return false;
         }
+
+        setStatus("Remixing left as it was for " + name);
+        showToast("Remixing not changed", false);
+
+        return false;
     }
 
     // Mureka refused a change on a published song. Taking it off, changing it
     // and publishing it again does work, but it is the user's call, so both
     // the phone and the web view ask first
     let forcePending = null;
+
+    // A change on Mureka that was asked for and did not go through: the
+    // question whether to try again, here and in every web view, before
+    // anything is put back. The first answer counts, the other places close
+    let retryAsk = null;
+    let retryAskSeq = 0;
+
+    function askRetry(title, text, key) {
+
+        return new Promise(function (resolve) {
+
+            // Only one question at a time, an older one counts as cancelled
+            if (retryAsk) {
+                finishRetry(retryAsk.n, false);
+            }
+
+            retryAskSeq += 1;
+
+            const ask = { n: retryAskSeq, title: title, text: text, key: key || "", resolve: resolve, el: null };
+
+            retryAsk = ask;
+            dbgLog("Mureka", title + ", asking whether to try again");
+            showToast(title, false);
+            ask.el = askYesNo(title, text, "Retry", function () {
+                finishRetry(ask.n, true);
+            }, function () {
+                finishRetry(ask.n, false);
+            });
+
+            // Without the player on screen there is nobody here to ask, the
+            // web views may still answer
+            publishHostSoon();
+        });
+    }
+
+    function finishRetry(n, retry) {
+
+        const ask = retryAsk;
+
+        if (!ask || ask.n !== n) {
+            return;
+        }
+
+        retryAsk = null;
+
+        if (ask.el && ask.el.parentNode) {
+            ask.el.remove();
+        }
+
+        publishHostSoon();
+        ask.resolve(retry === true);
+    }
+
+    // The same change asked for again while its question is open answers
+    // that question with Cancel first, and waits until what was asked
+    // before is put back. True when there was such a question
+    async function dropRetry(key) {
+
+        if (!retryAsk || retryAsk.key !== key) {
+            return false;
+        }
+
+        finishRetry(retryAsk.n, false);
+
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 0);
+        });
+
+        return true;
+    }
+
+    // Why a request to Mureka failed, in words, for the question
+    function failText(e) {
+
+        if (e && e.refused) {
+            return "Mureka said no" + (e.message ? ": " + e.message : "") + ".";
+        }
+
+        if (e && e.name === "AbortError") {
+            return "Mureka did not answer in time.";
+        }
+
+        if (e && e.message && /^HTTP /.test(e.message)) {
+            return "Mureka answered " + e.message + ".";
+        }
+
+        return "Mureka could not be reached.";
+    }
+
+    // A refusal from Mureka, told apart from a connection that failed
+    function refusedError(res, json) {
+
+        const e = new Error(json && json.msg ? String(json.msg).slice(0, 120) : "HTTP " + (res ? res.status : "?"));
+
+        e.refused = !!(res && res.ok && json);
+
+        return e;
+    }
 
     function askForce(kind, song, value) {
 
@@ -18575,6 +18744,7 @@
                 drift: settings.webMarkDrift
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
+            retryAsk: retryAsk ? { n: retryAsk.n, title: retryAsk.title, text: retryAsk.text } : null,
             version: VERSION,
             shuffle: shuffleMode,
             repeat: repeatMode,
@@ -20884,6 +21054,10 @@
             // the web view
             settings.trimFade = arg === true || arg === "true";
             saveSettings();
+        } else if (cmd === "retryAnswer") {
+
+            // Retry or Cancel from a web view, for the question it was shown
+            finishRetry(Number(arg && arg.n), !!(arg && arg.retry === true));
         } else if (cmd === "forceAnswer") {
 
             // The web view answered the question about a published song
@@ -25153,9 +25327,17 @@
     }
 
     // Like or unlike a song through the Mureka favorite endpoint
-    // The heart flips immediately and reverts if the request fails
+    // The heart flips immediately. When the request fails, the question
+    // whether to try again comes first, only Cancel puts it back
     // state 1 likes the song, state 2 removes the like
     async function toggleLike(song, heartEl) {
+
+        // The heart tapped again while its question is open: never mind
+        if (await dropRetry("like:" + song.song_id)) {
+
+            paintHeart(heartEl, song.is_liked === true);
+            return;
+        }
 
         const wasLiked = song.is_liked === true;
         const makeLiked = !wasLiked;
@@ -25165,54 +25347,72 @@
         noteChangedHere(song);
         paintHeart(heartEl, makeLiked);
         shiftLikes(song, makeLiked ? 1 : -1);
-        showToast(makeLiked ? "Liking" : "Removing the like", "wait");
 
-        try {
-            const res = await murekaFetch("/api/pgc/user/song/favorite", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    time: Date.now(),
-                    song_id: song.song_id,
-                    state: makeLiked ? 1 : 2,
-                    playlist_id: 0,
-                    home_module_id: 0
-                })
-            });
+        for (;;) {
 
-            const json = await res.json();
+            showToast(makeLiked ? "Liking" : "Removing the like", "wait");
 
-            if (!res.ok || !json || json.code !== 0) {
-                throw new Error("favorite failed");
+            try {
+                const res = await murekaFetch("/api/pgc/user/song/favorite", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        time: Date.now(),
+                        song_id: song.song_id,
+                        state: makeLiked ? 1 : 2,
+                        playlist_id: 0,
+                        home_module_id: 0
+                    })
+                });
+
+                const json = await res.json().catch(function () {
+                    return null;
+                });
+
+                if (!res.ok || !json || json.code !== 0) {
+                    throw refusedError(res, json);
+                }
+
+                // The server echoes the new state, 1 liked and 2 not liked
+                const liked = json.data && json.data.state === 1;
+
+                // Mureka may answer with another state than the one asked for
+                if (liked !== makeLiked) {
+                    shiftLikes(song, liked ? 1 : -1);
+                }
+
+                song.is_liked = liked;
+                paintHeart(heartEl, liked);
+                saveCache();
+
+                if (liked !== wasLiked) {
+                    shiftStoredLikes(song.song_id, liked ? 1 : -1);
+                }
+
+                setStatus((liked ? "Liked: " : "Unliked: ") + (song.title || "Untitled"));
+                showToast(liked ? "Liked" : "Like removed");
+
+                return;
+
+            } catch (e) {
+
+                if (await askRetry(makeLiked ? "Could not like" : "Could not remove the like",
+                    "\"" + ((song.title || "").trim() || "Untitled") + "\" was not "
+                    + (makeLiked ? "liked" : "unliked") + " on Mureka. " + failText(e)
+                    + " Try again, or cancel and leave it as it was?", "like:" + song.song_id)) {
+                    continue;
+                }
+
+                // Given up, the heart and the count go back
+                song.is_liked = !makeLiked;
+                paintHeart(heartEl, song.is_liked);
+                shiftLikes(song, makeLiked ? -1 : 1);
+                setStatus("Like left as it was");
+                showToast(makeLiked ? "Not liked" : "Like not removed", false);
+
+                return;
             }
-
-            // The server echoes the new state, 1 liked and 2 not liked
-            const liked = json.data && json.data.state === 1;
-
-            // Mureka may answer with another state than the one asked for
-            if (liked !== makeLiked) {
-                shiftLikes(song, liked ? 1 : -1);
-            }
-
-            song.is_liked = liked;
-            paintHeart(heartEl, liked);
-            saveCache();
-
-            if (liked !== wasLiked) {
-                shiftStoredLikes(song.song_id, liked ? 1 : -1);
-            }
-            setStatus((liked ? "Liked: " : "Unliked: ") + (song.title || "Untitled"));
-            showToast(liked ? "Liked" : "Like removed");
-
-        } catch (e) {
-
-            // Revert the optimistic change on any failure
-            song.is_liked = !makeLiked;
-            paintHeart(heartEl, song.is_liked);
-            shiftLikes(song, makeLiked ? -1 : 1);
-            setStatus("Could not update like, try again");
-            showToast("Could not " + (makeLiked ? "like" : "remove the like") + ", try again", false);
         }
     }
 
@@ -29526,6 +29726,224 @@
     }
 
     // The result of a merge in words
+    // The kinds of song tweaks an import can bring, which can each be left
+    // out, so two people can share tempos without touching each other's
+    // stars. What was left out last time is left out again to begin with
+    const IMPORT_TYPES = [
+        { key: "rating", label: "Ratings" },
+        { key: "bpm", label: "Tempos (BPM)" },
+        { key: "instr", label: "Instrumental marks" },
+        { key: "trimmed", label: "Trim marks" },
+        { key: "creators", label: "Saved creators" }
+    ];
+
+    // Each kind the file brings something of, with how much: new values,
+    // values removed there, and values that differ from the ones here
+    function planTypes(plan) {
+
+        const out = [];
+
+        for (const type of IMPORT_TYPES) {
+
+            const fresh = {
+                rating: plan.ratings.length,
+                bpm: plan.bpm.length,
+                instr: plan.instr.length,
+                trimmed: plan.trimmed.length,
+                creators: plan.creators.length
+            }[type.key];
+            const removed = plan.clears.filter(function (c) {
+                return c[0] === type.key;
+            }).length;
+            const differ = plan.conflicts.filter(function (c) {
+                return c.type === type.key;
+            }).length;
+
+            if (fresh + removed + differ === 0) {
+                continue;
+            }
+
+            const parts = [];
+
+            if (fresh > 0) {
+                parts.push(fresh + " new");
+            }
+
+            if (removed > 0) {
+                parts.push(removed + " removed");
+            }
+
+            if (differ > 0) {
+                parts.push(differ + (differ === 1 ? " differs" : " differ"));
+            }
+
+            out.push({
+                key: type.key,
+                label: type.label,
+                count: parts.join(", "),
+                on: settings.importSkip.indexOf(type.key) < 0
+            });
+        }
+
+        return out;
+    }
+
+    // The plan with the kinds left out taken away
+    function planOnly(plan, skip) {
+
+        const keep = function (kind) {
+            return skip.indexOf(kind) < 0;
+        };
+
+        return {
+            ratings: keep("rating") ? plan.ratings : [],
+            bpm: keep("bpm") ? plan.bpm : [],
+            instr: keep("instr") ? plan.instr : [],
+            trimmed: keep("trimmed") ? plan.trimmed : [],
+            creators: keep("creators") ? plan.creators : [],
+            clears: plan.clears.filter(function (c) {
+                return keep(c[0]);
+            }),
+            same: plan.same,
+            conflicts: plan.conflicts.filter(function (c) {
+                return keep(c.type);
+            })
+        };
+    }
+
+    // The kinds left out, remembered for the next import
+    function rememberImportSkip(skip) {
+
+        const clean = skip.filter(function (k) {
+            return IMPORT_TYPE_KEYS.indexOf(k) >= 0;
+        });
+
+        if (clean.join(",") !== settings.importSkip.join(",")) {
+
+            settings.importSkip = clean;
+            saveSettings();
+        }
+    }
+
+    // Which kinds to bring in, a switch each, set as last time. Import hands
+    // on the kinds left out
+    function askImportTypes(title, text, types, onImport, onCancel) {
+
+        if (!panelEl) {
+
+            if (onCancel) {
+                onCancel();
+            }
+
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const body = document.createElement("div");
+        const list = document.createElement("div");
+        const row = document.createElement("div");
+        const on = {};
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = title;
+        head.style.cssText = "font-weight:600";
+        body.textContent = text;
+        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = function (fn) {
+
+            back.remove();
+
+            if (fn) {
+                fn();
+            }
+        };
+
+        const importBtn = makeButton("Import", "#48e1eb", "#000", function () {
+
+            const skip = types.filter(function (t) {
+                return !on[t.key];
+            }).map(function (t) {
+                return t.key;
+            });
+
+            close(function () {
+                onImport(skip);
+            });
+        });
+
+        const paint = function () {
+
+            const any = types.some(function (t) {
+                return on[t.key];
+            });
+
+            importBtn.disabled = !any;
+            importBtn.style.opacity = any ? "1" : "0.4";
+        };
+
+        for (const type of types) {
+
+            const line = document.createElement("label");
+            const box = document.createElement("input");
+            const name = document.createElement("span");
+            const count = document.createElement("span");
+
+            on[type.key] = type.on !== false;
+            line.style.cssText = "display:flex;align-items:center;gap:10px;padding:7px 4px;cursor:pointer";
+            box.type = "checkbox";
+            box.checked = on[type.key];
+            box.style.cssText = "width:18px;height:18px;margin:0;accent-color:#48e1eb;flex:0 0 auto";
+            name.textContent = type.label;
+            name.style.cssText = "flex:1 1 auto;color:#fff";
+            count.textContent = type.count;
+            count.style.cssText = "flex:0 0 auto;color:#888;font-size:12px";
+
+            box.addEventListener("change", function () {
+
+                on[type.key] = box.checked;
+                paint();
+            });
+
+            line.appendChild(box);
+            line.appendChild(name);
+            line.appendChild(count);
+            list.appendChild(line);
+        }
+
+        const cancelBtn = makeButton("Cancel", "#444", "#fff", function () {
+            close(onCancel);
+        });
+
+        cancelBtn.style.flex = "1";
+        importBtn.style.flex = "1";
+        row.appendChild(cancelBtn);
+        row.appendChild(importBtn);
+        card.appendChild(head);
+        card.appendChild(body);
+        card.appendChild(list);
+        card.appendChild(row);
+        back.appendChild(card);
+
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close(onCancel);
+            }
+        });
+
+        paint();
+        panelEl.appendChild(back);
+    }
+
     function mergeSummary(plan, answers) {
 
         const added = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.trimmed.length;
@@ -29672,26 +30090,24 @@
                 return;
             }
 
-            const parts = [];
+            const types = planTypes(plan);
 
-            if (fresh > 0) {
-                parts.push(fresh + " new " + (fresh === 1 ? "value" : "values"));
+            // An older combined file with only settings in it besides
+            if (types.length === 0) {
+
+                mergeSongImport(p, plan, sourceName, donePrefix, asked);
+                return;
             }
 
-            if (plan.conflicts.length === 1) {
-                parts.push("1 that differs from yours, asked about next");
-            } else if (plan.conflicts.length > 1) {
-                parts.push(plan.conflicts.length + " that differ from yours, each asked about next");
-            }
+            askImportTypes("Import song tweaks?", "From the " + sourceName + " saved " + when
+                + ". Untick what should stay as it is here. Values that differ from yours are asked about one by one.",
+                types, function (skip) {
 
-            askChoices("Import song tweaks?\nFrom the " + sourceName + " saved " + when + ": "
-                + (parts.length ? parts.join(", ") : "nothing new") + ".", [
-                { label: "Import", fn: function () {
-                    mergeSongImport(p, plan, sourceName, donePrefix, asked);
-                } }
-            ], function () {
-                importDone("Import cancelled, nothing changed", false, false);
-            });
+                    rememberImportSkip(skip);
+                    mergeSongImport(p, planOnly(plan, skip), sourceName, donePrefix, asked);
+                }, function () {
+                    importDone("Import cancelled, nothing changed", false, false);
+                });
             return;
         }
 
@@ -30541,8 +30957,10 @@
 
             entry.plan = plan;
             out.what = "Song tweaks saved " + when + ", " + parsedSummary(p);
+            out.types = planTypes(plan);
             out.conflicts = plan.conflicts.map(function (c) {
                 return {
+                    type: c.type,
                     title: songTitleById(c.id),
                     what: names[c.type] || c.type,
                     mine: conflictValue(c, c.mine),
@@ -30573,12 +30991,26 @@
         if (entry.plan) {
 
             const given = Array.isArray(ask.answers) ? ask.answers : [];
-            const answers = entry.plan.conflicts.map(function (c, i) {
-                return given[i] === true;
+
+            // The kinds the web view left out, remembered as when chosen here
+            const skip = Array.isArray(ask.skip) ? ask.skip.map(String) : [];
+
+            if (Array.isArray(ask.skip)) {
+                rememberImportSkip(skip);
+            }
+
+            const plan = planOnly(entry.plan, skip);
+            const answers = [];
+
+            entry.plan.conflicts.forEach(function (c, i) {
+
+                if (skip.indexOf(c.type) < 0) {
+                    answers.push(given[i] === true);
+                }
             });
 
-            applySongMerge(entry.plan, answers);
-            dataStatus("Imported song tweaks, " + mergeSummary(entry.plan, answers));
+            applySongMerge(plan, answers);
+            dataStatus("Imported song tweaks, " + mergeSummary(plan, answers));
         } else {
 
             // For a play queue, whether the song playing plays on
@@ -33329,6 +33761,21 @@
     // sends. Answers whether it went and, when not, why
     async function deleteOnMureka(song) {
 
+        await dropRetry("delete:" + song.song_id);
+
+        for (;;) {
+
+            const done = await deleteOnMurekaOnce(song);
+
+            if (done.ok || !await askRetry("Could not delete on Mureka", "\"" + ((song.title || "").trim() || "Untitled")
+                + "\" was not deleted on Mureka, " + done.why + ". Try again, or cancel and keep it?", "delete:" + song.song_id)) {
+                return done;
+            }
+        }
+    }
+
+    async function deleteOnMurekaOnce(song) {
+
         showToast("Deleting on Mureka", "wait");
 
         try {
@@ -33868,15 +34315,28 @@
 
         let key;
 
-        try {
-            key = await uploadCover(blob);
-        } catch (e) {
+        for (;;) {
 
-            const why = "Could not upload the cover, " + (e && e.message ? e.message : "no connection");
+            try {
 
-            dbgLog("Mureka", why);
-            showToast(why, false);
-            return { ok: false, why: why };
+                key = await uploadCover(blob);
+                break;
+            } catch (e) {
+
+                const why = "Could not upload the cover, " + (e && e.message ? e.message : "no connection");
+
+                dbgLog("Mureka", why);
+
+                if (await askRetry("Could not upload the cover", "The picture for \"" + ((song.title || "").trim() || "Untitled")
+                    + "\" did not reach Mureka. " + failText(e) + " Try again, or cancel and keep the old cover?", "cover:" + song.song_id)) {
+
+                    showToast("Uploading the cover", "wait");
+                    continue;
+                }
+
+                showToast("The cover was not changed", false);
+                return { ok: false, why: why };
+            }
         }
 
         dbgLog("Mureka", "cover square x " + crop.x + ", y " + crop.y + ", size " + crop.s
@@ -33892,41 +34352,56 @@
     // A published song Mureka refuses can be taken down and put up again
     async function setSongCover(song, key, forced) {
 
-        showToast("Setting the cover", "wait");
+        await dropRetry("cover:" + song.song_id);
 
-        try {
+        for (;;) {
 
-            const res = await murekaFetch("/api/pgc/song/modify", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    time: Date.now(),
-                    song_id: song.song_id,
-                    title: song.title || "",
-                    type: song.publish_state === 1 ? 1 : 2,
-                    cover: key
-                })
-            });
-            const json = await res.json();
+            showToast("Setting the cover", "wait");
 
-            dbgLog("Mureka", "cover for " + song.song_id + ": HTTP " + res.status
-                + (json && json.code !== undefined ? ", code " + json.code : "")
-                + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+            try {
 
-            if (!res.ok || !json || json.code !== 0) {
-                throw new Error("modify failed");
-            }
-        } catch (e) {
+                const res = await murekaFetch("/api/pgc/song/modify", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        time: Date.now(),
+                        song_id: song.song_id,
+                        title: song.title || "",
+                        type: song.publish_state === 1 ? 1 : 2,
+                        cover: key
+                    })
+                });
+                const json = await res.json().catch(function () {
+                    return null;
+                });
 
-            if (!forced && song.publish_state === 1) {
+                dbgLog("Mureka", "cover for " + song.song_id + ": HTTP " + res.status
+                    + (json && json.code !== undefined ? ", code " + json.code : "")
+                    + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
 
-                askForce("cover", song, key);
+                if (!res.ok || !json || json.code !== 0) {
+                    throw refusedError(res, json);
+                }
+
+                break;
+            } catch (e) {
+
+                // A published song Mureka refuses is asked about on its own
+                if (e && e.refused && !forced && song.publish_state === 1) {
+
+                    askForce("cover", song, key);
+                    return false;
+                }
+
+                if (await askRetry("Could not set the cover", "The new cover of \"" + ((song.title || "").trim() || "Untitled")
+                    + "\" was not set on Mureka. " + failText(e) + " Try again, or cancel and keep the old cover?", "cover:" + song.song_id)) {
+                    continue;
+                }
+
+                showToast("The cover was not changed", false);
                 return false;
             }
-
-            showToast("Mureka did not take the cover", false);
-            return false;
         }
 
         await coverChanged(song, key);
