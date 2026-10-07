@@ -353,6 +353,16 @@ the new settings layout and a number of smaller improvements.
   own tempo along for songs without one set by hand. An import takes it
   only for a song with no tempo at all, as on a device signed in to another
   account, which Mureka gives none.
+- **Select to share** in the song menu picks songs to share with someone
+  using the player on another account, unpublished ones too. A tap picks a
+  song or lets it go, the bar above the list copies or shares them, Done
+  ends it. Pasted into Import in the other player, it asks where they go:
+  play next, at the end of the queue or as the whole queue. They play from
+  their links there, kept over a restart, with a violet shared badge since
+  they may not be public. Import in the web view asks the same.
+- **Mureka song links in Import**: pasted share links from Mureka's site,
+  one or many, mixed with other text, are read from Mureka and taken in as
+  shared songs, also songs not yet published.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,
@@ -428,8 +438,8 @@ the new settings layout and a number of smaller improvements.
   and a tap on the waveform plays from there. **Fade out the last second**
   fades the preview the way Mureka fades a trimmed song, once the end is
   moved. The new song gets a title of its own and is put at the top of the
-  list, marked new, with the original's rating, tempo and instrumental
-  mark. A small gold T on the public or draft badge marks every
+  list, marked new, with the original's rating, tempo, instrumental mark
+  and ignored mark, and liked when the original was. A small gold T on the public or draft badge marks every
   trimmed song, from Mureka's own mark, so also songs trimmed on Mureka's
   site or another device, once a Load or Rescan has read them. A song
   trimmed here counts as trimmed straight away until then. It shows

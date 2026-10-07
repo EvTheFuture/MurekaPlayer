@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.201";
+    const VERSION = "1.9.9.205";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2534,14 +2534,15 @@
 
             const cur = q[pos];
 
-            // Songs not in the library here, from an imported queue, are
-            // kept whole, so they are still there after a restart
+            // Songs not in the library here, from an imported queue or
+            // shared ones, are kept whole, so they are still there after a
+            // restart
             const lib = new Set(cache.songs.map(function (s) {
                 return s.song_id;
             }));
-            const extra = own ? q.filter(function (s) {
+            const extra = q.filter(function (s) {
                 return !lib.has(s.song_id);
-            }) : [];
+            });
 
             localStorage.setItem(QUEUE_KEY, JSON.stringify({
                 extra: extra,
@@ -2578,7 +2579,7 @@
         }));
 
         // Songs of an imported queue that are not in the library here
-        if (saved.own === true && Array.isArray(saved.extra)) {
+        if (Array.isArray(saved.extra)) {
 
             for (const s of saved.extra) {
 
@@ -2757,6 +2758,9 @@
             generation_method: s.generation_method,
             allow_remix: s.allow_remix,
             trimmed: hasTrimField(s) || undefined,
+
+            // Shared from another account's player, maybe not public
+            shared: s.shared === true || undefined,
 
             // The list page the song was last read on, "" for the first page
             page_cursor: s.page_cursor,
@@ -20741,6 +20745,7 @@
                 isNew: song.is_played === false,
                 trimmed: isTrimmed(song),
                 ignored: isIgnored(song),
+                shared: song.shared === true,
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -20790,6 +20795,7 @@
                 isNew: song.is_played === false,
                 trimmed: isTrimmed(song),
                 ignored: isIgnored(song),
+                shared: song.shared === true,
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -23049,6 +23055,7 @@
         bodyEl.appendChild(searchRow);
         bodyEl.appendChild(viewMenuBar);
         bodyEl.appendChild(countsEl);
+        bodyEl.appendChild(buildSelBar());
         bodyEl.appendChild(buildProgress());
         bodyEl.appendChild(listWrapEl);
 
@@ -25572,6 +25579,137 @@
         saveCacheMarksSoon();
     }
 
+    // Picking songs to share: a long press offers Select, then a tap on a
+    // song picks it or lets it go again, and the bar above the list copies
+    // them for the other player's Import. Kept in the order picked
+    let selectMode = false;
+    const selectedSongs = new Map();
+    let selBarEl = null;
+    let selCountEl = null;
+
+    function startSelect(song) {
+
+        selectMode = true;
+        selectedSongs.clear();
+        selectedSongs.set(String(song.song_id), song);
+        paintSelBar();
+        renderList();
+    }
+
+    function endSelect() {
+
+        selectMode = false;
+        selectedSongs.clear();
+        paintSelBar();
+        renderList();
+    }
+
+    function toggleSelected(song, row) {
+
+        const id = String(song.song_id);
+
+        if (selectedSongs.has(id)) {
+            selectedSongs.delete(id);
+        } else {
+            selectedSongs.set(id, song);
+        }
+
+        paintRowSelected(row, selectedSongs.has(id));
+        paintSelBar();
+    }
+
+    // A picked row is lit, with a bar of the accent colour at its start
+    function paintRowSelected(row, on) {
+
+        if (!row) {
+            return;
+        }
+
+        row.style.background = on ? "rgba(72,225,235,0.16)" : "";
+        row.style.boxShadow = on ? "inset 3px 0 0 #48e1eb" : "";
+    }
+
+    function paintSelBar() {
+
+        if (!selBarEl) {
+            return;
+        }
+
+        const n = selectedSongs.size;
+
+        selBarEl.style.display = selectMode ? "flex" : "none";
+        selCountEl.textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
+    }
+
+    // The picked songs as text for the other player's Import
+    function selectedText() {
+        return exportJson(sharedSongsData(Array.from(selectedSongs.values())));
+    }
+
+    async function copySelected() {
+
+        const n = selectedSongs.size;
+
+        if (n === 0) {
+
+            showToast("Pick songs first", false);
+            return;
+        }
+
+        if (await copyText(selectedText())) {
+            showToast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player", true);
+        } else {
+            showToast("Could not copy", false);
+        }
+    }
+
+    async function shareSelected() {
+
+        const n = selectedSongs.size;
+
+        if (n === 0) {
+
+            showToast("Pick songs first", false);
+            return;
+        }
+
+        try {
+            await navigator.share({ title: n + (n === 1 ? " song" : " songs") + " for Mureka Player", text: selectedText() });
+        } catch (e) {
+            // Closed without sharing
+        }
+    }
+
+    function buildSelBar() {
+
+        selBarEl = document.createElement("div");
+        selBarEl.style.cssText = "display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 8px;border-radius:8px;background:#26262c;border:1px solid rgba(72,225,235,0.5)";
+
+        selCountEl = document.createElement("span");
+        selCountEl.style.cssText = "flex:1 1 auto;min-width:0;font-size:12px;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        selBarEl.appendChild(selCountEl);
+
+        const copyBtn = makeButton("Copy", "#48e1eb", "#000", copySelected);
+
+        copyBtn.style.flex = "0 0 auto";
+        selBarEl.appendChild(copyBtn);
+
+        if (navigator.share) {
+
+            const shareBtn = makeButton("Share", "#333", "#fff", shareSelected);
+
+            shareBtn.style.flex = "0 0 auto";
+            selBarEl.appendChild(shareBtn);
+        }
+
+        const doneBtn = makeButton("Done", "#333", "#fff", endSelect);
+
+        doneBtn.style.flex = "0 0 auto";
+        selBarEl.appendChild(doneBtn);
+
+        return selBarEl;
+    }
+
     // Build one list row for a song
     // number may be null to leave the number column blank, as for a pinned song
     // dimmed greys the row, used for already played songs in the queue view
@@ -26027,23 +26165,29 @@
         // same badge, which tells the reader nothing. A song Mureka still marks
         // as new says new instead, it goes once Mureka has taken the played
         // report and the badge falls back to public or draft
-        if (!creatorSource && publishFilter === "all") {
+        // A song shared from another account's player says so wherever it
+        // shows, it may not be public
+        if ((!creatorSource && publishFilter === "all") || song.shared === true) {
 
             const published = song.publish_state === 1;
-            const isNew = song.is_played === false;
+            const isNew = song.is_played === false && song.shared !== true;
 
             // Fixed width, so the badge column lines up and the title beside it
             // keeps the same room whichever word the badge happens to carry
             const badge = document.createElement("span");
-            badge.textContent = isNew ? "new" : (published ? "public" : "draft");
+            badge.textContent = song.shared === true ? "shared" : (isNew ? "new" : (published ? "public" : "draft"));
             badge.style.cssText = "flex:0 0 auto;width:46px;margin-left:6px;padding:0;border-radius:4px;font-size:11px;line-height:16px;text-align:center;"
-                + (isNew
-                    ? "background:#48e1eb;color:#000;font-weight:600"
-                    : (published
-                        ? "background:#1f3a2a;color:#7fd6a0"
-                        : "background:#3a3a42;color:#bbb"));
+                + (song.shared === true
+                    ? "background:#2e2640;color:#c9a8ff"
+                    : (isNew
+                        ? "background:#48e1eb;color:#000;font-weight:600"
+                        : (published
+                            ? "background:#1f3a2a;color:#7fd6a0"
+                            : "background:#3a3a42;color:#bbb")));
 
-            if (isNew) {
+            if (song.shared === true) {
+                badge.title = "Shared with you from another account, it may not be public";
+            } else if (isNew) {
                 badge.title = published ? "Not played yet, public" : "Not played yet, draft";
             }
 
@@ -26124,8 +26268,19 @@
                 return;
             }
 
+            // Picking songs to share, a tap picks or lets go
+            if (selectMode) {
+
+                toggleSelected(song, item);
+                return;
+            }
+
             playFrom(song.song_id);
         });
+
+        if (selectMode) {
+            paintRowSelected(item, selectedSongs.has(String(song.song_id)));
+        }
 
         item.addEventListener("contextmenu", function (ev) {
             ev.preventDefault();
@@ -29453,6 +29608,49 @@
     // One kind of data entered by hand, gathered into one object, either
     // the song tweaks or the settings. Downloads, the queue and the caches
     // belong to this device and are left out
+    // Songs as a file carries them, with full links to their audio and
+    // cover, so a player of another account plays them without having them
+    // in its library
+    function songsWithLinks(list) {
+
+        return list.map(function (s) {
+
+            const out = trim(s);
+
+            out.mp3_url = songUrl(s) || s.mp3_url || "";
+            out.cover = coverUrl(s) || "";
+            delete out.page_cursor;
+            delete out.is_played;
+
+            return out;
+        });
+    }
+
+    // Songs picked to share, in the form of a play queue marked shared, so
+    // the other player's Import asks where they go rather than replacing
+    // its queue
+    function sharedSongsData(list) {
+
+        return {
+            app: "mureka-player",
+            kind: "queue",
+            format: 2,
+            version: VERSION,
+            exported: new Date().toISOString(),
+            queue: {
+                shared: true,
+                ids: list.map(function (s) {
+                    return String(s.song_id);
+                }),
+                titles: list.map(function (s) {
+                    return s.title || "";
+                }),
+                pos: -1,
+                songs: songsWithLinks(list)
+            }
+        };
+    }
+
     function collectUserData(kind) {
 
         const base = {
@@ -29484,17 +29682,7 @@
                 // Each song with full links to its audio and cover, so a
                 // player of another account plays it without having it in
                 // its library
-                songs: q.map(function (s) {
-
-                    const out = trim(s);
-
-                    out.mp3_url = songUrl(s) || s.mp3_url || "";
-                    out.cover = coverUrl(s) || "";
-                    delete out.page_cursor;
-                    delete out.is_played;
-
-                    return out;
-                })
+                songs: songsWithLinks(q)
             };
 
             return base;
@@ -29654,6 +29842,7 @@
             const q = data.queue && typeof data.queue === "object" ? data.queue : {};
 
             out.queue = {
+                shared: q.shared === true,
                 ids: Array.isArray(q.ids) ? q.ids.filter(function (id) {
                     return id !== null && id !== undefined && id !== "";
                 }).map(String) : [],
@@ -30427,6 +30616,42 @@
                 return;
             }
 
+            // Songs someone picked to share: added to the queue here where
+            // asked, next, at the end or in place of it
+            if (p.queue.shared === true) {
+
+                const n = found.songs.length;
+                const what = n + (n === 1 ? " shared song" : " shared songs");
+                const words = { next: "to play next", end: "at the end of the queue", replace: "as the queue" };
+
+                const take = function (mode) {
+
+                    applySharedSongs(found.songs, mode);
+                    importDone(donePrefix + " " + what + ", " + words[mode], true, asked);
+                };
+
+                if (asked) {
+
+                    take(words[p.sharedMode] ? p.sharedMode : "end");
+                    return;
+                }
+
+                askChoices(what + " from the " + sourceName + ".\nWhere in the queue do they go?", [
+                    { label: "Play next", fn: function () {
+                        take("next");
+                    } },
+                    { label: "Add to the end", ring: true, fn: function () {
+                        take("end");
+                    } },
+                    { label: "Replace the queue", fn: function () {
+                        take("replace");
+                    } }
+                ], function () {
+                    importDone("Import cancelled, nothing changed", false, false);
+                });
+                return;
+            }
+
             // keep: the song playing now plays on, with the queue after it.
             // Otherwise it stops and the imported queue plays at once
             const done = function (keep) {
@@ -30568,8 +30793,12 @@
                 songs.push(s);
             } else if (fromFile.has(id)) {
 
-                // Not in the library here, played from its link
-                songs.push(fromFile.get(id));
+                // Not in the library here, played from its link, marked
+                // shared since it may not be public
+                const s = fromFile.get(id);
+
+                s.shared = true;
+                songs.push(s);
                 foreign += 1;
             } else {
                 missing += 1;
@@ -30603,6 +30832,69 @@
     // Whether a song is sounding right now, not paused or only loaded
     function soundingNow() {
         return !!(currentSong && audio && audio.src && !audio.paused);
+    }
+
+    // Shared songs into the queue: next, after the playing song, at the end,
+    // or as the whole queue. With nothing playing they start a queue put
+    // together by hand, as Play next and Play last do
+    function applySharedSongs(songs, mode) {
+
+        if (mode === "replace") {
+
+            applyQueueImport(songs, false);
+            return;
+        }
+
+        const ids = new Set(songs.map(function (s) {
+            return s.song_id;
+        }));
+
+        dropNextReady();
+
+        if (queueIdle()) {
+
+            if (!queueOwn || queuePos >= queue.length) {
+
+                playNextMarks.clear();
+                queue = [];
+                queueOwn = true;
+            }
+
+            queuePos = -1;
+            resumeState = null;
+            queue = queue.filter(function (s) {
+                return !ids.has(s.song_id);
+            });
+            queue = mode === "next" ? songs.concat(queue) : queue.concat(songs);
+        } else {
+
+            // Later copies go, so a song does not play twice
+            queue = queue.filter(function (s, k) {
+                return k <= queuePos || !ids.has(s.song_id);
+            });
+
+            if (mode === "next") {
+
+                queue.splice.apply(queue, [queuePos + 1, 0].concat(songs));
+
+                for (const s of songs) {
+                    playNextMarks.set(String(s.song_id), -1);
+                }
+            } else {
+                queue = queue.concat(songs);
+            }
+        }
+
+        // Songs put in by hand, so the list does not fill it up again and
+        // drop them
+        queueOwn = true;
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        saveQueue();
+        publishHostSoon();
     }
 
     // An imported play queue in place of the one here. It is then one put
@@ -31227,7 +31519,7 @@
         back.setAttribute("data-mureka-notice", "1");
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:420px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
-        head.textContent = "Paste an export here";
+        head.textContent = "Paste an export or Mureka song links here";
         head.style.cssText = "font-weight:600";
 
         // At least 16 pixels, below that iOS zooms the page in on focus
@@ -31312,6 +31604,26 @@
 
         if (!p) {
 
+            // Mureka song links, shared from Mureka's site, are read from
+            // Mureka and taken in as shared songs
+            const keys = songLinkKeys(String(text || ""));
+
+            if (keys.length > 0) {
+
+                songsFromLinks(keys).then(function (got) {
+
+                    if (got.songs.length === 0) {
+
+                        importDone("Could not read the songs from Mureka", false, asked);
+                        return;
+                    }
+
+                    importText(exportJson(sharedSongsData(got.songs)), sourceName, asked);
+                });
+
+                return "";
+            }
+
             importDone("That is not a Mureka Player export", false, asked);
             return "That is not a Mureka Player export";
         }
@@ -31319,6 +31631,101 @@
         importParsed(p, sourceName, "Imported", asked);
 
         return "";
+    }
+
+    // The songs a text links to on Mureka, by the key or the id after
+    // song-detail in each link, each once and at most 50
+    function songLinkKeys(text) {
+
+        const out = [];
+        const re = /mureka\.ai\/song-detail\/([A-Za-z0-9]+)/g;
+        let m = re.exec(text);
+
+        while (m !== null && out.length < 50) {
+
+            if (out.indexOf(m[1]) < 0) {
+                out.push(m[1]);
+            }
+
+            m = re.exec(text);
+        }
+
+        return out;
+    }
+
+    // One linked song read from Mureka. A share key is first turned into
+    // the song's id from its page, which names it as the page's own
+    // address, then the song comes the way Mureka's own player asks for it
+    async function songFromLink(key) {
+
+        let id = /^\d+$/.test(key) ? key : "";
+
+        try {
+
+            if (!id) {
+
+                const page = await timedFetch("/song-detail/" + encodeURIComponent(key), { credentials: "include" }, 15000);
+                const html = page.ok ? await page.text() : "";
+                const tag = html.match(/<link[^>]*rel=["']canonical["'][^>]*>/i) || html.match(/<meta[^>]*og:url[^>]*>/i);
+                const found = tag ? tag[0].match(/song-detail\/(\d{6,})/) : null;
+
+                id = found ? found[1] : "";
+            }
+
+            if (!id) {
+
+                dbgLog("Import", "no song id on the page of " + key);
+                return null;
+            }
+
+            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(id),
+                { credentials: "include" }, 15000);
+            const json = res.ok ? await res.json() : null;
+            const s = json && json.code === 0 && json.data ? json.data.song : null;
+
+            if (!s || !s.mp3_url) {
+
+                dbgLog("Import", "Mureka gave no song for " + id + (json && json.msg ? ", " + String(json.msg) : ""));
+                return null;
+            }
+
+            const song = Object.assign({}, s);
+
+            song.mp3_url = songUrl(s);
+            song.cover = coverUrl(s);
+
+            return importedSong(song);
+        } catch (e) {
+
+            dbgLog("Import", "could not read " + key + " from Mureka");
+            return null;
+        }
+    }
+
+    // Every linked song, four at a time, in the order of the links
+    async function songsFromLinks(keys) {
+
+        const songs = new Array(keys.length).fill(null);
+        let next = 0;
+
+        showToast("Reading " + keys.length + (keys.length === 1 ? " song" : " songs") + " from Mureka", "wait");
+
+        const worker = async function () {
+
+            while (next < keys.length) {
+
+                const i = next;
+
+                next += 1;
+                songs[i] = await songFromLink(keys[i]);
+            }
+        };
+
+        await Promise.all([worker(), worker(), worker(), worker()]);
+
+        const got = songs.filter(Boolean);
+
+        return { songs: got, missed: keys.length - got.length };
     }
 
     // Imports from the web view, read and planned here and finished once
@@ -31343,6 +31750,26 @@
         const p = parseUserData(data);
 
         if (!p) {
+
+            // Mureka song links, read from Mureka and asked about as shared
+            // songs. The web view waits long enough for that
+            const keys = songLinkKeys(String(ask && ask.text || ""));
+
+            if (keys.length > 0) {
+
+                songsFromLinks(keys).then(function (got) {
+
+                    if (got.songs.length === 0) {
+
+                        hostReply(id, JSON.stringify({ ok: false, why: "Could not read the songs from Mureka" }));
+                        return;
+                    }
+
+                    hostImportText(id, { text: exportJson(sharedSongsData(got.songs)), from: ask.from });
+                });
+
+                return;
+            }
 
             hostReply(id, JSON.stringify({ ok: false, why: "That is not a Mureka Player export" }));
             return;
@@ -31375,6 +31802,12 @@
                     + (found.missing === 1 ? "is" : "are") + " left out" : "");
             out.songs = found.songs.length;
             out.playing = soundingNow();
+            out.shared = p.queue.shared === true;
+
+            if (out.shared) {
+                out.what = found.songs.length + (found.songs.length === 1 ? " shared song" : " shared songs")
+                    + queueForeignText(found);
+            }
         } else if (p.kind === "library") {
 
             const here = ownLibrary();
@@ -31445,9 +31878,14 @@
             dataStatus("Imported song tweaks, " + mergeSummary(plan, answers));
         } else {
 
-            // For a play queue, whether the song playing plays on
+            // For a play queue, whether the song playing plays on, for
+            // shared songs where in the queue they go
             if (entry.p.kind === "queue") {
-                entry.p.keepPlaying = Array.isArray(ask.answers) && ask.answers[0] === true;
+
+                const first = Array.isArray(ask.answers) ? ask.answers[0] : null;
+
+                entry.p.keepPlaying = first === true;
+                entry.p.sharedMode = typeof first === "string" ? first : "";
             }
 
             importParsed(entry.p, entry.source, "Imported", true);
@@ -35108,6 +35546,40 @@
         return any;
     }
 
+    // Like a song on Mureka, the same request a tap on the heart sends.
+    // Answers whether Mureka took it
+    async function likeOnMureka(id) {
+
+        try {
+
+            const res = await timedFetch("/api/pgc/user/song/favorite", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    time: Date.now(),
+                    song_id: id,
+                    state: 1,
+                    playlist_id: 0,
+                    home_module_id: 0
+                })
+            });
+            const json = await res.json().catch(function () {
+                return null;
+            });
+
+            if (res.ok && json && json.code === 0) {
+                return true;
+            }
+
+            dbgLog("Trim", "the like of " + id + " was refused: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status));
+        } catch (e) {
+            dbgLog("Trim", "the like of " + id + " could not reach Mureka");
+        }
+
+        return false;
+    }
+
     // Wait for a song Mureka is making until it can be played, asking every
     // few seconds. Answers whether it got there in time
     async function waitSongReady(id, limitMs) {
@@ -35280,6 +35752,44 @@
 
         if (carried) {
             note += ", with the original's tweaks";
+        }
+
+        // A liked original has its new song liked as well
+        if (song.is_liked === true) {
+
+            let liked = 0;
+            let tried = 0;
+
+            for (const s of extractSongs(json.data || json)) {
+
+                if (String(s.song_id) === String(song.song_id)) {
+                    continue;
+                }
+
+                tried += 1;
+
+                if (await likeOnMureka(s.song_id)) {
+
+                    liked += 1;
+
+                    const here = cache.songs.find(function (x) {
+                        return String(x.song_id) === String(s.song_id);
+                    });
+
+                    if (here) {
+
+                        here.is_liked = true;
+                        noteChangedHere(here);
+                    }
+                }
+            }
+
+            if (tried > 0) {
+
+                note += liked === tried ? ", liked like the original" : ", the like did not go through";
+                saveCache();
+                renderList();
+            }
         }
 
         // The original goes only once the new song is safely there, from
@@ -36614,6 +37124,22 @@
         addMenuRow("Play only this", "#fff", function () {
             playOnlyThis(song);
         });
+
+        // Pick songs to share with another player
+        if (selectMode) {
+
+            addMenuRow(selectedSongs.has(String(song.song_id)) ? "Let go of this" : "Pick this", "#fff", function () {
+                toggleSelected(song, null);
+                renderList();
+            });
+
+            addMenuRow("Done picking", "#fff", endSelect);
+        } else {
+
+            addMenuRow("Select to share", "#fff", function () {
+                startSelect(song);
+            });
+        }
 
         // The queue
         menuGroup();

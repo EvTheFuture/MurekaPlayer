@@ -2588,6 +2588,12 @@
         color: #f0a94a;
     }
 
+    /* A song shared from another account, which may not be public */
+    .rowBadge.shared {
+        background: #2e2640;
+        color: #c9a8ff;
+    }
+
     /* A song made by trimming, a small yellow T on the badge's corner */
     .rowBadge {
         position: relative;
@@ -8219,12 +8225,8 @@
         // An ignored song carries a small crossed circle before its title
         if (song.ignored) {
 
-            const mark = icon("ignore");
-
-            mark.classList.add("rowIgnored");
             title.classList.add("ignored");
-            mark.setAttribute("title", "Ignored, queues made from the list leave it out");
-            title.prepend(mark);
+            title.prepend(ignoredMark());
         }
 
         // Zero stars shows grey, not rated shows nothing, as on the phone
@@ -8269,7 +8271,8 @@
         row.appendChild(heart);
         row.appendChild(time);
 
-        if (rowMeta.badges) {
+        // A song shared from another account says so wherever it shows
+        if (rowMeta.badges || song.shared) {
 
             const badge = document.createElement("span");
 
@@ -8298,9 +8301,28 @@
         el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, Read play counts under Sort or Update reads them";
     }
 
+    // The small crossed circle before the title of an ignored song
+    function ignoredMark() {
+
+        const mark = icon("ignore");
+
+        mark.classList.add("rowIgnored");
+        mark.setAttribute("title", "Ignored, queues made from the list leave it out");
+
+        return mark;
+    }
+
     // The badge at the end of a line: new for a song not played yet, else
     // public or draft, with a small T for a song made by trimming
     function paintBadge(badge, song) {
+
+        if (song.shared) {
+
+            badge.className = "rowBadge shared";
+            badge.textContent = "shared";
+            badge.title = "Shared with you from another account, it may not be public";
+            return;
+        }
 
         badge.className = "rowBadge" + (song.isNew ? " new" : (song.published ? "" : " draft"));
         badge.textContent = song.isNew ? "new" : (song.published ? "public" : "draft");
@@ -10827,7 +10849,13 @@
             const title = row.querySelector(".rowTitle");
 
             if (title && typeof item.title === "string" && item.title && title.textContent !== item.title) {
+
                 title.textContent = item.title;
+
+                // The mark of an ignored song goes with the old text
+                if (item.ignored) {
+                    title.prepend(ignoredMark());
+                }
             }
 
             // New becomes public or draft once the phone has reported the
@@ -12991,8 +13019,8 @@
             + "justify-content:center;z-index:300;font-size:clamp(16px,1.8vw,24px)";
         card.style.cssText = "background:var(--card);border:1px solid var(--line);border-radius:18px;padding:3vh 3vw;"
             + "width:min(640px,92vw);display:flex;flex-direction:column;gap:2vh;color:var(--text)";
-        head.textContent = "Paste an export here";
-        area.placeholder = "Settings, song tweaks or a song library, as exported";
+        head.textContent = "Paste an export or Mureka song links here";
+        area.placeholder = "Settings, song tweaks, a song library or queue, or Mureka song links";
         area.setAttribute("autocomplete", "off");
         area.setAttribute("spellcheck", "false");
         area.style.cssText = "width:100%;height:30vh;box-sizing:border-box;padding:10px;border-radius:10px;"
@@ -13120,6 +13148,29 @@
                 askConfirm(r.what + ". Import them? The phone's settings are replaced.", "Import", false, function () {
                     applyImport(r.key, []);
                 });
+                return;
+            }
+
+            if (r.kind === "queue" && r.shared) {
+
+                // Songs someone picked to share: where in the queue they go
+                openChoice(r.what + ", where in the queue?", [
+                    { icon: "queueAdd", label: "Play next", fn: function () {
+
+                        closeSongMenu();
+                        applyImport(r.key, ["next"]);
+                    } },
+                    { icon: "listPlus", label: "Add to the end", cls: "inset", fn: function () {
+
+                        closeSongMenu();
+                        applyImport(r.key, ["end"]);
+                    } },
+                    { icon: "queue", label: "Replace the queue", fn: function () {
+
+                        closeSongMenu();
+                        applyImport(r.key, ["replace"]);
+                    } }
+                ]);
                 return;
             }
 
