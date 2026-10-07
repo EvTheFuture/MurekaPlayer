@@ -344,11 +344,15 @@ the new settings layout and a number of smaller improvements.
   brought up to date, and a song asked for starts playing at once, in place
   of a song playing meanwhile. Nothing of this is kept over a restart.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
-  instrumental marks, ignored songs, trim marks and saved creators each have
-  a switch, with how many are new or differ. The first time ratings and
-  ignored songs are left out, after that the choice from last time is
-  ticked again, so two people can share tempos without touching each
-  other's ratings. In the player and in the web view.
+  instrumental marks, ignored songs and saved creators each have a switch,
+  with how many are new or differ. The first time ratings, ignored songs and
+  saved creators are left out, after that the choice from last time is
+  ticked again, so two people can share tempos without touching each other's
+  ratings. In the player and in the web view.
+- **Include Mureka's BPM in song tweaks**, on by default, sends Mureka's
+  own tempo along for songs without one set by hand. An import takes it
+  only for a song with no tempo at all, as on a device signed in to another
+  account, which Mureka gives none.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,

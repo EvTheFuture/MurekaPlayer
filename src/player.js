@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.197";
+    const VERSION = "1.9.9.201";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -149,11 +149,12 @@
 
     // The kinds of song tweaks an import can leave out, read with the
     // settings, which remember what was left out last time
-    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "ignore", "trimmed", "creators"];
+    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "ignore", "creators"];
 
-    // Left out of an import until chosen otherwise: ratings and ignored
-    // songs are a matter of taste, tempos and instrumental marks are facts
-    const IMPORT_SKIP_DEFAULT = ["rating", "ignore"];
+    // Left out of an import until chosen otherwise: ratings, ignored songs
+    // and saved creators are a matter of taste, tempos and instrumental
+    // marks are facts
+    const IMPORT_SKIP_DEFAULT = ["rating", "ignore", "creators"];
 
     // Cache API bucket for re-encoded cover art data urls, so a cover downloads
     // and re-encodes only once and then persists across sessions, like the audio
@@ -1947,7 +1948,8 @@
             importSkip: IMPORT_SKIP_DEFAULT.slice(),
             importSeen: IMPORT_TYPE_KEYS.slice(),
             debugHide: [],
-            webSeekActions: true
+            webSeekActions: true,
+            exportMurekaBpm: true
         };
 
         try {
@@ -2149,7 +2151,8 @@
                     debugHide: Array.isArray(parsed.debugHide)
                         ? parsed.debugHide.filter(function (id) { return typeof id === "string"; })
                         : [],
-                    webSeekActions: parsed.webSeekActions !== false
+                    webSeekActions: parsed.webSeekActions !== false,
+                    exportMurekaBpm: parsed.exportMurekaBpm !== false
                 };
             }
         } catch (e) {
@@ -2911,10 +2914,22 @@
     function promptManualBpm(song) {
 
         const current = effectiveBpm(song);
+        const fromMureka = Number(song.bpm) > 0 ? Number(song.bpm) : 0;
+
+        // A tempo set here can be taken away again, back to Mureka's when
+        // Mureka gave the song one
+        const clear = hasManualBpm(song) ? {
+            label: fromMureka > 0 ? "Use Mureka's, " + fromMureka : "Clear",
+            onTap: function (value, close) {
+
+                close();
+                setManualBpmText(song, "");
+            }
+        } : null;
 
         askText("BPM for " + (song.title || "Untitled"), current > 0 ? String(current) : "", "Save", function (answer) {
             setManualBpmText(song, String(answer));
-        });
+        }, clear);
     }
 
     // Keep a typed tempo, or clear the hand entered one when the text is
@@ -19208,7 +19223,9 @@
             manualInstrumental: isManualInstrumental(song),
             ignored: isIgnored(song),
             bpm: effectiveBpm(song) || 0,
-            canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
+            canSetBpm: true,
+            manualBpm: hasManualBpm(song),
+            murekaBpm: Number(song.bpm) > 0 ? Number(song.bpm) : 0,
             published: song.publish_state === 1,
             remix: remixState(song),
             copyOnPublish: settings.copyLinkOnPublish !== false,
@@ -28280,7 +28297,7 @@
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
         const dataHint = document.createElement("div");
-        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks and saved creators."
+        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks, ignored songs and saved creators."
             + " Share saves to the Google Drive or Files app, Import can pick the file"
             + " from there. Import sees what a file holds. Song tweaks are merged, and"
             + " when a song has a different value here and in the file you are asked"
@@ -28387,7 +28404,15 @@
 
         updateDriveStatus();
 
+        // Mureka's own tempo for songs without one set by hand goes along
+        const murekaBpmRow = makeBoolRow("Include Mureka's BPM in song tweaks",
+            function () { return settings.exportMurekaBpm !== false; },
+            function (v) { settings.exportMurekaBpm = v; });
+
         backupPage.appendChild(dataHint);
+        backupPage.appendChild(withHint(murekaBpmRow, "For songs without a BPM set by hand, Mureka's own goes along."
+            + " An import takes it only for a song with no BPM at all there, as on a device signed in to another"
+            + " account, which Mureka gives none."));
         backupPage.appendChild(exportRow);
         backupPage.appendChild(libraryRow);
         backupPage.appendChild(importRow);
@@ -29536,6 +29561,24 @@
             data.manualBpm[key] = value;
         });
 
+        // Mureka's own tempo for songs without one set by hand, when asked
+        // for. Kept apart, an import takes it only where the song has no
+        // tempo at all, as for another account that Mureka gives none
+        if (settings.exportMurekaBpm !== false) {
+
+            data.murekaBpm = {};
+
+            for (const s of ownLibrary().songs || []) {
+
+                const id = String(s.song_id);
+                const v = Number(s.bpm);
+
+                if (isFinite(v) && v > 0 && !manualBpm.has(id)) {
+                    data.murekaBpm[id] = v;
+                }
+            }
+        }
+
         return data;
     }
 
@@ -29593,6 +29636,7 @@
             exported: typeof data.exported === "string" ? data.exported : "",
             ratings: [],
             bpm: [],
+            murekaBpm: [],
             instr: [],
             ignore: [],
             trimmed: [],
@@ -29662,6 +29706,19 @@
 
                 if (isFinite(v) && v > 0) {
                     out.bpm.push([String(key), v]);
+                }
+            }
+        }
+
+        // Mureka's tempos from where the file was made, from 1.9.9.200 on
+        if (data.murekaBpm && typeof data.murekaBpm === "object") {
+
+            for (const key of Object.keys(data.murekaBpm)) {
+
+                const v = Number(data.murekaBpm[key]);
+
+                if (isFinite(v) && v > 0) {
+                    out.murekaBpm.push([String(key), v]);
                 }
             }
         }
@@ -29742,8 +29799,8 @@
             return "settings";
         }
 
-        return userDataSummary(p.ratings.length, p.bpm.length, p.instr.length, p.creators.length, p.trimmed.length,
-            p.ignore.length);
+        return userDataSummary(p.ratings.length, p.bpm.length + p.murekaBpm.length, p.instr.length, p.creators.length,
+            p.trimmed.length, p.ignore.length);
     }
 
     // Put imported settings into effect without a reload, as far as the
@@ -29834,6 +29891,37 @@
                 plan.same++;
             } else {
                 plan.conflicts.push({ type: "bpm", id: entry[0], mine: manualBpm.get(entry[0]), theirs: entry[1] });
+            }
+        }
+
+        // Mureka's tempo from the file, only for a song with no tempo here,
+        // neither one set by hand nor one from Mureka, nor one removed here
+        // on purpose. Any of those is left as it is without asking
+        if (p.murekaBpm.length > 0) {
+
+            const ownBpm = new Map();
+            const fileBpm = new Set(p.bpm.map(function (e) {
+                return e[0];
+            }));
+
+            for (const s of cache.songs.concat(ownLibrary().songs || [])) {
+
+                if (Number(s.bpm) > 0) {
+                    ownBpm.set(String(s.song_id), Number(s.bpm));
+                }
+            }
+
+            for (const entry of p.murekaBpm) {
+
+                if (fileBpm.has(entry[0]) || manualBpm.has(entry[0]) || isCleared("bpm", entry[0])) {
+                    continue;
+                }
+
+                if (ownBpm.has(entry[0])) {
+                    plan.same++;
+                } else {
+                    plan.bpm.push(entry);
+                }
             }
         }
 
@@ -30088,7 +30176,6 @@
         { key: "bpm", label: "Tempos (BPM)" },
         { key: "instr", label: "Instrumental marks" },
         { key: "ignore", label: "Ignored songs" },
-        { key: "trimmed", label: "Trim marks" },
         { key: "creators", label: "Saved creators" }
     ];
 
@@ -30677,7 +30764,7 @@
         }
 
         return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
-            Object.keys(data.manualBpm).length, data.manualInstrumental.length,
+            Object.keys(data.manualBpm).length + Object.keys(data.murekaBpm || {}).length, data.manualInstrumental.length,
             data.creators.length, 0, data.ignored.length);
     }
 
@@ -31687,6 +31774,17 @@
         local.manualBpm = Object.assign(bpmOut, local.manualBpm);
         local.manualInstrumental = Array.from(new Set(p.instr.concat(local.manualInstrumental)));
         local.ignored = Array.from(new Set(p.ignore.concat(local.ignored)));
+
+        if (local.murekaBpm || p.murekaBpm.length > 0) {
+
+            const murekaOut = {};
+
+            for (const entry of p.murekaBpm) {
+                murekaOut[entry[0]] = entry[1];
+            }
+
+            local.murekaBpm = Object.assign(murekaOut, local.murekaBpm || {});
+        }
         local.trimmed = Array.from(new Set(p.trimmed.concat(local.trimmed || [])));
 
         // Removals follow the same rule, this device wins. Removed here takes
@@ -31726,6 +31824,14 @@
 
         for (const id of local.cleared.bpm) {
             delete local.manualBpm[id];
+        }
+
+        // A tempo set by hand goes in its own list, not as Mureka's
+        if (local.murekaBpm) {
+
+            for (const id of Object.keys(local.manualBpm)) {
+                delete local.murekaBpm[id];
+            }
         }
 
         local.manualInstrumental = local.manualInstrumental.filter(function (id) {
@@ -36604,12 +36710,12 @@
             toggleIgnored(song);
         });
 
-        if (hasManualBpm(song) || !(Number(song.bpm) > 0)) {
-
-            addMenuRow("Set BPM", "#fff", function () {
-                promptManualBpm(song);
-            });
-        }
+        // Also for a song Mureka gave a tempo, which may be wrong or not
+        // shown on Mureka's own site. One set here takes its place, and
+        // clearing it brings Mureka's back
+        addMenuRow("Set BPM", "#fff", function () {
+            promptManualBpm(song);
+        });
 
         // About the song and passing it on
         menuGroup();

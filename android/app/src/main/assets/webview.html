@@ -14252,6 +14252,11 @@
 
         $("titleRow").style.display = "none";
         $("bpmInput").value = m.bpm > 0 ? String(m.bpm) : "";
+
+        // Only a tempo set by hand can be cleared, back to Mureka's when
+        // Mureka gave the song one
+        $("bpmClear").style.display = m.manualBpm ? "" : "none";
+        $("bpmClear").textContent = m.murekaBpm > 0 ? "Use Mureka's, " + m.murekaBpm : "Clear";
         $("bpmRow").style.display = "flex";
         $("bpmInput").focus();
     }
