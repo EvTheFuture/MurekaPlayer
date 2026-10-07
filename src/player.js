@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.206";
+    const VERSION = "1.9.9.207";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25648,9 +25648,15 @@
         selCountEl.textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
-    // The picked songs as text for the other player's Import
+    // The picked songs as short text for the other player's Import: only
+    // their ids, written in base 36 after a mark the Import knows. The
+    // other player reads each song from Mureka itself, so a long list
+    // still fits a message
     function selectedText() {
-        return exportJson(sharedSongsData(Array.from(selectedSongs.values())));
+
+        const codes = Array.from(selectedSongs.keys()).map(idToCode).filter(Boolean);
+
+        return "Mureka Player songs: " + SHARE_MARK + "." + codes.join(".");
     }
 
     async function copySelected() {
@@ -25664,7 +25670,7 @@
         }
 
         if (await copyText(selectedText())) {
-            showToast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player", true);
+            showToast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player, which reads them from Mureka", true);
         } else {
             showToast("Could not copy", false);
         }
@@ -31812,20 +31818,72 @@
         return "";
     }
 
-    // The songs a text links to on Mureka, by the key or the id after
-    // song-detail in each link, each once and at most 50
+    // The mark before shared song ids, the version of the short form
+    const SHARE_MARK = "mps1";
+
+    // A song id as base 36 and back, through BigInt so a long id keeps
+    // every digit
+    function idToCode(id) {
+
+        try {
+            return BigInt(String(id)).toString(36);
+        } catch (e) {
+            return "";
+        }
+    }
+
+    function codeToId(code) {
+
+        let n = BigInt(0);
+
+        for (const ch of String(code).toLowerCase()) {
+
+            const d = parseInt(ch, 36);
+
+            if (isNaN(d)) {
+                return "";
+            }
+
+            n = n * BigInt(36) + BigInt(d);
+        }
+
+        return n.toString();
+    }
+
+    // The songs a text names: by the key or the id after song-detail in a
+    // Mureka link, and by the ids of the player's short form. Each once,
+    // at most 100
     function songLinkKeys(text) {
 
         const out = [];
+        const add = function (key) {
+
+            if (key && out.indexOf(key) < 0 && out.length < 100) {
+                out.push(key);
+            }
+        };
+
+        const short = new RegExp("\\b" + SHARE_MARK + "((?:\\.[0-9a-z]+)+)", "gi");
+        let s = short.exec(text);
+
+        while (s !== null) {
+
+            for (const code of s[1].split(".")) {
+
+                if (code) {
+                    add(codeToId(code));
+                }
+            }
+
+            s = short.exec(text);
+        }
+
         const re = /mureka\.ai\/song-detail\/([A-Za-z0-9]+)/g;
         let m = re.exec(text);
 
-        while (m !== null && out.length < 50) {
+        while (m !== null) {
 
-            if (out.indexOf(m[1]) < 0) {
-                out.push(m[1]);
-            }
-
+            add(m[1]);
             m = re.exec(text);
         }
 
