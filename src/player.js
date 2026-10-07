@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.194";
+    const VERSION = "1.9.9.195";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3615,29 +3615,50 @@
         return passesFilters(song) && !isIgnored(song);
     }
 
-    // Mark a song ignored or take the mark away. Marked, it leaves the part
-    // of the queue made from the list, songs put in by hand stay. Unmarked,
-    // a queue made from the list takes it in again
-    function toggleIgnored(song) {
+    // Mark a song ignored or take the mark away. Marked while it is still to
+    // come in the queue, the question is whether it leaves the queue too.
+    // dropFromQueue answers it beforehand, as the web view does, which asks
+    // itself. Unmarked, a queue made from the list takes it in again
+    function toggleIgnored(song, dropFromQueue) {
 
         const id = String(song.song_id);
+        const title = song.title || "Untitled";
 
         if (ignoredIds.has(id)) {
 
             ignoredIds.delete(id);
             markCleared("ignore", id);
-            setStatus("No longer ignored: " + (song.title || "Untitled"));
+            setStatus("No longer ignored: " + title);
             extendQueueWithNew();
         } else {
 
             ignoredIds.add(id);
             unmarkCleared("ignore", id);
-            setStatus("Ignored, queues made from the list leave it out: " + (song.title || "Untitled"));
-            dropIgnoredUpcoming();
+            setStatus("Ignored, queues made from the list leave it out: " + title);
+
+            if (upcomingIndex(song) >= 0) {
+
+                if (dropFromQueue === true) {
+                    dropUpcomingSong(song);
+                } else if (dropFromQueue === undefined) {
+
+                    askChoices(title + " is in the queue.\nTake it out of the queue as well?", [
+                        { label: "Remove from queue", fn: function () {
+                            dropUpcomingSong(song);
+                        } },
+                        { label: "Keep in queue", ring: true, fn: function () {
+                        } }
+                    ], function () {
+                    });
+                }
+            }
         }
 
         saveIgnored();
         noteChangedHere(song);
+
+        // The web view reads its lists again, with the mark
+        songDataStamp += 1;
         hostListStamp += 1;
         renderList();
         saveQueue();
@@ -3646,9 +3667,21 @@
         publishHostSoon();
     }
 
+    // Every place a song still has to come in the queue is taken out, also
+    // where it was put in by hand. The playing song and the ones played stay
+    function dropUpcomingSong(song) {
+
+        for (let i = queue.length - 1; i > queuePos; i -= 1) {
+
+            if (queue[i] && queue[i].song_id === song.song_id) {
+                removeFromQueue(i);
+            }
+        }
+    }
+
     // The ignored songs still to come in a queue made from the list are
-    // taken out. A queue put together by hand, and songs put in to play
-    // next, are the user's own choice and stay
+    // taken out, after an import. A queue put together by hand, and songs
+    // put in to play next, are the user's own choice and stay
     function dropIgnoredUpcoming() {
 
         if (queueOwn || queuePos < 0 || queuePos >= queue.length) {
@@ -21189,7 +21222,9 @@
                 toggleManualInstrumental(song);
             }
         } else if (act === "ignore") {
-            toggleIgnored(song);
+
+            // The web view asked about the queue itself, the answer comes along
+            toggleIgnored(song, a.value === true);
         } else if (act === "publish") {
             setPublished(song, true);
         } else if (act === "unpublish") {

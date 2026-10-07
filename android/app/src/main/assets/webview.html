@@ -13736,8 +13736,27 @@
         // Left out of queues made from the list, played only when asked for
         box.appendChild(menuItem("ignore", m.ignored ? "Stop ignoring" : "Ignore in queues", function () {
 
-            act("ignore");
             close();
+
+            // Still to come in the queue: whether it leaves the queue too
+            if (!m.ignored && m.queueAt >= 0) {
+
+                openChoice(m.title + " is in the queue", [
+                    { icon: "trash", label: "Ignore and remove from queue", fn: function () {
+
+                        closeSongMenu();
+                        act("ignore", true);
+                    } },
+                    { icon: "ignore", label: "Ignore, keep in queue", cls: "inset", fn: function () {
+
+                        closeSongMenu();
+                        act("ignore", false);
+                    } }
+                ]);
+                return;
+            }
+
+            act("ignore", false);
         }));
 
         if (m.canSetBpm) {
