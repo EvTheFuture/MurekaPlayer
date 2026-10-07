@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.182";
+    const VERSION = "1.9.9.183";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1447,11 +1447,24 @@
             controller.abort();
         }, limit);
 
+        // A caller's own signal stops it too, a background download given
+        // up for a song that was just tapped
+        if (opts.signal) {
+
+            if (opts.signal.aborted) {
+                controller.abort();
+            } else {
+                opts.signal.addEventListener("abort", function () {
+                    controller.abort();
+                });
+            }
+        }
+
         const merged = Object.assign({}, opts, { signal: controller.signal });
 
         return watchMureka(resource, fetch(resource, merged).finally(function () {
             clearTimeout(timer);
-        }));
+        }), opts.signal);
     }
 
     // Read the cache from localStorage, return an empty cache on failure
@@ -6417,6 +6430,20 @@
             const store = await caches.open(AUDIO_CACHE);
             let resp = await store.match(direct);
 
+            // Marked as stored, but the copy is gone, cleared by the browser
+            // say. With the direct stream on it plays from Mureka at once
+            // rather than after the whole file has come, and is stored again
+            // once it plays
+            if (!resp && cachedIds.has(song.song_id) && settings.directAudio && !offlineMode()) {
+
+                dbgLog("Song", "marked as stored but not found, streamed from Mureka: " + (song.title || "Untitled"));
+                cachedIds.delete(song.song_id);
+                repaintCacheDot(song);
+                saveCacheMarksSoon();
+
+                return direct;
+            }
+
             if (!resp) {
 
                 // Mark as caching so its dot pulses while the file downloads
@@ -6527,12 +6554,39 @@
     }
 
     // Ensure a song mp3 is stored in the cache, returns true on success
-    async function fetchToCache(song) {
+    // Songs being stored in the background, ahead of the queue or the
+    // playing one for later. A song tapped that has to come from Mureka
+    // stops them, so it gets the whole connection
+    const backgroundFetches = new Set();
+
+    function stopBackgroundFetches(why) {
+
+        if (backgroundFetches.size === 0) {
+            return;
+        }
+
+        dbgLog("Song", "stopped " + backgroundFetches.size + " background download"
+            + (backgroundFetches.size === 1 ? "" : "s") + ", " + why);
+
+        for (const c of backgroundFetches) {
+            c.abort();
+        }
+
+        backgroundFetches.clear();
+    }
+
+    async function fetchToCache(song, background) {
 
         const url = songUrl(song);
 
         if (!url) {
             return false;
+        }
+
+        const stopper = background && typeof AbortController !== "undefined" ? new AbortController() : null;
+
+        if (stopper) {
+            backgroundFetches.add(stopper);
         }
 
         try {
@@ -6546,7 +6600,7 @@
             cachingIds.add(song.song_id);
             repaintCacheDot(song);
 
-            const got = await timedFetch(url);
+            const got = await timedFetch(url, stopper ? { signal: stopper.signal } : {});
 
             if (!got || !got.ok) {
                 return false;
@@ -6560,6 +6614,10 @@
         } catch (e) {
             return false;
         } finally {
+
+            if (stopper) {
+                backgroundFetches.delete(stopper);
+            }
 
             if (cachingIds.delete(song.song_id)) {
                 repaintCacheDot(song);
@@ -7688,11 +7746,23 @@
         });
 
         audio.addEventListener("ended", function () {
+
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
             handleSongEnded();
         });
 
         // A song that starts playing proves the audio base URL is correct
         audio.addEventListener("playing", function () {
+
+            audioUnlocked = true;
+
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
 
             playbackWorks = true;
             userPaused = false;
@@ -7715,7 +7785,7 @@
                 && !cachedIds.has(currentSong.song_id)
                 && !cachingIds.has(currentSong.song_id)) {
 
-                fetchToCache(currentSong);
+                fetchToCache(currentSong, true);
             }
 
             if (npCoverSent) {
@@ -7736,6 +7806,11 @@
 
         audio.addEventListener("error", function () {
 
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
+
             // The source swap ended in an error rather than playing, so clear
             // the flag or the next real interruption pause would be ignored
             switchingTrack = false;
@@ -7744,6 +7819,11 @@
 
         // Set the seek bar range once the duration is known
         audio.addEventListener("loadedmetadata", function () {
+
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
 
             // Apply a one-shot resume seek now that the duration is known
             if (pendingSeek > 0 && isFinite(audio.duration)) {
@@ -7763,6 +7843,11 @@
 
         // Move the seek bar and time labels as the song plays
         audio.addEventListener("timeupdate", function () {
+
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
 
             if (audio.currentTime !== clockLast) {
 
@@ -7786,6 +7871,11 @@
         });
 
         audio.addEventListener("play", function () {
+
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
 
             userPaused = false;
 
@@ -7813,6 +7903,11 @@
         });
 
         audio.addEventListener("pause", function () {
+
+            // The silent unlock sound is not a song
+            if (isPriming()) {
+                return;
+            }
 
             // A source swap flips paused and may fire this on some engines.
             // The next song is already starting, so nothing below applies
@@ -10236,6 +10331,18 @@
     // audio element has played once before. With nothing loaded yet, a
     // moment of silence is played on the tap that asks for a song to play
     // later, so that song can start by itself once it is ready
+    // The silent sound played to unlock the element, while it plays. The
+    // element's listeners leave it alone, it is not a song
+    let primingUrl = null;
+
+    // Whether the element has played anything in this page, after which a
+    // browser lets it start without a tap
+    let audioUnlocked = false;
+
+    function isPriming() {
+        return !!(primingUrl && audio && audio.src === primingUrl);
+    }
+
     function primeAudio() {
 
         // The app's WebView plays without a tap
@@ -10280,17 +10387,28 @@
         const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
         const done = function () {
 
-            audio.pause();
-            audio.removeAttribute("src");
-            audio.load();
+            // The song may already have taken the element over, then it is
+            // left alone
+            if (audio.src === url) {
+
+                audio.pause();
+                audio.removeAttribute("src");
+                audio.load();
+                switchingTrack = false;
+                updatePlayPause();
+            }
+
+            if (primingUrl === url) {
+                primingUrl = null;
+            }
+
             URL.revokeObjectURL(url);
-            switchingTrack = false;
-            updatePlayPause();
         };
 
         // Not a song, so the pause and play listeners leave it alone
         userPaused = true;
         switchingTrack = true;
+        primingUrl = url;
         audio.src = url;
 
         try {
@@ -10298,7 +10416,11 @@
             const started = audio.play();
 
             if (started && typeof started.then === "function") {
-                started.then(done, done);
+                started.then(function () {
+
+                    audioUnlocked = true;
+                    done();
+                }, done);
             } else {
                 done();
             }
@@ -10409,6 +10531,12 @@
         const token = playToken + 1;
         playToken = token;
 
+        // A song that has to come from Mureka gets the whole connection, the
+        // songs being stored in the background are let go
+        if (!cachedIds.has(song.song_id) && !(nextReady && nextReady.song_id === song.song_id)) {
+            stopBackgroundFetches("the song asked for comes from Mureka");
+        }
+
         // Offline the direct stream cannot work, so fall through to the cache
         // path below, which serves the stored copy and keeps playback going
         // A URL prepared while the previous song played needs no waiting at
@@ -10448,6 +10576,13 @@
 
         } else {
 
+            // The first song of the page waits for its stored copy, so the
+            // tap unlocks the element now with a moment of silence, which a
+            // browser would not allow later without one
+            if (!isApkHost() && !audioUnlocked) {
+                primeAudio();
+            }
+
             const url = await getPlayableUrl(song);
 
             // A newer play started while fetching, drop this one
@@ -10472,13 +10607,8 @@
         // Remember the queue and position so a restart can resume here
         saveQueue();
 
-        // Tell Mureka the song was played, unless the user opted out
-        if (settings.reportPlays) {
-            reportPlay(song);
-        }
-
-        // Fetch play and like counts to show under the now playing title. The
-        // previous song's lyrics and waveform must not linger while it loads
+        // The previous song's lyrics and waveform must not linger while this
+        // one loads
         lyricRows = [];
         lyricIdx = -1;
         waveData = null;
@@ -10487,20 +10617,75 @@
         waveOwnLoud = null;
         updateLyricLine(true);
         updateSeekMode();
-        loadWaveForSong(song);
-        fetchNowPlayingCounts(song);
 
-        // The current song is cached now, get upcoming songs ready in the background
-        prefetchNext();
+        // Everything else waits until the music is going: the play report,
+        // unless switched off, the plays and likes, the waveform and getting
+        // the songs ahead ready, none of it in the way of the song starting
+        afterSongStarts(token, function () {
+
+            if (settings.reportPlays) {
+                reportPlay(song);
+            }
+
+            loadWaveForSong(song);
+            fetchNowPlayingCounts(song);
+            prefetchNext();
+        });
     }
 
     // A stored song plays from the copy here, also with the direct stream on,
-    // so a slow or patchy connection does not hold it up. Only once a song
-    // has played in this page, or in the app, since before that a browser
-    // may still need the tap itself to start the sound, which the wait for
-    // the stored copy would lose
+    // so a slow or patchy connection does not hold it up. The first song of
+    // a page too: the tap unlocks the element with a moment of silence
+    // first, so the wait for the stored copy does not lose it
     function playStoredFirst(song) {
-        return cachedIds.has(song.song_id) && (isApkHost() || playbackWorks);
+        return cachedIds.has(song.song_id);
+    }
+
+    // Work that can wait until the song is heard: the play report, Mureka's
+    // numbers, the waveform and the songs ahead. Started once the song plays,
+    // or after a few seconds whatever happens, and only while it is still
+    // the song asked for
+    function afterSongStarts(token, work) {
+
+        let done = false;
+        let timer = 0;
+
+        const run = function () {
+
+            if (done) {
+                return;
+            }
+
+            done = true;
+            clearTimeout(timer);
+
+            if (audio) {
+                audio.removeEventListener("playing", onPlaying);
+            }
+
+            if (token === playToken) {
+                work();
+            }
+        };
+
+        const onPlaying = function () {
+
+            if (!isPriming()) {
+                run();
+            }
+        };
+
+        timer = setTimeout(run, 4000);
+
+        if (audio && !audio.paused && audio.readyState >= 3 && !isPriming()) {
+
+            setTimeout(run, 0);
+            return;
+        }
+
+        if (audio) {
+            audio.addEventListener("playing", onPlaying);
+        }
     }
 
     // Report a play to Mureka, fire and forget so it never blocks playback
@@ -12019,7 +12204,7 @@
                 continue;
             }
 
-            const ok = await fetchToCache(song);
+            const ok = await fetchToCache(song, true);
 
             if (ok) {
 
@@ -35089,8 +35274,43 @@
             }
         }, true);
 
-        // Scrolling closes it so it does not float detached from its row
-        window.addEventListener("scroll", hideContextMenu, true);
+        // Scrolling closes it so it does not float detached from its row.
+        // Scrolling the menu itself, too long for the screen, leaves it open
+        window.addEventListener("scroll", function (ev) {
+
+            if (contextMenuEl && ev.target && ev.target.nodeType === 1 && contextMenuEl.contains(ev.target)) {
+                return;
+            }
+
+            hideContextMenu();
+        }, true);
+    }
+
+    // Where the rows of the song menu go, and whether a line comes before
+    // the next row: the menu is in groups with a thin line between them,
+    // drawn only once a group has a row, so an empty group leaves no line
+    let menuTarget = null;
+    let menuLineDue = false;
+
+    function menuGroup() {
+        menuLineDue = true;
+    }
+
+    function menuRowPlace() {
+
+        const box = menuTarget || contextMenuEl;
+
+        if (menuLineDue && box.querySelector(".mureka-menu-row, .mureka-menu-off")) {
+
+            const line = document.createElement("div");
+
+            line.style.cssText = "height:1px;margin:4px 8px;background:#3a3a42";
+            box.appendChild(line);
+        }
+
+        menuLineDue = false;
+
+        return box;
     }
 
     // Hide the right-click options popup
@@ -35109,13 +35329,14 @@
         const row = document.createElement("div");
 
         row.textContent = label;
+        row.className = "mureka-menu-off";
         row.style.cssText = "padding:7px 10px;border-radius:6px;color:#777;cursor:default";
 
         row.addEventListener("click", function (ev) {
             ev.stopPropagation();
         });
 
-        contextMenuEl.appendChild(row);
+        menuRowPlace().appendChild(row);
     }
 
     // The song's number and title at the top of the popup, so a long press
@@ -35172,7 +35393,7 @@
             handler();
         });
 
-        contextMenuEl.appendChild(row);
+        menuRowPlace().appendChild(row);
     }
 
     // Show the options popup for a song at the given screen position
@@ -35185,9 +35406,20 @@
         contextMenuEl.textContent = "";
 
         const cached = cachedIds.has(song.song_id);
+        const mine = !creatorSource;
 
         addMenuSongHead(song);
 
+        // The rows scroll on their own when the menu is taller than the
+        // screen, the song's name above and the stars below stay in view
+        const body = document.createElement("div");
+
+        body.style.cssText = "overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch";
+        contextMenuEl.appendChild(body);
+        menuTarget = body;
+        menuLineDue = false;
+
+        // Playing it now
         addMenuRow("Play", "#fff", function () {
             playFrom(song.song_id);
         });
@@ -35195,6 +35427,9 @@
         addMenuRow("Play only this", "#fff", function () {
             playOnlyThis(song);
         });
+
+        // The queue
+        menuGroup();
 
         addMenuRow("Play next", "#fff", function () {
             addNext(song);
@@ -35232,25 +35467,11 @@
             });
         }
 
-        addMenuRow("Refresh", "#fff", function () {
-            refreshOne(song);
-        });
-
-        addMenuRow("Download", "#fff", function () {
-            downloadOne(song);
-        });
-
-        addMenuRow("Copy link", "#fff", function () {
-            copyLink(song);
-        });
-
-        addMenuRow("Information", "#fff", function () {
-            openInfo(song);
-        });
-
-        // Only your own songs can be renamed or published, another creator's
+        // The song on Mureka, only your own songs. Another creator's
         // library is theirs
-        if (!creatorSource) {
+        if (mine) {
+
+            menuGroup();
 
             addMenuRow("Rename", "#fff", function () {
                 promptRename(song);
@@ -35279,9 +35500,12 @@
             });
         }
 
-        // A song the server already reports as instrumental cannot be marked
-        // by hand, the mark exists only for songs whose lyrics field holds
-        // prompt instructions rather than words that are sung
+        // What is noted about the song on this device: instrumental and its
+        // tempo. A song the server already reports as instrumental cannot
+        // be marked by hand, the mark exists only for songs whose lyrics
+        // field holds prompt instructions rather than words that are sung
+        menuGroup();
+
         if (song.generation_method === 7) {
 
             addDisabledMenuRow("Instrumental");
@@ -35301,6 +35525,38 @@
             });
         }
 
+        // About the song and passing it on
+        menuGroup();
+
+        addMenuRow("Information", "#fff", function () {
+            openInfo(song);
+        });
+
+        addMenuRow("Refresh", "#fff", function () {
+            refreshOne(song);
+        });
+
+        addMenuRow("Copy link", "#fff", function () {
+            copyLink(song);
+        });
+
+        addMenuRow("Download", "#fff", function () {
+            downloadOne(song);
+        });
+
+        // Developer only, copy the full song JSON to the clipboard
+        // Available on the bookmarklet too, where there is no console
+        if (isDebug()) {
+
+            addMenuRow("Copy JSON", "#ffd479", function () {
+                copyJson(song);
+            });
+        }
+
+        // On this device: stored for offline play, or off the list here,
+        // the song staying on Mureka
+        menuGroup();
+
         if (cached) {
 
             addMenuRow("Remove from cache", "#ff8a8a", function () {
@@ -35314,27 +35570,22 @@
             });
         }
 
-        // Off the list on this device only, the song stays on Mureka
         addMenuRow("Delete from list", "#ff8a8a", function () {
             deleteOne(song);
         });
 
-        // Gone for good on Mureka, only your own songs
-        if (!creatorSource) {
+        // Gone for good on Mureka, only your own songs, apart at the end
+        if (mine) {
+
+            menuGroup();
 
             addMenuRow("Delete on Mureka", "#ff8a8a", function () {
                 confirmDeleteOnMureka(song);
             });
         }
 
-        // Developer only, copy the full song JSON to the clipboard
-        // Available on the bookmarklet too, where there is no console
-        if (isDebug()) {
-
-            addMenuRow("Copy JSON", "#ffd479", function () {
-                copyJson(song);
-            });
-        }
+        menuTarget = null;
+        menuLineDue = false;
 
         // Star rating along the foot of the menu, wider than the rows above so
         // every star is a comfortable target
@@ -35349,16 +35600,31 @@
 
         contextMenuEl.appendChild(rateBar.el);
 
-        // Show first so the size is measurable, then clamp inside the viewport
+        // Show first so the size is measurable, then fit it on the screen as
+        // it is seen, Safari's bars left out. Taller than that, the rows
+        // scroll and the rest stays where it is
         contextMenuEl.style.display = "block";
+
+        const vv = window.visualViewport;
+        const viewH = vv ? vv.height : window.innerHeight;
+        const viewW = vv ? vv.width : window.innerWidth;
+        const viewTop = vv ? vv.offsetTop : 0;
+        const viewLeft = vv ? vv.offsetLeft : 0;
+        const room = Math.max(160, viewH - 16);
+
+        body.style.maxHeight = "";
+
+        if (contextMenuEl.offsetHeight > room) {
+            body.style.maxHeight = Math.max(80, body.offsetHeight - (contextMenuEl.offsetHeight - room)) + "px";
+        }
 
         const w = contextMenuEl.offsetWidth;
         const h = contextMenuEl.offsetHeight;
-        const left = Math.min(x, window.innerWidth - w - 8);
-        const top = Math.min(y, window.innerHeight - h - 8);
+        const left = Math.min(x, viewLeft + viewW - w - 8);
+        const top = Math.min(y, viewTop + viewH - h - 8);
 
-        contextMenuEl.style.left = Math.max(8, left) + "px";
-        contextMenuEl.style.top = Math.max(8, top) + "px";
+        contextMenuEl.style.left = Math.max(viewLeft + 8, left) + "px";
+        contextMenuEl.style.top = Math.max(viewTop + 8, top) + "px";
     }
 
     // Expose a toggle so a second bookmarklet tap minimizes or restores the panel

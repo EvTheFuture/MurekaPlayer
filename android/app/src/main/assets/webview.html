@@ -1499,6 +1499,14 @@
         }
     }
 
+    /* A thin line between the groups of a menu, across both columns */
+    .menuLine {
+        grid-column: 1 / -1;
+        height: 1px;
+        margin: 4px 0;
+        background: var(--line);
+    }
+
     /* The song's title over its choices, a heading with a thin line under
        it as in the settings. In the actions menu the playing song's title
        comes after the general choices, so it has room above it */
@@ -13289,6 +13297,9 @@
             closeSongMenu();
         }));
 
+        // The queue
+        menuLine(box);
+
         box.appendChild(menuItem("listPlus", "Play next", function () {
 
             songAction("playNext");
@@ -13353,22 +13364,21 @@
         songMenuItems(m, box, closeSongMenu, false);
     }
 
-    // How many cells the grid has since the last heading that spans the
-    // whole width, which starts a fresh row
-    function cellsInSection(box) {
+    // A line before the next group of a menu, only when something of this
+    // part of the menu comes before it
+    function menuLine(box) {
 
-        let count = 0;
+        const last = box.lastElementChild;
 
-        for (let el = box.lastElementChild; el; el = el.previousElementSibling) {
-
-            if (el.classList.contains("actionsSong")) {
-                break;
-            }
-
-            count += 1;
+        if (!last || last.classList.contains("menuLine") || last.classList.contains("actionsSong")) {
+            return;
         }
 
-        return count;
+        const line = document.createElement("div");
+
+        line.className = "menuLine";
+        line.setAttribute("aria-hidden", "true");
+        box.appendChild(line);
     }
 
     // The name a song is saved under, as on the phone: the title first, then
@@ -13442,49 +13452,8 @@
             return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
         };
 
-        box.appendChild(menuItem("refresh", "Refresh", function () {
-
-            act("refresh");
-            close();
-        }));
-
-        box.appendChild(menuItem("download", "Download", function () {
-
-            close();
-
-            if (m.src) {
-                askText("File name", songFileName(m), "Download", function (typed) {
-                    saveSong(m, cleanFileName(typed) || songFileName(m));
-                });
-            }
-        }, "", !m.src));
-
-        box.appendChild(menuItem("link", "Copy link", function () {
-
-            const ok = m.link ? copyText(m.link) : false;
-
-            statusLine.setText(ok ? "Copied link: " + m.title : "Could not copy the link");
-            close();
-        }, "", !m.link));
-
-        box.appendChild(menuItem("info", "Information", function () {
-
-            act("info");
-            close();
-
-            // The phone fetches the details first
-            setTimeout(function () {
-                showPanel("info");
-            }, 400);
-        }));
-
-        box.appendChild(menuItem("instrumental",
-            m.serverInstrumental ? "Instrumental" : (m.manualInstrumental ? "Unmark instrumental" : "Mark instrumental"),
-            function () {
-
-                act("instrumental");
-                close();
-            }, "", m.serverInstrumental));
+        // The song on Mureka, only your own songs
+        menuLine(box);
 
         if (m.mine) {
 
@@ -13542,6 +13511,17 @@
                 }));
         }
 
+        // What is noted about the song: instrumental, its tempo, its stars
+        menuLine(box);
+
+        box.appendChild(menuItem("instrumental",
+            m.serverInstrumental ? "Instrumental" : (m.manualInstrumental ? "Unmark instrumental" : "Mark instrumental"),
+            function () {
+
+                act("instrumental");
+                close();
+            }, "", m.serverInstrumental));
+
         if (m.canSetBpm) {
 
             box.appendChild(menuItem("tempo", "Set BPM", function () {
@@ -13568,19 +13548,49 @@
             }));
         }
 
-        if (m.cached) {
+        // About the song and passing it on
+        menuLine(box);
 
-            // The two red choices, Remove from cache and Delete from list,
-            // share a row. With an odd number of choices before them in this
-            // section the row is finished with an empty cell first
-            if (cellsInSection(box) % 2 === 1) {
+        box.appendChild(menuItem("info", "Information", function () {
 
-                const gap = document.createElement("div");
+            act("info");
+            close();
 
-                gap.className = "menuSpacer";
-                gap.setAttribute("aria-hidden", "true");
-                box.appendChild(gap);
+            // The phone fetches the details first
+            setTimeout(function () {
+                showPanel("info");
+            }, 400);
+        }));
+
+        box.appendChild(menuItem("refresh", "Refresh", function () {
+
+            act("refresh");
+            close();
+        }));
+
+        box.appendChild(menuItem("link", "Copy link", function () {
+
+            const ok = m.link ? copyText(m.link) : false;
+
+            statusLine.setText(ok ? "Copied link: " + m.title : "Could not copy the link");
+            close();
+        }, "", !m.link));
+
+        box.appendChild(menuItem("download", "Download", function () {
+
+            close();
+
+            if (m.src) {
+                askText("File name", songFileName(m), "Download", function (typed) {
+                    saveSong(m, cleanFileName(typed) || songFileName(m));
+                });
             }
+        }, "", !m.src));
+
+        // On this device: stored for offline play, or off the list here
+        menuLine(box);
+
+        if (m.cached) {
 
             box.appendChild(menuItem("trash", "Remove from cache", function () {
 
@@ -13612,8 +13622,10 @@
             });
         }, "danger"));
 
-        // Gone for good on Mureka, only your own songs
+        // Gone for good on Mureka, only your own songs, apart at the end
         if (m.mine) {
+
+            menuLine(box);
 
             box.appendChild(menuItem("trash", "Delete on Mureka", function () {
 
