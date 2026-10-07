@@ -359,7 +359,10 @@ the new settings layout and a number of smaller improvements.
   ends it. Pasted into Import in the other player, it asks where they go:
   play next, at the end of the queue or as the whole queue. They play from
   their links there, kept over a restart, with a violet shared badge since
-  they may not be public. Import in the web view asks the same.
+  they may not be public. Import in the web view asks the same. Once such a
+  song shows up on a list read from Mureka, the creator's public songs for
+  one, the published version takes its place, with a note saying so. Once a
+  day the shared songs are also looked up for new titles and covers.
 - **Mureka song links in Import**: pasted share links from Mureka's site,
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.

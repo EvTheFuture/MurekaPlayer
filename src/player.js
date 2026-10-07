@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.205";
+    const VERSION = "1.9.9.206";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5628,6 +5628,10 @@
         if (!feed().creator) {
             dropConfirmedTrimMarks(extractSongs(json));
         }
+
+        // A shared song on a list read now, a creator's public songs or the
+        // own library, is no longer only shared
+        refreshSharedFrom(extractSongs(json));
 
         if (!feed().creator) {
 
@@ -23378,6 +23382,9 @@
         // Bring back the queue from last time, ready to resume
         restoreQueue();
 
+        // Shared songs looked up once a day, for new titles and covers
+        setTimeout(checkSharedSongs, 8000);
+
         // Start playing on launch when the user asked for it
         maybeAutoPlay();
     }
@@ -30832,6 +30839,178 @@
     // Whether a song is sounding right now, not paused or only loaded
     function soundingNow() {
         return !!(currentSong && audio && audio.src && !audio.paused);
+    }
+
+    // The shared songs held in the queue, and in what Stop left to resume,
+    // each object once
+    function heldSharedSongs() {
+
+        const seen = new Set();
+        const out = [];
+        const lists = [queue, resumeState && Array.isArray(resumeState.queue) ? resumeState.queue : []];
+
+        for (const list of lists) {
+
+            for (const s of list) {
+
+                if (s && s.shared === true && !seen.has(s)) {
+
+                    seen.add(s);
+                    out.push(s);
+                }
+            }
+        }
+
+        return out;
+    }
+
+    // What a fresh copy of a song may change in a held one
+    const SHARED_FIELDS = ["title", "cover", "mp3_url", "duration_milliseconds", "genres", "moods", "publish_state",
+        "share_key", "bpm", "model", "generation_method", "allow_remix"];
+
+    // Take the fresh details of a song into a held shared one. Answers
+    // whether anything that shows changed
+    function takeSharedDetails(held, fresh) {
+
+        let changed = false;
+
+        for (const key of SHARED_FIELDS) {
+
+            if (fresh[key] === undefined || fresh[key] === null || fresh[key] === "") {
+                continue;
+            }
+
+            const value = key === "mp3_url" ? songUrl(fresh) : (key === "cover" ? coverUrl(fresh) : fresh[key]);
+
+            if (JSON.stringify(held[key]) !== JSON.stringify(value)) {
+
+                held[key] = value;
+                changed = changed || key === "title" || key === "cover" || key === "duration_milliseconds";
+            }
+        }
+
+        return changed;
+    }
+
+    // Songs on a list just read that are held as shared songs: a creator's
+    // public list or the own library, so the song is now public or one's
+    // own. It takes the fresh details and is no longer marked shared
+    function refreshSharedFrom(songs) {
+
+        const held = heldSharedSongs();
+
+        if (held.length === 0 || !songs || songs.length === 0) {
+            return;
+        }
+
+        const fresh = new Map();
+
+        for (const s of songs) {
+
+            if (s && s.song_id !== undefined) {
+                fresh.set(String(s.song_id), s);
+            }
+        }
+
+        const ids = new Set();
+
+        for (const s of held) {
+
+            const f = fresh.get(String(s.song_id));
+
+            if (!f) {
+                continue;
+            }
+
+            takeSharedDetails(s, f);
+            s.shared = false;
+            ids.add(String(s.song_id));
+        }
+
+        if (ids.size === 0) {
+            return;
+        }
+
+        const n = ids.size;
+
+        dbgLog("Queue", n + " shared " + (n === 1 ? "song is" : "songs are") + " now on a Mureka list, the published version is used");
+        sharedChanged();
+        showToast(n === 1 ? "A shared song is now published, the published version is in the queue"
+            : n + " shared songs are now published, the published versions are in the queue", true);
+    }
+
+    function sharedChanged() {
+
+        dropNextReady();
+        saveQueue();
+        hostListStamp += 1;
+        renderList();
+        setArtSources();
+        publishHostSoon();
+
+        if (currentSong) {
+            updatePlayerInfo(currentSong);
+        }
+    }
+
+    // Once a day the shared songs held are looked up on Mureka, the way a
+    // song link is read, so a new title or cover comes through. Whether a
+    // song is public that lookup does not say
+    const SHARED_CHECK_KEY = "mureka_shared_check_v1";
+
+    async function checkSharedSongs() {
+
+        const held = heldSharedSongs().slice(0, 30);
+
+        if (held.length === 0 || offlineMode()) {
+            return;
+        }
+
+        let last = 0;
+
+        try {
+            last = Number(localStorage.getItem(SHARED_CHECK_KEY)) || 0;
+        } catch (e) {
+            last = 0;
+        }
+
+        if (Date.now() - last < 86400000) {
+            return;
+        }
+
+        try {
+            localStorage.setItem(SHARED_CHECK_KEY, String(Date.now()));
+        } catch (e) {
+            // Checked again next time
+        }
+
+        let changed = 0;
+
+        for (const s of held) {
+
+            try {
+
+                const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id="
+                    + encodeURIComponent(s.song_id), { credentials: "include" }, 15000);
+                const json = res.ok ? await res.json() : null;
+                const f = json && json.code === 0 && json.data ? json.data.song : null;
+
+                if (f && String(f.song_id) === String(s.song_id) && takeSharedDetails(s, f)) {
+                    changed += 1;
+                }
+            } catch (e) {
+                // Looked up again tomorrow
+            }
+
+            await sleep(500);
+        }
+
+        if (changed > 0) {
+
+            sharedChanged();
+            showToast(changed === 1 ? "A shared song has new details, it is updated in the queue"
+                : changed + " shared songs have new details, they are updated in the queue", true);
+        }
     }
 
     // Shared songs into the queue: next, after the playing song, at the end,
