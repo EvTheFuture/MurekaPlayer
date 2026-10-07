@@ -344,10 +344,17 @@ the new settings layout and a number of smaller improvements.
   brought up to date, and a song asked for starts playing at once, in place
   of a song playing meanwhile. Nothing of this is kept over a restart.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
-  instrumental marks, trim marks and saved creators each have a switch, with
-  how many are new or differ. What was left out is left out again next time,
-  so two people can share tempos without touching each other's ratings. In
-  the player and in the web view.
+  instrumental marks, ignored songs, trim marks and saved creators each have
+  a switch, with how many are new or differ. The first time ratings and
+  ignored songs are left out, after that the choice from last time is
+  ticked again, so two people can share tempos without touching each
+  other's ratings. In the player and in the web view.
+- **Ignore in queues** in the song menu marks a song that a queue made from
+  the list leaves out, by Play, shuffle, a tap on another song or new songs
+  coming in. It still plays when tapped itself, and Play next, Play last,
+  Play only this and an imported queue take it as asked. A small crossed
+  circle before the title marks it in the lists, **Stop ignoring** takes
+  the mark away. Ignored songs go with the exported song tweaks.
 - **Retry or Cancel** when a change on Mureka does not go through: rename,
   publish and unpublish, remixing, like, a new cover and delete on Mureka.
   The change stays shown while the player asks, on the phone and in every
@@ -417,7 +424,8 @@ the new settings layout and a number of smaller improvements.
   and a tap on the waveform plays from there. **Fade out the last second**
   fades the preview the way Mureka fades a trimmed song, once the end is
   moved. The new song gets a title of its own and is put at the top of the
-  list, marked new. A small gold T on the public or draft badge marks every
+  list, marked new, with the original's rating, tempo and instrumental
+  mark. A small gold T on the public or draft badge marks every
   trimmed song, from Mureka's own mark, so also songs trimmed on Mureka's
   site or another device, once a Load or Rescan has read them. A song
   trimmed here counts as trimmed straight away until then. It shows

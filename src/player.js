@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.189";
+    const VERSION = "1.9.9.193";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -149,7 +149,11 @@
 
     // The kinds of song tweaks an import can leave out, read with the
     // settings, which remember what was left out last time
-    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "trimmed", "creators"];
+    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "ignore", "trimmed", "creators"];
+
+    // Left out of an import until chosen otherwise: ratings and ignored
+    // songs are a matter of taste, tempos and instrumental marks are facts
+    const IMPORT_SKIP_DEFAULT = ["rating", "ignore"];
 
     // Cache API bucket for re-encoded cover art data urls, so a cover downloads
     // and re-encodes only once and then persists across sessions, like the audio
@@ -163,6 +167,10 @@
     // localStorage key for songs made by trimming in the player, which the
     // list marks with a small T on their badge
     const TRIMMED_KEY = "mureka_trimmed_v1";
+
+    // localStorage key for songs marked ignored, which a queue made from
+    // the list leaves out. Played when asked for by name all the same
+    const IGNORED_KEY = "mureka_ignored_v1";
 
     // localStorage key for song tweaks the user took away again, a rating,
     // a hand entered tempo or an instrumental mark, with when it happened.
@@ -1813,6 +1821,27 @@
         return stored + ",songs";
     }
 
+    // The kinds left out of an import: as chosen last time for the kinds
+    // there were then, and as by default for kinds added since. Settings
+    // from before the list was remembered knew the first five kinds
+    function loadImportSkip(parsed) {
+
+        if (!Array.isArray(parsed.importSkip)) {
+            return IMPORT_SKIP_DEFAULT.slice();
+        }
+
+        const seen = Array.isArray(parsed.importSeen)
+            ? parsed.importSeen
+            : ["rating", "bpm", "instr", "trimmed", "creators"];
+
+        return IMPORT_TYPE_KEYS.filter(function (k) {
+
+            return seen.indexOf(k) >= 0
+                ? parsed.importSkip.indexOf(k) >= 0
+                : IMPORT_SKIP_DEFAULT.indexOf(k) >= 0;
+        });
+    }
+
     // Read the settings from localStorage, falling back to safe defaults
     // As last time is the default start, refresh on open is off for both feeds
     // Autoplay is off, the default play mode is not shuffled, repeat is all
@@ -1915,7 +1944,8 @@
             debugOverlay: false,
             webDebugOverlay: false,
             debugLog: false,
-            importSkip: [],
+            importSkip: IMPORT_SKIP_DEFAULT.slice(),
+            importSeen: IMPORT_TYPE_KEYS.slice(),
             debugHide: [],
             webSeekActions: true
         };
@@ -2114,9 +2144,8 @@
                     debugOverlay: parsed.debugOverlay === true || parsed.debugLine === true,
                     webDebugOverlay: parsed.webDebugOverlay === true,
                     debugLog: parsed.debugLog === true,
-                    importSkip: Array.isArray(parsed.importSkip)
-                        ? parsed.importSkip.filter(function (k) { return IMPORT_TYPE_KEYS.indexOf(k) >= 0; })
-                        : [],
+                    importSkip: loadImportSkip(parsed),
+                    importSeen: IMPORT_TYPE_KEYS.slice(),
                     debugHide: Array.isArray(parsed.debugHide)
                         ? parsed.debugHide.filter(function (id) { return typeof id === "string"; })
                         : [],
@@ -2615,9 +2644,9 @@
             return s.song_id;
         }));
         const stale = !queueOwn && queue.some(function (s, i) {
-            return i > queuePos && !passesFilters(s);
+            return i > queuePos && !queueable(s);
         }) || orderedSongs().some(function (s) {
-            return passesFilters(s) && !queued.has(s.song_id);
+            return queueable(s) && !queued.has(s.song_id);
         });
 
         if (stale) {
@@ -2747,12 +2776,17 @@
     // Song ids the user marked as instrumental by hand, loaded once on startup
     let manualInstrumental = loadManualInstrumental();
 
-    // Per kind, rating, bpm and instr, song id to the time it was removed
+    // Songs marked ignored: a queue made from the list leaves them out,
+    // asked for by name they play all the same
+    let ignoredIds = loadIgnored();
+
+    // Per kind, rating, bpm, instr and ignore, song id to the time it was
+    // removed
     let clearedMarks = loadClearedMarks();
 
     function loadClearedMarks() {
 
-        const out = { rating: {}, bpm: {}, instr: {} };
+        const out = { rating: {}, bpm: {}, instr: {}, ignore: {} };
 
         try {
 
@@ -3543,6 +3577,92 @@
 
             refreshNowPlayingMeta();
             updateLyricLine(true);
+        }
+    }
+
+    function loadIgnored() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(IGNORED_KEY));
+
+            if (Array.isArray(raw)) {
+                return new Set(raw.map(String));
+            }
+        } catch (e) {
+        }
+
+        return new Set();
+    }
+
+    function saveIgnored() {
+
+        exportsVersion += 1;
+
+        try {
+            localStorage.setItem(IGNORED_KEY, JSON.stringify(Array.from(ignoredIds)));
+        } catch (e) {
+        }
+    }
+
+    function isIgnored(song) {
+        return !!song && ignoredIds.has(String(song.song_id));
+    }
+
+    // Whether a queue made from the list takes the song: it passes the
+    // filters and is not ignored
+    function queueable(song) {
+        return passesFilters(song) && !isIgnored(song);
+    }
+
+    // Mark a song ignored or take the mark away. Marked, it leaves the part
+    // of the queue made from the list, songs put in by hand stay. Unmarked,
+    // a queue made from the list takes it in again
+    function toggleIgnored(song) {
+
+        const id = String(song.song_id);
+
+        if (ignoredIds.has(id)) {
+
+            ignoredIds.delete(id);
+            markCleared("ignore", id);
+            setStatus("No longer ignored: " + (song.title || "Untitled"));
+            extendQueueWithNew();
+        } else {
+
+            ignoredIds.add(id);
+            unmarkCleared("ignore", id);
+            setStatus("Ignored, queues made from the list leave it out: " + (song.title || "Untitled"));
+            dropIgnoredUpcoming();
+        }
+
+        saveIgnored();
+        noteChangedHere(song);
+        hostListStamp += 1;
+        renderList();
+        saveQueue();
+        setArtSources();
+        prefetchNext();
+        publishHostSoon();
+    }
+
+    // The ignored songs still to come in a queue made from the list are
+    // taken out. A queue put together by hand, and songs put in to play
+    // next, are the user's own choice and stay
+    function dropIgnoredUpcoming() {
+
+        if (queueOwn || queuePos < 0 || queuePos >= queue.length) {
+            return;
+        }
+
+        const before = queue.length;
+
+        queue = queue.filter(function (s, k) {
+            return k <= queuePos || !isIgnored(s) || isPlayNext(s.song_id) || isPreviewEntry(s);
+        });
+
+        if (queue.length !== before) {
+            dropNextReady();
         }
     }
 
@@ -7069,6 +7189,10 @@
 
             manualInstrumental.delete(String(song.song_id));
 
+            if (ignoredIds.delete(String(song.song_id))) {
+                saveIgnored();
+            }
+
             if (ratings.delete(String(song.song_id))) {
                 saveRatings();
             }
@@ -8351,7 +8475,11 @@
         // Made from the list, so no longer a queue put together by hand
         queueOwn = false;
 
-        let songs = orderedSongs().filter(passesFilters);
+        // The song asked for plays even when ignored, the songs after it
+        // leave the ignored ones out
+        let songs = orderedSongs().filter(function (s) {
+            return queueable(s) || s.song_id === startId;
+        });
 
         // If the chosen start song is hidden by the filter, fall back to the full
         // library so a direct play request always works
@@ -8362,7 +8490,9 @@
             });
 
             if (!inPool) {
-                songs = orderedSongs().slice();
+                songs = orderedSongs().filter(function (s) {
+                    return !isIgnored(s) || s.song_id === startId;
+                });
             }
         }
 
@@ -8545,7 +8675,7 @@
     // Whether the queue holds other songs than the list's filters give now
     function queueOutOfStep() {
 
-        const pool = orderedSongs().filter(passesFilters);
+        const pool = orderedSongs().filter(queueable);
 
         // A song played from outside the filters fell back to the whole
         // library, which is not a change worth acting on
@@ -9165,7 +9295,7 @@
 
             const added = orderedSongs().filter(function (s) {
 
-                return passesFilters(s) && !inQueue.has(s.song_id);
+                return queueable(s) && !inQueue.has(s.song_id);
             });
 
             if (added.length === 0) {
@@ -9241,7 +9371,7 @@
         // shuffled. orderedSongs is the displayed order, so with shuffle off the
         // queue matches the list. The vocals and playlist filters still apply
         let upcoming = orderedSongs().filter(function (s) {
-            return !playedIds.has(s.song_id) && passesFilters(s);
+            return !playedIds.has(s.song_id) && queueable(s);
         });
 
         if (shuffleMode) {
@@ -10249,7 +10379,13 @@
         // with the songs still being generated first, being the newest
         const ordered = orderedSongs();
 
-        return pendingSongs.size > 0 && !creatorSource ? pendingList().concat(ordered) : ordered;
+        return pendingSongs.size > 0 ? shownPending().concat(ordered) : ordered;
+    }
+
+    // The songs still being generated that the list shows: your own, and
+    // not while only published songs are shown, which they never are yet
+    function shownPending() {
+        return creatorSource || publishFilter === "published" ? [] : pendingList();
     }
 
     // Whether a song is one Mureka is still generating
@@ -19037,6 +19173,7 @@
             cached: cachedIds.has(song.song_id),
             serverInstrumental: song.generation_method === 7,
             manualInstrumental: isManualInstrumental(song),
+            ignored: isIgnored(song),
             bpm: effectiveBpm(song) || 0,
             canSetBpm: hasManualBpm(song) || !(Number(song.bpm) > 0),
             published: song.publish_state === 1,
@@ -20511,7 +20648,7 @@
         const numbers = prepared.numbers;
 
         // Songs still being generated first, in the list's own order only
-        const pending = view === "mureka" && !creatorSource ? pendingList() : [];
+        const pending = view === "mureka" ? shownPending() : [];
 
         for (const song of pending.concat(prepared.songs)) {
 
@@ -20553,6 +20690,7 @@
                 cached: hostCacheState(song),
                 isNew: song.is_played === false,
                 trimmed: isTrimmed(song),
+                ignored: isIgnored(song),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -20601,6 +20739,7 @@
                 cached: hostCacheState(song),
                 isNew: song.is_played === false,
                 trimmed: isTrimmed(song),
+                ignored: isIgnored(song),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -21049,6 +21188,8 @@
             if (song.generation_method !== 7) {
                 toggleManualInstrumental(song);
             }
+        } else if (act === "ignore") {
+            toggleIgnored(song);
         } else if (act === "publish") {
             setPublished(song, true);
         } else if (act === "unpublish") {
@@ -25773,6 +25914,18 @@
 
         item.appendChild(dot);
         item.appendChild(numEl);
+
+        // An ignored song carries a small crossed circle before its title
+        if (isIgnored(song)) {
+
+            const mark = document.createElement("span");
+
+            mark.textContent = "\u2298";
+            mark.title = "Ignored, queues made from the list leave it out";
+            mark.style.cssText = "flex:0 0 auto;margin-right:5px;color:#888;font-size:12px";
+            item.appendChild(mark);
+        }
+
         item.appendChild(titleEl);
 
         // Sorted by plays, each song's plays take the place of the rating,
@@ -29065,7 +29218,7 @@
     }
 
     // A readable count of what a set of user data holds, zeros left out
-    function userDataSummary(nRatings, nBpm, nInstr, nCreators, nTrimmed) {
+    function userDataSummary(nRatings, nBpm, nInstr, nCreators, nTrimmed, nIgnored) {
 
         const parts = [];
 
@@ -29079,6 +29232,7 @@
         add(nRatings, "rating", "ratings");
         add(nBpm, "tempo", "tempos");
         add(nInstr, "instrumental mark", "instrumental marks");
+        add(nIgnored || 0, "ignored song", "ignored songs");
         add(nTrimmed || 0, "trim mark", "trim marks");
         add(nCreators, "creator", "creators");
 
@@ -29324,11 +29478,13 @@
             ratings: {},
             manualBpm: {},
             manualInstrumental: Array.from(manualInstrumental),
+            ignored: Array.from(ignoredIds),
             creators: savedCreators.slice(),
             cleared: {
                 rating: Object.keys(clearedMarks.rating),
                 bpm: Object.keys(clearedMarks.bpm),
-                instr: Object.keys(clearedMarks.instr)
+                instr: Object.keys(clearedMarks.instr),
+                ignore: Object.keys(clearedMarks.ignore)
             }
         });
 
@@ -29398,9 +29554,10 @@
             ratings: [],
             bpm: [],
             instr: [],
+            ignore: [],
             trimmed: [],
             creators: [],
-            cleared: { rating: [], bpm: [], instr: [] },
+            cleared: { rating: [], bpm: [], instr: [], ignore: [] },
             settings: (data.settings && typeof data.settings === "object") ? data.settings : null,
             appSettings: (data.appSettings && typeof data.appSettings === "object") ? data.appSettings : null,
             library: null,
@@ -29479,6 +29636,17 @@
             }
         }
 
+        // Songs ignored where the file was made, from 1.9.9.192 on
+        if (Array.isArray(data.ignored)) {
+
+            for (const id of data.ignored) {
+
+                if (id !== null && id !== undefined && id !== "") {
+                    out.ignore.push(String(id));
+                }
+            }
+        }
+
         // Values removed on purpose where the file was made, files from
         // before 1.5.0.26 have none
         if (data.cleared && typeof data.cleared === "object") {
@@ -29502,7 +29670,8 @@
             bpm: new Set(out.bpm.map(function (e) {
                 return e[0];
             })),
-            instr: new Set(out.instr)
+            instr: new Set(out.instr),
+            ignore: new Set(out.ignore)
         };
 
         for (const kind of Object.keys(out.cleared)) {
@@ -29533,7 +29702,8 @@
             return "settings";
         }
 
-        return userDataSummary(p.ratings.length, p.bpm.length, p.instr.length, p.creators.length, p.trimmed.length);
+        return userDataSummary(p.ratings.length, p.bpm.length, p.instr.length, p.creators.length, p.trimmed.length,
+            p.ignore.length);
     }
 
     // Put imported settings into effect without a reload, as far as the
@@ -29587,7 +29757,9 @@
     // are left alone, and a different value on both sides is a conflict
     function planSongMerge(p) {
 
-        const plan = { ratings: [], bpm: [], instr: [], trimmed: [], creators: [], clears: [], same: 0, conflicts: [] };
+        const plan = {
+            ratings: [], bpm: [], instr: [], ignore: [], trimmed: [], creators: [], clears: [], same: 0, conflicts: []
+        };
 
         // A trimmed song stays trimmed, so these are only ever added
         for (const id of p.trimmed) {
@@ -29636,6 +29808,17 @@
             }
         }
 
+        for (const id of p.ignore) {
+
+            if (ignoredIds.has(id)) {
+                plan.same++;
+            } else if (isCleared("ignore", id)) {
+                plan.conflicts.push({ type: "ignore", id: id, mine: false, theirs: true });
+            } else {
+                plan.ignore.push(id);
+            }
+        }
+
         // Values removed where the file was made. Held here is a conflict,
         // not held here is only remembered as removed, so it travels on
         const held = {
@@ -29647,6 +29830,9 @@
             },
             instr: function (id) {
                 return manualInstrumental.has(id) ? true : null;
+            },
+            ignore: function (id) {
+                return ignoredIds.has(id) ? true : null;
             }
         };
 
@@ -29657,7 +29843,8 @@
                 const mine = held[kind](id);
 
                 if (mine !== null) {
-                    plan.conflicts.push({ type: kind, id: id, mine: mine, theirs: kind === "instr" ? false : null });
+                    plan.conflicts.push({ type: kind, id: id, mine: mine,
+                        theirs: kind === "instr" || kind === "ignore" ? false : null });
                 } else if (!isCleared(kind, id)) {
                     plan.clears.push([kind, id]);
                 }
@@ -29683,6 +29870,10 @@
 
         if (c.type === "instr") {
             return v ? "marked instrumental" : "mark removed";
+        }
+
+        if (c.type === "ignore") {
+            return v ? "ignored" : "not ignored";
         }
 
         if (v === null) {
@@ -29713,7 +29904,7 @@
 
             const c = conflicts[i];
             const left = conflicts.length - i;
-            const what = { rating: "Rating", bpm: "Tempo", instr: "Instrumental" }[c.type];
+            const what = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored" }[c.type];
 
             const answer = function (useFile, all) {
 
@@ -29765,6 +29956,10 @@
             manualInstrumental.add(id);
         }
 
+        for (const id of plan.ignore) {
+            ignoredIds.add(id);
+        }
+
         for (const id of plan.trimmed) {
             trimmedIds.add(id);
         }
@@ -29794,6 +29989,14 @@
 
                 manualInstrumental.delete(c.id);
                 clearedMarks.instr[c.id] = Date.now();
+            } else if (c.type === "ignore" && c.theirs) {
+
+                ignoredIds.add(c.id);
+                delete clearedMarks.ignore[c.id];
+            } else if (c.type === "ignore") {
+
+                ignoredIds.delete(c.id);
+                clearedMarks.ignore[c.id] = Date.now();
             } else if (c.theirs === null) {
 
                 store.delete(c.id);
@@ -29809,8 +30012,13 @@
         saveRatings();
         saveManualBpm();
         saveManualInstrumental();
+        saveIgnored();
         saveTrimmed();
         refreshSongDataViews();
+
+        // Songs now ignored leave the part of the queue made from the list
+        dropIgnoredUpcoming();
+        saveQueue();
 
         // The stars, tempos and marks on the rows shown, here and, read again,
         // in the web view
@@ -29839,6 +30047,7 @@
         { key: "rating", label: "Ratings" },
         { key: "bpm", label: "Tempos (BPM)" },
         { key: "instr", label: "Instrumental marks" },
+        { key: "ignore", label: "Ignored songs" },
         { key: "trimmed", label: "Trim marks" },
         { key: "creators", label: "Saved creators" }
     ];
@@ -29857,6 +30066,7 @@
                 rating: plan.ratings.length,
                 bpm: plan.bpm.length,
                 instr: plan.instr.length,
+                ignore: plan.ignore.length,
                 trimmed: plan.trimmed.length,
                 creators: plan.creators.length
             }[type.key];
@@ -29903,6 +30113,7 @@
             ratings: keep("rating") ? plan.ratings : [],
             bpm: keep("bpm") ? plan.bpm : [],
             instr: keep("instr") ? plan.instr : [],
+            ignore: keep("ignore") ? plan.ignore : [],
             trimmed: keep("trimmed") ? plan.trimmed : [],
             creators: keep("creators") ? plan.creators : [],
             clears: plan.clears.filter(function (c) {
@@ -30050,7 +30261,8 @@
 
     function mergeSummary(plan, answers) {
 
-        const added = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.trimmed.length;
+        const added = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.ignore.length
+            + plan.trimmed.length;
         const taken = answers.filter(Boolean).length;
         const parts = [];
 
@@ -30184,8 +30396,8 @@
         // from what is here, unless the web view asked already
         if (!asked) {
 
-            const fresh = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.trimmed.length
-                + plan.creators.length + plan.clears.length;
+            const fresh = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.ignore.length
+                + plan.trimmed.length + plan.creators.length + plan.clears.length;
             const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
             const types = planTypes(plan);
 
@@ -30426,7 +30638,7 @@
 
         return "song tweaks, " + userDataSummary(Object.keys(data.ratings).length,
             Object.keys(data.manualBpm).length, data.manualInstrumental.length,
-            data.creators.length, 0);
+            data.creators.length, 0, data.ignored.length);
     }
 
     // The file name of an export, without its extension
@@ -31046,7 +31258,7 @@
         } else {
 
             const plan = planSongMerge(p);
-            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental" };
+            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored" };
 
             entry.plan = plan;
             out.what = "Song tweaks saved " + when + ", " + parsedSummary(p);
@@ -31434,6 +31646,7 @@
         local.ratings = Object.assign(ratingsOut, local.ratings);
         local.manualBpm = Object.assign(bpmOut, local.manualBpm);
         local.manualInstrumental = Array.from(new Set(p.instr.concat(local.manualInstrumental)));
+        local.ignored = Array.from(new Set(p.ignore.concat(local.ignored)));
         local.trimmed = Array.from(new Set(p.trimmed.concat(local.trimmed || [])));
 
         // Removals follow the same rule, this device wins. Removed here takes
@@ -31447,6 +31660,9 @@
             },
             instr: function (id) {
                 return manualInstrumental.has(id);
+            },
+            ignore: function (id) {
+                return ignoredIds.has(id);
             }
         };
 
@@ -31474,6 +31690,10 @@
 
         local.manualInstrumental = local.manualInstrumental.filter(function (id) {
             return local.cleared.instr.indexOf(id) < 0;
+        });
+
+        local.ignored = local.ignored.filter(function (id) {
+            return local.cleared.ignore.indexOf(id) < 0;
         });
 
         const seen = new Set(local.creators.map(function (c) {
@@ -32180,6 +32400,61 @@
     let trimEl = null;
     let trimToken = 0;
     let trimCtx = null;
+
+    // Set when the sound engine stopped moving, so the next play makes a
+    // new one rather than waiting on it
+    let trimCtxStuck = false;
+
+    // Whether the line asking for another tap is showing
+    let trimStuckShown = false;
+
+    // Wake the sound engine. Safari also has an interrupted state, after
+    // another sound took over the phone's audio, which a resume ends too
+    function trimWake() {
+
+        if (!trimCtx || trimCtx.state === "running" || trimCtx.state === "closed") {
+            return;
+        }
+
+        try {
+
+            const woke = trimCtx.resume();
+
+            if (woke && woke.catch) {
+                woke.catch(function () {
+                    // Still asleep, the check after starting finds that
+                });
+            }
+        } catch (e) {
+            // Still asleep, the check after starting finds that
+        }
+    }
+
+    // A new sound engine in place of one that does not move. The song read
+    // into the old one plays on the new one as well
+    function trimNewCtx() {
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const old = trimCtx;
+
+        trimCtx = Ctx ? new Ctx() : null;
+        trimCtxStuck = false;
+
+        if (tr) {
+            tr.tail = null;
+        }
+
+        if (old) {
+
+            try {
+                old.close();
+            } catch (e) {
+                // Gone already
+            }
+        }
+
+        trimWake();
+    }
     let tr = null;
     let trimUi = null;
 
@@ -32875,23 +33150,17 @@
             buildTrimmer();
         }
 
-        // One sound engine for every opening, made during the tap so
-        // Safari lets it play
-        if (!trimCtx) {
-
-            const Ctx = window.AudioContext || window.webkitAudioContext;
-
-            trimCtx = Ctx ? new Ctx() : null;
-        }
-
-        if (trimCtx && trimCtx.state === "suspended") {
-            trimCtx.resume();
-        }
-
         // The preview needs the sound, the player pauses
         if (audio && audio.src && !audio.paused) {
             togglePlayPause();
         }
+
+        // A new sound engine for every opening, made during the tap so
+        // Safari lets it play, and only once the music has stopped. One
+        // kept from before was interrupted when the music started, and
+        // Safari lets such a one go on only after the page has been left
+        // and opened again
+        trimNewCtx();
 
         const token = ++trimToken;
         const duration = (song.duration_milliseconds || 0) / 1000;
@@ -33142,7 +33411,7 @@
     // a browser plays on past the length it was given
     // What started it, for the button that is ringed while it plays: start,
     // end, all, or kept for Play and a tap on a waveform
-    function trimPlay(from, to, mode) {
+    function trimPlay(from, to, mode, retried) {
 
         trimStop();
 
@@ -33154,8 +33423,23 @@
             return;
         }
 
-        if (trimCtx.state === "suspended") {
-            trimCtx.resume();
+        // The engine stopped moving last time, or Safari interrupted it for
+        // other sound, a new one is made while the tap still allows sound
+        if (trimCtxStuck || trimCtx.state === "interrupted") {
+
+            trimNewCtx();
+
+            if (!trimCtx) {
+                return;
+            }
+        }
+
+        trimWake();
+
+        if (trimStuckShown) {
+
+            trimStuckShown = false;
+            trimStatus("");
         }
 
         const at = trimCtx.currentTime + 0.05;
@@ -33213,6 +33497,33 @@
         tr.playMode = mode || "kept";
         trimAnimate();
         trimPaint();
+
+        // Safari can leave the engine standing still, the button lit and
+        // nothing heard, until the page is left and opened again. Its clock
+        // not moving gives that away: it is made again and the piece played
+        // once more, and should that not help either, the next tap makes it
+        const ctx = trimCtx;
+        const clock = ctx.currentTime;
+
+        setTimeout(function () {
+
+            if (!tr || tr.src !== last || trimCtx !== ctx || ctx.currentTime - clock > 0.1) {
+                return;
+            }
+
+            dbgLog("Trim", "the sound did not start, the engine was " + ctx.state + ", made again");
+            trimStop();
+            trimCtxStuck = true;
+
+            if (!retried) {
+
+                trimPlay(from, to, mode, true);
+                return;
+            }
+
+            trimStuckShown = true;
+            trimStatus("The sound did not start, tap play again");
+        }, 700);
     }
 
     // Whether the preview fades out the last second: with the switch on and
@@ -34602,6 +34913,55 @@
         });
     }
 
+    // The tweaks set on one song here put on another as well: rating,
+    // tempo, instrumental mark and ignored. Answers whether there was any
+    function copySongTweaks(from, to) {
+
+        const a = String(from.song_id);
+        const b = String(to.song_id);
+        let any = false;
+
+        if (ratings.has(a)) {
+
+            ratings.set(b, ratings.get(a));
+            unmarkCleared("rating", b);
+            saveRatings();
+            any = true;
+        }
+
+        if (manualBpm.has(a)) {
+
+            manualBpm.set(b, manualBpm.get(a));
+            unmarkCleared("bpm", b);
+            saveManualBpm();
+            any = true;
+        }
+
+        if (manualInstrumental.has(a)) {
+
+            manualInstrumental.add(b);
+            unmarkCleared("instr", b);
+            saveManualInstrumental();
+            any = true;
+        }
+
+        if (ignoredIds.has(a)) {
+
+            ignoredIds.add(b);
+            unmarkCleared("ignore", b);
+            saveIgnored();
+            any = true;
+        }
+
+        if (any) {
+
+            noteChangedHere(to);
+            hostListStamp += 1;
+        }
+
+        return any;
+    }
+
     // Trim a song on Mureka. The new song comes back finished and is put at
     // the top of the list, the original deleted when asked to, once the new
     // song is safely there. progress hears what is going on. Answers
@@ -34680,6 +35040,17 @@
             }
         }
 
+        // The new song keeps what was set on the original here: its rating,
+        // tempo, instrumental mark and ignored
+        let carried = false;
+
+        for (const s of extractSongs(json.data || json)) {
+
+            if (String(s.song_id) !== String(song.song_id) && copySongTweaks(song, s)) {
+                carried = true;
+            }
+        }
+
         saveTrimmed();
         saveCache();
         renderList();
@@ -34688,6 +35059,10 @@
         let note = made.length > 0
             ? "Trimmed: " + title + ", the new song is at the top of the list"
             : "Trimmed: " + title + ", Load brings the new song in";
+
+        if (carried) {
+            note += ", with the original's tweaks";
+        }
 
         // The original goes only once the new song is safely there, from
         // Mureka first and then from the lists here. The note for the delete
@@ -36085,6 +36460,11 @@
                     toggleManualInstrumental(song);
                 });
         }
+
+        // Left out of queues made from the list, played only when asked for
+        addMenuRow(isIgnored(song) ? "Stop ignoring" : "Ignore in queues", "#fff", function () {
+            toggleIgnored(song);
+        });
 
         if (hasManualBpm(song) || !(Number(song.bpm) > 0)) {
 

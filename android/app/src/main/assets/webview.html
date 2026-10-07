@@ -1271,6 +1271,16 @@
         text-overflow: ellipsis;
     }
 
+    /* The crossed circle before the title of an ignored song */
+    .rowIgnored {
+        display: inline-block;
+        width: 0.85em;
+        height: 0.85em;
+        margin-right: 0.35em;
+        vertical-align: -0.08em;
+        color: var(--muted);
+    }
+
     .rowRate {
         flex: 0 0 auto;
         color: var(--gold);
@@ -3805,6 +3815,10 @@
         ],
         check: [
             ["polyline", { points: "20 6 9 17 4 12" }]
+        ],
+        ignore: [
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["line", { x1: "5.6", y1: "5.6", x2: "18.4", y2: "18.4" }]
         ],
         circle: [
             ["circle", { cx: "12", cy: "12", r: "8" }]
@@ -8205,6 +8219,16 @@
 
         title.className = "rowTitle";
         title.textContent = song.title;
+
+        // An ignored song carries a small crossed circle before its title
+        if (song.ignored) {
+
+            const mark = icon("ignore");
+
+            mark.classList.add("rowIgnored");
+            mark.setAttribute("title", "Ignored, queues made from the list leave it out");
+            title.prepend(mark);
+        }
 
         // Zero stars shows grey, not rated shows nothing, as on the phone
         rate.className = "rowRate" + (rated && !song.rating ? " zero" : "");
@@ -13703,6 +13727,13 @@
                 close();
             }, "", m.serverInstrumental));
 
+        // Left out of queues made from the list, played only when asked for
+        box.appendChild(menuItem("ignore", m.ignored ? "Stop ignoring" : "Ignore in queues", function () {
+
+            act("ignore");
+            close();
+        }));
+
         if (m.canSetBpm) {
 
             box.appendChild(menuItem("tempo", "Set BPM", function () {
@@ -16287,6 +16318,61 @@
     const TRIM_PINCH_STEP = 1.35;
 
     let trimCtx = null;
+
+    // Set when the sound engine stopped moving, so the next play makes a
+    // new one rather than waiting on it
+    let trimCtxStuck = false;
+
+    // Whether the line asking for another tap is showing
+    let trimStuckShown = false;
+
+    // Wake the sound engine. Safari also has an interrupted state, after
+    // another sound took over the phone's audio, which a resume ends too
+    function trimWake() {
+
+        if (!trimCtx || trimCtx.state === "running" || trimCtx.state === "closed") {
+            return;
+        }
+
+        try {
+
+            const woke = trimCtx.resume();
+
+            if (woke && woke.catch) {
+                woke.catch(function () {
+                    // Still asleep, the check after starting finds that
+                });
+            }
+        } catch (e) {
+            // Still asleep, the check after starting finds that
+        }
+    }
+
+    // A new sound engine in place of one that does not move. The song read
+    // into the old one plays on the new one as well
+    function trimNewCtx() {
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const old = trimCtx;
+
+        trimCtx = Ctx ? new Ctx() : null;
+        trimCtxStuck = false;
+
+        if (tr) {
+            tr.tail = null;
+        }
+
+        if (old) {
+
+            try {
+                old.close();
+            } catch (e) {
+                // Gone already
+            }
+        }
+
+        trimWake();
+    }
     let trimToken = 0;
     let tr = null;
     let trimUi = null;
@@ -16755,23 +16841,28 @@
             buildTrimmer();
         }
 
-        // One sound engine for every opening, made during the tap so
-        // Safari lets it play
-        if (!trimCtx) {
-
-            const Ctx = window.AudioContext || window.webkitAudioContext;
-
-            trimCtx = Ctx ? new Ctx() : null;
-        }
-
-        if (trimCtx && trimCtx.state === "suspended") {
-            trimCtx.resume();
-        }
-
-        // The preview needs the sound to itself, the music pauses
+        // The preview needs the sound to itself, the music pauses, shown
+        // at once, the next state from the phone confirms it
         if (state && state.playing) {
+
             send("pause");
+            state.playing = false;
         }
+
+        // The song playing in this browser stops at once, not only once
+        // the phone says so, it has to let go of the sound first
+        const here = $("audio");
+
+        if (here && !here.paused) {
+            here.pause();
+        }
+
+        // A new sound engine for every opening, made during the tap so
+        // Safari lets it play, and only once the music has stopped. One
+        // kept from before was interrupted when the music started, and
+        // Safari lets such a one go on only after the page has been left
+        // and opened again
+        trimNewCtx();
 
         const token = ++trimToken;
         const duration = (m.durationMs || 0) / 1000;
@@ -17106,7 +17197,7 @@
     // trimmed song will
     // What started it, for the button that is ringed while it plays: start,
     // end, all, or kept for Play and a tap on a waveform
-    function trimPlay(from, to, mode) {
+    function trimPlay(from, to, mode, retried) {
 
         trimStop();
 
@@ -17118,8 +17209,23 @@
             return;
         }
 
-        if (trimCtx.state === "suspended") {
-            trimCtx.resume();
+        // The engine stopped moving last time, or Safari interrupted it for
+        // other sound, a new one is made while the tap still allows sound
+        if (trimCtxStuck || trimCtx.state === "interrupted") {
+
+            trimNewCtx();
+
+            if (!trimCtx) {
+                return;
+            }
+        }
+
+        trimWake();
+
+        if (trimStuckShown) {
+
+            trimStuckShown = false;
+            trimStatus("");
         }
 
         const at = trimCtx.currentTime + 0.05;
@@ -17177,6 +17283,33 @@
         tr.playMode = mode || "kept";
         trimAnimate();
         trimPaint();
+
+        // Safari can leave the engine standing still, the button lit and
+        // nothing heard, until the page is left and opened again. Its clock
+        // not moving gives that away: it is made again and the piece played
+        // once more, and should that not help either, the next tap makes it
+        const ctx = trimCtx;
+        const clock = ctx.currentTime;
+
+        setTimeout(function () {
+
+            if (!tr || tr.src !== last || trimCtx !== ctx || ctx.currentTime - clock > 0.1) {
+                return;
+            }
+
+            dbgLog("Trim", "the sound did not start, the engine was " + ctx.state + ", made again");
+            trimStop();
+            trimCtxStuck = true;
+
+            if (!retried) {
+
+                trimPlay(from, to, mode, true);
+                return;
+            }
+
+            trimStuckShown = true;
+            trimStatus("The sound did not start, tap play again");
+        }, 700);
     }
 
     // Whether the preview fades out the last second: with the switch on and
