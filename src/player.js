@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.209";
+    const VERSION = "1.9.9.212";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2584,6 +2584,13 @@
             for (const s of saved.extra) {
 
                 if (s && s.song_id !== undefined && !byId.has(s.song_id)) {
+
+                    // A shared song kept from before carried the sharer's
+                    // like, only one given here stays
+                    if (s.shared === true && s.likedHere !== true) {
+                        s.is_liked = false;
+                    }
+
                     byId.set(s.song_id, s);
                 }
             }
@@ -25798,6 +25805,11 @@
 
         // Optimistic update so the heart responds without waiting on the network
         song.is_liked = makeLiked;
+
+        // A shared song remembers that the like is this account's own
+        if (song.shared === true) {
+            song.likedHere = makeLiked;
+        }
         noteChangedHere(song);
         paintHeart(heartEl, makeLiked);
         shiftLikes(song, makeLiked ? 1 : -1);
@@ -25840,6 +25852,13 @@
                 paintHeart(heartEl, liked);
                 saveCache();
 
+                // A shared song is kept with the queue, not the library
+                if (song.shared === true) {
+
+                    song.likedHere = liked;
+                    saveQueue();
+                }
+
                 if (liked !== wasLiked) {
                     shiftStoredLikes(song.song_id, liked ? 1 : -1);
                 }
@@ -25860,6 +25879,11 @@
 
                 // Given up, the heart and the count go back
                 song.is_liked = !makeLiked;
+
+                if (song.shared === true) {
+                    song.likedHere = !makeLiked;
+                }
+
                 paintHeart(heartEl, song.is_liked);
                 shiftLikes(song, makeLiked ? -1 : 1);
                 setStatus("Like left as it was");
@@ -29639,6 +29663,9 @@
             delete out.page_cursor;
             delete out.is_played;
 
+            // A like is the account's own, not one for the other player
+            delete out.is_liked;
+
             return out;
         });
     }
@@ -30814,7 +30841,10 @@
                 // shared since it may not be public
                 const s = fromFile.get(id);
 
+                // The like in an older file is the sharer's, not this
+                // account's, so the heart starts empty
                 s.shared = true;
+                s.is_liked = false;
                 songs.push(s);
                 foreign += 1;
             } else {
@@ -30933,6 +30963,12 @@
             }
 
             takeSharedDetails(s, f);
+
+            // A list read by this account carries its own like
+            if (typeof f.is_liked === "boolean") {
+                s.is_liked = f.is_liked;
+            }
+
             s.shared = false;
             ids.add(String(s.song_id));
         }
@@ -36967,6 +37003,19 @@
     // Copy a string to the clipboard, with a fallback for older browsers
     async function copyText(text) {
 
+        // The Android app copies itself, its WebView refuses most copies
+        if (isApkHost() && window.MurekaHost && typeof window.MurekaHost.copyText === "function") {
+
+            try {
+
+                if (window.MurekaHost.copyText(String(text)) === true) {
+                    return true;
+                }
+            } catch (e) {
+                // The browser's own ways are tried below
+            }
+        }
+
         try {
 
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -37045,12 +37094,77 @@
             return;
         }
 
-        const ok = await copyText(JSON.stringify(lastFeedResponse, dropWaveList, 2));
+        const text = JSON.stringify(lastFeedResponse, dropWaveList, 2);
+        const ok = await copyText(text);
 
         setStatus(ok
             ? "Copied the last feed response to the clipboard"
-            : "Could not copy to clipboard");
-        buttonDone(btn, ok ? "Copied" : "Could not copy", ok);
+            : "Could not copy to clipboard, shown instead");
+        buttonDone(btn, ok ? "Copied" : "Shown instead", ok);
+
+        if (!ok) {
+            showTextToCopy("The last feed response", text);
+        }
+    }
+
+    // Text the clipboard would not take, shown in a box to select and copy
+    // by hand, or to hand on with the share sheet where there is one
+    function showTextToCopy(title, text) {
+
+        if (!panelEl) {
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const area = document.createElement("textarea");
+        const row = document.createElement("div");
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = title + ", select it and copy";
+        head.style.cssText = "font-weight:600";
+
+        // At least 16 pixels, below that iOS zooms the page in on focus
+        area.value = text;
+        area.readOnly = true;
+        area.style.cssText = "width:100%;height:40vh;box-sizing:border-box;font:12px monospace;font-size:16px;"
+            + "background:#1b1b20;color:#ddd;border:1px solid #4a4a52;border-radius:6px;padding:8px";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = makeButton("Close", "#444", "#fff", function () {
+            back.remove();
+        });
+
+        close.style.flex = "1";
+
+        if (navigator.share) {
+
+            const share = makeButton("Share", "#48e1eb", "#000", function () {
+
+                navigator.share({ title: title, text: text }).catch(function () {
+                    // Closed without sharing
+                });
+            });
+
+            share.style.flex = "1";
+            row.appendChild(share);
+        }
+
+        row.appendChild(close);
+        card.appendChild(head);
+        card.appendChild(area);
+        card.appendChild(row);
+        back.appendChild(card);
+        panelEl.appendChild(back);
+
+        area.addEventListener("focus", function () {
+            area.select();
+        });
     }
 
     // Fetch the full untrimmed song object and copy it to the clipboard
@@ -37080,7 +37194,12 @@
         } catch (e) {
         }
 
-        const ok = await copyText(JSON.stringify(payload, dropWaveList, 2));
+        const json = JSON.stringify(payload, dropWaveList, 2);
+        const ok = await copyText(json);
+
+        if (!ok) {
+            showTextToCopy("The song's JSON", json);
+        }
 
         setStatus(ok
             ? "Copied JSON to clipboard: " + (song.title || "Untitled")

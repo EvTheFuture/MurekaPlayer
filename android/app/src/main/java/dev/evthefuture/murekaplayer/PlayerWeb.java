@@ -23,6 +23,8 @@ package dev.evthefuture.murekaplayer;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
@@ -1034,6 +1036,55 @@ final class PlayerWeb {
         }
 
         // Every kept cover removed, in the background
+        // Text onto the phone's clipboard. The WebView's own clipboard
+        // calls are refused without a tap it counts, and many copies here
+        // come after a request to Mureka
+        @JavascriptInterface
+        public boolean copyText(String text) {
+
+            if (!onMureka || text == null || appContext == null || text.length() > 2000000) {
+                return false;
+            }
+
+            final boolean[] done = { false };
+            final Object lock = new Object();
+
+            new Handler(Looper.getMainLooper()).post(() -> {
+
+                boolean ok = false;
+
+                try {
+
+                    ClipboardManager cm = (ClipboardManager) appContext.getSystemService(Context.CLIPBOARD_SERVICE);
+
+                    if (cm != null) {
+
+                        cm.setPrimaryClip(ClipData.newPlainText("Mureka Player", text));
+                        ok = true;
+                    }
+                } catch (RuntimeException e) {
+                    ok = false;
+                }
+
+                synchronized (lock) {
+
+                    done[0] = ok;
+                    lock.notifyAll();
+                }
+            });
+
+            synchronized (lock) {
+
+                try {
+                    lock.wait(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            return done[0];
+        }
+
         @JavascriptInterface
         public void clearCoverCache() {
 
