@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.212";
+    const VERSION = "1.9.9.213";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5634,6 +5634,13 @@
         // Songs Mureka now marks trimmed need no mark of ours
         if (!feed().creator) {
             dropConfirmedTrimMarks(extractSongs(json));
+        }
+
+        // A creator's list marks every song liked, the creator's own likes
+        // as it seems, not the viewer's. The viewer's own come from the
+        // Liked Songs list of the account signed in here
+        if (feed().creator) {
+            markViewerLikes(json);
         }
 
         // A shared song on a list read now, a creator's public songs or the
@@ -23396,6 +23403,9 @@
         // Shared songs looked up once a day, for new titles and covers
         setTimeout(checkSharedSongs, 8000);
 
+        // Started on a creator's list, its hearts follow the viewer's likes
+        applyViewerLikes();
+
         // Start playing on launch when the user asked for it
         maybeAutoPlay();
     }
@@ -25851,6 +25861,16 @@
                 song.is_liked = liked;
                 paintHeart(heartEl, liked);
                 saveCache();
+
+                // The viewer's own likes, for a creator's list read later
+                if (viewerLiked) {
+
+                    if (liked) {
+                        viewerLiked.add(String(song.song_id));
+                    } else {
+                        viewerLiked.delete(String(song.song_id));
+                    }
+                }
 
                 // A shared song is kept with the queue, not the library
                 if (song.shared === true) {
@@ -36353,6 +36373,130 @@
         renderPlaylists();
     }
 
+    // The songs the account signed in here has liked, from its Liked Songs
+    // list, the one Mureka marks t 1. Null until read
+    let viewerLiked = null;
+    let viewerLikedReading = null;
+
+    function readViewerLiked() {
+
+        if (viewerLikedReading) {
+            return viewerLikedReading;
+        }
+
+        viewerLikedReading = (async function () {
+
+            let lastId = null;
+
+            for (let page = 0; page < 10; page += 1) {
+
+                let url = "/api/pgc/playlists?time=" + Date.now() + "&size=24&sort_type=2";
+
+                if (lastId) {
+                    url += "&last_id=" + encodeURIComponent(lastId);
+                }
+
+                const res = await timedFetch(url, { credentials: "include" });
+                const json = res.ok ? await res.json() : null;
+
+                if (!json || json.code !== 0 || !json.data) {
+                    break;
+                }
+
+                const list = json.data.list || [];
+                const liked = list.find(function (p) {
+                    return p && p.t === 1 && !p.parent_id;
+                });
+
+                if (liked) {
+
+                    viewerLiked = new Set((liked.song_ids || []).map(String));
+                    break;
+                }
+
+                lastId = json.data.last_id;
+
+                if (!lastId || list.length < 24) {
+
+                    // No Liked Songs list, nothing liked yet
+                    viewerLiked = new Set();
+                    break;
+                }
+            }
+        })().catch(function () {
+            // Read again the next time a creator's list comes
+        }).then(function () {
+
+            viewerLikedReading = null;
+
+            if (viewerLiked && creatorSource) {
+
+                for (const s of cache.songs) {
+                    s.is_liked = viewerLiked.has(String(s.song_id));
+                }
+
+                dbgLog("Feed", "the hearts of the creator's songs follow your Liked Songs, " + viewerLiked.size + " songs");
+                renderList();
+                publishHostSoon();
+            }
+        });
+
+        return viewerLikedReading;
+    }
+
+    // The viewer's likes onto the creator's songs held, read first when not
+    // known yet
+    function applyViewerLikes() {
+
+        if (!creatorSource) {
+            return;
+        }
+
+        if (!viewerLiked) {
+
+            for (const s of cache.songs) {
+                s.is_liked = false;
+            }
+
+            readViewerLiked();
+            return;
+        }
+
+        for (const s of cache.songs) {
+            s.is_liked = viewerLiked.has(String(s.song_id));
+        }
+    }
+
+    // The like on each song of a creator's list page, the wrapper's and the
+    // song's own, set from the viewer's Liked Songs. Empty until that list
+    // has been read, which then fills them in
+    function markViewerLikes(json) {
+
+        const data = json && json.data ? json.data : null;
+        const items = data ? (data.feeds || data.list || []) : [];
+
+        if (!viewerLiked) {
+            readViewerLiked();
+        }
+
+        for (const item of items) {
+
+            const song = item && item.song && typeof item.song === "object" ? item.song : (item && "song_id" in item ? item : null);
+
+            if (!song) {
+                continue;
+            }
+
+            const liked = !!(viewerLiked && viewerLiked.has(String(song.song_id)));
+
+            song.is_liked = liked;
+
+            if (item !== song && typeof item.is_liked === "boolean") {
+                item.is_liked = liked;
+            }
+        }
+    }
+
     // Render the playlist rows, or a loading or empty message
     function renderPlaylists() {
 
@@ -36484,6 +36628,10 @@
         cache = loadCache();
         cachedIds = new Set();
         restoreCacheMarks();
+
+        // The hearts kept with the creator's list are the creator's own,
+        // the viewer's likes take their place
+        applyViewerLikes();
 
         updateCreatorButton();
         updateFeedButton();
