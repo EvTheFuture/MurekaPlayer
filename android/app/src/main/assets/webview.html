@@ -17124,10 +17124,11 @@
         }
 
         // The preview needs the sound to itself, the music pauses, shown
-        // at once, the next state from the phone confirms it
-        if (state && state.playing) {
+        // at once, the next state from the phone confirms it. The phone
+        // remembers where it was, for the music to go on once this closes
+        send("trimHold");
 
-            send("pause");
+        if (state && state.playing) {
             state.playing = false;
         }
 
@@ -17345,6 +17346,11 @@
     }
 
     function closeTrimmer() {
+
+        // Open or not, the phone lets go of the music it held for it
+        if (tr) {
+            send("trimResume");
+        }
 
         trimToken += 1;
         trimStop();

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.213";
+    const VERSION = "1.9.9.214";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -21375,6 +21375,12 @@
             hostSongAction(arg || {});
         } else if (cmd === "trimSong") {
             hostTrim(arg || {});
+        } else if (cmd === "trimHold") {
+
+            // The web view's trimmer opened, the music pauses until it closes
+            trimHoldMusic();
+        } else if (cmd === "trimResume") {
+            trimResumeMusic();
         } else if (cmd === "trimFade") {
 
             // The trimmer's fade switch, the same one on the phone and in
@@ -34031,10 +34037,9 @@
             buildTrimmer();
         }
 
-        // The preview needs the sound, the player pauses
-        if (audio && audio.src && !audio.paused) {
-            togglePlayPause();
-        }
+        // The preview needs the sound, the music pauses, to go on where it
+        // was once the trimmer closes
+        trimHoldMusic();
 
         // A new sound engine for every opening, made during the tap so
         // Safari lets it play, and only once the music has stopped. One
@@ -34173,6 +34178,92 @@
         if (trimUi) {
             trimUi.ask.style.display = "none";
             trimUi.working.style.display = "none";
+        }
+
+        trimResumeMusic();
+    }
+
+    // The music playing when a trimmer opened, here or in a web view, and
+    // what a trim made meanwhile, so the music goes on once it closes
+    let trimResume = null;
+    let trimResult = null;
+
+    function trimHoldMusic() {
+
+        trimResult = null;
+        trimResume = null;
+
+        if (audio && audio.src && !audio.paused && currentSong) {
+
+            trimResume = { id: String(currentSong.song_id), time: audio.currentTime || 0 };
+            togglePlayPause();
+        }
+    }
+
+    // The music goes on where it was. The song playing was the one
+    // trimmed: its new version plays instead, at the same place in the
+    // music, the part cut off the start taken away. Not ready yet, it
+    // plays as soon as it is
+    function trimResumeMusic() {
+
+        const was = trimResume;
+        const made = trimResult;
+
+        trimResume = null;
+        trimResult = null;
+
+        if (!was) {
+            return;
+        }
+
+        if (made && made.from === was.id) {
+
+            if (!made.song) {
+
+                if (made.newId) {
+                    playWhenReady(made.newId);
+                }
+
+                return;
+            }
+
+            const length = Math.max(0, (made.endMs - made.startMs) / 1000);
+            const at = Math.max(0, Math.min(was.time - made.startMs / 1000, length - 1));
+            const qi = queue.findIndex(function (s) {
+                return String(s.song_id) === was.id;
+            });
+
+            if (qi >= 0) {
+
+                queue[qi] = made.song;
+                queuePos = qi;
+            } else {
+
+                const pos = Math.max(0, queuePos);
+
+                queue.splice(pos, 0, made.song);
+                queuePos = pos;
+            }
+
+            dropNextReady();
+            pendingSeek = at;
+            dbgLog("Trim", "the new song plays on at " + Math.round(at) + " s, where the trimmed one was");
+            playCurrent();
+            return;
+        }
+
+        if (currentSong && String(currentSong.song_id) === was.id && audio && audio.src) {
+
+            if (Math.abs((audio.currentTime || 0) - was.time) > 1) {
+
+                try {
+                    audio.currentTime = was.time;
+                } catch (e) {
+                    // Plays on from where it is
+                }
+            }
+
+            startAudioPlayback();
         }
     }
 
@@ -36042,6 +36133,23 @@
         saveCache();
         renderList();
         publishHostSoon();
+
+        // What the trim made, for the music to go on with once the trimmer
+        // closes. The copy in the library, which the lists hold
+        const newOne = extractSongs(json.data || json).find(function (s) {
+            return String(s.song_id) !== String(song.song_id);
+        });
+        const newHere = newOne ? cache.songs.find(function (s) {
+            return String(s.song_id) === String(newOne.song_id);
+        }) : null;
+
+        trimResult = {
+            from: String(song.song_id),
+            newId: newOne ? String(newOne.song_id) : "",
+            song: newHere && isUsableSong(newHere) ? newHere : null,
+            startMs: startMs,
+            endMs: endMs
+        };
 
         let note = made.length > 0
             ? "Trimmed: " + title + ", the new song is at the top of the list"

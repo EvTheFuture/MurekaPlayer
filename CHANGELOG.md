@@ -436,25 +436,28 @@ the new settings layout and a number of smaller improvements.
   its ends to drag, and a close up of the start or the end that zooms from
   30 seconds down to 20 milliseconds, by pinching it with two fingers, the
   wheel or the zoom buttons, with steps of 10 ms, 100 ms and 1 s and typed
-  times. The song's id, its length and the new length show under
-  the title, with Trim beside it. **Play end** plays what the close up
-  shows before the end and stops on the exact sample where the new song
-  will end, **Repeat the end** plays it again and again while the end is
-  moved, **Play** and **Pause** play the kept part and stop where it is,
-  and a tap on the waveform plays from there. **Fade out the last second**
-  fades the preview the way Mureka fades a trimmed song, once the end is
-  moved. The new song gets a title of its own and is put at the top of the
-  list, marked new, with the original's rating, tempo, instrumental mark
-  and ignored mark, and liked when the original was. A small gold T on the public or draft badge marks every
-  trimmed song, from Mureka's own mark, so also songs trimmed on Mureka's
-  site or another device, once a Load or Rescan has read them. A song
-  trimmed here counts as trimmed straight away until then. It shows
+  times. The song's id, its length and the new length show under the title,
+  with Trim beside it. **Play end** plays what the close up shows before the
+  end and stops on the exact sample where the new song will end, **Repeat
+  the end** plays it again and again while the end is moved, **Play** and
+  **Pause** play the kept part and stop where it is, and a tap on the
+  waveform plays from there. **Fade out the last second** fades the preview
+  the way Mureka fades a trimmed song, once the end is moved. The new song
+  gets a title of its own and is put at the top of the list, marked new,
+  with the original's rating, tempo, instrumental mark and ignored mark, and
+  liked when the original was. A small gold T on the public or draft badge
+  marks every trimmed song, from Mureka's own mark, so also songs trimmed on
+  Mureka's site or another device, once a Load or Rescan has read them. A
+  song trimmed here counts as trimmed straight away until then. It shows
   wherever that badge shows: the lists, and the playing song in the web
-  view. **Delete original**, ticked when confirming, deletes
-  the original on Mureka and from the lists here once the new song has
-  arrived. While Mureka works, a turning ring covers the page. The web
-  view has the same trimmer in its song menu, drawn in the browser, with
-  the phone fetching the song and sending the trim to Mureka.
+  view. **Delete original**, ticked when confirming, deletes the original on
+  Mureka and from the lists here once the new song has arrived. While Mureka
+  works, a turning ring covers the page. The web view has the same trimmer
+  in its song menu, drawn in the browser, with the phone fetching the song
+  and sending the trim to Mureka. Music playing when the trimmer opens
+  pauses and goes on where it was once it closes. When the song trimmed was
+  the one playing, its new version goes on at the same place in the music
+  instead.
 - **Download** in the song menu asks for the file name first, filled in
   with the song's title followed by its id in brackets, ready to change.
   Where the browser can hand files to other apps, on a phone for one,
