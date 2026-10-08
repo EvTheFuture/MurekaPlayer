@@ -577,6 +577,82 @@
         transition: opacity 1.5s ease;
     }
 
+    /* The phone's hotspot, when asked for in the settings: green while it
+       is on, grey while it is off, dim while the phone cannot tell */
+    #hotspotBadge {
+        display: none;
+        flex: 0 0 auto;
+        margin-left: 0.4em;
+        padding: 0 0.5em;
+        border: 1px solid var(--line);
+        border-radius: 0.6em;
+        color: var(--muted);
+        font-size: 0.75em;
+        font-weight: 400;
+        line-height: 1.5;
+        white-space: nowrap;
+    }
+
+    #hotspotBadge.on {
+        border-color: rgba(95, 211, 141, 0.6);
+        color: #5fd38d;
+    }
+
+    #hotspotBadge.unknown {
+        opacity: 0.6;
+    }
+
+    /* How warm the phone is, a tap tells the battery's temperature */
+    #heatBadge {
+        display: none;
+        flex: 0 0 auto;
+        margin-left: 0.4em;
+        padding: 0 0.5em;
+        border: 1px solid var(--line);
+        border-radius: 0.6em;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: 0.75em;
+        line-height: 1.5;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    #heatBadge.cool {
+        border-color: rgba(100, 170, 255, 0.6);
+        color: #7ab8ff;
+    }
+
+    #heatBadge.warm {
+        border-color: rgba(240, 169, 74, 0.6);
+        color: #f0a94a;
+    }
+
+    #heatBadge.hot {
+        border-color: rgba(255, 138, 128, 0.6);
+        color: #ff8a80;
+    }
+
+    #heatBadge.critical {
+        border-color: #ff5a4f;
+        background: rgba(255, 90, 79, 0.18);
+        color: #ff8a80;
+        font-weight: 600;
+    }
+
+    html.phone #heatBadge {
+        margin-left: 6px;
+        font-size: 10px;
+        vertical-align: 1px;
+    }
+
+    html.phone #hotspotBadge {
+        margin-left: 6px;
+        font-size: 10px;
+        vertical-align: 1px;
+    }
+
     html.phone #netBadge {
         margin-left: 6px;
         font-size: 10px;
@@ -3552,6 +3628,8 @@
             <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
         </div>
         <span id="netBadge"></span>
+        <span id="hotspotBadge"></span>
+        <button id="heatBadge" type="button"></button>
         <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
         <button class="chip iconOnly" id="actionsBtn" type="button" data-icon="menu" aria-label="Actions" title="Actions"></button>
@@ -5915,6 +5993,144 @@
         checkBrowserNet("the page opened", true);
     }, 3000);
 
+    // The phone's hotspot on or off, while the badge is asked for
+    function paintHotspotBadge(s) {
+
+        const el = $("hotspotBadge");
+        const st = s && typeof s.hotspotBadge === "string" ? s.hotspotBadge : null;
+
+        if (!el) {
+            return;
+        }
+
+        el.style.display = st ? "inline-block" : "none";
+
+        if (!st) {
+            return;
+        }
+
+        el.className = st;
+        el.textContent = st === "on" ? "Hotspot on" : (st === "off" ? "Hotspot off" : "Hotspot ?");
+        el.title = st === "unknown"
+            ? "The phone cannot tell whether its hotspot is on, the hotspot helper is not running"
+            : "The phone's hotspot is " + st;
+    }
+
+    // How warm the phone is. The battery's temperature decides: cool below
+    // 40 degrees, warm from 40, hot from 45, very hot from 50. Android's own
+    // heat level counts from moderate up, its light level comes too early
+    // to say much. The numbers wait for a tap
+    let heatNow = null;
+    let heatHotspot = null;
+
+    const HEAT_WORDS = ["none", "light", "moderate", "severe", "critical", "emergency", "shutdown"];
+
+    function heatLevel(heat) {
+
+        const temp = heat.temp;
+        const android = heat.level;
+
+        if (temp === null) {
+            return android;
+        }
+
+        let level = 0;
+
+        if (temp >= 50) {
+            level = 3;
+        } else if (temp >= 45) {
+            level = 2;
+        } else if (temp >= 40) {
+            level = 1;
+        }
+
+        if (android !== null && android >= 2 && android > level) {
+            level = android;
+        }
+
+        return level;
+    }
+
+    function paintHeatBadge(s) {
+
+        const el = $("heatBadge");
+        const heat = s && s.heat && typeof s.heat === "object" ? s.heat : null;
+
+        heatNow = heat;
+        heatHotspot = s && typeof s.hotspotNow === "string" ? s.hotspotNow : null;
+
+        if (!el) {
+            return;
+        }
+
+        if (!heat || (heat.level === null && heat.temp === null)) {
+
+            el.style.display = "none";
+            return;
+        }
+
+        const level = heatLevel(heat);
+        let word = "Heat";
+        let cls = "";
+
+        if (level === 0) {
+
+            word = "Cool";
+            cls = "cool";
+        } else if (level === 1) {
+
+            word = "Warm";
+            cls = "warm";
+        } else if (level === 2) {
+
+            word = "Hot";
+            cls = "hot";
+        } else if (level === 3) {
+
+            word = "Very hot";
+            cls = "hot";
+        } else if (level !== null && level >= 4) {
+
+            word = "Critical";
+            cls = "critical";
+        }
+
+        el.className = cls;
+        el.textContent = word;
+        el.title = "How warm the phone is, tap for the battery's temperature";
+        el.style.display = "inline-block";
+    }
+
+    // The battery's temperature, Android's heat level when it says more
+    // than none, and the hotspot switched off while it is on
+    $("heatBadge").addEventListener("click", function () {
+
+        const temp = heatNow && typeof heatNow.temp === "number" ? heatNow.temp : null;
+        const android = heatNow && typeof heatNow.level === "number" ? heatNow.level : null;
+        const items = [
+            { icon: "info", label: temp === null ? "Battery temperature not known"
+                : "Battery " + temp.toFixed(1) + " \u00B0C", cls: "inset", fn: closeSongMenu }
+        ];
+
+        if (android !== null && android >= 1) {
+
+            items.push({ icon: "info", label: "Android's heat level, " + (HEAT_WORDS[android] || android),
+                fn: closeSongMenu });
+        }
+
+        if (heatHotspot === "on") {
+
+            items.push({ icon: "close", label: "Switch off hotspot", cls: "danger", fn: function () {
+
+                closeSongMenu();
+                send("hotspotOff");
+                toast("Switching off the hotspot", "wait");
+            } });
+        }
+
+        openChoice("Phone heat", items);
+    });
+
     function paintNetBadge(s) {
 
         const el = $("netBadge");
@@ -5949,6 +6165,10 @@
             } else {
                 home.appendChild(el);
             }
+
+            // The hotspot and heat badges go along, right after it
+            el.after($("hotspotBadge"));
+            $("hotspotBadge").after($("heatBadge"));
         }
 
         if (bad) {
@@ -6018,6 +6238,8 @@
 
         // Shown with or without a song
         paintNetBadge(s);
+        paintHotspotBadge(s);
+        paintHeatBadge(s);
 
         if (!s || !s.id) {
 
@@ -13826,7 +14048,7 @@
         }
 
         if (copyText(pickedText())) {
-            toast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player", "good");
+            toast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player", "ok");
         } else {
             toast("Could not copy", "bad");
         }

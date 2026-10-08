@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.215";
+    const VERSION = "1.9.9.219";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1926,6 +1926,8 @@
             webWaveSource: "mureka",
             webOnlineBadge: "fade",
             webNames: false,
+            webHotspotBadge: false,
+            webHeatBadge: true,
             webLyrics: "info",
             webControlOrder: "repeat,shuffle,stop,play,songs",
             webControlsV2: true,
@@ -2111,6 +2113,8 @@
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
                     webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
                     webNames: parsed.webNames === true,
+                    webHotspotBadge: parsed.webHotspotBadge === true,
+                    webHeatBadge: parsed.webHeatBadge !== false,
                     webLyrics: (parsed.webLyrics === "off" || parsed.webLyrics === "cover")
                         ? parsed.webLyrics : "info",
                     webControlOrder: webControlsFrom(parsed),
@@ -19081,6 +19085,21 @@
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
             names: settings.webNames === true,
+
+            // Whether the phone's hotspot is on, for the badge the web view
+            // shows when asked for: on, off or not known
+            hotspotBadge: settings.webHotspotBadge === true && isApkHost()
+                && typeof window.MurekaHost.hotspotStatus === "function" ? hotspotBadgeState() : null,
+
+            // How warm the phone is, for the heat badge: Android's heat level
+            // and the battery's temperature
+            heat: settings.webHeatBadge !== false && isApkHost()
+                && typeof window.MurekaHost.heatStatus === "function" ? heatNow() : null,
+
+            // Whether the phone's hotspot is on, so the heat badge's panel
+            // can offer to switch it off: on, off or unknown
+            hotspotNow: settings.webHeatBadge !== false && isApkHost()
+                && typeof window.MurekaHost.hotspotStatus === "function" ? hotspotBadgeState() : null,
             lyricsWhere: settings.webLyrics || "info",
             lyricLayout: hostLyricLayout(),
             prevSong: hostNeighbor(-1),
@@ -19461,6 +19480,60 @@
     }
 
     // What the app says about the hotspot helper, or nothing outside it
+    // The phone's heat, read at most every ten seconds, it changes slowly.
+    // level is Android's, 0 none, 1 light, 2 moderate, 3 severe, 4
+    // critical, 5 emergency, 6 shutdown, null when not known. temp is the
+    // battery's in degrees, null when not known
+    let heatRead = null;
+    let heatReadAt = 0;
+
+    function heatNow() {
+
+        if (heatRead && Date.now() - heatReadAt < 10000) {
+            return heatRead;
+        }
+
+        let info = {};
+
+        try {
+            info = JSON.parse(window.MurekaHost.heatStatus() || "{}");
+        } catch (e) {
+            info = {};
+        }
+
+        const level = typeof info.level === "number" && info.level >= 0 ? info.level : null;
+        const temp = typeof info.temp === "number" && info.temp > -1000 ? Math.round(info.temp) / 10 : null;
+
+        heatRead = { level: level, temp: temp };
+        heatReadAt = Date.now();
+
+        if (heatRead.level !== null && heatRead.level >= 3) {
+            dbgLog("Power", "the phone is hot, Android's heat level " + heatRead.level
+                + (temp !== null ? ", battery " + temp + " C" : ""));
+        }
+
+        return heatRead;
+    }
+
+    // The hotspot as the badge says it. Known only while the hotspot
+    // helper runs
+    let hotspotBadgeRead = null;
+    let hotspotBadgeAt = 0;
+
+    function hotspotBadgeState() {
+
+        if (hotspotBadgeRead && Date.now() - hotspotBadgeAt < 3000) {
+            return hotspotBadgeRead;
+        }
+
+        const state = hotspotInfoNow().state;
+
+        hotspotBadgeRead = state === "on" || state === "off" ? state : "unknown";
+        hotspotBadgeAt = Date.now();
+
+        return hotspotBadgeRead;
+    }
+
     function hotspotInfoNow() {
 
         try {
@@ -21381,6 +21454,18 @@
             trimHoldMusic();
         } else if (cmd === "trimResume") {
             trimResumeMusic();
+        } else if (cmd === "hotspotOff") {
+
+            // The heat badge's panel in the web view switched the hotspot
+            // off
+            if (isApkHost() && typeof window.MurekaHost.hotspotSwitch === "function") {
+
+                dbgLog("Power", "the hotspot switched off from the web view");
+                window.MurekaHost.hotspotSwitch(false);
+                hotspotBadgeAt = 0;
+                setTimeout(publishHostSoon, 2000);
+                setTimeout(publishHostSoon, 6000);
+            }
         } else if (cmd === "trimFade") {
 
             // The trimmer's fade switch, the same one on the phone and in
@@ -28791,6 +28876,16 @@
                 function () { return settings.webNames; },
                 function (v) { settings.webNames = v; publishHostSoon(); });
 
+            // How warm the phone is, as a badge on the web view
+            const webHeatRow = makeBoolRow("Heat badge",
+                function () { return settings.webHeatBadge !== false; },
+                function (v) { settings.webHeatBadge = v; publishHostSoon(); });
+
+            // Whether the phone's hotspot is on, as a badge on the web view
+            const webHotspotRow = makeBoolRow("Hotspot badge",
+                function () { return settings.webHotspotBadge === true; },
+                function (v) { settings.webHotspotBadge = v; publishHostSoon(); });
+
             const webControlRow = buildControlEditor("webControlOrder");
 
             const webLyricLabels = { off: "Off", info: "Beside the cover", cover: "On the cover" };
@@ -28920,6 +29015,8 @@
             webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
             webPage.appendChild(makeLabel("Control buttons"));
             webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
+            webPage.appendChild(withHint(webHotspotRow, "A badge beside the network badge saying whether the phone's hotspot is on or off. The phone knows only while the hotspot helper runs, see Charger and power."));
+            webPage.appendChild(withHint(webHeatRow, "How warm the phone is, as Android judges it: cool, warm, hot, very hot or critical. A tap on it tells the battery's temperature."));
             webPage.appendChild(webControlRow);
 
             // The web view's own screen off, apart from the mobile player's

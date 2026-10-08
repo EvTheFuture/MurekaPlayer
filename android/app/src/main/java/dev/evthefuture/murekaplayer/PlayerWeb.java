@@ -28,6 +28,7 @@ import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.MutableContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -36,6 +37,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.VpnService;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
@@ -857,6 +859,55 @@ final class PlayerWeb {
         // as it reads it, what the last hotspot command said, the charger
         // countdown, the pairing with wireless debugging and the helper's
         // last start, and the command that starts it from a computer
+        // How warm the phone is: Android's own heat level, 0 for none up to
+        // 6 for shutdown, and the battery's temperature in tenths of a
+        // degree, from the battery status Android keeps. Either is -1000
+        // when not known
+        @JavascriptInterface
+        public String heatStatus() {
+
+            if (!onMureka || appContext == null) {
+                return "";
+            }
+
+            int level = -1000;
+            int temp = -1000;
+
+            try {
+
+                PowerManager pm = (PowerManager) appContext.getSystemService(Context.POWER_SERVICE);
+
+                if (pm != null) {
+                    level = pm.getCurrentThermalStatus();
+                }
+            } catch (RuntimeException e) {
+                level = -1000;
+            }
+
+            try {
+
+                Intent battery = appContext.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+
+                if (battery != null) {
+                    temp = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1000);
+                }
+            } catch (RuntimeException e) {
+                temp = -1000;
+            }
+
+            JSONObject o = new JSONObject();
+
+            try {
+
+                o.put("level", level);
+                o.put("temp", temp);
+            } catch (JSONException e) {
+                return "{}";
+            }
+
+            return o.toString();
+        }
+
         @JavascriptInterface
         public String hotspotStatus() {
 

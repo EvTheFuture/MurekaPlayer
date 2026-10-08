@@ -369,6 +369,14 @@ the new settings layout and a number of smaller improvements.
 - **Mureka song links in Import**: pasted share links from Mureka's site,
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.
+- **Heat badge** in the web view, from the Android app: how warm the phone
+  is, cool in blue below 40 °C battery, warm from 40, hot from 45, very hot
+  from 50, or worse when Android's own heat level says so. A tap shows the
+  battery's temperature and, while the hotspot is on, a button that switches
+  it off. On by default, under Web view display.
+- **Hotspot badge** in the web view, off by default, under Web view display
+  in the settings: says beside the network badge whether the phone's
+  hotspot is on or off, as the hotspot helper tells it.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,
