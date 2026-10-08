@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.214";
+    const VERSION = "1.9.9.215";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34248,7 +34248,16 @@
             dropNextReady();
             pendingSeek = at;
             dbgLog("Trim", "the new song plays on at " + Math.round(at) + " s, where the trimmed one was");
+
             playCurrent();
+
+            // The covers show the queue as it is now, the new song in the
+            // middle, without a slide from the old one
+            setArtTransition("none");
+            setArtSources();
+            positionArt(0);
+            renderList();
+            saveQueue();
             return;
         }
 
