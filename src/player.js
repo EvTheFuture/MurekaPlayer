@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.231";
+    const VERSION = "1.9.9.232";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19096,20 +19096,17 @@
             controls: hostControls("web"),
             names: settings.webNames === true,
 
-            // Whether the phone's hotspot is on, for the badge the web view
-            // shows when asked for: on, off or not known
-            hotspotBadge: settings.webHotspotBadge === true && isApkHost()
-                && typeof window.MurekaHost.hotspotStatus === "function" ? hotspotBadgeState() : null,
+            // Whether the phone's hotspot is on, on, off or not known, for
+            // the hotspot badge and the heat badge's panel. Each browser may
+            // show the badges or not, the phone's settings are the default
+            hotspotBadge: isApkHost() && typeof window.MurekaHost.hotspotStatus === "function"
+                ? hotspotBadgeState() : null,
+            hotspotBadgeOn: settings.webHotspotBadge === true,
 
             // How warm the phone is, for the heat badge: Android's heat level
             // and the battery's temperature
-            heat: settings.webHeatBadge !== false && isApkHost()
-                && typeof window.MurekaHost.heatStatus === "function" ? heatNow() : null,
-
-            // Whether the phone's hotspot is on, so the heat badge's panel
-            // can offer to switch it off: on, off or unknown
-            hotspotNow: settings.webHeatBadge !== false && isApkHost()
-                && typeof window.MurekaHost.hotspotStatus === "function" ? hotspotBadgeState() : null,
+            heat: isApkHost() && typeof window.MurekaHost.heatStatus === "function" ? heatNow() : null,
+            heatBadgeOn: settings.webHeatBadge !== false,
 
             // The battery temperatures where the heat badge turns warm, hot
             // and very hot

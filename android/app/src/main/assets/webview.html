@@ -4365,6 +4365,9 @@
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
+            hotspotBadge: s.hotspotBadgeOn === true,
+            heatBadge: s.heatBadgeOn !== false,
+            heatText: s.heatText === "both" || s.heatText === "temp" ? s.heatText : "word",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
             size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26,
             sidePct: s.lyricLayout && typeof s.lyricLayout.side === "number" ? Math.round(s.lyricLayout.side * 100) : 80,
@@ -4394,6 +4397,13 @@
         // A look kept before the badge could be set follows the phone
         s.onlineBadge = look.onlineBadge === "always" || look.onlineBadge === "fade"
             ? look.onlineBadge : (raw.onlineBadge === "always" ? "always" : "fade");
+
+        // The hotspot and heat badges and what the heat badge says. A look
+        // kept before they could be set follows the phone
+        s.hotspotBadgeOn = typeof look.hotspotBadge === "boolean" ? look.hotspotBadge : raw.hotspotBadgeOn === true;
+        s.heatBadgeOn = typeof look.heatBadge === "boolean" ? look.heatBadge : raw.heatBadgeOn !== false;
+        s.heatText = look.heatText === "word" || look.heatText === "both" || look.heatText === "temp"
+            ? look.heatText : raw.heatText;
 
         // Our own waveform when chosen and the phone has it ready
         s.waveFine = false;
@@ -4544,6 +4554,10 @@
             names: { percent: "Percent", steps: "Steps" } },
         { label: "Online badge", page: "Web view", key: "onlineBadge", kind: "choice", values: ["fade", "always"],
             names: { fade: "Fade away", always: "Always" } },
+        { label: "Hotspot badge", page: "Web view", key: "hotspotBadge", kind: "bool" },
+        { label: "Heat badge", page: "Web view", key: "heatBadge", kind: "bool" },
+        { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "choice", values: ["word", "both", "temp"],
+            names: { word: "Cool", both: "Cool 37 \u00B0C", temp: "37 \u00B0C" } },
         { label: "Lyric size", page: "Web view", key: "size", kind: "step", step: 1, min: 10, max: 60 },
         { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
         { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
@@ -6106,7 +6120,14 @@
     function paintHotspotBadge(s) {
 
         const el = $("hotspotBadge");
-        const st = s && typeof s.hotspotBadge === "string" ? s.hotspotBadge : null;
+        const known = s && typeof s.hotspotBadge === "string" ? s.hotspotBadge : null;
+        const st = s && s.hotspotBadgeOn === true ? known : null;
+
+        // A switch asked for from the heat badge is followed with the badge
+        // hidden too
+        if (known) {
+            hotspotSettled(known);
+        }
 
         if (!el) {
             return;
@@ -6119,7 +6140,6 @@
         }
 
         hotspotShown = st;
-        hotspotSettled(st);
         el.className = st;
         el.textContent = "";
         el.appendChild(icon(st === "on" ? "hotspot" : (st === "off" ? "hotspotOff" : "hotspotUnknown")));
@@ -6172,11 +6192,7 @@
         const heat = s && s.heat && typeof s.heat === "object" ? s.heat : null;
 
         heatNow = heat;
-        heatHotspot = s && typeof s.hotspotNow === "string" ? s.hotspotNow : null;
-
-        if (heatHotspot) {
-            hotspotSettled(heatHotspot);
-        }
+        heatHotspot = s && typeof s.hotspotBadge === "string" ? s.hotspotBadge : null;
 
         if (s && Array.isArray(s.heatLimits) && s.heatLimits.length === 3
             && s.heatLimits.every(function (n) { return typeof n === "number"; })) {
@@ -6187,7 +6203,7 @@
             return;
         }
 
-        if (!heat || (heat.level === null && heat.temp === null)) {
+        if (!heat || (heat.level === null && heat.temp === null) || s.heatBadgeOn === false) {
 
             el.style.display = "none";
             return;

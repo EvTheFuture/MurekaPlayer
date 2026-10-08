@@ -375,12 +375,14 @@ the new settings layout and a number of smaller improvements.
   be set under Web view display. A tap shows the battery's temperature,
   Android's heat level with the limits behind it, and, while the hotspot is
   on, a button that switches it off. It can show the word, the word and
-  the temperature, or the temperature alone. On by default.
+  the temperature, or the temperature alone. On by default, and each
+  browser can have its own choice.
 - **Hotspot badge** in the web view, off by default, under Web view display
   in the settings: an icon after the heat badge, cyan while the
   phone's hotspot is on, grey while it is off and dashed when the phone
   cannot tell, read from Android itself. A tap offers to switch the hotspot
-  on or off, which goes through the hotspot helper.
+  on or off, which goes through the hotspot helper. Each browser can show
+  it or not on its own.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,
