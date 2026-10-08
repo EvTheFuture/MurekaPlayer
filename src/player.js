@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.207";
+    const VERSION = "1.9.9.209";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19023,6 +19023,10 @@
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             songNew: song && !creatorSource ? song.is_played === false : null,
             songTrimmed: song && !creatorSource ? isTrimmed(song) : null,
+
+            // Shared from another account, it may not be public, Mureka's
+            // reply for it says nothing about that
+            songShared: !!(song && song.shared === true),
 
             // The latest note, while it is fresh, for the web view to show
             toast: lastToast && Date.now() - lastToast.at < 8000 ? lastToast : null,

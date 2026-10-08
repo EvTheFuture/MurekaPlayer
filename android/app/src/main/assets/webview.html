@@ -2588,6 +2588,39 @@
         color: #f0a94a;
     }
 
+    /* A song picked to share, lit with a bar of the accent colour */
+    .row.picked {
+        background: rgba(72, 225, 235, 0.16);
+        box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    #pickBar {
+        position: fixed;
+        left: 50%;
+        bottom: calc(14px + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        z-index: 60;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        max-width: calc(100vw - 32px);
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border-radius: 14px;
+        border: 1px solid rgba(72, 225, 235, 0.55);
+        background: var(--card);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    }
+
+    #pickCount {
+        flex: 1 1 auto;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--text);
+    }
+
     /* A song shared from another account, which may not be public */
     .rowBadge.shared {
         background: #2e2640;
@@ -3578,6 +3611,12 @@
     </div>
 </div>
 <div id="toast"></div>
+<div id="pickBar">
+    <span id="pickCount"></span>
+    <button class="chip" id="pickCopy" type="button">Copy</button>
+    <button class="chip" id="pickShare" type="button" style="display:none">Share</button>
+    <button class="chip" id="pickDone" type="button">Done</button>
+</div>
 <div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
 <div id="hotspotPop"><span id="hotspotText"></span><button id="hotspotClose" type="button" aria-label="Close" title="Close">&#x2715;</button></div>
 <div id="songMenu">
@@ -6087,16 +6126,19 @@
         $("likeCount").textContent = likes === null || (likes === 1 && mine) ? "" : compactCount(likes);
 
         // Public or draft, only for your own songs, another creator's are all
-        // public anyway
-        const pub = s && typeof s.songPublic === "boolean" ? s.songPublic : null;
+        // public anyway. A song shared from another account says Shared,
+        // whether it is public is not known
+        const shared = !!(s && s.songShared);
+        const pub = shared ? true : (s && typeof s.songPublic === "boolean" ? s.songPublic : null);
 
         // A song not played yet says New there instead, as in the list
-        const fresh = pub !== null && s.songNew === true;
+        const fresh = !shared && pub !== null && s.songNew === true;
 
         $("pubBadge").style.display = pub === null ? "none" : "inline-block";
-        $("pubBadge").classList.toggle("draft", pub === false && !fresh);
+        $("pubBadge").classList.toggle("draft", !shared && pub === false && !fresh);
         $("pubBadge").classList.toggle("new", fresh);
-        $("pubBadge").textContent = pub === null ? "" : (fresh ? "New" : (pub ? "Public" : "Draft"));
+        $("pubBadge").classList.toggle("shared", shared);
+        $("pubBadge").textContent = pub === null ? "" : (shared ? "Shared" : (fresh ? "New" : (pub ? "Public" : "Draft")));
 
         // The same small T as in the list for a song made by trimming
         if (pub !== null && s.songTrimmed === true) {
@@ -8221,6 +8263,10 @@
 
         title.className = "rowTitle";
         title.textContent = song.title;
+
+        if (picking && picked.has(String(song.id))) {
+            row.classList.add("picked");
+        }
 
         // An ignored song carries a small crossed circle before its title
         if (song.ignored) {
@@ -10856,6 +10902,13 @@
                 if (item.ignored) {
                     title.prepend(ignoredMark());
                 }
+            }
+
+            // A heart liked or unliked since the list was drawn
+            const heartBtn = row.querySelector(".rowHeart");
+
+            if (heartBtn && typeof item.liked === "boolean") {
+                heartBtn.classList.toggle("liked", item.liked);
             }
 
             // New becomes public or draft once the phone has reported the
@@ -13696,6 +13749,135 @@
         });
     }
 
+    // Picking songs to share, as on the phone: Select to share in a song's
+    // menu, then a tap on a song in any list picks it or lets it go, and
+    // the bar copies them as a short line of their ids for the other
+    // player's Import, which reads each song from Mureka
+    let picking = false;
+    const picked = new Map();
+
+    function startPicking(id) {
+
+        picking = true;
+        picked.clear();
+        picked.set(String(id), true);
+        paintPicked();
+    }
+
+    function stopPicking() {
+
+        picking = false;
+        picked.clear();
+        paintPicked();
+    }
+
+    function togglePicked(id) {
+
+        const key = String(id);
+
+        if (picked.has(key)) {
+            picked.delete(key);
+        } else {
+            picked.set(key, true);
+        }
+
+        paintPicked();
+    }
+
+    // Every row drawn now, and the bar, as the picks are
+    function paintPicked() {
+
+        for (const row of document.querySelectorAll(".row[data-id]")) {
+            row.classList.toggle("picked", picking && picked.has(row.dataset.id));
+        }
+
+        const n = picked.size;
+
+        $("pickBar").style.display = picking ? "flex" : "none";
+        $("pickCount").textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
+    }
+
+    // The short line, the same as the phone makes: mps1 and each id in
+    // base 36, through BigInt so a long id keeps every digit
+    function pickedText() {
+
+        const codes = [];
+
+        for (const id of picked.keys()) {
+
+            try {
+                codes.push(BigInt(id).toString(36));
+            } catch (e) {
+                // Not an id, left out
+            }
+        }
+
+        return "Mureka Player songs: mps1." + codes.join(".");
+    }
+
+    function copyPicked() {
+
+        const n = picked.size;
+
+        if (n === 0) {
+
+            toast("Pick songs first", "bad");
+            return;
+        }
+
+        if (copyText(pickedText())) {
+            toast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player", "good");
+        } else {
+            toast("Could not copy", "bad");
+        }
+    }
+
+    function sharePicked() {
+
+        const n = picked.size;
+
+        if (n === 0) {
+
+            toast("Pick songs first", "bad");
+            return;
+        }
+
+        navigator.share({ title: n + (n === 1 ? " song" : " songs") + " for Mureka Player", text: pickedText() }).catch(function () {
+            // Closed without sharing
+        });
+    }
+
+    // While picking, a tap on a song in any list picks it, before the row's
+    // own handlers, which would play it or jump in the queue
+    for (const listId of ["rows", "miniRows"]) {
+
+        $(listId).addEventListener("click", function (ev) {
+
+            if (!picking) {
+                return;
+            }
+
+            const row = ev.target.closest ? ev.target.closest(".row[data-id]") : null;
+
+            if (!row || (ev.target.closest(".rowGrip"))) {
+                return;
+            }
+
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            togglePicked(row.dataset.id);
+        }, true);
+    }
+
+    $("pickCopy").addEventListener("click", copyPicked);
+    $("pickDone").addEventListener("click", stopPicking);
+
+    if (navigator.share) {
+
+        $("pickShare").style.display = "";
+        $("pickShare").addEventListener("click", sharePicked);
+    }
+
     // The choices for one song that do not start it playing, shared by the
     // long press menu and the actions menu, where they are for the playing
     // song. Close is how the menu they sit in closes
@@ -13704,6 +13886,34 @@
         const act = function (action, value) {
             return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
         };
+
+        // Pick songs to share with another player
+        if (!fromActions) {
+
+            menuLine(box);
+
+            if (picking) {
+
+                box.appendChild(menuItem("check", picked.has(String(m.id)) ? "Let go of this" : "Pick this", function () {
+
+                    togglePicked(m.id);
+                    close();
+                }));
+
+                box.appendChild(menuItem("close", "Done picking", function () {
+
+                    stopPicking();
+                    close();
+                }));
+            } else {
+
+                box.appendChild(menuItem("check", "Select to share", function () {
+
+                    startPicking(m.id);
+                    close();
+                }));
+            }
+        }
 
         // The song on Mureka, only your own songs
         menuLine(box);
