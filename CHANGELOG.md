@@ -370,13 +370,17 @@ the new settings layout and a number of smaller improvements.
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.
 - **Heat badge** in the web view, from the Android app: how warm the phone
-  is, cool in blue below 40 °C battery, warm from 40, hot from 45, very hot
-  from 50, or worse when Android's own heat level says so. A tap shows the
-  battery's temperature and, while the hotspot is on, a button that switches
-  it off. On by default, under Web view display.
+  is, cool in blue below 40 °C battery, warm in yellow from 40, hot in
+  orange from 45, very hot in red from 50, or worse when Android's own heat level says so. The limits can
+  be set under Web view display. A tap shows the battery's temperature,
+  Android's heat level with the limits behind it, and, while the hotspot is
+  on, a button that switches it off. It can show the word, the word and
+  the temperature, or the temperature alone. On by default.
 - **Hotspot badge** in the web view, off by default, under Web view display
-  in the settings: says beside the network badge whether the phone's
-  hotspot is on or off, as the hotspot helper tells it.
+  in the settings: an icon after the heat badge, cyan while the
+  phone's hotspot is on, grey while it is off and dashed when the phone
+  cannot tell, read from Android itself. A tap offers to switch the hotspot
+  on or off, which goes through the hotspot helper.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,
@@ -466,6 +470,8 @@ the new settings layout and a number of smaller improvements.
   pauses and goes on where it was once it closes. When the song trimmed was
   the one playing, its new version goes on at the same place in the music
   instead.
+- **Trimmer keeps its zoom**: the close up opens as wide as it was left
+  last time, on the phone and in each browser with the web view.
 - **Download** in the song menu asks for the file name first, filled in
   with the song's title followed by its id in brackets, ready to change.
   Where the browser can hand files to other apps, on a phone for one,

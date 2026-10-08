@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.219";
+    const VERSION = "1.9.9.231";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1874,6 +1874,7 @@
             remoteArtwork: false,
             artOnResume: false,
             trimFade: true,
+            trimZoom: 3,
             pauseOnDisconnect: false,
             playOnConnect: "never",
             coverResend: "title",
@@ -1928,6 +1929,10 @@
             webNames: false,
             webHotspotBadge: false,
             webHeatBadge: true,
+            heatText: "word",
+            heatWarm: 40,
+            heatHot: 45,
+            heatVeryHot: 50,
             webLyrics: "info",
             webControlOrder: "repeat,shuffle,stop,play,songs",
             webControlsV2: true,
@@ -2031,6 +2036,7 @@
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
                     trimFade: parsed.trimFade !== false,
+                    trimZoom: numberIn(parsed.trimZoom, 0, 10, 3),
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
                     coverResend: ["art", "id", "title"].indexOf(parsed.coverResend) >= 0
                         ? parsed.coverResend
@@ -2115,6 +2121,10 @@
                     webNames: parsed.webNames === true,
                     webHotspotBadge: parsed.webHotspotBadge === true,
                     webHeatBadge: parsed.webHeatBadge !== false,
+                    heatText: parsed.heatText === "both" || parsed.heatText === "temp" ? parsed.heatText : "word",
+                    heatWarm: numberIn(parsed.heatWarm, 20, 70, 40),
+                    heatHot: numberIn(parsed.heatHot, 20, 70, 45),
+                    heatVeryHot: numberIn(parsed.heatVeryHot, 20, 70, 50),
                     webLyrics: (parsed.webLyrics === "off" || parsed.webLyrics === "cover")
                         ? parsed.webLyrics : "info",
                     webControlOrder: webControlsFrom(parsed),
@@ -19100,6 +19110,14 @@
             // can offer to switch it off: on, off or unknown
             hotspotNow: settings.webHeatBadge !== false && isApkHost()
                 && typeof window.MurekaHost.hotspotStatus === "function" ? hotspotBadgeState() : null,
+
+            // The battery temperatures where the heat badge turns warm, hot
+            // and very hot
+            heatLimits: [settings.heatWarm, settings.heatHot, settings.heatVeryHot],
+
+            // What the heat badge says: the word, the word and the battery's
+            // temperature, or the temperature alone
+            heatText: settings.heatText || "word",
             lyricsWhere: settings.webLyrics || "info",
             lyricLayout: hostLyricLayout(),
             prevSong: hostNeighbor(-1),
@@ -19515,8 +19533,8 @@
         return heatRead;
     }
 
-    // The hotspot as the badge says it. Known only while the hotspot
-    // helper runs
+    // The hotspot as the badge says it: from Android itself, else from the
+    // hotspot helper's last answer
     let hotspotBadgeRead = null;
     let hotspotBadgeAt = 0;
 
@@ -19526,7 +19544,9 @@
             return hotspotBadgeRead;
         }
 
-        const state = hotspotInfoNow().state;
+        // What Android says right now first, the helper's last answer next
+        const info = hotspotInfoNow();
+        const state = info.live === "on" || info.live === "off" ? info.live : info.state;
 
         hotspotBadgeRead = state === "on" || state === "off" ? state : "unknown";
         hotspotBadgeAt = Date.now();
@@ -21454,14 +21474,16 @@
             trimHoldMusic();
         } else if (cmd === "trimResume") {
             trimResumeMusic();
-        } else if (cmd === "hotspotOff") {
+        } else if (cmd === "hotspotSwitch" || cmd === "hotspotOff") {
 
-            // The heat badge's panel in the web view switched the hotspot
-            // off
+            // The web view's hotspot or heat badge switched the hotspot on
+            // or off
             if (isApkHost() && typeof window.MurekaHost.hotspotSwitch === "function") {
 
-                dbgLog("Power", "the hotspot switched off from the web view");
-                window.MurekaHost.hotspotSwitch(false);
+                const on = cmd === "hotspotSwitch" && arg === true;
+
+                dbgLog("Power", "the hotspot switched " + (on ? "on" : "off") + " from the web view");
+                window.MurekaHost.hotspotSwitch(on);
                 hotspotBadgeAt = 0;
                 setTimeout(publishHostSoon, 2000);
                 setTimeout(publishHostSoon, 6000);
@@ -28882,6 +28904,20 @@
                 function (v) { settings.webHeatBadge = v; publishHostSoon(); });
 
             // Whether the phone's hotspot is on, as a badge on the web view
+            // The battery temperatures where the heat badge turns warm, hot
+            // and very hot
+            const heatWarmRow = makeStepperRow("Warm from, \u00B0C",
+                function () { return settings.heatWarm; },
+                function (v) { settings.heatWarm = v; publishHostSoon(); }, 20, 70, 1);
+
+            const heatHotRow = makeStepperRow("Hot from, \u00B0C",
+                function () { return settings.heatHot; },
+                function (v) { settings.heatHot = v; publishHostSoon(); }, 20, 70, 1);
+
+            const heatVeryHotRow = makeStepperRow("Very hot from, \u00B0C",
+                function () { return settings.heatVeryHot; },
+                function (v) { settings.heatVeryHot = v; publishHostSoon(); }, 20, 70, 1);
+
             const webHotspotRow = makeBoolRow("Hotspot badge",
                 function () { return settings.webHotspotBadge === true; },
                 function (v) { settings.webHotspotBadge = v; publishHostSoon(); });
@@ -29006,6 +29042,25 @@
             webPage.appendChild(makeSubLabel("Online badge"));
             webPage.appendChild(webOnlineBadgeRow);
             webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
+            webPage.appendChild(withHint(webHotspotRow, "A badge after the heat badge, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
+            webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
+            const heatTextRow = makeChoiceRow([
+                { label: "Cool", value: "word" },
+                { label: "Cool 37 \u00B0C", value: "both" },
+                { label: "37 \u00B0C", value: "temp" }
+            ], function () { return settings.heatText || "word"; }, function (v) {
+
+                settings.heatText = v;
+                publishHostSoon();
+            });
+
+            webPage.appendChild(makeSubLabel("Heat badge shows"));
+            webPage.appendChild(heatTextRow);
+            webPage.appendChild(makeHint("The word, the word and the battery's temperature, or the temperature alone. The colour follows the limits below either way."));
+            webPage.appendChild(heatWarmRow);
+            webPage.appendChild(heatHotRow);
+            webPage.appendChild(heatVeryHotRow);
+            webPage.appendChild(makeHint("Below the warm temperature the heat badge says cool. Android's own heat level counts from moderate up and can make the badge say more."));
             webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
             webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
             webPage.appendChild(webLyricSizeRow);
@@ -29015,8 +29070,6 @@
             webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
             webPage.appendChild(makeLabel("Control buttons"));
             webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
-            webPage.appendChild(withHint(webHotspotRow, "A badge beside the network badge saying whether the phone's hotspot is on or off. The phone knows only while the hotspot helper runs, see Charger and power."));
-            webPage.appendChild(withHint(webHeatRow, "How warm the phone is, as Android judges it: cool, warm, hot, very hot or critical. A tap on it tells the battery's temperature."));
             webPage.appendChild(webControlRow);
 
             // The web view's own screen off, apart from the mobile player's
@@ -33772,6 +33825,8 @@
 
             tr.zoom = Math.max(0, Math.min(TRIM_ZOOMS.length - 1, tr.zoom + step));
             tr.viewC = tr[tr.edge];
+            settings.trimZoom = tr.zoom;
+            saveSettings();
             trimPaint();
 
             // Repeating, the new length is heard soon after
@@ -34157,7 +34212,9 @@
             start: 0,
             end: duration,
             edge: "end",
-            zoom: 3,
+
+            // The close up as wide as it was left last time
+            zoom: Math.max(0, Math.min(TRIM_ZOOMS.length - 1, settings.trimZoom === undefined ? 3 : settings.trimZoom)),
             viewC: duration,
             loop: false,
             src: null,

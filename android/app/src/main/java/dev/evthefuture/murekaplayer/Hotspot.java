@@ -22,10 +22,23 @@
 package dev.evthefuture.murekaplayer;
 
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.os.Build;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -72,6 +85,115 @@ final class Hotspot {
     static String state() {
 
         return cachedState;
+    }
+
+    // Android's announcement of each hotspot change, kept as a sticky
+    // broadcast, and the state in it: disabling, disabled, enabling,
+    // enabled, failed
+    private static final String AP_STATE_ACTION = "android.net.wifi.WIFI_AP_STATE_CHANGED";
+    private static final String AP_STATE_EXTRA = "wifi_state";
+
+    // The hotspot's state right now without the helper: on or off from
+    // Android's last announcement, else from the phone's networks. Empty
+    // only when neither can be read
+    static String liveState(Context c) {
+
+        String told = announced(c);
+
+        if (!told.isEmpty()) {
+            return told;
+        }
+
+        try {
+            return apUp(c) ? "on" : "off";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    // Android's last hotspot announcement, empty when there is none
+    private static String announced(Context c) {
+
+        try {
+
+            IntentFilter filter = new IntentFilter(AP_STATE_ACTION);
+            Context app = c.getApplicationContext();
+            Intent last;
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                last = app.registerReceiver(null, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                last = app.registerReceiver(null, filter);
+            }
+
+            if (last != null) {
+
+                int st = last.getIntExtra(AP_STATE_EXTRA, -1);
+
+                if (st == 12 || st == 13) {
+                    return "on";
+                }
+
+                if (st == 10 || st == 11 || st == 14) {
+                    return "off";
+                }
+            }
+        } catch (RuntimeException e) {
+            return "";
+        }
+
+        return "";
+    }
+
+    // Whether the hotspot's network is up. From Android 15 the hotspot is a
+    // Wi-Fi network marked as local, before that it is a Wi-Fi interface
+    // with an address that is not a Wi-Fi the phone has joined. Its name
+    // differs between phones, wlan1, ap0 or swlan0 and the like
+    private static boolean apUp(Context c) throws Exception {
+
+        Set<String> joined = new HashSet<>();
+        ConnectivityManager cm = c.getApplicationContext().getSystemService(ConnectivityManager.class);
+
+        if (cm != null) {
+
+            for (Network n : cm.getAllNetworks()) {
+
+                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                LinkProperties lp = cm.getLinkProperties(n);
+
+                if (caps == null || lp == null || lp.getInterfaceName() == null
+                    || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    continue;
+                }
+
+                if (Build.VERSION.SDK_INT >= 35
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_LOCAL_NETWORK)) {
+                    return true;
+                }
+
+                joined.add(lp.getInterfaceName());
+            }
+        }
+
+        for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+
+            String name = ni.getName() == null ? "" : ni.getName();
+            boolean apName = name.startsWith("wlan") || name.startsWith("ap") || name.startsWith("swlan")
+                || name.startsWith("softap");
+
+            if (!ni.isUp() || ni.isLoopback() || !apName || joined.contains(name)) {
+                continue;
+            }
+
+            for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+
+                if (a instanceof Inet4Address) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     static void start(Context c) {

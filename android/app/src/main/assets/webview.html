@@ -553,6 +553,18 @@
 
     /* Whether the phone is online: red while it is not, green for a few
        seconds once it is back, or for as long as it is online */
+    /* The online, hotspot and heat badges together, close to each other
+       and taking no room in the bar while none of them shows */
+    #badges {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+    }
+
+    #badges.none {
+        display: none;
+    }
+
     #netBadge {
         display: none;
         flex: 0 0 auto;
@@ -583,19 +595,28 @@
         display: none;
         flex: 0 0 auto;
         margin-left: 0.4em;
-        padding: 0 0.5em;
+        padding: 0.05em 0.45em;
         border: 1px solid var(--line);
         border-radius: 0.6em;
+        background: none;
         color: var(--muted);
+        font: inherit;
         font-size: 0.75em;
+        cursor: pointer;
         font-weight: 400;
         line-height: 1.5;
         white-space: nowrap;
     }
 
     #hotspotBadge.on {
-        border-color: rgba(95, 211, 141, 0.6);
-        color: #5fd38d;
+        border-color: rgba(72, 225, 235, 0.6);
+        color: var(--accent);
+    }
+
+    #hotspotBadge .ico {
+        display: block;
+        width: 1.25em;
+        height: 1.25em;
     }
 
     #hotspotBadge.unknown {
@@ -624,14 +645,20 @@
         color: #7ab8ff;
     }
 
+    /* Yellow, orange and red as it gets warmer, critical filled red */
     #heatBadge.warm {
-        border-color: rgba(240, 169, 74, 0.6);
-        color: #f0a94a;
+        border-color: rgba(245, 197, 24, 0.6);
+        color: var(--gold);
     }
 
     #heatBadge.hot {
-        border-color: rgba(255, 138, 128, 0.6);
-        color: #ff8a80;
+        border-color: rgba(240, 140, 50, 0.7);
+        color: #f08c32;
+    }
+
+    #heatBadge.veryhot {
+        border-color: rgba(255, 90, 79, 0.7);
+        color: #ff6b5f;
     }
 
     #heatBadge.critical {
@@ -651,6 +678,10 @@
         margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
+    }
+
+    html.phone #badges {
+        vertical-align: middle;
     }
 
     html.phone #netBadge {
@@ -1703,6 +1734,22 @@
 
     .menuItem.accent {
         color: var(--accent);
+    }
+
+    .menuItem.cool {
+        color: #7ab8ff;
+    }
+
+    .menuItem.warmText {
+        color: var(--gold);
+    }
+
+    .menuItem.hotText {
+        color: #f08c32;
+    }
+
+    .menuItem.veryHotText {
+        color: #ff6b5f;
     }
 
     /* Taken out of the queue only, the song itself stays */
@@ -3627,9 +3674,11 @@
             <button id="soundCar" type="button" data-icon="browser" data-name="This browser" aria-label="Music in this browser" title="Music in this browser"></button>
             <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
         </div>
-        <span id="netBadge"></span>
-        <span id="hotspotBadge"></span>
-        <button id="heatBadge" type="button"></button>
+        <span id="badges">
+            <span id="netBadge"></span>
+            <button id="heatBadge" type="button"></button>
+            <button id="hotspotBadge" type="button"></button>
+        </span>
         <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
         <button class="chip iconOnly" id="actionsBtn" type="button" data-icon="menu" aria-label="Actions" title="Actions"></button>
@@ -4102,6 +4151,28 @@
         link: [
             ["path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" }],
             ["path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }]
+        ],
+        hotspot: [
+            ["circle", { cx: "12", cy: "12", r: "1.5" }],
+            ["path", { d: "M8.5 15.5a5 5 0 0 1 0-7" }],
+            ["path", { d: "M15.5 8.5a5 5 0 0 1 0 7" }],
+            ["path", { d: "M5.6 18.4a9 9 0 0 1 0-12.8" }],
+            ["path", { d: "M18.4 5.6a9 9 0 0 1 0 12.8" }]
+        ],
+        hotspotOff: [
+            ["circle", { cx: "12", cy: "12", r: "1.5" }],
+            ["path", { d: "M8.5 15.5a5 5 0 0 1 0-7" }],
+            ["path", { d: "M15.5 8.5a5 5 0 0 1 0 7" }],
+            ["path", { d: "M5.6 18.4a9 9 0 0 1 0-12.8" }],
+            ["path", { d: "M18.4 5.6a9 9 0 0 1 0 12.8" }],
+            ["line", { x1: "3", y1: "3", x2: "21", y2: "21" }]
+        ],
+        hotspotUnknown: [
+            ["circle", { cx: "12", cy: "12", r: "1.5" }],
+            ["path", { d: "M8.5 15.5a5 5 0 0 1 0-7", "stroke-dasharray": "2 2.5" }],
+            ["path", { d: "M15.5 8.5a5 5 0 0 1 0 7", "stroke-dasharray": "2 2.5" }],
+            ["path", { d: "M5.6 18.4a9 9 0 0 1 0-12.8", "stroke-dasharray": "2 2.5" }],
+            ["path", { d: "M18.4 5.6a9 9 0 0 1 0 12.8", "stroke-dasharray": "2 2.5" }]
         ],
         info: [
             ["circle", { cx: "12", cy: "12", r: "10" }],
@@ -5993,6 +6064,44 @@
         checkBrowserNet("the page opened", true);
     }, 3000);
 
+    // The badge group hidden while none of its badges shows, so the bar
+    // keeps no gap for it
+    function syncBadges() {
+
+        const any = ["netBadge", "hotspotBadge", "heatBadge"].some(function (id) {
+            return $(id).style.display !== "" && $(id).style.display !== "none";
+        });
+
+        $("badges").classList.toggle("none", !any);
+    }
+
+    syncBadges();
+
+    new MutationObserver(syncBadges).observe($("badges"), {
+        attributes: true,
+        attributeFilter: ["style"],
+        subtree: true
+    });
+
+    // The phone's hotspot as the badge last said it, and a switch asked
+    // for here that is waited for: which way, and the timer giving up on it
+    let hotspotShown = null;
+    let hotspotWant = null;
+    let hotspotWantTimer = 0;
+
+    // The hotspot where it was asked to go: the waiting note gives way to a
+    // short one saying so
+    function hotspotSettled(st) {
+
+        if (hotspotWant === null || st !== (hotspotWant ? "on" : "off")) {
+            return;
+        }
+
+        hotspotWant = null;
+        clearTimeout(hotspotWantTimer);
+        toast(st === "on" ? "The hotspot is on" : "The hotspot is off", "ok");
+    }
+
     // The phone's hotspot on or off, while the badge is asked for
     function paintHotspotBadge(s) {
 
@@ -6009,21 +6118,27 @@
             return;
         }
 
+        hotspotShown = st;
+        hotspotSettled(st);
         el.className = st;
-        el.textContent = st === "on" ? "Hotspot on" : (st === "off" ? "Hotspot off" : "Hotspot ?");
+        el.textContent = "";
+        el.appendChild(icon(st === "on" ? "hotspot" : (st === "off" ? "hotspotOff" : "hotspotUnknown")));
+        el.setAttribute("aria-label", st === "on" ? "Hotspot on" : (st === "off" ? "Hotspot off" : "Hotspot not known"));
         el.title = st === "unknown"
-            ? "The phone cannot tell whether its hotspot is on, the hotspot helper is not running"
+            ? "The phone cannot tell whether its hotspot is on"
             : "The phone's hotspot is " + st;
     }
 
-    // How warm the phone is. The battery's temperature decides: cool below
-    // 40 degrees, warm from 40, hot from 45, very hot from 50. Android's own
-    // heat level counts from moderate up, its light level comes too early
-    // to say much. The numbers wait for a tap
+    // How warm the phone is. The battery's temperature decides, against
+    // the limits set on the phone, 40, 45 and 50 degrees unless changed.
+    // Android's own heat level counts from moderate up, its light level
+    // comes too early to say much. The numbers wait for a tap
     let heatNow = null;
     let heatHotspot = null;
 
     const HEAT_WORDS = ["none", "light", "moderate", "severe", "critical", "emergency", "shutdown"];
+
+    let heatLimits = [40, 45, 50];
 
     function heatLevel(heat) {
 
@@ -6036,11 +6151,11 @@
 
         let level = 0;
 
-        if (temp >= 50) {
+        if (temp >= heatLimits[2]) {
             level = 3;
-        } else if (temp >= 45) {
+        } else if (temp >= heatLimits[1]) {
             level = 2;
-        } else if (temp >= 40) {
+        } else if (temp >= heatLimits[0]) {
             level = 1;
         }
 
@@ -6058,6 +6173,15 @@
 
         heatNow = heat;
         heatHotspot = s && typeof s.hotspotNow === "string" ? s.hotspotNow : null;
+
+        if (heatHotspot) {
+            hotspotSettled(heatHotspot);
+        }
+
+        if (s && Array.isArray(s.heatLimits) && s.heatLimits.length === 3
+            && s.heatLimits.every(function (n) { return typeof n === "number"; })) {
+            heatLimits = s.heatLimits;
+        }
 
         if (!el) {
             return;
@@ -6088,47 +6212,104 @@
         } else if (level === 3) {
 
             word = "Very hot";
-            cls = "hot";
+            cls = "veryhot";
         } else if (level !== null && level >= 4) {
 
             word = "Critical";
             cls = "critical";
         }
 
+        // The word, the word and the temperature, or the temperature alone,
+        // as set on the phone. The word while the temperature is not known
+        const mode = s && (s.heatText === "both" || s.heatText === "temp") ? s.heatText : "word";
+        const deg = typeof heat.temp === "number" ? Math.round(heat.temp) + " \u00B0C" : "";
+
         el.className = cls;
-        el.textContent = word;
-        el.title = "How warm the phone is, tap for the battery's temperature";
+        el.textContent = !deg || mode === "word" ? word : (mode === "both" ? word + " " + deg : deg);
+        el.title = word + ", tap for the battery's temperature";
         el.style.display = "inline-block";
     }
 
-    // The battery's temperature, Android's heat level when it says more
-    // than none, and the hotspot switched off while it is on
-    $("heatBadge").addEventListener("click", function () {
+    // The battery's temperature, Android's heat level as a button that
+    // shows the limits, and the hotspot switched off while it is on
+    function openHeatPanel() {
 
         const temp = heatNow && typeof heatNow.temp === "number" ? heatNow.temp : null;
         const android = heatNow && typeof heatNow.level === "number" ? heatNow.level : null;
         const items = [
             { icon: "info", label: temp === null ? "Battery temperature not known"
-                : "Battery " + temp.toFixed(1) + " \u00B0C", cls: "inset", fn: closeSongMenu }
+                : "Battery " + temp.toFixed(1) + " \u00B0C", cls: "inset", fn: closeSongMenu },
+            { icon: "sliders", label: "Android's heat level, " + (android === null ? "not known"
+                : (HEAT_WORDS[android] || android)), fn: openHeatLimits }
         ];
-
-        if (android !== null && android >= 1) {
-
-            items.push({ icon: "info", label: "Android's heat level, " + (HEAT_WORDS[android] || android),
-                fn: closeSongMenu });
-        }
 
         if (heatHotspot === "on") {
 
             items.push({ icon: "close", label: "Switch off hotspot", cls: "danger", fn: function () {
 
-                closeSongMenu();
-                send("hotspotOff");
-                toast("Switching off the hotspot", "wait");
+                switchHotspot(false);
             } });
         }
 
         openChoice("Phone heat", items);
+    }
+
+    // What the badge's words mean, the limits set on the phone. A tap goes
+    // back to the heat panel
+    function openHeatLimits() {
+
+        const back = function () {
+            openHeatPanel();
+        };
+
+        openChoice("Heat badge limits", [
+            { icon: "info", label: "Cool, below " + heatLimits[0] + " \u00B0C", cls: "cool", fn: back },
+            { icon: "info", label: "Warm, from " + heatLimits[0] + " \u00B0C", cls: "warmText", fn: back },
+            { icon: "info", label: "Hot, from " + heatLimits[1] + " \u00B0C", cls: "hotText", fn: back },
+            { icon: "info", label: "Very hot, from " + heatLimits[2] + " \u00B0C", cls: "veryHotText", fn: back }
+        ]);
+
+        $("menuCaption").textContent = "The battery's temperature. Android's heat level counts from moderate up"
+            + " and can make the badge say more, up to critical. Set the limits in the settings, Web view.";
+        $("menuCaption").style.display = "";
+    }
+
+    $("heatBadge").addEventListener("click", openHeatPanel);
+
+    // A tap on the hotspot badge offers to switch the hotspot the other
+    // way, or either way while the phone cannot tell
+    function switchHotspot(on) {
+
+        closeSongMenu();
+        send("hotspotSwitch", on);
+        toast(on ? "Switching on the hotspot" : "Switching off the hotspot", "wait");
+        hotspotWant = on;
+        clearTimeout(hotspotWantTimer);
+
+        hotspotWantTimer = setTimeout(function () {
+
+            if (hotspotWant !== null) {
+
+                hotspotWant = null;
+                toast(on ? "The hotspot did not switch on" : "The hotspot did not switch off", "bad");
+            }
+        }, 40000);
+    }
+
+    $("hotspotBadge").addEventListener("click", function () {
+
+        const st = hotspotShown;
+        const items = [];
+
+        if (st !== "on") {
+            items.push({ icon: "hotspot", label: "Switch on hotspot", cls: "accent", fn: function () { switchHotspot(true); } });
+        }
+
+        if (st !== "off") {
+            items.push({ icon: "hotspotOff", label: "Switch off hotspot", cls: "danger", fn: function () { switchHotspot(false); } });
+        }
+
+        openChoice(st === "on" ? "Hotspot is on" : (st === "off" ? "Hotspot is off" : "Hotspot, not known"), items);
     });
 
     function paintNetBadge(s) {
@@ -6160,15 +6341,12 @@
 
             netBadgeHome = home;
 
+            // The hotspot and heat badges go along, they share one group
             if (home === $("bottom")) {
-                home.insertBefore(el, $("status"));
+                home.insertBefore($("badges"), $("status"));
             } else {
-                home.appendChild(el);
+                home.appendChild($("badges"));
             }
-
-            // The hotspot and heat badges go along, right after it
-            el.after($("hotspotBadge"));
-            $("hotspotBadge").after($("heatBadge"));
         }
 
         if (bad) {
@@ -16817,6 +16995,32 @@
     const TRIM_PREVIEW_MIN = 0.5;
     const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
 
+    // The close up as wide as it was left last time in this browser, 5 s
+    // the first time
+    const TRIM_ZOOM_KEY = "murekaTrimZoom";
+
+    function trimZoomKept() {
+
+        let n = 3;
+
+        try {
+            n = parseInt(localStorage.getItem(TRIM_ZOOM_KEY) || "3", 10);
+        } catch (e) {
+            n = 3;
+        }
+
+        return isNaN(n) ? 3 : Math.max(0, Math.min(TRIM_ZOOMS.length - 1, n));
+    }
+
+    function trimZoomKeep(n) {
+
+        try {
+            localStorage.setItem(TRIM_ZOOM_KEY, String(n));
+        } catch (e) {
+            return;
+        }
+    }
+
     // How much two fingers must spread or close for the close up to zoom
     // one step
     const TRIM_PINCH_STEP = 1.35;
@@ -17134,6 +17338,7 @@
 
             tr.zoom = Math.max(0, Math.min(TRIM_ZOOMS.length - 1, tr.zoom + step));
             tr.viewC = tr[tr.edge];
+            trimZoomKeep(tr.zoom);
             trimPaint();
 
             // Repeating, the new length is heard soon after
@@ -17382,7 +17587,7 @@
             start: 0,
             end: duration,
             edge: "end",
-            zoom: 3,
+            zoom: trimZoomKept(),
             viewC: duration,
             loop: false,
             src: null,

@@ -927,6 +927,7 @@ final class PlayerWeb {
 
                 o.put("helper", helper);
                 o.put("state", "stopped".equals(helper) ? "" : Hotspot.state());
+                o.put("live", Hotspot.liveState(appContext));
                 o.put("last", Hotspot.lastResult());
                 o.put("countdown", ChargeWatch.left());
                 o.put("reason", ChargeWatch.reason());
