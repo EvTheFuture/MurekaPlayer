@@ -3818,7 +3818,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><text id="repeatOne" x="12" y="15" font-size="8" text-anchor="middle" fill="currentColor" stroke="none" style="display:none">1</text></svg>
         </button>
         <button class="ctl" id="stopBtn" type="button" data-label="Stop" aria-label="Stop" data-icon="stop"></button>
-        <button class="ctl" id="pubBtn" type="button" data-label="Published" aria-label="Published or all songs" data-icon="check"></button>
+        <button class="ctl" id="pubBtn" type="button" data-label="Published" aria-label="Published, all songs or drafts" data-icon="check"></button>
         <button class="ctl" id="vocBtn" type="button" data-label="Vocals" aria-label="Vocals, instrumental or all" data-icon="all"></button>
         <button class="ctl" id="rateBtn" type="button" data-label="Rate" aria-label="Rate the playing song" data-icon="star"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
@@ -4446,6 +4446,10 @@
             ["circle", { cx: "12", cy: "5", r: "1.6", fill: "currentColor" }],
             ["circle", { cx: "12", cy: "12", r: "1.6", fill: "currentColor" }],
             ["circle", { cx: "12", cy: "19", r: "1.6", fill: "currentColor" }]
+        ],
+        draft: [
+            ["path", { d: "M12 20h9" }],
+            ["path", { d: "M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" }]
         ],
         lock: [
             ["rect", { x: "4", y: "11", width: "16", height: "10", rx: "2" }],
@@ -6958,10 +6962,11 @@
         $("rateBtn").classList.toggle("on", !!(s && s.rating !== null && s.rating !== undefined));
 
         // Like the phone: a tick for published only, an open circle for all
-        // songs, on the button and on the list's chip alike, and the names
-        // under the buttons follow what the buttons show
-        const onlyPublished = eff.published !== "all";
-        const pubIcon = onlyPublished ? "check" : "circle";
+        // songs and a pencil for drafts only, on the button and on the
+        // list's chip alike, and the names under the buttons follow
+        const pubShows = pubNow(eff);
+        const onlyPublished = pubShows !== "all";
+        const pubIcon = pubIconName(pubShows);
 
         if ($("pubBtn").dataset.shows !== pubIcon) {
 
@@ -7010,7 +7015,7 @@
         paintWork(s);
 
         setCtlLabel("play", playing ? "Pause" : "Play");
-        setCtlLabel("pubBtn", onlyPublished ? "Public" : "All");
+        setCtlLabel("pubBtn", pubName(pubShows, true));
         setCtlLabel("vocBtn", vocals === "vocal" ? "Vocals" : (vocals === "instrumental" ? "Instr" : "All"));
         setCtlLabel("rateBtn", rated ? s.rating + "\u2605" : "Rate");
 
@@ -9519,6 +9524,35 @@
         paintFrom(eff);
     }
 
+    // The three ways of showing your own library, in the order a tap goes
+    // through them, as on the phone: published only, all songs, drafts only
+    const PUB_ORDER = ["published", "all", "drafts"];
+
+    function pubNow(f) {
+        return f && PUB_ORDER.indexOf(f.published) >= 0 ? f.published : "published";
+    }
+
+    function pubNext(now) {
+        return PUB_ORDER[(PUB_ORDER.indexOf(now) + 1) % PUB_ORDER.length];
+    }
+
+    function pubName(v, short) {
+
+        if (v === "all") {
+            return short ? "All" : "All songs";
+        }
+
+        if (v === "drafts") {
+            return "Drafts";
+        }
+
+        return short ? "Public" : "Published";
+    }
+
+    function pubIconName(v) {
+        return v === "all" ? "circle" : (v === "drafts" ? "draft" : "check");
+    }
+
     // A filter tap: shown at once, then sent to the phone
     function filterTap(cmd, arg) {
 
@@ -9528,7 +9562,7 @@
         if (cmd === "vocals") {
             filterPending.vocals = { value: arg, until: until };
         } else if (cmd === "feed") {
-            filterPending.published = { value: eff.published === "all" ? "published" : "all", until: until };
+            filterPending.published = { value: PUB_ORDER.indexOf(arg) >= 0 ? arg : pubNext(pubNow(eff)), until: until };
         } else if (cmd === "smart") {
             filterPending.smart = { value: !eff.smart, until: until };
         }
@@ -9555,7 +9589,7 @@
         if (f.creator) {
             parts.push(f.creator);
         } else {
-            parts.push(f.published === "all" ? "All songs" : "Published");
+            parts.push(pubName(pubNow(f), false));
         }
 
         if (f.playlist) {
@@ -9645,16 +9679,22 @@
 
         box.appendChild(fromHead("Library"));
         box.appendChild(fromRow([
-            fromChip("check", "Published", !browsing && f.published !== "all", function () {
+            fromChip("check", "Published", !browsing && pubNow(f) === "published", function () {
 
-                if (f.published === "all") {
-                    filterTap("feed", null);
+                if (pubNow(f) !== "published") {
+                    filterTap("feed", "published");
                 }
             }, browsing),
-            fromChip("circle", "All songs", !browsing && f.published === "all", function () {
+            fromChip("circle", "All songs", !browsing && pubNow(f) === "all", function () {
 
-                if (f.published !== "all") {
-                    filterTap("feed", null);
+                if (pubNow(f) !== "all") {
+                    filterTap("feed", "all");
+                }
+            }, browsing),
+            fromChip("draft", "Drafts", !browsing && pubNow(f) === "drafts", function () {
+
+                if (pubNow(f) !== "drafts") {
+                    filterTap("feed", "drafts");
                 }
             }, browsing),
             fromChip("person", (f.creator ? f.creator : "Your library") + "  \u203A", browsing, function () {
@@ -10093,10 +10133,10 @@
         $("vocalsCycle").classList.toggle("on", voc !== "all");
         $("vocalsCycle").classList.toggle("ring", voc === "all");
 
-        setLabel($("feed"), f.published === "published" ? "Published" : "All songs");
-        setIcon($("feed"), f.published === "published" ? "check" : "circle");
-        $("feed").classList.toggle("on", f.published === "published");
-        $("feed").classList.toggle("ring", f.published !== "published");
+        setLabel($("feed"), pubName(pubNow(f), false));
+        setIcon($("feed"), pubIconName(pubNow(f)));
+        $("feed").classList.toggle("on", pubNow(f) !== "all");
+        $("feed").classList.toggle("ring", pubNow(f) === "all");
 
         // Like the phone's Filters on and off, parked or restored without
         // losing what is ticked, and nothing to switch when nothing is set

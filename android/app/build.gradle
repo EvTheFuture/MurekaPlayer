@@ -164,9 +164,12 @@ android {
     }
 
     buildTypes {
+        // Signed with the release key when it is there, as make release
+        // does. Without it the release APK is left unsigned, which is what
+        // F-Droid's build server expects, it signs with its own key
         release {
             minifyEnabled = false
-            signingConfig = hasReleaseKey ? signingConfigs.release : signingConfigs.debug
+            signingConfig = hasReleaseKey ? signingConfigs.release : null
         }
 
         // The debug build takes the release key too when it is there, so a

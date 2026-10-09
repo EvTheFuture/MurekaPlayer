@@ -490,6 +490,10 @@ the new settings layout and a number of smaller improvements.
   Tapped before the song is ready, it asks again once it is.
   In the web view the song is saved under that name too, the phone
   fetching it for the browser.
+- **Drafts** as a third way of showing your own library, beside Published
+  and All songs: only the songs not published. The Published button, the
+  feed button and the web view's button and chips go through all three, a
+  pencil marks Drafts.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
   songs, and **Allow remixing** or **Disallow remixing**, instrumentals included.
   Publishing copies the song's link to the clipboard, in the web view to

@@ -84,9 +84,15 @@ all: version check ext release
 ext:
 	./build.sh
 
-# Keep the manifest in step with the player on its own
+# Keep the manifest in step with the player on its own, and the version
+# file F-Droid reads to notice a new release. The code is the one the app
+# gets, two digits per part, 2.0.0 is 2000000
+VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '{ c = 0; for (i = 1; i <= 4; i++) c = c * 100 + ($$i + 0); print c }')
+
 version:
 	./update-manifest-version.sh
+	@printf 'versionName=%s\nversionCode=%s\n' "$(VERSION)" "$(VERSION_CODE)" > android/version.properties
+	@echo "android/version.properties at $(VERSION), code $(VERSION_CODE)"
 
 # The release bookmarklet, pinned to a tag with the player's hash. Tag the
 # release first
@@ -104,6 +110,11 @@ check:
 	@manifest=$$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' manifest.json | head -1); \
 	if [ "$$manifest" != "$(VERSION)" ]; then \
 	    echo "Version mismatch: manifest.json is $$manifest, player.js is $(VERSION), run make version"; \
+	    exit 1; \
+	fi; \
+	if ! grep -qx "versionName=$(VERSION)" android/version.properties 2>/dev/null \
+	    || ! grep -qx "versionCode=$(VERSION_CODE)" android/version.properties; then \
+	    echo "android/version.properties is not at $(VERSION), run make version"; \
 	    exit 1; \
 	fi; \
 	echo "Versions agree at $(VERSION)"

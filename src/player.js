@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.243";
+    const VERSION = "1.9.9.246";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -358,7 +358,7 @@
     // Honor the remembered feed, or the chosen start feed, before its cache loads
     // A remembered creator is applied after the UI is built, see applyStartupSource
     publishFilter = (startupSource && startupSource.kind === "feed")
-        ? startupSource.feed
+        ? (["published", "all", "drafts"].indexOf(startupSource.feed) >= 0 ? startupSource.feed : "published")
         : (settings.startFeed === "all" ? "all" : "published");
 
     // The creator whose library is being browsed, or null for your own library
@@ -3779,11 +3779,38 @@
     // published by definition, so the filter only applies to your own songs
     function passesPublishFilter(song) {
 
-        if (creatorSource || publishFilter !== "published") {
+        if (creatorSource || publishFilter === "all") {
             return true;
         }
 
+        // Drafts, your own songs not published, also those taken down
+        if (publishFilter === "drafts") {
+            return song.publish_state !== 1;
+        }
+
         return song.publish_state === 1;
+    }
+
+    // The three ways of showing your own library, in the order a tap goes
+    // through them: published only, all songs, drafts only
+    const PUBLISH_FILTERS = ["published", "all", "drafts"];
+
+    function nextPublishFilter(now) {
+        return PUBLISH_FILTERS[(PUBLISH_FILTERS.indexOf(now) + 1) % PUBLISH_FILTERS.length];
+    }
+
+    // The name of a way of showing, for buttons and the line under the title
+    function publishFilterName(f, short) {
+
+        if (f === "all") {
+            return short ? "All" : "All songs";
+        }
+
+        if (f === "drafts") {
+            return "Drafts";
+        }
+
+        return short ? "Public" : "Published";
     }
 
     // The smart filter sheet, built the first time it is opened
@@ -6535,7 +6562,7 @@
     // Switch between the published feed and the all songs feed
     // Each feed keeps its own cache, so this just swaps which one is shown
     // While browsing a creator this instead returns to your own current feed
-    function switchFeed() {
+    function switchFeed(to) {
 
         // Cancel any load in progress so it cannot write into the new feed cache
         if (running) {
@@ -6562,8 +6589,9 @@
         } else {
 
             // One library, so this only changes which part of it is shown. No
-            // reload, no second cursor, and nothing to go stale
-            publishFilter = publishFilter === "published" ? "all" : "published";
+            // reload, no second cursor, and nothing to go stale. A way asked
+            // for by name is taken, otherwise the next one in turn
+            publishFilter = PUBLISH_FILTERS.indexOf(to) >= 0 ? to : nextPublishFilter(publishFilter);
         }
 
         updateFeedButton();
@@ -6605,9 +6633,7 @@
         if (creatorSource) {
             sourceEl.textContent = creatorSource.stage_name || "Creator";
         } else {
-            sourceEl.textContent = publishFilter === "published"
-                ? "Published"
-                : "All songs";
+            sourceEl.textContent = publishFilterName(publishFilter, false);
         }
 
         sourceEl.style.display = "inline";
@@ -6617,22 +6643,23 @@
     function updateFeedButton() {
 
         if (feedButton) {
-            feedButton.labelEl.textContent = publishFilter === "published"
-                ? "Published"
-                : "All";
+            feedButton.labelEl.textContent = publishFilter === "all" ? "All" : publishFilterName(publishFilter, false);
         }
 
         if (publishedCtrlBtn) {
 
-            const onlyPublished = publishFilter === "published";
+            const shows = publishFilter;
+            const next = nextPublishFilter(shows);
 
-            // A tick for published only, an open circle for everything
-            setTransportIcon(publishedCtrlBtn, onlyPublished ? "\u2713" : "\u25CB");
+            // A tick for published only, an open circle for everything and
+            // a pencil for drafts only
+            setTransportIcon(publishedCtrlBtn, shows === "published" ? "\u2713" : (shows === "drafts" ? "\u270E" : "\u25CB"));
             updateControlLabels();
-            publishedCtrlBtn.title = onlyPublished ? "Showing published, tap for all" : "Showing all, tap for published";
+            publishedCtrlBtn.title = "Showing " + publishFilterName(shows, false).toLowerCase()
+                + ", tap for " + publishFilterName(next, false).toLowerCase();
 
-            // Filled for published only, ringed for every song
-            paintCtrl(publishedCtrlBtn, onlyPublished ? "fill" : "ring");
+            // Filled while only a part is shown, ringed for every song
+            paintCtrl(publishedCtrlBtn, shows === "all" ? "ring" : "fill");
 
             // Greyed and inert while browsing a creator
             publishedCtrlBtn.style.opacity = creatorSource ? "0.35" : "1";
@@ -20921,7 +20948,7 @@
 
         return {
             anyRated: ratings.size > 0,
-            badges: !creatorSource && publishFilter === "all"
+            badges: !creatorSource && publishFilter !== "published"
         };
     }
 
@@ -22002,7 +22029,9 @@
 
             setVocalFilter(value);
         } else if (cmd === "feed") {
-            switchFeed();
+
+            // A way of showing asked for by name, or the next one in turn
+            switchFeed(PUBLISH_FILTERS.indexOf(arg) >= 0 ? arg : null);
         } else if (cmd === "smart") {
 
             settings.smartEnabled = !settings.smartEnabled;
@@ -22405,8 +22434,10 @@
         // Choosing which collection of songs the list shows
         const rowSource = makeActionRow();
 
-        feedButton = makeActionButton(iconFeed(), feed().label, "#444", "#fff", switchFeed);
-        feedButton.title = "Switch between published and all songs";
+        feedButton = makeActionButton(iconFeed(), feed().label, "#444", "#fff", function () {
+            switchFeed();
+        });
+        feedButton.title = "Switch between published, all songs and drafts";
 
         playlistButton = makeActionButton(iconPlaylists(), "Playlists", "#444", "#fff", openPlaylists);
         creatorButton = makeActionButton(iconCreators(), "Creators", "#444", "#fff", openCreators);
@@ -22974,7 +23005,7 @@
         // Flips between published only and every song. Greyed out while a
         // creator is being browsed, since another creator only ever exposes
         // published songs, so the toggle would have nothing to switch
-        publishedCtrlBtn = makeIconButton("\u2713", "Published / All", function () {
+        publishedCtrlBtn = makeIconButton("\u2713", "Published / All / Drafts", function () {
 
             if (creatorSource) {
                 return;
@@ -25377,7 +25408,7 @@
         }
 
         if (name === "published") {
-            return publishFilter === "published" ? "Public" : "All";
+            return publishFilterName(publishFilter, true);
         }
 
         // The playing song's rating, or the action while it has none
@@ -26681,7 +26712,7 @@
         // report and the badge falls back to public or draft
         // A song shared from another account's player says so wherever it
         // shows, it may not be public
-        if ((!creatorSource && publishFilter === "all") || song.shared === true) {
+        if ((!creatorSource && publishFilter !== "published") || song.shared === true) {
 
             const published = song.publish_state === 1;
             const isNew = song.is_played === false && song.shared !== true;
@@ -32533,8 +32564,19 @@
         await Promise.all([worker(), worker(), worker(), worker()]);
 
         const got = songs.filter(Boolean);
+        const missed = keys.length - got.length;
 
-        return { songs: got, missed: keys.length - got.length };
+        // The waiting note gives way to how it went, it would otherwise
+        // stay up until something else is said
+        if (got.length > 0) {
+
+            showToast("Read " + got.length + (got.length === 1 ? " song" : " songs") + " from Mureka"
+                + (missed > 0 ? ", " + missed + " could not be read" : ""), missed === 0);
+        } else {
+            showToast("Could not read the songs from Mureka", false);
+        }
+
+        return { songs: got, missed: missed };
     }
 
     // Imports from the web view, read and planned here and finished once
