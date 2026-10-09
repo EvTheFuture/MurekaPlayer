@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.240";
+    const VERSION = "1.9.9.241";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2954,7 +2954,7 @@
 
         askText("BPM for " + (song.title || "Untitled"), current > 0 ? String(current) : "", "Save", function (answer) {
             setManualBpmText(song, String(answer));
-        }, clear);
+        }, clear, "numeric");
     }
 
     // Keep a typed tempo, or clear the hand entered one when the text is
@@ -13612,7 +13612,9 @@
     // extra is an optional third button between the two: its label, what a
     // tap does, handed the text and a way to close, and a setup that gets
     // the button, to dim it until it can be used
-    function askText(title, value, okLabel, onOk, extra, password) {
+    // kind makes the field a password, true, or numbers only, "numeric",
+    // which brings up the number pad on a phone
+    function askText(title, value, okLabel, onOk, extra, kind) {
 
         if (!panelEl) {
             return;
@@ -13655,7 +13657,13 @@
 
         // At least 16 pixels, below that iOS zooms the page in on focus
         const field = document.createElement("input");
-        field.type = password === true ? "password" : "text";
+        field.type = kind === true ? "password" : "text";
+
+        if (kind === "numeric") {
+
+            field.inputMode = "numeric";
+            field.pattern = "[0-9]*";
+        }
         field.value = value || "";
         field.setAttribute("autocomplete", "off");
         field.setAttribute("autocapitalize", "off");
@@ -21276,7 +21284,8 @@
                 min: el.min || "",
                 max: el.max || "",
                 step: el.step || "",
-                placeholder: el.placeholder || ""
+                placeholder: el.placeholder || "",
+                inputMode: el.inputMode || ""
             });
             return;
         }
@@ -27855,6 +27864,15 @@
 
         value.type = "number";
         value.style.font = INPUT_FONT;
+
+        // The number pad on a phone, where nothing below zero is needed. A
+        // phone's number pad has no minus key
+        if (min >= 0) {
+
+            value.inputMode = Number.isInteger(st) ? "numeric" : "decimal";
+            value.pattern = Number.isInteger(st) ? "[0-9]*" : "";
+        }
+
         value.min = String(min);
         value.max = String(max);
         value.step = String(st);
@@ -33796,7 +33814,17 @@
     // Read a typed time: 1:05.25, 65.25 or 65. Null when it is not a time
     function trimParseTime(text) {
 
-        const m = String(text || "").trim().match(/^(?:(\d+):)?(\d+(?:[.,]\d+)?)$/);
+        const t = String(text || "").trim();
+
+        // Minutes, seconds and parts typed with dots or commas only, as the
+        // number pad on a phone has no colon: 1.23.456 is 1:23.456
+        const dots = t.match(/^(\d+)[.,](\d{1,2})[.,](\d+)$/);
+
+        if (dots) {
+            return Number(dots[1]) * 60 + Number(dots[2] + "." + dots[3]);
+        }
+
+        const m = t.match(/^(?:(\d+):)?(\d+(?:[.,]\d+)?)$/);
 
         if (!m) {
             return null;
@@ -34301,7 +34329,7 @@
         const hint = document.createElement("div");
 
         hint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         trimEl.appendChild(head);
         trimEl.appendChild(ui.info);

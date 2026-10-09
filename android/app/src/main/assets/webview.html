@@ -11002,6 +11002,11 @@
         field.placeholder = node.placeholder || "";
         field.autocomplete = "off";
 
+        // The phone's field brings up the number pad, so does this one
+        if (node.inputMode) {
+            field.inputMode = node.inputMode;
+        }
+
         // A date or a colour is picked, not typed, and sent once it is
         // picked. Sent while typing, a half written date would be taken as
         // none and clear the filter it belongs to
@@ -17815,7 +17820,17 @@
     // Read a typed time: 1:05.25, 65.25 or 65. Null when it is not a time
     function trimParseTime(text) {
 
-        const m = String(text || "").trim().match(/^(?:(\d+):)?(\d+(?:[.,]\d+)?)$/);
+        const t = String(text || "").trim();
+
+        // Minutes, seconds and parts typed with dots or commas only, as the
+        // number pad on a phone has no colon: 1.23.456 is 1:23.456
+        const dots = t.match(/^(\d+)[.,](\d{1,2})[.,](\d+)$/);
+
+        if (dots) {
+            return Number(dots[1]) * 60 + Number(dots[2] + "." + dots[3]);
+        }
+
+        const m = t.match(/^(?:(\d+):)?(\d+(?:[.,]\d+)?)$/);
 
         if (!m) {
             return null;
@@ -18169,7 +18184,7 @@
         const hint = document.createElement("div");
 
         hint.className = "pText small";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         box.appendChild(head);
         box.appendChild(ui.info);
