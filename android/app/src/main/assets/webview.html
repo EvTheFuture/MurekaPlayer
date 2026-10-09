@@ -12988,6 +12988,7 @@
         render();
         paintForceAsk();
         paintRetryAsk();
+        paintGoneAsk();
         theaterSound();
 
         if (volOpen()) {
@@ -16735,6 +16736,46 @@
 
             forceAsking = false;
             send("forceAnswer", false);
+        });
+    }
+
+    // Songs deleted on Mureka, to remove here too or not. The phone asks as
+    // well, and the first answer anywhere closes the question everywhere
+    let goneShown = 0;
+    let goneAsking = false;
+
+    function paintGoneAsk() {
+
+        const ask = state && state.goneAsk ? state.goneAsk : null;
+        const n = ask ? Number(ask.n) : 0;
+
+        if (n === goneShown) {
+            return;
+        }
+
+        goneShown = n;
+
+        if (!ask) {
+
+            // Answered elsewhere, so this one goes away by itself
+            if (goneAsking) {
+
+                goneAsking = false;
+                closeConfirm();
+            }
+
+            return;
+        }
+
+        goneAsking = true;
+        askConfirm(ask.title + " " + ask.text, "Remove", true, function () {
+
+            goneAsking = false;
+            send("goneAnswer", { n: n, remove: true });
+        }, function () {
+
+            goneAsking = false;
+            send("goneAnswer", { n: n, remove: false });
         });
     }
 

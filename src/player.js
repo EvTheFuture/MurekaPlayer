@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.241";
+    const VERSION = "1.9.9.243";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5181,20 +5181,65 @@
         askGone(gone);
     }
 
+    // The question about songs deleted on Mureka, open on the phone and in
+    // the web views at once. The first answer anywhere closes it everywhere
+    let goneAsk = null;
+    let goneAskSeq = 0;
+
     function askGone(gone) {
 
+        // Each with its number in the list, as the rows show it
+        const numbers = hostNumbers();
         const names = gone.slice(0, 5).map(function (s) {
-            return "\"" + (s.title || "Untitled") + "\"";
+
+            const n = numbers.get(s.song_id);
+
+            return (n ? "#" + n + " " : "") + "\"" + (s.title || "Untitled") + "\"";
         });
         const more = gone.length - names.length;
         const which = names.join(", ") + (more > 0 ? " and " + more + " more" : "");
         const are = gone.length === 1 ? " is" : " are";
+        const title = gone.length === 1 ? "Deleted on Mureka?" : gone.length + " songs deleted on Mureka?";
+        const text = which + are + " no longer on Mureka. Remove " + (gone.length === 1 ? "it" : "them")
+            + " from this device too? Ratings and tempos are kept.";
 
-        askYesNo(gone.length === 1 ? "Deleted on Mureka?" : gone.length + " songs deleted on Mureka?",
-            which + are + " no longer on Mureka. Remove " + (gone.length === 1 ? "it" : "them")
-            + " from this device too? Ratings and tempos are kept.", "Remove", function () {
-            removeGone(gone);
+        // A newer question takes the place of an older one
+        if (goneAsk) {
+            finishGone(goneAsk.n, false);
+        }
+
+        goneAskSeq += 1;
+
+        const ask = { n: goneAskSeq, title: title, text: text, gone: gone, el: null };
+
+        goneAsk = ask;
+        ask.el = askYesNo(title, text, "Remove", function () {
+            finishGone(ask.n, true);
+        }, function () {
+            finishGone(ask.n, false);
         });
+        publishHostSoon();
+    }
+
+    function finishGone(n, remove) {
+
+        const ask = goneAsk;
+
+        if (!ask || ask.n !== n) {
+            return;
+        }
+
+        goneAsk = null;
+
+        if (ask.el && ask.el.parentNode) {
+            ask.el.remove();
+        }
+
+        publishHostSoon();
+
+        if (remove) {
+            removeGone(ask.gone);
+        }
     }
 
     async function removeGone(gone) {
@@ -19346,6 +19391,7 @@
                 drift: settings.webMarkDrift
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
+            goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
             retryAsk: retryAsk ? {
                 n: retryAsk.n,
                 title: retryAsk.title,
@@ -21778,6 +21824,11 @@
             // the web view
             settings.trimFade = arg === true || arg === "true";
             saveSettings();
+        } else if (cmd === "goneAnswer") {
+
+            // Remove or Cancel from a web view, for the songs deleted on
+            // Mureka it was asked about
+            finishGone(Number(arg && arg.n), !!(arg && arg.remove === true));
         } else if (cmd === "retryAnswer") {
 
             // Retry or Cancel from a web view, for the question it was shown,
