@@ -41,7 +41,7 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Configure Pages
-              uses: actions/configure-pages@v5
+              uses: actions/configure-pages@v6.0.0
 
             # The repository root is the site, so every committed file is served
             - name: Upload the repository as the site
