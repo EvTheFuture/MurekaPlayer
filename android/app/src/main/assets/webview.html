@@ -8620,6 +8620,7 @@
             + (item.index < pos ? " past" : "");
         row.dataset.qi = String(item.index);
         row.dataset.id = String(item.id);
+        row.dataset.share = item.share || "";
         attachLongPress(row, item.id);
 
         // A handle to drag any song, played, playing or to come, to another
@@ -9360,6 +9361,7 @@
         row.setAttribute("role", "button");
         row.className = "row pending";
         row.dataset.id = song.id;
+        row.dataset.share = song.share || "";
         songLine(song, row);
 
         const thumb = row.querySelector(".thumb");
@@ -9433,6 +9435,7 @@
         row.setAttribute("role", "button");
         row.className = "row" + (song.playing ? " playing" : "");
         row.dataset.id = song.id;
+        row.dataset.share = song.share || "";
         attachLongPress(row, song.id);
         songLine(song, row);
 
@@ -14697,22 +14700,38 @@
         $("pickCount").textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
-    // The short line, the same as the phone makes: mps1 and each id in
-    // base 36, through BigInt so a long id keeps every digit
+    // The short line, the same as the phone makes: each id in base 36,
+    // through BigInt so a long id keeps every digit, with your own tempo
+    // and instrumental mark as the phone wrote them on the row. mps2 when a
+    // song carries one, else mps1, which older players read too
     function pickedText() {
 
-        const codes = [];
+        const tokens = [];
 
         for (const id of picked.keys()) {
 
-            try {
-                codes.push(BigInt(id).toString(36));
-            } catch (e) {
-                // Not an id, left out
+            const row = document.querySelector('.row[data-id="' + CSS.escape(id) + '"]');
+            let token = row && row.dataset.share ? row.dataset.share : "";
+
+            if (!token) {
+
+                try {
+                    token = BigInt(id).toString(36);
+                } catch (e) {
+                    token = "";
+                }
+            }
+
+            if (/^[0-9a-z]+(_[0-9a-z]+)?!?$/.test(token)) {
+                tokens.push(token);
             }
         }
 
-        return "Mureka Player songs: mps1." + codes.join(".");
+        const tweaks = tokens.some(function (t) {
+            return /[_!]/.test(t);
+        });
+
+        return "Mureka Player songs: " + (tweaks ? "mps2." : "mps1.") + tokens.join(".");
     }
 
     function copyPicked() {

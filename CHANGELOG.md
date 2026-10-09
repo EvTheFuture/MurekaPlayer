@@ -356,8 +356,10 @@ the new settings layout and a number of smaller improvements.
 - **Select to share** in the song menu picks songs to share with someone
   using the player on another account, unpublished ones too. A tap picks a
   song or lets it go, the bar above the list copies or shares them as a
-  short line of their ids, about eleven characters a song, Done ends it. The
-  other player reads each song from Mureka. Pasted into Import in the other
+  short line of their ids, about eleven characters a song, Done ends it. Your
+  own tempo and instrumental mark go along in a few more characters, and the
+  other player takes them where it has none of its own. The other player
+  reads each song from Mureka. Pasted into Import in the other
   player, it asks where they go: play next, at the end of the queue or as
   the whole queue. They play from their links there, kept over a restart,
   with a violet shared badge since they may not be public. The web view has

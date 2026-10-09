@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.246";
+    const VERSION = "1.9.9.247";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -21217,6 +21217,7 @@
                 trimmed: isTrimmed(song),
                 ignored: isIgnored(song),
                 shared: song.shared === true,
+                share: shareToken(song.song_id),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -21267,6 +21268,7 @@
                 trimmed: isTrimmed(song),
                 ignored: isIgnored(song),
                 shared: song.shared === true,
+                share: shareToken(song.song_id),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -26158,10 +26160,7 @@
     // other player reads each song from Mureka itself, so a long list
     // still fits a message
     function selectedText() {
-
-        const codes = Array.from(selectedSongs.keys()).map(idToCode).filter(Boolean);
-
-        return "Mureka Player songs: " + SHARE_MARK + "." + codes.join(".");
+        return shareLine(Array.from(selectedSongs.keys()));
     }
 
     async function copySelected() {
@@ -30236,7 +30235,7 @@
     // Songs picked to share, in the form of a play queue marked shared, so
     // the other player's Import asks where they go rather than replacing
     // its queue
-    function sharedSongsData(list) {
+    function sharedSongsData(list, tweaks) {
 
         return {
             app: "mureka-player",
@@ -30253,7 +30252,10 @@
                     return s.title || "";
                 }),
                 pos: -1,
-                songs: songsWithLinks(list)
+                songs: songsWithLinks(list),
+
+                // The sharer's own tempo and instrumental marks, by song id
+                tweaks: tweaks && typeof tweaks === "object" ? tweaks : {}
             }
         };
     }
@@ -30450,6 +30452,7 @@
 
             out.queue = {
                 shared: q.shared === true,
+                tweaks: q.shared === true ? cleanShareTweaks(q.tweaks) : {},
                 ids: Array.isArray(q.ids) ? q.ids.filter(function (id) {
                     return id !== null && id !== undefined && id !== "";
                 }).map(String) : [],
@@ -30865,6 +30868,84 @@
         ask(0);
     }
 
+    // Shared tweaks as read from a file or a short line, only well formed
+    // ones, by song id
+    function cleanShareTweaks(raw) {
+
+        const out = {};
+
+        if (!raw || typeof raw !== "object") {
+            return out;
+        }
+
+        for (const id of Object.keys(raw)) {
+
+            const t = raw[id];
+
+            if (!/^\d{1,25}$/.test(id) || !t || typeof t !== "object") {
+                continue;
+            }
+
+            const bpm = Number(t.bpm);
+
+            out[id] = { bpm: isFinite(bpm) && bpm > 0 && bpm < 1000 ? Math.round(bpm) : 0, instr: t.instr === true };
+        }
+
+        return out;
+    }
+
+    // The sharer's tempo and instrumental marks for the songs taken in,
+    // where this player has none of its own. Its own tweaks always stay
+    function applyShareTweaks(tweaks, songs) {
+
+        let bpms = 0;
+        let instr = 0;
+
+        for (const song of songs) {
+
+            const id = String(song.song_id);
+            const t = tweaks && tweaks[id];
+
+            if (!t) {
+                continue;
+            }
+
+            if (t.bpm > 0 && !manualBpm.has(id)) {
+
+                manualBpm.set(id, t.bpm);
+                unmarkCleared("bpm", id);
+                bpms += 1;
+            }
+
+            if (t.instr && !manualInstrumental.has(id)) {
+
+                manualInstrumental.add(id);
+                delete clearedMarks.instr[id];
+                instr += 1;
+            }
+        }
+
+        if (bpms > 0) {
+            saveManualBpm();
+        }
+
+        if (instr > 0) {
+
+            saveClearedMarks();
+            saveManualInstrumental();
+        }
+
+        if (bpms > 0 || instr > 0) {
+
+            dbgLog("Import", "shared tweaks taken in: " + bpms + " tempos, " + instr + " instrumental marks");
+            applySmartFilters();
+
+            if (currentSong) {
+                updatePlayerInfo(currentSong);
+            }
+        }
+    }
+
     // Put a merge plan and the conflict answers into effect
     function applySongMerge(plan, answers) {
 
@@ -31234,6 +31315,7 @@
                 const take = function (mode) {
 
                     applySharedSongs(found.songs, mode);
+                    applyShareTweaks(p.queue.tweaks, found.songs);
                     importDone(donePrefix + " " + what + ", " + words[mode], true, asked);
                 };
 
@@ -32406,7 +32488,7 @@
                         return;
                     }
 
-                    importText(exportJson(sharedSongsData(got.songs)), sourceName, asked);
+                    importText(exportJson(sharedSongsData(got.songs, shareTweaks(text))), sourceName, asked);
                 });
 
                 return "";
@@ -32421,8 +32503,77 @@
         return "";
     }
 
-    // The mark before shared song ids, the version of the short form
+    // The mark before shared song ids, the version of the short form. The
+    // second carries your own tempo and instrumental mark with a song, as
+    // _ and the tempo in base 36, and ! for instrumental: 3x9k2_2z! is a
+    // song at 107 BPM marked instrumental. Without either the first mark is
+    // used, so older players still read it
     const SHARE_MARK = "mps1";
+    const SHARE_MARK_TWEAKS = "mps2";
+
+    // One song in the short form, with its tweaks
+    function shareToken(id) {
+
+        const key = String(id);
+        let token = idToCode(key);
+
+        if (!token) {
+            return "";
+        }
+
+        if (manualBpm.has(key)) {
+            token += "_" + Math.round(manualBpm.get(key)).toString(36);
+        }
+
+        if (manualInstrumental.has(key)) {
+            token += "!";
+        }
+
+        return token;
+    }
+
+    // The short line for songs, by their ids, mps2 only when one carries a
+    // tweak
+    function shareLine(ids) {
+
+        const tokens = ids.map(shareToken).filter(Boolean);
+        const tweaks = tokens.some(function (t) {
+            return /[_!]/.test(t);
+        });
+
+        return "Mureka Player songs: " + (tweaks ? SHARE_MARK_TWEAKS : SHARE_MARK) + "." + tokens.join(".");
+    }
+
+    // The tweaks in a short line, by song id: a tempo, an instrumental mark
+    function shareTweaks(text) {
+
+        const out = {};
+        const re = /\bmps[12]((?:\.[0-9a-z]+(?:_[0-9a-z]+)?!?)+)/gi;
+        let m = re.exec(String(text || ""));
+
+        while (m !== null) {
+
+            for (const token of m[1].split(".")) {
+
+                const t = token.match(/^([0-9a-z]+)(?:_([0-9a-z]+))?(!)?$/i);
+
+                if (!t || (!t[2] && !t[3])) {
+                    continue;
+                }
+
+                const id = codeToId(t[1]);
+                const bpm = t[2] ? parseInt(t[2], 36) : 0;
+
+                if (id) {
+                    out[id] = { bpm: bpm > 0 && bpm < 1000 ? bpm : 0, instr: !!t[3] };
+                }
+            }
+
+            m = re.exec(String(text || ""));
+        }
+
+        return out;
+    }
 
     // A song id as base 36 and back, through BigInt so a long id keeps
     // every digit
@@ -32466,12 +32617,14 @@
             }
         };
 
-        const short = new RegExp("\\b" + SHARE_MARK + "((?:\\.[0-9a-z]+)+)", "gi");
+        const short = /\bmps[12]((?:\.[0-9a-z]+(?:_[0-9a-z]+)?!?)+)/gi;
         let s = short.exec(text);
 
         while (s !== null) {
 
-            for (const code of s[1].split(".")) {
+            for (const token of s[1].split(".")) {
+
+                const code = token.replace(/[_!].*$/, "");
 
                 if (code) {
                     add(codeToId(code));
@@ -32616,7 +32769,7 @@
                         return;
                     }
 
-                    hostImportText(id, { text: exportJson(sharedSongsData(got.songs)), from: ask.from });
+                    hostImportText(id, { text: exportJson(sharedSongsData(got.songs, shareTweaks(ask.text))), from: ask.from });
                 });
 
                 return;
