@@ -52,7 +52,7 @@ KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all ext android apk debug release install install-debug signing check version clean distclean
+.PHONY: help all ext android apk debug release install install-debug signing check version bookmarklet clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
@@ -66,6 +66,7 @@ help:
 	@echo "  make signing        ask again which key signs the APKs"
 	@echo "  make check          syntax check the player and compare versions"
 	@echo "  make version        bump manifest.json to the player version"
+	@echo "  make bookmarklet    pin the release bookmarklet to a tag, TAG=v$(VERSION) unless given"
 	@echo "  make clean          remove build output, keep the caches"
 	@echo "  make distclean      also remove the Gradle and SDK caches in the tree"
 	@echo
@@ -86,6 +87,13 @@ ext:
 # Keep the manifest in step with the player on its own
 version:
 	./update-manifest-version.sh
+
+# The release bookmarklet, pinned to a tag with the player's hash. Tag the
+# release first
+TAG ?= v$(VERSION)
+
+bookmarklet:
+	./release-bookmarklet.sh $(TAG)
 
 # The player has to parse, and the manifest has to agree with it. Both are
 # cheap, so they run before anything is packaged

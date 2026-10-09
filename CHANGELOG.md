@@ -377,6 +377,13 @@ the new settings layout and a number of smaller improvements.
   on, a button that switches it off. It can show the word, the word and
   the temperature, or the temperature alone. On by default, and each
   browser can have its own choice.
+- **Password for the web view**, optional, under Connections in the
+  settings on the phone. A browser asks for it once and stays signed in until
+  the password changes or all browsers are signed out, the app's own screen
+  never asks. While none is set, the app asks at each start whether to set
+  one, with Never show again.
+- **Signed in account** in the web view, beside the badges, and on a phone
+  on a second line of the header together with the badges.
 - **Hotspot badge** in the web view, off by default, under Web view display
   in the settings: an icon after the heat badge, cyan while the
   phone's hotspot is on, grey while it is off and dashed when the phone

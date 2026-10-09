@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.232";
+    const VERSION = "1.9.9.235";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13491,7 +13491,7 @@
     // extra is an optional third button between the two: its label, what a
     // tap does, handed the text and a way to close, and a setup that gets
     // the button, to dim it until it can be used
-    function askText(title, value, okLabel, onOk, extra) {
+    function askText(title, value, okLabel, onOk, extra, password) {
 
         if (!panelEl) {
             return;
@@ -13534,7 +13534,7 @@
 
         // At least 16 pixels, below that iOS zooms the page in on focus
         const field = document.createElement("input");
-        field.type = "text";
+        field.type = password === true ? "password" : "text";
         field.value = value || "";
         field.setAttribute("autocomplete", "off");
         field.setAttribute("autocapitalize", "off");
@@ -13642,11 +13642,154 @@
         return back;
     }
 
+    // A new password for the web view, typed twice. Done is told whether it
+    // was set
+    function askWebPassword(done) {
+
+        askText("New password for the web view, at least 4 characters", "", "Next", function (first) {
+
+            if (String(first).length < 4) {
+
+                showNotice("Password too short", "Use at least 4 characters.");
+                return;
+            }
+
+            askText("The same password again", "", "Set password", function (second) {
+
+                if (second !== first) {
+
+                    showNotice("The passwords differ", "Nothing was changed, try again.");
+                    return;
+                }
+
+                const ok = window.MurekaHost.setWebPassword(first);
+
+                showToast(ok ? "The web view asks for the password now" : "The password could not be set", ok);
+
+                if (done) {
+                    done(ok);
+                }
+            }, null, true);
+        }, null, true);
+    }
+
+    // The web view's password in the settings, on the phone only: whether
+    // one is set, and buttons to set, change or remove it and to sign every
+    // browser out
+    function buildWebLoginRows(page) {
+
+        const label = document.createElement("div");
+        const status = document.createElement("div");
+        const row = document.createElement("div");
+
+        label.textContent = "Password for the web view";
+        label.style.cssText = "color:#bbb;margin-top:8px";
+        status.style.cssText = "font-size:12px;line-height:1.4";
+        row.style.cssText = "display:flex;flex-wrap:wrap;gap:6px";
+
+        const setBtn = makeButton("Set password", "#333", "#fff", function () {
+            askWebPassword(paint);
+        });
+
+        const offBtn = makeButton("Remove password", "#333", "#fff", function () {
+
+            askYesNo("Remove the password?", "The web view opens again for anyone on the hotspot or an allowed Wi-Fi.",
+                "Remove", function () {
+
+                    window.MurekaHost.clearWebLogin();
+                    showToast("The web view has no password now", true);
+                    paint();
+                }, null, true);
+        });
+
+        const outBtn = makeButton("Sign out all browsers", "#333", "#fff", function () {
+
+            window.MurekaHost.signOutWebBrowsers();
+            showToast("Every browser has to sign in again", true);
+        });
+
+        const paint = function () {
+
+            const on = window.MurekaHost.webLoginOn() === true;
+
+            status.textContent = on
+                ? "On. A browser asks for the password once, and stays signed in until the password changes or all browsers are signed out. The app's own screen never asks."
+                : "Off. Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
+            status.style.color = on ? "#9a9aa2" : "#f5c518";
+            setBtn.textContent = on ? "Change password" : "Set password";
+            offBtn.style.display = on ? "" : "none";
+            outBtn.style.display = on ? "" : "none";
+        };
+
+        row.appendChild(setBtn);
+        row.appendChild(offBtn);
+        row.appendChild(outBtn);
+        paint();
+        settingsRefreshers.push(paint);
+
+        // The phone's own settings, never shown in the web view's copy
+        [label, status, row].forEach(function (el) {
+            el.dataset.hostSkip = "1";
+            page.appendChild(el);
+        });
+    }
+
+    // At each start of the app, while the web view has no password, a
+    // question whether to set one, unless asked never to show it again
+    const LOGIN_ASK_KEY = "mureka_web_login_ask";
+
+    function askWebLoginAtStart() {
+
+        if (!isApkHost() || typeof window.MurekaHost.webLoginOn !== "function" || window.MurekaHost.webLoginOn() === true) {
+            return;
+        }
+
+        try {
+
+            if (localStorage.getItem(LOGIN_ASK_KEY) === "never") {
+                return;
+            }
+        } catch (e) {
+            return;
+        }
+
+        const box = document.createElement("label");
+        const tick = document.createElement("input");
+        const words = document.createElement("span");
+
+        box.style.cssText = "display:flex;align-items:center;gap:8px;font-size:13px;color:#ccc;cursor:pointer";
+        tick.type = "checkbox";
+        words.textContent = "Never show again";
+        box.appendChild(tick);
+        box.appendChild(words);
+
+        const remember = function () {
+
+            if (!tick.checked) {
+                return;
+            }
+
+            try {
+                localStorage.setItem(LOGIN_ASK_KEY, "never");
+            } catch (e) {
+                return;
+            }
+        };
+
+        askYesNo("The web view has no password",
+            "Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later under Connections in the settings.",
+            "Set a password", function () {
+
+                remember();
+                askWebPassword(null);
+            }, remember, false, box, "Not now");
+    }
+
     // A yes or no question in the panel. window.confirm would do, but it
     // stops the page, and with it the state the web view lives on. The yes
     // button is cyan, or red for something that cannot be undone. extra is
     // shown under the text, a picture for one
-    function askYesNo(title, body, yesLabel, onYes, onNo, danger, extra) {
+    function askYesNo(title, body, yesLabel, onYes, onNo, danger, extra, noLabel) {
 
         if (!panelEl) {
 
@@ -13702,7 +13845,7 @@
             }
         };
 
-        const no = makeButton("Cancel", "#444", "#fff", function () {
+        const no = makeButton(noLabel || "Cancel", "#444", "#fff", function () {
             close(onNo);
         });
 
@@ -19080,6 +19223,9 @@
             repeat: repeatMode,
             carAudio: hostCarAudio,
             signedIn: authState,
+
+            // The account signed in on the phone, for the web view's header
+            selfName: selfName || "",
             status: statusText || "",
             showUpNext: settings.webUpNext !== false,
             // The waveforms and the lyrics are read apart, by /parts, since
@@ -23454,7 +23600,10 @@
         loadPlayCounts();
 
         if (isApkHost()) {
+
             checkHotspotAtStart();
+            tellAppDebug();
+            setTimeout(askWebLoginAtStart, 6000);
         }
 
         // The pies for songs coming in, before the time and in the list
@@ -29206,6 +29355,10 @@
             connPage.appendChild(nameRow);
             connPage.appendChild(carStatusEl);
             connPage.appendChild(carHint);
+
+            if (typeof window.MurekaHost.webLoginOn === "function") {
+                buildWebLoginRows(connPage);
+            }
             devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
 
             // The phone tells the service when a Bluetooth output goes away,
@@ -29253,7 +29406,8 @@
         }
 
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
-        devPage.appendChild(debugRow);
+        devPage.appendChild(withHint(debugRow, "Says on the status line why a key, a tap or a media button was passed over, and adds Copy JSON to the song menu."
+            + (isApkHost() ? " In the app it also lets chrome://inspect on a computer with USB debugging look into the app's pages, signed in to Mureka, so keep it off otherwise." : "")));
         devPage.appendChild(withHint(debugLogRow, "Keeps a log of what the player does, for Copy debug log, while the player is used as usual. Mureka's requests are in it too, with anything that looks like a token, password or signature blanked out. Off, nothing is logged, except while a debug overlay is shown."));
         devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, "
             + (isApkHost() ? "commands " : "") + "and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
@@ -37483,6 +37637,23 @@
                 localStorage.removeItem(DEBUG_KEY);
             }
         } catch (e) {
+        }
+
+        tellAppDebug();
+    }
+
+    // In the app, chrome://inspect may look into its pages only while Debug
+    // mode is on
+    function tellAppDebug() {
+
+        if (!isApkHost() || typeof window.MurekaHost.setPref !== "function") {
+            return;
+        }
+
+        try {
+            window.MurekaHost.setPref("webDebugging", isDebug() ? "1" : "0");
+        } catch (e) {
+            return;
         }
     }
 

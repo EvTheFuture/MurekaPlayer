@@ -31,6 +31,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
@@ -97,6 +98,10 @@ final class AppScreen {
                 return owner.showFileChooser(callback, params);
             }
         });
+        // The secret that tells the server this is the app's own screen
+        CookieManager.getInstance().setCookie(BASE, WebViewServer.APP_COOKIE + "=" + WebViewServer.APP_SECRET
+            + "; Path=/; HttpOnly; SameSite=Strict");
+
         w.loadUrl(BASE);
 
         return w;

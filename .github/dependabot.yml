@@ -1,0 +1,9 @@
+# Proposes updates of the actions the workflows use, as pull requests that
+# keep them pinned to full commits with the version in a comment
+version: 2
+
+updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: monthly

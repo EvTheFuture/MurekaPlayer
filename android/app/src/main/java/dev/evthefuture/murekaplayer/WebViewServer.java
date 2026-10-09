@@ -34,18 +34,21 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.HttpURLConnection;
 import java.net.InterfaceAddress;
 import java.net.MalformedURLException;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -125,6 +128,35 @@ final class WebViewServer {
     // browser that comes and goes, so it never counts as one: not for the
     // music coming back, not for the browsers here, not for power saving
     static final String APP_AGENT = "MurekaPlayerApp/";
+
+    // The app's own screen proves itself with this cookie, a new random one
+    // each time the app starts, set by the app in its own WebView. Another
+    // app on the phone can send the app's name, but not this
+    static final String APP_COOKIE = "mp_app";
+    static final String APP_SECRET = newSecret();
+
+    private static String newSecret() {
+
+        byte[] raw = new byte[32];
+        StringBuilder sb = new StringBuilder();
+
+        new SecureRandom().nextBytes(raw);
+
+        for (byte b : raw) {
+            sb.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+        }
+
+        return sb.toString();
+    }
+
+    // Whether a Cookie header carries the app's secret
+    static boolean appCookie(String header) {
+
+        String v = WebLogin.cookieValue(header, APP_COOKIE);
+
+        return v != null && MessageDigest.isEqual(v.getBytes(StandardCharsets.US_ASCII),
+            APP_SECRET.getBytes(StandardCharsets.US_ASCII));
+    }
     private static final ThreadLocal<Boolean> APP_REQUEST = new ThreadLocal<>();
 
     // Every browser that asked for the state lately, by the id it sends with
@@ -421,6 +453,10 @@ final class WebViewServer {
             int length = 0;
             String range = "";
             String agent = "";
+            String host = null;
+            String origin = null;
+            String contentType = null;
+            String cookie = null;
             String line;
             int headers = 0;
             long headUntil = System.currentTimeMillis() + HEAD_MS;
@@ -448,6 +484,24 @@ final class WebViewServer {
                     agent = line.substring(colon + 1);
                 }
 
+                // Where the browser thinks it is and which page sent it, to
+                // turn away requests from other websites
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("host")) {
+                    host = line.substring(colon + 1).trim();
+                }
+
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("origin")) {
+                    origin = line.substring(colon + 1).trim();
+                }
+
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("cookie")) {
+                    cookie = line.substring(colon + 1).trim();
+                }
+
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-type")) {
+                    contentType = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
+                }
+
                 if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-length")) {
 
                     try {
@@ -458,9 +512,20 @@ final class WebViewServer {
                 }
             }
 
-            // The app's own screen, from the device itself and named so
+            // Another website open in a browser here may not use the web
+            // view: not through a name of its own pointing at the phone, not
+            // by sending commands from its page
+            if (!sameSite(method, host, origin, contentType)) {
+
+                Hub.note("Web view", "turned away a request from another website for " + path);
+                send(out, 403, "text/plain", bytes("Not from this page"));
+                return;
+            }
+
+            // The app's own screen, from the device itself, named so and
+            // with the app's secret
             boolean appScreen = c.getInetAddress() != null && plainV4(c.getInetAddress()).isLoopbackAddress()
-                && agent.contains(APP_AGENT);
+                && agent.contains(APP_AGENT) && appCookie(cookie);
 
             APP_REQUEST.set(appScreen);
 
@@ -478,6 +543,30 @@ final class WebViewServer {
             }
 
             byte[] body = readBody(in, length, System.currentTimeMillis() + BODY_MS);
+
+            // With a password set, all but the page itself and signing in
+            // needs a browser that has signed in. The app's own screen never
+            String key = WebLogin.fromCookie(cookie);
+            boolean pageItself = "GET".equals(method) && ("/".equals(path) || "/index.html".equals(path));
+
+            if ("POST".equals(method) && "/login".equals(path)) {
+
+                signIn(out, body, c.getInetAddress() == null ? "" : plainV4(c.getInetAddress()).getHostAddress());
+                return;
+            }
+
+            if ("POST".equals(method) && "/logout".equals(path)) {
+
+                WebLogin.signOut(context, key);
+                sendCookie(out, "{\"ok\":true}", "");
+                return;
+            }
+
+            if (!appScreen && !pageItself && WebLogin.on(context) && !WebLogin.valid(context, key)) {
+
+                send(out, 401, "application/json", bytes("{\"login\":true}"));
+                return;
+            }
 
             if ("GET".equals(method) && ("/".equals(path) || "/index.html".equals(path))) {
                 send(out, 200, "text/html; charset=utf-8", page != null ? page : bytes("webview.html missing"));
@@ -1112,6 +1201,80 @@ final class WebViewServer {
             : "1".equals(prefs.getString(WebViewSettings.ALLOW_HOTSPOT, "1"));
     }
 
+    // Whether a request comes from the web view's own page. The address
+    // asked for must be the phone's: an IP address, a .local name or
+    // localhost, so a website whose name was made to point at the phone
+    // gets nothing. A POST must come from a page on that same address, and
+    // be of a type a browser only sends from another website after asking
+    // first, which this server never agrees to
+    static boolean sameSite(String method, String host, String origin, String contentType) {
+
+        String name = hostName(host);
+
+        if (name != null && !ownName(name)) {
+            return false;
+        }
+
+        if (!"POST".equals(method)) {
+            return true;
+        }
+
+        if (contentType == null || contentType.isEmpty() || contentType.startsWith("text/plain")
+            || contentType.startsWith("multipart/form-data")
+            || contentType.startsWith("application/x-www-form-urlencoded")) {
+            return false;
+        }
+
+        if (origin == null) {
+            return true;
+        }
+
+        if ("null".equals(origin)) {
+            return false;
+        }
+
+        try {
+
+            String from = URI.create(origin).getHost();
+
+            return from != null && name != null
+                && from.replace("[", "").replace("]", "").equalsIgnoreCase(name.replace("[", "").replace("]", ""));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    // The name part of a Host header, without the port. Null without one
+    private static String hostName(String host) {
+
+        if (host == null || host.isEmpty()) {
+            return null;
+        }
+
+        String h = host.toLowerCase(Locale.ROOT);
+
+        if (h.startsWith("[")) {
+
+            int end = h.indexOf(']');
+
+            return end > 0 ? h.substring(0, end + 1) : h;
+        }
+
+        int colon = h.indexOf(':');
+
+        return colon >= 0 ? h.substring(0, colon) : h;
+    }
+
+    // An address or name that can only be the phone itself
+    private static boolean ownName(String name) {
+
+        if (name.startsWith("[") || "localhost".equals(name) || name.endsWith(".local")) {
+            return true;
+        }
+
+        return name.matches("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
+    }
+
     // The mobile network, whatever Android or the chip maker calls it
     private boolean isCell(String name) {
         return cellInterfaces.contains(name) || name.startsWith("rmnet") || name.startsWith("ccmni");
@@ -1455,6 +1618,66 @@ final class WebViewServer {
         String answer = Hub.requestLater("__murekaHostSetCover", ask.toString(), 90000);
 
         send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
+    }
+
+    // A browser signing in with the password. Right, it gets its key in a
+    // cookie only this server sees. Wrong, it is told how long to wait
+    // before the next try, if at all
+    private void signIn(OutputStream out, byte[] body, String who) throws IOException {
+
+        if (!WebLogin.on(context)) {
+
+            send(out, 200, "application/json", bytes("{\"ok\":true}"));
+            return;
+        }
+
+        String password = "";
+
+        try {
+            password = new JSONObject(new String(body, StandardCharsets.UTF_8)).optString("password", "");
+        } catch (JSONException e) {
+            password = "";
+        }
+
+        long wait = WebLogin.waitSeconds(who);
+
+        if (wait > 0) {
+
+            send(out, 429, "application/json", bytes("{\"wait\":" + wait + "}"));
+            return;
+        }
+
+        String key = WebLogin.signIn(context, password, who);
+
+        if (key == null) {
+
+            send(out, 401, "application/json", bytes("{\"wrong\":true,\"wait\":" + WebLogin.waitSeconds(who) + "}"));
+            return;
+        }
+
+        sendCookie(out, "{\"ok\":true}", key);
+    }
+
+    // An answer that sets the sign in cookie, or clears it when the key is
+    // empty. Not readable by the page's scripts and never sent along from
+    // another website
+    private static void sendCookie(OutputStream out, String json, String key) throws IOException {
+
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
+        String cookie = WebLogin.COOKIE + "=" + key + "; Path=/; HttpOnly; SameSite=Strict; Max-Age="
+            + (key.isEmpty() ? "0" : "31536000");
+
+        String head = String.format(Locale.ROOT,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n"
+            + "Set-Cookie: %s\r\n"
+            + "Cache-Control: no-store\r\nX-Frame-Options: DENY\r\n"
+            + "Content-Security-Policy: frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\n"
+            + "Connection: close\r\n\r\n",
+            body.length, cookie);
+
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        out.write(body);
+        out.flush();
     }
 
     private static void send(OutputStream out, int code, String type, byte[] body) throws IOException {

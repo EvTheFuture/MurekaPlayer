@@ -1,0 +1,59 @@
+# Publish the repository to GitHub Pages
+#
+# The whole repository is published, so the privacy policy at privacy.html and
+# the player at src/player.js are both served from the Pages site. The player
+# URL is what the in development bookmarklet loads, so it has to keep working.
+#
+# Set Settings, Pages, Source to GitHub Actions for this workflow to take effect.
+#
+# Each action is pinned to the full commit it was released as, with the
+# version in a comment. A tag can be moved to other code later, a commit
+# cannot. Dependabot, see .github/dependabot.yml, proposes updates as pull
+# requests, with the new commit and version filled in.
+
+name: Deploy to GitHub Pages
+
+on:
+    # Publish whenever master changes
+    push:
+        branches:
+            - master
+
+    # And allow a deploy to be started by hand
+    workflow_dispatch:
+
+# Permissions the deploy action needs
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+# Never let two deploys run at once, and let a newer push win
+concurrency:
+    group: pages
+    cancel-in-progress: true
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+
+        steps:
+            - name: Check out the repository
+              uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+            - name: Configure Pages
+              uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+            # The repository root is the site, so every committed file is served
+            - name: Upload the repository as the site
+              uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+              with:
+                  path: .
+
+            - name: Deploy to Pages
+              id: deployment
+              uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

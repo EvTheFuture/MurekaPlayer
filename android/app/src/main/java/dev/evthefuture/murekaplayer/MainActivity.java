@@ -106,8 +106,9 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
         applyInsets();
         applyFullscreen();
 
-        // chrome://inspect on the desktop can debug the page on the phone
-        WebView.setWebContentsDebuggingEnabled(true);
+        // chrome://inspect on the desktop can debug the page on the phone,
+        // in a release build only while Debug mode is on
+        WebViewSettings.applyDebugging(this);
 
         // The service owns the player. Started here as well, so the music and
         // the web view keep going once this screen is closed
@@ -555,6 +556,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
 
                 conn = (HttpURLConnection) new URL(AppScreen.BASE + path.substring(1)).openConnection();
                 conn.setRequestProperty("User-Agent", WebViewServer.APP_AGENT + "1");
+                conn.setRequestProperty("Cookie", WebViewServer.APP_COOKIE + "=" + WebViewServer.APP_SECRET);
                 conn.setConnectTimeout(5000);
                 conn.setReadTimeout(60000);
 

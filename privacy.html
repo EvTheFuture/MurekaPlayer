@@ -23,6 +23,11 @@
         font-size: 19px;
     }
 
+    h3 {
+        margin-top: 22px;
+        font-size: 17px;
+    }
+
     .updated {
         color: #666;
         font-size: 14px;
@@ -43,70 +48,96 @@
 <body>
 
 <h1>Privacy Policy for Mureka Player</h1>
-<p class="updated">Last updated: 12 September 2026</p>
+<p class="updated">Last updated: 9 October 2026</p>
 
 <p>
-Mureka Player is a free, open source browser extension that adds a music player
-to <code>mureka.ai</code> so you can browse and listen to the songs in your own
-Mureka library. It is developed by EvTheFuture (Magnus Sandin) and is not
-affiliated with, endorsed by, or operated by Mureka.
+Mureka Player is a free, open source music player for the songs on
+<code>mureka.ai</code>. It comes in three versions: a browser add-on for Firefox
+and Chromium based browsers, a bookmarklet for browsers without add-ons such as
+Safari on iPhone, and an Android app. All three run the same player. It is
+developed by EvTheFuture (Magnus Sandin) and is not affiliated with, endorsed
+by, or operated by Mureka.
 </p>
 
 <h2>Summary</h2>
-<p>
-The extension collects nothing. It has no servers, no analytics, no telemetry
-and no advertising. No personal data is sent to the developer or to any third
-party. Everything it stores stays in your own browser, on your own device.
-</p>
-
-<h2>Data the extension does not collect</h2>
 <ul>
-    <li>No account details, passwords or authentication tokens are read, stored or transmitted.</li>
-    <li>No browsing history, no page content from other sites, and no data from any site other than <code>mureka.ai</code>.</li>
-    <li>No analytics, usage statistics, crash reports, device identifiers or advertising identifiers.</li>
-    <li>Nothing is sent to the developer. The developer operates no server and receives no data of any kind.</li>
+    <li>No version collects anything for the developer. There are no developer servers, no analytics, no telemetry, no crash reports and no advertising.</li>
+    <li>The player talks to Mureka on your behalf, with the login you already have on <code>mureka.ai</code>, the same way Mureka's own website does.</li>
+    <li>What the player keeps, your song list, stored songs, ratings and settings, stays on your device.</li>
+    <li>The bookmarklet loads the player's code from the internet each time it starts, see below. The add-on and the app contain all of their code.</li>
+    <li>The Android app can show the player to other browsers on networks you allow, such as a car's browser on the phone's hotspot. That stays on those local networks.</li>
 </ul>
 
-<h2>Data stored on your device</h2>
+<h2>What every version does</h2>
+
+<h3>Requests to Mureka</h3>
 <p>
-To work offline and to avoid re-downloading the same content, the extension
-stores the following locally in your browser. None of it leaves your device, and
-all of it is removed if you uninstall the extension or clear the site data.
+These are made only while the player runs on <code>mureka.ai</code>, using your
+Mureka login, and only for what the player shows or what you ask it to do:
 </p>
 <ul>
-    <li>Your list of songs and their details, such as title, genre, duration and publish state.</li>
-    <li>Cached audio files, cover images and waveform data, so playback works offline.</li>
-    <li>Your own settings and preferences, such as the transport button layout, and any songs you have marked as instrumental.</li>
+    <li><code>mureka.ai</code>: the songs in your library or of a creator you browse, song details such as lyrics, play counts and likes, and the actions you choose: like, publish, unpublish, rename, allow or disallow remixing, trim, delete, and change a cover.</li>
+    <li><code>static-cos.mureka.ai</code> and other <code>mureka.ai</code> hosts: the audio files, cover images and waveforms of those songs.</li>
+    <li>A new cover you choose is uploaded to Mureka's file storage, at the address Mureka's own upload service gives for it, the way Mureka's website uploads one.</li>
+    <li>When a song plays, a play is reported to Mureka, as Mureka's website does. This can be turned off in the settings.</li>
 </ul>
 
-<h2>Network requests</h2>
-<p>
-The extension communicates only with Mureka, using the login session already
-present in your browser. It does so on your behalf, in the same way the Mureka
-website itself does, and only while you are on <code>mureka.ai</code>.
-</p>
+<h3>Kept on your device</h3>
 <ul>
-    <li><code>mureka.ai</code> is contacted to list the songs in your library and to read song details such as lyrics and play counts.</li>
-    <li><code>static-cos.mureka.ai</code> is contacted to fetch the audio files and cover images for those songs.</li>
-    <li>When you play a song, a play is reported to Mureka, exactly as the Mureka website does. This can be turned off in the extension settings.</li>
-    <li>When you like or unlike a song in the player, that action is sent to Mureka so your library stays in step.</li>
+    <li>Your song list and the songs' details, such as title, genre, length and publish state, so the list opens at once and works offline.</li>
+    <li>Stored songs, covers and waveforms, so playback works without signal.</li>
+    <li>What you add yourself: ratings, tempos, instrumental marks, saved creators, the play queue and your settings.</li>
+    <li>A debug log of what the player did, only while you switch it on under Developer or show a debug overlay. It also lists the requests made to Mureka, with anything that looks like a token, password or signature blanked out. It stays on the device and only leaves it if you copy or export it yourself, so look through it before you share it.</li>
 </ul>
 <p>
-No other host is contacted. The extension contains all of its own code and never
-downloads or executes code from a remote source.
+None of this is sent anywhere. It is removed when you clear the site data for
+<code>mureka.ai</code>, remove the add-on, or uninstall the app.
 </p>
 
-<h2>Downloads</h2>
-<p>
-The extension requests the <code>downloads</code> permission for one purpose
-only: when you choose to download your songs, it saves those mp3 files into a
-Mureka subfolder of your normal download directory. It does not read your
-existing downloads, and it never downloads anything without you asking.
-</p>
+<h3>Export, import and the clipboard</h3>
+<ul>
+    <li>An export is made only when you ask for it: as a file you save or share, or as text copied to the clipboard. Where it goes from there is up to you.</li>
+    <li>The player reads the clipboard only when you tap Paste in the import box.</li>
+    <li>An imported file is read on your device. Links to songs and covers in an imported file are only used when they point at <code>mureka.ai</code>.</li>
+    <li>Google Drive backup is not turned on in any published version. If it is ever turned on, this policy will say so first.</li>
+</ul>
+
+<h2>The browser add-on</h2>
+<ul>
+    <li>It runs only on <code>mureka.ai</code> and contains all of its own code. It never downloads or runs code from elsewhere.</li>
+    <li>The <code>downloads</code> permission is used for one thing: when you download songs, they are saved as mp3 files in a Mureka folder in your downloads. Only Mureka's own song files are saved this way, never anything else, and your existing downloads are never read.</li>
+    <li>Its data is kept in the browser's storage for <code>mureka.ai</code>.</li>
+</ul>
+
+<h2>The bookmarklet</h2>
+<ul>
+    <li>Each time you tap it, the bookmarklet loads the player's code from the project's public repository on GitHub, through the jsDelivr content network (<code>cdn.jsdelivr.net</code>), or from GitHub Pages (<code>evthefuture.github.io</code>) for the test version. Like any download, that request shows the host your IP address and browser. Nothing else is sent.</li>
+    <li>The code it loads runs inside the <code>mureka.ai</code> page with your Mureka login, so it is the published source code on GitHub, open for anyone to inspect.</li>
+    <li>Its data is kept in the browser's site data for <code>mureka.ai</code>, such as Safari's on an iPhone.</li>
+</ul>
+
+<h2>The Android app</h2>
+<ul>
+    <li>The app opens <code>mureka.ai</code> in its own built in browser and keeps your Mureka login there, on the phone. Another site opened from Mureka, a sign in page say, is shown in the same browser but gets no access to the app. Frames from other sites inside Mureka's page are only shown from Mureka itself and a few sign in and payment services.</li>
+    <li>It keeps playing in the background and shows what plays on the lock screen, in its notification and on Bluetooth devices such as a car.</li>
+    <li>
+        <strong>The web view.</strong> The app runs a small web server on the phone, so a browser on another device can show and control the player: a car's browser on the phone's hotspot, or a computer on your Wi-Fi.
+        Only devices on the networks you allow in the settings can reach it, never the mobile network, and nothing goes through the internet.
+        It answers only pages it served itself, never requests sent from other websites.
+        A password for it can be set in the settings. Only a salted hash of the password is kept, on the phone. A browser that signs in keeps a random sign in key in a cookie that only the phone's web view gets, until the password changes or all browsers are signed out.
+        Without a password, anyone on an allowed network can use it while the app runs, so allow only networks you trust.
+    </li>
+    <li><strong>Local name.</strong> The phone answers a local name (<code>murekaplayer.local</code> by default) on the networks it is on, so the web view can be found by name.</li>
+    <li><strong>Public address (VPN).</strong> When you turn it on, the app starts a VPN that carries no traffic at all. It only gives the phone one fixed address on the hotspot for car browsers that refuse private addresses.</li>
+    <li><strong>Hotspot helper.</strong> To turn the hotspot on and off for power saving, the app can pair with the phone's own wireless debugging, once and with your confirmation. That connection stays inside the phone.</li>
+    <li><strong>Bluetooth.</strong> The names of paired Bluetooth devices are read only so you can choose which ones start or end power saving. They stay on the phone.</li>
+    <li><strong>Battery, heat and hotspot.</strong> The charging state, the battery's temperature, Android's heat level and whether the hotspot is on are read on the phone, for power saving and for the badges in the web view. They go only to the web view and are not sent anywhere else.</li>
+    <li>Files you export are saved to the phone's Downloads folder, only when you ask.</li>
+</ul>
 
 <h2>Children</h2>
 <p>
-The extension is not directed at children and collects no data from anyone,
+Mureka Player is not directed at children and collects no data from anyone,
 regardless of age.
 </p>
 
@@ -120,7 +151,7 @@ a new date at the top.
 <p>
 Questions about this policy can be raised as an issue at
 <a href="https://github.com/EvTheFuture/MurekaPlayer">github.com/EvTheFuture/MurekaPlayer</a>.
-The full source code of the extension is available there for inspection.
+The full source code of every version is available there for inspection.
 </p>
 
 </body>

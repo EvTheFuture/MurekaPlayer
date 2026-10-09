@@ -69,9 +69,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -171,6 +175,7 @@ final class PlayerWeb {
 
         appContext = c.getApplicationContext();
         playerJs = readAsset(appContext, "player.js");
+        WebViewSettings.applyDebugging(appContext);
 
         // A context that can be pointed at the activity while it is on
         // screen, which dialogs and popups need, and back at the application
@@ -717,6 +722,10 @@ final class PlayerWeb {
                 MAIN.post(PlayerWeb::tellScreen);
             }
 
+            if (WebViewSettings.WEB_DEBUGGING.equals(key)) {
+                MAIN.post(() -> WebViewSettings.applyDebugging(appContext));
+            }
+
             // What starts the power saving, the devices that count or the
             // master switch: a countdown running stops
             if (WebViewSettings.SAVE_TRIGGER.equals(key) || WebViewSettings.SAVE_BT.equals(key)
@@ -1021,6 +1030,35 @@ final class PlayerWeb {
             }
         }
 
+        // The web view's password: whether one is set, setting a new one,
+        // taking it away and signing every browser out. The password itself
+        // is never handed back
+        @JavascriptInterface
+        public boolean webLoginOn() {
+            return onMureka && appContext != null && WebLogin.on(appContext);
+        }
+
+        @JavascriptInterface
+        public boolean setWebPassword(String password) {
+            return onMureka && appContext != null && WebLogin.setPassword(appContext, password);
+        }
+
+        @JavascriptInterface
+        public void clearWebLogin() {
+
+            if (onMureka && appContext != null) {
+                WebLogin.clear(appContext);
+            }
+        }
+
+        @JavascriptInterface
+        public void signOutWebBrowsers() {
+
+            if (onMureka && appContext != null) {
+                WebLogin.signOutAll(appContext);
+            }
+        }
+
         // The hotspot switched by hand, to try the settings
         @JavascriptInterface
         public void hotspotSwitch(boolean on) {
@@ -1265,6 +1303,16 @@ final class PlayerWeb {
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
 
+            // A frame inside Mureka's page from a site not trusted gets an
+            // empty page, every frame would get the app's bridge
+            if (!request.isForMainFrame() && isFrame(request) && !frameAllowed(request.getUrl())) {
+
+                noteBlockedFrame(request.getUrl().getHost());
+
+                return new WebResourceResponse("text/html", "utf-8", 403, "Forbidden", new HashMap<>(),
+                    new ByteArrayInputStream(new byte[0]));
+            }
+
             if (!offlinePage || !request.isForMainFrame() || !isMureka(request.getUrl().toString())) {
                 return null;
             }
@@ -1318,6 +1366,68 @@ final class PlayerWeb {
                 view.evaluateJavascript(tags, null);
                 view.evaluateJavascript(playerJs, null);
             });
+        }
+    }
+
+    // Sites whose frames Mureka's page may show: Mureka itself, and the
+    // sign in, robot check and payment pages a site like it embeds
+    private static final String[] FRAME_SITES = {
+        "mureka.ai", "google.com", "gstatic.com", "recaptcha.net", "apple.com",
+        "stripe.com", "stripe.network", "paypal.com", "discord.com"
+    };
+
+    // Whether a request loads a frame's page rather than a picture, a script
+    // or data. Android tells by Sec-Fetch-Dest, else the page asks for HTML
+    private static boolean isFrame(WebResourceRequest request) {
+
+        String dest = null;
+        String accept = null;
+
+        for (Map.Entry<String, String> h : request.getRequestHeaders().entrySet()) {
+
+            if ("sec-fetch-dest".equalsIgnoreCase(h.getKey())) {
+                dest = h.getValue();
+            } else if ("accept".equalsIgnoreCase(h.getKey())) {
+                accept = h.getValue();
+            }
+        }
+
+        if (dest != null) {
+            return "iframe".equalsIgnoreCase(dest) || "frame".equalsIgnoreCase(dest);
+        }
+
+        return accept != null && accept.startsWith("text/html");
+    }
+
+    private static boolean frameAllowed(Uri uri) {
+
+        String host = uri.getHost();
+        String scheme = uri.getScheme();
+
+        if (host == null || !"https".equalsIgnoreCase(scheme)) {
+            return false;
+        }
+
+        String h = host.toLowerCase(Locale.ROOT);
+
+        for (String site : FRAME_SITES) {
+
+            if (h.equals(site) || h.endsWith("." + site)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Each blocked site once in the debug log, so a part of Mureka that
+    // stops working can be traced to it
+    private static final Set<String> BLOCKED_SEEN = Collections.synchronizedSet(new HashSet<>());
+
+    private static void noteBlockedFrame(String host) {
+
+        if (host != null && BLOCKED_SEEN.add(host)) {
+            Hub.note("Network", "kept a frame from " + host + " out of Mureka's page");
         }
     }
 

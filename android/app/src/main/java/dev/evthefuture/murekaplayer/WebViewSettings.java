@@ -23,6 +23,8 @@ package dev.evthefuture.murekaplayer;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.webkit.WebView;
 
 // The app's own settings for the web view, stored apart from the player's.
 // The player's settings panel reads and writes them through the bridge, and
@@ -84,6 +86,19 @@ final class WebViewSettings {
 
     static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    // Whether chrome://inspect on a computer may look into the app's pages:
+    // always in a debug build, in a release build only while the player's
+    // Debug mode is on
+    static final String WEB_DEBUGGING = "webDebugging";
+
+    // Main thread only
+    static void applyDebugging(Context c) {
+
+        boolean debugBuild = (c.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+
+        WebView.setWebContentsDebuggingEnabled(debugBuild || "1".equals(prefs(c).getString(WEB_DEBUGGING, "0")));
     }
 
     // Whether the app hides Android's bars while it is on screen
@@ -206,7 +221,7 @@ final class WebViewSettings {
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
             || FULLSCREEN.equals(key) || TABLET_VIEW.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
-            || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key)) {
+            || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";
         } else if (SAVE_TRIGGER.equals(key)) {

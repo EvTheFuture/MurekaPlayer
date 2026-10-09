@@ -18,12 +18,14 @@
 
 // Readable source of the bookmarklet loader. Two paste-ready minified forms
 // live next to this file:
-//   web/bookmarklet.min.js       latest release, cached and fast
+//   web/bookmarklet.min.js       one tagged release, checked by its hash
 //   web/bookmarklet-dev.min.js   newest in-development code, re-fetched each run
-// The dev form only differs by its src, which is:
+// The dev form loads, without a hash:
 //   https://evthefuture.github.io/MurekaPlayer/src/player.js?v=<timestamp>
-// To use one, bookmark mureka.ai, set the bookmark URL to the one-liner, then
-// run it from the Bookmarks menu while logged in.
+// The release form is written by release-bookmarklet.sh after a release is
+// tagged, which fills in the tag and the hash below. To use one, bookmark
+// mureka.ai, set the bookmark URL to the one-liner, then run it from the
+// Bookmarks menu while logged in.
 
 (function () {
     "use strict";
@@ -34,10 +36,14 @@
         return;
     }
 
-    // Inject the shared player, latest release served from this repo via jsDelivr
+    // Inject the shared player from one tagged release, served by jsDelivr.
+    // The browser runs it only when it matches the hash, so a later change
+    // to the repository or to jsDelivr cannot change what runs here
     const script = document.createElement("script");
 
-    script.src = "https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@latest/src/player.js";
+    script.src = "https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@TAG/src/player.js";
+    script.integrity = "HASH";
+    script.crossOrigin = "anonymous";
 
     document.body.appendChild(script);
 })();
