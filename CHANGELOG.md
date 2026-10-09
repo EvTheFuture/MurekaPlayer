@@ -377,11 +377,12 @@ the new settings layout and a number of smaller improvements.
   on, a button that switches it off. It can show the word, the word and
   the temperature, or the temperature alone. On by default, and each
   browser can have its own choice.
-- **Password for the web view**, optional, under Connections in the
-  settings on the phone. A browser asks for it once and stays signed in until
-  the password changes or all browsers are signed out, the app's own screen
-  never asks. While none is set, the app asks at each start whether to set
-  one, with Never show again.
+- **Password for the web view**, optional, at the top of the Web view page
+  in the settings, on the phone or in the web view, where changing or
+  removing it needs the current one. A browser asks for it once and stays
+  signed in until the password changes or all browsers are signed out, the
+  app's own screen never asks. While none is set, the app and each browser
+  ask at every start whether to set one, with Never show again.
 - **Signed in account** in the web view, beside the badges, and on a phone
   on a second line of the header together with the badges.
 - **Hotspot badge** in the web view, off by default, under Web view display
@@ -493,7 +494,9 @@ the new settings layout and a number of smaller improvements.
   songs, and **Allow remixing** or **Disallow remixing**, instrumentals included.
   Publishing copies the song's link to the clipboard, in the web view to
   that browser's, and a short note on the page says it is published and the
-  link copied.
+  link copied. A title Mureka does not accept, when publishing or renaming,
+  is said plainly, with a field to change it and try again, on the phone
+  and in the web view.
 - **Set cover** in the song menu for your own songs, in the web view too:
   pick a picture and choose the square in the cover editor, dragging to
   move it and zooming with two fingers, the mouse wheel or the slider.

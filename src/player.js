@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.235";
+    const VERSION = "1.9.9.240";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -7679,7 +7679,22 @@
                 break;
             } catch (e) {
 
-                if (await askRetry(publish ? "Could not publish" : "Could not unpublish", "\"" + name + "\" was not "
+                // A title Mureka will not have: a new one is asked for and
+                // goes with the next try, as on Mureka's own page
+                if (publish && e && e.code === TITLE_REFUSED) {
+
+                    const typed = await askRetry("Title not accepted", "Mureka does not accept the title \"" + body.title
+                        + "\", it breaks Mureka's rules for titles. Change it and publish again?", "publish:" + song.song_id,
+                        body.title, "Publish");
+
+                    if (typed) {
+
+                        body.title = typed;
+                        body.time = Date.now();
+                        showToast("Publishing", "wait");
+                        continue;
+                    }
+                } else if (await askRetry(publish ? "Could not publish" : "Could not unpublish", "\"" + name + "\" was not "
                     + (publish ? "published" : "taken off") + " on Mureka. " + failText(e)
                     + " Try again, or cancel and leave it as it was?", "publish:" + song.song_id)) {
 
@@ -7697,8 +7712,20 @@
             }
         }
 
+        // Published under a new title, after Mureka refused the old one
+        if (publish && body.title !== name) {
+
+            song.title = body.title;
+            songEdits += 1;
+            renderList();
+
+            if (currentSong && currentSong.song_id === song.song_id) {
+                updatePlayerInfo(currentSong);
+            }
+        }
+
         saveCache();
-        setStatus((publish ? "Published: " : "Unpublished: ") + name);
+        setStatus((publish ? "Published: " : "Unpublished: ") + body.title);
 
         // The server decides the state and the publish date, so take its
         // word for it rather than ours
@@ -7728,7 +7755,7 @@
 
         await dropRetry("rename:" + song.song_id);
 
-        const clean = String(title == null ? "" : title).trim();
+        let clean = String(title == null ? "" : title).trim();
         const was = (song.title || "").trim();
 
         if (clean === "" || clean === was) {
@@ -7786,6 +7813,28 @@
             } catch (e) {
 
                 failed = e;
+
+                // A title Mureka will not have: a new one is asked for, as
+                // on Mureka's own page, and Cancel keeps the old title
+                if (e && e.code === TITLE_REFUSED) {
+
+                    const typed = await askRetry("Title not accepted", "Mureka does not accept the title \"" + clean
+                        + "\", it breaks Mureka's rules for titles. Change it and try again?", "rename:" + song.song_id,
+                        clean, "Rename");
+
+                    if (!typed || typed === was) {
+
+                        failed = null;
+                        break;
+                    }
+
+                    clean = typed;
+                    song.title = clean;
+                    songEdits += 1;
+                    renderList();
+                    publishHostSoon();
+                    continue;
+                }
 
                 // A published song Mureka refuses is asked about on its own
                 // below. Anything else may go through on a second try
@@ -7931,7 +7980,10 @@
     let retryAsk = null;
     let retryAskSeq = 0;
 
-    function askRetry(title, text, key) {
+    // With field, a text to change before trying again, filled in with it,
+    // and yes the word on the button. The answer is then what was typed, or
+    // false for Cancel
+    function askRetry(title, text, key, field, yes) {
 
         return new Promise(function (resolve) {
 
@@ -7942,16 +7994,61 @@
 
             retryAskSeq += 1;
 
-            const ask = { n: retryAskSeq, title: title, text: text, key: key || "", resolve: resolve, el: null };
+            const ask = {
+                n: retryAskSeq,
+                title: title,
+                text: text,
+                key: key || "",
+                field: typeof field === "string" ? field : null,
+                yes: yes || "Retry",
+                resolve: resolve,
+                el: null
+            };
 
             retryAsk = ask;
             dbgLog("Mureka", title + ", asking whether to try again");
             showToast(title, false);
-            ask.el = askYesNo(title, text, "Retry", function () {
-                finishRetry(ask.n, true);
-            }, function () {
-                finishRetry(ask.n, false);
-            });
+
+            if (ask.field !== null) {
+
+                ask.el = askText(title + ". " + text, ask.field, ask.yes, function (typed) {
+                    finishRetry(ask.n, true, typed);
+                });
+
+                // Cancel and a tap beside it give up
+                const cancel = ask.el ? ask.el.querySelector("button") : null;
+
+                if (cancel) {
+                    cancel.addEventListener("click", function () {
+                        finishRetry(ask.n, false);
+                    });
+                }
+
+                if (ask.el) {
+
+                    ask.el.addEventListener("click", function (ev) {
+
+                        if (ev.target === ask.el) {
+                            finishRetry(ask.n, false);
+                        }
+                    });
+
+                    // Escape in the field gives up too
+                    ask.el.addEventListener("keydown", function (ev) {
+
+                        if (ev.key === "Escape") {
+                            finishRetry(ask.n, false);
+                        }
+                    }, true);
+                }
+            } else {
+
+                ask.el = askYesNo(title, text, ask.yes, function () {
+                    finishRetry(ask.n, true);
+                }, function () {
+                    finishRetry(ask.n, false);
+                });
+            }
 
             // Without the player on screen there is nobody here to ask, the
             // web views may still answer
@@ -7959,7 +8056,7 @@
         });
     }
 
-    function finishRetry(n, retry) {
+    function finishRetry(n, retry, typed) {
 
         const ask = retryAsk;
 
@@ -7974,6 +8071,15 @@
         }
 
         publishHostSoon();
+
+        if (ask.field !== null) {
+
+            const text = String(typed == null ? "" : typed).trim();
+
+            ask.resolve(retry === true && text !== "" ? text : false);
+            return;
+        }
+
         ask.resolve(retry === true);
     }
 
@@ -7998,8 +8104,12 @@
     // Why a request to Mureka failed, in words, for the question
     function failText(e) {
 
+        if (e && e.refused && e.code !== null && MUREKA_CODES[e.code]) {
+            return MUREKA_CODES[e.code] + ".";
+        }
+
         if (e && e.refused) {
-            return "Mureka said no" + (e.message ? ": " + e.message : "") + ".";
+            return "Mureka said no" + (e.message ? ": " + e.message : "") + (e.code !== null && e.code !== undefined ? ", code " + e.code : "") + ".";
         }
 
         if (e && e.name === "AbortError") {
@@ -8019,9 +8129,20 @@
         const e = new Error(json && json.msg ? String(json.msg).slice(0, 120) : "HTTP " + (res ? res.status : "?"));
 
         e.refused = !!(res && res.ok && json);
+        e.code = json && typeof json.code === "number" ? json.code : null;
 
         return e;
     }
+
+    // Mureka's error codes whose meaning is known, in words. Mureka's own
+    // page has a table like this, its answers only carry a code and a short
+    // English note. Add codes here as they turn up in the debug log
+    const MUREKA_CODES = {
+        6316: "Mureka does not accept the song's title, it breaks Mureka's rules for titles"
+    };
+
+    // A title Mureka refused, to be changed rather than tried again
+    const TITLE_REFUSED = 6316;
 
     function askForce(kind, song, value) {
 
@@ -13777,7 +13898,7 @@
         };
 
         askYesNo("The web view has no password",
-            "Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later under Connections in the settings.",
+            "Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later in the settings under Web view, here or in the web view.",
             "Set a password", function () {
 
                 remember();
@@ -19217,7 +19338,13 @@
                 drift: settings.webMarkDrift
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
-            retryAsk: retryAsk ? { n: retryAsk.n, title: retryAsk.title, text: retryAsk.text } : null,
+            retryAsk: retryAsk ? {
+                n: retryAsk.n,
+                title: retryAsk.title,
+                text: retryAsk.text,
+                field: retryAsk.field,
+                yes: retryAsk.yes
+            } : null,
             version: VERSION,
             shuffle: shuffleMode,
             repeat: repeatMode,
@@ -19226,6 +19353,11 @@
 
             // The account signed in on the phone, for the web view's header
             selfName: selfName || "",
+
+            // Whether the web view asks for a password, so it can offer to
+            // set one while it does not
+            loginOn: isApkHost() && typeof window.MurekaHost.webLoginOn === "function"
+                ? window.MurekaHost.webLoginOn() === true : null,
             status: statusText || "",
             showUpNext: settings.webUpNext !== false,
             // The waveforms and the lyrics are read apart, by /parts, since
@@ -21639,8 +21771,10 @@
             saveSettings();
         } else if (cmd === "retryAnswer") {
 
-            // Retry or Cancel from a web view, for the question it was shown
-            finishRetry(Number(arg && arg.n), !!(arg && arg.retry === true));
+            // Retry or Cancel from a web view, for the question it was shown,
+            // with the text typed there when it asked for one
+            finishRetry(Number(arg && arg.n), !!(arg && arg.retry === true),
+                arg && typeof arg.value === "string" ? arg.value : null);
         } else if (cmd === "forceAnswer") {
 
             // The web view answered the question about a published song
@@ -29158,6 +29292,11 @@
                 webPage.appendChild(el);
             }
 
+            // The password first, the web view shows its own copy of it here
+            if (typeof window.MurekaHost.webLoginOn === "function") {
+                buildWebLoginRows(webPage);
+            }
+
             webPage.appendChild(makeLabel("Main page"));
             webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
@@ -29356,9 +29495,6 @@
             connPage.appendChild(carStatusEl);
             connPage.appendChild(carHint);
 
-            if (typeof window.MurekaHost.webLoginOn === "function") {
-                buildWebLoginRows(connPage);
-            }
             devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
 
             // The phone tells the service when a Bluetooth output goes away,

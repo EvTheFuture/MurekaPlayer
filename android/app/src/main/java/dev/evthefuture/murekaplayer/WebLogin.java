@@ -96,7 +96,7 @@ final class WebLogin {
             return false;
         }
 
-        prefs(c).edit().putString(SALT, hex(salt)).putString(HASH, hash).putString(KEYS, "").apply();
+        prefs(c).edit().putString(SALT, hex(salt)).putString(HASH, hash).putString(KEYS, "").commit();
         Hub.note("Web view", "a password was set, every browser signs in again");
 
         return true;
@@ -129,8 +129,23 @@ final class WebLogin {
     // made while the device waits is not checked at all
     static synchronized String signIn(Context c, String password, String who) {
 
-        if (waitSeconds(who) > 0 || password == null) {
+        if (!check(c, password, who)) {
             return null;
+        }
+
+        String key = newKey(c);
+
+        Hub.note("Web view", "a browser signed in");
+
+        return key;
+    }
+
+    // Whether the password is the one set, counting a wrong one against the
+    // device that sent it
+    static synchronized boolean check(Context c, String password, String who) {
+
+        if (waitSeconds(who) > 0 || password == null) {
+            return false;
         }
 
         SharedPreferences p = prefs(c);
@@ -138,35 +153,42 @@ final class WebLogin {
         String want = p.getString(HASH, "");
         String got = salt.isEmpty() ? null : hash(password, unhex(salt));
 
-        if (got == null || want.isEmpty()
-            || !MessageDigest.isEqual(got.getBytes(StandardCharsets.US_ASCII),
-                want.getBytes(StandardCharsets.US_ASCII))) {
+        if (got != null && !want.isEmpty()
+            && MessageDigest.isEqual(got.getBytes(StandardCharsets.US_ASCII), want.getBytes(StandardCharsets.US_ASCII))) {
 
-            // Many devices at once, the oldest counts are let go
-            if (TRIES.size() >= MAX_DEVICES && !TRIES.containsKey(who)) {
-                TRIES.clear();
-            }
-
-            long[] t = TRIES.get(who);
-
-            if (t == null) {
-
-                t = new long[2];
-                TRIES.put(who, t);
-            }
-
-            t[0] += 1;
-
-            if (t[0] >= 3) {
-                t[1] = System.currentTimeMillis() + Math.min(600000L, 5000L << Math.min(t[0] - 3, 7));
-            }
-
-            Hub.note("Web view", "a wrong password from " + who + ", " + t[0] + " in a row");
-            return null;
+            TRIES.remove(who);
+            return true;
         }
 
-        TRIES.remove(who);
+        // Many devices at once, the oldest counts are let go
+        if (TRIES.size() >= MAX_DEVICES && !TRIES.containsKey(who)) {
+            TRIES.clear();
+        }
 
+        long[] t = TRIES.get(who);
+
+        if (t == null) {
+
+            t = new long[2];
+            TRIES.put(who, t);
+        }
+
+        t[0] += 1;
+
+        if (t[0] >= 3) {
+            t[1] = System.currentTimeMillis() + Math.min(600000L, 5000L << Math.min(t[0] - 3, 7));
+        }
+
+        Hub.note("Web view", "a wrong password from " + who + ", " + t[0] + " in a row");
+
+        return false;
+    }
+
+    // A new key kept as signed in, for a browser that has just shown it
+    // knows the password
+    static synchronized String newKey(Context c) {
+
+        SharedPreferences p = prefs(c);
         byte[] raw = new byte[32];
 
         RANDOM.nextBytes(raw);
@@ -181,7 +203,6 @@ final class WebLogin {
         }
 
         p.edit().putString(KEYS, String.join(",", keys)).apply();
-        Hub.note("Web view", "a browser signed in");
 
         return key;
     }

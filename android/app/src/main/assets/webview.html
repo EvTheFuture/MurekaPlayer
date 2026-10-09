@@ -612,6 +612,58 @@
         opacity: 0.5;
     }
 
+    .loginBtn.plain {
+        background: #333;
+        color: #fff;
+        font-weight: 400;
+    }
+
+    .loginBtn.danger {
+        background: #ff6b6b;
+    }
+
+    /* The same card over the page, for the password questions */
+    .pwBack {
+        position: fixed;
+        inset: 0;
+        z-index: 900;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.7);
+    }
+
+    .pwCard {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+        max-width: 360px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #1c1c21;
+    }
+
+    .pwCheck {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .pwRow {
+        display: flex;
+        gap: 8px;
+    }
+
+    .pwRow .loginBtn {
+        flex: 1;
+    }
+
     .loginNote {
         min-height: 1.2em;
         color: #ff8a80;
@@ -4039,6 +4091,69 @@
         });
     }
 
+    // The sign in screen and the password cards hold the keyboard while
+    // open: keys reach only their fields and buttons, never the player's
+    // shortcuts, Escape closes a card, and focus cannot wander behind it.
+    // Heard first of all, before any other key handler of the page
+    function topCard() {
+
+        const cards = document.querySelectorAll("#loginCard, .pwCard");
+
+        return cards.length > 0 ? cards[cards.length - 1] : null;
+    }
+
+    function firstFocus(card) {
+
+        const el = card.querySelector("input, button");
+
+        if (el) {
+            el.focus();
+        }
+    }
+
+    window.addEventListener("keydown", function (ev) {
+
+        const card = topCard();
+
+        if (!card) {
+            return;
+        }
+
+        ev.stopImmediatePropagation();
+
+        if (ev.key === "Escape" && card.classList.contains("pwCard")) {
+
+            ev.preventDefault();
+            card.parentNode.remove();
+            return;
+        }
+
+        if (!card.contains(ev.target)) {
+
+            ev.preventDefault();
+            firstFocus(card);
+        }
+    }, true);
+
+    for (const kind of ["keyup", "keypress"]) {
+
+        window.addEventListener(kind, function (ev) {
+
+            if (topCard()) {
+                ev.stopImmediatePropagation();
+            }
+        }, true);
+    }
+
+    document.addEventListener("focusin", function (ev) {
+
+        const card = topCard();
+
+        if (card && !card.contains(ev.target)) {
+            firstFocus(card);
+        }
+    }, true);
+
     // Every request of the page goes through here, so an answer asking to
     // sign in is noticed wherever it comes from
     const plainFetch = window.fetch.bind(window);
@@ -4331,6 +4446,10 @@
             ["circle", { cx: "12", cy: "5", r: "1.6", fill: "currentColor" }],
             ["circle", { cx: "12", cy: "12", r: "1.6", fill: "currentColor" }],
             ["circle", { cx: "12", cy: "19", r: "1.6", fill: "currentColor" }]
+        ],
+        lock: [
+            ["rect", { x: "4", y: "11", width: "16", height: "10", rx: "2" }],
+            ["path", { d: "M8 11V7a4 4 0 0 1 8 0v4" }]
         ],
         moon: [
             ["path", { d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" }]
@@ -4848,6 +4967,85 @@
         return "";
     }
 
+    // Whether the phone asks for a password, as last told, put right at
+    // once after a change here so the settings show it before the next state
+    function loginOnHere(on) {
+
+        if (state) {
+            state.loginOn = on;
+        }
+
+        if (panelName === "settings") {
+            renderPanelAgain();
+        }
+    }
+
+    // The password on the settings' Web view page, done by this browser
+    // itself, at the top under the page's head. Not on the app's own screen,
+    // which never asks for one
+    function addPasswordRows(box) {
+
+        if (appScreen || !state || typeof state.loginOn !== "boolean" || box.querySelector(".pwRows")) {
+            return;
+        }
+
+        const on = state.loginOn;
+        const section = document.createElement("div");
+        const hint = document.createElement("div");
+
+        const row = function (text, label, cls, fn) {
+
+            const r = document.createElement("div");
+            const t = document.createElement("div");
+            const b = document.createElement("button");
+
+            r.className = "pRow";
+            t.className = "pText";
+            t.textContent = text;
+            b.type = "button";
+            b.className = "pBtn" + (cls ? " " + cls : "");
+            b.textContent = label;
+            b.addEventListener("click", fn);
+            r.appendChild(t);
+            r.appendChild(b);
+            section.appendChild(r);
+        };
+
+        section.className = "pwRows";
+        row("Password for the web view", on ? "Change" : "Set", on ? "on" : "", askNewPassword);
+
+        if (on) {
+
+            row("Sign out all browsers", "Sign out", "", function () {
+
+                plainFetch("/signOutAll", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+                    .then(function () {
+                        location.reload();
+                    });
+            });
+
+            row("Remove the password", "Remove", "", askRemovePassword);
+        }
+
+        hint.className = "pText small";
+        hint.textContent = on
+            ? "On. Every browser signs in once and stays signed in until the password changes or all browsers are signed out, this one included. Changing or removing it asks for the current one."
+            : "Off. Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
+        hint.style.color = on ? "" : "#f5c518";
+        section.appendChild(hint);
+
+        // Under the page's head, before its first heading
+        const first = Array.prototype.find.call(box.querySelectorAll(".pText"), function (el) {
+            return el.textContent.trim() === "Main page";
+        });
+
+        if (first) {
+            box.insertBefore(section, first.closest(".pRow") || first);
+        } else {
+            box.appendChild(section);
+        }
+    }
+
     // The switch at the top of the main settings page, and on the pages
     // the dots and this browser's values in the rows that can be its own
     function addLocalSection(box) {
@@ -4858,6 +5056,10 @@
 
         const page = panelPage(box);
         const local = localSettings();
+
+        if (page === "Web view") {
+            addPasswordRows(box);
+        }
 
         if (!page) {
 
@@ -6665,6 +6867,7 @@
         const s = state;
 
         // Shown with or without a song
+        nagPassword(s);
         paintWho(s);
         paintNetBadge(s);
         paintHotspotBadge(s);
@@ -16559,15 +16762,27 @@
         }
 
         retryAsking = true;
-        askConfirm(ask.title + ". " + ask.text, "Retry", false, function () {
+
+        const field = typeof ask.field === "string" ? ask.field : null;
+
+        askConfirm(ask.title + ". " + ask.text, ask.yes || "Retry", false, function () {
 
             retryAsking = false;
-            send("retryAnswer", { n: n, retry: true });
+            send("retryAnswer", { n: n, retry: true, value: field !== null ? $("confirmField").value : null });
         }, function () {
 
             retryAsking = false;
             send("retryAnswer", { n: n, retry: false });
         });
+
+        // A text to change before trying again, a new title say
+        if (field !== null) {
+
+            $("confirmField").value = field;
+            $("confirmField").style.display = "block";
+            $("confirmField").focus();
+            $("confirmField").select();
+        }
     }
 
     // A question before something that cannot be undone
@@ -16905,6 +17120,255 @@
         for (const el of document.querySelectorAll(".versionLine")) {
             el.textContent = v;
         }
+    }
+
+    // A card over the page with a title, words, password fields, a tick box
+    // and buttons. Each button is handed the typed values, whether the box
+    // is ticked, a line for a note and a way to close the card
+    function pwDialog(o) {
+
+        const back = document.createElement("div");
+        const card = document.createElement("form");
+        const head = document.createElement("div");
+        const note = document.createElement("div");
+        const fields = [];
+        let tick = null;
+
+        back.className = "pwBack";
+        card.className = "pwCard";
+        head.className = "loginHead";
+        head.textContent = o.title;
+        note.className = "loginNote";
+        card.appendChild(head);
+
+        if (o.text) {
+
+            const text = document.createElement("div");
+
+            text.className = "loginText";
+            text.textContent = o.text;
+            card.appendChild(text);
+        }
+
+        for (const f of o.fields || []) {
+
+            const field = document.createElement("input");
+
+            field.type = "password";
+            field.className = "loginField";
+            field.placeholder = f;
+            field.autocomplete = "new-password";
+            fields.push(field);
+            card.appendChild(field);
+        }
+
+        if (o.check) {
+
+            const label = document.createElement("label");
+            const words = document.createElement("span");
+
+            tick = document.createElement("input");
+            tick.type = "checkbox";
+            label.className = "pwCheck";
+            words.textContent = o.check;
+            label.appendChild(tick);
+            label.appendChild(words);
+            card.appendChild(label);
+        }
+
+        const row = document.createElement("div");
+        const close = function () {
+            back.remove();
+        };
+
+        row.className = "pwRow";
+
+        o.buttons.forEach(function (b, i) {
+
+            const btn = document.createElement("button");
+
+            btn.type = i === o.buttons.length - 1 ? "submit" : "button";
+            btn.className = "loginBtn" + (b.cls ? " " + b.cls : "");
+            btn.textContent = b.label;
+            btn.addEventListener("click", function (ev) {
+
+                ev.preventDefault();
+                note.textContent = "";
+                b.fn(fields.map(function (f) { return f.value; }), tick ? tick.checked : false, note, close);
+            });
+            row.appendChild(btn);
+        });
+
+        card.appendChild(row);
+        card.appendChild(note);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+        document.body.appendChild(back);
+
+        if (fields.length > 0) {
+            fields[0].focus();
+        }
+    }
+
+    // A password question sent straight to the phone's server, which
+    // answers at once and signs this browser in with a new password
+    function passwordPost(path, body, note, done) {
+
+        plainFetch(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        }).then(function (res) {
+
+            return res.json().catch(function () {
+                return {};
+            }).then(function (j) {
+
+                if (res.ok) {
+
+                    done();
+                    return;
+                }
+
+                if (j && j.short) {
+                    note.textContent = "Use at least 4 characters.";
+                } else if (j && j.wait > 0) {
+                    note.textContent = "Wrong current password. Too many tries, wait " + j.wait + " s.";
+                } else if (j && j.wrong) {
+                    note.textContent = "Wrong current password.";
+                } else {
+                    note.textContent = "The phone said no, HTTP " + res.status + ".";
+                }
+            });
+        }).catch(function () {
+            note.textContent = "The phone did not answer.";
+        });
+    }
+
+    // Setting a password, or changing it, which asks for the current one
+    function askNewPassword() {
+
+        const on = !!(state && state.loginOn === true);
+        const fields = on ? ["Current password", "New password", "New password again"] : ["New password", "New password again"];
+
+        pwDialog({
+            title: on ? "Change the password" : "Set a password",
+            text: "The web view asks every browser for it once. At least 4 characters.",
+            fields: fields,
+            buttons: [
+                { label: "Cancel", cls: "plain", fn: function (v, t, note, close) { close(); } },
+                { label: on ? "Change" : "Set", fn: function (v, t, note, close) {
+
+                    const current = on ? v[0] : "";
+                    const first = on ? v[1] : v[0];
+                    const second = on ? v[2] : v[1];
+
+                    if (first.length < 4) {
+
+                        note.textContent = "Use at least 4 characters.";
+                        return;
+                    }
+
+                    if (first !== second) {
+
+                        note.textContent = "The new passwords differ.";
+                        return;
+                    }
+
+                    passwordPost("/password", { password: first, current: current }, note, function () {
+
+                        close();
+                        loginOnHere(true);
+                        toast(on ? "Password changed, other browsers sign in again" : "Password set, other browsers sign in now", "ok");
+                    });
+                } }
+            ]
+        });
+    }
+
+    function askRemovePassword() {
+
+        pwDialog({
+            title: "Remove the password",
+            text: "The web view opens again for anyone on the hotspot or an allowed Wi-Fi.",
+            fields: ["Current password"],
+            buttons: [
+                { label: "Cancel", cls: "plain", fn: function (v, t, note, close) { close(); } },
+                { label: "Remove", cls: "danger", fn: function (v, t, note, close) {
+
+                    passwordPost("/passwordOff", { current: v[0] }, note, function () {
+
+                        close();
+                        loginOnHere(false);
+                        toast("The web view has no password now", "ok");
+                    });
+                } }
+            ]
+        });
+    }
+
+    // Each time the page opens while the phone has no password, a question
+    // whether to set one, until it is asked never to show again in this
+    // browser. Not on the app's own screen, which never asks for one
+    const PW_NAG_KEY = "murekaPasswordNag";
+    let pwNagChecked = false;
+
+    function nagPassword(s) {
+
+        if (pwNagChecked || !s || typeof s.loginOn !== "boolean") {
+            return;
+        }
+
+        pwNagChecked = true;
+
+        let never = false;
+
+        try {
+            never = localStorage.getItem(PW_NAG_KEY) === "never";
+        } catch (e) {
+            never = false;
+        }
+
+        if (s.loginOn || never || appScreen) {
+            return;
+        }
+
+        const remember = function (ticked) {
+
+            if (!ticked) {
+                return;
+            }
+
+            try {
+                localStorage.setItem(PW_NAG_KEY, "never");
+            } catch (e) {
+                return;
+            }
+        };
+
+        pwDialog({
+            title: "No password set",
+            text: "Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later in the settings under Web view.",
+            check: "Never show again in this browser",
+            buttons: [
+                { label: "Not now", cls: "plain", fn: function (v, ticked, note, close) {
+
+                    remember(ticked);
+                    close();
+                } },
+                { label: "Set a password", fn: function (v, ticked, note, close) {
+
+                    remember(ticked);
+                    close();
+                    askNewPassword();
+                } }
+            ]
+        });
     }
 
     $("actionsBtn").addEventListener("click", function () {

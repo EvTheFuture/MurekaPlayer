@@ -551,7 +551,7 @@ final class WebViewServer {
 
             if ("POST".equals(method) && "/login".equals(path)) {
 
-                signIn(out, body, c.getInetAddress() == null ? "" : plainV4(c.getInetAddress()).getHostAddress());
+                signIn(out, body, who(c));
                 return;
             }
 
@@ -565,6 +565,29 @@ final class WebViewServer {
             if (!appScreen && !pageItself && WebLogin.on(context) && !WebLogin.valid(context, key)) {
 
                 send(out, 401, "application/json", bytes("{\"login\":true}"));
+                return;
+            }
+
+            // The password itself, from a browser allowed in: setting or
+            // changing it, which signs this browser in with the new one,
+            // taking it away and signing every browser out. With one set,
+            // changing or removing it needs the current one too
+            if ("POST".equals(method) && "/password".equals(path)) {
+
+                changePassword(out, body, who(c), appScreen);
+                return;
+            }
+
+            if ("POST".equals(method) && "/passwordOff".equals(path)) {
+
+                removePassword(out, body, who(c), appScreen);
+                return;
+            }
+
+            if ("POST".equals(method) && "/signOutAll".equals(path)) {
+
+                WebLogin.signOutAll(context);
+                sendCookie(out, "{\"ok\":true}", "");
                 return;
             }
 
@@ -1656,6 +1679,58 @@ final class WebViewServer {
         }
 
         sendCookie(out, "{\"ok\":true}", key);
+    }
+
+    // The device a request came from, to count its wrong passwords
+    private static String who(Socket c) {
+
+        InetAddress a = c.getInetAddress() == null ? null : plainV4(c.getInetAddress());
+
+        return a == null ? "" : a.getHostAddress();
+    }
+
+    private static String field(byte[] body, String name) {
+
+        try {
+            return new JSONObject(new String(body, StandardCharsets.UTF_8)).optString(name, "");
+        } catch (JSONException e) {
+            return "";
+        }
+    }
+
+    // A new password. With one set already, the current one has to be right,
+    // the app's own screen excepted. The browser setting it stays signed in
+    private void changePassword(OutputStream out, byte[] body, String who, boolean appScreen) throws IOException {
+
+        String password = field(body, "password");
+
+        if (WebLogin.on(context) && !appScreen && !WebLogin.check(context, field(body, "current"), who)) {
+
+            send(out, 403, "application/json", bytes("{\"wrong\":true,\"wait\":" + WebLogin.waitSeconds(who) + "}"));
+            return;
+        }
+
+        if (!WebLogin.setPassword(context, password)) {
+
+            send(out, 400, "application/json", bytes("{\"short\":true}"));
+            return;
+        }
+
+        sendCookie(out, "{\"ok\":true}", WebLogin.newKey(context));
+    }
+
+    // No password any more, which needs the current one, the app's own
+    // screen excepted
+    private void removePassword(OutputStream out, byte[] body, String who, boolean appScreen) throws IOException {
+
+        if (WebLogin.on(context) && !appScreen && !WebLogin.check(context, field(body, "current"), who)) {
+
+            send(out, 403, "application/json", bytes("{\"wrong\":true,\"wait\":" + WebLogin.waitSeconds(who) + "}"));
+            return;
+        }
+
+        WebLogin.clear(context);
+        sendCookie(out, "{\"ok\":true}", "");
     }
 
     // An answer that sets the sign in cookie, or clears it when the key is
