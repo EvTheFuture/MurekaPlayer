@@ -14246,14 +14246,15 @@
                 const played = Number(r.played) || 0;
 
                 // Songs played before the one that was playing where it was
-                // copied: along with the rest, or from that song on
+                // copied: along with the rest, or from that song on. Then the
+                // values that differ from the ones on the phone
                 const placed = function (mode) {
 
                     closeSongMenu();
 
                     if (played === 0) {
 
-                        applyImport(r.key, [mode, true]);
+                        finishQueueImport(r, [mode, true]);
                         return;
                     }
 
@@ -14261,12 +14262,12 @@
                         { icon: "check", label: played === 1 ? "Take it too" : "Take them too", fn: function () {
 
                             closeSongMenu();
-                            applyImport(r.key, [mode, true]);
+                            finishQueueImport(r, [mode, true]);
                         } },
                         { icon: "play", label: "Start from the playing song", cls: "inset", fn: function () {
 
                             closeSongMenu();
-                            applyImport(r.key, [mode, false]);
+                            finishQueueImport(r, [mode, false]);
                         } }
                     ]);
                 };
@@ -14306,7 +14307,7 @@
                     // or stops and the imported queue plays at once
                     if (!r.playing) {
 
-                        applyImport(r.key, []);
+                        finishQueueImport(r, []);
                         return;
                     }
 
@@ -14314,12 +14315,12 @@
                         { icon: "check", label: "Keep the playing song", cls: "inset", fn: function () {
 
                             closeSongMenu();
-                            applyImport(r.key, [true]);
+                            finishQueueImport(r, [true]);
                         } },
                         { icon: "play", label: "Play the imported queue now", fn: function () {
 
                             closeSongMenu();
-                            applyImport(r.key, [false]);
+                            finishQueueImport(r, [false]);
                         } }
                     ]);
                 });
@@ -14340,6 +14341,24 @@
         }).catch(function () {
             toast("The phone could not be reached", "bad");
         });
+    }
+
+    // A play queue or shared songs, once where they go is known: the values
+    // that came with them and differ from the phone's are asked about one by
+    // one, the missing ones come in without asking
+    function finishQueueImport(r, answers) {
+
+        const conflicts = Array.isArray(r.tweakConflicts) ? r.tweakConflicts : [];
+
+        if (conflicts.length === 0) {
+
+            applyImport(r.key, answers);
+            return;
+        }
+
+        askConflicts(conflicts, function (picked) {
+            applyImport(r.key, answers, undefined, picked);
+        }, "the import's");
     }
 
     // Song tweaks read on the phone: which kinds come in, then every value
@@ -14445,7 +14464,9 @@
 
     // One question per song that differs, with the choice for all that are
     // left. done hears true for every song where the file is used
-    function askConflicts(conflicts, done) {
+    function askConflicts(conflicts, done, theirs) {
+
+        const other = theirs || "the file's";
 
         const answers = [];
 
@@ -14477,13 +14498,13 @@
 
             const items = [
                 { icon: "check", label: "Keep mine, " + c.mine, fn: answer(false, false), cls: "inset" },
-                { icon: "download", label: "Use the file's, " + c.file, fn: answer(true, false) }
+                { icon: "download", label: "Use " + other + ", " + c.file, fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
                 items.push({ icon: "check", label: "Keep mine for all " + left, fn: answer(false, true), cls: "inset" });
-                items.push({ icon: "download", label: "Use the file's for all " + left, fn: answer(true, true) });
+                items.push({ icon: "download", label: "Use " + other + " for all " + left, fn: answer(true, true) });
             }
 
             openChoice((i + 1) + " of " + conflicts.length + ": " + c.title + ", " + c.what.toLowerCase(), items);
@@ -14492,11 +14513,17 @@
         ask(0);
     }
 
-    function applyImport(key, answers, skip) {
+    function applyImport(key, answers, skip, tweakAnswers) {
 
         toast("Importing on the phone", "wait");
 
         const ask = { key: key, answers: answers };
+
+        // The answers to the values that came with a queue, true for the
+        // import's
+        if (Array.isArray(tweakAnswers)) {
+            ask.tweakAnswers = tweakAnswers;
+        }
 
         // The kinds of song tweaks left out, which the phone remembers
         if (Array.isArray(skip)) {

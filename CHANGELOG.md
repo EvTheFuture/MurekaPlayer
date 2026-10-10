@@ -383,8 +383,10 @@ the new settings layout and a number of smaller improvements.
   the next few after it, the songs coming up as many as are cached ahead,
   and a song about to play before it plays. So a line of any length comes
   in at once, and a song Mureka no longer has is passed over. The same goes
-  for an imported play queue. The values that came along fill in only
-  where it has none of its own. They play from their links there, kept over a restart,
+  for an imported play queue. The values that came along fill in where
+  the other player has none, and where one differs from its own, or was
+  removed there on purpose, Import asks which to keep, one by one or for
+  all at once. They play from their links there, kept over a restart,
   with a violet shared badge since they may not be public. The web view has
   Select to share too, in the song menu, with the same line and box, and
   its Import asks the same. Once such a song shows up on a list read from
@@ -398,7 +400,7 @@ the new settings layout and a number of smaller improvements.
   does. A copied play queue marks the song that was playing, and Import
   asks whether the songs played before it come along. Files stay as before,
   and a play queue file carries your own tempos and instrumental marks too,
-  taken in where the other player has none of its own. A tempo goes along
+  taken in the same way as with shared songs. A tempo goes along
   whether set by hand or Mureka's own, so a song the other player reads from
   Mureka by its id, which comes without a tempo, still has one.
 - **Mureka song links in Import**: pasted share links from Mureka's site,

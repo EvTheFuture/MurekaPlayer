@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.265";
+    const VERSION = "1.9.9.266";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31734,7 +31734,10 @@
     // Ask about each conflict in turn, in the data section, and hand the
     // answers to done, true meaning the file's value. Cancel hands null and
     // nothing is changed at all
-    function resolveConflicts(conflicts, done) {
+    function resolveConflicts(conflicts, done, from) {
+
+        const there = from === "import" ? "in the import" : "in the file";
+        const use = from === "import" ? "Use the import's" : "Use file";
 
         const answers = [];
 
@@ -31766,18 +31769,18 @@
 
             const options = [
                 { label: "Keep mine", fn: answer(false, false), ring: true },
-                { label: "Use file", fn: answer(true, false) }
+                { label: use, fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
                 options.push({ label: "Keep mine for all " + left, fn: answer(false, true), ring: true });
-                options.push({ label: "Use file for all " + left, fn: answer(true, true) });
+                options.push({ label: use + " for all " + left, fn: answer(true, true) });
             }
 
             showDataChoice("Conflict " + (i + 1) + " of " + conflicts.length + ": "
                 + songTitleById(c.id) + "\n" + what + " here " + conflictValue(c, c.mine)
-                + ", in the file " + conflictValue(c, c.theirs), options, function () {
+                + ", " + there + " " + conflictValue(c, c.theirs), options, function () {
                     done(null);
                 });
         }
@@ -31820,86 +31823,188 @@
         return out;
     }
 
-    // The sharer's values for the songs taken in, where this player has
-    // none of its own and has not removed one on purpose. Its own tweaks
-    // always stay
-    function applyShareTweaks(tweaks, songs) {
+    // What the values that came with imported songs do here, song by song.
+    // A value missing here is filled in without asking, one that differs
+    // from the value here, or that was removed here on purpose, is a
+    // conflict to ask about. A tempo is compared with the tempo the song
+    // plays at here, set by hand or Mureka's own. Mureka's own tempo from
+    // where it was copied counts as the song's tempo there
+    function planShareTweaks(tweaks, songs) {
 
-        let bpms = 0;
-        let instr = 0;
-        let rated = 0;
-        let ignored = 0;
+        const plan = { fill: [], conflicts: [] };
+        const seen = new Set();
 
         for (const song of songs) {
 
-            const id = String(song.song_id);
+            const id = String(song && song.song_id);
             const t = tweaks && tweaks[id];
 
-            if (!t) {
+            if (!t || seen.has(id)) {
                 continue;
             }
 
-            if (t.bpm > 0 && !manualBpm.has(id)) {
+            seen.add(id);
 
-                manualBpm.set(id, t.bpm);
-                unmarkCleared("bpm", id);
-                bpms += 1;
-            } else if (t.mbpm > 0 && !manualBpm.has(id) && !isCleared("bpm", id) && !(Number(song.bpm) > 0)) {
+            const tempo = t.bpm > 0 ? t.bpm : (t.mbpm > 0 ? t.mbpm : 0);
 
-                // Mureka's tempo from where it was copied, for a song with no
-                // tempo here at all, as a song read from Mureka by its id
-                manualBpm.set(id, t.mbpm);
-                bpms += 1;
+            if (tempo > 0) {
+
+                const here = effectiveBpm(song);
+
+                if (here > 0) {
+
+                    if (Math.abs(here - tempo) >= 0.01) {
+                        plan.conflicts.push({ type: "bpm", id: id, mine: here, theirs: tempo });
+                    }
+                } else if (isCleared("bpm", id)) {
+                    plan.conflicts.push({ type: "bpm", id: id, mine: null, theirs: tempo });
+                } else {
+                    plan.fill.push({ type: "bpm", id: id, value: tempo });
+                }
+            }
+
+            if (typeof t.rating === "number") {
+
+                if (ratings.has(id)) {
+
+                    if (ratings.get(id) !== t.rating) {
+                        plan.conflicts.push({ type: "rating", id: id, mine: ratings.get(id), theirs: t.rating });
+                    }
+                } else if (isCleared("rating", id)) {
+                    plan.conflicts.push({ type: "rating", id: id, mine: null, theirs: t.rating });
+                } else {
+                    plan.fill.push({ type: "rating", id: id, value: t.rating });
+                }
             }
 
             if (t.instr && !manualInstrumental.has(id)) {
 
-                manualInstrumental.add(id);
-                delete clearedMarks.instr[id];
-                instr += 1;
+                if (isCleared("instr", id)) {
+                    plan.conflicts.push({ type: "instr", id: id, mine: false, theirs: true });
+                } else {
+                    plan.fill.push({ type: "instr", id: id, value: true });
+                }
             }
 
-            if (typeof t.rating === "number" && !ratings.has(id) && !isCleared("rating", id)) {
+            if (t.ignore && !ignoredIds.has(id)) {
 
-                ratings.set(id, t.rating);
-                rated += 1;
-            }
-
-            if (t.ignore && !ignoredIds.has(id) && !isCleared("ignore", id)) {
-
-                ignoredIds.add(id);
-                ignored += 1;
+                if (isCleared("ignore", id)) {
+                    plan.conflicts.push({ type: "ignore", id: id, mine: false, theirs: true });
+                } else {
+                    plan.fill.push({ type: "ignore", id: id, value: true });
+                }
             }
         }
 
-        if (rated > 0) {
-            saveRatings();
+        return plan;
+    }
+
+    // Put the values that came with imported songs into effect: every one
+    // missing here, and of the conflicts those answered true. only, when
+    // given, limits it to those song ids
+    function applyShareTweakPlan(plan, answers, only) {
+
+        const take = plan.fill.slice();
+
+        plan.conflicts.forEach(function (c, i) {
+
+            if (answers && answers[i] === true) {
+                take.push({ type: c.type, id: c.id, value: c.theirs });
+            }
+        });
+
+        const counts = { bpm: 0, instr: 0, rating: 0, ignore: 0 };
+
+        for (const v of take) {
+
+            if (only && !only.has(v.id)) {
+                continue;
+            }
+
+            if (v.type === "bpm") {
+
+                manualBpm.set(v.id, v.value);
+                unmarkCleared("bpm", v.id);
+            } else if (v.type === "rating") {
+
+                ratings.set(v.id, v.value);
+                unmarkCleared("rating", v.id);
+            } else if (v.type === "instr") {
+
+                manualInstrumental.add(v.id);
+                unmarkCleared("instr", v.id);
+            } else if (v.type === "ignore") {
+
+                ignoredIds.add(v.id);
+                unmarkCleared("ignore", v.id);
+            }
+
+            counts[v.type] += 1;
         }
 
-        if (ignored > 0) {
-            saveIgnored();
-        }
-
-        if (bpms > 0) {
+        if (counts.bpm > 0) {
             saveManualBpm();
         }
 
-        if (instr > 0) {
+        if (counts.rating > 0) {
+            saveRatings();
+        }
 
-            saveClearedMarks();
+        if (counts.instr > 0) {
             saveManualInstrumental();
         }
 
-        if (bpms > 0 || instr > 0 || rated > 0 || ignored > 0) {
+        if (counts.ignore > 0) {
+            saveIgnored();
+        }
 
-            dbgLog("Import", "shared tweaks taken in: " + bpms + " tempos, " + instr + " instrumental marks, "
-                + rated + " ratings, " + ignored + " ignored");
+        if (counts.bpm + counts.instr + counts.rating + counts.ignore > 0) {
+
+            dbgLog("Import", "values with the songs taken in: " + counts.bpm + " tempos, " + counts.instr
+                + " instrumental marks, " + counts.rating + " ratings, " + counts.ignore + " ignored");
             applySmartFilters();
+            renderList();
+            publishHostSoon();
 
             if (currentSong) {
                 updatePlayerInfo(currentSong);
             }
         }
+    }
+
+    // The values that came with imported songs, for the songs taken in.
+    // Asked from the web view, its answers to the conflicts come along and
+    // refer to every song of the import. Otherwise the conflicts are asked
+    // here, then done goes on
+    function takeShareTweaks(p, list, asked, done) {
+
+        if (asked) {
+
+            const ids = new Set(list.map(function (s) {
+                return String(s.song_id);
+            }));
+
+            applyShareTweakPlan(planShareTweaks(p.queue.tweaks, queueImportSongs(p).songs),
+                Array.isArray(p.tweakAnswers) ? p.tweakAnswers : [], ids);
+            done();
+            return;
+        }
+
+        const plan = planShareTweaks(p.queue.tweaks, list);
+
+        if (plan.conflicts.length === 0) {
+
+            applyShareTweakPlan(plan, [], null);
+            done();
+            return;
+        }
+
+        resolveConflicts(plan.conflicts, function (answers) {
+
+            // Cancelled, the values here stay, the missing ones still come
+            applyShareTweakPlan(plan, answers || [], null);
+            done();
+        }, "import");
     }
 
     // Put a merge plan and the conflict answers into effect
@@ -32262,8 +32367,9 @@
                     const what = n + (n === 1 ? " shared song" : " shared songs");
 
                     applySharedSongs(list, mode);
-                    applyShareTweaks(p.queue.tweaks, list);
-                    importDone(donePrefix + " " + what + ", " + words[mode], true, asked);
+                    takeShareTweaks(p, list, asked, function () {
+                        importDone(donePrefix + " " + what + ", " + words[mode], true, asked);
+                    });
                 };
 
                 const cancel = function () {
@@ -32332,11 +32438,12 @@
                 const sounding = soundingNow();
 
                 applyQueueImport(found.songs, keep);
-                applyShareTweaks(p.queue.tweaks, found.songs);
-                importDone(donePrefix + " the play queue, " + found.songs.length
-                    + (found.songs.length === 1 ? " song" : " songs")
-                    + (found.missing > 0 ? ", " + found.missing + " not in the library here left out" : "")
-                    + (sounding && !keep ? ", playing it now" : ""), true, asked);
+                takeShareTweaks(p, found.songs, asked, function () {
+                    importDone(donePrefix + " the play queue, " + found.songs.length
+                        + (found.songs.length === 1 ? " song" : " songs")
+                        + (found.missing > 0 ? ", " + found.missing + " not in the library here left out" : "")
+                        + (sounding && !keep ? ", playing it now" : ""), true, asked);
+                });
             };
 
             if (asked) {
@@ -34728,6 +34835,20 @@
             out.playing = soundingNow();
             out.shared = p.queue.shared === true;
 
+            // Values that came with the songs and differ from the ones here,
+            // for the web view to ask about
+            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored" };
+
+            out.tweakConflicts = planShareTweaks(p.queue.tweaks, found.songs).conflicts.map(function (c) {
+                return {
+                    type: c.type,
+                    title: songTitleById(c.id),
+                    what: names[c.type] || c.type,
+                    mine: conflictValue(c, c.mine),
+                    file: conflictValue(c, c.theirs)
+                };
+            });
+
             if (out.shared) {
 
                 out.what = found.songs.length + (found.songs.length === 1 ? " shared song" : " shared songs")
@@ -34817,6 +34938,11 @@
                 // For shared songs, whether the songs played before the
                 // playing one come along
                 entry.p.includePlayed = Array.isArray(ask.answers) && ask.answers[1] === true;
+
+                // The answers to the values that differ, true for the import's
+                entry.p.tweakAnswers = Array.isArray(ask.tweakAnswers) ? ask.tweakAnswers.map(function (a) {
+                    return a === true;
+                }) : [];
             }
 
             importParsed(entry.p, entry.source, "Imported", true);
