@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.254";
+    const VERSION = "1.9.9.255";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -208,6 +208,11 @@
 
     // Default number of upcoming songs to cache ahead, now also a user setting
     const PREFETCH_DEFAULT = 3;
+
+    // Minutes since the last look for new songs before coming back to the
+    // player or a web view looks again, when that is switched on
+    const REFRESH_RETURN_DEFAULT = 30;
+    const REFRESH_RETURN_MAX = 1440;
 
     // Album art coverflow, the center cover takes this fraction of the width and
     // the previous and next covers peek in on the sides. Lower shows more of the
@@ -1847,12 +1852,25 @@
     // Read the settings from localStorage, falling back to safe defaults
     // As last time is the default start, refresh on open is off for both feeds
     // Autoplay is off, the default play mode is not shuffled, repeat is all
+    function returnMinutes(v) {
+
+        const n = parseInt(v, 10);
+
+        if (!isFinite(n) || n < 1) {
+            return REFRESH_RETURN_DEFAULT;
+        }
+
+        return Math.min(n, REFRESH_RETURN_MAX);
+    }
+
     function loadSettings() {
 
         const defaults = {
             startFeed: "last",
             startFeedV2: true,
             refreshOnStart: false,
+            refreshOnReturn: false,
+            refreshOnReturnMin: REFRESH_RETURN_DEFAULT,
             absoluteNumbers: false,
             autoPlay: false,
             shuffle: false,
@@ -2011,6 +2029,8 @@
                         ? parsed.startFeed : "last",
                     startFeedV2: true,
                     refreshOnStart: refreshOnStart,
+                    refreshOnReturn: parsed.refreshOnReturn === true,
+                    refreshOnReturnMin: returnMinutes(parsed.refreshOnReturnMin),
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoPlay: parsed.autoPlay === true,
                     shuffle: parsed.shuffle === true,
@@ -2692,6 +2712,39 @@
         updateSeekDisplay();
 
         setStatus("Resumed queue, press play to continue");
+    }
+
+    // Back in the player or a web view after a while: a look for new songs
+    // when that is switched on and the last one is older than the minutes
+    // set. Only the newest songs, as on open. queue: the play queue is what
+    // shows where it came back, so new songs found are offered to it
+    let lastReturnCheck = 0;
+
+    function maybeRefreshOnReturn(queue) {
+
+        const now = Date.now();
+
+        // Coming back fires a few events at once, and one is enough
+        if (!settings.refreshOnReturn || running || offlineMode() || now - lastReturnCheck < 5000) {
+            return;
+        }
+
+        const since = now - (Number(cache.updated) || 0);
+
+        if (since < returnMinutes(settings.refreshOnReturnMin) * 60000) {
+            return;
+        }
+
+        lastReturnCheck = now;
+        dbgLog("Feed", "back after " + Math.round(since / 60000) + " minutes, looking for new songs");
+        run(true, queue === true);
+    }
+
+    function playerBackInView() {
+
+        if (!document.hidden) {
+            maybeRefreshOnReturn(listView === "queue");
+        }
     }
 
     // Refresh the active feed on open when the user has asked for it
@@ -5859,9 +5912,10 @@
     // Entry point for the Load / refresh button
     // While the library is not fully cached it resumes loading older songs
     // Once everything is cached it only checks the top for new songs
-    // light: the check on open, only the newest songs. fromQueue: asked for
-    // with the play queue in view, so new songs found are offered to the
-    // queue. Left out, the player's own list view decides
+    // light: only the newest songs, as on open or on coming back. fromQueue:
+    // asked for with the play queue in view, so new songs found are offered
+    // to the queue. Left out, the player's own list view decides, and a
+    // light run does not ask
     async function run(light, fromQueue) {
 
         if (!running) {
@@ -5882,7 +5936,7 @@
         running = true;
         runOwner = "load";
         runFailed = false;
-        askNewInQueue = light !== true && (fromQueue === undefined ? listView === "queue" : fromQueue === true);
+        askNewInQueue = fromQueue === undefined ? light !== true && listView === "queue" : fromQueue === true;
         const myToken = ++loadToken;
 
         // Confirm login state for your own feed and warn if logged out
@@ -20519,6 +20573,8 @@
         watchBrowserNetwork();
         document.addEventListener("visibilitychange", netBackInView);
         window.addEventListener("pageshow", netBackInView);
+        document.addEventListener("visibilitychange", playerBackInView);
+        window.addEventListener("focus", playerBackInView);
 
         // Only in the app, where it is given without a word. Firefox would
         // ask the user about it every time
@@ -22307,6 +22363,11 @@
             clearCache();
         } else if (cmd === "cacheAll") {
             cacheAll();
+        } else if (cmd === "cameBack") {
+
+            // A web view shown again or given focus, with whether its play
+            // queue is in view
+            maybeRefreshOnReturn(!!(arg && arg.queue === true));
         } else if (cmd === "rescan") {
             rescan();
         } else if (cmd === "readPlays") {
@@ -28685,6 +28746,15 @@
             function () { return settings.refreshOnStart; },
             function (v) { settings.refreshOnStart = v; });
 
+        const returnRow = makeBoolRow("Look for new songs on return",
+            function () { return settings.refreshOnReturn; },
+            function (v) { settings.refreshOnReturn = v; });
+
+        const returnMinRow = makeStepperRow("When the last look is older than, minutes",
+            function () { return returnMinutes(settings.refreshOnReturnMin); },
+            function (v) { settings.refreshOnReturnMin = returnMinutes(v); },
+            1, REFRESH_RETURN_MAX);
+
         const goneRow = makeChoiceRow([
             { label: "Ask", value: "ask" },
             { label: "Remove", value: "remove" },
@@ -28775,6 +28845,8 @@
         libraryPage.appendChild(makeHint("Which list the player opens on: only your published songs, all of them including drafts, or the same list as when it was last used, an artist included."));
         libraryPage.appendChild(makeLabel("Updates and numbers"));
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
+        libraryPage.appendChild(returnRow);
+        libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when you come back to the player or a web view, once the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         libraryPage.appendChild(makeSubLabel("Songs deleted on Mureka"));
         libraryPage.appendChild(goneRow);

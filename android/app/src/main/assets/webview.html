@@ -13113,6 +13113,26 @@
         }
     });
 
+    // Shown again or given focus: the phone looks for new songs when that is
+    // switched on and the last look is old enough. It decides, this only
+    // says it is back and whether the play queue is in view
+    let cameBackAt = 0;
+
+    function sayCameBack() {
+
+        const now = Date.now();
+
+        if (document.hidden || now - cameBackAt < 5000) {
+            return;
+        }
+
+        cameBackAt = now;
+        send("cameBack", { queue: queueInView() });
+    }
+
+    document.addEventListener("visibilitychange", sayCameBack);
+    window.addEventListener("focus", sayCameBack);
+
     function poll() {
 
         // A request the network swallowed is given up, and the next asked

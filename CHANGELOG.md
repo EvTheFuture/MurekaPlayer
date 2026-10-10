@@ -348,6 +348,9 @@ the new settings layout and a number of smaller improvements.
   after the playing song** does that for the tapped song and then every
   other one, each going in as it is ready, in list order, so nothing is cut
   off and nothing goes quiet. Nothing of this is kept over a restart.
+- **Look for new songs on return**: coming back to the player or a web
+  view looks for new songs once the last look is older than the minutes
+  set, only the newest, as on open.
 - **New songs found with the play queue in view** are offered to it, as an
   import is: play next, add to the end, replace the queue with the playing
   song playing on, or leave them out for now. Left out, they still show in
