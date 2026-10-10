@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.255";
+    const VERSION = "1.9.9.256";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -9765,19 +9765,34 @@
             return;
         }
 
+        if (!playPrevSong() && audio) {
+            audio.currentTime = 0;
+        }
+    }
+
+    // The previous song in the queue, however far into the playing one,
+    // false when there is none. A swipe to the previous cover plays the song
+    // on that cover, it never starts the playing song over
+    function playPrevSong() {
+
         queueMoveDir = -1;
 
         if (queuePos > 0) {
+
             queuePos -= 1;
             playCurrent();
-        } else if (repeatMode === "all" && queue.length > 0) {
+            return true;
+        }
 
-            // At the first song, wrap around to the last when repeating all
+        // At the first song, wrap around to the last when repeating all
+        if (repeatMode === "all" && queue.length > 0) {
+
             queuePos = queue.length - 1;
             playCurrent();
-        } else if (audio) {
-            audio.currentTime = 0;
+            return true;
         }
+
+        return false;
     }
 
     // Append newly loaded songs to the active queue so a running play-all keeps
@@ -17048,7 +17063,7 @@
 
                 currentSwipeOffset = 0;
                 artSwipeLanded = true;
-                playPrev();
+                playPrevSong();
             });
 
         } else {
@@ -22265,10 +22280,15 @@
 
             if (neighborSong(step)) {
 
-                queuePos = queuePos + step < 0
-                    ? queue.length - 1
-                    : (queuePos + step >= queue.length ? 0 : queuePos + step);
-                playCurrent();
+                if (step < 0) {
+                    playPrevSong();
+                } else {
+
+                    // Which way to look for a stored song when offline
+                    queueMoveDir = 1;
+                    queuePos = queuePos + 1 >= queue.length ? 0 : queuePos + 1;
+                    playCurrent();
+                }
             }
         } else if (cmd === "seek") {
             seekToTime(Number(arg) || 0);
