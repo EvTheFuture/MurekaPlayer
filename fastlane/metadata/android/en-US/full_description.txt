@@ -1,0 +1,26 @@
+Mureka Player is an unofficial player for your songs on mureka.ai. Sign in to Mureka in the app and it loads your whole library, published songs and drafts, and plays it with a full player.
+
+<b>Playing</b>
+<ul>
+<li>A queue with shuffle, repeat, play next and add to the end</li>
+<li>Keeps playing with the screen off, with the lock screen, the notification and Bluetooth controls, a car included</li>
+<li>Songs stored on the phone for offline play, one by one or the whole library</li>
+<li>Synced lyrics, waveform seek bar, ratings, tempo and instrumental marks, filters and search</li>
+</ul>
+
+<b>Your songs</b>
+<ul>
+<li>Rename, publish, unpublish, set the cover, allow or disallow remixing and delete on Mureka</li>
+<li>A trimmer that cuts the start or the end of a song, with the real waveform down to single samples</li>
+<li>Export and import of song tweaks, the library and the queue, and sharing songs with other players</li>
+</ul>
+
+<b>Web view</b>
+<ul>
+<li>A browser on another device can show and control the player: a car's browser on the phone's hotspot, a laptop or a tablet on your Wi-Fi</li>
+<li>Music can play on the phone or in that browser</li>
+<li>Optional password, chosen networks only, never the mobile network</li>
+<li>Badges for the phone's heat and hotspot, and power saving that can turn the hotspot off when the car is gone</li>
+</ul>
+
+The app works with your own Mureka account and needs mureka.ai to load songs. It is not made by or affiliated with Mureka.

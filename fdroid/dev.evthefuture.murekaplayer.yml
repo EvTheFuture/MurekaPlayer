@@ -1,0 +1,35 @@
+# Draft of the build recipe for F-Droid. It is not used by this repository's
+# own build. Copy it to metadata/dev.evthefuture.murekaplayer.yml in a fork
+# of https://gitlab.com/fdroid/fdroiddata and open a merge request there.
+# The store texts and the icon are read from fastlane/metadata in this
+# repository, so they are not repeated here.
+
+Categories:
+  - Multimedia
+License: GPL-3.0-or-later
+AuthorName: EvTheFuture
+SourceCode: https://github.com/EvTheFuture/MurekaPlayer
+IssueTracker: https://github.com/EvTheFuture/MurekaPlayer/issues
+Changelog: https://github.com/EvTheFuture/MurekaPlayer/blob/master/CHANGELOG.md
+Donate: https://www.buymeacoffee.com/EvTheFuture
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: Plays and manages songs on mureka.ai, a non-free online service.
+
+RepoType: git
+Repo: https://github.com/EvTheFuture/MurekaPlayer.git
+
+Builds:
+  - versionName: 2.0.0
+    versionCode: 2000000
+    commit: v2.0.0
+    subdir: android/app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9.]+$
+UpdateCheckData: android/version.properties|versionCode=(\d+)|.|versionName=(.+)
+CurrentVersion: 2.0.0
+CurrentVersionCode: 2000000

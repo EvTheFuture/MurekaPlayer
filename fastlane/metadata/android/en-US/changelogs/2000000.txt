@@ -1,0 +1,1 @@
+First release on F-Droid. A new Android app running the same player as the browser add-on: your whole Mureka library, background play, offline songs, a trimmer, and a web view that a car or another browser can open, with an optional password.
