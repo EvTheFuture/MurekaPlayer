@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.260";
+    const VERSION = "1.9.9.261";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -14579,19 +14579,15 @@
             return;
         }
 
-        const box = document.createElement("label");
-        const tick = document.createElement("input");
-        const words = document.createElement("span");
+        const tick = makeTickBox("Never show again", false);
+        const box = tick.el;
 
-        box.style.cssText = "display:flex;align-items:center;gap:8px;font-size:13px;color:#ccc;cursor:pointer";
-        tick.type = "checkbox";
-        words.textContent = "Never show again";
-        box.appendChild(tick);
-        box.appendChild(words);
+        box.style.fontSize = "13px";
+        box.style.color = "#ccc";
 
         const remember = function () {
 
-            if (!tick.checked) {
+            if (!tick.get()) {
                 return;
             }
 
@@ -26938,7 +26934,7 @@
         const paint = function () {
 
             for (const t of COPY_TYPES) {
-                boxes[t.key].checked = on[t.key] === true;
+                boxes[t.key].set(on[t.key] === true);
             }
 
             // Songs go without any values, tweaks need at least one kind
@@ -26974,26 +26970,12 @@
 
         for (const type of COPY_TYPES) {
 
-            const line = document.createElement("label");
-            const box = document.createElement("input");
-            const name = document.createElement("span");
+            boxes[type.key] = makeTickBox(type.label, on[type.key], function (value) {
 
-            line.style.cssText = "display:flex;align-items:center;gap:10px;padding:7px 4px;cursor:pointer";
-            box.type = "checkbox";
-            box.style.cssText = "width:18px;height:18px;margin:0;accent-color:#48e1eb;flex:0 0 auto";
-            name.textContent = type.label;
-            name.style.cssText = "flex:1 1 auto;color:#fff";
-            boxes[type.key] = box;
-
-            box.addEventListener("change", function () {
-
-                on[type.key] = box.checked;
+                on[type.key] = value;
                 paint();
             });
-
-            line.appendChild(box);
-            line.appendChild(name);
-            list.appendChild(line);
+            list.appendChild(boxes[type.key].el);
         }
 
         const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
@@ -32094,31 +32076,16 @@
 
         for (const type of types) {
 
-            const line = document.createElement("label");
-            const box = document.createElement("input");
-            const name = document.createElement("span");
             const count = document.createElement("span");
 
             on[type.key] = type.on !== false;
-            line.style.cssText = "display:flex;align-items:center;gap:10px;padding:7px 4px;cursor:pointer";
-            box.type = "checkbox";
-            box.checked = on[type.key];
-            box.style.cssText = "width:18px;height:18px;margin:0;accent-color:#48e1eb;flex:0 0 auto";
-            name.textContent = type.label;
-            name.style.cssText = "flex:1 1 auto;color:#fff";
             count.textContent = type.count;
             count.style.cssText = "flex:0 0 auto;color:#888;font-size:12px";
+            list.appendChild(makeTickBox(type.label, on[type.key], function (value) {
 
-            box.addEventListener("change", function () {
-
-                on[type.key] = box.checked;
+                on[type.key] = value;
                 paint();
-            });
-
-            line.appendChild(box);
-            line.appendChild(name);
-            line.appendChild(count);
-            list.appendChild(line);
+            }, count).el);
         }
 
         const cancelBtn = makeButton("Cancel", "#444", "#fff", function () {
@@ -33179,6 +33146,65 @@
         dataChoiceEl.appendChild(caption);
         dataChoiceEl.appendChild(row);
         dataChoiceEl.style.display = "flex";
+    }
+
+    // A box to tick of its own rather than the browser's checkbox. Mureka's
+    // page takes the look away from checkboxes, which leaves a dark square
+    // with a dark tick on it. Cyan with a black tick when on, a grey ring
+    // when off. extra goes at the end of the line, a count for one
+    function makeTickBox(label, checked, onChange, extra) {
+
+        const line = document.createElement("button");
+        const box = document.createElement("span");
+        const name = document.createElement("span");
+        let on = checked === true;
+
+        line.type = "button";
+        line.style.cssText = "display:flex;align-items:center;gap:10px;width:100%;cursor:pointer;background:transparent;"
+            + "border:none;color:inherit;font:inherit;padding:7px 4px;text-align:left";
+        box.style.cssText = "flex:0 0 auto;width:20px;height:20px;box-sizing:border-box;border-radius:5px;display:flex;"
+            + "align-items:center;justify-content:center;font-weight:700;font-size:15px;line-height:1;color:#000";
+        name.textContent = label;
+        name.style.cssText = "flex:1 1 auto;min-width:0";
+        line.setAttribute("role", "checkbox");
+        line.appendChild(box);
+        line.appendChild(name);
+
+        if (extra) {
+            line.appendChild(extra);
+        }
+
+        const paint = function () {
+
+            box.textContent = on ? "\u2713" : "";
+            box.style.background = on ? "#48e1eb" : "transparent";
+            box.style.border = on ? "2px solid #48e1eb" : "2px solid #8a8a94";
+            line.setAttribute("aria-checked", on ? "true" : "false");
+        };
+
+        line.addEventListener("click", function () {
+
+            on = !on;
+            paint();
+
+            if (onChange) {
+                onChange(on);
+            }
+        });
+
+        paint();
+
+        return {
+            el: line,
+            get: function () {
+                return on;
+            },
+            set: function (value) {
+
+                on = value === true;
+                paint();
+            }
+        };
     }
 
     // Choices in a box over the player, one button each and Cancel. The
@@ -36299,40 +36325,13 @@
         ui.askText = document.createElement("div");
         ui.askText.style.cssText = "line-height:1.4";
 
-        // A box of its own rather than the browser's checkbox. Mureka's page
-        // takes the look away from checkboxes, which left a dark square with
-        // no visible tick on an iPhone. Cyan with a black tick when on
-        const deleteLabel = document.createElement("button");
-        const deleteBox = document.createElement("span");
+        // The tick box drawn by the player, the browser's own shows no tick
+        // on Mureka's page
+        ui.askDelete = makeTickBox("Delete original", false);
 
-        deleteLabel.type = "button";
-        deleteLabel.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;background:transparent;border:none;color:inherit;font:inherit;padding:2px 0;text-align:left";
-        deleteBox.style.cssText = "flex:0 0 auto;width:22px;height:22px;box-sizing:border-box;border-radius:5px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;line-height:1";
-        deleteLabel.setAttribute("role", "checkbox");
-        deleteLabel.appendChild(deleteBox);
-        deleteLabel.appendChild(document.createTextNode("Delete original"));
+        const deleteLabel = ui.askDelete.el;
 
-        ui.askDelete = {
-            checked: false,
-            paint: function () {
-
-                const on = ui.askDelete.checked === true;
-
-                deleteBox.textContent = on ? "\u2713" : "";
-                deleteBox.style.background = on ? "#48e1eb" : "transparent";
-                deleteBox.style.color = "#000";
-                deleteBox.style.border = on ? "2px solid #48e1eb" : "2px solid #8a8a94";
-                deleteLabel.setAttribute("aria-checked", on ? "true" : "false");
-            }
-        };
-
-        deleteLabel.addEventListener("click", function () {
-
-            ui.askDelete.checked = !ui.askDelete.checked;
-            ui.askDelete.paint();
-        });
-
-        ui.askDelete.paint();
+        deleteLabel.style.padding = "2px 0";
 
         const askButtons = document.createElement("div");
 
@@ -36343,7 +36342,7 @@
         askButtons.appendChild(makeButton("Trim", "#48e1eb", "#000", function () {
 
             ui.ask.style.display = "none";
-            submitTrim(ui.askDelete.checked === true);
+            submitTrim(ui.askDelete.get());
         }));
 
         askBox.appendChild(ui.askText);
@@ -37631,8 +37630,7 @@
 
         trimUi.askText.textContent = "Trim \"" + (tr.song.title || "Untitled") + "\" to "
             + trimTimeText(tr.start) + " - " + trimTimeText(tr.end) + "?";
-        trimUi.askDelete.checked = false;
-        trimUi.askDelete.paint();
+        trimUi.askDelete.set(false);
         trimUi.ask.style.display = "flex";
     }
 
