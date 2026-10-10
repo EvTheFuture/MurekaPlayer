@@ -348,9 +348,10 @@ the new settings layout and a number of smaller improvements.
   after the playing song** does that for the tapped song and then every
   other one, each going in as it is ready, in list order, so nothing is cut
   off and nothing goes quiet. Nothing of this is kept over a restart.
-- **Look for new songs on return**: coming back to the player or a web
-  view looks for new songs once the last look is older than the minutes
-  set, only the newest, as on open.
+- **Look for new songs while in use**: when the player or a web view opens
+  or comes back into view, and again while it stays in view, it looks for
+  new songs each time the last look is older than the minutes set, in steps
+  of five. Only the newest, as on open.
 - **New songs with the play queue in view** are offered to it on a Load,
   however they came in: found by the Load, done generating, or newly
   published while only published songs are shown. As an import is: play next, add to the end, replace the queue with the playing

@@ -13113,9 +13113,9 @@
         }
     });
 
-    // Shown again or given focus: the phone looks for new songs when that is
-    // switched on and the last look is old enough. It decides, this only
-    // says it is back and whether the play queue is in view
+    // Opened, shown again, given focus or in view: the phone looks for new
+    // songs when that is switched on and the last look is old enough. It
+    // decides, this only says it is here and whether the play queue shows
     let cameBackAt = 0;
 
     function sayCameBack() {
@@ -13132,6 +13132,18 @@
 
     document.addEventListener("visibilitychange", sayCameBack);
     window.addEventListener("focus", sayCameBack);
+
+    // Opened counts as coming back, and in view and in focus it says so
+    // every minute, so the phone looks again once the last look is old
+    // enough
+    sayCameBack();
+
+    setInterval(function () {
+
+        if (!document.hidden && document.hasFocus()) {
+            sayCameBack();
+        }
+    }, 60000);
 
     function poll() {
 

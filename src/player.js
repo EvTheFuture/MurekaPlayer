@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.257";
+    const VERSION = "1.9.9.258";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -209,10 +209,14 @@
     // Default number of upcoming songs to cache ahead, now also a user setting
     const PREFETCH_DEFAULT = 3;
 
-    // Minutes since the last look for new songs before coming back to the
-    // player or a web view looks again, when that is switched on
+    // Minutes since the last look for new songs before the player or a web
+    // view in use looks again, when that is switched on. In steps of five
     const REFRESH_RETURN_DEFAULT = 30;
     const REFRESH_RETURN_MAX = 1440;
+    const REFRESH_RETURN_STEP = 5;
+
+    // How often a player or web view in view sees whether it is time
+    const REFRESH_RETURN_TICK_MS = 60000;
 
     // Album art coverflow, the center cover takes this fraction of the width and
     // the previous and next covers peek in on the sides. Lower shows more of the
@@ -1879,7 +1883,9 @@
             return REFRESH_RETURN_DEFAULT;
         }
 
-        return Math.min(n, REFRESH_RETURN_MAX);
+        const stepped = Math.round(n / REFRESH_RETURN_STEP) * REFRESH_RETURN_STEP;
+
+        return Math.max(REFRESH_RETURN_STEP, Math.min(stepped, REFRESH_RETURN_MAX));
     }
 
     function loadSettings() {
@@ -2733,10 +2739,11 @@
         setStatus("Resumed queue, press play to continue");
     }
 
-    // Back in the player or a web view after a while: a look for new songs
-    // when that is switched on and the last one is older than the minutes
-    // set. Only the newest songs, as on open. queue: the play queue is what
-    // shows where it came back, so new songs found are offered to it
+    // The player or a web view opened, back in view, or in view all along:
+    // a look for new songs when that is switched on and the last one is
+    // older than the minutes set. Only the newest songs, as on open. queue:
+    // the play queue is what shows there, so new songs found are offered
+    // to it
     let lastReturnCheck = 0;
 
     function maybeRefreshOnReturn(queue) {
@@ -2766,13 +2773,27 @@
         }
     }
 
+    // In view and in focus, it looks again each time the last look grows
+    // old enough, not only when it comes back
+    function playerInViewTick() {
+
+        if (!document.hidden && document.hasFocus()) {
+            maybeRefreshOnReturn(listView === "queue");
+        }
+    }
+
     // Refresh the active feed on open when the user has asked for it
     // This only checks the top for new songs, it never re-pages the library
     function maybeAutoRefresh() {
 
         if (settings.refreshOnStart && !offlineMode()) {
+
             run(true);
+            return;
         }
+
+        // Opened counts as coming back, when the last look is old enough
+        maybeRefreshOnReturn(listView === "queue");
     }
 
     // Start playback on open when the user has asked for it and songs exist.
@@ -20643,6 +20664,7 @@
         window.addEventListener("pageshow", netBackInView);
         document.addEventListener("visibilitychange", playerBackInView);
         window.addEventListener("focus", playerBackInView);
+        setInterval(playerInViewTick, REFRESH_RETURN_TICK_MS);
 
         // Only in the app, where it is given without a word. Firefox would
         // ask the user about it every time
@@ -28819,14 +28841,14 @@
             function () { return settings.refreshOnStart; },
             function (v) { settings.refreshOnStart = v; });
 
-        const returnRow = makeBoolRow("Look for new songs on return",
+        const returnRow = makeBoolRow("Look for new songs while in use",
             function () { return settings.refreshOnReturn; },
             function (v) { settings.refreshOnReturn = v; });
 
         const returnMinRow = makeStepperRow("When the last look is older than, minutes",
             function () { return returnMinutes(settings.refreshOnReturnMin); },
             function (v) { settings.refreshOnReturnMin = returnMinutes(v); },
-            1, REFRESH_RETURN_MAX);
+            REFRESH_RETURN_STEP, REFRESH_RETURN_MAX, REFRESH_RETURN_STEP);
 
         const goneRow = makeChoiceRow([
             { label: "Ask", value: "ask" },
@@ -28919,7 +28941,7 @@
         libraryPage.appendChild(makeLabel("Updates and numbers"));
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(returnRow);
-        libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when you come back to the player or a web view, once the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
+        libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when the player or a web view opens or comes back into view, and again while it stays in view, each time the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         libraryPage.appendChild(makeSubLabel("Songs deleted on Mureka"));
         libraryPage.appendChild(goneRow);
