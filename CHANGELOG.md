@@ -342,7 +342,9 @@ the new settings layout and a number of smaller improvements.
   ready**, with a turning ring in front of the song while Mureka is asked
   every five seconds. Once done they join the library with everything
   brought up to date, and a song asked for starts playing at once, in place
-  of a song playing meanwhile. Nothing of this is kept over a restart.
+  of a song playing meanwhile. **Play after the playing song** waits instead:
+  once ready, the song goes in to play next and starts when the playing song
+  ends. Nothing of this is kept over a restart.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
   instrumental marks, ignored songs and saved creators each have a switch,
   with how many are new or differ. The first time ratings, ignored songs and

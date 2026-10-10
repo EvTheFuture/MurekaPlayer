@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.247";
+    const VERSION = "1.9.9.251";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -661,9 +661,10 @@
     // Songs Mureka is still generating, seen on your own list pages, by id.
     // Only kept while the player runs. They show greyed at the top of the
     // list, and the first list page is read every few seconds until they
-    // are ready. Those asked to play when ready are in pendingPlay
+    // are ready. Those asked to play when ready are in pendingPlay, as
+    // "now" to play at once or "after" to play once the playing song ends
     const pendingSongs = new Map();
-    const pendingPlay = new Set();
+    const pendingPlay = new Map();
     const PENDING_POLL_MS = 5000;
 
     let pendingTimer = 0;
@@ -10733,6 +10734,7 @@
         }));
         const done = [];
         let wanted = null;
+        let wantedHow = "now";
 
         for (const id of Array.from(pendingSongs.keys())) {
 
@@ -10746,8 +10748,12 @@
             pendingStamp += 1;
             done.push(song);
 
-            if (pendingPlay.delete(id) && wanted === null) {
+            const how = pendingPlay.get(id);
+
+            if (how && pendingPlay.delete(id) && wanted === null) {
+
                 wanted = song;
+                wantedHow = how;
             }
         }
 
@@ -10764,6 +10770,20 @@
 
             showToast(done.length === 1 ? "Ready to play: " + (done[0].title || "Untitled")
                 : done.length + " new songs are ready to play", true);
+            return;
+        }
+
+        // Asked to wait for the playing song: it goes in right after the
+        // song playing now, whichever that is by then, so nothing is cut
+        // and nothing goes quiet. Paused, it waits there too. With nothing
+        // in the queue at all it starts at once after all
+        if (wantedHow === "after" && !queueIdle() && currentSong && currentSong.song_id !== wanted.song_id) {
+
+            addAfterWithTwins(wanted);
+            saveQueue();
+            publishHostSoon();
+            showToast("Ready, plays after this song: " + (wanted.title || "Untitled"), true);
+            dbgLog("Song", "ready, put to play next as asked: " + (wanted.title || "Untitled"));
             return;
         }
 
@@ -10879,26 +10899,62 @@
 
         if (pendingPlay.has(id)) {
 
-            showToast("Not ready yet, it plays as soon as it is", "wait");
+            showToast(pendingPlay.get(id) === "after" ? "Not ready yet, it plays after the playing song once it is"
+                : "Not ready yet, it plays as soon as it is", "wait");
             return;
         }
 
         showToast("Not finished generating yet", false);
-        askYesNo("Still generating", "\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
-            + " as it is ready.", "Play when ready", function () {
-            playWhenReady(id);
-        });
+        askChoices("Still generating\n\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
+            + " as it is ready, or once the playing song has ended.", [
+            { label: "Play when ready", fn: function () {
+                playWhenReady(id);
+            } },
+            { label: "Play after the playing song", ring: true, fn: function () {
+                playWhenReady(id, "after");
+            } }
+        ]);
     }
 
-    // Play a song once it is ready, at once when it is already
-    function playWhenReady(id) {
+    // A song put in to play after the playing one, with the other songs
+    // Mureka made in the same go right behind it, the way a queue made from
+    // the list would have played them
+    function addAfterWithTwins(song) {
+
+        const twins = song.feed_id ? cache.songs.filter(function (s) {
+            return s !== song && s.feed_id === song.feed_id && !isPendingSong(s)
+                && (!currentSong || s.song_id !== currentSong.song_id);
+        }) : [];
+
+        // Each goes in right after the playing song, so the last put in
+        // plays first: the twins first, then the song asked for
+        for (let i = twins.length - 1; i >= 0; i -= 1) {
+            addNext(twins[i]);
+        }
+
+        addNext(song);
+    }
+
+    // Play a song once it is ready, at once when it is already. After, it
+    // waits for the playing song to end instead, put in to play next
+    function playWhenReady(id, how) {
 
         const key = String(id);
+        const after = how === "after";
         const song = cache.songs.find(function (s) {
             return String(s.song_id) === key;
         });
 
         if (song) {
+
+            if (after && !queueIdle() && currentSong && currentSong.song_id !== song.song_id) {
+
+                addAfterWithTwins(song);
+                saveQueue();
+                publishHostSoon();
+                showToast("Plays after this song", true);
+                return;
+            }
 
             playFrom(song.song_id);
             return;
@@ -10908,12 +10964,12 @@
             return;
         }
 
-        pendingPlay.add(key);
+        pendingPlay.set(key, after ? "after" : "now");
         pendingStamp += 1;
         primeAudio();
         renderList();
         publishHostSoon();
-        showToast("Plays as soon as it is ready", true);
+        showToast(after ? "Plays after the playing song, once it is ready" : "Plays as soon as it is ready", true);
     }
 
     // Safari on iOS lets a page start sound only from a tap, unless the
@@ -21200,6 +21256,7 @@
                     title: title,
                     pending: true,
                     playWhenReady: pendingPlay.has(String(song.song_id)),
+                    playAfter: pendingPlay.get(String(song.song_id)) === "after",
                     cover: song.cover ? coverUrl(song) : "",
                     rating: null,
                     duration: 0
@@ -21959,7 +22016,14 @@
                 playFrom(song.song_id);
             }
         } else if (cmd === "playWhenReady") {
-            playWhenReady(arg);
+
+            // An id alone plays at once when ready, with after it waits
+            // for the playing song
+            if (arg && typeof arg === "object") {
+                playWhenReady(arg.id, arg.after === true ? "after" : "now");
+            } else {
+                playWhenReady(arg);
+            }
         } else if (cmd === "playNext") {
 
             const wanted = String(arg);
@@ -26588,7 +26652,8 @@
         numEl.appendChild(ring);
         titleEl.textContent = (song.title || "").trim() || "Untitled";
         titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.45";
-        stateEl.textContent = pendingPlay.has(String(song.song_id)) ? "Plays when ready" : "Generating";
+        stateEl.textContent = pendingPlay.has(String(song.song_id))
+            ? (pendingPlay.get(String(song.song_id)) === "after" ? "Plays next when ready" : "Plays when ready") : "Generating";
         stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap;opacity:0.7";
 
         item.appendChild(dot);

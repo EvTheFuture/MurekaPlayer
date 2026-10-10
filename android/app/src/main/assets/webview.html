@@ -9387,7 +9387,7 @@
         }
 
         if (time) {
-            time.textContent = song.playWhenReady ? "Plays when ready" : "Generating";
+            time.textContent = song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
         }
 
         // Nothing to like before it exists
@@ -9401,7 +9401,8 @@
 
             if (song.playWhenReady) {
 
-                toast("Not ready yet, it plays as soon as it is", "wait");
+                toast(song.playAfter ? "Not ready yet, it plays after the playing song once it is"
+                    : "Not ready yet, it plays as soon as it is", "wait");
                 return;
             }
 
@@ -9410,8 +9411,15 @@
                 { icon: "play", label: "Play when ready", fn: function () {
 
                     closeSongMenu();
-                    send("playWhenReady", song.id).then(function () {
+                    send("playWhenReady", { id: song.id, after: false }).then(function () {
                         toast("Plays as soon as it is ready", "ok");
+                    });
+                } },
+                { icon: "queueAdd", label: "Play after the playing song", cls: "inset", fn: function () {
+
+                    closeSongMenu();
+                    send("playWhenReady", { id: song.id, after: true }).then(function () {
+                        toast("Plays after the playing song, once it is ready", "ok");
                     });
                 } }
             ]);
