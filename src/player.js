@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.256";
+    const VERSION = "1.9.9.257";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -648,6 +648,25 @@
     // queue view can show what is coming up
     let queue = [];
     let queuePos = -1;
+
+    // Set by a Load asked for with the play queue in view
+    let askNewInQueue = false;
+
+    // New songs left out of the queue for now. A queue made from the list
+    // does not take them in by itself, until a new one is made from the list
+    const queueSkipIds = new Set();
+
+    // Songs new to the library that the play queue has not been offered
+    // yet: found by a Load, done generating, or newly published while only
+    // published songs are shown. A Load with the queue in view offers them
+    // all, however they came in, and a queue made from the list has them
+    const unofferedNew = new Set();
+    const UNOFFERED_MAX = 200;
+
+    // The question about where new songs go, open on the phone and in the
+    // web views at once. The first answer anywhere closes it everywhere
+    let newAsk = null;
+    let newAskSeq = 0;
 
     // True while the queue is one put together by hand, with Play next and
     // Play last from a stopped player. It then holds only those songs: the
@@ -6208,24 +6227,26 @@
         }
     }
 
-    // Set by a Load asked for with the play queue in view
-    let askNewInQueue = false;
+    function noteUnoffered(ids) {
 
-    // New songs left out of the queue for now. A queue made from the list
-    // does not take them in by itself, until a new one is made from the list
-    const queueSkipIds = new Set();
+        for (const id of ids) {
+            unofferedNew.add(String(id));
+        }
 
-    // The question about where new songs go, open on the phone and in the
-    // web views at once. The first answer anywhere closes it everywhere
-    let newAsk = null;
-    let newAskSeq = 0;
+        // The oldest go first when very many pile up
+        while (unofferedNew.size > UNOFFERED_MAX) {
+            unofferedNew.delete(unofferedNew.values().next().value);
+        }
+    }
 
     // The songs a refresh found, as the list holds them, without ones still
     // generating and ones already waiting in the queue, a song asked to play
     // once ready for one
     function newQueueSongs(ids) {
 
-        const upcoming = new Set(queue.slice(Math.max(0, queuePos + 1)).map(function (s) {
+        // Played or still to come, a song already in the queue is not new
+        // to it
+        const upcoming = new Set(queue.map(function (s) {
             return String(s.song_id);
         }));
         const byId = new Map(cache.songs.map(function (s) {
@@ -6251,7 +6272,14 @@
             out.push(song);
         }
 
-        return out;
+        // Newest first, as the list shows them
+        const at = new Map(cache.songs.map(function (s, i) {
+            return [s, i];
+        }));
+
+        return out.sort(function (a, b) {
+            return at.get(a) - at.get(b);
+        });
     }
 
     function askNewSongs(songs) {
@@ -6318,6 +6346,14 @@
 
         if (ask.el && ask.el.parentNode) {
             ask.el.remove();
+        }
+
+        // Answered, so not offered again
+        if (["next", "end", "replace", "skip"].indexOf(mode) !== -1) {
+
+            for (const s of ask.songs) {
+                unofferedNew.delete(String(s.song_id));
+            }
         }
 
         publishHostSoon();
@@ -6567,7 +6603,13 @@
             }
 
             if (isPublished) {
+
                 nowPublished += 1;
+
+                // New to a list of the published songs only
+                if (publishFilter === "published") {
+                    noteUnoffered([s.song_id]);
+                }
             } else {
                 nowDraft += 1;
             }
@@ -6660,7 +6702,12 @@
         // Asked for with the play queue in view, the new songs are offered to
         // it, as an import would. Otherwise a queue made from the list grows
         // with them by itself
-        const offered = askNewInQueue && !deep ? newQueueSongs(newIds) : [];
+        // Songs done generating go in first, so they are offered as well.
+        // Those asked to play are in the queue by then and are not
+        noteUnoffered(newIds);
+        settlePending();
+
+        const offered = askNewInQueue && !deep ? newQueueSongs(Array.from(unofferedNew)) : [];
 
         askNewInQueue = false;
 
@@ -6671,7 +6718,6 @@
         }
 
         handleGone(goneMaybe);
-        settlePending();
 
         // Only the counts that are not zero, so an ordinary refresh stays
         // short and a rescan that actually changed something says what
@@ -8977,8 +9023,10 @@
         // Made from the list, so no longer a queue put together by hand
         queueOwn = false;
 
-        // A new queue from the list takes in the songs left out before
+        // A new queue from the list takes in the songs left out before,
+        // and every new song, so none is waiting to be offered
         queueSkipIds.clear();
+        unofferedNew.clear();
 
         // The song asked for plays even when ignored, the songs after it
         // leave the ignored ones out
@@ -11004,6 +11052,11 @@
         if (done.length === 0) {
             return;
         }
+
+        // New to the library, for the play queue to be offered
+        noteUnoffered(done.map(function (s) {
+            return s.song_id;
+        }));
 
         renderList();
         publishHostSoon();

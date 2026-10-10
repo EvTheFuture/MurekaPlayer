@@ -351,8 +351,9 @@ the new settings layout and a number of smaller improvements.
 - **Look for new songs on return**: coming back to the player or a web
   view looks for new songs once the last look is older than the minutes
   set, only the newest, as on open.
-- **New songs found with the play queue in view** are offered to it, as an
-  import is: play next, add to the end, replace the queue with the playing
+- **New songs with the play queue in view** are offered to it on a Load,
+  however they came in: found by the Load, done generating, or newly
+  published while only published songs are shown. As an import is: play next, add to the end, replace the queue with the playing
   song playing on, or leave them out for now. Left out, they still show in
   the Mureka list. Asked on the phone and in the web view, the first answer
   anywhere counts.
