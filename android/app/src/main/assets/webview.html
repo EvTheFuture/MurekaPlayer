@@ -9407,7 +9407,7 @@
             }
 
             toast("Not finished generating yet", "bad");
-            openChoice("Still generating: " + song.title, [
+            const choices = [
                 { icon: "play", label: "Play when ready", fn: function () {
 
                     closeSongMenu();
@@ -9415,14 +9415,28 @@
                         toast("Plays as soon as it is ready", "ok");
                     });
                 } },
-                { icon: "queueAdd", label: "Play after the playing song", cls: "inset", fn: function () {
+                { icon: "queueAdd", label: "Play this after the playing song", cls: "inset", fn: function () {
 
                     closeSongMenu();
                     send("playWhenReady", { id: song.id, after: true }).then(function () {
                         toast("Plays after the playing song, once it is ready", "ok");
                     });
                 } }
-            ]);
+            ];
+
+            // With more than one being generated, all of them can follow
+            if (state && Number(state.pendingCount) > 1) {
+
+                choices.push({ icon: "queue", label: "Play all new after the playing song", cls: "inset", fn: function () {
+
+                    closeSongMenu();
+                    send("playWhenReady", { id: song.id, after: true, all: true }).then(function () {
+                        toast("The new songs play after the playing song, each once it is ready", "ok");
+                    });
+                } });
+            }
+
+            openChoice("Still generating: " + song.title, choices);
         };
 
         row.addEventListener("click", tap);
@@ -11359,9 +11373,18 @@
     // The playing song may be further down than what is loaded so far
     // Ask the phone for whatever is new on Mureka, from the Update chip or
     // a pull on the list, and reload the list once it has had a moment
+    // Whether the play queue is what this page shows, the list open on it
+    // or the small player's queue. A Load from there offers new songs to it
+    function queueInView() {
+
+        const browsing = $("browse").style.display === "flex";
+
+        return browsing ? listView === "queue" : miniView === "queue";
+    }
+
     function loadNewSongs(reload) {
 
-        send("refresh");
+        send("refresh", { queue: queueInView() });
         toast("Loading songs from Mureka");
 
         setTimeout(function () {
@@ -13040,6 +13063,7 @@
         paintForceAsk();
         paintRetryAsk();
         paintGoneAsk();
+        paintNewAsk();
         theaterSound();
 
         if (volOpen()) {
@@ -16747,7 +16771,7 @@
                 }
             });
         } else if (key === "r") {
-            send("refresh");
+            send("refresh", { queue: queueInView() });
         } else if (key === "R") {
             send("rescan");
         } else if (key === "q") {
@@ -16844,6 +16868,59 @@
             goneAsking = false;
             send("goneAnswer", { n: n, remove: false });
         });
+    }
+
+    // New songs a Load found with the play queue in view, and where in the
+    // queue they go. The phone asks as well, and the first answer anywhere
+    // closes the question everywhere
+    let newShown = 0;
+    let newAsking = "";
+
+    function paintNewAsk() {
+
+        const ask = state && state.newAsk ? state.newAsk : null;
+        const n = ask ? Number(ask.n) : 0;
+
+        if (n === newShown) {
+            return;
+        }
+
+        newShown = n;
+
+        // Answered elsewhere, so this one goes away by itself, unless the
+        // box shows something else by now
+        if (newAsking && $("songMenu").style.display === "flex" && $("menuTitle").textContent === newAsking) {
+            closeSongMenu();
+        }
+
+        newAsking = "";
+
+        if (!ask) {
+            return;
+        }
+
+        const answer = function (mode) {
+
+            newAsking = "";
+            closeSongMenu();
+            send("newAnswer", { n: n, mode: mode });
+        };
+
+        newAsking = ask.title + ". " + ask.text;
+        openChoice(newAsking, [
+            { icon: "queueAdd", label: "Play next", fn: function () {
+                answer("next");
+            } },
+            { icon: "queue", label: "Add to the end", fn: function () {
+                answer("end");
+            } },
+            { icon: "play", label: "Replace the queue", fn: function () {
+                answer("replace");
+            } },
+            { icon: "close", label: "Leave out for now", fn: function () {
+                answer("skip");
+            } }
+        ]);
     }
 
     // A change on Mureka that did not go through: Retry or Cancel. The phone
@@ -16990,7 +17067,7 @@
 
         box.appendChild(menuItem("refresh", s.loading ? "Loading" : "Load", function () {
 
-            send("refresh");
+            send("refresh", { queue: queueInView() });
             $("actionsPop").style.display = "none";
         }));
 

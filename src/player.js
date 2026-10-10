@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.251";
+    const VERSION = "1.9.9.254";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5859,7 +5859,10 @@
     // Entry point for the Load / refresh button
     // While the library is not fully cached it resumes loading older songs
     // Once everything is cached it only checks the top for new songs
-    async function run(light) {
+    // light: the check on open, only the newest songs. fromQueue: asked for
+    // with the play queue in view, so new songs found are offered to the
+    // queue. Left out, the player's own list view decides
+    async function run(light, fromQueue) {
 
         if (!running) {
             userTry("loading");
@@ -5879,6 +5882,7 @@
         running = true;
         runOwner = "load";
         runFailed = false;
+        askNewInQueue = light !== true && (fromQueue === undefined ? listView === "queue" : fromQueue === true);
         const myToken = ++loadToken;
 
         // Confirm login state for your own feed and warn if logged out
@@ -6150,6 +6154,158 @@
         }
     }
 
+    // Set by a Load asked for with the play queue in view
+    let askNewInQueue = false;
+
+    // New songs left out of the queue for now. A queue made from the list
+    // does not take them in by itself, until a new one is made from the list
+    const queueSkipIds = new Set();
+
+    // The question about where new songs go, open on the phone and in the
+    // web views at once. The first answer anywhere closes it everywhere
+    let newAsk = null;
+    let newAskSeq = 0;
+
+    // The songs a refresh found, as the list holds them, without ones still
+    // generating and ones already waiting in the queue, a song asked to play
+    // once ready for one
+    function newQueueSongs(ids) {
+
+        const upcoming = new Set(queue.slice(Math.max(0, queuePos + 1)).map(function (s) {
+            return String(s.song_id);
+        }));
+        const byId = new Map(cache.songs.map(function (s) {
+            return [String(s.song_id), s];
+        }));
+        const seen = new Set();
+        const out = [];
+
+        for (const id of ids) {
+
+            const key = String(id);
+            const song = byId.get(key);
+
+            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song)) {
+                continue;
+            }
+
+            if (currentSong && String(currentSong.song_id) === key) {
+                continue;
+            }
+
+            seen.add(key);
+            out.push(song);
+        }
+
+        return out;
+    }
+
+    function askNewSongs(songs) {
+
+        // Each with its number in the list, as the rows show it
+        const numbers = hostNumbers();
+        const names = songs.slice(0, 5).map(function (s) {
+
+            const n = numbers.get(s.song_id);
+
+            return (n ? "#" + n + " " : "") + "\"" + (s.title || "Untitled") + "\"";
+        });
+        const more = songs.length - names.length;
+        const title = songs.length === 1 ? "A new song" : songs.length + " new songs";
+        const text = names.join(", ") + (more > 0 ? " and " + more + " more" : "")
+            + ". Where in the play queue do " + (songs.length === 1 ? "it" : "they") + " go? Left out, "
+            + (songs.length === 1 ? "it still shows" : "they still show") + " in the Mureka list.";
+
+        // A newer question takes the place of an older one
+        if (newAsk) {
+            finishNewAsk(newAsk.n, "");
+        }
+
+        newAskSeq += 1;
+
+        const ask = { n: newAskSeq, title: title, text: text, songs: songs, el: null };
+
+        newAsk = ask;
+        ask.el = askChoices(title + "\n" + text, [
+            { label: "Play next", fn: function () {
+                finishNewAsk(ask.n, "next");
+            } },
+            { label: "Add to the end", ring: true, fn: function () {
+                finishNewAsk(ask.n, "end");
+            } },
+            { label: "Replace the queue", fn: function () {
+                finishNewAsk(ask.n, "replace");
+            } },
+            { label: "Leave out for now", fn: function () {
+                finishNewAsk(ask.n, "skip");
+            } }
+        ], function () {
+
+            // Without the player's box it is asked in the web views only,
+            // so it is not cancelled before the box would have been shown
+            if (ask.el) {
+                finishNewAsk(ask.n, "skip");
+            }
+        }, true);
+        publishHostSoon();
+    }
+
+    // mode: next, end, replace or skip, which leaves them out for now.
+    // Anything else, a newer question taking over, leaves things as they are
+    function finishNewAsk(n, mode) {
+
+        const ask = newAsk;
+
+        if (!ask || ask.n !== n) {
+            return;
+        }
+
+        newAsk = null;
+
+        if (ask.el && ask.el.parentNode) {
+            ask.el.remove();
+        }
+
+        publishHostSoon();
+
+        // Songs taken off meanwhile stay out
+        const songs = ask.songs.filter(function (s) {
+            return cache.songs.indexOf(s) !== -1;
+        });
+        const one = songs.length === 1;
+        const said = {
+            next: one ? "The new song plays next" : "The " + songs.length + " new songs play next",
+            end: one ? "The new song is at the end of the queue" : "The " + songs.length + " new songs are at the end of the queue",
+            replace: one ? "The new song is the play queue now" : "The " + songs.length + " new songs are the play queue now"
+        };
+
+        if (mode === "skip") {
+
+            for (const s of songs) {
+                queueSkipIds.add(String(s.song_id));
+            }
+
+            return;
+        }
+
+        if (songs.length === 0 || ["next", "end", "replace"].indexOf(mode) === -1) {
+            return;
+        }
+
+        for (const s of songs) {
+            queueSkipIds.delete(String(s.song_id));
+        }
+
+        // Replaced, the playing song plays on, with the new songs after it
+        if (mode === "replace") {
+            applyQueueImport(songs, true);
+        } else {
+            applySharedSongs(songs, mode);
+        }
+
+        showToast(said[mode], true);
+    }
+
     function changedSince(id, since) {
 
         const at = changedHere.get(String(id));
@@ -6196,6 +6352,9 @@
 
         // Songs kept here but missing from the pages read
         const goneMaybe = [];
+
+        // The songs that are new here, in the order the pages listed them
+        const newIds = [];
 
         let cursor = null;
         let knownStreak = 0;
@@ -6259,6 +6418,7 @@
                 } else {
                     knownStreak = 0;
                     newCount += 1;
+                    newIds.push(s.song_id);
                 }
 
                 fresh.push(trim(s));
@@ -6443,8 +6603,18 @@
 
         saveCache();
 
-        // Grow the active queue with any songs the refresh brought in
-        extendQueueWithNew();
+        // Asked for with the play queue in view, the new songs are offered to
+        // it, as an import would. Otherwise a queue made from the list grows
+        // with them by itself
+        const offered = askNewInQueue && !deep ? newQueueSongs(newIds) : [];
+
+        askNewInQueue = false;
+
+        if (offered.length > 0) {
+            askNewSongs(offered);
+        } else {
+            extendQueueWithNew();
+        }
 
         handleGone(goneMaybe);
         settlePending();
@@ -8753,6 +8923,9 @@
         // Made from the list, so no longer a queue put together by hand
         queueOwn = false;
 
+        // A new queue from the list takes in the songs left out before
+        queueSkipIds.clear();
+
         // The song asked for plays even when ignored, the songs after it
         // leave the ignored ones out
         let songs = orderedSongs().filter(function (s) {
@@ -9573,7 +9746,7 @@
 
             const added = orderedSongs().filter(function (s) {
 
-                return queueable(s) && !inQueue.has(s.song_id);
+                return queueable(s) && !inQueue.has(s.song_id) && !queueSkipIds.has(String(s.song_id));
             });
 
             if (added.length === 0) {
@@ -9649,7 +9822,7 @@
         // shuffled. orderedSongs is the displayed order, so with shuffle off the
         // queue matches the list. The vocals and playlist filters still apply
         let upcoming = orderedSongs().filter(function (s) {
-            return !playedIds.has(s.song_id) && queueable(s);
+            return !playedIds.has(s.song_id) && queueable(s) && !queueSkipIds.has(String(s.song_id));
         });
 
         if (shuffleMode) {
@@ -10733,8 +10906,8 @@
             return [String(s.song_id), s];
         }));
         const done = [];
+        const afters = [];
         let wanted = null;
-        let wantedHow = "now";
 
         for (const id of Array.from(pendingSongs.keys())) {
 
@@ -10750,10 +10923,12 @@
 
             const how = pendingPlay.get(id);
 
-            if (how && pendingPlay.delete(id) && wanted === null) {
+            pendingPlay.delete(id);
 
+            if (how === "after") {
+                afters.push(song);
+            } else if (how === "now" && wanted === null) {
                 wanted = song;
-                wantedHow = how;
             }
         }
 
@@ -10764,43 +10939,74 @@
         renderList();
         publishHostSoon();
 
-        // One note, about the song asked for when there is one, since
+        // One note, about the songs asked for when there are any, since
         // Mureka makes two at a time and the second would hide the first
-        if (wanted === null) {
+        if (wanted === null && afters.length === 0) {
 
             showToast(done.length === 1 ? "Ready to play: " + (done[0].title || "Untitled")
                 : done.length + " new songs are ready to play", true);
             return;
         }
 
-        // Asked to wait for the playing song: it goes in right after the
-        // song playing now, whichever that is by then, so nothing is cut
-        // and nothing goes quiet. Paused, it waits there too. With nothing
-        // in the queue at all it starts at once after all
-        if (wantedHow === "after" && !queueIdle() && currentSong && currentSong.song_id !== wanted.song_id) {
+        // As if it was tapped just now: a song playing stops for it
+        if (wanted !== null) {
 
-            addAfterWithTwins(wanted);
-            saveQueue();
-            publishHostSoon();
-            showToast("Ready, plays after this song: " + (wanted.title || "Untitled"), true);
-            dbgLog("Song", "ready, put to play next as asked: " + (wanted.title || "Untitled"));
+            showToast("Ready, playing " + (wanted.title || "Untitled"), true);
+            dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
+            playFrom(wanted.song_id);
+
+            // A browser that does not let a page start sound by itself keeps
+            // it loaded and paused, then a tap on Play starts it
+            setTimeout(function () {
+
+                if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
+                    showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), "wait");
+                }
+            }, 2500);
+        }
+
+        if (afters.length === 0) {
             return;
         }
 
-        showToast("Ready, playing " + (wanted.title || "Untitled"), true);
-        dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
+        // Asked to wait for the playing song: each goes in after the song
+        // playing now, whichever that is by then, behind the ones asked for
+        // before it, so nothing is cut and nothing goes quiet. Paused, they
+        // wait there too. With nothing in the queue at all the first starts
+        // at once and the others follow it
+        afters.sort(function (a, b) {
+            return afterChain.indexOf(String(a.song_id)) - afterChain.indexOf(String(b.song_id));
+        });
 
-        // As if it was tapped just now: a song playing stops for it
-        playFrom(wanted.song_id);
+        let started = null;
 
-        // A browser that does not let a page start sound by itself keeps it
-        // loaded and paused, then a tap on Play starts it
-        setTimeout(function () {
+        for (const song of afters) {
 
-            if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
-                showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), "wait");
+            if (canGoAfter(song)) {
+                insertAfterInOrder(song);
+            } else if (started === null) {
+
+                started = song;
+                playFrom(song.song_id);
             }
-        }, 2500);
+        }
+
+        saveQueue();
+        publishHostSoon();
+
+        const first = afters[0].title || "Untitled";
+
+        if (wanted === null) {
+
+            showToast(started !== null ? "Ready, playing " + (started.title || "Untitled")
+                : (afters.length === 1 ? "Ready, plays after this song: " + first
+                    : "Ready, " + afters.length + " new songs play after this song"), true);
+        }
+
+        dbgLog("Song", "ready, put in to play after the playing song as asked: "
+            + afters.map(function (s) {
+                return s.title || "Untitled";
+            }).join(", "));
     }
 
     // Every few seconds while songs are being generated: the first list page
@@ -10905,71 +11111,224 @@
         }
 
         showToast("Not finished generating yet", false);
-        askChoices("Still generating\n\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
-            + " as it is ready, or once the playing song has ended.", [
+        const options = [
             { label: "Play when ready", fn: function () {
                 playWhenReady(id);
             } },
-            { label: "Play after the playing song", ring: true, fn: function () {
+            { label: "Play this after the playing song", ring: true, fn: function () {
                 playWhenReady(id, "after");
             } }
-        ]);
-    }
+        ];
 
-    // A song put in to play after the playing one, with the other songs
-    // Mureka made in the same go right behind it, the way a queue made from
-    // the list would have played them
-    function addAfterWithTwins(song) {
+        // With more than one being generated, all of them can follow
+        if (pendingCount() > 1) {
 
-        const twins = song.feed_id ? cache.songs.filter(function (s) {
-            return s !== song && s.feed_id === song.feed_id && !isPendingSong(s)
-                && (!currentSong || s.song_id !== currentSong.song_id);
-        }) : [];
-
-        // Each goes in right after the playing song, so the last put in
-        // plays first: the twins first, then the song asked for
-        for (let i = twins.length - 1; i >= 0; i -= 1) {
-            addNext(twins[i]);
+            options.push({ label: "Play all new after the playing song", ring: true, fn: function () {
+                playWhenReady(id, "all");
+            } });
         }
 
-        addNext(song);
+        askChoices("Still generating\n\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
+            + " as it is ready, or once the playing song has ended.", options);
     }
 
-    // Play a song once it is ready, at once when it is already. After, it
-    // waits for the playing song to end instead, put in to play next
+    // The songs asked to play after the playing song, in the order they
+    // were asked for. Each goes in as it is ready, behind the ones before it
+    // in this order that are already in, so one that is ready sooner does
+    // not jump ahead of one asked for first
+    const afterChain = [];
+
+    // Songs of the chain that have played or were taken out of the queue
+    // are let go
+    function pruneAfterChain() {
+
+        const ahead = new Set(queue.slice(Math.max(0, queuePos)).map(function (s) {
+            return String(s.song_id);
+        }));
+
+        for (let i = afterChain.length - 1; i >= 0; i -= 1) {
+
+            const id = afterChain[i];
+
+            if (!pendingSongs.has(id) && !ahead.has(id)) {
+                afterChain.splice(i, 1);
+            }
+        }
+    }
+
+    // A ready song in after the playing song, in its place in the chain.
+    // Only with a song playing or paused, the caller sees to that
+    function insertAfterInOrder(song) {
+
+        const key = String(song.song_id);
+
+        if (afterChain.indexOf(key) === -1) {
+            afterChain.push(key);
+        }
+
+        // A later copy goes, so the song does not also play again further on
+        for (let i = queue.length - 1; i > queuePos; i -= 1) {
+
+            if (String(queue[i].song_id) === key) {
+                queue.splice(i, 1);
+            }
+        }
+
+        // Behind the last song before it in the chain that is in the queue
+        // from the playing song on, else right after the playing song
+        let at = queuePos + 1;
+
+        for (let j = afterChain.indexOf(key) - 1; j >= 0; j -= 1) {
+
+            let found = -1;
+
+            for (let i = queue.length - 1; i >= queuePos; i -= 1) {
+
+                if (String(queue[i].song_id) === afterChain[j]) {
+
+                    found = i;
+                    break;
+                }
+            }
+
+            if (found !== -1) {
+
+                at = found + 1;
+                break;
+            }
+        }
+
+        queue.splice(at, 0, song);
+        playNextMarks.set(key, -1);
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+    }
+
+    // Whether a song asked to play after the playing one can go in now:
+    // something plays or is paused, and it is not that song
+    function canGoAfter(song) {
+        return !queueIdle() && currentSong && currentSong.song_id !== song.song_id;
+    }
+
+    // Play a song once it is ready, at once when it is already. how:
+    // "now", the default, starts it and the queue goes on from it in the
+    // list. "after" waits for the playing song to end, put in to play next.
+    // "all" does that for it and then every other song still generating,
+    // in the order the list shows them
     function playWhenReady(id, how) {
 
         const key = String(id);
-        const after = how === "after";
-        const song = cache.songs.find(function (s) {
-            return String(s.song_id) === key;
-        });
+        const mode = how === "after" || how === "all" ? how : "now";
 
-        if (song) {
+        if (mode === "now") {
 
-            if (after && !queueIdle() && currentSong && currentSong.song_id !== song.song_id) {
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === key;
+            });
 
-                addAfterWithTwins(song);
-                saveQueue();
-                publishHostSoon();
-                showToast("Plays after this song", true);
+            if (song) {
+
+                playFrom(song.song_id);
                 return;
             }
 
-            playFrom(song.song_id);
+            if (!pendingSongs.has(key)) {
+                return;
+            }
+
+            pendingPlay.set(key, "now");
+            pendingStamp += 1;
+            primeAudio();
+            renderList();
+            publishHostSoon();
+            showToast("Plays as soon as it is ready", true);
             return;
         }
 
-        if (!pendingSongs.has(key)) {
+        pruneAfterChain();
+
+        // The song tapped first, then the others still generating
+        const keys = [key];
+
+        if (mode === "all") {
+
+            for (const s of pendingList()) {
+
+                const k = String(s.song_id);
+
+                if (keys.indexOf(k) === -1 && pendingPlay.get(k) !== "now") {
+                    keys.push(k);
+                }
+            }
+        }
+
+        let waiting = 0;
+        let queued = 0;
+
+        for (const k of keys) {
+
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === k;
+            });
+
+            if (song) {
+
+                if (afterChain.indexOf(k) === -1) {
+                    afterChain.push(k);
+                }
+
+                // Nothing playing, it starts at once and the rest follow it.
+                // Already the playing song, it plays on
+                if (canGoAfter(song)) {
+                    insertAfterInOrder(song);
+                } else if (!currentSong || currentSong.song_id !== song.song_id) {
+                    playFrom(song.song_id);
+                }
+
+                queued += 1;
+                continue;
+            }
+
+            if (!pendingSongs.has(k)) {
+                continue;
+            }
+
+            pendingPlay.set(k, "after");
+
+            if (afterChain.indexOf(k) === -1) {
+                afterChain.push(k);
+            }
+
+            waiting += 1;
+        }
+
+        if (waiting === 0 && queued === 0) {
             return;
         }
 
-        pendingPlay.set(key, after ? "after" : "now");
         pendingStamp += 1;
-        primeAudio();
+
+        if (waiting > 0) {
+            primeAudio();
+        }
+
+        saveQueue();
         renderList();
         publishHostSoon();
-        showToast(after ? "Plays after the playing song, once it is ready" : "Plays as soon as it is ready", true);
+
+        const n = waiting + queued;
+
+        showToast(n === 1 ? (waiting > 0 ? "Plays after the playing song, once it is ready" : "Plays after this song")
+            : n + " new songs play after the playing song, each once it is ready", true);
+    }
+
+    // How many songs are still being generated, for whether Play all new
+    // is worth offering
+    function pendingCount() {
+        return pendingSongs.size;
     }
 
     // Safari on iOS lets a page start sound only from a tap, unless the
@@ -19475,6 +19834,8 @@
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
+            newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text } : null,
+            pendingCount: pendingCount(),
             retryAsk: retryAsk ? {
                 n: retryAsk.n,
                 title: retryAsk.title,
@@ -21934,7 +22295,14 @@
         } else if (cmd === "seekBy") {
             seekByKey(Number(arg) || 0);
         } else if (cmd === "refresh") {
-            run();
+
+            // From a web view, which says whether its play queue is in view
+            run(false, arg && typeof arg === "object" ? arg.queue === true : undefined);
+        } else if (cmd === "newAnswer") {
+
+            // Where the new songs go, from a web view, for the question it
+            // was shown
+            finishNewAsk(Number(arg && arg.n), arg && typeof arg.mode === "string" ? arg.mode : "");
         } else if (cmd === "clearCache") {
             clearCache();
         } else if (cmd === "cacheAll") {
@@ -22020,7 +22388,7 @@
             // An id alone plays at once when ready, with after it waits
             // for the playing song
             if (arg && typeof arg === "object") {
-                playWhenReady(arg.id, arg.after === true ? "after" : "now");
+                playWhenReady(arg.id, arg.all === true ? "all" : (arg.after === true ? "after" : "now"));
             } else {
                 playWhenReady(arg);
             }
@@ -32267,8 +32635,10 @@
     }
 
     // Choices in a box over the player, one button each and Cancel. The
-    // first line of the title is its heading, the rest the text under it
-    function askChoices(title, options, onCancel) {
+    // first line of the title is its heading, the rest the text under it.
+    // noCancel: no Cancel button, for when one of the choices already is
+    // the way out. A tap beside the box still calls onCancel
+    function askChoices(title, options, onCancel, noCancel) {
 
         if (!panelEl) {
 
@@ -32324,12 +32694,15 @@
             col.appendChild(b);
         }
 
-        const cancel = makeButton("Cancel", "#444", "#fff", function () {
-            close(onCancel);
-        });
+        if (noCancel !== true) {
 
-        cancel.style.width = "100%";
-        col.appendChild(cancel);
+            const cancel = makeButton("Cancel", "#444", "#fff", function () {
+                close(onCancel);
+            });
+
+            cancel.style.width = "100%";
+            col.appendChild(cancel);
+        }
         card.appendChild(head);
 
         if (text.textContent) {
@@ -32346,6 +32719,8 @@
         });
 
         panelEl.appendChild(back);
+
+        return back;
     }
 
     function hideDataChoice() {

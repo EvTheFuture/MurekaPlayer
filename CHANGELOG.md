@@ -342,9 +342,17 @@ the new settings layout and a number of smaller improvements.
   ready**, with a turning ring in front of the song while Mureka is asked
   every five seconds. Once done they join the library with everything
   brought up to date, and a song asked for starts playing at once, in place
-  of a song playing meanwhile. **Play after the playing song** waits instead:
-  once ready, the song goes in to play next and starts when the playing song
-  ends. Nothing of this is kept over a restart.
+  of a song playing meanwhile. **Play this after the playing song** waits
+  instead: once ready, the song goes in to play next and starts when the
+  playing song ends. With more than one song generating, **Play all new
+  after the playing song** does that for the tapped song and then every
+  other one, each going in as it is ready, in list order, so nothing is cut
+  off and nothing goes quiet. Nothing of this is kept over a restart.
+- **New songs found with the play queue in view** are offered to it, as an
+  import is: play next, add to the end, replace the queue with the playing
+  song playing on, or leave them out for now. Left out, they still show in
+  the Mureka list. Asked on the phone and in the web view, the first answer
+  anywhere counts.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
   instrumental marks, ignored songs and saved creators each have a switch,
   with how many are new or differ. The first time ratings, ignored songs and
