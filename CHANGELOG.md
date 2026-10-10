@@ -396,7 +396,9 @@ the new settings layout and a number of smaller improvements.
   the same box for what goes along. A line of song tweaks carries what a
   file does, values removed included, and its Import asks as a file's
   does. A copied play queue marks the song that was playing, and Import
-  asks whether the songs played before it come along. Files stay as before.
+  asks whether the songs played before it come along. Files stay as before,
+  and a play queue file carries your own tempos and instrumental marks too,
+  taken in where the other player has none of its own.
 - **Mureka song links in Import**: pasted share links from Mureka's site,
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.

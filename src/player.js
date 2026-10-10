@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.263";
+    const VERSION = "1.9.9.264";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31192,7 +31192,11 @@
                 // Each song with full links to its audio and cover, so a
                 // player of another account plays it without having it in
                 // its library
-                songs: songsWithLinks(q)
+                songs: songsWithLinks(q),
+
+                // Your own tempo and instrumental mark of each song, taken in
+                // where the other player has none of its own
+                tweaks: queueTweaks(q)
             };
 
             return base;
@@ -31353,7 +31357,7 @@
 
             out.queue = {
                 shared: q.shared === true,
-                tweaks: q.shared === true ? cleanShareTweaks(q.tweaks) : {},
+                tweaks: cleanShareTweaks(q.tweaks),
                 playing: typeof q.playing === "string" && /^\d{1,25}$/.test(q.playing) ? q.playing : "",
                 ids: Array.isArray(q.ids) ? q.ids.filter(function (id) {
                     return id !== null && id !== undefined && id !== "";
@@ -32309,6 +32313,7 @@
                 const sounding = soundingNow();
 
                 applyQueueImport(found.songs, keep);
+                applyShareTweaks(p.queue.tweaks, found.songs);
                 importDone(donePrefix + " the play queue, " + found.songs.length
                     + (found.songs.length === 1 ? " song" : " songs")
                     + (found.missing > 0 ? ", " + found.missing + " not in the library here left out" : "")
@@ -33975,6 +33980,33 @@
         }
 
         return entries.length > 0 ? { kind: "songs", entries: entries } : null;
+    }
+
+    // The tempos and instrumental marks set here for the songs of a queue,
+    // by song id, as a shared line carries them
+    function queueTweaks(list) {
+
+        const out = {};
+
+        for (const song of list) {
+
+            const id = String(song && song.song_id);
+            const t = {};
+
+            if (manualBpm.has(id) && Number(manualBpm.get(id)) > 0) {
+                t.bpm = Math.round(Number(manualBpm.get(id)));
+            }
+
+            if (manualInstrumental.has(id)) {
+                t.instr = true;
+            }
+
+            if (Object.keys(t).length > 0) {
+                out[id] = t;
+            }
+        }
+
+        return out;
     }
 
     // The values of a songs line, by song id, for the songs taken in
