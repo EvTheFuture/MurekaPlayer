@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.261";
+    const VERSION = "1.9.9.262";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -218,6 +218,22 @@
     // How often a player or web view in view sees whether it is time
     const REFRESH_RETURN_TICK_MS = 60000;
 
+    // The values a copy can carry, in the order the copy box lists them
+    const COPY_TYPES = [
+        { key: "bpm", label: "Tempos (BPM)" },
+        { key: "instr", label: "Instrumental marks" },
+        { key: "rating", label: "Ratings" },
+        { key: "ignore", label: "Ignored songs" }
+    ];
+
+    // What each kind of copy carries until chosen otherwise. Songs for
+    // someone else leave your stars and ignored songs at home
+    const COPY_DEFAULTS = {
+        songs: { bpm: true, instr: true, rating: false, ignore: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true }
+    };
+
     // Album art coverflow, the center cover takes this fraction of the width and
     // the previous and next covers peek in on the sides. Lower shows more of the
     // neighbors, 0.5 shows exactly half of each
@@ -289,6 +305,12 @@
     ].join(";");
 
     // User settings, loaded once on startup, published is the default start feed
+    // Why the stored settings could not be read on start, empty when they
+    // were, and whether settings kept aside after such a failure were
+    // brought back
+    let settingsReadFailed = "";
+    let settingsRestored = false;
+
     let settings = loadSettings();
 
     // Debug overlay, declared early since anything can log from the start.
@@ -2022,7 +2044,11 @@
         };
 
         try {
-            const raw = localStorage.getItem(SETTINGS_KEY);
+            // Settings kept aside when an earlier start could not read them
+            // come first, once read they take the place of the defaults
+            // saved over them meanwhile
+            const kept = localStorage.getItem(SETTINGS_KEY + "_unread");
+            const raw = kept || localStorage.getItem(SETTINGS_KEY);
 
             if (raw) {
 
@@ -2067,7 +2093,7 @@
                 // chosen creator too. Published picked from now on stays
                 const oldDefault = parsed.startFeed === "published" && parsed.startFeedV2 !== true;
 
-                return {
+                const loaded = {
                     startFeed: (parsed.startFeed === "all" || parsed.startFeed === "published") && !oldDefault
                         ? parsed.startFeed : "last",
                     startFeedV2: true,
@@ -2233,8 +2259,30 @@
                     exportMurekaBpm: parsed.exportMurekaBpm !== false,
                     copyTypes: cleanCopyTypes(parsed.copyTypes)
                 };
+
+                // Read this time, so saved again in their usual place once
+                // the player is up, and no longer kept aside
+                settingsRestored = !!kept;
+
+                return loaded;
             }
         } catch (e) {
+
+            // The stored settings could not be read. They are kept aside
+            // before the defaults are saved over them, the first time only,
+            // so they can still be brought back
+            try {
+
+                const raw = localStorage.getItem(SETTINGS_KEY);
+
+                if (raw && !localStorage.getItem(SETTINGS_KEY + "_unread")) {
+                    localStorage.setItem(SETTINGS_KEY + "_unread", raw);
+                }
+            } catch (e2) {
+                // Nothing more can be done here
+            }
+
+            settingsReadFailed = String(e && e.message || e);
         }
 
         return defaults;
@@ -24552,6 +24600,25 @@
         restoreQueue();
         wantStubsAhead();
 
+        // Settings that could not be read on start, kept aside, and ones
+        // kept aside before and read now, saved in their usual place again
+        if (settingsReadFailed) {
+            dbgLog("Settings", "could not be read, kept aside for the next version: " + settingsReadFailed);
+        }
+
+        if (settingsRestored) {
+
+            saveSettings();
+
+            try {
+                localStorage.removeItem(SETTINGS_KEY + "_unread");
+            } catch (e) {
+                // Read again from there next time, which does no harm
+            }
+
+            dbgLog("Settings", "brought back the settings kept aside after a start that could not read them");
+        }
+
         // Shared songs looked up once a day, for new titles and covers
         setTimeout(checkSharedSongs, 8000);
 
@@ -33557,22 +33624,6 @@
     const SHARE_MARK = "mps3";
     const SHARE_LINE_RE = /\bmps3\.([st])((?:\.[0-9a-z]+(?:_[0-9A-Za-z]+)?)+)/;
     const SHARE_OLD_RE = /\bmps[12]((?:\.[0-9a-z]+(?:_[0-9a-z]+)?!?)+)/gi;
-
-    // The values a copy can carry, in the order the copy box lists them
-    const COPY_TYPES = [
-        { key: "bpm", label: "Tempos (BPM)" },
-        { key: "instr", label: "Instrumental marks" },
-        { key: "rating", label: "Ratings" },
-        { key: "ignore", label: "Ignored songs" }
-    ];
-
-    // What each kind of copy carries until chosen otherwise. Songs for
-    // someone else leave your stars and ignored songs at home
-    const COPY_DEFAULTS = {
-        songs: { bpm: true, instr: true, rating: false, ignore: false },
-        queue: { bpm: true, instr: true, rating: false, ignore: false },
-        tweaks: { bpm: true, instr: true, rating: true, ignore: true }
-    };
 
     function cleanCopyTypes(raw) {
 
