@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, the app's own connection to the phone's wireless debugging
  *
  * Copyright (C) 2026 EvTheFuture

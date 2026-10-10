@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Standalone bookmarklet player, runs inside the mureka.ai page
  *
  * Copyright (C) 2026 EvTheFuture
@@ -35,8 +35,8 @@
 
     window.__murekaPlayerLoaded = true;
 
-    // The player only works on mureka.ai, where it can reach the API with your
-    // session cookie. Keep the site origin in one place for redirects and links
+    // The player only works on mureka.ai, where it can reach the API with the
+    // signed in session cookie. Keep the site origin in one place for redirects and links
     const SITE_ORIGIN = "https://www.mureka.ai";
 
     // Whether the current page is mureka.ai or one of its subdomains
@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.264";
+    const VERSION = "1.9.9.265";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -76,9 +76,10 @@
     }
 
     // The two feeds this player can load
-    // published returns only your published songs
-    // all returns every song you made, including drafts and unpublished ones
-    // One library for your own songs. The mysong feed returns everything,
+    // published returns only the account's published songs
+    // all returns every song the account made, drafts and unpublished included
+    // One library for the account's own songs. The mysong feed returns
+    // everything,
     // drafts and published alike, each carrying its publish state, so published
     // is a filter over the single cache rather than a second feed with its own
     // cache and its own cursor that goes stale while the other is refreshed
@@ -94,7 +95,7 @@
     const LEGACY_PUBLISHED_KEY = "mureka_autoload_publishedmysong";
 
     // Which feed is active, published by default
-    // Which songs of your own library the list shows, all or published only
+    // Which songs of the account's own library the list shows, all or published only
     let publishFilter = "published";
 
     // Shortcut to the active feed config
@@ -227,7 +228,7 @@
     ];
 
     // What each kind of copy carries until chosen otherwise. Songs for
-    // someone else leave your stars and ignored songs at home
+    // someone else leave the ratings and ignored songs out
     const COPY_DEFAULTS = {
         songs: { bpm: true, instr: true, rating: false, ignore: false },
         queue: { bpm: true, instr: true, rating: false, ignore: false },
@@ -275,13 +276,14 @@
     const DOWNLOADED_KEY = "mureka_player_downloaded";
 
     // localStorage key that remembers the logged in user id once it is learned
-    // It is read from your own feed so the followed creators list can load
+    // It is read from the account's own feed so the followed creators list can load
     const SELF_KEY = "mureka_player_self";
 
     // localStorage key that remembers creators added by hand in the picker
     const CREATORS_KEY = "mureka_player_creators";
 
-    // localStorage key that remembers the last source, your feed or a creator
+    // localStorage key that remembers the last source, the account's own
+    // feed or a creator
     const SOURCE_KEY = "mureka_player_source";
 
     // localStorage key that remembers the play queue across restarts
@@ -381,9 +383,10 @@
     // The status line's last text, each new one is logged once
     let debugLastStatus = "";
 
-    // The last browsed source, used to reopen on your feed or a creator when
+    // The last browsed source, used to reopen on the account's own feed or a
+    // creator when
     // the player is set to start where it was left. Set to published or all,
-    // it always opens your own library that way
+    // it always opens the account's own library that way
     let startupSource = settings.startFeed === "last" ? loadSource() : null;
 
     // Honor the remembered feed, or the chosen start feed, before its cache loads
@@ -392,7 +395,7 @@
         ? (["published", "all", "drafts"].indexOf(startupSource.feed) >= 0 ? startupSource.feed : "published")
         : (settings.startFeed === "all" ? "all" : "published");
 
-    // The creator whose library is being browsed, or null for your own library
+    // The creator whose library is being browsed, or null for the account's own library
     // When set, feed() returns a creator config so the loader and cache follow it
     // This must be declared before the cache is loaded below, because loadCache
     // calls feed(), which reads creatorSource. A later declaration would leave it
@@ -427,7 +430,8 @@
     // True while a playlist load is in progress
     let playlistsLoading = false;
 
-    // The logged in user id, learned from your own feed, used to list who you follow
+    // The logged in user id, learned from the account's own feed, used to
+    // list the creators the account follows
     let selfUserId = loadSelfUserId();
 
     // Counts the New marks taken off, so the web view knows to repaint its rows
@@ -436,7 +440,8 @@
     // Counts renames, so a web view knows to write the titles in its list again
     let songEdits = 0;
 
-    // Creators you follow plus any added by hand, loaded on demand into the picker
+    // Creators the account follows plus any added by hand, loaded on demand
+    // into the picker
     let followedCreators = [];
     let savedCreators = loadSavedCreators();
 
@@ -725,7 +730,7 @@
     // Counts merges of song tweaks, so the web view reads its list again
     let songDataStamp = 0;
 
-    // Songs Mureka is still generating, seen on your own list pages, by id.
+    // Songs Mureka is still generating, seen on the account's own list pages, by id.
     // Only kept while the player runs. They show greyed at the top of the
     // list, and the first list page is read every few seconds until they
     // are ready. Those asked to play when ready are in pendingPlay, as
@@ -1601,7 +1606,7 @@
 
     // Published used to be a separate feed with its own cache, which may hold
     // songs this one has not paged back to yet. Fold those in once so nothing
-    // disappears on upgrade, then drop the old key. Only your own library has a
+    // disappears on upgrade, then drop the old key. Only the account's own library has a
     // legacy cache, a creator feed never did
     function mergeLegacyPublished(target) {
 
@@ -2422,8 +2427,9 @@
         saveSavedCreators();
     }
 
-    // Learn the logged in user id from your own feed response the first time
-    // Only called outside creator mode, where every feed item is yours
+    // Learn the logged in user id from the account's own feed response the
+    // first time. Only called outside creator mode, where every feed item is
+    // the account's own
     function recordSelfUserId(root) {
 
         if (selfUserId !== null) {
@@ -2455,8 +2461,9 @@
                 }
             }
 
-            // Fallback, your own songs store files under a path with your id
-            // This catches feeds that omit the user object on your own songs
+            // Fallback, the account's own songs store files under a path with
+            // the account's id. This catches feeds that omit the user object
+            // on the account's own songs
             const m = JSON.stringify(root).match(/files\/(\d{6,})\//);
 
             if (m) {
@@ -2467,8 +2474,9 @@
         }
     }
 
-    // Resolve the logged in user id on demand by probing your own feed
-    // This lets the picker map your own profile to your library before a Load
+    // Resolve the logged in user id on demand by probing the account's own
+    // feed. This lets the picker map the account's own profile to its own
+    // library before a Load
     async function ensureSelfUserId() {
 
         if (selfUserId !== null) {
@@ -2509,14 +2517,16 @@
             return;
         }
 
-        // Your own profile is just your own library, never a separate creator view
+        // The account's own profile is just its own library, never a separate
+        // creator view
         if (selfUserId !== null && String(startupSource.user_id) === String(selfUserId)) {
             return;
         }
 
         creatorSource = { user_id: startupSource.user_id, stage_name: startupSource.stage_name };
 
-        // A creator has no access to your playlists, so drop the filter
+        // A creator has no access to the account's playlists, so drop the
+        // filter
         activePlaylist = null;
         updatePlaylistButton();
 
@@ -2541,14 +2551,14 @@
 
         } else {
 
-            // No cached songs for this creator, stay on your own library
+            // No cached songs for this creator, stay on the account's own library
             creatorSource = null;
             updateCreatorButton();
             updateFeedButton();
         }
     }
 
-    // Persist which source is showing now, your own feed or a creator
+    // Persist which source is showing now, the account's own feed or a creator
     function saveSource() {
 
         try {
@@ -2948,7 +2958,7 @@
             page_cursor: s.page_cursor,
 
             // False until the song has been played, Mureka's "new" mark. Only
-            // songs of your own library carry it, others leave it out
+            // songs of the account's own library carry it, others leave it out
             is_played: typeof s.is_played === "boolean" ? s.is_played : undefined
         };
     }
@@ -3937,14 +3947,14 @@
 
     // Whether a song passes every active filter, vocals and playlist together
     // True when the song passes the published filter. Creator libraries are
-    // published by definition, so the filter only applies to your own songs
+    // published by definition, so the filter only applies to the account's own songs
     function passesPublishFilter(song) {
 
         if (creatorSource || publishFilter === "all") {
             return true;
         }
 
-        // Drafts, your own songs not published, also those taken down
+        // Drafts, the account's own songs not published, also those taken down
         if (publishFilter === "drafts") {
             return song.publish_state !== 1;
         }
@@ -3952,7 +3962,7 @@
         return song.publish_state === 1;
     }
 
-    // The three ways of showing your own library, in the order a tap goes
+    // The three ways of showing the account's own library, in the order a tap goes
     // through them: published only, all songs, drafts only
     const PUBLISH_FILTERS = ["published", "all", "drafts"];
 
@@ -5899,7 +5909,7 @@
             logPlayedFlags(json);
 
             // Mureka leaves the played flag out on songs never played and
-            // shows those as new, so a song of your own without it is new
+            // shows those as new, so a song of the account's own without it is new
             for (const song of extractSongs(json)) {
 
                 if (typeof song.is_played !== "boolean") {
@@ -5958,7 +5968,8 @@
         publishHostSoon();
     }
 
-    // Ask Mureka for your own profile to confirm you are logged in
+    // Ask Mureka for the account's own profile to confirm the session is
+    // logged in
     // Returns true when logged in, false when logged out, null when it could
     // not be determined, for example a network error
     async function checkAuth() {
@@ -6046,7 +6057,7 @@
         askNewInQueue = fromQueue === undefined ? light !== true && listView === "queue" : fromQueue === true;
         const myToken = ++loadToken;
 
-        // Confirm login state for your own feed and warn if logged out
+        // Confirm login state for the account's own feed and warn if logged out
         if (!creatorSource) {
             refreshAuthBanner();
         }
@@ -6191,7 +6202,7 @@
                 break;
             }
 
-            // Learn the logged in user id from your own feed for the picker
+            // Learn the logged in user id from the account's own feed for the picker
             if (!creatorSource) {
                 recordSelfUserId(page);
             }
@@ -6564,7 +6575,7 @@
                 return;
             }
 
-            // Learn the logged in user id from your own feed for the picker
+            // Learn the logged in user id from the account's own feed for the picker
             if (!creatorSource) {
                 recordSelfUserId(page);
             }
@@ -6726,7 +6737,7 @@
             cache.complete = true;
             cache.lastCursor = null;
 
-            // Logged out, your own feed returns nothing at all, or the
+            // Logged out, the account's own feed returns nothing at all, or the
             // published songs only. Every draft would then look deleted and
             // be thrown away along with its audio, cover and waveform, so the
             // login is confirmed before anything is removed. A creator
@@ -6920,7 +6931,7 @@
 
     // Switch between the published feed and the all songs feed
     // Each feed keeps its own cache, so this just swaps which one is shown
-    // While browsing a creator this instead returns to your own current feed
+    // While browsing a creator this instead returns to the account's own current feed
     function switchFeed(to) {
 
         // Cancel any load in progress so it cannot write into the new feed cache
@@ -6934,7 +6945,7 @@
 
         if (creatorSource) {
 
-            // Leaving a creator returns to your own library, whose cache and
+            // Leaving a creator returns to the account's own library, whose cache and
             // wave scan differ, so those are reset here and not on a filter flip
             waveScanCursor = null;
             waveScanDone = false;
@@ -6969,7 +6980,7 @@
 
         saveSource();
 
-        // Creator feeds never warn, your own feed re-checks login state
+        // Creator feeds never warn, the account's own feed re-checks login state
         if (creatorSource) {
             setAuthWarn(false);
         } else {
@@ -6981,7 +6992,7 @@
     }
 
     // Show the active feed name on the feed button
-    // This always reflects your own feed, creator state shows on its own tile
+    // This always reflects the account's own feed, creator state shows on its own tile
     // Show the current source under the title, the active feed or creator name
     function updateSourceLabel() {
 
@@ -7728,7 +7739,7 @@
         setStatus("Removed from the list: " + title);
     }
 
-    // Delete a song of your own on Mureka for good, asked first. Once
+    // Delete a song of the account's own on Mureka for good, asked first. Once
     // Mureka has deleted it, it goes from the list and the cache here too
     function confirmDeleteOnMureka(song) {
 
@@ -9256,7 +9267,7 @@
 
         // Tapping the song that is already loaded never restarts it. Playing,
         // it is left alone, paused, it carries on from where it was. Losing
-        // your place in a track you are part way through is the worst possible
+        // the place in a track that is part way through is the worst possible
         // answer to a mistaken tap. The queue is untouched either way, so a
         // shuffle order is not regenerated
         // With no audio loaded yet, as just after a restored queue, fall through
@@ -10949,7 +10960,7 @@
     // The songs to show for the current view
     // The number shown per song is always its Mureka position, set in renderSongs
     // The songs in their canonical order for the current source
-    // Your own Published feed, once fully loaded, is ordered by publish date
+    // The account's own Published feed, once fully loaded, is ordered by publish date
     // newest published first, matching the Mureka website, so a freshly
     // published older song appears at the top. Every other case keeps the
     // creation order the API returns
@@ -11026,7 +11037,7 @@
 
         if (listView === "queue") {
 
-            // The full queue, played songs included so you can scroll back
+            // The full queue, played songs included so it can be scrolled back
             // Played songs are greyed out in renderSongs
             return queue.slice();
         }
@@ -11038,7 +11049,7 @@
         return pendingSongs.size > 0 ? shownPending().concat(ordered) : ordered;
     }
 
-    // The songs still being generated that the list shows: your own, and
+    // The songs still being generated that the list shows: the account's own, and
     // not while only published songs are shown, which they never are yet
     function shownPending() {
         return creatorSource || publishFilter === "published" ? [] : pendingList();
@@ -11056,7 +11067,7 @@
         });
     }
 
-    // A song on a list page that is not finished yet. Your own songs only,
+    // A song on a list page that is not finished yet. The account's own songs only,
     // and only while it is not in the library already
     function notePending(s) {
 
@@ -15169,7 +15180,7 @@
     }
 
     // A double tap or double click on the header. On a wider screen it
-    // steps from your own size to the whole window, and from there to
+    // steps from the size set by hand to the whole window, and from there to
     // folded, the way back being one tap on the folded header. On a phone,
     // where the player fills the screen anyway, it folds and unfolds
     function headerDoubleTap() {
@@ -20331,7 +20342,7 @@
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
             src: songUrl(song) || "",
 
-            // What the web view's trimmer needs: your own song with a file
+            // What the web view's trimmer needs: the account's own song with a file
             canTrim: !creatorSource && !!songUrl(song),
             durationMs: Number(song.duration_milliseconds) || 0,
 
@@ -21753,8 +21764,8 @@
         return parts.join(", ");
     }
 
-    // Where the queue comes from, for the web view's line under up next: your
-    // library, published or all, or an artist, a playlist, the vocals choice
+    // Where the queue comes from, for the web view's line under up next: the
+    // account's own library, published or all, or an artist, a playlist, the vocals choice
     // and the filters, the same things the phone's view bar names
     function hostPlayFrom() {
 
@@ -22751,7 +22762,7 @@
             applySmartFilters();
         } else if (cmd === "creator") {
 
-            // An empty id means your own library
+            // An empty id means the account's own library
             const id = arg === null || arg === undefined ? "" : String(arg);
 
             if (!id) {
@@ -23006,7 +23017,7 @@
         sourceSepEl.textContent = " - ";
         sourceSepEl.style.cssText = "display:none;color:#888";
 
-        // Current source, your active feed (Published / All) or the creator name
+        // Current source, the active feed (Published / All) or the creator name
         sourceEl = document.createElement("span");
         sourceEl.style.cssText = "display:none;color:#888";
 
@@ -23094,8 +23105,8 @@
         statusEl = document.createElement("div");
         statusEl.style.marginBottom = "8px";
 
-        // Hidden warning banner, shown when a load looks like you are logged out
-        // Tapping it opens mureka.ai so you can sign in
+        // Hidden warning banner, shown when a load looks logged out. Tapping it
+        // opens mureka.ai to sign in there
         authWarnEl = document.createElement("div");
         authWarnEl.style.cssText = [
             "display:none",
@@ -24591,7 +24602,7 @@
             refreshAuthBanner();
         }
 
-        // Refresh on launch only when asked, and only for your own feed
+        // Refresh on launch only when asked, and only for the account's own feed
         if (!creatorSource) {
             maybeAutoRefresh();
         }
@@ -29894,7 +29905,7 @@
         mobilePage.appendChild(makeLabel("Control buttons"));
         mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
-        // Your own data, song tweaks and settings kept apart, since the
+        // The data entered by hand, song tweaks and settings, kept apart, since the
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
         const dataHint = document.createElement("div");
@@ -30756,7 +30767,7 @@
             aboutPage.appendChild(makeHint("Allowed networks are set under Device, Connections. The local name does not work in every browser, Tesla's among them."));
         }
 
-        // Publishing a song of your own: the link to the clipboard, and
+        // Publishing a song of the account's own: the link to the clipboard, and
         // remixing turned off first
         const copyOnPublishRow = makeBoolRow("Copy the link when publishing",
             function () { return settings.copyLinkOnPublish !== false; },
@@ -31194,7 +31205,7 @@
                 // its library
                 songs: songsWithLinks(q),
 
-                // Your own tempo and instrumental mark of each song, taken in
+                // The tempo and instrumental mark set by hand on each song, taken in
                 // where the other player has none of its own
                 tweaks: queueTweaks(q)
             };
@@ -31793,10 +31804,12 @@
             }
 
             const bpm = Number(t.bpm);
+            const mbpm = Number(t.mbpm);
             const rating = Number(t.rating);
 
             out[id] = {
                 bpm: isFinite(bpm) && bpm > 0 && bpm < 1000 ? Math.round(bpm) : 0,
+                mbpm: isFinite(mbpm) && mbpm > 0 && mbpm < 1000 ? Math.round(mbpm) : 0,
                 instr: t.instr === true,
                 rating: t.rating !== undefined && t.rating !== null && isFinite(rating) && rating >= 0 && rating <= 5
                     ? snapRating(rating) : null,
@@ -31830,6 +31843,12 @@
 
                 manualBpm.set(id, t.bpm);
                 unmarkCleared("bpm", id);
+                bpms += 1;
+            } else if (t.mbpm > 0 && !manualBpm.has(id) && !isCleared("bpm", id) && !(Number(song.bpm) > 0)) {
+
+                // Mureka's tempo from where it was copied, for a song with no
+                // tempo here at all, as a song read from Mureka by its id
+                manualBpm.set(id, t.mbpm);
                 bpms += 1;
             }
 
@@ -33705,7 +33724,7 @@
                 f += "B" + b36(manualBpm.get(id));
             } else if (tweaks && isCleared("bpm", id)) {
                 f += "B0";
-            } else if (tweaks && murekaTempo && murekaTempo.has(id)) {
+            } else if (murekaTempo && murekaTempo.has(id)) {
                 f += "M" + b36(murekaTempo.get(id));
             }
         }
@@ -33750,23 +33769,11 @@
 
         const tweaks = kind === "tweaks";
         const tokens = [];
-        let murekaTempo = null;
 
-        // Mureka's tempo for songs with none set by hand, when exports are
-        // to carry it, as a file does
-        if (tweaks && types.bpm && settings.exportMurekaBpm !== false) {
-
-            murekaTempo = new Map();
-
-            for (const s of ownLibrary().songs || []) {
-
-                const v = Number(s.bpm);
-
-                if (isFinite(v) && v > 0) {
-                    murekaTempo.set(String(s.song_id), v);
-                }
-            }
-        }
+        // Mureka's tempo for songs with none set by hand, when exports are to
+        // carry it, as a file does. A player that reads the song from Mureka
+        // by its id is not given a tempo, so it would have none at all
+        const murekaTempo = types.bpm && settings.exportMurekaBpm !== false ? knownMurekaTempos() : null;
 
         const seen = new Set();
 
@@ -33797,6 +33804,28 @@
             text: tokens.length > 0 ? head + SHARE_MARK + "." + (tweaks ? "t" : "s") + "." + tokens.join(".") : "",
             count: tokens.length
         };
+    }
+
+    // Mureka's own tempo of every song held here, by song id: the library,
+    // the list shown and the songs of the queue
+    function knownMurekaTempos() {
+
+        const out = new Map();
+        const lists = [ownLibrary().songs || [], cache.songs, queue];
+
+        for (const list of lists) {
+
+            for (const s of list) {
+
+                const v = Number(s && s.bpm);
+
+                if (s && !isStubSong(s) && isFinite(v) && v > 0) {
+                    out.set(String(s.song_id), v);
+                }
+            }
+        }
+
+        return out;
     }
 
     // Every song with a tweak or a removed one here, for a tweaks line
@@ -33995,6 +34024,11 @@
 
             if (manualBpm.has(id) && Number(manualBpm.get(id)) > 0) {
                 t.bpm = Math.round(Number(manualBpm.get(id)));
+            } else if (settings.exportMurekaBpm !== false && Number(song.bpm) > 0) {
+
+                // Mureka's own tempo, for a player that reads the song from
+                // Mureka by its id and is not given one
+                t.mbpm = Math.round(Number(song.bpm));
             }
 
             if (manualInstrumental.has(id)) {
@@ -34020,6 +34054,10 @@
 
             if (e.bpm > 0) {
                 t.bpm = e.bpm;
+            }
+
+            if (e.mbpm > 0) {
+                t.mbpm = e.mbpm;
             }
 
             if (typeof e.rating === "number") {
@@ -34105,7 +34143,7 @@
 
             const t = tweaks[id];
 
-            entries.push({ id: id, bpm: t.bpm, rating: t.rating, instr: t.instr, ignore: t.ignore });
+            entries.push({ id: id, bpm: t.bpm, mbpm: t.mbpm, rating: t.rating, instr: t.instr, ignore: t.ignore });
         }
 
         return entries.length > 0 ? songDataFromEntries(entries) : null;
@@ -35861,7 +35899,7 @@
     }
 
     // The trimmer: a page over the panel to cut the start and the end off a
-    // song of your own with Mureka's trim call, which makes a new song and
+    // song of the account's own with Mureka's trim call, which makes a new song and
     // keeps the original. The song is decoded in the page, so the waveform
     // can be zoomed down to single samples and the preview stops on the
     // exact sample where the cut is, which the audio element cannot do
@@ -37718,7 +37756,7 @@
         trimUi.ask.style.display = "flex";
     }
 
-    // Delete a song of your own on Mureka, the request Mureka's own site
+    // Delete a song of the account's own on Mureka, the request Mureka's own site
     // sends. Answers whether it went and, when not, why
     async function deleteOnMureka(song) {
 
@@ -37773,7 +37811,7 @@
         }
     }
 
-    // A new cover for a song of your own. The picture goes to Mureka's
+    // A new cover for a song of the account's own. The picture goes to Mureka's
     // storage as it is, the way Mureka's own site sends it, and the song is
     // told to use it with the square chosen in the editor cut out and made
     // 1408 by 1408 pixels by the storage itself, as Mureka sizes its covers
@@ -39287,10 +39325,12 @@
 
     // Browse another creator published songs, each creator keeps its own cache
     // This mirrors switchFeed, swapping the cache and reloading from scratch
-    // Selecting your own profile shows your existing library, not a new cache
+    // Selecting the account's own profile shows the existing library, not a
+    // new cache
     async function selectCreator(userId, name) {
 
-        // Resolve who you are so picking yourself maps to your own library
+        // Resolve the signed in account, so picking its own profile maps to
+        // the account's own library
         if (selfUserId === null) {
             await ensureSelfUserId();
         }
@@ -39314,7 +39354,7 @@
         waveScanCursor = null;
         waveScanDone = false;
 
-        // Your own playlists do not apply to a creator, so drop the filter
+        // The account's own playlists do not apply to a creator, so drop the filter
         activePlaylist = null;
         updatePlaylistButton();
 
@@ -39341,7 +39381,7 @@
 
         saveSource();
 
-        // The logged out banner is about your own feed, not a creator
+        // The logged out banner is about the account's own feed, not a creator
         setAuthWarn(false);
 
         // Pull the catalogue the first time this creator is opened
@@ -39350,8 +39390,8 @@
         }
     }
 
-    // Leave creator mode and show your own published library as usual
-    // Your creator profile and your published feed are the same songs
+    // Leave creator mode and show the account's own published library as usual
+    // The account's creator profile and its published feed are the same songs
     function selectOwnLibrary() {
 
         if (running) {
@@ -39383,16 +39423,16 @@
 
         saveSource();
 
-        // Back on your own feed, re-check login state for the banner
+        // Back on the account's own feed, re-check login state for the banner
         refreshAuthBanner();
 
-        // Populate your library if it has not been loaded yet
+        // Populate the account's own library if it has not been loaded yet
         if (cache.songs.length === 0 || cache.complete !== true) {
             run();
         }
     }
 
-    // Leave creator mode and return to your own current feed
+    // Leave creator mode and return to the account's own current feed
     function clearCreator() {
 
         if (!creatorSource) {
@@ -39425,7 +39465,7 @@
 
         saveSource();
 
-        // Back on your own feed, re-check login state for the banner
+        // Back on the account's own feed, re-check login state for the banner
         refreshAuthBanner();
     }
 
@@ -39461,7 +39501,7 @@
         head.appendChild(heading);
         head.appendChild(doneBtn);
 
-        // My library entry leaves creator mode and shows your own songs again
+        // My library entry leaves creator mode and shows the account's own songs again
         const mineBtn = makeButton("My library", "#333", "#fff", clearCreator);
         mineBtn.style.textAlign = "left";
 
@@ -39522,7 +39562,8 @@
         panelEl.appendChild(creatorsEl);
     }
 
-    // Show the creators overlay, loading who you follow the first time it opens
+    // Show the creators overlay, loading the creators the account follows the
+    // first time it opens
     function openCreators() {
 
         closeDropdowns();
@@ -39610,7 +39651,8 @@
         creatorsLoading = true;
         renderCreators();
 
-        // Resolve who you are so the follow lists below can be requested
+        // Resolve the signed in account, so the follow lists below can be
+        // requested
         if (selfUserId === null) {
             await ensureSelfUserId();
         }
@@ -39632,7 +39674,7 @@
 
         try {
 
-            // Featured creators are available without knowing who you are
+            // Featured creators are available without knowing the account
             await collectCreatorUsers("/api/pgc/home/modules/featured-users?module_id=6&page_size=50", addUser);
 
             // The follow lists round out the pool once the self id is known
@@ -39780,7 +39822,8 @@
             return;
         }
 
-        // Pasting your own id should open your library, not save you as a creator
+        // Pasting the account's own id opens its own library, it is not saved
+        // as a creator
         if (selfUserId === null) {
             await ensureSelfUserId();
         }
@@ -40405,7 +40448,7 @@
             });
         }
 
-        // The song on Mureka, only your own songs. Another creator's
+        // The song on Mureka, only the account's own songs. Another creator's
         // library is theirs
         if (mine) {
 
@@ -40431,8 +40474,8 @@
                 setPublished(song, song.publish_state !== 1, true);
             });
 
-            // Mureka lets instrumentals be remixed too, so every song of your
-            // own can have remixing allowed or stopped
+            // Mureka lets instrumentals be remixed too, so every song of the
+            // account's own can have remixing allowed or stopped
             addMenuRow(remixState(song) === 1 ? "Disallow remixing" : "Allow remixing", "#fff", function () {
                 setRemixAllowed(song, remixState(song) !== 1);
             });
@@ -40517,7 +40560,7 @@
             deleteOne(song);
         });
 
-        // Gone for good on Mureka, only your own songs, apart at the end
+        // Gone for good on Mureka, only the account's own songs, apart at the end
         if (mine) {
 
             menuGroup();

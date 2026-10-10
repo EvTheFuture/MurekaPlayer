@@ -398,7 +398,9 @@ the new settings layout and a number of smaller improvements.
   does. A copied play queue marks the song that was playing, and Import
   asks whether the songs played before it come along. Files stay as before,
   and a play queue file carries your own tempos and instrumental marks too,
-  taken in where the other player has none of its own.
+  taken in where the other player has none of its own. A tempo goes along
+  whether set by hand or Mureka's own, so a song the other player reads from
+  Mureka by its id, which comes without a tempo, still has one.
 - **Mureka song links in Import**: pasted share links from Mureka's site,
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.

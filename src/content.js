@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Content script, marks the host, injects the shared player and relays downloads
  *
  * Copyright (C) 2026 EvTheFuture

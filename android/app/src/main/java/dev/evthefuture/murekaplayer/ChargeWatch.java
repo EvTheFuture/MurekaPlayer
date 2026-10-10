@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, what happens when the phone goes on battery or the chosen
  * Bluetooth devices go away, and when they come back
  *

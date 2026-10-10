@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, a VPN that only gives the phone an address the car accepts
  *
  * Copyright (C) 2026 EvTheFuture

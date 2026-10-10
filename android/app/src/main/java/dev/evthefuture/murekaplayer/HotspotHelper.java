@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, the hotspot helper that runs as the debugging shell
  *
  * Copyright (C) 2026 EvTheFuture

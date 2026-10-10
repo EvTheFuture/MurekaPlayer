@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, answers to murekaplayer.local on the local network
  *
  * Copyright (C) 2026 EvTheFuture

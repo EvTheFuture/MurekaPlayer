@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Background script, saves downloads to a folder
  *
  * Copyright (C) 2026 EvTheFuture

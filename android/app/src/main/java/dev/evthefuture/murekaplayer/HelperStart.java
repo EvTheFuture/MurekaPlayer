@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, pairing with wireless debugging and starting the hotspot
  * helper from the phone itself
  *

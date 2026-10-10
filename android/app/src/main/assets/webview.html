@@ -7008,7 +7008,7 @@
 
         $("likeCount").textContent = likes === null || (likes === 1 && mine) ? "" : compactCount(likes);
 
-        // Public or draft, only for your own songs, another creator's are all
+        // Public or draft, only for the account's own songs, another creator's are all
         // public anyway. A song shared from another account says Shared,
         // whether it is public is not known
         const shared = !!(s && s.songShared);
@@ -9610,7 +9610,7 @@
         paintFrom(eff);
     }
 
-    // The three ways of showing your own library, in the order a tap goes
+    // The three ways of showing the account's own library, in the order a tap goes
     // through them, as on the phone: published only, all songs, drafts only
     const PUB_ORDER = ["published", "all", "drafts"];
 
@@ -14898,8 +14898,8 @@
     }
 
     // The values a copy can carry, and what each kind of copy carries until
-    // chosen otherwise in this browser. Songs for someone else leave your
-    // stars and ignored songs at home
+    // chosen otherwise in this browser. Songs for someone else leave the
+    // ratings and ignored songs out
     const COPY_TYPES = [
         { key: "bpm", label: "Tempos (BPM)" },
         { key: "instr", label: "Instrumental marks" },
@@ -15184,7 +15184,7 @@
             }
         }
 
-        // The song on Mureka, only your own songs
+        // The song on Mureka, only the account's own songs
         menuLine(box);
 
         if (m.mine) {
@@ -15233,7 +15233,7 @@
                     close();
                 }));
 
-            // Instrumentals can be remixed too, so every song of your own
+            // Instrumentals can be remixed too, so every song of the account's own
             // offers it
             box.appendChild(menuItem("shuffle",
                 m.remix === 1 ? "Disallow remixing" : "Allow remixing", function () {
@@ -15380,7 +15380,7 @@
             });
         }, "danger"));
 
-        // Gone for good on Mureka, only your own songs, apart at the end
+        // Gone for good on Mureka, only the account's own songs, apart at the end
         if (m.mine) {
 
             menuLine(box);
@@ -18208,7 +18208,7 @@
     setInterval(fixGutters, 500);
 
     // The trimmer: a page over everything to cut the start and the end off
-    // a song of your own. The same as the phone's, drawn here: the song is
+    // a song of the account's own. The same as the phone's, drawn here: the song is
     // read and decoded in this browser, so the waveform zooms down to single
     // samples and the preview stops on the exact sample where the cut is.
     // The phone fetches the file from Mureka for it and sends the trim to

@@ -1,5 +1,5 @@
 /*
- * Mureka Player - load and play all your Mureka songs
+ * Mureka Player - load and play all Mureka songs of an account
  * Android host, the covers kept on the phone for the web view
  *
  * Copyright (C) 2026 EvTheFuture

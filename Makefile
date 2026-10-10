@@ -154,7 +154,7 @@ release: android/local.properties $(SIGNING)
 
 # The first build asks which keystore signs the APKs, its password and the
 # key, checks the password with keytool and keeps the answers in
-# android/keystore.properties, readable by you only. Enter at the keystore
+# android/keystore.properties, readable by its owner only. Enter at the keystore
 # question means no key, the debug key then. make signing asks again
 $(SIGNING):
 	@umask 077; \
