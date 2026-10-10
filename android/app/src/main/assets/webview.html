@@ -1902,6 +1902,16 @@
         box-shadow: inset 0 0 0 2px var(--accent);
     }
 
+    /* Taller, with room between, where a wrong tap does something
+       different at once, as for a song still generating */
+    .menuItem.tall {
+        min-height: calc(var(--ctl-h) * 1.6);
+    }
+
+    .menuItem.tall + .menuItem.tall {
+        margin-top: 10px;
+    }
+
     .menuItem:disabled {
         opacity: 0.4;
     }
@@ -9418,20 +9428,14 @@
                 return;
             }
 
-            toast("Not finished generating yet", "bad");
+            // The title says it is still generating, so no note besides.
+            // Tall buttons with room between, a wrong tap starts a song
             const choices = [
-                { icon: "play", label: "Play when ready", fn: function () {
+                { icon: "play", label: "Play when ready", cls: "tall", fn: function () {
 
                     closeSongMenu();
                     send("playWhenReady", { id: song.id, after: false }).then(function () {
                         toast("Plays as soon as it is ready", "ok");
-                    });
-                } },
-                { icon: "queueAdd", label: "Play this after the playing song", cls: "inset", fn: function () {
-
-                    closeSongMenu();
-                    send("playWhenReady", { id: song.id, after: true }).then(function () {
-                        toast("Plays after the playing song, once it is ready", "ok");
                     });
                 } }
             ];
@@ -9439,7 +9443,7 @@
             // With more than one being generated, all of them can follow
             if (state && Number(state.pendingCount) > 1) {
 
-                choices.push({ icon: "queue", label: "Play all new after the playing song", cls: "inset", fn: function () {
+                choices.push({ icon: "queue", label: "Play all new after the playing song", cls: "inset tall", fn: function () {
 
                     closeSongMenu();
                     send("playWhenReady", { id: song.id, after: true, all: true }).then(function () {
@@ -9447,6 +9451,14 @@
                     });
                 } });
             }
+
+            choices.push({ icon: "queueAdd", label: "Play this after the playing song", cls: "inset tall", fn: function () {
+
+                closeSongMenu();
+                send("playWhenReady", { id: song.id, after: true }).then(function () {
+                    toast("Plays after the playing song, once it is ready", "ok");
+                });
+            } });
 
             openChoice("Still generating: " + song.title, choices);
         };

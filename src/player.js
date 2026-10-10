@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.262";
+    const VERSION = "1.9.9.263";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11320,13 +11320,10 @@
             return;
         }
 
-        showToast("Not finished generating yet", false);
+        // The box says it is still generating, so no note besides
         const options = [
             { label: "Play when ready", fn: function () {
                 playWhenReady(id);
-            } },
-            { label: "Play this after the playing song", ring: true, fn: function () {
-                playWhenReady(id, "after");
             } }
         ];
 
@@ -11337,6 +11334,10 @@
                 playWhenReady(id, "all");
             } });
         }
+
+        options.push({ label: "Play this after the playing song", ring: true, fn: function () {
+            playWhenReady(id, "after");
+        } });
 
         askChoices("Still generating\n\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
             + " as it is ready, or once the playing song has ended.", options);
