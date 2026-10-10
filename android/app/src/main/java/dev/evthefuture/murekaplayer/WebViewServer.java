@@ -534,7 +534,8 @@ final class WebViewServer {
                 PlayerService.webViewActive();
             }
 
-            boolean big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path);
+            boolean big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path)
+                || "/shareLine".equals(path);
 
             if (length < 0 || length > (big ? MAX_COVER : MAX_BODY)) {
 
@@ -696,6 +697,8 @@ final class WebViewServer {
                 importText(out, query, body);
             } else if ("POST".equals(method) && "/importApply".equals(path)) {
                 importApply(out, body);
+            } else if ("POST".equals(method) && "/shareLine".equals(path)) {
+                shareLine(out, body);
             } else if ("POST".equals(method) && "/setCover".equals(path)) {
                 setCover(out, query, body);
             } else {
@@ -1598,6 +1601,29 @@ final class WebViewServer {
         }
 
         String answer = Hub.requestLater("__murekaHostImportApply", clean, 30000);
+
+        send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
+    }
+
+    // The short line for a web view's copy: its picked songs, the play
+    // queue or the song tweaks, with the kinds of values it chose
+    private void shareLine(OutputStream out, byte[] body) throws IOException {
+
+        markPoll();
+
+        String clean;
+
+        // Written out again from what was parsed, never passed on as it came,
+        // the text goes into the player as script
+        try {
+            clean = new JSONObject(new String(body, StandardCharsets.UTF_8)).toString();
+        } catch (JSONException e) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false}"));
+            return;
+        }
+
+        String answer = Hub.requestLater("__murekaHostShareLine", clean, 10000);
 
         send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
     }

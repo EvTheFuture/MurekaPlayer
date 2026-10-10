@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.258";
+    const VERSION = "1.9.9.260";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -655,6 +655,23 @@
 
     // Set by a Load asked for with the play queue in view
     let askNewInQueue = false;
+
+    // Songs of the queue known only by their id, from a pasted line or an
+    // imported queue, until they are read from Mureka: as their row comes
+    // into sight, as they come near in the queue, or when they are to
+    // play. Each id has one such song, so every place holding it sees it
+    // filled in at once. A song Mureka no longer has stays, marked gone,
+    // and is passed over
+    const stubSongs = new Map();
+    const stubReads = new Map();
+    const stubWait = [];
+    let stubStamp = 0;
+    let stubRefreshTimer = 0;
+    let goneSkips = 0;
+
+    // Read ahead of what is seen or played, a few at a time
+    const STUB_AHEAD = 5;
+    const STUB_WORKERS = 3;
 
     // New songs left out of the queue for now. A queue made from the list
     // does not take them in by itself, until a new one is made from the list
@@ -2000,7 +2017,8 @@
             importSeen: IMPORT_TYPE_KEYS.slice(),
             debugHide: [],
             webSeekActions: true,
-            exportMurekaBpm: true
+            exportMurekaBpm: true,
+            copyTypes: {}
         };
 
         try {
@@ -2212,7 +2230,8 @@
                         ? parsed.debugHide.filter(function (id) { return typeof id === "string"; })
                         : [],
                     webSeekActions: parsed.webSeekActions !== false,
-                    exportMurekaBpm: parsed.exportMurekaBpm !== false
+                    exportMurekaBpm: parsed.exportMurekaBpm !== false,
+                    copyTypes: cleanCopyTypes(parsed.copyTypes)
                 };
             }
         } catch (e) {
@@ -2651,7 +2670,7 @@
                         s.is_liked = false;
                     }
 
-                    byId.set(s.song_id, s);
+                    byId.set(s.song_id, s.__stub === true ? adoptStub(s) : s);
                 }
             }
         }
@@ -11661,6 +11680,52 @@
             return;
         }
 
+        // A song known only by its id is read from Mureka first. One Mureka
+        // no longer has is passed over, the way the queue was moving, and
+        // with nothing but such songs left the queue ends
+        if (isStubSong(song)) {
+
+            if (!song.__gone) {
+
+                setStatus("Reading the song from Mureka");
+                await readStub(song);
+
+                // Something else was asked for meanwhile
+                if (queue[queuePos] !== song) {
+                    return;
+                }
+            }
+
+            if (song.__gone) {
+
+                goneSkips += 1;
+
+                if (goneSkips > queue.length) {
+
+                    goneSkips = 0;
+                    setStatus("None of the songs left are on Mureka any more");
+                    return;
+                }
+
+                queuePos += queueMoveDir < 0 ? -1 : 1;
+
+                if (queuePos < 0 || queuePos >= queue.length) {
+                    queuePos = repeatMode === "all" ? (queuePos < 0 ? queue.length - 1 : 0) : queue.length;
+                }
+
+                playCurrent();
+                return;
+            }
+
+            if (isStubSong(song)) {
+
+                setStatus("Could not read the song from Mureka");
+                showToast("Could not read the song from Mureka, try again in a moment", false);
+                return;
+            }
+        }
+
+        goneSkips = 0;
         queueMoveDir = 1;
 
         ensureAudio();
@@ -13404,6 +13469,8 @@
 
         const round = ++prefetchRound;
 
+        wantStubsAhead();
+
         // Needs no network, only the cache, so it happens before the online
         // check and even when there is no signal
         await prepareNextReady();
@@ -13435,7 +13502,7 @@
                 return;
             }
 
-            if (!song) {
+            if (!song || isStubSong(song)) {
                 continue;
             }
 
@@ -20193,6 +20260,13 @@
             return null;
         }
 
+        // Not read from Mureka yet, it has nothing to offer until it is
+        if (isStubSong(song)) {
+
+            wantStubs([song]);
+            return null;
+        }
+
         return {
             id: wanted,
             title: (song.title || "").trim() || "Untitled",
@@ -21365,7 +21439,8 @@
             }
         }
 
-        return queue.length + ":" + queuePos + ":" + h;
+        // Songs read from Mureka meanwhile change the rows too
+        return queue.length + ":" + queuePos + ":" + h + ":" + stubStamp;
     }
 
     // Changes when what the song list holds does: the filters, the source
@@ -21781,7 +21856,6 @@
                 trimmed: isTrimmed(song),
                 ignored: isIgnored(song),
                 shared: song.shared === true,
-                share: shareToken(song.song_id),
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -21832,7 +21906,7 @@
                 trimmed: isTrimmed(song),
                 ignored: isIgnored(song),
                 shared: song.shared === true,
-                share: shareToken(song.song_id),
+                stub: isStubSong(song) && !song.__gone,
                 cover: coverUrl(song),
                 rating: getRating(song),
                 liked: song.is_liked === true,
@@ -22449,6 +22523,10 @@
 
             // From a web view, which says whether its play queue is in view
             run(false, arg && typeof arg === "object" ? arg.queue === true : undefined);
+        } else if (cmd === "seenStubs") {
+
+            // Rows of songs known only by their id in sight in a web view
+            wantStubsSeen(arg && Array.isArray(arg.ids) ? arg.ids.map(String).slice(0, 200) : []);
         } else if (cmd === "newAnswer") {
 
             // Where the new songs go, from a web view, for the question it
@@ -22719,6 +22797,7 @@
         window.__murekaHostExportText = hostExportText;
         window.__murekaHostImportText = hostImportText;
         window.__murekaHostImportApply = hostImportApply;
+        window.__murekaHostShareLine = hostShareLine;
         window.__murekaHostList = hostList;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
@@ -24105,6 +24184,7 @@
             lastListScroll = top;
 
             updateLocateBtn();
+            noteSeenStubs();
 
             // Build more rows once the scroll gets near what has been built
             if (top + listEl.clientHeight > listEl.scrollHeight - 800) {
@@ -24471,8 +24551,10 @@
             maybeAutoRefresh();
         }
 
-        // Bring back the queue from last time, ready to resume
+        // Bring back the queue from last time, ready to resume, and read
+        // the songs coming up that are known only by their id
         restoreQueue();
+        wantStubsAhead();
 
         // Shared songs looked up once a day, for new titles and covers
         setTimeout(checkSharedSongs, 8000);
@@ -26743,46 +26825,199 @@
         selCountEl.textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
-    // The picked songs as short text for the other player's Import: only
-    // their ids, written in base 36 after a mark the Import knows. The
-    // other player reads each song from Mureka itself, so a long list
+    // The picked songs as a short line for the other player's Import,
+    // with the values chosen in the copy box. Only ids and values, the
+    // other player has the songs or reads them from Mureka, so a long list
     // still fits a message
-    function selectedText() {
-        return shareLine(Array.from(selectedSongs.keys()));
-    }
+    function copySelected() {
 
-    async function copySelected() {
-
-        const n = selectedSongs.size;
-
-        if (n === 0) {
+        if (selectedSongs.size === 0) {
 
             showToast("Pick songs first", false);
             return;
         }
 
-        if (await copyText(selectedText())) {
-            showToast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player, which reads them from Mureka", true);
-        } else {
-            showToast("Could not copy", false);
-        }
+        askCopyTypes("songs", "Copy", function (types) {
+            copyLine(makeShareLine("songs", Array.from(selectedSongs.keys()), types, ""), "songs");
+        });
     }
 
-    async function shareSelected() {
+    function shareSelected() {
 
-        const n = selectedSongs.size;
-
-        if (n === 0) {
+        if (selectedSongs.size === 0) {
 
             showToast("Pick songs first", false);
             return;
         }
 
-        try {
-            await navigator.share({ title: n + (n === 1 ? " song" : " songs") + " for Mureka Player", text: selectedText() });
-        } catch (e) {
-            // Closed without sharing
+        askCopyTypes("songs", "Share", function (types) {
+
+            const line = makeShareLine("songs", Array.from(selectedSongs.keys()), types, "");
+
+            navigator.share({ title: line.count + (line.count === 1 ? " song" : " songs") + " for Mureka Player",
+                text: line.text }).catch(function () {
+                // Closed without sharing
+            });
+        });
+    }
+
+    // A line onto the clipboard, with a note on how it went
+    async function copyLine(line, kind) {
+
+        if (!line.text) {
+
+            showToast(kind === "tweaks" ? "No song tweaks to copy with those choices" : "No songs to copy", false);
+            return;
         }
+
+        const ok = await copyText(line.text);
+        const what = line.count + (line.count === 1 ? " song" : " songs");
+
+        dataStatus(ok ? "Copied " + (kind === "tweaks" ? "the tweaks of " : "") + what + " to the clipboard" : "Could not copy to the clipboard");
+        showToast(ok ? "Copied " + (kind === "tweaks" ? "the tweaks of " : "") + what
+            + ", paste it in Import in the other player" : "Could not copy", ok);
+    }
+
+    // What a copy carries, a switch per kind with All and None, set as last
+    // time. go hears the kinds chosen, from the tap on the button, so the
+    // copy itself still counts as asked for by a tap
+    function askCopyTypes(kind, action, go) {
+
+        if (!panelEl) {
+
+            go(copyTypesFor(kind));
+            return;
+        }
+
+        const on = copyTypesFor(kind);
+        const titles = { songs: "Copy the picked songs", queue: "Copy the play queue", tweaks: "Copy song tweaks" };
+        const texts = {
+            songs: "What goes along with the songs:",
+            queue: "What goes along with the songs:",
+            tweaks: "Which kinds to copy:"
+        };
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const body = document.createElement("div");
+        const quick = document.createElement("div");
+        const list = document.createElement("div");
+        const row = document.createElement("div");
+        const boxes = {};
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = action === "Share" ? titles[kind].replace("Copy", "Share") : titles[kind];
+        head.style.cssText = "font-weight:600";
+        body.textContent = texts[kind];
+        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        quick.style.cssText = "display:flex;gap:6px";
+        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = function () {
+            back.remove();
+        };
+
+        const goBtn = makeButton(action, "#48e1eb", "#000", function () {
+
+            const chosen = {};
+
+            for (const t of COPY_TYPES) {
+                chosen[t.key] = on[t.key] === true;
+            }
+
+            rememberCopyTypes(kind, chosen);
+            close();
+            go(chosen);
+        });
+
+        const paint = function () {
+
+            for (const t of COPY_TYPES) {
+                boxes[t.key].checked = on[t.key] === true;
+            }
+
+            // Songs go without any values, tweaks need at least one kind
+            const any = COPY_TYPES.some(function (t) {
+                return on[t.key];
+            });
+            const ready = kind !== "tweaks" || any;
+
+            goBtn.disabled = !ready;
+            goBtn.style.opacity = ready ? "1" : "0.4";
+        };
+
+        const setAll = function (value) {
+
+            for (const t of COPY_TYPES) {
+                on[t.key] = value;
+            }
+
+            paint();
+        };
+
+        const allBtn = makeButton("All", "#333", "#fff", function () {
+            setAll(true);
+        });
+        const noneBtn = makeButton("None", "#333", "#fff", function () {
+            setAll(false);
+        });
+
+        allBtn.style.flex = "1";
+        noneBtn.style.flex = "1";
+        quick.appendChild(allBtn);
+        quick.appendChild(noneBtn);
+
+        for (const type of COPY_TYPES) {
+
+            const line = document.createElement("label");
+            const box = document.createElement("input");
+            const name = document.createElement("span");
+
+            line.style.cssText = "display:flex;align-items:center;gap:10px;padding:7px 4px;cursor:pointer";
+            box.type = "checkbox";
+            box.style.cssText = "width:18px;height:18px;margin:0;accent-color:#48e1eb;flex:0 0 auto";
+            name.textContent = type.label;
+            name.style.cssText = "flex:1 1 auto;color:#fff";
+            boxes[type.key] = box;
+
+            box.addEventListener("change", function () {
+
+                on[type.key] = box.checked;
+                paint();
+            });
+
+            line.appendChild(box);
+            line.appendChild(name);
+            list.appendChild(line);
+        }
+
+        const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
+
+        cancelBtn.style.flex = "1";
+        goBtn.style.flex = "1";
+        row.appendChild(cancelBtn);
+        row.appendChild(goBtn);
+        card.appendChild(head);
+        card.appendChild(body);
+        card.appendChild(quick);
+        card.appendChild(list);
+        card.appendChild(row);
+        back.appendChild(card);
+
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        paint();
+        panelEl.appendChild(back);
     }
 
     function buildSelBar() {
@@ -27210,6 +27445,13 @@
         item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;user-select:none;-moz-user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
         item.title = "Play; long press or right-click for options";
 
+        // Read from Mureka once the row is in sight
+        if (isStubSong(song) && !song.__gone) {
+
+            item.dataset.stubId = String(song.song_id);
+            item.style.fontStyle = "italic";
+        }
+
         if (dimmed || (offlineMode() && !cachedIds.has(song.song_id))) {
             item.style.opacity = "0.45";
         }
@@ -27498,6 +27740,7 @@
         listEl.appendChild(frag);
         lazyRendered = end;
         lazyKeep = Math.max(lazyKeep, end);
+        noteSeenStubs();
     }
 
     function renderSongs(songs, fromQueue) {
@@ -30816,7 +31059,9 @@
     // in its library
     function songsWithLinks(list) {
 
-        return list.map(function (s) {
+        return list.filter(function (s) {
+            return !isStubSong(s);
+        }).map(function (s) {
 
             const out = trim(s);
 
@@ -30835,7 +31080,7 @@
     // Songs picked to share, in the form of a play queue marked shared, so
     // the other player's Import asks where they go rather than replacing
     // its queue
-    function sharedSongsData(list, tweaks) {
+    function sharedSongsData(list, tweaks, playingId) {
 
         return {
             app: "mureka-player",
@@ -30852,9 +31097,15 @@
                     return s.title || "";
                 }),
                 pos: -1,
-                songs: songsWithLinks(list),
+                songs: songsWithLinks(list.filter(function (s) {
+                    return !isStubSong(s);
+                })),
 
-                // The sharer's own tempo and instrumental marks, by song id
+                // The song that was playing where the line was copied, the
+                // ones before it were played
+                playing: playingId ? String(playingId) : "",
+
+                // The sharer's own values, by song id
                 tweaks: tweaks && typeof tweaks === "object" ? tweaks : {}
             }
         };
@@ -31053,6 +31304,7 @@
             out.queue = {
                 shared: q.shared === true,
                 tweaks: q.shared === true ? cleanShareTweaks(q.tweaks) : {},
+                playing: typeof q.playing === "string" && /^\d{1,25}$/.test(q.playing) ? q.playing : "",
                 ids: Array.isArray(q.ids) ? q.ids.filter(function (id) {
                     return id !== null && id !== undefined && id !== "";
                 }).map(String) : [],
@@ -31487,19 +31739,29 @@
             }
 
             const bpm = Number(t.bpm);
+            const rating = Number(t.rating);
 
-            out[id] = { bpm: isFinite(bpm) && bpm > 0 && bpm < 1000 ? Math.round(bpm) : 0, instr: t.instr === true };
+            out[id] = {
+                bpm: isFinite(bpm) && bpm > 0 && bpm < 1000 ? Math.round(bpm) : 0,
+                instr: t.instr === true,
+                rating: t.rating !== undefined && t.rating !== null && isFinite(rating) && rating >= 0 && rating <= 5
+                    ? snapRating(rating) : null,
+                ignore: t.ignore === true
+            };
         }
 
         return out;
     }
 
-    // The sharer's tempo and instrumental marks for the songs taken in,
-    // where this player has none of its own. Its own tweaks always stay
+    // The sharer's values for the songs taken in, where this player has
+    // none of its own and has not removed one on purpose. Its own tweaks
+    // always stay
     function applyShareTweaks(tweaks, songs) {
 
         let bpms = 0;
         let instr = 0;
+        let rated = 0;
+        let ignored = 0;
 
         for (const song of songs) {
 
@@ -31523,6 +31785,26 @@
                 delete clearedMarks.instr[id];
                 instr += 1;
             }
+
+            if (typeof t.rating === "number" && !ratings.has(id) && !isCleared("rating", id)) {
+
+                ratings.set(id, t.rating);
+                rated += 1;
+            }
+
+            if (t.ignore && !ignoredIds.has(id) && !isCleared("ignore", id)) {
+
+                ignoredIds.add(id);
+                ignored += 1;
+            }
+        }
+
+        if (rated > 0) {
+            saveRatings();
+        }
+
+        if (ignored > 0) {
+            saveIgnored();
         }
 
         if (bpms > 0) {
@@ -31535,9 +31817,10 @@
             saveManualInstrumental();
         }
 
-        if (bpms > 0 || instr > 0) {
+        if (bpms > 0 || instr > 0 || rated > 0 || ignored > 0) {
 
-            dbgLog("Import", "shared tweaks taken in: " + bpms + " tempos, " + instr + " instrumental marks");
+            dbgLog("Import", "shared tweaks taken in: " + bpms + " tempos, " + instr + " instrumental marks, "
+                + rated + " ratings, " + ignored + " ignored");
             applySmartFilters();
 
             if (currentSong) {
@@ -31905,39 +32188,82 @@
             }
 
             // Songs someone picked to share: added to the queue here where
-            // asked, next, at the end or in place of it
+            // asked, next, at the end or in place of it. Or only the values
+            // that came with them, as an import of song tweaks
             if (p.queue.shared === true) {
 
-                const n = found.songs.length;
-                const what = n + (n === 1 ? " shared song" : " shared songs");
+                const all = found.songs;
+                const played = playedBefore(p, all);
                 const words = { next: "to play next", end: "at the end of the queue", replace: "as the queue" };
+                const tweaksData = sharedTweaksAsData(p.queue.tweaks);
 
-                const take = function (mode) {
+                const take = function (mode, withPlayed) {
 
-                    applySharedSongs(found.songs, mode);
-                    applyShareTweaks(p.queue.tweaks, found.songs);
+                    const list = withPlayed ? all : all.slice(played);
+                    const n = list.length;
+                    const what = n + (n === 1 ? " shared song" : " shared songs");
+
+                    applySharedSongs(list, mode);
+                    applyShareTweaks(p.queue.tweaks, list);
                     importDone(donePrefix + " " + what + ", " + words[mode], true, asked);
+                };
+
+                const cancel = function () {
+                    importDone("Import cancelled, nothing changed", false, false);
                 };
 
                 if (asked) {
 
-                    take(words[p.sharedMode] ? p.sharedMode : "end");
+                    take(words[p.sharedMode] ? p.sharedMode : "end", p.includePlayed === true || played === 0);
                     return;
                 }
 
-                askChoices(what + " from the " + sourceName + ".\nWhere in the queue do they go?", [
+                // Songs played before the one that was playing where it was
+                // copied: along with the rest, or from that song on
+                const placed = function (mode) {
+
+                    if (played === 0) {
+
+                        take(mode, true);
+                        return;
+                    }
+
+                    askChoices((played === 1 ? "1 song was" : played + " songs were") + " played already\n"
+                        + "Where it was copied, " + (played === 1 ? "it was" : "they were")
+                        + " played before the song that was playing. Take " + (played === 1 ? "it" : "them")
+                        + " too, or start from the song that was playing?", [
+                        { label: played === 1 ? "Take it too" : "Take them too", fn: function () {
+                            take(mode, true);
+                        } },
+                        { label: "Start from the playing song", ring: true, fn: function () {
+                            take(mode, false);
+                        } }
+                    ], cancel);
+                };
+
+                const options = [
                     { label: "Play next", fn: function () {
-                        take("next");
+                        placed("next");
                     } },
                     { label: "Add to the end", ring: true, fn: function () {
-                        take("end");
+                        placed("end");
                     } },
                     { label: "Replace the queue", fn: function () {
-                        take("replace");
+                        placed("replace");
                     } }
-                ], function () {
-                    importDone("Import cancelled, nothing changed", false, false);
-                });
+                ];
+
+                if (tweaksData) {
+
+                    options.push({ label: "Only take the tweaks", fn: function () {
+                        importParsed(parseUserData(tweaksData), sourceName, donePrefix, false);
+                    } });
+                }
+
+                const n = all.length;
+
+                askChoices(n + (n === 1 ? " shared song" : " shared songs") + " from the " + sourceName
+                    + ".\nWhere in the queue do they go?", options, cancel);
                 return;
             }
 
@@ -32092,12 +32418,28 @@
                 s.is_liked = false;
                 songs.push(s);
                 foreign += 1;
+            } else if (/^\d{1,25}$/.test(id)) {
+
+                // Read from Mureka once it is needed
+                songs.push(stubFor(id));
+                foreign += 1;
             } else {
                 missing += 1;
             }
         }
 
         return { songs: songs, missing: missing, foreign: foreign };
+    }
+
+    // How many of the songs taken in were played before the one playing
+    // where they were copied, 0 when none was marked
+    function playedBefore(p, songs) {
+
+        const at = p.queue.playing ? songs.findIndex(function (s) {
+            return String(s.song_id) === p.queue.playing;
+        }) : -1;
+
+        return at > 0 ? at : 0;
     }
 
     // The songs of an imported queue that are not in the library here, in
@@ -32309,6 +32651,10 @@
     // together by hand, as Play next and Play last do
     function applySharedSongs(songs, mode) {
 
+        // The first few not held here are read at once, the rest as they
+        // come near or into sight
+        wantStubs(songs.filter(isStubSong).slice(0, STUB_AHEAD));
+
         if (mode === "replace") {
 
             applyQueueImport(songs, false);
@@ -32372,6 +32718,8 @@
     // goes on, with the imported songs after it. A paused or only loaded
     // song goes, like after Stop, and Play starts the imported queue
     function applyQueueImport(songs, keep) {
+
+        wantStubs(songs.filter(isStubSong).slice(0, STUB_AHEAD));
 
         const sounding = soundingNow();
         const keepIt = sounding && keep === true;
@@ -32656,6 +33004,38 @@
         return { name: exportBaseName(data) + ".json", data: data };
     }
 
+    // A line for a web view: its picked songs, the play queue or the song
+    // tweaks, with the kinds of values chosen there
+    function hostShareLine(id, ask) {
+
+        const kind = ask && (ask.kind === "queue" || ask.kind === "tweaks") ? ask.kind : "songs";
+        const types = {};
+
+        for (const t of COPY_TYPES) {
+            types[t.key] = !!(ask && ask.types && ask.types[t.key] === true);
+        }
+
+        let line;
+
+        if (kind === "tweaks") {
+            line = makeShareLine("tweaks", tweakedIds(types), types, "");
+        } else if (kind === "queue") {
+
+            const q = queueForCopy();
+
+            line = makeShareLine("songs", q.ids, types, q.playing);
+        } else {
+
+            const ids = ask && Array.isArray(ask.ids) ? ask.ids.filter(function (x) {
+                return /^\d{1,25}$/.test(String(x));
+            }).map(String) : [];
+
+            line = makeShareLine("songs", ids, types, "");
+        }
+
+        hostReply(id, JSON.stringify({ ok: true, text: line.text, count: line.count }));
+    }
+
     // Only the name an export would get, for the web view to offer before
     // the file is made
     function hostExportName(kind) {
@@ -32901,6 +33281,27 @@
     // under Import reads it back in
     function copyUserData(kind) {
 
+        // Song tweaks and the play queue as the short line, with what goes
+        // along chosen first
+        if (kind === "songs") {
+
+            askCopyTypes("tweaks", "Copy", function (types) {
+                copyLine(makeShareLine("tweaks", tweakedIds(types), types, ""), "tweaks");
+            });
+            return;
+        }
+
+        if (kind === "queue") {
+
+            askCopyTypes("queue", "Copy", function (types) {
+
+                const q = queueForCopy();
+
+                copyLine(makeShareLine("songs", q.ids, types, q.playing), "queue");
+            });
+            return;
+        }
+
         const data = collectUserData(kind);
 
         copyText(exportJson(data)).then(function (ok) {
@@ -33081,13 +33482,20 @@
 
         if (!p) {
 
-            // Mureka song links, shared from Mureka's site, are read from
-            // Mureka and taken in as shared songs
-            const keys = songLinkKeys(String(text || ""));
+            // A line of song tweaks, imported as a file of them is
+            const line = readShareLine(text);
 
-            if (keys.length > 0) {
+            if (line && line.kind === "tweaks") {
 
-                songsFromLinks(keys).then(function (got) {
+                importParsed(parseUserData(songDataFromEntries(line.entries)), sourceName, "Imported", asked);
+                return "";
+            }
+
+            // Songs from a line or Mureka song links, the ones not held here
+            // read from Mureka, then taken in as shared songs
+            if (line || songLinkKeys(String(text || "")).length > 0) {
+
+                sharedFromText(text).then(function (got) {
 
                     if (got.songs.length === 0) {
 
@@ -33095,7 +33503,7 @@
                         return;
                     }
 
-                    importText(exportJson(sharedSongsData(got.songs, shareTweaks(text))), sourceName, asked);
+                    importText(exportJson(sharedSongsData(got.songs, got.tweaks, got.playing)), sourceName, asked);
                 });
 
                 return "";
@@ -33110,76 +33518,487 @@
         return "";
     }
 
-    // The mark before shared song ids, the version of the short form. The
-    // second carries your own tempo and instrumental mark with a song, as
-    // _ and the tempo in base 36, and ! for instrumental: 3x9k2_2z! is a
-    // song at 107 BPM marked instrumental. Without either the first mark is
-    // used, so older players still read it
-    const SHARE_MARK = "mps1";
-    const SHARE_MARK_TWEAKS = "mps2";
+    // The short line for the clipboard, for songs to play and for song
+    // tweaks. mps3, then s for songs or t for tweaks only, then one token
+    // per song: its id in base 36 and, after _, its values. Each value is a
+    // capital letter and a number in base 36:
+    //   B a tempo, M Mureka's own tempo, R a rating in quarter stars plus
+    //   one, I instrumental, X ignored, P the song that was playing
+    // A 0 is a value removed, a letter alone a mark that is set, so
+    // 3x9k2_B2zI is a song at 107 BPM marked instrumental. A letter not
+    // known here is skipped, so more kinds can be added later. The older
+    // mps1 and mps2 lines of shared songs are still read
+    const SHARE_MARK = "mps3";
+    const SHARE_LINE_RE = /\bmps3\.([st])((?:\.[0-9a-z]+(?:_[0-9A-Za-z]+)?)+)/;
+    const SHARE_OLD_RE = /\bmps[12]((?:\.[0-9a-z]+(?:_[0-9a-z]+)?!?)+)/gi;
 
-    // One song in the short form, with its tweaks
-    function shareToken(id) {
+    // The values a copy can carry, in the order the copy box lists them
+    const COPY_TYPES = [
+        { key: "bpm", label: "Tempos (BPM)" },
+        { key: "instr", label: "Instrumental marks" },
+        { key: "rating", label: "Ratings" },
+        { key: "ignore", label: "Ignored songs" }
+    ];
 
-        const key = String(id);
-        let token = idToCode(key);
+    // What each kind of copy carries until chosen otherwise. Songs for
+    // someone else leave your stars and ignored songs at home
+    const COPY_DEFAULTS = {
+        songs: { bpm: true, instr: true, rating: false, ignore: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true }
+    };
 
-        if (!token) {
-            return "";
-        }
-
-        if (manualBpm.has(key)) {
-            token += "_" + Math.round(manualBpm.get(key)).toString(36);
-        }
-
-        if (manualInstrumental.has(key)) {
-            token += "!";
-        }
-
-        return token;
-    }
-
-    // The short line for songs, by their ids, mps2 only when one carries a
-    // tweak
-    function shareLine(ids) {
-
-        const tokens = ids.map(shareToken).filter(Boolean);
-        const tweaks = tokens.some(function (t) {
-            return /[_!]/.test(t);
-        });
-
-        return "Mureka Player songs: " + (tweaks ? SHARE_MARK_TWEAKS : SHARE_MARK) + "." + tokens.join(".");
-    }
-
-    // The tweaks in a short line, by song id: a tempo, an instrumental mark
-    function shareTweaks(text) {
+    function cleanCopyTypes(raw) {
 
         const out = {};
-        const re = /\bmps[12]((?:\.[0-9a-z]+(?:_[0-9a-z]+)?!?)+)/gi;
-        let m = re.exec(String(text || ""));
 
-        while (m !== null) {
+        if (!raw || typeof raw !== "object") {
+            return out;
+        }
 
-            for (const token of m[1].split(".")) {
+        for (const kind of Object.keys(COPY_DEFAULTS)) {
 
-                const t = token.match(/^([0-9a-z]+)(?:_([0-9a-z]+))?(!)?$/i);
+            const kept = raw[kind];
 
-                if (!t || (!t[2] && !t[3])) {
-                    continue;
-                }
-
-                const id = codeToId(t[1]);
-                const bpm = t[2] ? parseInt(t[2], 36) : 0;
-
-                if (id) {
-                    out[id] = { bpm: bpm > 0 && bpm < 1000 ? bpm : 0, instr: !!t[3] };
-                }
+            if (!kept || typeof kept !== "object") {
+                continue;
             }
 
-            m = re.exec(String(text || ""));
+            out[kind] = {};
+
+            for (const t of COPY_TYPES) {
+
+                if (typeof kept[t.key] === "boolean") {
+                    out[kind][t.key] = kept[t.key];
+                }
+            }
         }
 
         return out;
+    }
+
+    // The values a kind of copy carries, as chosen last time
+    function copyTypesFor(kind) {
+
+        const base = COPY_DEFAULTS[kind] || COPY_DEFAULTS.songs;
+        const kept = settings.copyTypes && settings.copyTypes[kind] ? settings.copyTypes[kind] : {};
+        const out = {};
+
+        for (const t of COPY_TYPES) {
+            out[t.key] = typeof kept[t.key] === "boolean" ? kept[t.key] : base[t.key];
+        }
+
+        return out;
+    }
+
+    function rememberCopyTypes(kind, types) {
+
+        const all = Object.assign({}, settings.copyTypes || {});
+
+        all[kind] = {};
+
+        for (const t of COPY_TYPES) {
+            all[kind][t.key] = types[t.key] === true;
+        }
+
+        settings.copyTypes = all;
+        saveSettings();
+    }
+
+    // A number in base 36, whole
+    function b36(v) {
+        return Math.max(0, Math.round(Number(v) || 0)).toString(36);
+    }
+
+    // The values of one song for a line. A tweaks line also carries the
+    // values removed here and Mureka's own tempo, as a file does
+    function shareFields(id, types, tweaks, playingId, murekaTempo) {
+
+        let f = "";
+
+        if (types.bpm) {
+
+            if (manualBpm.has(id) && Number(manualBpm.get(id)) > 0) {
+                f += "B" + b36(manualBpm.get(id));
+            } else if (tweaks && isCleared("bpm", id)) {
+                f += "B0";
+            } else if (tweaks && murekaTempo && murekaTempo.has(id)) {
+                f += "M" + b36(murekaTempo.get(id));
+            }
+        }
+
+        if (types.rating) {
+
+            if (ratings.has(id)) {
+                f += "R" + b36(Math.round(Number(ratings.get(id)) * 4) + 1);
+            } else if (tweaks && isCleared("rating", id)) {
+                f += "R0";
+            }
+        }
+
+        if (types.instr) {
+
+            if (manualInstrumental.has(id)) {
+                f += "I";
+            } else if (tweaks && isCleared("instr", id)) {
+                f += "I0";
+            }
+        }
+
+        if (types.ignore) {
+
+            if (ignoredIds.has(id)) {
+                f += "X";
+            } else if (tweaks && isCleared("ignore", id)) {
+                f += "X0";
+            }
+        }
+
+        if (playingId && playingId === id) {
+            f += "P";
+        }
+
+        return f;
+    }
+
+    // The line for songs to play, in their order, or for the song tweaks
+    // held here. The count is the songs in it
+    function makeShareLine(kind, ids, types, playingId) {
+
+        const tweaks = kind === "tweaks";
+        const tokens = [];
+        let murekaTempo = null;
+
+        // Mureka's tempo for songs with none set by hand, when exports are
+        // to carry it, as a file does
+        if (tweaks && types.bpm && settings.exportMurekaBpm !== false) {
+
+            murekaTempo = new Map();
+
+            for (const s of ownLibrary().songs || []) {
+
+                const v = Number(s.bpm);
+
+                if (isFinite(v) && v > 0) {
+                    murekaTempo.set(String(s.song_id), v);
+                }
+            }
+        }
+
+        const seen = new Set();
+
+        for (const raw of ids) {
+
+            const id = String(raw);
+            const code = idToCode(id);
+
+            if (!code || seen.has(id)) {
+                continue;
+            }
+
+            seen.add(id);
+
+            const f = shareFields(id, types, tweaks, playingId ? String(playingId) : "", murekaTempo);
+
+            // A tweaks line only names songs with something to say
+            if (tweaks && !f) {
+                continue;
+            }
+
+            tokens.push(f ? code + "_" + f : code);
+        }
+
+        const head = tweaks ? "Mureka Player song tweaks: " : "Mureka Player songs: ";
+
+        return {
+            text: tokens.length > 0 ? head + SHARE_MARK + "." + (tweaks ? "t" : "s") + "." + tokens.join(".") : "",
+            count: tokens.length
+        };
+    }
+
+    // Every song with a tweak or a removed one here, for a tweaks line
+    function tweakedIds(types) {
+
+        const ids = new Set();
+        const add = function (list) {
+
+            for (const id of list) {
+                ids.add(String(id));
+            }
+        };
+
+        if (types.bpm) {
+
+            add(manualBpm.keys());
+            add(Object.keys(clearedMarks.bpm));
+
+            if (settings.exportMurekaBpm !== false) {
+
+                for (const s of ownLibrary().songs || []) {
+
+                    if (Number(s.bpm) > 0) {
+                        ids.add(String(s.song_id));
+                    }
+                }
+            }
+        }
+
+        if (types.rating) {
+
+            add(ratings.keys());
+            add(Object.keys(clearedMarks.rating));
+        }
+
+        if (types.instr) {
+
+            add(manualInstrumental);
+            add(Object.keys(clearedMarks.instr));
+        }
+
+        if (types.ignore) {
+
+            add(ignoredIds);
+            add(Object.keys(clearedMarks.ignore));
+        }
+
+        return Array.from(ids);
+    }
+
+    // The play queue as it plays, or as Stop left it, and its playing song
+    function queueForCopy() {
+
+        const live = queue.length > 0;
+        const q = live ? queue : (resumeState && Array.isArray(resumeState.queue) ? resumeState.queue : []);
+        const pos = live ? queuePos : (resumeState ? resumeState.queuePos : -1);
+        const songs = q.filter(function (s) {
+            return s && !isPreviewEntry(s) && !isPendingSong(s);
+        });
+        const at = q[pos];
+
+        return {
+            ids: songs.map(function (s) {
+                return String(s.song_id);
+            }),
+            playing: at && !isPreviewEntry(at) ? String(at.song_id) : ""
+        };
+    }
+
+    // What a line holds: songs to play or tweaks only, and per song its
+    // values. A value removed is kept as such, a missing one is left out.
+    // Mureka song links and the older lines are read as songs. Null when
+    // the text holds none of these
+    function readShareLine(text) {
+
+        const t = String(text || "");
+        const m = SHARE_LINE_RE.exec(t);
+
+        if (m) {
+
+            const entries = [];
+
+            for (const token of m[2].split(".")) {
+
+                const parts = token.split("_");
+                const id = parts[0] ? codeToId(parts[0]) : "";
+
+                if (!id) {
+                    continue;
+                }
+
+                const e = { id: id };
+                const re = /([A-Z])([0-9a-z]*)/g;
+                let f = re.exec(parts[1] || "");
+
+                while (f !== null) {
+
+                    const has = f[2] !== "";
+                    const v = has ? parseInt(f[2], 36) : NaN;
+
+                    if (f[1] === "B" && has) {
+
+                        if (v === 0) {
+                            e.bpmGone = true;
+                        } else if (v > 0 && v < 1000) {
+                            e.bpm = v;
+                        }
+                    } else if (f[1] === "M" && has && v > 0 && v < 1000) {
+                        e.mbpm = v;
+                    } else if (f[1] === "R" && has) {
+
+                        if (v === 0) {
+                            e.ratingGone = true;
+                        } else if (v >= 1 && v <= 21) {
+                            e.rating = snapRating((v - 1) / 4);
+                        }
+                    } else if (f[1] === "I") {
+
+                        if (has && v === 0) {
+                            e.instrGone = true;
+                        } else {
+                            e.instr = true;
+                        }
+                    } else if (f[1] === "X") {
+
+                        if (has && v === 0) {
+                            e.ignoreGone = true;
+                        } else {
+                            e.ignore = true;
+                        }
+                    } else if (f[1] === "P") {
+                        e.playing = true;
+                    }
+
+                    f = re.exec(parts[1] || "");
+                }
+
+                entries.push(e);
+            }
+
+            return entries.length > 0 ? { kind: m[1] === "t" ? "tweaks" : "songs", entries: entries } : null;
+        }
+
+        // The older lines of shared songs, with a tempo after _ and ! for
+        // instrumental
+        const entries = [];
+        const seen = new Set();
+
+        SHARE_OLD_RE.lastIndex = 0;
+
+        let o = SHARE_OLD_RE.exec(t);
+
+        while (o !== null) {
+
+            for (const token of o[1].split(".")) {
+
+                const x = token.match(/^([0-9a-z]+)(?:_([0-9a-z]+))?(!)?$/i);
+                const id = x ? codeToId(x[1]) : "";
+
+                if (!id || seen.has(id)) {
+                    continue;
+                }
+
+                seen.add(id);
+
+                const e = { id: id };
+                const bpm = x[2] ? parseInt(x[2], 36) : 0;
+
+                if (bpm > 0 && bpm < 1000) {
+                    e.bpm = bpm;
+                }
+
+                if (x[3]) {
+                    e.instr = true;
+                }
+
+                entries.push(e);
+            }
+
+            o = SHARE_OLD_RE.exec(t);
+        }
+
+        return entries.length > 0 ? { kind: "songs", entries: entries } : null;
+    }
+
+    // The values of a songs line, by song id, for the songs taken in
+    function lineTweaks(entries) {
+
+        const out = {};
+
+        for (const e of entries) {
+
+            const t = {};
+
+            if (e.bpm > 0) {
+                t.bpm = e.bpm;
+            }
+
+            if (typeof e.rating === "number") {
+                t.rating = e.rating;
+            }
+
+            if (e.instr === true) {
+                t.instr = true;
+            }
+
+            if (e.ignore === true) {
+                t.ignore = true;
+            }
+
+            if (Object.keys(t).length > 0) {
+                out[e.id] = t;
+            }
+        }
+
+        return out;
+    }
+
+    // A tweaks line, or the values of a songs line, as a song tweaks file
+    // would hold them, for the same import with its switches and questions
+    function songDataFromEntries(entries) {
+
+        const data = {
+            app: "mureka-player",
+            kind: "song-data",
+            format: 2,
+            version: VERSION,
+            exported: new Date().toISOString(),
+            ratings: {},
+            manualBpm: {},
+            murekaBpm: {},
+            manualInstrumental: [],
+            ignored: [],
+            creators: [],
+            cleared: { rating: [], bpm: [], instr: [], ignore: [] }
+        };
+
+        for (const e of entries) {
+
+            if (e.bpm > 0) {
+                data.manualBpm[e.id] = e.bpm;
+            } else if (e.bpmGone) {
+                data.cleared.bpm.push(e.id);
+            }
+
+            if (e.mbpm > 0) {
+                data.murekaBpm[e.id] = e.mbpm;
+            }
+
+            if (typeof e.rating === "number") {
+                data.ratings[e.id] = e.rating;
+            } else if (e.ratingGone) {
+                data.cleared.rating.push(e.id);
+            }
+
+            if (e.instr === true) {
+                data.manualInstrumental.push(e.id);
+            } else if (e.instrGone) {
+                data.cleared.instr.push(e.id);
+            }
+
+            if (e.ignore === true) {
+                data.ignored.push(e.id);
+            } else if (e.ignoreGone) {
+                data.cleared.ignore.push(e.id);
+            }
+        }
+
+        return data;
+    }
+
+    // The shared values kept with shared songs, as song tweaks, or null
+    // when they carry none
+    function sharedTweaksAsData(tweaks) {
+
+        const entries = [];
+
+        for (const id of Object.keys(tweaks || {})) {
+
+            const t = tweaks[id];
+
+            entries.push({ id: id, bpm: t.bpm, rating: t.rating, instr: t.instr, ignore: t.ignore });
+        }
+
+        return entries.length > 0 ? songDataFromEntries(entries) : null;
     }
 
     // A song id as base 36 and back, through BigInt so a long id keeps
@@ -33211,9 +34030,8 @@
         return n.toString();
     }
 
-    // The songs a text names: by the key or the id after song-detail in a
-    // Mureka link, and by the ids of the player's short form. Each once,
-    // at most 100
+    // The songs Mureka links in a text name, by the key or the id after
+    // song-detail. Each once, at most 100
     function songLinkKeys(text) {
 
         const out = [];
@@ -33223,23 +34041,6 @@
                 out.push(key);
             }
         };
-
-        const short = /\bmps[12]((?:\.[0-9a-z]+(?:_[0-9a-z]+)?!?)+)/gi;
-        let s = short.exec(text);
-
-        while (s !== null) {
-
-            for (const token of s[1].split(".")) {
-
-                const code = token.replace(/[_!].*$/, "");
-
-                if (code) {
-                    add(codeToId(code));
-                }
-            }
-
-            s = short.exec(text);
-        }
 
         const re = /mureka\.ai\/song-detail\/([A-Za-z0-9]+)/g;
         let m = re.exec(text);
@@ -33251,6 +34052,278 @@
         }
 
         return out;
+    }
+
+    function isStubSong(song) {
+        return !!(song && song.__stub === true);
+    }
+
+    // The song for an id not held here, the same one every time it is
+    // asked for until it is read
+    function stubFor(id) {
+
+        const key = String(id);
+        let stub = stubSongs.get(key);
+
+        if (!stub) {
+
+            stub = { song_id: key, title: "Song " + key + ", reading it from Mureka", __stub: true };
+            stubSongs.set(key, stub);
+        }
+
+        return stub;
+    }
+
+    // A song kept from before a restart, known only by its id, taken back
+    // as the one song for that id
+    function adoptStub(saved) {
+
+        const key = String(saved.song_id);
+
+        if (!stubSongs.has(key)) {
+            stubSongs.set(key, saved);
+        }
+
+        return stubSongs.get(key);
+    }
+
+    // One song read from Mureka by its id: the song, gone when Mureka says
+    // it has none, or failed when Mureka could not be asked
+    async function readSongById(id) {
+
+        try {
+
+            const res = await timedFetch("/api/pgc/song/detail?time=" + Date.now() + "&song_id=" + encodeURIComponent(id),
+                { credentials: "include" }, 15000);
+
+            if (!res.ok) {
+                return { failed: true };
+            }
+
+            const json = await res.json();
+            const song = json && json.code === 0 && json.data ? json.data.song : null;
+
+            if (!song || !song.mp3_url) {
+                return { gone: true };
+            }
+
+            const out = Object.assign({}, song);
+
+            out.mp3_url = songUrl(song);
+            out.cover = coverUrl(song);
+
+            return { song: importedSong(out) };
+        } catch (e) {
+            return { failed: true };
+        }
+    }
+
+    // Read one song known only by its id. Asked for twice, the one read
+    // serves both. True once it is filled in
+    function readStub(stub) {
+
+        const key = String(stub.song_id);
+
+        if (!isStubSong(stub) || stub.__gone) {
+            return Promise.resolve(!isStubSong(stub));
+        }
+
+        if (stubReads.has(key)) {
+            return stubReads.get(key);
+        }
+
+        const job = (async function () {
+
+            if (offlineMode()) {
+                return false;
+            }
+
+            const got = await readSongById(key);
+
+            if (!isStubSong(stub)) {
+                return true;
+            }
+
+            if (got.song) {
+
+                // Filled in where it is, the queue and every other place
+                // holding it keep the same song. Played from its link, like
+                // a shared song, since it is not in the library here
+                delete stub.__stub;
+                Object.assign(stub, got.song, { shared: true, is_liked: false });
+                stubSongs.delete(key);
+                dbgLog("Queue", "read from Mureka: " + (stub.title || "Untitled") + " (" + key + ")");
+            } else if (got.gone) {
+
+                stub.__gone = true;
+                stub.title = "Song " + key + ", no longer on Mureka";
+                dbgLog("Queue", "Mureka no longer has " + key + ", it is passed over");
+            } else {
+                return false;
+            }
+
+            stubStamp += 1;
+            stubRefreshSoon();
+
+            return got.song ? true : false;
+        })();
+
+        stubReads.set(key, job);
+        job.finally(function () {
+            stubReads.delete(key);
+        });
+
+        return job;
+    }
+
+    // Songs known only by their id to read soon, in the order given, a few
+    // at a time
+    function wantStubs(songs) {
+
+        for (const song of songs) {
+
+            if (!isStubSong(song) || song.__gone) {
+                continue;
+            }
+
+            const key = String(song.song_id);
+
+            if (!stubReads.has(key) && stubWait.indexOf(key) < 0) {
+                stubWait.push(key);
+            }
+        }
+
+        pumpStubs();
+    }
+
+    function pumpStubs() {
+
+        while (stubReads.size < STUB_WORKERS && stubWait.length > 0) {
+
+            const stub = stubSongs.get(stubWait.shift());
+
+            if (stub && isStubSong(stub) && !stub.__gone) {
+
+                readStub(stub).then(pumpStubs, pumpStubs);
+            }
+        }
+    }
+
+    // The songs coming up in the queue are read before they are reached:
+    // as many as are cached ahead, at least a few
+    function wantStubsAhead() {
+
+        const ahead = Math.max(STUB_AHEAD, settings.prefetchCount || 0);
+        const list = [];
+
+        for (let i = 1; i <= ahead && queue.length > 0; i += 1) {
+
+            let pos = queuePos + i;
+
+            if (pos >= queue.length) {
+
+                if (repeatMode !== "all") {
+                    break;
+                }
+
+                pos = pos % queue.length;
+            }
+
+            list.push(queue[pos]);
+        }
+
+        wantStubs(list);
+    }
+
+    // Songs known only by their id seen in a list, and the next few after
+    // the last of them in the queue, so scrolling on finds them read
+    function wantStubsSeen(seenIds) {
+
+        if (seenIds.length === 0) {
+            return;
+        }
+
+        const seen = new Set(seenIds.map(String));
+        const list = [];
+        let last = -1;
+
+        queue.forEach(function (song, i) {
+
+            if (isStubSong(song) && seen.has(String(song.song_id))) {
+
+                list.push(song);
+                last = i;
+            }
+        });
+
+        let more = 0;
+
+        for (let i = last + 1; i < queue.length && more < STUB_AHEAD; i += 1) {
+
+            if (isStubSong(queue[i]) && !queue[i].__gone) {
+
+                list.push(queue[i]);
+                more += 1;
+            }
+        }
+
+        wantStubs(list);
+    }
+
+    // The rows of the phone's list that are songs known only by their id
+    // and on screen now, read at once
+    let stubSeenTimer = 0;
+
+    function noteSeenStubs() {
+
+        if (stubSeenTimer || !listEl || stubSongs.size === 0) {
+            return;
+        }
+
+        stubSeenTimer = setTimeout(function () {
+
+            stubSeenTimer = 0;
+
+            const box = listEl.getBoundingClientRect();
+
+            if (box.height === 0) {
+                return;
+            }
+
+            const ids = [];
+
+            for (const row of listEl.querySelectorAll("[data-stub-id]")) {
+
+                const r = row.getBoundingClientRect();
+
+                if (r.bottom > box.top && r.top < box.bottom) {
+                    ids.push(row.dataset.stubId);
+                }
+            }
+
+            wantStubsSeen(ids);
+        }, 150);
+    }
+
+    // Songs read meanwhile show at once, in one go when several come close
+    // together. The queue is kept with them filled in
+    function stubRefreshSoon() {
+
+        if (stubRefreshTimer) {
+            return;
+        }
+
+        stubRefreshTimer = setTimeout(function () {
+
+            stubRefreshTimer = 0;
+            renderList();
+            setArtTransition("none");
+            setArtSources();
+            positionArt(0);
+            saveQueue();
+            publishHostSoon();
+            prefetchNext();
+        }, 300);
     }
 
     // One linked song read from Mureka. A share key is first turned into
@@ -33336,7 +34409,71 @@
             showToast("Could not read the songs from Mureka", false);
         }
 
-        return { songs: got, missed: missed };
+        return { songs: got, missed: missed, byKey: songs };
+    }
+
+    // The songs a line or Mureka links name, in their order. Songs held
+    // here come from the library as they are, only the others are read
+    // from Mureka, at most 100 of them. With the line's values and the
+    // song that was playing where it was copied
+    async function sharedFromText(text) {
+
+        const line = readShareLine(text);
+        const entries = line && line.kind === "songs" ? line.entries : [];
+        const held = new Map();
+
+        for (const s of ownLibrary().songs || []) {
+            held.set(String(s.song_id), s);
+        }
+
+        for (const s of cache.songs) {
+            held.set(String(s.song_id), s);
+        }
+
+        const keys = entries.map(function (e) {
+            return e.id;
+        });
+
+        for (const key of songLinkKeys(String(text || ""))) {
+
+            if (keys.indexOf(key) < 0) {
+                keys.push(key);
+            }
+        }
+
+        // Ids not held here are read from Mureka only once they are needed,
+        // so a line of any length comes in at once. Mureka's share keys are
+        // no ids, those few are read now to learn them
+        const linkKeys = keys.filter(function (k) {
+            return !held.has(k) && !/^\d{1,25}$/.test(k);
+        }).slice(0, 100);
+
+        const read = linkKeys.length > 0 ? await songsFromLinks(linkKeys) : { songs: [], missed: 0 };
+        const fetched = new Map();
+
+        linkKeys.forEach(function (k, i) {
+
+            if (read.byKey && read.byKey[i]) {
+                fetched.set(k, read.byKey[i]);
+            }
+        });
+
+        const songs = [];
+
+        for (const k of keys) {
+
+            const s = held.get(k) || fetched.get(k) || (/^\d{1,25}$/.test(k) ? stubFor(k) : null);
+
+            if (s) {
+                songs.push(s);
+            }
+        }
+
+        const playing = entries.find(function (e) {
+            return e.playing === true;
+        });
+
+        return { songs: songs, tweaks: lineTweaks(entries), playing: playing ? playing.id : "", missed: read.missed };
     }
 
     // Imports from the web view, read and planned here and finished once
@@ -33358,17 +34495,21 @@
             data = null;
         }
 
-        const p = parseUserData(data);
+        let p = parseUserData(data);
 
         if (!p) {
 
-            // Mureka song links, read from Mureka and asked about as shared
-            // songs. The web view waits long enough for that
-            const keys = songLinkKeys(String(ask && ask.text || ""));
+            const text = String(ask && ask.text || "");
+            const line = readShareLine(text);
 
-            if (keys.length > 0) {
+            // A line of song tweaks, asked about as a file of them is
+            if (line && line.kind === "tweaks") {
+                p = parseUserData(songDataFromEntries(line.entries));
+            } else if (line || songLinkKeys(text).length > 0) {
 
-                songsFromLinks(keys).then(function (got) {
+                // Songs, the ones not held here read from Mureka, then
+                // asked about as shared songs. The web view waits for that
+                sharedFromText(text).then(function (got) {
 
                     if (got.songs.length === 0) {
 
@@ -33376,15 +34517,39 @@
                         return;
                     }
 
-                    hostImportText(id, { text: exportJson(sharedSongsData(got.songs, shareTweaks(ask.text))), from: ask.from });
+                    hostImportText(id, { text: exportJson(sharedSongsData(got.songs, got.tweaks, got.playing)), from: ask.from });
                 });
 
                 return;
             }
+        }
+
+        if (!p) {
 
             hostReply(id, JSON.stringify({ ok: false, why: "That is not a Mureka Player export" }));
             return;
         }
+
+        const replied = hostPlanImport(p, ask && ask.from === "file" ? "file" : "pasted text");
+
+        // Shared songs can bring their values alone too, asked about as an
+        // import of song tweaks of its own
+        if (replied.shared) {
+
+            const tweaksData = sharedTweaksAsData(p.queue.tweaks);
+
+            if (tweaksData) {
+                replied.tweaks = hostPlanImport(parseUserData(tweaksData), "pasted text");
+            }
+        }
+
+        hostReply(id, JSON.stringify(replied));
+    }
+
+    // An import read for the web view, kept by a key until it is applied.
+    // The answer says what it holds and, for song tweaks, every song that
+    // differs
+    function hostPlanImport(p, source) {
 
         // An import left waiting is dropped after ten minutes
         for (const [k, v] of webImports) {
@@ -33395,7 +34560,7 @@
         }
 
         const key = "i" + (++webImportSeq);
-        const entry = { p: p, at: Date.now(), source: ask && ask.from === "file" ? "file" : "pasted text" };
+        const entry = { p: p, at: Date.now(), source: source };
         const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
         const out = { ok: true, key: key, kind: p.kind };
 
@@ -33416,8 +34581,10 @@
             out.shared = p.queue.shared === true;
 
             if (out.shared) {
+
                 out.what = found.songs.length + (found.songs.length === 1 ? " shared song" : " shared songs")
                     + queueForeignText(found);
+                out.played = playedBefore(p, found.songs);
             }
         } else if (p.kind === "library") {
 
@@ -33446,7 +34613,8 @@
         }
 
         webImports.set(key, entry);
-        hostReply(id, JSON.stringify(out));
+
+        return out;
     }
 
     // The web view has asked everything: the import is put into effect,
@@ -33497,6 +34665,10 @@
 
                 entry.p.keepPlaying = first === true;
                 entry.p.sharedMode = typeof first === "string" ? first : "";
+
+                // For shared songs, whether the songs played before the
+                // playing one come along
+                entry.p.includePlayed = Array.isArray(ask.answers) && ask.answers[1] === true;
             }
 
             importParsed(entry.p, entry.source, "Imported", true);
@@ -39061,6 +40233,13 @@
     function showContextMenu(x, y, song, queueIndex) {
 
         if (!contextMenuEl) {
+            return;
+        }
+
+        if (isStubSong(song)) {
+
+            wantStubs([song]);
+            showToast(song.__gone ? "Mureka no longer has this song" : "Still reading this song from Mureka", false);
             return;
         }
 

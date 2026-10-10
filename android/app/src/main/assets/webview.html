@@ -2875,6 +2875,11 @@
     }
 
     /* A song shared from another account, which may not be public */
+    .row.stub .rowTitle {
+        font-style: italic;
+        opacity: 0.7;
+    }
+
     .rowBadge.shared {
         background: #2e2640;
         color: #c9a8ff;
@@ -8620,7 +8625,6 @@
             + (item.index < pos ? " past" : "");
         row.dataset.qi = String(item.index);
         row.dataset.id = String(item.id);
-        row.dataset.share = item.share || "";
         attachLongPress(row, item.id);
 
         // A handle to drag any song, played, playing or to come, to another
@@ -9361,7 +9365,6 @@
         row.setAttribute("role", "button");
         row.className = "row pending";
         row.dataset.id = song.id;
-        row.dataset.share = song.share || "";
         songLine(song, row);
 
         const thumb = row.querySelector(".thumb");
@@ -9445,6 +9448,38 @@
         return row;
     }
 
+    // Rows of songs the phone knows only by their id, from a pasted line or
+    // an imported queue. Once one is in sight the phone is told, and reads
+    // it and the next few from Mureka. The list is read again as they come
+    let stubSeen = [];
+    let stubSeenTimer = 0;
+
+    const stubObserver = window.IntersectionObserver
+        ? new IntersectionObserver(function (entries) {
+
+            for (const entry of entries) {
+
+                if (entry.isIntersecting && entry.target.isConnected) {
+
+                    stubSeen.push(entry.target.dataset.id);
+                    stubObserver.unobserve(entry.target);
+                }
+            }
+
+            if (stubSeen.length > 0 && !stubSeenTimer) {
+
+                stubSeenTimer = setTimeout(function () {
+
+                    const ids = stubSeen;
+
+                    stubSeen = [];
+                    stubSeenTimer = 0;
+                    send("seenStubs", { ids: ids });
+                }, 150);
+            }
+        })
+        : null;
+
     function makeRow(song, place) {
 
         if (song.pending) {
@@ -9454,10 +9489,15 @@
         // A div, since a button inside a button is not allowed
         const row = document.createElement("div");
 
+        if (song.stub && stubObserver) {
+
+            row.classList.add("stub");
+            stubObserver.observe(row);
+        }
+
         row.setAttribute("role", "button");
         row.className = "row" + (song.playing ? " playing" : "");
         row.dataset.id = song.id;
-        row.dataset.share = song.share || "";
         attachLongPress(row, song.id);
         songLine(song, row);
 
@@ -13949,6 +13989,15 @@
             { icon: "link", label: "Copy to clipboard", fn: function () {
 
                 closeSongMenu();
+
+                // Song tweaks and the play queue as the short line, with
+                // what goes along chosen first
+                if (kind === "songs" || kind === "queue") {
+
+                    askCopy(kind === "songs" ? "tweaks" : "queue", [], "copy");
+                    return;
+                }
+
                 copyExportHere(kind);
             } }
         ];
@@ -14173,24 +14222,58 @@
 
             if (r.kind === "queue" && r.shared) {
 
-                // Songs someone picked to share: where in the queue they go
-                openChoice(r.what + ", where in the queue?", [
-                    { icon: "queueAdd", label: "Play next", fn: function () {
+                const played = Number(r.played) || 0;
 
-                        closeSongMenu();
-                        applyImport(r.key, ["next"]);
+                // Songs played before the one that was playing where it was
+                // copied: along with the rest, or from that song on
+                const placed = function (mode) {
+
+                    closeSongMenu();
+
+                    if (played === 0) {
+
+                        applyImport(r.key, [mode, true]);
+                        return;
+                    }
+
+                    openChoice((played === 1 ? "1 song was" : played + " songs were") + " played before the playing song", [
+                        { icon: "check", label: played === 1 ? "Take it too" : "Take them too", fn: function () {
+
+                            closeSongMenu();
+                            applyImport(r.key, [mode, true]);
+                        } },
+                        { icon: "play", label: "Start from the playing song", cls: "inset", fn: function () {
+
+                            closeSongMenu();
+                            applyImport(r.key, [mode, false]);
+                        } }
+                    ]);
+                };
+
+                // Songs someone picked to share: where in the queue they go,
+                // or only the values that came with them
+                const choices = [
+                    { icon: "queueAdd", label: "Play next", fn: function () {
+                        placed("next");
                     } },
                     { icon: "listPlus", label: "Add to the end", cls: "inset", fn: function () {
-
-                        closeSongMenu();
-                        applyImport(r.key, ["end"]);
+                        placed("end");
                     } },
                     { icon: "queue", label: "Replace the queue", fn: function () {
+                        placed("replace");
+                    } }
+                ];
+
+                if (r.tweaks && r.tweaks.ok) {
+
+                    choices.push({ icon: "sliders", label: "Only take the tweaks", fn: function () {
 
                         closeSongMenu();
-                        applyImport(r.key, ["replace"]);
-                    } }
-                ]);
+                        askTweaksImport(r.tweaks);
+                    } });
+                }
+
+                openChoice(r.what + ", where in the queue?", choices);
                 return;
             }
 
@@ -14232,50 +14315,57 @@
                 return;
             }
 
-            const conflicts = Array.isArray(r.conflicts) ? r.conflicts : [];
-            const types = Array.isArray(r.types) ? r.types : [];
-
-            // The values that differ of the kinds kept, asked one by one,
-            // the answers put back in their places in the whole list
-            const merge = function (skip) {
-
-                const asked = [];
-
-                conflicts.forEach(function (c, i) {
-
-                    if (skip.indexOf(c.type) < 0) {
-                        asked.push(i);
-                    }
-                });
-
-                askConflicts(asked.map(function (i) {
-                    return conflicts[i];
-                }), function (answers) {
-
-                    const all = conflicts.map(function () {
-                        return false;
-                    });
-
-                    asked.forEach(function (i, k) {
-                        all[i] = answers[k] === true;
-                    });
-
-                    applyImport(r.key, all, skip);
-                });
-            };
-
-            if (types.length === 0) {
-
-                askConfirm(r.what + ". Merge them into the phone's?", "Import", false, function () {
-                    merge([]);
-                });
-                return;
-            }
-
-            askImportTypes(r.what, types, merge);
+            askTweaksImport(r);
         }).catch(function () {
             toast("The phone could not be reached", "bad");
         });
+    }
+
+    // Song tweaks read on the phone: which kinds come in, then every value
+    // that differs, then the phone puts them into effect
+    function askTweaksImport(r) {
+
+        const conflicts = Array.isArray(r.conflicts) ? r.conflicts : [];
+        const types = Array.isArray(r.types) ? r.types : [];
+
+        // The values that differ of the kinds kept, asked one by one,
+        // the answers put back in their places in the whole list
+        const merge = function (skip) {
+
+            const asked = [];
+
+            conflicts.forEach(function (c, i) {
+
+                if (skip.indexOf(c.type) < 0) {
+                    asked.push(i);
+                }
+            });
+
+            askConflicts(asked.map(function (i) {
+                return conflicts[i];
+            }), function (answers) {
+
+                const all = conflicts.map(function () {
+                    return false;
+                });
+
+                asked.forEach(function (i, k) {
+                    all[i] = answers[k] === true;
+                });
+
+                applyImport(r.key, all, skip);
+            });
+        };
+
+        if (types.length === 0) {
+
+            askConfirm(r.what + ". Merge them into the phone's?", "Import", false, function () {
+                merge([]);
+            });
+            return;
+        }
+
+        askImportTypes(r.what, types, merge);
     }
 
     // Which kinds of song tweaks to bring in, a switch each, set the way
@@ -14764,70 +14854,245 @@
         $("pickCount").textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
-    // The short line, the same as the phone makes: each id in base 36,
-    // through BigInt so a long id keeps every digit, with your own tempo
-    // and instrumental mark as the phone wrote them on the row. mps2 when a
-    // song carries one, else mps1, which older players read too
-    function pickedText() {
-
-        const tokens = [];
-
-        for (const id of picked.keys()) {
-
-            const row = document.querySelector('.row[data-id="' + CSS.escape(id) + '"]');
-            let token = row && row.dataset.share ? row.dataset.share : "";
-
-            if (!token) {
-
-                try {
-                    token = BigInt(id).toString(36);
-                } catch (e) {
-                    token = "";
-                }
-            }
-
-            if (/^[0-9a-z]+(_[0-9a-z]+)?!?$/.test(token)) {
-                tokens.push(token);
-            }
-        }
-
-        const tweaks = tokens.some(function (t) {
-            return /[_!]/.test(t);
-        });
-
-        return "Mureka Player songs: " + (tweaks ? "mps2." : "mps1.") + tokens.join(".");
-    }
-
     function copyPicked() {
 
-        const n = picked.size;
-
-        if (n === 0) {
+        if (picked.size === 0) {
 
             toast("Pick songs first", "bad");
             return;
         }
 
-        if (copyText(pickedText())) {
-            toast("Copied " + n + (n === 1 ? " song" : " songs") + ", paste it in Import in the other player", "ok");
-        } else {
-            toast("Could not copy", "bad");
-        }
+        askCopy("songs", Array.from(picked.keys()), "copy");
     }
 
     function sharePicked() {
 
-        const n = picked.size;
-
-        if (n === 0) {
+        if (picked.size === 0) {
 
             toast("Pick songs first", "bad");
             return;
         }
 
-        navigator.share({ title: n + (n === 1 ? " song" : " songs") + " for Mureka Player", text: pickedText() }).catch(function () {
-            // Closed without sharing
+        askCopy("songs", Array.from(picked.keys()), "share");
+    }
+
+    // The values a copy can carry, and what each kind of copy carries until
+    // chosen otherwise in this browser. Songs for someone else leave your
+    // stars and ignored songs at home
+    const COPY_TYPES = [
+        { key: "bpm", label: "Tempos (BPM)" },
+        { key: "instr", label: "Instrumental marks" },
+        { key: "rating", label: "Ratings" },
+        { key: "ignore", label: "Ignored songs" }
+    ];
+
+    const COPY_DEFAULTS = {
+        songs: { bpm: true, instr: true, rating: false, ignore: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true }
+    };
+
+    function copyTypesHere(kind) {
+
+        let kept = {};
+
+        try {
+
+            const all = JSON.parse(localStorage.getItem("murekaCopyTypes") || "{}");
+
+            kept = all && all[kind] && typeof all[kind] === "object" ? all[kind] : {};
+        } catch (e) {
+            kept = {};
+        }
+
+        const out = {};
+
+        for (const t of COPY_TYPES) {
+            out[t.key] = typeof kept[t.key] === "boolean" ? kept[t.key] : COPY_DEFAULTS[kind][t.key];
+        }
+
+        return out;
+    }
+
+    function keepCopyTypes(kind, on) {
+
+        try {
+
+            const all = JSON.parse(localStorage.getItem("murekaCopyTypes") || "{}") || {};
+
+            all[kind] = Object.assign({}, on);
+            localStorage.setItem("murekaCopyTypes", JSON.stringify(all));
+        } catch (e) {
+            // Not kept then, asked as before next time
+        }
+    }
+
+    // A copy of picked songs, the play queue or the song tweaks, as the
+    // short line the phone makes, with a switch for each kind of value that
+    // goes along, and All and None. The line is asked for while the box is
+    // open, so the tap on Copy copies it at once, which a browser allows
+    // only straight from a tap
+    function askCopy(kind, ids, action) {
+
+        const on = copyTypesHere(kind);
+        const titles = {
+            songs: action === "share" ? "Share the picked songs" : "Copy the picked songs",
+            queue: "Copy the play queue",
+            tweaks: "Copy song tweaks"
+        };
+        let line = null;
+        let seq = 0;
+
+        const ask = function () {
+
+            const mine = ++seq;
+
+            line = null;
+
+            return fetch("/shareLine", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ kind: kind, ids: ids || [], types: on }),
+                cache: "no-store"
+            }).then(function (res) {
+                return res.json();
+            }).then(function (r) {
+
+                if (mine === seq && r && r.ok) {
+                    line = r;
+                }
+
+                return r;
+            });
+        };
+
+        const finish = function (r) {
+
+            if (!r || !r.text) {
+
+                toast(kind === "tweaks" ? "No song tweaks to copy with those choices" : "No songs to copy", "bad");
+                return;
+            }
+
+            const what = (kind === "tweaks" ? "the tweaks of " : "") + r.count + (r.count === 1 ? " song" : " songs");
+
+            if (action === "share") {
+
+                navigator.share({ title: r.count + (r.count === 1 ? " song" : " songs") + " for Mureka Player",
+                    text: r.text }).catch(function () {
+                    // Closed without sharing
+                });
+                return;
+            }
+
+            const ok = copyText(r.text);
+
+            toast(ok ? "Copied " + what + ", paste it in Import in the other player" : "This browser could not copy it", ok ? "ok" : "bad");
+        };
+
+        const go = function () {
+
+            const ready = line;
+
+            keepCopyTypes(kind, on);
+            closeSongMenu();
+
+            if (ready) {
+
+                finish(ready);
+                return;
+            }
+
+            // Not here yet, so one more tap copies it once it is
+            toast("Getting it from the phone", "wait");
+            ask().then(function (r) {
+
+                if (!r || !r.ok || !r.text) {
+
+                    finish(r);
+                    return;
+                }
+
+                toast("Ready", "ok");
+                askConfirm("Ready, " + r.count + (r.count === 1 ? " song" : " songs") + ". "
+                    + (action === "share" ? "Share" : "Copy") + " it?", action === "share" ? "Share" : "Copy", false, function () {
+                    finish(r);
+                });
+            }).catch(function () {
+                toast("The phone could not be reached", "bad");
+            });
+        };
+
+        const draw = function () {
+
+            const any = COPY_TYPES.some(function (t) {
+                return on[t.key];
+            });
+            const ready = kind !== "tweaks" || any;
+            const items = COPY_TYPES.map(function (t) {
+
+                return {
+                    icon: on[t.key] ? "check" : "circle",
+                    label: t.label,
+                    cls: on[t.key] ? "inset" : "",
+                    fn: function () {
+
+                        on[t.key] = !on[t.key];
+                        ask().catch(function () {
+                            // Asked again on the tap that copies
+                        });
+                        draw();
+                    }
+                };
+            });
+
+            items.push({ icon: "check", label: "All", fn: function () {
+
+                for (const t of COPY_TYPES) {
+                    on[t.key] = true;
+                }
+
+                ask().catch(function () {
+                    // Asked again on the tap that copies
+                });
+                draw();
+            } });
+
+            items.push({ icon: "circle", label: "None", fn: function () {
+
+                for (const t of COPY_TYPES) {
+                    on[t.key] = false;
+                }
+
+                ask().catch(function () {
+                    // Asked again on the tap that copies
+                });
+                draw();
+            } });
+
+            items.push({
+                icon: action === "share" ? "link" : "copy",
+                label: !ready ? "Choose at least one kind" : (action === "share" ? "Share" : "Copy"),
+                cls: ready ? "accent" : "",
+                fn: function () {
+
+                    if (!ready) {
+
+                        toast("Choose at least one kind to copy", "bad");
+                        return;
+                    }
+
+                    go();
+                }
+            });
+
+            openChoice(titles[kind] + ", tap to switch", items);
+        };
+
+        ask().catch(function () {
+            // Asked again on the tap that copies
         });
+        draw();
     }
 
     // While picking, a tap on a song in any list picks it, before the row's

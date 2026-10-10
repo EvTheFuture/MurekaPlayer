@@ -371,18 +371,32 @@ the new settings layout and a number of smaller improvements.
 - **Select to share** in the song menu picks songs to share with someone
   using the player on another account, unpublished ones too. A tap picks a
   song or lets it go, the bar above the list copies or shares them as a
-  short line of their ids, about eleven characters a song, Done ends it. Your
-  own tempo and instrumental mark go along in a few more characters, and the
-  other player takes them where it has none of its own. The other player
-  reads each song from Mureka. Pasted into Import in the other
-  player, it asks where they go: play next, at the end of the queue or as
-  the whole queue. They play from their links there, kept over a restart,
+  short line of their ids, about eleven characters a song, Done ends it.
+  Before it is copied, a box asks what goes along: tempos, instrumental
+  marks, ratings and ignored songs, each with a switch, All and None,
+  remembered for next time. Pasted into Import in the other player, it asks
+  where they go: play next, at the end of the queue or as the whole queue,
+  or only takes the values along as song tweaks. Songs the other player
+  already has come straight from its library. The others go into the queue
+  at once, known only by their id, and are read from Mureka as they are
+  needed: the first few right away, a row as soon as it is in sight with
+  the next few after it, the songs coming up as many as are cached ahead,
+  and a song about to play before it plays. So a line of any length comes
+  in at once, and a song Mureka no longer has is passed over. The same goes
+  for an imported play queue. The values that came along fill in only
+  where it has none of its own. They play from their links there, kept over a restart,
   with a violet shared badge since they may not be public. The web view has
-  Select to share too, in the song menu, with the same short line, and its
-  Import asks the same. Once such a song shows up on a list read from
+  Select to share too, in the song menu, with the same line and box, and
+  its Import asks the same. Once such a song shows up on a list read from
   Mureka, the creator's public songs for one, the published version takes
   its place, with a note saying so. Once a day the shared songs are also
   looked up for new titles and covers.
+- **Copy to clipboard as a short line**: song tweaks and the play queue
+  copied to the clipboard go as the same short line as shared songs, with
+  the same box for what goes along. A line of song tweaks carries what a
+  file does, values removed included, and its Import asks as a file's
+  does. A copied play queue marks the song that was playing, and Import
+  asks whether the songs played before it come along. Files stay as before.
 - **Mureka song links in Import**: pasted share links from Mureka's site,
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.
