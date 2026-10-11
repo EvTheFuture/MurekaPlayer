@@ -473,7 +473,9 @@
         touch-action: none;
     }
 
-    /* A small mark at their top for the swipe up that opens the other list */
+    /* A small arrow at the top of Songs and List for the swipe up that
+       opens the other list. On Songs it points down while the small list
+       is open, a swipe down closing it */
     #browseBtn::before,
     #miniBtn::before {
         content: "";
@@ -487,6 +489,12 @@
         border-left: 2px solid currentColor;
         transform: rotate(45deg);
         opacity: 0.45;
+        transition: transform 0.2s ease, top 0.2s ease;
+    }
+
+    #app.miniOpen #browseBtn::before {
+        top: 3px;
+        transform: rotate(225deg);
     }
 
     #browseBtn.fail::after {
@@ -9269,7 +9277,8 @@
         row.appendChild(grip);
         songLine(item, row);
 
-        if (item.index > pos) {
+        // Any row but the playing song's can be taken out, played or to come
+        if (item.index !== pos) {
 
             row.appendChild(lineButton("Remove from the queue", "close", function () {
                 send("queueRemove", item.index).then(function () {
@@ -12760,8 +12769,8 @@
         updateMiniLocate();
     }
 
-    // A swipe up on Songs or a tap on List opens the small list, the same
-    // again closes it
+    // A tap on List opens the small list and closes it again. A swipe up on
+    // Songs opens it, a swipe down closes it
     function toggleMini() {
 
         if (miniOpen) {
@@ -12976,7 +12985,8 @@
                     next.remove();
                 }
 
-                if (item.index > data.pos) {
+                // Any row but the playing song's, played or to come
+                if (item.index !== data.pos) {
 
                     row.appendChild(lineButton("Remove from the queue", "close", function () {
                         send("queueRemove", item.index).then(function () {
@@ -13894,8 +13904,8 @@
             const dx = ev.clientX - holdStart.x;
             const dy = ev.clientY - holdStart.y;
 
-            // Songs swiped upwards opens or closes the small list, List swiped
-            // upwards opens the whole one, the other way round from a tap.
+            // Songs swiped upwards opens the small list, List swiped upwards
+            // opens the whole one, the other way round from a tap.
             // Going up is not a slip there, it gives up the hold that would
             // move the button and waits for the swipe to be long enough
             const swipeBtn = holdStart.btn.id === "browseBtn" || holdStart.btn.id === "miniBtn";
@@ -13915,8 +13925,13 @@
                         swallowClick = false;
                     }, 400);
 
+                    // Songs swiped up opens the small list, a swipe down
+                    // closes it again
                     if (which === "browseBtn") {
-                        toggleMini();
+
+                        if (!miniOpen) {
+                            openMini();
+                        }
                     } else {
                         openFullList();
                     }
@@ -15290,6 +15305,21 @@
 
                 closeSongMenu();
                 send("queueRemove", m.queueAt).then(function () {
+
+                    toast("Taken out of the queue", "ok");
+                    setTimeout(reloadQueues, 200);
+                });
+            }, "warn"));
+        }
+
+        // Opened on a played row of a queue, that one song can go too
+        if (!(typeof m.queueAt === "number" && m.queueAt >= 0) && typeof queueIndex === "number" && queueIndex >= 0
+            && typeof m.queuePos === "number" && queueIndex < m.queuePos) {
+
+            box.appendChild(menuItem("close", "Remove from queue", function () {
+
+                closeSongMenu();
+                send("queueRemove", queueIndex).then(function () {
 
                     toast("Taken out of the queue", "ok");
                     setTimeout(reloadQueues, 200);

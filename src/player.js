@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.294";
+    const VERSION = "1.9.9.297";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10279,15 +10279,26 @@
         return -1;
     }
 
-    // Take a song still to come out of the queue. The playing song and the
-    // ones played stay
+    // Take a song out of the queue, one still to come or one played. The
+    // playing song stays
     function removeFromQueue(i) {
 
-        if (!Number.isInteger(i) || i <= queuePos || i >= queue.length) {
+        if (!Number.isInteger(i) || i < 0 || i === queuePos || i >= queue.length) {
             return;
         }
 
         const song = queue.splice(i, 1)[0];
+
+        // One played before the playing song: that one is a place further
+        // up now, also in the queue Play resumes when it is the same
+        if (i < queuePos) {
+
+            queuePos -= 1;
+
+            if (resumeState && resumeState.queue === queue) {
+                resumeState.queuePos = queuePos;
+            }
+        }
 
         playNextMarks.delete(String(song.song_id));
         dropNextReady();
@@ -42743,6 +42754,16 @@
         // On the playing song it is the others that go, it keeps playing
         const qi = typeof queueIndex === "number" && queueIndex >= 0 && queue[queueIndex]
             && queue[queueIndex].song_id === song.song_id ? queueIndex : -1;
+
+        // A played row of the queue can go on its own as well
+        if (qi >= 0 && qi < queuePos) {
+
+            addMenuRow("Remove from queue", STAR_GOLD, function () {
+
+                removeFromQueue(qi);
+                showToast("Taken out of the queue", true);
+            }, "close");
+        }
 
         if (qi >= 0 && cutRange(qi, "after").length > 0) {
 
