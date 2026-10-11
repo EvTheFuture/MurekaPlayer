@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.267";
+    const VERSION = "1.9.9.268";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1127,6 +1127,56 @@
         } catch (e) {
             return net;
         }
+    }
+
+    // A song's file read in full, then handed on as an answer held in
+    // memory, ready to be stored. Safari stores an answer still streaming
+    // in such a way that the copy can later not be read, which left songs
+    // marked as stored with no waveform. A stall or a short file fails here,
+    // before anything is stored
+    async function wholeDownload(song, net) {
+
+        const blob = await trackDownload(song, net).blob();
+
+        return new Response(blob, { status: net.status, statusText: net.statusText, headers: net.headers });
+    }
+
+    // A stored copy of a song that cannot be read or decoded is thrown
+    // away, so the song is not shown as stored when it is not, and fetched
+    // again, once per song for each opening of the page. False when it was
+    // thrown away once already, the song itself is then what fails
+    const brokenCopies = new Set();
+
+    async function dropBrokenCopy(song, url, why) {
+
+        const id = String(song.song_id);
+        const again = !brokenCopies.has(id);
+
+        brokenCopies.add(id);
+        dbgLog("Cache", "the stored copy of " + id + " " + why + ", thrown away" + (again ? " and fetched again" : ""));
+
+        try {
+            await (await caches.open(AUDIO_CACHE)).delete(url, { ignoreVary: true });
+        } catch (e) {
+            // Gone already, or the store is not there
+        }
+
+        if (cachedIds.delete(song.song_id)) {
+
+            saveCacheMarksSoon();
+            repaintCacheDot(song);
+        }
+
+        if (again) {
+            fetchToCache(song, true);
+        }
+
+        return again;
+    }
+
+    // An error in a few words for the debug log
+    function errText(e) {
+        return (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
     }
 
     // How far a song being cached has come, in percent, 100 while its size
@@ -7170,7 +7220,7 @@
                 // being played, but it must still fail rather than hang, or
                 // playback dies silently with no error to recover from
                 const got = await timedFetch(direct, {}, 30000);
-                const net = got && got.ok ? trackDownload(song, got) : got;
+                const net = got && got.ok ? await wholeDownload(song, got) : got;
 
                 if (net && net.ok) {
                     await store.put(direct, net.clone());
@@ -7186,7 +7236,18 @@
             }
 
             if (resp) {
-                const blob = await resp.blob();
+
+                let blob = null;
+
+                try {
+                    blob = await resp.blob();
+                } catch (e) {
+
+                    // A stored copy that cannot be read plays from Mureka,
+                    // and is fetched again
+                    await dropBrokenCopy(song, direct, "could not be read (" + errText(e) + ")");
+                    return direct;
+                }
 
                 return URL.createObjectURL(blob);
             }
@@ -7322,7 +7383,7 @@
                 return false;
             }
 
-            await store.put(url, trackDownload(song, got));
+            await store.put(url, await wholeDownload(song, got));
             cachedIds.add(song.song_id);
             songStored(song);
 
@@ -8995,7 +9056,7 @@
                 repaintCacheDot(song);
 
                 const got = await timedFetch(direct);
-                const net = got && got.ok ? trackDownload(song, got) : got;
+                const net = got && got.ok ? await wholeDownload(song, got) : got;
 
                 // Only a 404 proves the file is gone. Anything else can be a
                 // dropped connection, a proxy error or an expired link
@@ -18600,7 +18661,32 @@
         }
 
         const t0 = Date.now();
-        const buffer = await trimDecode(new Off(1, 1, 8000), await hit.arrayBuffer());
+        let bytes = null;
+        let buffer = null;
+
+        try {
+            bytes = await hit.arrayBuffer();
+        } catch (e) {
+
+            // Fetched again, the waveform follows once it is stored
+            if (await dropBrokenCopy(song, url, "could not be read (" + errText(e) + ")")) {
+                return null;
+            }
+
+            throw e;
+        }
+
+        try {
+            buffer = await trimDecode(new Off(1, 1, 8000), bytes);
+        } catch (e) {
+
+            if (await dropBrokenCopy(song, url, "could not be decoded (" + errText(e) + ")")) {
+                return null;
+            }
+
+            throw e;
+        }
+
         const chans = [];
 
         for (let c = 0; c < buffer.numberOfChannels; c++) {
@@ -18690,7 +18776,7 @@
 
                 // Stored but not readable, trying again would not help
                 failed = true;
-                dbgLog("Audio", "Own waveform for " + id + " failed: " + (e && e.message ? e.message : e));
+                dbgLog("Audio", "Own waveform for " + id + " failed: " + errText(e));
             }
 
             if (ownWaveBusy !== job) {
