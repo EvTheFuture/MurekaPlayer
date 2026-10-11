@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.271";
+    const VERSION = "1.9.9.275";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1204,6 +1204,49 @@
         return openStores.get(name);
     }
 
+    // What is on the screen comes first: the playing song read from the
+    // store, its waveform worked out. Work for the lists and the library,
+    // checking what is stored, collecting waveforms from list pages,
+    // storing the songs ahead, waits its turn: while such work runs, for a
+    // moment after it, and for the first seconds of a song. Safari answers
+    // one store request after another, so a long check in the background
+    // made the playing song wait
+    let foregroundWork = 0;
+    let foregroundAt = 0;
+
+    const BACKGROUND_AFTER_MS = 1500;
+    const BACKGROUND_SONG_START_MS = 4000;
+
+    async function foreground(work) {
+
+        foregroundWork += 1;
+
+        try {
+            return await work;
+        } finally {
+
+            foregroundWork -= 1;
+            foregroundAt = Date.now();
+        }
+    }
+
+    // Waits until nothing on the screen is waiting, then for a moment the
+    // browser has nothing else to do
+    async function backgroundTurn() {
+
+        while (foregroundWork > 0 || Date.now() - foregroundAt < BACKGROUND_AFTER_MS
+            || Date.now() - trackAskedAt < BACKGROUND_SONG_START_MS) {
+            await sleep(250);
+        }
+
+        if (typeof window.requestIdleCallback === "function") {
+
+            await new Promise(function (resolve) {
+                window.requestIdleCallback(resolve, { timeout: 1000 });
+            });
+        }
+    }
+
     // An error in a few words for the debug log
     function errText(e) {
         return (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
@@ -1227,6 +1270,10 @@
 
         storeBroken = true;
         openStores.clear();
+
+        // A next song made ready from the store may no longer play either,
+        // it is made ready again, from Mureka if need be
+        dropNextReady();
         showToast("The browser stopped answering for the stored songs. They play from Mureka meanwhile,"
             + " reload the page to store songs again", false);
     }
@@ -7783,27 +7830,77 @@
         }
 
         try {
+
             const store = await openStore(AUDIO_CACHE);
-            const requests = await store.keys();
 
-            const urls = new Set(requests.map(function (r) {
-                return r.url;
-            }));
+            if (cachedIds.size === 0) {
 
-            const ids = new Set();
+                // No marks from last time, the store is listed once to find
+                // what it holds, when nothing on the screen is waiting
+                await backgroundTurn();
 
-            for (const song of cache.songs) {
+                const requests = await store.keys();
+                const urls = new Set(requests.map(function (r) {
+                    return r.url;
+                }));
+                const ids = new Set();
 
-                const url = songUrl(song);
+                for (const song of cache.songs) {
 
-                if (url && urls.has(url)) {
-                    ids.add(song.song_id);
+                    const url = songUrl(song);
+
+                    if (url && urls.has(url)) {
+                        ids.add(song.song_id);
+                    }
                 }
-            }
 
-            cachedIds = ids;
-            renderList();
-            logStartup("songs", "cached songs checked, " + ids.size + " of " + cache.songs.length);
+                cachedIds = ids;
+                renderList();
+                saveCacheMarksSoon();
+                logStartup("songs", "cached songs checked, " + ids.size + " of " + cache.songs.length);
+            } else {
+
+                // The songs marked as stored last time are looked up one at
+                // a time, giving way to what is on the screen every few
+                // songs. Listing the whole store took Safari many seconds,
+                // and nothing else of the store answered meanwhile
+                const marked = cache.songs.filter(function (song) {
+                    return cachedIds.has(song.song_id);
+                });
+                let gone = 0;
+
+                for (let i = 0; i < marked.length; i += 1) {
+
+                    if (i % 20 === 0) {
+                        await backgroundTurn();
+                    }
+
+                    const song = marked[i];
+                    const url = songUrl(song);
+                    let held = true;
+
+                    try {
+                        held = !!(url && await store.match(url));
+                    } catch (e) {
+
+                        // The store failing says nothing about the song
+                        held = true;
+                    }
+
+                    if (!held && cachedIds.delete(song.song_id)) {
+                        gone += 1;
+                    }
+                }
+
+                if (gone > 0) {
+
+                    saveCacheMarksSoon();
+                    renderList();
+                }
+
+                logStartup("songs", "cached songs checked, " + cachedIds.size + " of " + cache.songs.length
+                    + (gone > 0 ? ", " + gone + " no longer stored" : ""));
+            }
         } catch (e) {
         }
 
@@ -7816,6 +7913,8 @@
     async function refreshArtCachedIds() {
 
         try {
+
+            await backgroundTurn();
 
             const store = await openStore(ART_STORE);
             const requests = await store.keys();
@@ -9206,6 +9305,21 @@
                 repaintCacheDot(song);
             }
 
+            // The browser's store failing, the song streams from Mureka
+            if (isStoreFailure(e) && !offlineMode()) {
+
+                noteStoreBroken(e, "playing " + song.song_id);
+
+                if (token !== playToken || !currentSong || currentSong.song_id !== song.song_id) {
+                    return "stale";
+                }
+
+                setCurrentSrc(direct);
+                startAudioPlayback();
+
+                return "playing";
+            }
+
             return "failed";
         }
     }
@@ -9223,21 +9337,46 @@
         const failed = currentSong;
         const title = failed.title || "Untitled";
         const token = playToken;
+        const src = audio ? String(audio.currentSrc || audio.src || "") : "";
+        const fromStore = src.indexOf("blob:") === 0;
 
         // The retry itself failed, stop here and leave the queue in place so
         // the next play press starts again from the same song
         if (errorRetryToken === token) {
 
-            // A stored copy that will not decode is not worth keeping
-            removeFromCache(failed);
-            cachedIds.delete(failed.song_id);
-            renderList();
+            // A stored copy that will not decode is not worth keeping. One
+            // that failed to stream says nothing about the stored copy
+            if (fromStore) {
+
+                removeFromCache(failed);
+                cachedIds.delete(failed.song_id);
+                renderList();
+            }
+
             updatePlayPause();
             setStatus("Could not play, press play to retry: " + title);
             return;
         }
 
         errorRetryToken = token;
+
+        // The stored copy, or one made ready ahead from it, would not play.
+        // Safari can lose the stored songs while the page is in the
+        // background, a copy read before then no longer plays. The song is
+        // streamed from Mureka instead, rather than skipped
+        if (fromStore && !offlineMode()) {
+
+            const direct = songUrl(failed);
+
+            if (direct) {
+
+                dbgLog("Song", "the stored copy of " + failed.song_id + " would not play, streamed from Mureka");
+                dropNextReady();
+                setCurrentSrc(direct);
+                startAudioPlayback();
+                return;
+            }
+        }
 
         const outcome = await retryFromFetch(failed);
 
@@ -11418,7 +11557,16 @@
             setTimeout(function () {
 
                 if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
+
                     showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), "wait");
+
+                    // Gone again once it plays, by a tap or by the browser
+                    // itself when the page is back in view
+                    const seq = toastSeq;
+
+                    audio.addEventListener("playing", function () {
+                        hideToast(seq);
+                    }, { once: true });
                 }
             }, 2500);
         }
@@ -12104,7 +12252,7 @@
                 primeAudio();
             }
 
-            stored = getPlayableUrl(song);
+            stored = foreground(getPlayableUrl(song));
         }
 
         // Art and title right away, even while the audio is still loading
@@ -13793,6 +13941,8 @@
             }
 
             const song = queue[pos];
+
+            await backgroundTurn();
 
             // What comes next changed meanwhile, a newer round takes over
             if (round !== prefetchRound) {
@@ -18382,6 +18532,36 @@
         });
     }
 
+    // Take the note away before its time, when what it asked for has
+    // happened. seq, when given, is the note meant, a newer one stays
+    function hideToast(seq) {
+
+        if (seq !== undefined && seq !== toastSeq) {
+            return;
+        }
+
+        clearTimeout(toastHideTimer);
+
+        if (panelToastEl) {
+
+            try {
+
+                panelToastEl.getAnimations().forEach(function (a) {
+                    a.cancel();
+                });
+            } catch (e) {
+                // Nothing running
+            }
+
+            panelToastEl.style.opacity = "0";
+        }
+
+        // The web views take theirs away too
+        toastSeq += 1;
+        lastToast = { n: toastSeq, text: "", ok: true, kind: "hide", at: Date.now() };
+        publishHostSoon();
+    }
+
     // Show a short confirmation pill centered on the art
     function showArtToast(text) {
 
@@ -18608,6 +18788,8 @@
 
             try {
 
+                await backgroundTurn();
+
                 const store = await openStore(WAVE_STORE);
                 const key = waveStoreKey(id);
 
@@ -18676,6 +18858,8 @@
 
                 let page;
 
+                await backgroundTurn();
+
                 try {
                     page = await fetchPage(cursor);
                 } catch (e) {
@@ -18739,6 +18923,11 @@
     const OWN_WAVE_POINTS = 2000;
 
     let ownWaveBusy = null;
+
+    // When the own waveform is tried, from the song's start: soon, then
+    // more and more seldom while the song is not stored yet. A song stored
+    // meanwhile has it worked out at once
+    const OWN_WAVE_RETRY_MS = [2000, 3000, 5000, 8000, 15000];
 
     function ownWaveKey(id) {
 
@@ -18916,6 +19105,7 @@
         const job = { id: id };
 
         ownWaveBusy = job;
+        paintWaveWait();
 
         setTimeout(async function () {
 
@@ -18930,7 +19120,7 @@
             try {
 
                 if (currentSong && currentSong.song_id === id && ownWaveWanted()) {
-                    own = await makeOwnWave(song);
+                    own = await foreground(makeOwnWave(song));
                 }
             } catch (e) {
 
@@ -18944,6 +19134,7 @@
             }
 
             ownWaveBusy = null;
+            paintWaveWait();
 
             if (!currentSong || currentSong.song_id !== id || !ownWaveWanted()) {
                 return;
@@ -18957,7 +19148,7 @@
             } else if (!failed) {
                 makeOwnWaveSoon(song, (tries || 0) + 1);
             }
-        }, now ? 200 : (tries ? 15000 : 2000));
+        }, now ? 200 : OWN_WAVE_RETRY_MS[Math.min(tries || 0, OWN_WAVE_RETRY_MS.length - 1)]);
     }
 
     // A song has just been stored on this device. Its cover is kept with
@@ -19072,14 +19263,36 @@
 
         waveData = settings.waveSource === "song" && waveOwn ? waveOwn : waveMureka;
         updateSeekMode();
+        paintWaveWait();
         publishHostSoon();
+    }
+
+    // Whether the playing song's own waveform is being worked out or waited
+    // for, the song still to be stored first
+    function ownWaveWorking() {
+        return !!(ownWaveBusy && currentSong && ownWaveBusy.id === currentSong.song_id && !waveOwn);
+    }
+
+    // While the own waveform is chosen and still to come, the bar or
+    // Mureka's waveform in its place fades softly in and out
+    function paintWaveWait() {
+
+        const on = settings.waveSource === "song" && ownWaveWorking();
+        const pulse = on ? "mureka-wave-wait 2.4s ease-in-out infinite" : "";
+
+        for (const el of [waveCanvas, seekBar]) {
+
+            if (el && el.style.animation !== pulse) {
+                el.style.animation = pulse;
+            }
+        }
     }
 
     // Load the stored waveforms for the song now starting
     async function loadWaveForSong(song) {
 
         const id = song.song_id;
-        const own = await loadOwnWave(id);
+        const own = await foreground(loadOwnWave(id));
 
         if (!currentSong || currentSong.song_id !== id) {
             return;
@@ -20437,6 +20650,7 @@
             // the state goes out every second and they change once a song.
             // The key says when to read them again
             partsKey: hostPartsKey(),
+            waveWorking: ownWaveWorking(),
             exportsKey: hostExportsKey(),
             trimJob: hostTrimJob,
             trimFade: settings.trimFade !== false,
@@ -24205,6 +24419,7 @@
             + ".mureka-pie.mureka-pie-loading{animation:mureka-fade-dot 1.2s ease-in-out infinite}"
             + "@keyframes mureka-fade-dot{50%{opacity:0.45}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
+            + "@keyframes mureka-wave-wait{0%,100%{opacity:1}50%{opacity:0.45}}"
 
             // Every button lights up and dips a little while it is pressed,
             // so a tap is seen to have landed even when what it does shows

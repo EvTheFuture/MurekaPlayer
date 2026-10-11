@@ -2506,6 +2506,32 @@
         position: relative;
     }
 
+    /* The own waveform still being worked out on the phone: the bar or the
+       waveform in its place fades softly in and out */
+    #bar.waveWait #wave,
+    #bar.waveWait #track {
+        animation: waveWait 2.4s ease-in-out infinite;
+    }
+
+    @keyframes waveWait {
+        0%, 100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: 0.45;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+        #bar.waveWait #wave,
+        #bar.waveWait #track {
+            animation: none;
+            opacity: 0.7;
+        }
+    }
+
     #wave {
         position: absolute;
         left: 0;
@@ -4772,9 +4798,11 @@
         s.heatText = look.heatText === "word" || look.heatText === "both" || look.heatText === "temp"
             ? look.heatText : raw.heatText;
 
-        // Our own waveform when chosen and the phone has it ready
+        // Our own waveform when chosen and the phone has it ready, and
+        // whether it is still being worked out there
         s.waveFine = false;
         s.waveLoud = null;
+        s.waveWait = look.waveSource === "song" && raw.waveWorking === true;
 
         if (look.waveSource === "song" && Array.isArray(raw.waveOwn) && raw.waveOwn.length > 0) {
 
@@ -6943,6 +6971,7 @@
 
         $("wave").style.display = wave ? "block" : "none";
         $("track").style.visibility = wave ? "hidden" : "visible";
+        $("bar").classList.toggle("waveWait", !!(s && s.waveWait && !s.waveFine));
         waveShown = -1;
 
         const playing = !!(s && s.playing);
@@ -13935,6 +13964,15 @@
         }
 
         toastSeen = key;
+
+        // The phone took its note away, what it asked for has happened
+        if (t.kind === "hide") {
+
+            clearTimeout(toastTimer);
+            $("toast").style.display = "none";
+            return;
+        }
+
         toast(t.text, t.kind === "wait" || t.kind === "online" ? t.kind : (t.ok === false ? "bad" : "ok"));
     }
 
