@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.289";
+    const VERSION = "1.9.9.290";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19767,7 +19767,7 @@
     // Our own waveform, worked out from the song itself, many more points
     // than Mureka's and true to the sound. Kept beside Mureka's in the
     // same store, so it is only worked out once per song
-    const OWN_WAVE_POINTS = 2000;
+    const OWN_WAVE_POINTS = 4000;
 
     let ownWaveBusy = null;
 
@@ -20104,7 +20104,8 @@
     // out now instead of at the next try
     function ownWaveOnStored(song) {
 
-        if (currentSong && currentSong.song_id === song.song_id && !waveOwn && ownWaveWanted()) {
+        if (currentSong && currentSong.song_id === song.song_id && ownWaveWanted()
+            && (!waveOwn || waveOwn.length < OWN_WAVE_POINTS)) {
             makeOwnWaveSoon(song, 0, true);
         }
     }
@@ -20159,8 +20160,10 @@
         waveOwn = own ? own.peak : null;
         waveOwnLoud = own ? own.loud : null;
 
-        // Not worked out yet, done in the background once the song is cached
-        if (!own && ownWaveWanted()) {
+        // Not worked out yet, or kept from before it had as many points as
+        // now, which shows meanwhile: worked out in the background once the
+        // song is cached
+        if ((!own || own.peak.length < OWN_WAVE_POINTS) && ownWaveWanted()) {
             makeOwnWaveSoon(song, 0);
         }
 
@@ -20285,7 +20288,7 @@
     // commit(frac) to seek, redraw() after a change of the view
     function makeWaveZoom(el, hooks) {
 
-        const ZOOM_MAX = 16;
+        const ZOOM_MAX = 32;
         const EDGE = 2 / 3;
         const EDGE_SPEED = 1.5;
         const GLIDE_MS = 350;

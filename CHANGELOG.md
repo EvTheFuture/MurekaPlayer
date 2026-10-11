@@ -602,7 +602,7 @@ the new settings layout and a number of smaller improvements.
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
 - **Zoom into the waveform**, in the player and the web views: pinch, or
-  the mouse wheel over it, zooms in up to 16 times, pinch or a double tap
+  the mouse wheel over it, zooms in up to 32 times, pinch or a double tap
   zooms out. Zoomed in, the play head stays in the middle and the
   waveform moves under it, with a thin line along the foot showing where
   in the song the view is. Dragging past two thirds of the way to an edge
