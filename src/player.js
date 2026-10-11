@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.268";
+    const VERSION = "1.9.9.271";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1156,7 +1156,7 @@
         dbgLog("Cache", "the stored copy of " + id + " " + why + ", thrown away" + (again ? " and fetched again" : ""));
 
         try {
-            await (await caches.open(AUDIO_CACHE)).delete(url, { ignoreVary: true });
+            await (await openStore(AUDIO_CACHE)).delete(url, { ignoreVary: true });
         } catch (e) {
             // Gone already, or the store is not there
         }
@@ -1174,9 +1174,109 @@
         return again;
     }
 
+    // The browser's stores, each opened once and kept. Opened anew for
+    // every read and write, a list page of songs asked Safari for dozens of
+    // stores at once, every few seconds while songs were generating, which
+    // is the likeliest way its store came to stop answering. One that fails
+    // to open is opened anew the next time
+    const openStores = new Map();
+
+    // Songs whose waveform from a list page was looked at while the page is
+    // open, and the one keeping now, so they are kept one at a time
+    const wavesKept = new Set();
+    let waveSaving = Promise.resolve();
+
+    function openStore(name) {
+
+        if (!openStores.has(name)) {
+
+            const opening = caches.open(name);
+
+            openStores.set(name, opening);
+            opening.catch(function () {
+
+                if (openStores.get(name) === opening) {
+                    openStores.delete(name);
+                }
+            });
+        }
+
+        return openStores.get(name);
+    }
+
     // An error in a few words for the debug log
     function errText(e) {
         return (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
+    }
+
+    // Safari can stop answering for the stored songs while the page stays
+    // open, most often after it was in the background a while: every read
+    // fails with an internal error until the page is opened again. Songs
+    // then play from Mureka, their waveforms are worked out from Mureka's
+    // file, and a note says once that reloading the page brings the store
+    // back. When the page is back in view it is asked again
+    let storeBroken = false;
+
+    function noteStoreBroken(e, doing) {
+
+        dbgLog("Cache", "the browser's store failed while " + doing + ": " + errText(e));
+
+        if (storeBroken) {
+            return;
+        }
+
+        storeBroken = true;
+        openStores.clear();
+        showToast("The browser stopped answering for the stored songs. They play from Mureka meanwhile,"
+            + " reload the page to store songs again", false);
+    }
+
+    // Whether an error is the browser's store failing, Safari's internal
+    // error, rather than the data or the network
+    function isStoreFailure(e) {
+        return !!(e && e.name === "TypeError" && /internal error/i.test(String(e.message)));
+    }
+
+    function checkStoreAgain() {
+
+        if (!storeBroken || document.hidden) {
+            return;
+        }
+
+        caches.open(AUDIO_CACHE).then(function (store) {
+            return store.match("https://mureka-store-check/");
+        }).then(function () {
+
+            storeBroken = false;
+            openStores.clear();
+            dbgLog("Cache", "the browser's store answers again");
+        }).catch(function () {
+            // Still not answering, asked again next time
+        });
+    }
+
+    // A song's file read from Mureka, for its waveform when the stored copy
+    // cannot be read. Null when Mureka could not be reached
+    async function songBytesFromMureka(song, url) {
+
+        try {
+
+            const got = await timedFetch(url, {}, 30000);
+
+            if (!got || !got.ok) {
+                return null;
+            }
+
+            const blob = await trackDownload(song, got).blob();
+
+            cachingProgress.delete(song.song_id);
+
+            return await blob.arrayBuffer();
+        } catch (e) {
+
+            dbgLog("Audio", "the file of " + song.song_id + " could not be read from Mureka: " + errText(e));
+            return null;
+        }
     }
 
     // How far a song being cached has come, in percent, 100 while its size
@@ -2951,6 +3051,8 @@
     function playerBackInView() {
 
         if (!document.hidden) {
+
+            checkStoreAgain();
             maybeRefreshOnReturn(listView === "queue");
         }
     }
@@ -5172,7 +5274,7 @@
             artCache.delete(song.song_id);
             coverRechecked.delete(String(song.song_id));
 
-            caches.open(ART_STORE).then(function (store) {
+            openStore(ART_STORE).then(function (store) {
                 return store.delete(artStoreKey(song.song_id));
             }).catch(function () {
                 // Stored again when the cover is next needed
@@ -6986,7 +7088,7 @@
 
         try {
 
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
             const keys = await store.keys();
 
             songClearing = { done: 0, total: keys.length };
@@ -7193,7 +7295,7 @@
         }
 
         try {
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
             let resp = await store.match(direct);
 
             // Marked as stored, but the copy is gone, cleared by the browser
@@ -7244,8 +7346,14 @@
                 } catch (e) {
 
                     // A stored copy that cannot be read plays from Mureka,
-                    // and is fetched again
-                    await dropBrokenCopy(song, direct, "could not be read (" + errText(e) + ")");
+                    // and is fetched again. With the store itself failing
+                    // the copy is left as it is
+                    if (isStoreFailure(e)) {
+                        noteStoreBroken(e, "reading the stored copy of " + song.song_id);
+                    } else {
+                        await dropBrokenCopy(song, direct, "could not be read (" + errText(e) + ")");
+                    }
+
                     return direct;
                 }
 
@@ -7305,7 +7413,7 @@
         }
 
         try {
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
             const resp = await store.match(direct);
 
             if (!resp) {
@@ -7367,7 +7475,7 @@
         }
 
         try {
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
 
             if (await store.match(url)) {
                 return true;
@@ -7389,6 +7497,12 @@
 
             return true;
         } catch (e) {
+
+            // The browser's own store failing, not the download
+            if (isStoreFailure(e)) {
+                noteStoreBroken(e, "storing " + song.song_id);
+            }
+
             return false;
         } finally {
 
@@ -7663,13 +7777,13 @@
         try {
 
             // The songs in view first, then the whole cache
-            await markSeenSongs(await caches.open(AUDIO_CACHE));
+            await markSeenSongs(await openStore(AUDIO_CACHE));
         } catch (e) {
             // The full check below does it all
         }
 
         try {
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
             const requests = await store.keys();
 
             const urls = new Set(requests.map(function (r) {
@@ -7703,7 +7817,7 @@
 
         try {
 
-            const store = await caches.open(ART_STORE);
+            const store = await openStore(ART_STORE);
             const requests = await store.keys();
             const prefix = "https://mureka-art-cache/";
             const ids = new Set();
@@ -7732,7 +7846,7 @@
         }
 
         try {
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
 
             return await store.delete(url);
         } catch (e) {
@@ -7749,7 +7863,7 @@
 
         try {
 
-            const artStore = await caches.open(ART_STORE);
+            const artStore = await openStore(ART_STORE);
 
             await artStore.delete(artStoreKey(song.song_id));
         } catch (e) {
@@ -7757,7 +7871,7 @@
 
         try {
 
-            const waveStore = await caches.open(WAVE_STORE);
+            const waveStore = await openStore(WAVE_STORE);
 
             await waveStore.delete(waveStoreKey(song.song_id));
             await waveStore.delete(ownWaveKey(song.song_id));
@@ -9046,7 +9160,7 @@
         const token = playToken;
 
         try {
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
             let resp = await store.match(direct);
 
             if (!resp) {
@@ -12687,7 +12801,7 @@
 
         try {
 
-            const store = await caches.open(DETAIL_STORE);
+            const store = await openStore(DETAIL_STORE);
             const res = await store.match(detailStoreKey(id));
 
             if (!res) {
@@ -13392,7 +13506,7 @@
 
         try {
 
-            const store = await caches.open(DETAIL_STORE);
+            const store = await openStore(DETAIL_STORE);
             const keys = await store.keys();
             const prefix = "https://mureka-detail-cache/";
 
@@ -13431,7 +13545,7 @@
 
         try {
 
-            const store = await caches.open(DETAIL_STORE);
+            const store = await openStore(DETAIL_STORE);
 
             await store.put(detailStoreKey(id), new Response(JSON.stringify(entry), {
                 headers: { "Content-Type": "application/json" }
@@ -18132,7 +18246,7 @@
             artCache.delete(song.song_id);
 
             try {
-                await (await caches.open(ART_STORE)).delete(artStoreKey(song.song_id));
+                await (await openStore(ART_STORE)).delete(artStoreKey(song.song_id));
             } catch (e) {
                 // Stored again when the cover is next needed
             }
@@ -18478,22 +18592,40 @@
     }
 
     // Persist a song's waveform, skipping songs already stored
-    async function saveWaveToStore(id, list) {
+    // Every list page brings the waveforms of its songs. They are kept
+    // one at a time rather than all at once, see wavesKept
+    function saveWaveToStore(id, list) {
 
-        try {
+        const name = String(id);
 
-            const store = await caches.open(WAVE_STORE);
-            const key = waveStoreKey(id);
-
-            if (await store.match(key)) {
-                return;
-            }
-
-            await store.put(key, new Response(JSON.stringify(list), {
-                headers: { "Content-Type": "application/json" }
-            }));
-        } catch (e) {
+        if (wavesKept.has(name)) {
+            return waveSaving;
         }
+
+        wavesKept.add(name);
+
+        waveSaving = waveSaving.then(async function () {
+
+            try {
+
+                const store = await openStore(WAVE_STORE);
+                const key = waveStoreKey(id);
+
+                if (await store.match(key)) {
+                    return;
+                }
+
+                await store.put(key, new Response(JSON.stringify(list), {
+                    headers: { "Content-Type": "application/json" }
+                }));
+            } catch (e) {
+
+                // Kept another time
+                wavesKept.delete(name);
+            }
+        });
+
+        return waveSaving;
     }
 
     // Read a song's stored waveform, or null when it has none yet
@@ -18501,7 +18633,7 @@
 
         try {
 
-            const store = await caches.open(WAVE_STORE);
+            const store = await openStore(WAVE_STORE);
             const res = await store.match(waveStoreKey(id));
 
             if (!res) {
@@ -18620,7 +18752,7 @@
 
         try {
 
-            const store = await caches.open(WAVE_STORE);
+            const store = await openStore(WAVE_STORE);
             const res = await store.match(ownWaveKey(id));
             const kept = res ? await res.json() : null;
 
@@ -18647,40 +18779,68 @@
             return null;
         }
 
-        const store = await caches.open(AUDIO_CACHE);
-        const hit = await store.match(url, { ignoreVary: true });
-
-        if (!hit) {
-            return null;
-        }
-
         const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
 
         if (!Off) {
             return null;
         }
 
-        const t0 = Date.now();
+        let hit = null;
         let bytes = null;
         let buffer = null;
 
         try {
-            bytes = await hit.arrayBuffer();
+            hit = await (await openStore(AUDIO_CACHE)).match(url, { ignoreVary: true });
         } catch (e) {
 
-            // Fetched again, the waveform follows once it is stored
-            if (await dropBrokenCopy(song, url, "could not be read (" + errText(e) + ")")) {
+            // The browser's store does not answer at all. The song is read
+            // from Mureka for its waveform instead
+            noteStoreBroken(e, "reading the stored copy of " + song.song_id);
+            bytes = await songBytesFromMureka(song, url);
+
+            if (!bytes) {
                 return null;
             }
+        }
 
-            throw e;
+        if (!hit && !bytes) {
+            return null;
+        }
+
+        const t0 = Date.now();
+        const fromMureka = !!bytes;
+
+        try {
+
+            if (!bytes) {
+                bytes = await hit.arrayBuffer();
+            }
+        } catch (e) {
+
+            // The store itself failing, the copy may be fine. Mureka's file
+            // is read instead and the copy left as it is
+            if (isStoreFailure(e)) {
+
+                noteStoreBroken(e, "reading the stored copy of " + song.song_id);
+                bytes = await songBytesFromMureka(song, url);
+
+                if (!bytes) {
+                    return null;
+                }
+            } else if (await dropBrokenCopy(song, url, "could not be read (" + errText(e) + ")")) {
+
+                // Fetched again, the waveform follows once it is stored
+                return null;
+            } else {
+                throw e;
+            }
         }
 
         try {
             buffer = await trimDecode(new Off(1, 1, 8000), bytes);
         } catch (e) {
 
-            if (await dropBrokenCopy(song, url, "could not be decoded (" + errText(e) + ")")) {
+            if (!fromMureka && await dropBrokenCopy(song, url, "could not be decoded (" + errText(e) + ")")) {
                 return null;
             }
 
@@ -18727,7 +18887,7 @@
 
         try {
 
-            await (await caches.open(WAVE_STORE)).put(ownWaveKey(song.song_id), new Response(JSON.stringify(out), {
+            await (await openStore(WAVE_STORE)).put(ownWaveKey(song.song_id), new Response(JSON.stringify(out), {
                 headers: { "Content-Type": "application/json" }
             }));
         } catch (e) {
@@ -19611,7 +19771,7 @@
 
         try {
 
-            const store = await caches.open(ART_STORE);
+            const store = await openStore(ART_STORE);
             const res = await store.match(artStoreKey(id));
 
             if (!res) {
@@ -19631,7 +19791,7 @@
 
         try {
 
-            const store = await caches.open(ART_STORE);
+            const store = await openStore(ART_STORE);
             const body = JSON.stringify(entry);
 
             await store.put(artStoreKey(id), new Response(body, {
@@ -21505,7 +21665,7 @@
             return kept;
         }
 
-        const store = await caches.open(AUDIO_CACHE);
+        const store = await openStore(AUDIO_CACHE);
         const resp = await store.match(url);
 
         if (!resp) {
@@ -27304,7 +27464,7 @@
 
         try {
 
-            const store = await caches.open(DETAIL_STORE);
+            const store = await openStore(DETAIL_STORE);
 
             await store.put(detailStoreKey(id), new Response(JSON.stringify(entry), {
                 headers: { "Content-Type": "application/json" }
@@ -36183,7 +36343,9 @@
     // keeps the original. The song is decoded in the page, so the waveform
     // can be zoomed down to single samples and the preview stops on the
     // exact sample where the cut is, which the audio element cannot do
-    const TRIM_FADE = 1;
+    // Mureka fades the end of a trimmed song out over its last two seconds,
+    // straight down in level, measured on a song trimmed there
+    const TRIM_FADE = 2;
     const TRIM_MIN_LEN = 1;
     const TRIM_PREVIEW_MIN = 0.5;
     const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
@@ -36313,7 +36475,7 @@
 
         try {
 
-            const store = await caches.open(AUDIO_CACHE);
+            const store = await openStore(AUDIO_CACHE);
             const hit = await store.match(url, { ignoreVary: true });
 
             if (hit) {
@@ -36679,7 +36841,7 @@
             trimStop();
         }));
 
-        ui.fadeRow = trimSwitch("Fade out the last second", function () {
+        ui.fadeRow = trimSwitch("Fade out the last two seconds", function () {
             return settings.trimFade !== false;
         }, function (v) {
 
@@ -36755,7 +36917,7 @@
         const hint = document.createElement("div");
 
         hint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         trimEl.appendChild(head);
         trimEl.appendChild(ui.info);
@@ -37245,7 +37407,7 @@
         trimPaint();
     }
 
-    // The last second with the fade worked into the samples, as a short
+    // The last two seconds with the fade worked into the samples, as a short
     // buffer of its own. Played right after the rest, it fades whatever
     // the browser does with volume changes over time. Kept while the end
     // stays put, so repeating the end does not work it out again
@@ -37282,7 +37444,7 @@
     }
 
     // Play a stretch of the song. Past the end of the kept part it never
-    // goes, and with the fade on the last second fades out as Mureka's
+    // goes, and with the fade on the last two seconds fade out as Mureka's
     // trimmed song will. Each piece is stopped at its time as well, in case
     // a browser plays on past the length it was given
     // What started it, for the button that is ringed while it plays: start,
@@ -37402,7 +37564,7 @@
         }, 700);
     }
 
-    // Whether the preview fades out the last second: with the switch on and
+    // Whether the preview fades out the last two seconds: with the switch on and
     // the end actually cut. Left at the song's own end, the song is heard
     // to its real ending
     function trimFades() {
@@ -38711,7 +38873,7 @@
 
         try {
 
-            const store = await caches.open(ART_STORE);
+            const store = await openStore(ART_STORE);
 
             await store.delete(artStoreKey(id));
         } catch (e) {

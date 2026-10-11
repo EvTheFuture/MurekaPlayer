@@ -18240,7 +18240,9 @@
     // samples and the preview stops on the exact sample where the cut is.
     // The phone fetches the file from Mureka for it and sends the trim to
     // Mureka, which makes a new song and keeps the original
-    const TRIM_FADE = 1;
+    // Mureka fades the end of a trimmed song out over its last two seconds,
+    // straight down in level, measured on a song trimmed there
+    const TRIM_FADE = 2;
     const TRIM_MIN_LEN = 1;
     const TRIM_PREVIEW_MIN = 0.5;
     const TRIM_ZOOMS = [30, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02];
@@ -18674,7 +18676,7 @@
         }, "trimFill"));
 
         // The same switch as on the phone, kept there
-        ui.fadeRow = trimSwitch("Fade out the last second", function () {
+        ui.fadeRow = trimSwitch("Fade out the last two seconds", function () {
             return trimFadeOn;
         }, function (v) {
 
@@ -18714,7 +18716,7 @@
         const hint = document.createElement("div");
 
         hint.className = "pText small";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last second of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         box.appendChild(head);
         box.appendChild(ui.info);
@@ -19132,7 +19134,7 @@
         trimPaint();
     }
 
-    // The last second with the fade worked into the samples, as a short
+    // The last two seconds with the fade worked into the samples, as a short
     // buffer of its own. Played right after the rest, it fades whatever
     // the browser does with volume changes over time
     function trimFadeTail(from, to) {
@@ -19168,7 +19170,7 @@
     }
 
     // Play a stretch of the song. Past the end of the kept part it never
-    // goes, and with the fade on the last second fades out as Mureka's
+    // goes, and with the fade on the last two seconds fade out as Mureka's
     // trimmed song will
     // What started it, for the button that is ringed while it plays: start,
     // end, all, or kept for Play and a tap on a waveform
@@ -19287,7 +19289,7 @@
         }, 700);
     }
 
-    // Whether the preview fades out the last second: with the switch on and
+    // Whether the preview fades out the last two seconds: with the switch on and
     // the end actually cut
     function trimFades() {
         return trimFadeOn && tr !== null && tr.end < tr.duration - 0.05;

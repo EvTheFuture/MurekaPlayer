@@ -500,7 +500,7 @@ the new settings layout and a number of smaller improvements.
   end and stops on the exact sample where the new song will end, **Repeat
   the end** plays it again and again while the end is moved, **Play** and
   **Pause** play the kept part and stop where it is, and a tap on the
-  waveform plays from there. **Fade out the last second** fades the preview
+  waveform plays from there. **Fade out the last two seconds** fades the preview
   the way Mureka fades a trimmed song, once the end is moved. The new song
   gets a title of its own and is put at the top of the list, marked new,
   with the original's rating, tempo, instrumental mark and ignored mark, and
