@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.298";
+    const VERSION = "1.9.9.300";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -7720,6 +7720,8 @@
         const url = songUrl(song);
 
         if (!url) {
+
+            dbgLog("Cache", "no file from Mureka yet for " + song.song_id + " " + (song.title || "Untitled"));
             return false;
         }
 
@@ -7743,6 +7745,9 @@
             const got = await timedFetch(url, stopper ? { signal: stopper.signal } : {});
 
             if (!got || !got.ok) {
+
+                dbgLog("Cache", "storing " + song.song_id + " " + (song.title || "Untitled") + " failed: "
+                    + (got ? "HTTP " + got.status : "no answer"));
                 return false;
             }
 
@@ -12172,7 +12177,8 @@
             } });
         }
 
-        options.push({ label: "Play this after the playing song", ring: true, fn: function () {
+        // Blue, so it stands apart from playing all new after the playing song
+        options.push({ label: "Play this after the playing song", ring: true, color: "#7ab8ff", fn: function () {
             playWhenReady(id, "after");
         } });
 
@@ -14358,9 +14364,21 @@
     // round started meanwhile lets an older one stop
     let prefetchRound = 0;
 
+    // A song ahead that could not be stored yet, a song just generated whose
+    // file Mureka does not hand out yet most often, is tried again a while
+    // later, sooner at first, rather than only when the next song starts
+    const PREFETCH_RETRY_FIRST_MS = 15000;
+    const PREFETCH_RETRY_MAX_MS = 120000;
+    let prefetchRetryTimer = 0;
+    let prefetchRetryMs = PREFETCH_RETRY_FIRST_MS;
+
     async function prefetchNext() {
 
         const round = ++prefetchRound;
+        let missed = false;
+
+        clearTimeout(prefetchRetryTimer);
+        prefetchRetryTimer = 0;
 
         wantStubsAhead();
 
@@ -14424,8 +14442,24 @@
                 if (i === 1) {
                     await prepareNextReady();
                 }
+            } else {
+                missed = true;
             }
         }
+
+        if (round !== prefetchRound) {
+            return;
+        }
+
+        if (!missed) {
+
+            prefetchRetryMs = PREFETCH_RETRY_FIRST_MS;
+            return;
+        }
+
+        dbgLog("Cache", "a song ahead could not be stored yet, tried again in " + Math.round(prefetchRetryMs / 1000) + " s");
+        prefetchRetryTimer = setTimeout(prefetchNext, prefetchRetryMs);
+        prefetchRetryMs = Math.min(PREFETCH_RETRY_MAX_MS, prefetchRetryMs * 2);
     }
 
     // Start the element and deal with the returned promise. A rejected play is
@@ -17979,6 +18013,69 @@
         return (w - ART_SIDE_SCALE * cover) / 2;
     }
 
+    // A cover's song menu, as a long press on a row of the list opens it. A
+    // tap opens it once the moment a second tap would take is over, a
+    // second tap making it a double tap instead. Held still it opens at
+    // once, and a right click opens it on a computer
+    const ART_MENU_HOLD_MS = 550;
+    const ART_DOUBLE_TAP_MS = 320;
+    let artMenuTimer = 0;
+    let artHoldTimer = 0;
+    let artHeld = false;
+
+    // The song of the cover at a point: a side cover's own song, otherwise
+    // the playing one. With where it is in the queue when it is there
+    function artSongAt(x, y) {
+
+        let rel = 0;
+        const center = artTiles[ART_SIDE_TILES];
+        const inside = function (el) {
+
+            const r = el.getBoundingClientRect();
+
+            return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        };
+
+        // The middle cover lies over the side ones and the nearer side ones
+        // over the outer ones, so they are asked in that order
+        if (!center || !inside(center)) {
+
+            for (let d = 1; d <= ART_SIDE_TILES && rel === 0; d += 1) {
+
+                for (const i of [ART_SIDE_TILES - d, ART_SIDE_TILES + d]) {
+
+                    if (artTiles[i] && artTiles[i].style.visibility !== "hidden" && inside(artTiles[i])) {
+
+                        rel = i - ART_SIDE_TILES;
+                        break;
+                    }
+                }
+            }
+        }
+
+        const song = rel === 0 ? currentSong : neighborSong(rel);
+
+        if (!song) {
+            return null;
+        }
+
+        const at = queuePos + rel;
+
+        return { song: song, queueIndex: queue[at] && queue[at].song_id === song.song_id ? at : -1 };
+    }
+
+    function openArtMenu(x, y) {
+
+        clearTimeout(artMenuTimer);
+        artMenuTimer = 0;
+
+        const hit = artSongAt(x, y);
+
+        if (hit) {
+            showContextMenu(x, y, hit.song, hit.queueIndex);
+        }
+    }
+
     // Begin tracking a swipe on the cover
     function onArtTouchStart(ev) {
 
@@ -17987,6 +18084,21 @@
         }
 
         const t = ev.touches[0];
+        const holdX = t.clientX;
+        const holdY = t.clientY;
+
+        // Held still, the menu opens without waiting for the finger to lift
+        artHeld = false;
+        clearTimeout(artHoldTimer);
+        artHoldTimer = setTimeout(function () {
+
+            if (swipeActive && swipeDir === 0) {
+
+                artHeld = true;
+                lastArtTapT = 0;
+                openArtMenu(holdX, holdY);
+            }
+        }, ART_MENU_HOLD_MS);
 
         // Finish any glide still animating so its song change is not lost, then
         // reset to a clean rest layout before the new gesture starts
@@ -18021,6 +18133,9 @@
             }
 
             swipeDir = Math.abs(dx) > Math.abs(dy) ? 1 : 2;
+
+            // Moving, it is no longer a press for the menu
+            clearTimeout(artHoldTimer);
         }
 
         // A vertical gesture is a scroll, leave it to the page
@@ -18042,11 +18157,26 @@
         // from a real mouse double click
         lastArtTouchEndT = Date.now();
 
+        clearTimeout(artHoldTimer);
+
         if (!swipeActive) {
             return;
         }
 
         swipeActive = false;
+
+        // Held, the menu is open already. The click the browser makes of
+        // the touch would close it again, so it is not made
+        if (artHeld) {
+
+            artHeld = false;
+
+            if (ev && ev.cancelable) {
+                ev.preventDefault();
+            }
+
+            return;
+        }
 
         if (swipeDir !== 1) {
 
@@ -18060,18 +18190,29 @@
 
                     const now = Date.now();
 
-                    if (now - lastArtTapT < 320
+                    if (now - lastArtTapT < ART_DOUBLE_TAP_MS
                         && Math.abs(t.clientX - lastArtTapX) < 24
                         && Math.abs(t.clientY - lastArtTapY) < 24) {
 
                         lastArtTapT = 0;
+                        clearTimeout(artMenuTimer);
+                        artMenuTimer = 0;
                         cycleOverlayMode();
 
                     } else {
 
+                        const x = t.clientX;
+                        const y = t.clientY;
+
                         lastArtTapT = now;
-                        lastArtTapX = t.clientX;
-                        lastArtTapY = t.clientY;
+                        lastArtTapX = x;
+                        lastArtTapY = y;
+
+                        // No second tap, the cover's song menu
+                        clearTimeout(artMenuTimer);
+                        artMenuTimer = setTimeout(function () {
+                            openArtMenu(x, y);
+                        }, ART_DOUBLE_TAP_MS);
                     }
                 }
             }
@@ -25396,12 +25537,44 @@
         artWrapEl.addEventListener("dblclick", function (ev) {
 
             ev.preventDefault();
+            clearTimeout(artMenuTimer);
+            artMenuTimer = 0;
 
             if (Date.now() - lastArtTouchEndT < 700) {
                 return;
             }
 
             cycleOverlayMode();
+        });
+
+        // A click opens the cover's song menu once a double click would have
+        // come, a right click at once. A touch does its own, the click the
+        // browser makes of it is let be
+        artWrapEl.addEventListener("click", function (ev) {
+
+            if (Date.now() - lastArtTouchEndT < 700 || !currentSong) {
+                return;
+            }
+
+            const x = ev.clientX;
+            const y = ev.clientY;
+
+            clearTimeout(artMenuTimer);
+            artMenuTimer = setTimeout(function () {
+                openArtMenu(x, y);
+            }, ART_DOUBLE_TAP_MS);
+        });
+
+        artWrapEl.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+
+            // A long press on a touch screen has opened it already
+            if (Date.now() - lastArtTouchEndT < 700 || artHeld || !currentSong) {
+                return;
+            }
+
+            openArtMenu(ev.clientX, ev.clientY);
         });
 
         // Re-seat the strip when the viewport changes, for example on rotation
@@ -35397,12 +35570,15 @@
                 opt.fn();
             });
 
-            // Ringed rather than filled, so it stands apart from the others
+            // Ringed rather than filled, so it stands apart from the others,
+            // in a colour of its own when given one
             if (opt.ring) {
 
+                const ring = opt.color || "#48e1eb";
+
                 b.style.background = "transparent";
-                b.style.color = "#48e1eb";
-                b.style.boxShadow = CTRL_RING + "#48e1eb";
+                b.style.color = ring;
+                b.style.boxShadow = CTRL_RING + ring;
             }
 
             row.appendChild(b);
@@ -35529,12 +35705,15 @@
                 close(opt.fn);
             });
 
-            // Ringed rather than filled, so it stands apart from the others
+            // Ringed rather than filled, so it stands apart from the others,
+            // in a colour of its own when given one
             if (opt.ring) {
 
+                const ring = opt.color || "#48e1eb";
+
                 b.style.background = "transparent";
-                b.style.color = "#48e1eb";
-                b.style.boxShadow = CTRL_RING + "#48e1eb";
+                b.style.color = ring;
+                b.style.boxShadow = CTRL_RING + ring;
             }
 
             b.style.width = "100%";

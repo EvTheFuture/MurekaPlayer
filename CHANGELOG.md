@@ -326,6 +326,10 @@ the new settings layout and a number of smaller improvements.
   did not. The web view shows the same notes.
 - **Icons in the song menu**: each row has an icon before its name, the
   same in the player and the web views, so a row is found at a glance.
+- **A tap on a cover** opens that song's menu, the playing song's or a
+  side cover's, as a long press on a row of the list does. A long press or
+  a right click on a cover opens it too. In the player a double tap still
+  changes what shows over the cover.
 - **A tap outside the song menu** only closes it: the song or button under
   it is not played or pressed.
 - **A tap on the playing song** never restarts it, but when the list shows

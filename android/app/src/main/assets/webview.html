@@ -1992,6 +1992,12 @@
         box-shadow: inset 0 0 0 2px var(--accent);
     }
 
+    /* Ringed in blue, apart from a ringed choice beside it */
+    .menuItem.insetBlue {
+        color: #7ab8ff;
+        box-shadow: inset 0 0 0 2px #7ab8ff;
+    }
+
     /* Taller, with room between, where a wrong tap does something
        different at once, as for a song still generating */
     .menuItem.tall {
@@ -10025,7 +10031,9 @@
                 } });
             }
 
-            choices.push({ icon: "queueAdd", label: "Play this after the playing song", cls: "inset tall", fn: function () {
+            // Blue, so it stands apart from playing all new after the
+            // playing song
+            choices.push({ icon: "queueAdd", label: "Play this after the playing song", cls: "insetBlue tall", fn: function () {
 
                 closeSongMenu();
                 send("playWhenReady", { id: song.id, after: true }).then(function () {
@@ -17162,13 +17170,12 @@
         // A cancelled pointer carries no place, the last move does
         const dx = (ev.type === "pointercancel" ? d.lastX : ev.clientX) - d.x;
 
+        // A tap on a cover opens its song's menu, as a long press does. A
+        // side cover's song is played from there, or by a swipe
         if (!d.moved) {
 
-            // A tap on a side cover goes to that song
-            if (d.target === tiles[1] && !tiles[1].classList.contains("empty")) {
-                flowTo(1, 0);
-            } else if (d.target === tiles[3] && !tiles[3].classList.contains("empty")) {
-                flowTo(-1, 0);
+            if (ev.type !== "pointercancel") {
+                openCoverMenu(d.target);
             }
 
             return;
