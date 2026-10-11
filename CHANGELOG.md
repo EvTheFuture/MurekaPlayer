@@ -324,6 +324,8 @@ the new settings layout and a number of smaller improvements.
   show a ringed note with a turning ring as soon as Mureka is asked, which
   turns into a filled one with the answer, cyan when it went and red when it
   did not. The web view shows the same notes.
+- **Icons in the song menu**: each row has an icon before its name, the
+  same in the player and the web views, so a row is found at a glance.
 - **A tap outside the song menu** only closes it: the song or button under
   it is not played or pressed.
 - **A tap on the playing song** never restarts it, but when the list shows

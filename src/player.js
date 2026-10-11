@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.280";
+    const VERSION = "1.9.9.281";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -41578,13 +41578,133 @@
     // Add one clickable row to the options popup
     // A row that states something rather than offering an action. Greyed and
     // inert, so it reads as information and cannot be tapped by mistake
-    function addDisabledMenuRow(label) {
+    // The icons before the rows of the song menu, the same as the web
+    // view's song menu shows, so a row is found by its look and not only by
+    // reading. Each is a list of shapes for makeSvgIcon
+    const MENU_ICONS = {
+        cache: [
+            ["polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }]
+        ],
+        check: [
+            ["polyline", { points: "20 6 9 17 4 12" }]
+        ],
+        close: [
+            ["line", { "x1": "18", "y1": "6", "x2": "6", "y2": "18" }],
+            ["line", { "x1": "6", "y1": "6", "x2": "18", "y2": "18" }]
+        ],
+        copy: [
+            ["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }],
+            ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }]
+        ],
+        download: [
+            ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }],
+            ["polyline", { points: "7 10 12 15 17 10" }],
+            ["line", { "x1": "12", "y1": "15", "x2": "12", "y2": "3" }]
+        ],
+        ignore: [
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["line", { "x1": "5.6", "y1": "5.6", "x2": "18.4", "y2": "18.4" }]
+        ],
+        image: [
+            ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2", ry: "2" }],
+            ["circle", { cx: "8.5", cy: "8.5", r: "1.5" }],
+            ["polyline", { points: "21 15 16 10 5 21" }]
+        ],
+        info: [
+            ["circle", { cx: "12", cy: "12", r: "10" }],
+            ["line", { "x1": "12", "y1": "16", "x2": "12", "y2": "12" }],
+            ["line", { "x1": "12", "y1": "8", "x2": "12.01", "y2": "8" }]
+        ],
+        instrumental: [
+            ["path", { d: "M9 18V5l12-2v13" }],
+            ["circle", { cx: "6", cy: "18", r: "3" }],
+            ["circle", { cx: "18", cy: "16", r: "3" }]
+        ],
+        link: [
+            ["path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" }],
+            ["path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }]
+        ],
+        listPlus: [
+            ["line", { "x1": "3", "y1": "6", "x2": "15", "y2": "6" }],
+            ["line", { "x1": "3", "y1": "12", "x2": "15", "y2": "12" }],
+            ["line", { "x1": "3", "y1": "18", "x2": "11", "y2": "18" }],
+            ["line", { "x1": "18", "y1": "13", "x2": "18", "y2": "21" }],
+            ["line", { "x1": "14", "y1": "17", "x2": "22", "y2": "17" }]
+        ],
+        pencil: [
+            ["path", { d: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" }]
+        ],
+        play: [
+            ["path", { d: "M8 5.2v13.6a1 1 0 0 0 1.53.85l10.7-6.8a1 1 0 0 0 0-1.7L9.53 4.35A1 1 0 0 0 8 5.2z", fill: "currentColor", stroke: "none" }]
+        ],
+        queueAdd: [
+            ["line", { "x1": "3", "y1": "6", "x2": "15", "y2": "6" }],
+            ["line", { "x1": "3", "y1": "12", "x2": "11", "y2": "12" }],
+            ["line", { "x1": "3", "y1": "18", "x2": "11", "y2": "18" }],
+            ["line", { "x1": "18", "y1": "9", "x2": "18", "y2": "21" }],
+            ["line", { "x1": "12", "y1": "15", "x2": "24", "y2": "15" }]
+        ],
+        refresh: [
+            ["polyline", { points: "23 4 23 10 17 10" }],
+            ["polyline", { points: "1 20 1 14 7 14" }],
+            ["path", { d: "M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" }]
+        ],
+        scissors: [
+            ["circle", { cx: "6", cy: "6", r: "3" }],
+            ["circle", { cx: "6", cy: "18", r: "3" }],
+            ["line", { "x1": "20", "y1": "4", "x2": "8.12", "y2": "15.88" }],
+            ["line", { "x1": "14.47", "y1": "14.48", "x2": "20", "y2": "20" }],
+            ["line", { "x1": "8.12", "y1": "8.12", "x2": "12", "y2": "12" }]
+        ],
+        shuffle: [
+            ["path", { d: "M16 3h5v5" }],
+            ["path", { d: "M4 20L21 3" }],
+            ["path", { d: "M21 16v5h-5" }],
+            ["path", { d: "M15 15l6 6" }],
+            ["path", { d: "M4 4l5 5" }]
+        ],
+        tempo: [
+            ["circle", { cx: "12", cy: "13", r: "8" }],
+            ["polyline", { points: "12 9 12 13 14.5 15.5" }],
+            ["line", { "x1": "9", "y1": "2", "x2": "15", "y2": "2" }]
+        ],
+        trash: [
+            ["polyline", { points: "3 6 5 6 21 6" }],
+            ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }]
+        ]
+    };
+
+    // A row's icon and its name, the icon a little dimmer than the text
+    function fillMenuRow(row, label, iconName) {
+
+        const shapes = MENU_ICONS[iconName];
+
+        row.textContent = "";
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.gap = "10px";
+
+        if (shapes) {
+
+            const ic = makeSvgIcon(shapes, 16);
+
+            ic.style.cssText = "flex:0 0 auto;opacity:0.85";
+            row.appendChild(ic);
+        }
+
+        const text = document.createElement("span");
+
+        text.textContent = label;
+        row.appendChild(text);
+    }
+
+    function addDisabledMenuRow(label, iconName) {
 
         const row = document.createElement("div");
 
-        row.textContent = label;
         row.className = "mureka-menu-off";
         row.style.cssText = "padding:7px 10px;border-radius:6px;color:#777;cursor:default";
+        fillMenuRow(row, label, iconName);
 
         row.addEventListener("click", function (ev) {
             ev.stopPropagation();
@@ -41625,13 +41745,13 @@
         contextMenuEl.appendChild(head);
     }
 
-    function addMenuRow(label, color, handler) {
+    function addMenuRow(label, color, handler, iconName) {
 
         const row = document.createElement("div");
 
-        row.textContent = label;
         row.className = "mureka-menu-row";
         row.style.cssText = "padding:7px 10px;border-radius:6px;cursor:pointer;color:" + color;
+        fillMenuRow(row, label, iconName);
 
         row.addEventListener("mouseenter", function () {
             row.style.background = "#36363e";
@@ -41683,11 +41803,11 @@
         // Playing it now
         addMenuRow("Play", "#fff", function () {
             playFrom(song.song_id);
-        });
+        }, "play");
 
         addMenuRow("Play only this", "#fff", function () {
             playOnlyThis(song);
-        });
+        }, "play");
 
         // Pick songs to share with another player
         if (selectMode) {
@@ -41695,14 +41815,14 @@
             addMenuRow(selectedSongs.has(String(song.song_id)) ? "Let go of this" : "Pick this", "#fff", function () {
                 toggleSelected(song, null);
                 renderList();
-            });
+            }, "check");
 
-            addMenuRow("Done picking", "#fff", endSelect);
+            addMenuRow("Done picking", "#fff", endSelect, "close");
         } else {
 
             addMenuRow("Select to share", "#fff", function () {
                 startSelect(song);
-            });
+            }, "check");
         }
 
         // The queue
@@ -41710,11 +41830,11 @@
 
         addMenuRow("Play next", "#fff", function () {
             addNext(song);
-        });
+        }, "listPlus");
 
         addMenuRow("Play last", "#fff", function () {
             addLast(song);
-        });
+        }, "queueAdd");
 
         if (upcomingIndex(song) >= 0) {
 
@@ -41722,7 +41842,7 @@
 
                 removeFromQueue(upcomingIndex(song));
                 showToast("Taken out of the queue", true);
-            });
+            }, "close");
         }
 
         // Opened on a row of the queue view, a part of the queue can go.
@@ -41734,14 +41854,14 @@
 
             addMenuRow(qi === queuePos ? "Remove all after this" : "Remove this and all after", STAR_GOLD, function () {
                 cutQueue(qi, "after");
-            });
+            }, "close");
         }
 
         if (qi >= 0 && cutRange(qi, "before").length > 0) {
 
             addMenuRow(qi === queuePos ? "Remove all before this" : "Remove this and all before", STAR_GOLD, function () {
                 cutQueue(qi, "before");
-            });
+            }, "close");
         }
 
         // The song on Mureka, only the account's own songs. Another creator's
@@ -41752,29 +41872,29 @@
 
             addMenuRow("Rename", "#fff", function () {
                 promptRename(song);
-            });
+            }, "pencil");
 
             // Cut the start or the end off, Mureka makes a new song of it
             if (songUrl(song)) {
 
                 addMenuRow("Trim", "#fff", function () {
                     openTrimmer(song);
-                });
+                }, "scissors");
             }
 
             addMenuRow("Set cover", "#fff", function () {
                 pickCover(song);
-            });
+            }, "image");
 
             addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", "#fff", function () {
                 setPublished(song, song.publish_state !== 1, true);
-            });
+            }, song.publish_state === 1 ? "close" : "check");
 
             // Mureka lets instrumentals be remixed too, so every song of the
             // account's own can have remixing allowed or stopped
             addMenuRow(remixState(song) === 1 ? "Disallow remixing" : "Allow remixing", "#fff", function () {
                 setRemixAllowed(song, remixState(song) !== 1);
-            });
+            }, "shuffle");
         }
 
         // What is noted about the song on this device: instrumental and its
@@ -41785,46 +41905,46 @@
 
         if (song.generation_method === 7) {
 
-            addDisabledMenuRow("Instrumental");
+            addDisabledMenuRow("Instrumental", "instrumental");
 
         } else {
 
             addMenuRow(isManualInstrumental(song) ? "Unmark instrumental" : "Mark instrumental",
                 "#fff", function () {
                     toggleManualInstrumental(song);
-                });
+                }, "instrumental");
         }
 
         // Left out of queues made from the list, played only when asked for
         addMenuRow(isIgnored(song) ? "Stop ignoring" : "Ignore in queues", "#fff", function () {
             toggleIgnored(song);
-        });
+        }, "ignore");
 
         // Also for a song Mureka gave a tempo, which may be wrong or not
         // shown on Mureka's own site. One set here takes its place, and
         // clearing it brings Mureka's back
         addMenuRow("Set BPM", "#fff", function () {
             promptManualBpm(song);
-        });
+        }, "tempo");
 
         // About the song and passing it on
         menuGroup();
 
         addMenuRow("Information", "#fff", function () {
             openInfo(song);
-        });
+        }, "info");
 
         addMenuRow("Refresh", "#fff", function () {
             refreshOne(song);
-        });
+        }, "refresh");
 
         addMenuRow("Copy link", "#fff", function () {
             copyLink(song);
-        });
+        }, "link");
 
         addMenuRow("Download", "#fff", function () {
             downloadOne(song);
-        });
+        }, "download");
 
         // Developer only, copy the full song JSON to the clipboard
         // Available on the bookmarklet too, where there is no console
@@ -41832,7 +41952,7 @@
 
             addMenuRow("Copy JSON", "#ffd479", function () {
                 copyJson(song);
-            });
+            }, "copy");
         }
 
         // On this device: stored for offline play, or off the list here,
@@ -41843,18 +41963,18 @@
 
             addMenuRow("Remove from cache", "#ff8a8a", function () {
                 removeOne(song);
-            });
+            }, "trash");
 
         } else {
 
             addMenuRow("Cache", "#48e1eb", function () {
                 cacheOne(song);
-            });
+            }, "cache");
         }
 
         addMenuRow("Delete from list", "#ff8a8a", function () {
             deleteOne(song);
-        });
+        }, "close");
 
         // Gone for good on Mureka, only the account's own songs, apart at the end
         if (mine) {
@@ -41863,7 +41983,7 @@
 
             addMenuRow("Delete on Mureka", "#ff8a8a", function () {
                 confirmDeleteOnMureka(song);
-            });
+            }, "trash");
         }
 
         menuTarget = null;
