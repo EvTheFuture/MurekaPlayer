@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.283";
+    const VERSION = "1.9.9.284";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25438,13 +25438,15 @@
                 return;
             }
 
-            // Nothing to jump to once the list is already at the edge the arrow
-            // would point at, so the button goes rather than lingers
+            // At either edge there is nothing to jump to, whichever way it
+            // moves. Safari's list bounces past the edge and back, and the
+            // way back looks like a scroll the other way, which would show
+            // the arrow to the far end
             const atTop = top <= 4;
             const atBottom = top + listEl.clientHeight >= listEl.scrollHeight - 4
                 && lazyRendered >= lazyRows.length;
 
-            if ((delta > 0 && atBottom) || (delta < 0 && atTop)) {
+            if (atTop || atBottom) {
 
                 fadeToTopBtn();
                 return;
