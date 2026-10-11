@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.266";
+    const VERSION = "1.9.9.267";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1045,9 +1045,17 @@
     // is not known, for the growing dot in the web view's lists
     const cachingProgress = new Map();
 
+    // A download that brings nothing new for this long is given up. A song
+    // just done generating can be served while Mureka still writes it, and
+    // such a download may never end. Waiting on it held the song as being
+    // stored until the page was opened again, so it was never stored and
+    // never got its own waveform
+    const DOWNLOAD_STALL_MS = 20000;
+
     // The same answer, its body counted as it is read, so the progress of a
-    // download shows as it is stored. An answer that cannot be read this way
-    // is handed back as it is
+    // download shows as it is stored. One that stalls, or ends short of the
+    // size it gave, fails, so nothing half is kept. An answer that cannot be
+    // read this way is handed back as it is
     function trackDownload(song, net) {
 
         const id = song.song_id;
@@ -1067,9 +1075,36 @@
             const body = new ReadableStream({
                 pull: async function (controller) {
 
-                    const part = await reader.read();
+                    let timer = 0;
+
+                    const stalled = new Promise(function (resolve) {
+                        timer = setTimeout(function () {
+                            resolve(null);
+                        }, DOWNLOAD_STALL_MS);
+                    });
+
+                    const part = await Promise.race([reader.read(), stalled]);
+
+                    clearTimeout(timer);
+
+                    if (part === null) {
+
+                        dbgLog("Cache", "the download of " + id + " stalled after " + seen + " bytes, given up");
+                        reader.cancel("stalled").catch(function () {
+                            // Already gone
+                        });
+                        controller.error(new Error("download stalled"));
+                        return;
+                    }
 
                     if (part.done) {
+
+                        if (total > 0 && seen < total) {
+
+                            dbgLog("Cache", "the download of " + id + " ended at " + seen + " of " + total + " bytes, not kept");
+                            controller.error(new Error("download ended short"));
+                            return;
+                        }
 
                         controller.close();
                         return;
@@ -1514,6 +1549,26 @@
     // network stack finally gives up, which ties up the connection pool and
     // stalls the audio stream, so every background request uses this.
     // Offline, a request to Mureka is refused at once
+    // A promise that settles by itself after ms, with null, when the one
+    // given has not by then. For work whose answer may never come, so what
+    // waits on it goes on
+    function withinTime(promise, ms) {
+
+        let timer = 0;
+
+        const late = new Promise(function (resolve) {
+            timer = setTimeout(function () {
+                resolve(null);
+            }, ms);
+        });
+
+        return Promise.race([Promise.resolve(promise).catch(function () {
+            return null;
+        }), late]).finally(function () {
+            clearTimeout(timer);
+        });
+    }
+
     function timedFetch(resource, options, ms) {
 
         if (offlineMode() && isMurekaRequest(resource) && Date.now() > netTryUntil) {
@@ -5867,7 +5922,14 @@
             throw new Error("HTTP " + res.status);
         }
 
-        const json = await res.json();
+        // The body is given a deadline of its own, the request's ends once
+        // the headers are in. A page that never comes in full would hold the
+        // load, and the check for songs done generating, until a restart
+        const json = await withinTime(res.json(), 20000);
+
+        if (json === null) {
+            throw new Error("the list page stalled");
+        }
 
         // Mureka can answer 200 with an error code and no songs. Taken as an
         // empty page that would read as the end of the library, and a
@@ -13566,12 +13628,13 @@
                 continue;
             }
 
-            // Pre-cache the cover too, cacheArt skips if it is already stored
-            await cacheArt(song);
+            // Pre-cache the cover too, cacheArt skips if it is already stored.
+            // Neither may hold up the songs after it, one that hangs is left
+            await withinTime(cacheArt(song), 30000);
 
             // Refresh the counts ahead of time, so the numbers are already
             // current when the song reaches the top of the queue
-            await prefetchDetail(song);
+            await withinTime(prefetchDetail(song), 30000);
 
             if (cachedIds.has(song.song_id)) {
                 continue;
@@ -34355,8 +34418,13 @@
                 return { failed: true };
             }
 
-            const json = await res.json();
-            const song = json && json.code === 0 && json.data ? json.data.song : null;
+            const json = await withinTime(res.json(), 20000);
+
+            if (json === null) {
+                return { failed: true };
+            }
+
+            const song = json.code === 0 && json.data ? json.data.song : null;
 
             if (!song || !song.mp3_url) {
                 return { gone: true };
