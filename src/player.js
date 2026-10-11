@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.282";
+    const VERSION = "1.9.9.283";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1393,6 +1393,17 @@
                 window.requestIdleCallback(resolve, { timeout: 1000 });
             });
         }
+    }
+
+    // Whether the store holds the key, asked without reading what it holds.
+    // In Safari match reads the whole stored file, some megabytes for a
+    // song, and the startup check looking up every stored song that way
+    // used so much memory that Safari closed the page
+    async function storeHas(store, key, options) {
+
+        const found = await store.keys(key, options);
+
+        return !!(found && found.length > 0);
     }
 
     // An error in a few words for the debug log
@@ -7701,7 +7712,7 @@
         try {
             const store = await openStore(AUDIO_CACHE);
 
-            if (await store.match(url)) {
+            if (await storeHas(store, url)) {
                 return true;
             }
 
@@ -7978,7 +7989,7 @@
 
             try {
 
-                if (await store.match(url, { ignoreVary: true })) {
+                if (await storeHas(store, url, { ignoreVary: true })) {
 
                     cachedIds.add(song.song_id);
                     found += 1;
@@ -8057,7 +8068,7 @@
                     let held = true;
 
                     try {
-                        held = !!(url && await store.match(url));
+                        held = !!(url && await storeHas(store, url));
                     } catch (e) {
 
                         // The store failing says nothing about the song
@@ -19405,7 +19416,7 @@
                 const store = await openStore(WAVE_STORE);
                 const key = waveStoreKey(id);
 
-                if (await store.match(key)) {
+                if (await storeHas(store, key)) {
                     return;
                 }
 
