@@ -351,6 +351,13 @@
         visibility: visible;
     }
 
+    /* The whole song in this browser but not stored on the phone, a ring
+       rather than a solid dot */
+    #songDot.ring {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px #48e1eb;
+    }
+
     #bar {
         flex: 1;
         height: 44px;
@@ -11765,6 +11772,7 @@
         let p = 0;
         let full = false;
         let loading = false;
+        let ring = false;
         let tip = "";
 
         const c = s && s.songCache ? s.songCache : null;
@@ -11789,10 +11797,12 @@
 
             full = p >= 99;
             loading = !full;
-            tip = full ? "The whole song is in this browser" : "Loading the song into this browser, " + p + "%";
+            ring = full;
+            tip = full ? "The whole song is in this browser, not stored on the phone" : "Loading the song into this browser, " + p + "%";
         }
 
         dot.classList.toggle("full", full);
+        dot.classList.toggle("ring", ring);
         dot.classList.toggle("loading", loading);
         dot.style.setProperty("--p", String(loading ? Math.max(4, p) : 100));
         dot.title = tip;

@@ -650,6 +650,12 @@ the new settings layout and a number of smaller improvements.
   with the layout numbers at the top. It never takes a tap. **Copy debug
   log** copies it all, **Clear debug log** starts it again, in the web views
   too.
+- **Stats for nerds** under Developer: a small ringed i after the time
+  opens what the player knows about the playing song: where the sound and
+  the cover come from, how long the song took to be heard, the file's size,
+  format and bit rate, how much of it is loaded, the cover's size and
+  resolution, which waveform shows and how it was made, the next song made
+  ready, and how much is stored and how full the store is.
 - **Debug log** under Developer: the log is kept only while it is switched
   on or a debug overlay is shown, so a log can be made while the player is
   used as usual. Mureka requests in it have anything that looks like a

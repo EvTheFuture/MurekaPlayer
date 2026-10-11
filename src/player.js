@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.275";
+    const VERSION = "1.9.9.278";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -681,7 +681,6 @@
     let queuePos = -1;
 
     // Set by a Load asked for with the play queue in view
-    let askNewInQueue = false;
 
     // Songs of the queue known only by their id, from a pasted line or an
     // imported queue, until they are read from Mureka: as their row comes
@@ -1186,23 +1185,112 @@
     const wavesKept = new Set();
     let waveSaving = Promise.resolve();
 
+    // How often a store request failed, was tried again on the store
+    // opened anew, and worked then, for the stats and the debug log
+    const storeCounts = { failed: 0, retried: 0, recovered: 0 };
+
     function openStore(name) {
 
         if (!openStores.has(name)) {
-
-            const opening = caches.open(name);
-
-            openStores.set(name, opening);
-            opening.catch(function () {
-
-                if (openStores.get(name) === opening) {
-                    openStores.delete(name);
-                }
-            });
+            openStores.set(name, Promise.resolve(storeHandle(name)));
         }
 
         return openStores.get(name);
     }
+
+    // A store that asks Safari's store object it holds, and when that
+    // fails with Safari's internal error, opens the store anew and asks
+    // once more. A store object held while the page was in the background
+    // can stop answering while a newly opened one answers
+    function storeHandle(name) {
+
+        let held = null;
+
+        function cacheNow(fresh) {
+
+            if (fresh || !held) {
+
+                const opening = caches.open(name);
+
+                held = opening;
+                opening.catch(function () {
+
+                    if (held === opening) {
+                        held = null;
+                    }
+                });
+            }
+
+            return held;
+        }
+
+        async function ask(method, args) {
+
+            let first = args;
+            let spare = null;
+
+            // A response can be read only once, a copy goes first so the
+            // original is left for the second try
+            if (method === "put" && args[1] && typeof args[1].clone === "function" && !args[1].bodyUsed) {
+
+                spare = args[1];
+                first = [args[0], args[1].clone()];
+            }
+
+            try {
+
+                const c = await cacheNow(false);
+
+                return await c[method].apply(c, first);
+            } catch (e) {
+
+                if (!isStoreFailure(e)) {
+                    throw e;
+                }
+
+                storeCounts.retried += 1;
+                dbgLog("Cache", method + " in " + name + " failed (" + errText(e) + "), opening the store anew"
+                    + (pageHiddenAt ? ", the page was last hidden " + Math.round((Date.now() - pageHiddenAt) / 1000) + " s ago" : ""));
+
+                try {
+
+                    const c = await cacheNow(true);
+                    const out = await c[method].apply(c, spare ? [args[0], spare] : args);
+
+                    storeCounts.recovered += 1;
+                    dbgLog("Cache", method + " in " + name + " worked on the store opened anew");
+                    return out;
+                } catch (e2) {
+
+                    storeCounts.failed += 1;
+                    throw e2;
+                }
+            }
+        }
+
+        return {
+            add: function () { return ask("add", Array.from(arguments)); },
+            addAll: function () { return ask("addAll", Array.from(arguments)); },
+            delete: function () { return ask("delete", Array.from(arguments)); },
+            keys: function () { return ask("keys", Array.from(arguments)); },
+            match: function () { return ask("match", Array.from(arguments)); },
+            matchAll: function () { return ask("matchAll", Array.from(arguments)); },
+            put: function () { return ask("put", Array.from(arguments)); }
+        };
+    }
+
+    // When the page was last hidden. The stores held are let go then, so
+    // the page opens them anew when it is back
+    let pageHiddenAt = 0;
+
+    document.addEventListener("visibilitychange", function () {
+
+        if (document.hidden) {
+
+            pageHiddenAt = Date.now();
+            openStores.clear();
+        }
+    });
 
     // What is on the screen comes first: the playing song read from the
     // store, its waveform worked out. Work for the lists and the library,
@@ -1270,6 +1358,7 @@
 
         storeBroken = true;
         openStores.clear();
+        probeIndexedDb();
 
         // A next song made ready from the store may no longer play either,
         // it is made ready again, from Mureka if need be
@@ -1283,6 +1372,30 @@
     function isStoreFailure(e) {
         return !!(e && e.name === "TypeError" && /internal error/i.test(String(e.message)));
     }
+
+    // Whether the browser's other store, IndexedDB, answers while the song
+    // store does not, for the debug log
+    function probeIndexedDb() {
+
+        try {
+
+            const t0 = Date.now();
+            const req = indexedDB.open("mureka-probe");
+
+            req.onsuccess = function () {
+
+                dbgLog("Cache", "IndexedDB answers (" + (Date.now() - t0) + " ms)");
+                req.result.close();
+            };
+            req.onerror = function () {
+                dbgLog("Cache", "IndexedDB fails too: " + errText(req.error));
+            };
+        } catch (e) {
+            dbgLog("Cache", "IndexedDB not reachable: " + errText(e));
+        }
+    }
+
+    setInterval(checkStoreAgain, 30000);
 
     function checkStoreAgain() {
 
@@ -1369,6 +1482,7 @@
         let p = 0;
         let full = false;
         let loading = false;
+        let ring = false;
         let tip = "";
 
         if (id !== null && cachedIds.has(id)) {
@@ -1391,11 +1505,16 @@
 
             full = p >= 99;
             loading = !full && p > 0;
-            tip = full ? "The whole song is loaded" : "Loading the song, " + p + "%";
+            ring = full;
+            tip = full ? "The whole song is loaded, not stored on this device" : "Loading the song, " + p + "%";
         }
 
         songDotEl.style.visibility = full || loading ? "visible" : "hidden";
         songDotEl.classList.toggle("mureka-pie-loading", loading);
+
+        // Loaded in full but not stored, a ring rather than a solid dot, so
+        // it is not taken for a stored song, which the list's dot shows
+        songDotEl.classList.toggle("mureka-pie-ring", ring);
         songDotEl.style.setProperty("--mureka-p", String(loading ? Math.max(4, p) : 100));
         songDotEl.title = tip;
     }
@@ -2297,7 +2416,8 @@
             debugHide: [],
             webSeekActions: true,
             exportMurekaBpm: true,
-            copyTypes: {}
+            copyTypes: {},
+            statsButton: false
         };
 
         try {
@@ -2514,7 +2634,8 @@
                         : [],
                     webSeekActions: parsed.webSeekActions !== false,
                     exportMurekaBpm: parsed.exportMurekaBpm !== false,
-                    copyTypes: cleanCopyTypes(parsed.copyTypes)
+                    copyTypes: cleanCopyTypes(parsed.copyTypes),
+                    statsButton: parsed.statsButton === true
                 };
 
                 // Read this time, so saved again in their usual place once
@@ -6291,11 +6412,9 @@
     // Entry point for the Load / refresh button
     // While the library is not fully cached it resumes loading older songs
     // Once everything is cached it only checks the top for new songs
-    // light: only the newest songs, as on open or on coming back. fromQueue:
-    // asked for with the play queue in view, so new songs found are offered
-    // to the queue. Left out, the player's own list view decides, and a
-    // light run does not ask
-    async function run(light, fromQueue) {
+    // light: only the newest songs, as on open or on coming back. New songs
+    // found are offered to the queue whenever there is one
+    async function run(light) {
 
         if (!running) {
             userTry("loading");
@@ -6315,7 +6434,6 @@
         running = true;
         runOwner = "load";
         runFailed = false;
-        askNewInQueue = fromQueue === undefined ? light !== true && listView === "queue" : fromQueue === true;
         const myToken = ++loadToken;
 
         // Confirm login state for the account's own feed and warn if logged out
@@ -6606,7 +6724,7 @@
 
         // Played or still to come, a song already in the queue is not new
         // to it
-        const upcoming = new Set(queue.map(function (s) {
+        const upcoming = new Set(heldQueue().q.map(function (s) {
             return String(s.song_id);
         }));
         const byId = new Map(cache.songs.map(function (s) {
@@ -6750,7 +6868,7 @@
         if (mode === "replace") {
             applyQueueImport(songs, true);
         } else {
-            applySharedSongs(songs, mode);
+            applySharedSongs(songs, mode, true);
         }
 
         showToast(said[mode], true);
@@ -7059,17 +7177,16 @@
 
         saveCache();
 
-        // Asked for with the play queue in view, the new songs are offered to
-        // it, as an import would. Otherwise a queue made from the list grows
-        // with them by itself
-        // Songs done generating go in first, so they are offered as well.
-        // Those asked to play are in the queue by then and are not
+        // With a queue, the new songs are offered to it, as an import would,
+        // whatever list shows and however the look started. Without one
+        // there is nothing to ask. Songs done generating go in first, so
+        // they are offered as well. Those asked to play are in the queue by
+        // then and are not
         noteUnoffered(newIds);
         settlePending();
 
-        const offered = askNewInQueue && !deep ? newQueueSongs(Array.from(unofferedNew)) : [];
-
-        askNewInQueue = false;
+        const held = heldQueue();
+        const offered = !deep && held.pos >= 0 && held.pos < held.q.length ? newQueueSongs(Array.from(unofferedNew)) : [];
 
         if (offered.length > 0) {
             askNewSongs(offered);
@@ -9042,8 +9159,9 @@
 
             if (trackStartAt) {
 
-                dbgLog("Song", "heard " + Math.round(performance.now() - trackStartAt) + " ms after it was asked for, "
-                    + (trackSource || "source not known"));
+                trackHeardMs = Math.round(performance.now() - trackStartAt);
+                trackHeardFrom = trackSource || "source not known";
+                dbgLog("Song", "heard " + trackHeardMs + " ms after it was asked for, " + trackHeardFrom);
                 trackStartAt = 0;
             }
 
@@ -9761,6 +9879,17 @@
     // Play, so Play next and Play last put a queue together by hand
     function queueIdle() {
         return queuePos < 0 || queuePos >= queue.length;
+    }
+
+    // The queue there is: the live one, or with nothing loaded the one Play
+    // resumes, as Stop or a restart left it
+    function heldQueue() {
+
+        if (queueIdle() && resumeState && Array.isArray(resumeState.queue) && resumeState.queue.length > 0) {
+            return { q: resumeState.queue, pos: resumeState.queuePos, resumed: true };
+        }
+
+        return { q: queue, pos: queuePos, resumed: false };
     }
 
     // A song put in the queue while nothing plays. The first one starts a
@@ -11951,6 +12080,11 @@
     let trackStartAt = 0;
     let trackSource = "";
 
+    // How long the playing song took to be heard and from where, for the
+    // stats for nerds
+    let trackHeardMs = 0;
+    let trackHeardFrom = "";
+
     // Whether the element has played anything in this page, after which a
     // browser lets it start without a tap
     let audioUnlocked = false;
@@ -12190,6 +12324,8 @@
 
         // How long it takes to be heard, for the debug log
         trackStartAt = performance.now();
+        trackHeardMs = 0;
+        trackHeardFrom = "";
 
         // Songs being stored in the background are let go, so their
         // downloads and the writing of them to the device do not hold up
@@ -18532,6 +18668,398 @@
         });
     }
 
+    // Stats for nerds: what the player knows about the playing song, drawn
+    // again every second while open. The file's details, the stored cover
+    // and how full the store is are read once per song
+    let statsBtnEl = null;
+    let statsEl = null;
+    let statsBodyEl = null;
+    let statsTimer = 0;
+    let statsInfo = { id: "", file: null, cover: null, quota: null };
+
+    function openStats() {
+
+        if (!panelEl) {
+            return;
+        }
+
+        if (!statsEl) {
+
+            statsEl = document.createElement("div");
+            statsEl.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+                + "justify-content:center;padding:12px;box-sizing:border-box;z-index:12";
+            statsEl.setAttribute("data-mureka-notice", "1");
+
+            const card = document.createElement("div");
+            const head = document.createElement("div");
+            const title = document.createElement("span");
+            const close = makeButton("Close", "#333", "#fff", closeStats);
+
+            card.style.cssText = "background:#1d1d22;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;"
+                + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px";
+            head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            title.textContent = "Stats for nerds";
+            title.style.cssText = "font-weight:600";
+            close.style.padding = "4px 12px";
+            statsBodyEl = document.createElement("div");
+            statsBodyEl.style.cssText = "overflow-y:auto;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#ddd";
+            head.appendChild(title);
+            head.appendChild(close);
+            card.appendChild(head);
+            card.appendChild(statsBodyEl);
+            statsEl.appendChild(card);
+            statsEl.addEventListener("click", function (ev) {
+
+                if (ev.target === statsEl) {
+                    closeStats();
+                }
+            });
+        }
+
+        panelEl.appendChild(statsEl);
+        statsEl.style.display = "flex";
+        paintStats();
+        clearInterval(statsTimer);
+        statsTimer = setInterval(paintStats, 1000);
+    }
+
+    function closeStats() {
+
+        clearInterval(statsTimer);
+        statsTimer = 0;
+
+        if (statsEl) {
+            statsEl.style.display = "none";
+        }
+    }
+
+    // A size in bytes for people
+    function bytesText(n) {
+
+        if (!(n >= 0)) {
+            return "not known";
+        }
+
+        if (n < 1024) {
+            return n + " B";
+        }
+
+        if (n < 1024 * 1024) {
+            return (n / 1024).toFixed(1) + " kB";
+        }
+
+        if (n < 1024 * 1024 * 1024) {
+            return (n / 1024 / 1024).toFixed(1) + " MB";
+        }
+
+        return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+    }
+
+    // The MP3 frame header at i, or null when there is none there
+    function mp3FrameAt(b, i) {
+
+        if (i + 4 > b.length || b[i] !== 0xff || (b[i + 1] & 0xe0) !== 0xe0) {
+            return null;
+        }
+
+        const ver = (b[i + 1] >> 3) & 3;
+        const layer = (b[i + 1] >> 1) & 3;
+        const rateIx = (b[i + 2] >> 4) & 15;
+        const srIx = (b[i + 2] >> 2) & 3;
+
+        if (ver === 1 || layer !== 1 || rateIx === 0 || rateIx === 15 || srIx === 3) {
+            return null;
+        }
+
+        const mpeg1 = ver === 3;
+        const rates = mpeg1 ? [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
+            : [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+        const sr = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] }[ver][srIx];
+        const rate = rates[rateIx];
+        const mode = (b[i + 3] >> 6) & 3;
+
+        return {
+            ver: ver,
+            mpeg1: mpeg1,
+            rate: rate,
+            sr: sr,
+            mode: mode,
+            len: Math.floor((mpeg1 ? 144000 : 72000) * rate / sr) + ((b[i + 2] >> 1) & 1),
+            side: mpeg1 ? (mode === 3 ? 17 : 32) : (mode === 3 ? 9 : 17)
+        };
+    }
+
+    // The MP3 file's format from its first frames, after an ID3 tag if
+    // there is one: the MPEG version, the bit rate, the sample rate and the
+    // channels. A first frame holding a Xing or Info header is the
+    // encoder's note, VBR or CBR, and the bit rate is read from the frame
+    // after it
+    function mp3Header(bytes) {
+
+        const b = new Uint8Array(bytes);
+        let i = 0;
+
+        if (b.length > 10 && b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) {
+            i = 10 + ((b[6] & 0x7f) << 21 | (b[7] & 0x7f) << 14 | (b[8] & 0x7f) << 7 | (b[9] & 0x7f));
+        }
+
+        for (; i + 4 < b.length; i += 1) {
+
+            const f = mp3FrameAt(b, i);
+
+            if (!f) {
+                continue;
+            }
+
+            const tag = String.fromCharCode.apply(null, Array.from(b.slice(i + 4 + f.side, i + 8 + f.side)));
+            const after = tag === "Xing" || tag === "Info" ? mp3FrameAt(b, i + f.len) : null;
+            const shown = after || f;
+            let rate = shown.rate + " kb/s";
+
+            if (tag === "Xing") {
+                rate = "VBR";
+            } else if (tag === "Info") {
+                rate += " CBR";
+            }
+
+            return {
+                text: (f.mpeg1 ? "MPEG-1" : (f.ver === 2 ? "MPEG-2" : "MPEG-2.5")) + " Layer III, " + rate + ", "
+                    + (shown.sr / 1000) + " kHz, " + ["stereo", "joint stereo", "dual channel", "mono"][shown.mode]
+            };
+        }
+
+        return null;
+    }
+
+    // The details that are read once per song: the file, as stored or the
+    // first part of it from Mureka, the stored cover and the store's size
+    async function readStatsInfo(song) {
+
+        const id = String(song.song_id);
+        const info = { id: id, file: null, cover: null, quota: null };
+
+        statsInfo = info;
+
+        const url = songUrl(song);
+
+        try {
+
+            const hit = url ? await (await openStore(AUDIO_CACHE)).match(url, { ignoreVary: true }) : null;
+
+            if (hit) {
+
+                const blob = await hit.blob();
+
+                info.file = { where: "stored copy", size: blob.size, head: mp3Header(await blob.slice(0, 65536).arrayBuffer()) };
+            }
+        } catch (e) {
+            info.file = { where: "store failing, " + errText(e), size: -1, head: null };
+        }
+
+        if (!info.file && url && !offlineMode()) {
+
+            try {
+
+                const res = await timedFetch(url, { headers: { Range: "bytes=0-65535" } }, 15000);
+                const range = res.headers.get("Content-Range");
+                const total = range && range.indexOf("/") > 0 ? Number(range.split("/")[1]) : NaN;
+                const reader = res.body.getReader();
+                const part = await reader.read();
+
+                reader.cancel().catch(function () {
+                    // Already done
+                });
+
+                info.file = {
+                    where: "Mureka, not stored",
+                    size: isFinite(total) ? total : (res.status === 200 ? Number(res.headers.get("Content-Length")) || -1 : -1),
+                    head: part && part.value ? mp3Header(part.value.buffer) : null
+                };
+            } catch (e) {
+                info.file = { where: "Mureka, not read: " + errText(e), size: -1, head: null };
+            }
+        }
+
+        try {
+
+            const art = await (await openStore(ART_STORE)).match(artStoreKey(song.song_id));
+
+            if (art) {
+
+                const blob = await art.blob();
+
+                info.cover = { size: blob.size, type: blob.type || "type not known" };
+            }
+        } catch (e) {
+            // Shown as not stored
+        }
+
+        try {
+
+            if (navigator.storage && navigator.storage.estimate) {
+                info.quota = await navigator.storage.estimate();
+            }
+        } catch (e) {
+            // Not offered by this browser
+        }
+
+        if (statsInfo === info) {
+            paintStats();
+        }
+    }
+
+    function paintStats() {
+
+        if (!statsBodyEl || !statsEl || statsEl.style.display === "none") {
+            return;
+        }
+
+        const song = currentSong;
+        const rows = [];
+        const add = function (key, value) {
+            rows.push([key, value === undefined || value === null || value === "" ? "-" : String(value)]);
+        };
+        const part = function (name) {
+            rows.push([name, null]);
+        };
+
+        if (song && statsInfo.id !== String(song.song_id)) {
+            readStatsInfo(song);
+        }
+
+        const info = song && statsInfo.id === String(song.song_id) ? statsInfo : null;
+
+        part("Song");
+        add("title", song ? (song.title || "Untitled") : "nothing playing");
+
+        if (song) {
+
+            add("id", song.song_id);
+            add("model", song.model);
+            add("length", formatTime((song.duration_milliseconds || 0) / 1000));
+            add("tempo", effectiveBpm(song) ? effectiveBpm(song) + " BPM" + (manualBpm.has(String(song.song_id)) ? ", set by hand" : "") : "");
+            add("trimmed", isTrimmed(song) ? "yes" : "no");
+        }
+
+        part("Sound");
+
+        const src = audio ? String(audio.currentSrc || audio.src || "") : "";
+
+        add("plays from", src.indexOf("blob:") === 0 ? "a copy in memory, " + (trackHeardFrom || "") : (src ? src.replace(/^https?:\/\/([^/]+).*$/, "$1") + ", streamed" : "nothing loaded"));
+        add("heard after", trackHeardMs ? trackHeardMs + " ms" : "");
+
+        if (audio && src) {
+
+            const d = audio.duration;
+            const b = audio.buffered;
+            const loaded = b && b.length > 0 && isFinite(d) && d > 0 ? Math.round(b.end(b.length - 1) * 100 / d) : 0;
+
+            add("position", formatTime(audio.currentTime || 0) + " of " + formatTime(isFinite(d) ? d : 0));
+            add("loaded", loaded + " %");
+            add("ready state", ["nothing", "metadata", "current data", "future data", "enough data"][audio.readyState] || audio.readyState);
+            add("network", ["empty", "idle", "loading", "no source"][audio.networkState] || audio.networkState);
+            add("volume", Math.round((audio.volume || 0) * 100) + " %" + (audio.muted ? ", muted" : ""));
+        }
+
+        part("File");
+
+        if (info && info.file) {
+
+            add("from", info.file.where);
+            add("size", bytesText(info.file.size));
+            add("format", info.file.head ? info.file.head.text : "not read");
+
+            const secs = song ? (song.duration_milliseconds || 0) / 1000 : 0;
+
+            if (info.file.size > 0 && secs > 0) {
+                add("average", Math.round(info.file.size * 8 / secs / 1000) + " kb/s");
+            }
+        } else {
+            add("from", song ? "being read" : "");
+        }
+
+        add("stored here", song && cachedIds.has(song.song_id) ? "yes" : "no");
+        add("being stored", song && cachingIds.has(song.song_id) ? cachingPercent(song.song_id) + " %" : "no");
+
+        part("Next");
+
+        const next = neighborSong(1);
+
+        add("song", next ? (next.title || "Untitled") : "none");
+        add("made ready", nextReady ? "yes, " + (String(nextReady.url).indexOf("blob:") === 0 ? "from the store" : "a link") : "no");
+        add("cached ahead", settings.prefetchCount + " songs");
+
+        part("Waveform");
+        add("showing", settings.waveSource === "song" && waveOwn ? "own, from the song" : (waveMureka ? "Mureka's" : "none"));
+        add("Mureka's", waveMureka ? waveMureka.length + " points" : "none");
+        add("own", waveOwn ? waveOwn.length + " points" : (ownWaveWorking() ? "being worked out" : "none"));
+
+        if (song && ownWaveInfo && ownWaveInfo.id === String(song.song_id)) {
+            add("own made", ownWaveInfo.text);
+        }
+
+        part("Cover");
+
+        const tile = artTiles[ART_SIDE_TILES];
+        const cover = song ? coverUrl(song) : "";
+
+        add("from", cover ? cover.replace(/^https?:\/\/([^/]+).*$/, "$1") : "none");
+        add("shown at", tile && tile.naturalWidth ? tile.naturalWidth + " x " + tile.naturalHeight : "");
+        add("stored here", info && info.cover ? "yes, " + bytesText(info.cover.size) + ", " + info.cover.type : (song && artCachedIds.has(String(song.song_id)) ? "yes" : "no"));
+
+        part("Store");
+        add("songs stored", cachedIds.size);
+        add("covers stored", artCachedIds.size);
+        add("state", storeBroken ? "not answering, reload the page" : "answering");
+        add("tried anew", storeCounts.retried + ", worked " + storeCounts.recovered + ", failed " + storeCounts.failed);
+
+        if (info && info.quota) {
+            add("used", bytesText(info.quota.usage) + " of " + bytesText(info.quota.quota));
+        }
+
+        part("Player");
+
+        let host = "bookmarklet";
+
+        if (isApkHost()) {
+            host = "app";
+        } else if (isExtensionHost()) {
+            host = "extension";
+        }
+
+        add("version", VERSION + ", " + host);
+        add("queue", (queuePos + 1) + " of " + queue.length + (shuffleMode ? ", shuffled" : ""));
+        add("library", cache.songs.length + " songs");
+        add("network", offlineMode() ? "offline" : (navigator.onLine === false ? "browser says offline" : "online"));
+
+        statsBodyEl.textContent = "";
+
+        for (const r of rows) {
+
+            const line = document.createElement("div");
+
+            if (r[1] === null) {
+
+                line.textContent = r[0];
+                line.style.cssText = "color:#48e1eb;font-weight:700;margin-top:6px";
+            } else {
+
+                const k = document.createElement("span");
+                const v = document.createElement("span");
+
+                line.style.cssText = "display:flex;gap:8px";
+                k.textContent = r[0];
+                k.style.cssText = "flex:0 0 96px;color:#8a8a94";
+                v.textContent = r[1];
+                v.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
+                line.appendChild(k);
+                line.appendChild(v);
+            }
+
+            statsBodyEl.appendChild(line);
+        }
+    }
+
     // Take the note away before its time, when what it asked for has
     // happened. seq, when given, is the note meant, a newer one stays
     function hideToast(seq) {
@@ -18924,6 +19452,9 @@
 
     let ownWaveBusy = null;
 
+    // How the playing song's own waveform came about, for the stats
+    let ownWaveInfo = null;
+
     // When the own waveform is tried, from the song's start: soon, then
     // more and more seldom while the song is not stored yet. A song stored
     // meanwhile has it worked out at once
@@ -18952,6 +19483,7 @@
             const peak = normalizeWave(kept.peak);
             const loud = normalizeWave(kept.loud);
 
+            ownWaveInfo = { id: String(id), text: "read back as worked out before, " + kept.peak.length + " points" };
             return peak && loud ? { peak: peak, loud: loud } : null;
         } catch (e) {
             return null;
@@ -18997,7 +19529,7 @@
         }
 
         const t0 = Date.now();
-        const fromMureka = !!bytes;
+        let fromMureka = !!bytes;
 
         try {
 
@@ -19012,6 +19544,7 @@
 
                 noteStoreBroken(e, "reading the stored copy of " + song.song_id);
                 bytes = await songBytesFromMureka(song, url);
+                fromMureka = true;
 
                 if (!bytes) {
                     return null;
@@ -19073,6 +19606,11 @@
         }
 
         dbgLog("Audio", "Own waveform for " + song.song_id + " worked out in " + (Date.now() - t0) + " ms");
+        ownWaveInfo = {
+            id: String(song.song_id),
+            text: "worked out in " + (Date.now() - t0) + " ms from " + (fromMureka ? "Mureka's file" : "the stored copy")
+                + ", " + n + " points"
+        };
 
         try {
 
@@ -19126,6 +19664,7 @@
 
                 // Stored but not readable, trying again would not help
                 failed = true;
+                ownWaveInfo = { id: String(id), text: "failed, " + errText(e) };
                 dbgLog("Audio", "Own waveform for " + id + " failed: " + errText(e));
             }
 
@@ -24237,6 +24776,21 @@
         seekRow.appendChild(waveCanvas);
         seekRow.appendChild(remTimeEl);
 
+        // A small ringed i at the end, when switched on, opens the stats
+        statsBtnEl = document.createElement("span");
+        statsBtnEl.textContent = "i";
+        statsBtnEl.title = "Stats for nerds";
+        statsBtnEl.setAttribute("role", "button");
+        statsBtnEl.style.cssText = "flex:0 0 auto;width:15px;height:15px;box-sizing:border-box;border:1.5px solid #8a8a94;"
+            + "border-radius:50%;color:#8a8a94;font:italic 700 10px/12px Georgia,serif;text-align:center;cursor:pointer;"
+            + "display:" + (settings.statsButton ? "inline-block" : "none");
+        statsBtnEl.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            openStats();
+        });
+        seekRow.appendChild(statsBtnEl);
+
         // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
         const controlRow = document.createElement("div");
         controlRow.style.cssText = "display:flex;gap:8px";
@@ -24417,6 +24971,7 @@
             + "@property --mureka-p{syntax:'<number>';inherits:false;initial-value:100}"
             + ".mureka-pie{display:inline-block;border-radius:50%;background:conic-gradient(#48e1eb calc(var(--mureka-p) * 1%),rgba(72,225,235,0.25) 0);transition:--mureka-p 1s linear}"
             + ".mureka-pie.mureka-pie-loading{animation:mureka-fade-dot 1.2s ease-in-out infinite}"
+            + ".mureka-pie.mureka-pie-ring{background:transparent;box-shadow:inset 0 0 0 1.5px #48e1eb}"
             + "@keyframes mureka-fade-dot{50%{opacity:0.45}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
             + "@keyframes mureka-wave-wait{0%,100%{opacity:1}50%{opacity:0.45}}"
@@ -29721,6 +30276,17 @@
             + " Text in [ ] is dropped when a tag inside it is empty.";
         tplHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
 
+        const statsRow = makeBoolRow("Stats for nerds",
+            function () { return settings.statsButton === true; },
+            function (v) {
+
+                settings.statsButton = v;
+
+                if (statsBtnEl) {
+                    statsBtnEl.style.display = v ? "inline-block" : "none";
+                }
+            });
+
         const debugRow = makeBoolRow("Debug mode",
             function () { return isDebug(); },
             function (v) { setDebug(v); });
@@ -31069,6 +31635,7 @@
         }
 
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
+        devPage.appendChild(withHint(statsRow, "A small ringed i after the time opens what the player knows about the playing song: where the sound and the cover come from, the file, the waveform, what is stored and how full the store is."));
         devPage.appendChild(withHint(debugRow, "Says on the status line why a key, a tap or a media button was passed over, and adds Copy JSON to the song menu."
             + (isApkHost() ? " In the app it also lets chrome://inspect on a computer with USB debugging look into the app's pages, signed in to Mureka, so keep it off otherwise." : "")));
         devPage.appendChild(withHint(debugLogRow, "Keeps a log of what the player does, for Copy debug log, while the player is used as usual. Mureka's requests are in it too, with anything that looks like a token, password or signature blanked out. Off, nothing is logged, except while a debug overlay is shown."));
@@ -33339,7 +33906,9 @@
     // Shared songs into the queue: next, after the playing song, at the end,
     // or as the whole queue. With nothing playing they start a queue put
     // together by hand, as Play next and Play last do
-    function applySharedSongs(songs, mode) {
+    // keepHeld: the queue waiting to be resumed takes the songs, as a live
+    // one would, rather than giving way to a queue of only these songs
+    function applySharedSongs(songs, mode, keepHeld) {
 
         // The first few not held here are read at once, the rest as they
         // come near or into sight
@@ -33355,9 +33924,35 @@
             return s.song_id;
         }));
 
+        // A queue restored at start is both the live one and the one Play
+        // resumes, and the two are kept the same
+        const resumedToo = !!(resumeState && resumeState.queue === queue);
+
         dropNextReady();
 
-        if (queueIdle()) {
+        const intoResumed = keepHeld && heldQueue().resumed;
+
+        if (intoResumed) {
+
+            const pos = resumeState.queuePos;
+            let rq = resumeState.queue.filter(function (s, k) {
+                return k <= pos || !ids.has(s.song_id);
+            });
+
+            if (mode === "next") {
+
+                rq.splice.apply(rq, [pos + 1, 0].concat(songs));
+
+                for (const s of songs) {
+                    playNextMarks.set(String(s.song_id), -1);
+                }
+            } else {
+                rq = rq.concat(songs);
+            }
+
+            resumeState.queue = rq;
+            resumeState.own = true;
+        } else if (queueIdle()) {
 
             if (!queueOwn || queuePos >= queue.length) {
 
@@ -33389,11 +33984,22 @@
             } else {
                 queue = queue.concat(songs);
             }
+
+            if (resumedToo) {
+
+                resumeState.queue = queue;
+                resumeState.queuePos = queuePos;
+                resumeState.own = true;
+            }
         }
 
         // Songs put in by hand, so the list does not fill it up again and
-        // drop them
-        queueOwn = true;
+        // drop them. Put in the queue to resume, that one is marked so and
+        // the empty live one is left as it is
+        if (!intoResumed) {
+            queueOwn = true;
+        }
+
         renderList();
         setArtTransition("none");
         setArtSources();
