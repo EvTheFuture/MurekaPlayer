@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.290";
+    const VERSION = "1.9.9.293";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1774,6 +1774,10 @@
     // waveData is the one this screen draws, the web view picks its own
     let waveMureka = null;
     let waveOwn = null;
+
+    // The song whose waveform from Mureka is being looked for in the feed,
+    // so the bar shows it is waiting
+    let murekaWaveWait = null;
 
     // How loud each slice of our own waveform sounds, beside its peaks
     let waveOwnLoud = null;
@@ -6823,7 +6827,9 @@
             const key = String(id);
             const song = byId.get(key);
 
-            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song)) {
+            // Only songs the list lets through as it is filtered now, a draft
+            // with only the published showing is not asked about
+            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song) || !queueable(song)) {
                 continue;
             }
 
@@ -19766,8 +19772,28 @@
 
     // Our own waveform, worked out from the song itself, many more points
     // than Mureka's and true to the sound. Kept beside Mureka's in the
-    // same store, so it is only worked out once per song
-    const OWN_WAVE_POINTS = 4000;
+    // same store, so it is only worked out once per song. The points go by
+    // the song's length, so zoomed in every song shows the same detail per
+    // second, 40 ms a point, with a floor for short songs and a ceiling
+    // for very long ones
+    const OWN_WAVE_PER_MINUTE = 1500;
+    const OWN_WAVE_MIN_POINTS = 1000;
+    const OWN_WAVE_MAX_POINTS = 20000;
+
+    function ownWavePoints(seconds) {
+
+        const n = Math.round((Number(seconds) || 0) / 60 * OWN_WAVE_PER_MINUTE);
+
+        return Math.max(OWN_WAVE_MIN_POINTS, Math.min(OWN_WAVE_MAX_POINTS, n));
+    }
+
+    // Whether a kept waveform has fewer points than one worked out now
+    // would have, from before the points went by the length. A little
+    // short is fine, the song's length as Mureka gives it and as decoded
+    // differ slightly
+    function ownWaveOutdated(list, song) {
+        return !list || list.length < ownWavePoints(Number(song.duration_milliseconds) / 1000) * 0.9;
+    }
 
     let ownWaveBusy = null;
 
@@ -19894,7 +19920,7 @@
             chans.push(buffer.getChannelData(c));
         }
 
-        const n = Math.min(OWN_WAVE_POINTS, buffer.length);
+        const n = Math.min(ownWavePoints(buffer.duration), buffer.length);
         const out = { peak: new Array(n), loud: new Array(n) };
 
         for (let i = 0; i < n; i++) {
@@ -20104,8 +20130,7 @@
     // out now instead of at the next try
     function ownWaveOnStored(song) {
 
-        if (currentSong && currentSong.song_id === song.song_id && ownWaveWanted()
-            && (!waveOwn || waveOwn.length < OWN_WAVE_POINTS)) {
+        if (currentSong && currentSong.song_id === song.song_id && ownWaveWanted() && ownWaveOutdated(waveOwn, song)) {
             makeOwnWaveSoon(song, 0, true);
         }
     }
@@ -20132,12 +20157,19 @@
         return !!(ownWaveBusy && currentSong && ownWaveBusy.id === currentSong.song_id && !waveOwn);
     }
 
-    // While the own waveform is chosen and still to come, the bar or
-    // Mureka's waveform in its place fades softly in and out
+    // Whether Mureka's waveform of the playing song is still being looked
+    // for
+    function murekaWaveWaiting() {
+        return !!(currentSong && !waveMureka && (murekaWaveWait === currentSong.song_id || waveScanRunning));
+    }
+
+    // While the chosen waveform is still to come, worked out from the song
+    // or looked for on Mureka, the bar or the waveform in its place fades in
+    // and out like the dot of a song that is loading
     function paintWaveWait() {
 
-        const on = settings.waveSource === "song" && ownWaveWorking();
-        const pulse = on ? "mureka-wave-wait 2.4s ease-in-out infinite" : "";
+        const on = settings.waveSource === "song" ? ownWaveWorking() : murekaWaveWaiting();
+        const pulse = on ? "mureka-wave-wait 1.2s ease-in-out infinite" : "";
 
         for (const el of [waveCanvas, seekBar]) {
 
@@ -20163,7 +20195,7 @@
         // Not worked out yet, or kept from before it had as many points as
         // now, which shows meanwhile: worked out in the background once the
         // song is cached
-        if ((!own || own.peak.length < OWN_WAVE_POINTS) && ownWaveWanted()) {
+        if ((!own || ownWaveOutdated(own.peak, song)) && ownWaveWanted()) {
             makeOwnWaveSoon(song, 0);
         }
 
@@ -20182,8 +20214,20 @@
         if (!w) {
 
             // Not stored yet, collect it from the feed in the background. When
-            // the scan reaches this song it re-loads and shows the wave
-            collectWaves(id);
+            // the scan reaches this song it re-loads and shows the wave. The
+            // bar pulses meanwhile
+            murekaWaveWait = id;
+            paintWaveWait();
+            publishHostSoon();
+            collectWaves(id).finally(function () {
+
+                if (murekaWaveWait === id) {
+
+                    murekaWaveWait = null;
+                    paintWaveWait();
+                    publishHostSoon();
+                }
+            });
         }
     }
 
@@ -21931,6 +21975,7 @@
             // The key says when to read them again
             partsKey: hostPartsKey(),
             waveWorking: ownWaveWorking(),
+            murekaWaveWaiting: murekaWaveWaiting(),
             statsButton: settings.statsButton === true,
             stats: Date.now() < statsWebUntil ? statsRows() : null,
             exportsKey: hostExportsKey(),
@@ -21995,15 +22040,29 @@
 
         return {
             wave: hostWave(),
-            waveOwn: hostWaveOf(waveOwn, HOST_WAVE_POINTS * 2),
-            waveOwnLoud: hostWaveOf(waveOwnLoud, HOST_WAVE_POINTS * 2),
+            waveOwn: hostWaveOf(waveOwn),
+            waveOwnLoud: hostWaveOf(waveOwnLoud),
             lyrics: hostLyrics()
         };
     }
 
     // A short fingerprint of the parts, the song's id first, so the state
     // only says whether they changed
+    // The key is asked for with every state, once a second, and the whole
+    // waveforms make the parts some tens of kilobytes. It is worked out
+    // again only when the song, a waveform or the lyrics changed
+    let partsKeyMemo = null;
+
     function hostPartsKey() {
+
+        const id = currentSong ? String(currentSong.song_id) : "-";
+        const mureka = hostWave();
+        const lyrics = JSON.stringify(hostLyrics());
+        const m = partsKeyMemo;
+
+        if (m && m.id === id && m.mureka === mureka && m.own === waveOwn && m.loud === waveOwnLoud && m.lyrics === lyrics) {
+            return m.key;
+        }
 
         const text = JSON.stringify(hostParts());
         let h = 0;
@@ -22012,7 +22071,10 @@
             h = (h * 31 + text.charCodeAt(i)) | 0;
         }
 
-        return (currentSong ? String(currentSong.song_id) : "-") + ":" + text.length + ":" + (h >>> 0).toString(36);
+        const key = id + ":" + text.length + ":" + (h >>> 0).toString(36);
+
+        partsKeyMemo = { id: id, mureka: mureka, own: waveOwn, loud: waveOwnLoud, lyrics: lyrics, key: key };
+        return key;
     }
 
     // What /parts hands the web view, with the key it belongs to
@@ -23472,11 +23534,10 @@
         };
     }
 
-    // The current song's waveform shrunk to a few hundred peaks, small enough
-    // to go along with every state
-    const HOST_WAVE_POINTS = 240;
-
-    // The shrunk copies, kept per waveform so they are made once
+    // The copies of the waveforms for the web view, each value rounded to
+    // two places so the text sent is shorter, kept per waveform so they are
+    // made once. Whole, so zoomed in the web view shows as much detail as
+    // the phone. They go out with /parts once a song, not with every state
     const hostWaveCopies = new WeakMap();
 
     // The song whose stored waveform was last asked for on the web view's behalf
@@ -23492,11 +23553,11 @@
             loadWaveForSong(currentSong);
         }
 
-        return hostWaveOf(waveMureka, HOST_WAVE_POINTS);
+        return hostWaveOf(waveMureka);
     }
 
-    // A waveform shrunk to a set number of peaks
-    function hostWaveOf(list, points) {
+    // A waveform for the web view, its values rounded
+    function hostWaveOf(list) {
 
         if (!list || list.length === 0) {
             return null;
@@ -23509,22 +23570,12 @@
         }
 
         const out = [];
-        const n = Math.min(points, list.length);
 
-        for (let i = 0; i < n; i++) {
+        for (let i = 0; i < list.length; i++) {
 
-            const a = Math.floor(i * list.length / n);
-            const b = Math.max(a + 1, Math.floor((i + 1) * list.length / n));
-            let peak = 0;
+            const v = Number(list[i]);
 
-            for (let j = a; j < b; j++) {
-
-                if (list[j] > peak) {
-                    peak = list[j];
-                }
-            }
-
-            out.push(Math.round(peak * 100) / 100);
+            out.push(isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0);
         }
 
         hostWaveCopies.set(list, out);

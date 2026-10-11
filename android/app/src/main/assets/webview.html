@@ -2592,7 +2592,7 @@
        waveform in its place fades softly in and out */
     #bar.waveWait #wave,
     #bar.waveWait #track {
-        animation: waveWait 2.4s ease-in-out infinite;
+        animation: waveWait 1.2s ease-in-out infinite;
     }
 
     @keyframes waveWait {
@@ -4897,7 +4897,7 @@
         // whether it is still being worked out there
         s.waveFine = false;
         s.waveLoud = null;
-        s.waveWait = look.waveSource === "song" && raw.waveWorking === true;
+        s.waveWait = look.waveSource === "song" ? raw.waveWorking === true : raw.murekaWaveWaiting === true;
 
         if (look.waveSource === "song" && Array.isArray(raw.waveOwn) && raw.waveOwn.length > 0) {
 
