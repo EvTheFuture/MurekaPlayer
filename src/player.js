@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.281";
+    const VERSION = "1.9.9.282";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -331,6 +331,54 @@
     const DEBUG_LOG_KEEP = 300;
     const DEBUG_LOG_SHOW = 80;
     const debugLog = [];
+
+    // The last lines of the log are kept in the tab's own storage while the
+    // log is on. Safari reloads a page it had to close, and the log of the
+    // page before then comes first in the new one, marked as such
+    const DEBUG_LOG_TAB_KEY = "mureka_player_debug_before";
+    const DEBUG_LOG_TAB_LINES = 150;
+    let debugLogTabTimer = 0;
+
+    try {
+
+        const before = JSON.parse(sessionStorage.getItem(DEBUG_LOG_TAB_KEY) || "null");
+
+        sessionStorage.removeItem(DEBUG_LOG_TAB_KEY);
+
+        if (before && Array.isArray(before.lines) && before.lines.length > 0) {
+
+            debugLog.push("--- before the page was opened again, " + new Date(before.at).toLocaleTimeString() + " ---");
+
+            for (const line of before.lines.slice(-DEBUG_LOG_TAB_LINES)) {
+                debugLog.push(String(line));
+            }
+
+            debugLog.push("--- this page ---");
+        }
+    } catch (e) {
+        // No storage for the tab, the log starts empty
+    }
+
+    function keepDebugLogInTab() {
+
+        if (debugLogTabTimer) {
+            return;
+        }
+
+        debugLogTabTimer = setTimeout(function () {
+
+            debugLogTabTimer = 0;
+
+            try {
+                sessionStorage.setItem(DEBUG_LOG_TAB_KEY, JSON.stringify({
+                    at: Date.now(),
+                    lines: debugLog.slice(-DEBUG_LOG_TAB_LINES)
+                }));
+            } catch (e) {
+                // Full or not allowed, the log stays in this page only
+            }
+        }, 1000);
+    }
 
     // What the debug overlays log, in groups to pick from under Developer,
     // each with the kinds of lines it covers and what that is in words. The
@@ -1202,9 +1250,12 @@
     // fails with Safari's internal error, opens the store anew and asks
     // once more. A store object held while the page was in the background
     // can stop answering while a newly opened one answers
+    const STORE_REOPEN_MS = 5000;
+
     function storeHandle(name) {
 
         let held = null;
+        let reopenedAt = 0;
 
         function cacheNow(fresh) {
 
@@ -1248,6 +1299,15 @@
                     throw e;
                 }
 
+                // Already known not to answer, or opened anew a moment ago:
+                // the request fails as it is, the caller falls back
+                if (storeBroken || Date.now() - reopenedAt < STORE_REOPEN_MS) {
+
+                    storeCounts.failed += 1;
+                    throw e;
+                }
+
+                reopenedAt = Date.now();
                 storeCounts.retried += 1;
                 dbgLog("Cache", method + " in " + name + " failed (" + errText(e) + "), opening the store anew"
                     + (pageHiddenAt ? ", the page was last hidden " + Math.round((Date.now() - pageHiddenAt) / 1000) + " s ago" : ""));
@@ -26248,6 +26308,8 @@
             debugLog.shift();
         }
 
+        keepDebugLogInTab();
+
         if (debugOverlayOn() && debugLogEl) {
             debugLogEl.textContent = debugLog.slice(-DEBUG_LOG_SHOW).join("\n");
         }
@@ -26437,6 +26499,12 @@
         debugLog.length = 0;
         webViewDebugLog = "";
         debugClearedAt = Date.now();
+
+        try {
+            sessionStorage.removeItem(DEBUG_LOG_TAB_KEY);
+        } catch (e) {
+            // No storage for the tab
+        }
 
         if (debugLogEl) {
             debugLogEl.textContent = "";
