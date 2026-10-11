@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.284";
+    const VERSION = "1.9.9.289";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -762,6 +762,20 @@
     // web views at once. The first answer anywhere closes it everywhere
     let newAsk = null;
     let newAskSeq = 0;
+
+    // The question whether a queue put together by hand follows the list
+    // after its filter changed, open on the phone and in the web views at
+    // once, like the one about new songs
+    let followAsk = null;
+    let followAskSeq = 0;
+
+    // A filter change is followed a second after the last one, so a few
+    // taps through the filters count as one change. followBase describes
+    // the songs the list let through when the queue last followed it, so
+    // ending up where it started does nothing
+    const FOLLOW_SETTLE_MS = 1000;
+    let followTimer = 0;
+    let followBase = null;
 
     // True while the queue is one put together by hand, with Play next and
     // Play last from a stopped player. It then holds only those songs: the
@@ -4446,7 +4460,7 @@
         updateSmartFilterButton();
         updateViewMenuBar();
         renderList();
-        rebuildUpcoming();
+        queueFollowFilter();
 
         if (tagSheetRefresh) {
             tagSheetRefresh();
@@ -7419,7 +7433,7 @@
         // The set of songs the filter admits just changed, so what plays next
         // has to change with it. The current song is kept, only the upcoming
         // part is rebuilt, exactly as the vocals filter does
-        rebuildUpcoming();
+        queueFollowFilter();
 
         const n = shownSongCount();
 
@@ -9683,6 +9697,7 @@
 
         // A new queue has no songs put in to play next
         playNextMarks.clear();
+        playLastMarks.clear();
 
         // Made from the list, so no longer a queue put together by hand
         queueOwn = false;
@@ -9972,6 +9987,7 @@
 
             dropNextReady();
             playNextMarks.clear();
+            playLastMarks.clear();
             queue = [];
             queueOwn = true;
         }
@@ -10044,6 +10060,7 @@
                 queue = [];
                 queueOwn = false;
                 playNextMarks.clear();
+                playLastMarks.clear();
             }
 
             previewFromIdle = true;
@@ -10295,6 +10312,8 @@
         }
 
         queue.push(song);
+        playNextMarks.delete(String(song.song_id));
+        playLastMarks.add(String(song.song_id));
         renderList();
         setArtTransition("none");
         setArtSources();
@@ -10332,6 +10351,7 @@
 
         queue.splice(queuePos + 1, 0, song);
         playNextMarks.set(String(song.song_id), oldOffset);
+        playLastMarks.delete(String(song.song_id));
         renderList();
 
         // The next cover changed, so refresh the coverflow neighbors
@@ -10348,6 +10368,10 @@
     // Songs put in to play next, with how far after the playing song each
     // one was before, -1 when it was not in the queue at all
     const playNextMarks = new Map();
+
+    // Songs put at the end with Play last, by id. A queue following the list
+    // keeps them at its end
+    const playLastMarks = new Set();
 
     // Whether a song was put in to play next and has not played yet
     function isPlayNext(id) {
@@ -10579,9 +10603,12 @@
     // Does nothing when nothing is playing, the next play picks up the changes
     function rebuildUpcoming(fromShuffle) {
 
+        // With nothing loaded, the queue Play resumes is the one there is
+        const held = heldQueue();
+
         // A queue put together by hand keeps its songs. Shuffle switched on
         // only mixes the ones still to come
-        if (queueOwn) {
+        if (held.resumed ? resumeState.own === true : queueOwn) {
 
             if (fromShuffle === true && shuffleMode && queuePos >= 0 && queuePos < queue.length) {
 
@@ -10600,28 +10627,29 @@
 
         dropNextReady();
 
+        // After Stop or a restart the queue Play resumes follows the list
+        if (held.resumed) {
+
+            resumeState.queue = queueFromList(held.q, held.pos);
+            renderList();
+            saveQueue();
+            return;
+        }
+
         if (queuePos < 0 || queuePos >= queue.length) {
             return;
         }
 
-        const played = queue.slice(0, queuePos + 1);
+        // A queue restored at start is also the one Play resumes, and the
+        // two stay the same, or Play would bring the old one back
+        const resumedToo = !!(resumeState && resumeState.queue === queue);
 
-        const playedIds = new Set(played.map(function (s) {
-            return s.song_id;
-        }));
+        queue = queueFromList(queue, queuePos);
 
-        // Songs not yet reached, kept in the Mureka sorted order then optionally
-        // shuffled. orderedSongs is the displayed order, so with shuffle off the
-        // queue matches the list. The vocals and playlist filters still apply
-        let upcoming = orderedSongs().filter(function (s) {
-            return !playedIds.has(s.song_id) && queueable(s) && !queueSkipIds.has(String(s.song_id));
-        });
-
-        if (shuffleMode) {
-            upcoming = shuffleCopy(upcoming);
+        if (resumedToo) {
+            resumeState.queue = queue;
         }
 
-        queue = played.concat(upcoming);
         renderList();
 
         // The upcoming order changed, keep the saved queue in step
@@ -10634,6 +10662,202 @@
         setArtSources();
         positionArt(0);
         prefetchNext();
+    }
+
+    // A queue's played part and song at pos as they are, and after them the
+    // songs of the list not yet reached, kept in the Mureka sorted order then
+    // optionally shuffled. orderedSongs is the displayed order, so with
+    // shuffle off the queue matches the list. The vocals and playlist
+    // filters still apply. Songs put in with Play next stay right after the
+    // song at pos, and songs put in with Play last stay at the end, in the
+    // order they were put in, also when the list leaves them out: they were
+    // asked for
+    function queueFromList(q, pos) {
+
+        const played = q.slice(0, pos + 1);
+        const rest = q.slice(pos + 1);
+        const playedIds = new Set(played.map(function (s) {
+            return s.song_id;
+        }));
+        const next = rest.filter(function (s) {
+            return playNextMarks.has(String(s.song_id));
+        });
+        const last = rest.filter(function (s) {
+            return playLastMarks.has(String(s.song_id)) && !playNextMarks.has(String(s.song_id));
+        });
+        const picked = new Set(next.concat(last).map(function (s) {
+            return s.song_id;
+        }));
+        let upcoming = orderedSongs().filter(function (s) {
+            return !playedIds.has(s.song_id) && !picked.has(s.song_id) && queueable(s)
+                && !queueSkipIds.has(String(s.song_id));
+        });
+
+        if (shuffleMode) {
+            upcoming = shuffleCopy(upcoming);
+        }
+
+        return played.concat(next, upcoming, last);
+    }
+
+    // How many of the songs still to come in the queue the list, as it is
+    // filtered now, leaves out
+    function upcomingOutsideList() {
+
+        const held = heldQueue();
+
+        if (held.pos < 0 || held.pos >= held.q.length) {
+            return 0;
+        }
+
+        const allowed = new Set(orderedSongs().filter(queueable).map(function (s) {
+            return s.song_id;
+        }));
+
+        return held.q.slice(held.pos + 1).filter(function (s) {
+            return !allowed.has(s.song_id) && !playNextMarks.has(String(s.song_id))
+                && !playLastMarks.has(String(s.song_id));
+        }).length;
+    }
+
+    // The songs the list lets through into a queue, in its order, as a short
+    // text that changes whenever any of them do
+    function admittedSig() {
+
+        let h = 0;
+        let n = 0;
+
+        for (const song of orderedSongs()) {
+
+            if (!queueable(song)) {
+                continue;
+            }
+
+            const id = String(song.song_id);
+
+            for (let i = 0; i < id.length; i++) {
+                h = (h * 31 + id.charCodeAt(i)) | 0;
+            }
+
+            h = (h * 31 + 44) | 0;
+            n += 1;
+        }
+
+        return n + ":" + h;
+    }
+
+    // The list's filter changed. Once the filters have been still for a
+    // second, a queue made from the list follows it. A queue put together
+    // by hand, Play next, an import or new songs put in it, is asked about
+    // when songs still to come in it are no longer in the list, rather than
+    // losing them unasked. Back where it started, nothing happens
+    function queueFollowFilter() {
+
+        clearTimeout(followTimer);
+        followTimer = setTimeout(settleFollow, FOLLOW_SETTLE_MS);
+    }
+
+    function settleFollow() {
+
+        followTimer = 0;
+
+        // A question still open is about filters as they were
+        if (followAsk) {
+            finishFollowAsk(followAsk.n, "");
+        }
+
+        const sig = admittedSig();
+
+        if (sig === followBase) {
+            return;
+        }
+
+        followBase = sig;
+
+        const held = heldQueue();
+        const own = held.resumed ? resumeState.own === true : queueOwn;
+
+        if (!own) {
+
+            rebuildUpcoming();
+            return;
+        }
+
+        const out = upcomingOutsideList();
+
+        if (out > 0) {
+            askFollowList(out);
+        }
+    }
+
+    function askFollowList(out) {
+
+        // A newer question takes the place of an older one
+        if (followAsk) {
+            finishFollowAsk(followAsk.n, "");
+        }
+
+        followAskSeq += 1;
+
+        const ask = {
+            n: followAskSeq,
+            title: "Follow the list?",
+            text: (out === 1 ? "A song" : out + " songs") + " still to come in the play queue "
+                + (out === 1 ? "is" : "are") + " no longer in the list as it is filtered now. The queue was put"
+                + " together by hand, so it keeps " + (out === 1 ? "it" : "them") + " unless it follows the list.",
+            el: null
+        };
+
+        followAsk = ask;
+        ask.el = askChoices(ask.title + "\n" + ask.text, [
+            { label: "Follow the list", ring: true, fn: function () {
+                finishFollowAsk(ask.n, "follow");
+            } },
+            { label: "Keep the queue", fn: function () {
+                finishFollowAsk(ask.n, "keep");
+            } }
+        ], function () {
+
+            // Without the player's box it is asked in the web views only,
+            // so it is not cancelled before the box would have been shown
+            if (ask.el) {
+                finishFollowAsk(ask.n, "keep");
+            }
+        }, true);
+        publishHostSoon();
+    }
+
+    // mode: follow makes the queue one made from the list, keep leaves it.
+    // Anything else, a newer question taking over, leaves things as they are
+    function finishFollowAsk(n, mode) {
+
+        const ask = followAsk;
+
+        if (!ask || ask.n !== n) {
+            return;
+        }
+
+        followAsk = null;
+
+        if (ask.el && ask.el.parentNode) {
+            ask.el.remove();
+        }
+
+        publishHostSoon();
+
+        if (mode !== "follow") {
+            return;
+        }
+
+        // Made from the list from now on, so it follows the next change too
+        queueOwn = false;
+
+        if (resumeState) {
+            resumeState.own = false;
+        }
+
+        rebuildUpcoming();
+        showToast("The play queue follows the list", true);
     }
 
     // Toggle shuffle as a mode
@@ -11347,7 +11571,7 @@
 
         // Rebuild the upcoming queue so the filter takes effect while playing,
         // then re-render so the list and counts update in every view
-        rebuildUpcoming();
+        queueFollowFilter();
         renderList();
     }
 
@@ -20046,6 +20270,393 @@
     }
 
     // Draw the waveform bars, played part cyan, optionally previewing a seek
+    // Zooming into a waveform. Pinch, or the mouse wheel over it, zooms in
+    // and out, and a double tap goes back to the whole song. Zoomed in, the
+    // play head stays in the middle and the waveform moves under it, off
+    // the middle only near the start and the end. Dragging moves the play
+    // head as before. Past two thirds of the way to an edge with more song
+    // beyond it, the play head stays there and the waveform scrolls
+    // instead, faster the nearer the finger is to the edge. Let go, the
+    // waveform glides back so the play head is in the middle again. A tap
+    // zoomed in seeks a moment later, so a second tap can zoom out instead.
+    // hooks: ready() a song to seek in, zoomable() a waveform shown,
+    // playFrac() where it plays, rect() the box the waveform fills,
+    // preview(frac) while dragging and preview(null) when that stops,
+    // commit(frac) to seek, redraw() after a change of the view
+    function makeWaveZoom(el, hooks) {
+
+        const ZOOM_MAX = 16;
+        const EDGE = 2 / 3;
+        const EDGE_SPEED = 1.5;
+        const GLIDE_MS = 350;
+        const DOUBLE_TAP_MS = 300;
+        const TAP_MOVE = 6;
+        const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false };
+        const pointers = new Map();
+
+        function span() {
+            return hooks.zoomable() ? 1 / z.zoom : 1;
+        }
+
+        function clampStart(s) {
+            return Math.max(0, Math.min(1 - span(), s));
+        }
+
+        function follow(frac) {
+            return clampStart(frac - span() / 2);
+        }
+
+        // Where the pointer is across the waveform, 0 at the left edge and
+        // 1 at the right, beyond those when the pointer is outside it
+        function across(ev) {
+
+            const r = hooks.rect();
+
+            return r.width > 0 ? (ev.clientX - r.left) / r.width : 0;
+        }
+
+        function spread() {
+
+            const xs = Array.from(pointers.values());
+
+            return Math.max(1, Math.abs(xs[0] - xs[1]));
+        }
+
+        function setZoom(v) {
+
+            const was = z.zoom;
+
+            z.zoom = Math.max(1, Math.min(ZOOM_MAX, v));
+
+            if (z.zoom < 1.03) {
+                z.zoom = 1;
+            }
+
+            if (z.zoom !== was) {
+                hooks.redraw();
+            }
+        }
+
+        function dropTap() {
+
+            clearTimeout(z.tapTimer);
+            z.tapTimer = 0;
+            z.tap = null;
+        }
+
+        // A tap still waiting seeks now, a press elsewhere came before the
+        // moment it waits for was over
+        function flushTap() {
+
+            const t = z.tap;
+            const waiting = !!z.tapTimer;
+
+            dropTap();
+
+            if (waiting && t) {
+
+                z.glide = { from: z.held ? z.held.start : 0, at: performance.now() };
+                z.held = null;
+                hooks.commit(t.frac);
+            }
+        }
+
+        z.span = span;
+
+        // The start of the part of the song in view, as a fraction, with the
+        // play head at frac
+        z.start = function (frac) {
+
+            if (span() >= 1) {
+                return 0;
+            }
+
+            if (z.drag || z.held) {
+                return clampStart((z.drag || z.held).start);
+            }
+
+            const target = follow(frac);
+
+            if (z.glide) {
+
+                const k = Math.min(1, (performance.now() - z.glide.at) / GLIDE_MS);
+
+                if (k >= 1) {
+                    z.glide = null;
+                } else {
+                    return clampStart(z.glide.from + (target - z.glide.from) * (1 - Math.pow(1 - k, 3)));
+                }
+            }
+
+            return target;
+        };
+
+        z.dragging = function () {
+            return !!z.drag;
+        };
+
+        // Whether the view moves by itself, so it is drawn every frame
+        z.moving = function () {
+            return span() < 1 && (!!z.drag || !!z.glide);
+        };
+
+        // The play head while dragging, the view scrolled on by the time
+        // since the last call when the finger is past two thirds of the way
+        // to an edge with song beyond it
+        z.dragFrac = function () {
+
+            const d = z.drag;
+
+            if (!d) {
+                return 0;
+            }
+
+            const now = performance.now();
+            const dt = Math.min(0.1, (now - d.at) / 1000);
+            const sp = span();
+            let px = Math.max(0, Math.min(1, d.px));
+
+            d.at = now;
+
+            if (sp < 1) {
+
+                const right = (d.px - EDGE) / (1 - EDGE);
+                const left = (1 - EDGE - d.px) / (1 - EDGE);
+
+                if (right > 0 && d.start < 1 - sp) {
+
+                    d.start = clampStart(d.start + Math.pow(Math.min(1.5, right), 2) * EDGE_SPEED * sp * dt);
+                    px = d.start < 1 - sp ? EDGE : px;
+                } else if (left > 0 && d.start > 0) {
+
+                    d.start = clampStart(d.start - Math.pow(Math.min(1.5, left), 2) * EDGE_SPEED * sp * dt);
+                    px = d.start > 0 ? 1 - EDGE : px;
+                }
+            }
+
+            return Math.max(0, Math.min(1, d.start + px * sp));
+        };
+
+        el.addEventListener("pointerdown", function (ev) {
+
+            if (!hooks.ready()) {
+                return;
+            }
+
+            ev.preventDefault();
+            pointers.set(ev.pointerId, ev.clientX);
+
+            try {
+                el.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Moves outside are then not seen, which only ends the drag
+            }
+
+            // A second finger makes it a pinch, the drag is let go
+            if (pointers.size === 2) {
+
+                flushTap();
+
+                if (z.drag) {
+
+                    z.drag = null;
+                    hooks.preview(null);
+                }
+
+                z.pinch = hooks.zoomable() ? { dist: spread(), zoom: z.zoom } : null;
+                return;
+            }
+
+            if (pointers.size > 2 || z.pinch) {
+                return;
+            }
+
+            const now = performance.now();
+
+            // A second tap soon after one close to it: the whole song again,
+            // and the first tap's seek, still waiting, is dropped
+            if (z.tap && now - z.tap.at < DOUBLE_TAP_MS && Math.abs(ev.clientX - z.tap.x) < 30) {
+
+                const waiting = !!z.tapTimer;
+
+                dropTap();
+                z.eatUp = true;
+
+                if (waiting) {
+
+                    z.held = null;
+                    hooks.preview(null);
+                }
+
+                setZoom(1);
+                return;
+            }
+
+            flushTap();
+            z.glide = null;
+            z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false };
+            hooks.preview(z.dragFrac());
+        });
+
+        el.addEventListener("pointermove", function (ev) {
+
+            if (!pointers.has(ev.pointerId)) {
+                return;
+            }
+
+            pointers.set(ev.pointerId, ev.clientX);
+
+            if (z.pinch && pointers.size >= 2) {
+
+                setZoom(z.pinch.zoom * spread() / z.pinch.dist);
+                return;
+            }
+
+            if (z.drag) {
+
+                z.drag.px = across(ev);
+
+                if (Math.abs(ev.clientX - z.drag.x) > TAP_MOVE) {
+                    z.drag.moved = true;
+                }
+
+                hooks.preview(z.dragFrac());
+            }
+        });
+
+        const up = function (ev, cancelled) {
+
+            if (!pointers.has(ev.pointerId)) {
+                return;
+            }
+
+            pointers.delete(ev.pointerId);
+
+            // The pinch ends with its fingers, a finger left on does nothing
+            if (z.pinch) {
+
+                if (pointers.size === 0) {
+                    z.pinch = null;
+                }
+
+                return;
+            }
+
+            if (z.eatUp) {
+
+                z.eatUp = false;
+                return;
+            }
+
+            const d = z.drag;
+
+            if (!d) {
+                return;
+            }
+
+            const frac = z.dragFrac();
+            const now = performance.now();
+
+            z.drag = null;
+
+            if (cancelled) {
+
+                hooks.preview(null);
+                return;
+            }
+
+            const tap = !d.moved && now - d.t0 < DOUBLE_TAP_MS;
+
+            z.tap = tap ? { at: now, x: d.x, frac: frac } : null;
+
+            // Zoomed in, a tap waits a moment in case a second one follows
+            if (tap && span() < 1) {
+
+                z.held = { start: d.start };
+                z.tapTimer = setTimeout(function () {
+
+                    z.tapTimer = 0;
+                    z.glide = { from: z.held ? z.held.start : 0, at: performance.now() };
+                    z.held = null;
+                    hooks.commit(frac);
+                }, DOUBLE_TAP_MS);
+                return;
+            }
+
+            z.glide = { from: d.start, at: now };
+            hooks.commit(frac);
+        };
+
+        el.addEventListener("pointerup", function (ev) {
+            up(ev, false);
+        });
+
+        el.addEventListener("pointercancel", function (ev) {
+            up(ev, true);
+        });
+
+        // The mouse wheel or a touchpad pinch over the waveform
+        el.addEventListener("wheel", function (ev) {
+
+            if (!hooks.ready() || !hooks.zoomable()) {
+                return;
+            }
+
+            ev.preventDefault();
+            setZoom(z.zoom * Math.exp(-ev.deltaY * (ev.deltaMode === 1 ? 0.05 : 0.0025)));
+        }, { passive: false });
+
+        return z;
+    }
+
+    // Zoomed in, the whole song as a thin, dim line along the foot of the
+    // waveform with the part in view a shade brighter, and a thin play head
+    function drawWaveOverview(ctx, w, h, start, span, frac, dpr) {
+
+        const lh = Math.max(1, Math.round(2 * dpr));
+        const x = Math.round((frac - start) / span * w);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.fillRect(0, h - lh, w, lh);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.24)";
+        ctx.fillRect(Math.round(start * w), h - lh, Math.max(lh, Math.round(span * w)), lh);
+
+        if (x >= 0 && x < w) {
+
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            ctx.fillRect(x, 0, Math.max(1, Math.round(dpr)), h - lh);
+        }
+    }
+
+    // Mureka's waveform as bars, each the highest point of its slice. Each
+    // bar keeps its place in the song, so zoomed in they slide along rather
+    // than change height as the view moves
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr) {
+
+        const pitch = barW + gap;
+        const count = Math.max(1, Math.floor(w / pitch));
+        const step = span / count;
+
+        for (let k = Math.floor(start / step + 1e-9); ; k++) {
+
+            const from = k * step;
+            const x = Math.round((from - start) / step * pitch);
+
+            if (from >= 1 || x >= w) {
+                break;
+            }
+
+            const peak = waveSlice(data, from, Math.min(1, from + step));
+            const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
+
+            ctx.fillStyle = from + step / 2 <= frac ? "#48e1eb" : "#555";
+            ctx.fillRect(x, (h - bh) / 2, barW, bh);
+        }
+    }
+
+    // The zoom of the player's waveform, made with the seek row
+    let waveZoomer = null;
+
     function drawWave(previewFrac) {
 
         if (!waveCanvas || !waveData) {
@@ -20081,38 +20692,20 @@
             frac = times.at / times.length;
         }
 
+        // The part of the song in view, all of it unless zoomed in
+        const span = waveZoomer ? waveZoomer.span() : 1;
+        const start = waveZoomer ? waveZoomer.start(frac) : 0;
+
         // Our own waveform in two layers a column per screen pixel, Mureka's
         // as bars, so the two look apart
         if (waveOwn !== null && waveData === waveOwn && waveOwnLoud) {
-
-            drawLayeredWave(ctx, w, h, waveOwn, waveOwnLoud, frac);
-            return;
+            drawLayeredWave(ctx, w, h, waveOwn, waveOwnLoud, frac, start, span);
+        } else {
+            drawWaveBars(ctx, w, h, waveData, frac, start, span, 2 * dpr, 1 * dpr, dpr);
         }
 
-        const barW = 2 * dpr;
-        const gap = 1 * dpr;
-        const count = Math.max(1, Math.floor(w / (barW + gap)));
-
-        for (let i = 0; i < count; i += 1) {
-
-            // Each bar shows the peak of its slice of the wave
-            const a = Math.floor(i * waveData.length / count);
-            const b = Math.max(a + 1, Math.floor((i + 1) * waveData.length / count));
-            let peak = 0;
-
-            for (let j = a; j < b; j += 1) {
-
-                if (waveData[j] > peak) {
-                    peak = waveData[j];
-                }
-            }
-
-            const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
-            const x = i * (barW + gap);
-            const y = (h - bh) / 2;
-
-            ctx.fillStyle = ((i + 0.5) / count) <= frac ? "#48e1eb" : "#555";
-            ctx.fillRect(x, y, barW, bh);
+        if (span < 1) {
+            drawWaveOverview(ctx, w, h, start, span, frac, dpr);
         }
     }
 
@@ -20149,26 +20742,73 @@
 
     // Our own waveform: the peaks dim, and in front of them how loud the
     // song sounds, bright, a column per screen pixel. Played in the accent
-    // colour, the rest grey
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac) {
+    // colour, the rest grey. start and span the part of the song in view,
+    // each column keeping its place in the song as the view moves
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span) {
 
         const room = h - 1;
+        const from0 = start || 0;
+        const step = (span || 1) / w;
 
-        for (let i = 0; i < w; i++) {
+        for (let k = Math.floor(from0 / step + 1e-9); ; k++) {
 
-            const from = i / w;
-            const to = (i + 1) / w;
-            const played = (i + 0.5) / w <= frac;
+            const from = k * step;
+            const x = Math.round((from - from0) / step);
+
+            if (from >= 1 || x >= w) {
+                break;
+            }
+
+            const to = Math.min(1, from + step);
+            const played = from + step / 2 <= frac;
             const p = waveSlice(peaks, from, to);
             const l = Math.min(p, waveSlice(loud, from, to) * 0.95);
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
             ctx.fillStyle = played ? "#2a7f86" : "#3a3a3e";
-            ctx.fillRect(i, (h - ph) / 2, 1, ph);
+            ctx.fillRect(x, (h - ph) / 2, 1, ph);
             ctx.fillStyle = played ? "#48e1eb" : "#666";
-            ctx.fillRect(i, (h - lh) / 2, 1, lh);
+            ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
+    }
+
+    // Drawn every frame while zoomed in and playing, while dragging and
+    // while the view glides back, and not otherwise
+    let waveLoopOn = false;
+
+    function waveLoopSoon() {
+
+        if (waveLoopOn || !waveZoomer) {
+            return;
+        }
+
+        waveLoopOn = true;
+        requestAnimationFrame(waveLoopStep);
+    }
+
+    function waveLoopStep() {
+
+        const z = waveZoomer;
+        const shown = !!(z && waveCanvas && waveData && waveCanvas.style.display !== "none" && !document.hidden);
+
+        if (shown && z.dragging()) {
+
+            const frac = z.dragFrac();
+            const duration = songTimes().length;
+
+            curTimeEl.textContent = formatTime(frac * duration);
+            remTimeEl.textContent = "-" + formatTime(duration > 0 ? duration - frac * duration : 0);
+            drawWave(frac);
+        } else if (shown && z.span() < 1 && ((audio && !audio.paused) || z.moving()) && !isSeeking) {
+            drawWave();
+        } else {
+
+            waveLoopOn = false;
+            return;
+        }
+
+        requestAnimationFrame(waveLoopStep);
     }
 
     // The song restored from the last session and not started yet, shown
@@ -20254,7 +20894,9 @@
         }
 
         if (waveCanvas && waveData && !isSeeking && waveCanvas.style.display !== "none") {
+
             drawWave();
+            waveLoopSoon();
         }
 
         updateMediaPosition();
@@ -21257,6 +21899,7 @@
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
             newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text } : null,
+            followAsk: followAsk ? { n: followAsk.n, title: followAsk.title, text: followAsk.text } : null,
             pendingCount: pendingCount(),
             retryAsk: retryAsk ? {
                 n: retryAsk.n,
@@ -23742,6 +24385,10 @@
 
             // Rows of songs known only by their id in sight in a web view
             wantStubsSeen(arg && Array.isArray(arg.ids) ? arg.ids.map(String).slice(0, 200) : []);
+        } else if (cmd === "followAnswer") {
+
+            // Whether the queue follows the list, from a web view
+            finishFollowAsk(Number(arg && arg.n), arg && typeof arg.mode === "string" ? arg.mode : "");
         } else if (cmd === "newAnswer") {
 
             // Where the new songs go, from a web view, for the question it
@@ -24808,68 +25455,58 @@
             }).observe(waveCanvas);
         }
 
-        // Fraction of the canvas width for a pointer event, clamped to 0..1
-        const waveFrac = function (ev) {
+        // Pressing or dragging previews the time and the played part, and
+        // letting go seeks there. Pinch, the mouse wheel and a double tap
+        // zoom, see makeWaveZoom
+        waveZoomer = makeWaveZoom(waveCanvas, {
+            ready: function () {
+                return songTimes().length > 0;
+            },
+            zoomable: function () {
+                return !!waveData && waveCanvas.style.display !== "none";
+            },
+            playFrac: function () {
 
-            const rect = waveCanvas.getBoundingClientRect();
+                const times = songTimes();
 
-            if (rect.width <= 0) {
-                return 0;
+                return times.length > 0 ? times.at / times.length : 0;
+            },
+            rect: function () {
+                return waveCanvas.getBoundingClientRect();
+            },
+            preview: function (frac) {
+
+                if (frac === null) {
+
+                    isSeeking = false;
+                    updateSeekDisplay();
+                    return;
+                }
+
+                const duration = songTimes().length;
+                const t = frac * duration;
+
+                isSeeking = true;
+                curTimeEl.textContent = formatTime(t);
+                remTimeEl.textContent = "-" + formatTime(duration > 0 ? duration - t : 0);
+                drawWave(frac);
+                waveLoopSoon();
+            },
+            commit: function (frac) {
+
+                seekToTime(frac * songTimes().length);
+                isSeeking = false;
+                updateSeekDisplay();
+                waveLoopSoon();
+            },
+            redraw: function () {
+
+                if (!isSeeking) {
+                    drawWave();
+                }
+
+                waveLoopSoon();
             }
-
-            return Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-        };
-
-        // Preview the labels and progress while pressing or dragging
-        const wavePreview = function (frac) {
-
-            const duration = songTimes().length;
-            const t = frac * duration;
-
-            curTimeEl.textContent = formatTime(t);
-            remTimeEl.textContent = "-" + formatTime(duration > 0 ? duration - t : 0);
-            drawWave(frac);
-        };
-
-        waveCanvas.addEventListener("pointerdown", function (ev) {
-
-            if (songTimes().length <= 0) {
-                return;
-            }
-
-            ev.preventDefault();
-            isSeeking = true;
-
-            try {
-                waveCanvas.setPointerCapture(ev.pointerId);
-            } catch (e) {
-            }
-
-            wavePreview(waveFrac(ev));
-        });
-
-        waveCanvas.addEventListener("pointermove", function (ev) {
-
-            if (isSeeking) {
-                wavePreview(waveFrac(ev));
-            }
-        });
-
-        waveCanvas.addEventListener("pointerup", function (ev) {
-
-            if (!isSeeking) {
-                return;
-            }
-
-            seekToTime(waveFrac(ev) * songTimes().length);
-            isSeeking = false;
-            updateSeekDisplay();
-        });
-
-        waveCanvas.addEventListener("pointercancel", function () {
-
-            isSeeking = false;
-            updateSeekDisplay();
         });
 
         seekRow.appendChild(songDotEl);
@@ -34071,6 +34708,7 @@
             if (!queueOwn || queuePos >= queue.length) {
 
                 playNextMarks.clear();
+                playLastMarks.clear();
                 queue = [];
                 queueOwn = true;
             }
@@ -34140,6 +34778,7 @@
 
         dropNextReady();
         playNextMarks.clear();
+        playLastMarks.clear();
         resumeState = null;
 
         if (keepIt) {
@@ -40653,7 +41292,7 @@
         activePlaylist = { playlist_id: pl.playlist_id, name: pl.name, ids: pl.ids };
 
         updatePlaylistButton();
-        rebuildUpcoming();
+        queueFollowFilter();
         renderList();
         renderPlaylists();
         closePlaylists();
@@ -40665,7 +41304,7 @@
         activePlaylist = null;
 
         updatePlaylistButton();
-        rebuildUpcoming();
+        queueFollowFilter();
         renderList();
         renderPlaylists();
         closePlaylists();
@@ -42120,6 +42759,9 @@
         installDebugWatchers();
         installTrimKeys();
         buildPanel();
+
+        // What the list lets through as it opens, for the first filter change
+        followBase = admittedSig();
         syncWakeLock();
         followOtherTabs();
 

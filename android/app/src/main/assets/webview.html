@@ -7081,7 +7081,7 @@
         $("wave").style.display = wave ? "block" : "none";
         $("track").style.visibility = wave ? "hidden" : "visible";
         $("bar").classList.toggle("waveWait", !!(s && s.waveWait && !s.waveFine));
-        waveShown = -1;
+        waveShown = "";
 
         const playing = !!(s && s.playing);
 
@@ -7231,8 +7231,8 @@
     }
 
     // The waveform bars, played part in the accent colour, redrawn only
-    // when the played part or the size moved on
-    let waveShown = -1;
+    // when the played part, the view or the size moved on
+    let waveShown = "";
 
     // A value of a waveform over a slice of it, from and to as fractions of
     // the song: the highest point when the slice holds several, and a blend
@@ -7267,27 +7267,423 @@
 
     // The waveform from the song as the phone draws it: the peaks dim, and
     // in front of them how loud the song sounds, bright, a column per
-    // screen pixel
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac) {
+    // screen pixel. start and span the part of the song in view, each
+    // column keeping its place in the song as the view moves
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span) {
 
         const room = h - 1;
+        const from0 = start || 0;
+        const step = (span || 1) / w;
 
-        for (let i = 0; i < w; i++) {
+        for (let k = Math.floor(from0 / step + 1e-9); ; k++) {
 
-            const from = i / w;
-            const to = (i + 1) / w;
-            const played = (i + 0.5) / w <= frac;
+            const from = k * step;
+            const x = Math.round((from - from0) / step);
+
+            if (from >= 1 || x >= w) {
+                break;
+            }
+
+            const to = Math.min(1, from + step);
+            const played = from + step / 2 <= frac;
             const p = waveSlice(peaks, from, to);
             const l = Math.min(p, waveSlice(loud, from, to) * 0.95);
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
             ctx.fillStyle = played ? "#2a7f86" : "#3a3a3e";
-            ctx.fillRect(i, (h - ph) / 2, 1, ph);
+            ctx.fillRect(x, (h - ph) / 2, 1, ph);
             ctx.fillStyle = played ? "#48e1eb" : "#666";
-            ctx.fillRect(i, (h - lh) / 2, 1, lh);
+            ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
     }
+
+    // Zooming into a waveform. Pinch, or the mouse wheel over it, zooms in
+    // and out, and a double tap goes back to the whole song. Zoomed in, the
+    // play head stays in the middle and the waveform moves under it, off
+    // the middle only near the start and the end. Dragging moves the play
+    // head as before. Past two thirds of the way to an edge with more song
+    // beyond it, the play head stays there and the waveform scrolls
+    // instead, faster the nearer the finger is to the edge. Let go, the
+    // waveform glides back so the play head is in the middle again. A tap
+    // zoomed in seeks a moment later, so a second tap can zoom out instead.
+    // hooks: ready() a song to seek in, zoomable() a waveform shown,
+    // playFrac() where it plays, rect() the box the waveform fills,
+    // preview(frac) while dragging and preview(null) when that stops,
+    // commit(frac) to seek, redraw() after a change of the view
+    function makeWaveZoom(el, hooks) {
+
+        const ZOOM_MAX = 16;
+        const EDGE = 2 / 3;
+        const EDGE_SPEED = 1.5;
+        const GLIDE_MS = 350;
+        const DOUBLE_TAP_MS = 300;
+        const TAP_MOVE = 6;
+        const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false };
+        const pointers = new Map();
+
+        function span() {
+            return hooks.zoomable() ? 1 / z.zoom : 1;
+        }
+
+        function clampStart(s) {
+            return Math.max(0, Math.min(1 - span(), s));
+        }
+
+        function follow(frac) {
+            return clampStart(frac - span() / 2);
+        }
+
+        // Where the pointer is across the waveform, 0 at the left edge and
+        // 1 at the right, beyond those when the pointer is outside it
+        function across(ev) {
+
+            const r = hooks.rect();
+
+            return r.width > 0 ? (ev.clientX - r.left) / r.width : 0;
+        }
+
+        function spread() {
+
+            const xs = Array.from(pointers.values());
+
+            return Math.max(1, Math.abs(xs[0] - xs[1]));
+        }
+
+        function setZoom(v) {
+
+            const was = z.zoom;
+
+            z.zoom = Math.max(1, Math.min(ZOOM_MAX, v));
+
+            if (z.zoom < 1.03) {
+                z.zoom = 1;
+            }
+
+            if (z.zoom !== was) {
+                hooks.redraw();
+            }
+        }
+
+        function dropTap() {
+
+            clearTimeout(z.tapTimer);
+            z.tapTimer = 0;
+            z.tap = null;
+        }
+
+        // A tap still waiting seeks now, a press elsewhere came before the
+        // moment it waits for was over
+        function flushTap() {
+
+            const t = z.tap;
+            const waiting = !!z.tapTimer;
+
+            dropTap();
+
+            if (waiting && t) {
+
+                z.glide = { from: z.held ? z.held.start : 0, at: performance.now() };
+                z.held = null;
+                hooks.commit(t.frac);
+            }
+        }
+
+        z.span = span;
+
+        // The start of the part of the song in view, as a fraction, with the
+        // play head at frac
+        z.start = function (frac) {
+
+            if (span() >= 1) {
+                return 0;
+            }
+
+            if (z.drag || z.held) {
+                return clampStart((z.drag || z.held).start);
+            }
+
+            const target = follow(frac);
+
+            if (z.glide) {
+
+                const k = Math.min(1, (performance.now() - z.glide.at) / GLIDE_MS);
+
+                if (k >= 1) {
+                    z.glide = null;
+                } else {
+                    return clampStart(z.glide.from + (target - z.glide.from) * (1 - Math.pow(1 - k, 3)));
+                }
+            }
+
+            return target;
+        };
+
+        z.dragging = function () {
+            return !!z.drag;
+        };
+
+        // Whether the view moves by itself, so it is drawn every frame
+        z.moving = function () {
+            return span() < 1 && (!!z.drag || !!z.glide);
+        };
+
+        // The play head while dragging, the view scrolled on by the time
+        // since the last call when the finger is past two thirds of the way
+        // to an edge with song beyond it
+        z.dragFrac = function () {
+
+            const d = z.drag;
+
+            if (!d) {
+                return 0;
+            }
+
+            const now = performance.now();
+            const dt = Math.min(0.1, (now - d.at) / 1000);
+            const sp = span();
+            let px = Math.max(0, Math.min(1, d.px));
+
+            d.at = now;
+
+            if (sp < 1) {
+
+                const right = (d.px - EDGE) / (1 - EDGE);
+                const left = (1 - EDGE - d.px) / (1 - EDGE);
+
+                if (right > 0 && d.start < 1 - sp) {
+
+                    d.start = clampStart(d.start + Math.pow(Math.min(1.5, right), 2) * EDGE_SPEED * sp * dt);
+                    px = d.start < 1 - sp ? EDGE : px;
+                } else if (left > 0 && d.start > 0) {
+
+                    d.start = clampStart(d.start - Math.pow(Math.min(1.5, left), 2) * EDGE_SPEED * sp * dt);
+                    px = d.start > 0 ? 1 - EDGE : px;
+                }
+            }
+
+            return Math.max(0, Math.min(1, d.start + px * sp));
+        };
+
+        el.addEventListener("pointerdown", function (ev) {
+
+            if (!hooks.ready()) {
+                return;
+            }
+
+            ev.preventDefault();
+            pointers.set(ev.pointerId, ev.clientX);
+
+            try {
+                el.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Moves outside are then not seen, which only ends the drag
+            }
+
+            // A second finger makes it a pinch, the drag is let go
+            if (pointers.size === 2) {
+
+                flushTap();
+
+                if (z.drag) {
+
+                    z.drag = null;
+                    hooks.preview(null);
+                }
+
+                z.pinch = hooks.zoomable() ? { dist: spread(), zoom: z.zoom } : null;
+                return;
+            }
+
+            if (pointers.size > 2 || z.pinch) {
+                return;
+            }
+
+            const now = performance.now();
+
+            // A second tap soon after one close to it: the whole song again,
+            // and the first tap's seek, still waiting, is dropped
+            if (z.tap && now - z.tap.at < DOUBLE_TAP_MS && Math.abs(ev.clientX - z.tap.x) < 30) {
+
+                const waiting = !!z.tapTimer;
+
+                dropTap();
+                z.eatUp = true;
+
+                if (waiting) {
+
+                    z.held = null;
+                    hooks.preview(null);
+                }
+
+                setZoom(1);
+                return;
+            }
+
+            flushTap();
+            z.glide = null;
+            z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false };
+            hooks.preview(z.dragFrac());
+        });
+
+        el.addEventListener("pointermove", function (ev) {
+
+            if (!pointers.has(ev.pointerId)) {
+                return;
+            }
+
+            pointers.set(ev.pointerId, ev.clientX);
+
+            if (z.pinch && pointers.size >= 2) {
+
+                setZoom(z.pinch.zoom * spread() / z.pinch.dist);
+                return;
+            }
+
+            if (z.drag) {
+
+                z.drag.px = across(ev);
+
+                if (Math.abs(ev.clientX - z.drag.x) > TAP_MOVE) {
+                    z.drag.moved = true;
+                }
+
+                hooks.preview(z.dragFrac());
+            }
+        });
+
+        const up = function (ev, cancelled) {
+
+            if (!pointers.has(ev.pointerId)) {
+                return;
+            }
+
+            pointers.delete(ev.pointerId);
+
+            // The pinch ends with its fingers, a finger left on does nothing
+            if (z.pinch) {
+
+                if (pointers.size === 0) {
+                    z.pinch = null;
+                }
+
+                return;
+            }
+
+            if (z.eatUp) {
+
+                z.eatUp = false;
+                return;
+            }
+
+            const d = z.drag;
+
+            if (!d) {
+                return;
+            }
+
+            const frac = z.dragFrac();
+            const now = performance.now();
+
+            z.drag = null;
+
+            if (cancelled) {
+
+                hooks.preview(null);
+                return;
+            }
+
+            const tap = !d.moved && now - d.t0 < DOUBLE_TAP_MS;
+
+            z.tap = tap ? { at: now, x: d.x, frac: frac } : null;
+
+            // Zoomed in, a tap waits a moment in case a second one follows
+            if (tap && span() < 1) {
+
+                z.held = { start: d.start };
+                z.tapTimer = setTimeout(function () {
+
+                    z.tapTimer = 0;
+                    z.glide = { from: z.held ? z.held.start : 0, at: performance.now() };
+                    z.held = null;
+                    hooks.commit(frac);
+                }, DOUBLE_TAP_MS);
+                return;
+            }
+
+            z.glide = { from: d.start, at: now };
+            hooks.commit(frac);
+        };
+
+        el.addEventListener("pointerup", function (ev) {
+            up(ev, false);
+        });
+
+        el.addEventListener("pointercancel", function (ev) {
+            up(ev, true);
+        });
+
+        // The mouse wheel or a touchpad pinch over the waveform
+        el.addEventListener("wheel", function (ev) {
+
+            if (!hooks.ready() || !hooks.zoomable()) {
+                return;
+            }
+
+            ev.preventDefault();
+            setZoom(z.zoom * Math.exp(-ev.deltaY * (ev.deltaMode === 1 ? 0.05 : 0.0025)));
+        }, { passive: false });
+
+        return z;
+    }
+
+    // Zoomed in, the whole song as a thin, dim line along the foot of the
+    // waveform with the part in view a shade brighter, and a thin play head
+    function drawWaveOverview(ctx, w, h, start, span, frac, dpr) {
+
+        const lh = Math.max(1, Math.round(2 * dpr));
+        const x = Math.round((frac - start) / span * w);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.fillRect(0, h - lh, w, lh);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.24)";
+        ctx.fillRect(Math.round(start * w), h - lh, Math.max(lh, Math.round(span * w)), lh);
+
+        if (x >= 0 && x < w) {
+
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            ctx.fillRect(x, 0, Math.max(1, Math.round(dpr)), h - lh);
+        }
+    }
+
+    // Mureka's waveform as bars, each the highest point of its slice. Each
+    // bar keeps its place in the song, so zoomed in they slide along rather
+    // than change height as the view moves
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr) {
+
+        const pitch = barW + gap;
+        const count = Math.max(1, Math.floor(w / pitch));
+        const step = span / count;
+
+        for (let k = Math.floor(start / step + 1e-9); ; k++) {
+
+            const from = k * step;
+            const x = Math.round((from - start) / step * pitch);
+
+            if (from >= 1 || x >= w) {
+                break;
+            }
+
+            const peak = waveSlice(data, from, Math.min(1, from + step));
+            const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
+
+            ctx.fillStyle = from + step / 2 <= frac ? "#48e1eb" : "#555";
+            ctx.fillRect(x, (h - bh) / 2, barW, bh);
+        }
+    }
+
+    // The zoom of the waveform, made with the seek bar's handlers below
+    let waveZoomer = null;
 
     function drawWave(frac) {
 
@@ -7307,8 +7703,15 @@
         const barW = fine ? 1 : 3 * dpr;
         const gap = fine ? 0 : 2 * dpr;
         const count = Math.max(1, Math.floor(w / (barW + gap)));
-        const played = Math.round(frac * count);
-        const key = played * 100000 + w + (fine ? 0.5 : 0) + (loud ? 0.25 : 0);
+
+        // The part of the song in view, all of it unless zoomed in
+        const span = waveZoomer ? waveZoomer.span() : 1;
+        const start = waveZoomer ? waveZoomer.start(frac) : 0;
+
+        // Drawn again only when the played part, the view or the size moved
+        // on by a column or more
+        const played = Math.round(frac / span * count);
+        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -7327,28 +7730,13 @@
         ctx.clearRect(0, 0, w, h);
 
         if (loud) {
-
-            drawLayeredWave(ctx, w, h, data, loud, played / count);
-            return;
+            drawLayeredWave(ctx, w, h, data, loud, frac, start, span);
+        } else {
+            drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr);
         }
 
-        for (let i = 0; i < count; i++) {
-
-            const a = Math.floor(i * data.length / count);
-            const b = Math.max(a + 1, Math.floor((i + 1) * data.length / count));
-            let peak = 0;
-
-            for (let j = a; j < b; j++) {
-
-                if (data[j] > peak) {
-                    peak = data[j];
-                }
-            }
-
-            const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
-
-            ctx.fillStyle = i < played ? "#48e1eb" : "#555";
-            ctx.fillRect(i * (barW + gap), (h - bh) / 2, barW, bh);
+        if (span < 1) {
+            drawWaveOverview(ctx, w, h, start, span, frac, dpr);
         }
     }
 
@@ -7656,6 +8044,11 @@
     function tick() {
 
         const dur = state && state.duration ? state.duration : 0;
+
+        if (dragging && waveZoomer && waveZoomer.dragging()) {
+            dragFrac = waveZoomer.dragFrac();
+        }
+
         const pos = dragging ? dragFrac * dur : smoothPosition(position());
         const frac = dur > 0 ? Math.min(1, pos / dur) : 0;
 
@@ -13266,6 +13659,7 @@
         paintRetryAsk();
         paintGoneAsk();
         paintNewAsk();
+        paintFollowAsk();
         theaterSound();
 
         if (volOpen()) {
@@ -13882,54 +14276,52 @@
         setLocalMute(true);
     });
 
-    // Seeking, the bar follows the finger and the phone jumps on release
+    // Seeking, the bar follows the finger and the phone jumps on release.
+    // With a waveform shown, pinch, the mouse wheel over it and a double
+    // tap zoom, see makeWaveZoom
     const bar = $("bar");
 
-    function barFrac(ev) {
+    waveZoomer = makeWaveZoom(bar, {
+        ready: function () {
+            return !!(state && state.duration);
+        },
+        zoomable: function () {
+            return !!(state && state.wave && state.wave.length) && $("wave").style.display !== "none";
+        },
+        playFrac: function () {
 
-        const r = $("track").getBoundingClientRect();
+            const dur = state && state.duration ? state.duration : 0;
 
-        return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-    }
+            return dur > 0 ? Math.min(1, shownPos / dur) : 0;
+        },
+        rect: function () {
+            return $("track").getBoundingClientRect();
+        },
+        preview: function (frac) {
 
-    bar.addEventListener("pointerdown", function (ev) {
+            dragging = frac !== null;
 
-        if (!state || !state.duration) {
-            return;
+            if (frac !== null) {
+                dragFrac = frac;
+            }
+        },
+        commit: function (frac) {
+
+            dragging = false;
+            dragFrac = frac;
+
+            const target = frac * state.duration;
+
+            // Shown at once, the next poll confirms it
+            state.position = target;
+            state.at = null;
+            stateAt = Date.now();
+            shownPos = target;
+            send("seek", target);
+        },
+        redraw: function () {
+            waveShown = "";
         }
-
-        dragging = true;
-        dragFrac = barFrac(ev);
-        bar.setPointerCapture(ev.pointerId);
-    });
-
-    bar.addEventListener("pointermove", function (ev) {
-
-        if (dragging) {
-            dragFrac = barFrac(ev);
-        }
-    });
-
-    bar.addEventListener("pointerup", function (ev) {
-
-        if (!dragging) {
-            return;
-        }
-
-        dragging = false;
-        dragFrac = barFrac(ev);
-
-        const target = dragFrac * state.duration;
-
-        // Shown at once, the next poll confirms it
-        state.position = target;
-        state.at = null;
-        stateAt = Date.now();
-        send("seek", target);
-    });
-
-    bar.addEventListener("pointercancel", function () {
-        dragging = false;
     });
 
     // The song menu, the phone's long press menu with its choices in the
@@ -14124,6 +14516,12 @@
     function openChoice(title, items) {
 
         const box = $("menuItems");
+
+        // A question comes first. Playing from would cover it, and the
+        // question is often about the filter just picked there
+        if (isShown("fromPop")) {
+            closeFrom();
+        }
 
         menuSong = null;
         box.textContent = "";
@@ -17536,6 +17934,53 @@
             } },
             { icon: "close", label: "Leave out for now", fn: function () {
                 answer("skip");
+            } }
+        ]);
+    }
+
+    // Whether a queue put together by hand follows the list after its filter
+    // changed. The phone asks too, and the first answer anywhere closes the
+    // question everywhere
+    let followShown = 0;
+    let followAsking = "";
+
+    function paintFollowAsk() {
+
+        const ask = state && state.followAsk ? state.followAsk : null;
+        const n = ask ? Number(ask.n) : 0;
+
+        if (n === followShown) {
+            return;
+        }
+
+        followShown = n;
+
+        // Answered elsewhere, so this one goes away by itself, unless the
+        // box shows something else by now
+        if (followAsking && $("songMenu").style.display === "flex" && $("menuTitle").textContent === followAsking) {
+            closeSongMenu();
+        }
+
+        followAsking = "";
+
+        if (!ask) {
+            return;
+        }
+
+        const answer = function (mode) {
+
+            followAsking = "";
+            closeSongMenu();
+            send("followAnswer", { n: n, mode: mode });
+        };
+
+        followAsking = ask.title + " " + ask.text;
+        openChoice(followAsking, [
+            { icon: "filter", label: "Follow the list", fn: function () {
+                answer("follow");
+            } },
+            { icon: "queue", label: "Keep the queue", fn: function () {
+                answer("keep");
             } }
         ]);
     }
