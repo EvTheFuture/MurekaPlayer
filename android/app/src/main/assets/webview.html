@@ -2586,6 +2586,14 @@
 
     #bar {
         position: relative;
+        transition: opacity 0.3s ease-out;
+    }
+
+    /* The waveform waited for has come: the bar fades quickly to nothing
+       as it was, then up again with the new one */
+    #bar.waveOut {
+        opacity: 0;
+        transition: opacity 0.15s ease-in;
     }
 
     /* The own waveform still being worked out on the phone: the bar or the
@@ -7077,11 +7085,32 @@
 
         // The waveform replaces the plain bar when the phone sends one
         const wave = s && s.wave && s.wave.length ? s.wave : null;
+        const bar = $("bar");
+        const wantWait = !!(s && s.waveWait && !s.waveFine);
 
-        $("wave").style.display = wave ? "block" : "none";
-        $("track").style.visibility = wave ? "hidden" : "visible";
-        $("bar").classList.toggle("waveWait", !!(s && s.waveWait && !s.waveFine));
-        waveShown = "";
+        // The wait just ended: the bar fades out as it was, then the new
+        // look goes in and it fades up again
+        if (bar.classList.contains("waveWait") && !wantWait && !waveSwapUntil) {
+
+            waveSwapUntil = Date.now() + 200;
+            bar.classList.add("waveOut");
+            setTimeout(function () {
+
+                waveSwapUntil = 0;
+                bar.classList.remove("waveWait");
+                bar.classList.remove("waveOut");
+                waveShown = "";
+                render();
+            }, 200);
+        }
+
+        if (!waveSwapUntil) {
+
+            $("wave").style.display = wave ? "block" : "none";
+            $("track").style.visibility = wave ? "hidden" : "visible";
+            bar.classList.toggle("waveWait", wantWait);
+            waveShown = "";
+        }
 
         const playing = !!(s && s.playing);
 
@@ -7233,6 +7262,10 @@
     // The waveform bars, played part in the accent colour, redrawn only
     // when the played part, the view or the size moved on
     let waveShown = "";
+
+    // While the bar fades out at the end of a wait, until when, the old
+    // look stays as it was
+    let waveSwapUntil = 0;
 
     // A value of a waveform over a slice of it, from and to as fractions of
     // the song: the highest point when the slice holds several, and a blend
@@ -7690,7 +7723,7 @@
         const canvas = $("wave");
         const data = state && state.wave ? state.wave : null;
 
-        if (!data || canvas.style.display === "none") {
+        if (!data || canvas.style.display === "none" || waveSwapUntil) {
             return;
         }
 

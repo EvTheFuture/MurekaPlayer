@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.293";
+    const VERSION = "1.9.9.294";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20018,20 +20018,32 @@
             }
 
             ownWaveBusy = null;
-            paintWaveWait();
 
-            if (!currentSong || currentSong.song_id !== id || !ownWaveWanted()) {
+            const still = !!(currentSong && currentSong.song_id === id && ownWaveWanted());
+
+            // Ready: the pulse gives way to it with a fade
+            if (still && own) {
+
+                waveSwap(function () {
+
+                    if (currentSong && currentSong.song_id === id) {
+
+                        waveOwn = own.peak;
+                        waveOwnLoud = own.loud;
+                        applyWave();
+                    }
+                });
                 return;
             }
 
-            if (own) {
+            // Not stored yet, tried again later, the pulse goes on meanwhile
+            if (still && !failed) {
 
-                waveOwn = own.peak;
-                waveOwnLoud = own.loud;
-                applyWave();
-            } else if (!failed) {
                 makeOwnWaveSoon(song, (tries || 0) + 1);
+                return;
             }
+
+            paintWaveWait();
         }, now ? 200 : OWN_WAVE_RETRY_MS[Math.min(tries || 0, OWN_WAVE_RETRY_MS.length - 1)]);
     }
 
@@ -20168,15 +20180,109 @@
     // and out like the dot of a song that is loading
     function paintWaveWait() {
 
+        // The swap to the waveform that came takes it from here
+        if (waveSwapping) {
+            return;
+        }
+
         const on = settings.waveSource === "song" ? ownWaveWorking() : murekaWaveWaiting();
         const pulse = on ? "mureka-wave-wait 1.2s ease-in-out infinite" : "";
 
         for (const el of [waveCanvas, seekBar]) {
 
-            if (el && el.style.animation !== pulse) {
-                el.style.animation = pulse;
+            if (!el || el.style.animation === pulse) {
+                continue;
             }
+
+            // The wait over with nothing new to show: up to full from where
+            // the pulse was, not a jump
+            if (!pulse) {
+
+                const now = getComputedStyle(el).opacity;
+
+                el.style.animation = "";
+                el.style.transition = "none";
+                el.style.opacity = now;
+                void el.offsetWidth;
+                el.style.transition = "opacity 0.3s ease-out";
+                el.style.opacity = "1";
+                setTimeout(function () {
+
+                    if (!el.style.animation && !waveSwapping) {
+
+                        el.style.transition = "";
+                        el.style.opacity = "";
+                    }
+                }, 350);
+                continue;
+            }
+
+            el.style.transition = "";
+            el.style.opacity = "";
+            el.style.animation = pulse;
         }
+    }
+
+    // The waveform that was waited for has come. While the bar pulses, it
+    // fades quickly to nothing as it was, apply puts the new waveform in,
+    // and it fades up again, so the change of look does not flash. Without
+    // a pulse apply just runs
+    let waveSwapping = false;
+
+    function waveSwap(apply) {
+
+        const els = [waveCanvas, seekBar].filter(Boolean);
+
+        if (waveSwapping || !els.some(function (el) {
+            return !!el.style.animation;
+        })) {
+
+            apply();
+            return;
+        }
+
+        waveSwapping = true;
+
+        for (const el of els) {
+
+            const now = getComputedStyle(el).opacity;
+
+            el.style.animation = "";
+            el.style.transition = "none";
+            el.style.opacity = now;
+        }
+
+        void els[0].offsetWidth;
+
+        for (const el of els) {
+
+            el.style.transition = "opacity 0.15s ease-in";
+            el.style.opacity = "0";
+        }
+
+        setTimeout(function () {
+
+            apply();
+
+            for (const el of els) {
+
+                el.style.transition = "opacity 0.3s ease-out";
+                el.style.opacity = "1";
+            }
+
+            setTimeout(function () {
+
+                waveSwapping = false;
+
+                for (const el of els) {
+
+                    el.style.transition = "";
+                    el.style.opacity = "";
+                }
+
+                paintWaveWait();
+            }, 320);
+        }, 200);
     }
 
     // Load the stored waveforms for the song now starting
@@ -20208,8 +20314,22 @@
 
         const w = normalizeWave(stored);
 
-        waveMureka = w;
-        applyWave();
+        const show = function () {
+
+            if (currentSong && currentSong.song_id === id) {
+
+                waveMureka = w;
+                applyWave();
+            }
+        };
+
+        // Waited for, the pulse gives way to it with a fade. While our own
+        // is the one waited for, Mureka's goes in under the pulse
+        if (w && settings.waveSource !== "song") {
+            waveSwap(show);
+        } else {
+            show();
+        }
 
         if (!w) {
 
