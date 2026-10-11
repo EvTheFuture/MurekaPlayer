@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.297";
+    const VERSION = "1.9.9.298";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15519,6 +15519,9 @@
         }
 
         const back = document.createElement("div");
+
+        // Its buttons tall on a touch screen, like a question's
+        back.className = "mureka-ask";
         back.style.cssText = [
             "position:absolute",
             "inset:0",
@@ -25899,6 +25902,10 @@
             + "@keyframes mureka-fade-dot{50%{opacity:0.45}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
             + "@keyframes mureka-wave-wait{0%,100%{opacity:1}50%{opacity:0.45}}"
+
+            // The answers of a question are tall on a touch screen, so a
+            // finger does not land on the one beside the one it meant
+            + "@media (pointer:coarse){[data-mureka-notice] button,.mureka-ask button{min-height:44px}}"
 
             // Every button lights up and dips a little while it is pressed,
             // so a tap is seen to have landed even when what it does shows

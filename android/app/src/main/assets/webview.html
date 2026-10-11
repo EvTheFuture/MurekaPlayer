@@ -14579,8 +14579,15 @@
         $("menuStars").style.display = "none";
         $("menuCaption").style.display = "none";
 
+        // A question's answers are tall, so a finger does not land on the
+        // one beside the one it meant
         for (const item of items) {
-            box.appendChild(menuItem(item.icon, item.label, item.fn, item.cls));
+
+            const cls = (item.cls || "").split(" ").filter(function (c) {
+                return c && c !== "tall";
+            }).concat(["tall"]).join(" ");
+
+            box.appendChild(menuItem(item.icon, item.label, item.fn, cls));
         }
 
         $("songMenu").style.display = "flex";
