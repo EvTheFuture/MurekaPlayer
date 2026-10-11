@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.278";
+    const VERSION = "1.9.9.280";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -18686,7 +18686,7 @@
         if (!statsEl) {
 
             statsEl = document.createElement("div");
-            statsEl.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            statsEl.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.25);display:flex;align-items:center;"
                 + "justify-content:center;padding:12px;box-sizing:border-box;z-index:12";
             statsEl.setAttribute("data-mureka-notice", "1");
 
@@ -18695,7 +18695,8 @@
             const title = document.createElement("span");
             const close = makeButton("Close", "#333", "#fff", closeStats);
 
-            card.style.cssText = "background:#1d1d22;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;"
+            card.style.cssText = "background:rgba(22,22,27,0.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);"
+                + "box-shadow:0 6px 24px rgba(0,0,0,0.45);border-radius:12px;padding:12px;width:100%;"
                 + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px";
             head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
             title.textContent = "Stats for nerds";
@@ -18904,15 +18905,58 @@
         }
 
         if (statsInfo === info) {
+
             paintStats();
+
+            if (Date.now() < statsWebUntil) {
+                publishHostSoon();
+            }
         }
     }
+
+    // Until when a web view has the stats open. It asks again every few
+    // seconds while they show, and they go out with the state until then
+    let statsWebUntil = 0;
 
     function paintStats() {
 
         if (!statsBodyEl || !statsEl || statsEl.style.display === "none") {
             return;
         }
+
+        const rows = statsRows();
+
+        statsBodyEl.textContent = "";
+
+        for (const r of rows) {
+
+            const line = document.createElement("div");
+
+            if (r[1] === null) {
+
+                line.textContent = r[0];
+                line.style.cssText = "color:#48e1eb;font-weight:700;margin-top:6px";
+            } else {
+
+                const k = document.createElement("span");
+                const v = document.createElement("span");
+
+                line.style.cssText = "display:flex;gap:8px";
+                k.textContent = r[0];
+                k.style.cssText = "flex:0 0 96px;color:#8a8a94";
+                v.textContent = r[1];
+                v.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
+                line.appendChild(k);
+                line.appendChild(v);
+            }
+
+            statsBodyEl.appendChild(line);
+        }
+    }
+
+    // The stats as lines of a name and a value, a part's heading having
+    // null for its value
+    function statsRows() {
 
         const song = currentSong;
         const rows = [];
@@ -18941,11 +18985,15 @@
             add("trimmed", isTrimmed(song) ? "yes" : "no");
         }
 
-        part("Sound");
+        part("Audio");
 
         const src = audio ? String(audio.currentSrc || audio.src || "") : "";
 
         add("plays from", src.indexOf("blob:") === 0 ? "a copy in memory, " + (trackHeardFrom || "") : (src ? src.replace(/^https?:\/\/([^/]+).*$/, "$1") + ", streamed" : "nothing loaded"));
+
+        if (hostCarAudio) {
+            add("heard in", "a web view, the phone plays along silently");
+        }
         add("heard after", trackHeardMs ? trackHeardMs + " ms" : "");
 
         if (audio && src) {
@@ -18958,7 +19006,8 @@
             add("loaded", loaded + " %");
             add("ready state", ["nothing", "metadata", "current data", "future data", "enough data"][audio.readyState] || audio.readyState);
             add("network", ["empty", "idle", "loading", "no source"][audio.networkState] || audio.networkState);
-            add("volume", Math.round((audio.volume || 0) * 100) + " %" + (audio.muted ? ", muted" : ""));
+            add("volume", hostCarAudio ? "silent here, the web view sets its own"
+                : Math.round((audio.volume || 0) * 100) + " %" + (audio.muted ? ", muted" : ""));
         }
 
         part("File");
@@ -19032,32 +19081,7 @@
         add("library", cache.songs.length + " songs");
         add("network", offlineMode() ? "offline" : (navigator.onLine === false ? "browser says offline" : "online"));
 
-        statsBodyEl.textContent = "";
-
-        for (const r of rows) {
-
-            const line = document.createElement("div");
-
-            if (r[1] === null) {
-
-                line.textContent = r[0];
-                line.style.cssText = "color:#48e1eb;font-weight:700;margin-top:6px";
-            } else {
-
-                const k = document.createElement("span");
-                const v = document.createElement("span");
-
-                line.style.cssText = "display:flex;gap:8px";
-                k.textContent = r[0];
-                k.style.cssText = "flex:0 0 96px;color:#8a8a94";
-                v.textContent = r[1];
-                v.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
-                line.appendChild(k);
-                line.appendChild(v);
-            }
-
-            statsBodyEl.appendChild(line);
-        }
+        return rows;
     }
 
     // Take the note away before its time, when what it asked for has
@@ -21190,6 +21214,8 @@
             // The key says when to read them again
             partsKey: hostPartsKey(),
             waveWorking: ownWaveWorking(),
+            statsButton: settings.statsButton === true,
+            stats: Date.now() < statsWebUntil ? statsRows() : null,
             exportsKey: hostExportsKey(),
             trimJob: hostTrimJob,
             trimFade: settings.trimFade !== false,
@@ -23654,6 +23680,11 @@
             clearCache();
         } else if (cmd === "cacheAll") {
             cacheAll();
+        } else if (cmd === "stats") {
+
+            // A web view shows the stats, or closed them
+            statsWebUntil = arg === true ? Date.now() + 8000 : 0;
+            publishHostSoon();
         } else if (cmd === "cameBack") {
 
             // A web view shown again or given focus, with whether its play
@@ -30285,6 +30316,8 @@
                 if (statsBtnEl) {
                     statsBtnEl.style.display = v ? "inline-block" : "none";
                 }
+
+                publishHostSoon();
             });
 
         const debugRow = makeBoolRow("Debug mode",
@@ -31635,7 +31668,7 @@
         }
 
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
-        devPage.appendChild(withHint(statsRow, "A small ringed i after the time opens what the player knows about the playing song: where the sound and the cover come from, the file, the waveform, what is stored and how full the store is."));
+        devPage.appendChild(withHint(statsRow, "A small ringed i after the time opens what the player knows about the playing song: where the sound and the cover come from, the file, the waveform, what is stored and how full the store is. In the web views too, for the song on the phone."));
         devPage.appendChild(withHint(debugRow, "Says on the status line why a key, a tap or a media button was passed over, and adds Copy JSON to the song menu."
             + (isApkHost() ? " In the app it also lets chrome://inspect on a computer with USB debugging look into the app's pages, signed in to Mureka, so keep it off otherwise." : "")));
         devPage.appendChild(withHint(debugLogRow, "Keeps a log of what the player does, for Copy debug log, while the player is used as usual. Mureka's requests are in it too, with anything that looks like a token, password or signature blanked out. Off, nothing is logged, except while a debug overlay is shown."));

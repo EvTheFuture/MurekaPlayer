@@ -655,7 +655,8 @@ the new settings layout and a number of smaller improvements.
   the cover come from, how long the song took to be heard, the file's size,
   format and bit rate, how much of it is loaded, the cover's size and
   resolution, which waveform shows and how it was made, the next song made
-  ready, and how much is stored and how full the store is.
+  ready, and how much is stored and how full the store is. The web views
+  show the same for the song on the phone, behind the same i.
 - **Debug log** under Developer: the log is kept only while it is switched
   on or a debug overlay is shown, so a log can be made while the player is
   used as usual. Mureka requests in it have anything that looks like a

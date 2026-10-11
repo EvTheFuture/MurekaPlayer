@@ -1546,7 +1546,12 @@ final class WebViewServer {
             String shown = "webDebugLog".equals(cmd) ? "its debug log"
                 : cmd + (arg != null ? " " + arg : "");
 
-            Hub.note("Command", "From a web view: " + (shown.length() > 100 ? shown.substring(0, 100) + "..." : shown));
+            // The stats are asked for again every few seconds while open,
+            // which would only fill the log
+            if (!"stats".equals(cmd)) {
+                Hub.note("Command", "From a web view: " + (shown.length() > 100 ? shown.substring(0, 100) + "..." : shown));
+            }
+
             Hub.command(cmd, arg);
             send(out, 200, "application/json", bytes("{\"ok\":true}"));
         } catch (JSONException e) {

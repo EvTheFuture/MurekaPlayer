@@ -1700,6 +1700,7 @@
     }
 
     #songMenu,
+    #statsPop,
     #helpPop {
         position: fixed;
         inset: 0;
@@ -1712,6 +1713,7 @@
     #menuBox,
     #actionsBox,
     #ssBox,
+    #statsBox,
     #helpBox {
         background: var(--card);
         border: 1px solid var(--line);
@@ -1728,8 +1730,81 @@
     #menuBox > *,
     #actionsBox > *,
     #ssBox > *,
+    #statsBox > *,
     #helpBox > * {
         flex-shrink: 0;
+    }
+
+    /* Stats for nerds: a small ringed i after the time, shown when the
+       phone's setting is on, and the lines the phone sends for it */
+    #statsBtn {
+        flex: 0 0 auto;
+        display: none;
+        width: 1.4em;
+        height: 1.4em;
+        box-sizing: border-box;
+        border: 2px solid var(--muted);
+        border-radius: 50%;
+        color: var(--muted);
+        font: italic 700 0.7em/1 Georgia, serif;
+        line-height: calc(1.4em - 4px);
+        text-align: center;
+        cursor: pointer;
+    }
+
+    #statsPop {
+        background: transparent;
+    }
+
+    #statsBox {
+        width: min(760px, 94vw);
+        background: rgba(22, 22, 27, 0.72);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+        border: none;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    }
+
+    #statsHead {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    #statsTitle {
+        font-weight: 600;
+        font-size: clamp(18px, 1.9vw, 28px);
+    }
+
+    #statsRows {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: clamp(15px, 1.6vw, 22px);
+        line-height: 1.5;
+        overflow-y: auto;
+        flex-shrink: 1;
+    }
+
+    .statsPart {
+        color: #48e1eb;
+        font-weight: 700;
+        margin-top: 8px;
+    }
+
+    .statsLine {
+        display: flex;
+        gap: 10px;
+    }
+
+    .statsKey {
+        flex: 0 0 9em;
+        color: var(--muted);
+    }
+
+    .statsValue {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-wrap: anywhere;
     }
 
     #menuBox {
@@ -3856,6 +3931,7 @@
         <span id="cur">0:00</span>
         <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div><canvas id="wave"></canvas></div>
         <span id="left">-0:00</span>
+        <span id="statsBtn" role="button" tabindex="0" title="Stats for nerds" aria-label="Stats for nerds">i</span>
     </div>
     <div id="controls">
         <button class="ctl" id="shuffle" type="button" data-label="Shuffle" aria-label="Shuffle">
@@ -4029,6 +4105,15 @@
             <button class="chip" id="confirmNo" type="button">Cancel</button>
             <button class="chip" id="confirmYes" type="button">Yes</button>
         </div>
+    </div>
+</div>
+<div id="statsPop">
+    <div id="statsBox">
+        <div id="statsHead">
+            <span id="statsTitle">Stats for nerds</span>
+            <button class="chip" id="statsClose" type="button">Close</button>
+        </div>
+        <div id="statsRows"></div>
     </div>
 </div>
 <div id="helpPop">
@@ -5555,6 +5640,8 @@
 
         if (cmd === "webDebugLog") {
             dbgLog("Send", "the debug log, " + String(arg).split("\n").length + " lines");
+        } else if (cmd === "stats" && arg === true) {
+            // Asked again every few seconds while open
         } else {
             dbgLog("Send", cmd + (arg !== null && arg !== undefined
                 ? " " + String(JSON.stringify(arg)).slice(0, 80) : ""));
@@ -6928,6 +7015,18 @@
     function render() {
 
         const s = state;
+
+        // The stats' i follows the phone's setting, and when switched off
+        // there the stats close too
+        const statsOn = !!(s && s.statsButton);
+
+        $("statsBtn").style.display = statsOn ? "inline-block" : "none";
+
+        if (!statsOn && isShown("statsPop") && s) {
+            closeStats();
+        }
+
+        paintStats();
 
         // Shown with or without a song
         nagPassword(s);
@@ -16794,6 +16893,122 @@
         $("helpPop").style.display = "none";
     });
 
+    // Stats for nerds: the phone sends them with its state while this page
+    // asks for them, which it does again every few seconds while open
+    let statsAskTimer = 0;
+    let statsShownKey = "";
+
+    function openStats() {
+
+        $("statsPop").style.display = "flex";
+        statsShownKey = "";
+        paintStats();
+        send("stats", true);
+        clearInterval(statsAskTimer);
+        statsAskTimer = setInterval(function () {
+            send("stats", true);
+        }, 4000);
+    }
+
+    function closeStats() {
+
+        clearInterval(statsAskTimer);
+        statsAskTimer = 0;
+        $("statsPop").style.display = "none";
+        send("stats", false);
+    }
+
+    function paintStats() {
+
+        if (!isShown("statsPop")) {
+            return;
+        }
+
+        const rows = state && Array.isArray(state.stats) ? state.stats : null;
+        const key = rows ? JSON.stringify(rows) + "|" + statsVolume("") : (online ? "wait" : "off");
+
+        if (key === statsShownKey) {
+            return;
+        }
+
+        statsShownKey = key;
+
+        const box = $("statsRows");
+
+        box.textContent = "";
+
+        if (!rows) {
+
+            box.textContent = online ? "Asking the phone..." : "The phone is not reachable";
+            return;
+        }
+
+        for (const r of rows) {
+
+            const line = document.createElement("div");
+
+            if (!Array.isArray(r)) {
+                continue;
+            }
+
+            if (r[1] === null) {
+
+                line.className = "statsPart";
+                line.textContent = String(r[0]);
+            } else {
+
+                const k = document.createElement("span");
+                const v = document.createElement("span");
+
+                line.className = "statsLine";
+                k.className = "statsKey";
+                k.textContent = String(r[0]);
+                v.className = "statsValue";
+                v.textContent = r[0] === "volume" ? statsVolume(String(r[1])) : String(r[1]);
+                line.appendChild(k);
+                line.appendChild(v);
+            }
+
+            box.appendChild(line);
+        }
+    }
+
+    // The volume line: this browser's level when the audio plays here, the
+    // phone's media volume beside the player's own level otherwise
+    function statsVolume(phone) {
+
+        if (volHere()) {
+            return "this browser " + Math.round(webVolume() * 100) + " %" + (localMute ? ", muted" : "");
+        }
+
+        const max = state && state.volMax > 0 ? state.volMax : 0;
+        const media = max > 0 && typeof state.vol === "number" && state.vol >= 0
+            ? ", media volume " + state.vol + " of " + max : "";
+
+        return "player " + phone + media;
+    }
+
+    $("statsBtn").addEventListener("click", function (ev) {
+
+        ev.stopPropagation();
+        openStats();
+    });
+    $("statsBtn").addEventListener("keydown", function (ev) {
+
+        if (ev.key === "Enter" || ev.key === " ") {
+
+            ev.preventDefault();
+            openStats();
+        }
+    });
+    $("statsClose").addEventListener("click", closeStats);
+    $("statsPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("statsPop")) {
+            closeStats();
+        }
+    });
+
     function isShown(id) {
 
         const d = $(id).style.display;
@@ -16866,6 +17081,12 @@
         if (isShown("volPop")) {
 
             closeVol();
+            return true;
+        }
+
+        if (isShown("statsPop")) {
+
+            closeStats();
             return true;
         }
 
