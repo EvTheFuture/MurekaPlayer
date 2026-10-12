@@ -1992,10 +1992,10 @@
         box-shadow: inset 0 0 0 2px var(--accent);
     }
 
-    /* Ringed in blue, apart from a ringed choice beside it */
-    .menuItem.insetBlue {
-        color: #7ab8ff;
-        box-shadow: inset 0 0 0 2px #7ab8ff;
+    /* Ringed in grey, apart from a ringed choice beside it */
+    .menuItem.insetGrey {
+        color: #b8b8c0;
+        box-shadow: inset 0 0 0 2px #b8b8c0;
     }
 
     /* Taller, with room between, where a wrong tap does something
@@ -10033,9 +10033,9 @@
                 } });
             }
 
-            // Blue, so it stands apart from playing all new after the
+            // Grey, so it stands apart from playing all new after the
             // playing song
-            choices.push({ icon: "queueAdd", label: "Play this after the playing song", cls: "insetBlue tall", fn: function () {
+            choices.push({ icon: "queueAdd", label: "Play this after the playing song", cls: "insetGrey tall", fn: function () {
 
                 closeSongMenu();
                 send("playWhenReady", { id: song.id, after: true }).then(function () {

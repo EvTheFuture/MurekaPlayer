@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.301";
+    const VERSION = "1.9.9.302";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12177,8 +12177,8 @@
             } });
         }
 
-        // Blue, so it stands apart from playing all new after the playing song
-        options.push({ label: "Play this after the playing song", ring: true, color: "#7ab8ff", fn: function () {
+        // Grey, so it stands apart from playing all new after the playing song
+        options.push({ label: "Play this after the playing song", ring: true, color: "#b8b8c0", fn: function () {
             playWhenReady(id, "after");
         } });
 
