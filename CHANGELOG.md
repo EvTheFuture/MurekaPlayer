@@ -605,16 +605,25 @@ the new settings layout and a number of smaller improvements.
   how loud the song sounds, bright. It is worked out once and kept, and
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
-- **Zoom into the waveform**, in the player and the web views: pinch, or
-  the mouse wheel over it, zooms in up to 32 times, pinch or a double tap
-  zooms out. Zoomed in, the play head stays in the middle and the waveform
-  moves under it, with a thin progress line of the whole song along its
-  foot. Dragging past two thirds of the way to an edge scrolls the
-  waveform that way, faster the nearer the edge. **Remember the waveform
-  zoom level**, under Mobile player and Web view, keeps the zoom for the
-  next time the player opens, each browser its own, and a web view can
-  have it set for itself alone.
+- **Zoom into the waveform**, in the player and the web views: pinch, the
+  mouse wheel over it, or a press held still a moment and then slid up
+  zooms in up to 32 times. Pinch, sliding down after the hold, or a double
+  tap zooms out. A press that moves sideways first stays a drag. Zoomed
+  in, the play head stays in the middle and the waveform moves under it,
+  with a thin progress line of the whole song along its foot. Dragging
+  along that line moves through the whole song, as zoomed out. Dragging
+  past two thirds of the way to an edge scrolls the waveform that way,
+  faster the nearer the edge. **Remember the waveform zoom level**, under
+  Mobile player and Web view, keeps the zoom for the next time the player
+  opens, each browser its own, and a web view can have it set for itself
+  alone.
 - **Autoplay on start** moved to This device, under Playing by itself.
+- **Play on after a quick restart**, under This device, Playing by itself:
+  opened again within that many seconds after it closed while playing, a
+  reload or a restart of the app, the player plays on from the same song
+  and second. Half a minute unless set, 0 turns it off. Later than that it
+  opens paused, unless Autoplay on start is on. A browser that wants a tap
+  first gets Tap Play to play on from where it was.
 - Opening the app, or coming back to the page from another tab or app,
   takes the black screen cover away as a tap would, so the player shows
   at once.

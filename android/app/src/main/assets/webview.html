@@ -7358,8 +7358,9 @@
         }
     }
 
-    // Zooming into a waveform. Pinch, or the mouse wheel over it, zooms in
-    // and out, and a double tap goes back to the whole song. Zoomed in, the
+    // Zooming into a waveform. Pinch, the mouse wheel over it, or a press
+    // held still a moment and then slid up or down zooms in and out, and a
+    // double tap goes back to the whole song. Zoomed in, the
     // play head stays in the middle and the waveform moves under it, off
     // the middle only near the start and the end. Dragging moves the play
     // head as before. Past two thirds of the way to an edge with more song
@@ -7380,7 +7381,10 @@
         const GLIDE_MS = 350;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
-        const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false };
+        const HOLD_MS = 350;
+        const HOLD_ZOOM_PX = 90;
+        const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
+            holdTimer: 0, holdZoom: null };
         const pointers = new Map();
 
         function span() {
@@ -7466,6 +7470,11 @@
                 return 0;
             }
 
+                // Dragging along the progress line, the view follows the play head
+            if (z.drag && z.drag.overview) {
+                return follow(frac);
+            }
+
             if (z.drag || z.held) {
                 return clampStart((z.drag || z.held).start);
             }
@@ -7504,6 +7513,11 @@
 
             if (!d) {
                 return 0;
+            }
+
+            // Along the progress line it is the whole song across
+            if (d.overview) {
+                return Math.max(0, Math.min(1, d.px));
             }
 
             const now = performance.now();
@@ -7550,6 +7564,8 @@
             // A second finger makes it a pinch, the drag is let go
             if (pointers.size === 2) {
 
+                clearTimeout(z.holdTimer);
+                z.holdZoom = null;
                 flushTap();
 
                 if (z.drag) {
@@ -7589,8 +7605,46 @@
 
             flushTap();
             z.glide = null;
-            z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false };
+
+            // Zoomed in, a press on the lowest third, where the progress line
+            // runs, moves through the whole song as the waveform does zoomed
+            // out. Elsewhere it moves the play head in the part in view
+            const box = el.getBoundingClientRect();
+            const overview = span() < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+
+            z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false,
+                overview: overview, y: ev.clientY, lastY: ev.clientY, movedY: false };
             hooks.preview(z.dragFrac());
+
+            // Held still a moment, it zooms instead: sliding up zooms in and
+            // sliding down zooms out, and letting go seeks nothing. Moved
+            // before then, sideways or not, it stays a drag
+            const pressed = z.drag;
+
+            clearTimeout(z.holdTimer);
+
+            if (hooks.zoomable()) {
+
+                z.holdTimer = setTimeout(function () {
+
+                    if (z.drag !== pressed || pressed.moved || pressed.movedY || pointers.size !== 1) {
+                        return;
+                    }
+
+                    z.drag = null;
+                    hooks.preview(null);
+                    z.holdZoom = { y: pressed.lastY, zoom: z.zoom };
+
+                    try {
+
+                        if (navigator.vibrate) {
+                            navigator.vibrate(12);
+                        }
+                    } catch (e) {
+                        // No buzz, the zoom shows it
+                    }
+                }, HOLD_MS);
+            }
         });
 
         el.addEventListener("pointermove", function (ev) {
@@ -7607,12 +7661,28 @@
                 return;
             }
 
+            // Held and sliding: up zooms in, down zooms out
+            if (z.holdZoom) {
+
+                setZoom(z.holdZoom.zoom * Math.exp((z.holdZoom.y - ev.clientY) / HOLD_ZOOM_PX));
+                return;
+            }
+
             if (z.drag) {
 
                 z.drag.px = across(ev);
+                z.drag.lastY = ev.clientY;
 
                 if (Math.abs(ev.clientX - z.drag.x) > TAP_MOVE) {
+
                     z.drag.moved = true;
+                    clearTimeout(z.holdTimer);
+                }
+
+                if (Math.abs(ev.clientY - z.drag.y) > TAP_MOVE) {
+
+                    z.drag.movedY = true;
+                    clearTimeout(z.holdTimer);
                 }
 
                 hooks.preview(z.dragFrac());
@@ -7626,6 +7696,14 @@
             }
 
             pointers.delete(ev.pointerId);
+            clearTimeout(z.holdTimer);
+
+            // Zoomed by holding and sliding: letting go only ends it
+            if (z.holdZoom) {
+
+                z.holdZoom = null;
+                return;
+            }
 
             // The pinch ends with its fingers, a finger left on does nothing
             if (z.pinch) {
@@ -7667,7 +7745,7 @@
             // Zoomed in, a tap waits a moment in case a second one follows
             if (tap && span() < 1) {
 
-                z.held = { start: d.start };
+                z.held = { start: d.overview ? follow(frac) : d.start };
                 z.tapTimer = setTimeout(function () {
 
                     z.tapTimer = 0;
@@ -7678,7 +7756,9 @@
                 return;
             }
 
-            z.glide = { from: d.start, at: now };
+            // Along the progress line the view already follows, elsewhere it
+            // glides back to the play head
+            z.glide = d.overview ? null : { from: d.start, at: now };
             hooks.commit(frac);
         };
 

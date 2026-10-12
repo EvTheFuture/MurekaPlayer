@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.305";
+    const VERSION = "1.9.9.307";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -212,6 +212,11 @@
 
     // Minutes since the last look for new songs before the player or a web
     // view in use looks again, when that is switched on. In steps of five
+    // Play on after a quick restart: half a minute unless set, ten minutes at
+    // the most
+    const PLAY_ON_DEFAULT = 30;
+    const PLAY_ON_MAX = 600;
+
     const REFRESH_RETURN_DEFAULT = 30;
     const REFRESH_RETURN_MAX = 1440;
     const REFRESH_RETURN_STEP = 5;
@@ -2392,6 +2397,20 @@
         return Math.max(REFRESH_RETURN_STEP, Math.min(stepped, REFRESH_RETURN_MAX));
     }
 
+    // Play on after a quick restart, in seconds: 0 turns it off, otherwise
+    // in steps of 5 up to ten minutes. Missing, it is half a minute. The
+    // limits are declared near the top, the settings are read before this
+    function playOnSeconds(v) {
+
+        const n = Number(v);
+
+        if (v === undefined || v === null || !isFinite(n)) {
+            return PLAY_ON_DEFAULT;
+        }
+
+        return Math.max(0, Math.min(PLAY_ON_MAX, Math.round(n / 5) * 5));
+    }
+
     function loadSettings() {
 
         const defaults = {
@@ -2402,6 +2421,7 @@
             refreshOnReturnMin: REFRESH_RETURN_DEFAULT,
             absoluteNumbers: false,
             autoPlay: false,
+            playOnSeconds: 30,
             shuffle: false,
             repeat: "all",
             prefetchCount: PREFETCH_DEFAULT,
@@ -2570,6 +2590,7 @@
                     refreshOnReturnMin: returnMinutes(parsed.refreshOnReturnMin),
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoPlay: parsed.autoPlay === true,
+                    playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
                     repeat: repeat,
                     prefetchCount: prefetchCount,
@@ -3351,6 +3372,43 @@
         resumeAfterUpdate = null;
 
         if (cache.songs.length === 0) {
+            return;
+        }
+
+        // Opened again soon after it closed while playing, a reload or a
+        // quick restart: it plays on from where it was. A fresh start opens
+        // paused, unless Autoplay on start says otherwise
+        const quick = after ? null : quickRestartSession();
+
+        if (quick) {
+
+            if (resumeState && currentSong && quick.id === String(currentSong.song_id)
+                && typeof quick.time === "number" && quick.time > 0) {
+                resumeState.time = quick.time;
+            }
+
+            dbgLog("App", "Closed while playing " + Math.round((Date.now() - quick.at) / 1000) + " s ago, playing on from "
+                + Math.round(quick.time || 0) + " s");
+            startPlay();
+            setStatus("Playing on from where it was");
+
+            // A browser that does not let a page start sound by itself keeps
+            // it loaded at that place, and a tap on Play plays on
+            setTimeout(function () {
+
+                if (audio && audio.paused) {
+
+                    showToast("Tap Play to play on from where it was", "wait");
+
+                    const seq = toastSeq;
+
+                    if (audio) {
+                        audio.addEventListener("playing", function () {
+                            hideToast(seq);
+                        }, { once: true });
+                    }
+                }
+            }, 2500);
             return;
         }
 
@@ -17665,6 +17723,9 @@
     // Update the play/pause icon to match the audio state
     function updatePlayPause() {
 
+        // Playing or not changed, the record for a quick restart follows
+        saveSession();
+
         if (!playPauseBtn) {
             return;
         }
@@ -20624,8 +20685,9 @@
     }
 
     // Draw the waveform bars, played part cyan, optionally previewing a seek
-    // Zooming into a waveform. Pinch, or the mouse wheel over it, zooms in
-    // and out, and a double tap goes back to the whole song. Zoomed in, the
+    // Zooming into a waveform. Pinch, the mouse wheel over it, or a press
+    // held still a moment and then slid up or down zooms in and out, and a
+    // double tap goes back to the whole song. Zoomed in, the
     // play head stays in the middle and the waveform moves under it, off
     // the middle only near the start and the end. Dragging moves the play
     // head as before. Past two thirds of the way to an edge with more song
@@ -20646,7 +20708,10 @@
         const GLIDE_MS = 350;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
-        const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false };
+        const HOLD_MS = 350;
+        const HOLD_ZOOM_PX = 90;
+        const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
+            holdTimer: 0, holdZoom: null };
         const pointers = new Map();
 
         function span() {
@@ -20732,6 +20797,11 @@
                 return 0;
             }
 
+                // Dragging along the progress line, the view follows the play head
+            if (z.drag && z.drag.overview) {
+                return follow(frac);
+            }
+
             if (z.drag || z.held) {
                 return clampStart((z.drag || z.held).start);
             }
@@ -20770,6 +20840,11 @@
 
             if (!d) {
                 return 0;
+            }
+
+            // Along the progress line it is the whole song across
+            if (d.overview) {
+                return Math.max(0, Math.min(1, d.px));
             }
 
             const now = performance.now();
@@ -20816,6 +20891,8 @@
             // A second finger makes it a pinch, the drag is let go
             if (pointers.size === 2) {
 
+                clearTimeout(z.holdTimer);
+                z.holdZoom = null;
                 flushTap();
 
                 if (z.drag) {
@@ -20855,8 +20932,46 @@
 
             flushTap();
             z.glide = null;
-            z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false };
+
+            // Zoomed in, a press on the lowest third, where the progress line
+            // runs, moves through the whole song as the waveform does zoomed
+            // out. Elsewhere it moves the play head in the part in view
+            const box = el.getBoundingClientRect();
+            const overview = span() < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+
+            z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false,
+                overview: overview, y: ev.clientY, lastY: ev.clientY, movedY: false };
             hooks.preview(z.dragFrac());
+
+            // Held still a moment, it zooms instead: sliding up zooms in and
+            // sliding down zooms out, and letting go seeks nothing. Moved
+            // before then, sideways or not, it stays a drag
+            const pressed = z.drag;
+
+            clearTimeout(z.holdTimer);
+
+            if (hooks.zoomable()) {
+
+                z.holdTimer = setTimeout(function () {
+
+                    if (z.drag !== pressed || pressed.moved || pressed.movedY || pointers.size !== 1) {
+                        return;
+                    }
+
+                    z.drag = null;
+                    hooks.preview(null);
+                    z.holdZoom = { y: pressed.lastY, zoom: z.zoom };
+
+                    try {
+
+                        if (navigator.vibrate) {
+                            navigator.vibrate(12);
+                        }
+                    } catch (e) {
+                        // No buzz, the zoom shows it
+                    }
+                }, HOLD_MS);
+            }
         });
 
         el.addEventListener("pointermove", function (ev) {
@@ -20873,12 +20988,28 @@
                 return;
             }
 
+            // Held and sliding: up zooms in, down zooms out
+            if (z.holdZoom) {
+
+                setZoom(z.holdZoom.zoom * Math.exp((z.holdZoom.y - ev.clientY) / HOLD_ZOOM_PX));
+                return;
+            }
+
             if (z.drag) {
 
                 z.drag.px = across(ev);
+                z.drag.lastY = ev.clientY;
 
                 if (Math.abs(ev.clientX - z.drag.x) > TAP_MOVE) {
+
                     z.drag.moved = true;
+                    clearTimeout(z.holdTimer);
+                }
+
+                if (Math.abs(ev.clientY - z.drag.y) > TAP_MOVE) {
+
+                    z.drag.movedY = true;
+                    clearTimeout(z.holdTimer);
                 }
 
                 hooks.preview(z.dragFrac());
@@ -20892,6 +21023,14 @@
             }
 
             pointers.delete(ev.pointerId);
+            clearTimeout(z.holdTimer);
+
+            // Zoomed by holding and sliding: letting go only ends it
+            if (z.holdZoom) {
+
+                z.holdZoom = null;
+                return;
+            }
 
             // The pinch ends with its fingers, a finger left on does nothing
             if (z.pinch) {
@@ -20933,7 +21072,7 @@
             // Zoomed in, a tap waits a moment in case a second one follows
             if (tap && span() < 1) {
 
-                z.held = { start: d.start };
+                z.held = { start: d.overview ? follow(frac) : d.start };
                 z.tapTimer = setTimeout(function () {
 
                     z.tapTimer = 0;
@@ -20944,7 +21083,9 @@
                 return;
             }
 
-            z.glide = { from: d.start, at: now };
+            // Along the progress line the view already follows, elsewhere it
+            // glides back to the play head
+            z.glide = d.overview ? null : { from: d.start, at: now };
             hooks.commit(frac);
         };
 
@@ -21233,6 +21374,9 @@
     }
 
     function updateSeekDisplay() {
+
+        // Every few seconds while it plays, the place for a quick restart
+        saveSession();
 
         if (!seekBar) {
             return;
@@ -22158,6 +22302,54 @@
     const SESSION_FRESH_MS = 3 * 60 * 1000;
     let sessionWritten = "";
     let sessionWrittenAt = 0;
+
+    // The record as the player found it on opening. Building the player
+    // would write a new one, not playing, before the start decides whether
+    // to play on, so none is written until it has
+    let sessionAtStart = null;
+    let sessionSaving = false;
+
+    try {
+        sessionAtStart = JSON.parse(localStorage.getItem(SESSION_KEY));
+    } catch (e) {
+        sessionAtStart = null;
+    }
+
+    // What was playing when the player last closed, when it is opened again
+    // soon enough to play on, else null. The record says whether it was
+    // playing, which song and where, and is kept every few seconds while
+    // it plays and as the page closes
+    function quickRestartSession() {
+
+        const within = settings.playOnSeconds;
+
+        if (!(within > 0)) {
+            return null;
+        }
+
+        const saved = sessionAtStart;
+
+        if (!saved || saved.playing !== true || typeof saved.at !== "number") {
+            return null;
+        }
+
+        const ago = Date.now() - saved.at;
+
+        if (ago < 0 || ago > within * 1000) {
+
+            dbgLog("App", "Closed while playing " + Math.round(ago / 1000) + " s ago, longer than " + within + " s, opened paused");
+            return null;
+        }
+
+        return saved;
+    }
+
+    // Kept as the page closes, whatever was written a moment ago
+    function saveSessionNow() {
+
+        sessionWritten = "";
+        saveSession();
+    }
 
     // Set when the app was started again by an update of itself, to what
     // was playing then, until the queue is back and it has been picked up
@@ -24483,6 +24675,11 @@
     // the place is close, and now and then otherwise so it stays fresh
     function saveSession() {
 
+        // Not before the start has read the last one
+        if (!sessionSaving) {
+            return;
+        }
+
         const playing = !!(audio && audio.src && !audio.paused);
         const id = currentSong ? String(currentSong.song_id) : "";
         const key = hostCarAudio + "|" + playing + "|" + id;
@@ -26741,8 +26938,10 @@
 
         window.addEventListener("load", settleLayout);
 
-        // Persist the queue position when the tab is hidden or about to unload
+        // Persist the queue position when the tab is hidden or about to
+        // unload, and whether it was playing, for a quick restart
         window.addEventListener("pagehide", saveQueue);
+        window.addEventListener("pagehide", saveSessionNow);
 
         document.addEventListener("visibilitychange", function () {
 
@@ -26756,6 +26955,7 @@
                 }
 
                 saveQueue();
+                saveSessionNow();
                 return;
             }
 
@@ -26893,8 +27093,11 @@
         // Started on a creator's list, its hearts follow the viewer's likes
         applyViewerLikes();
 
-        // Start playing on launch when the user asked for it
+        // Start playing on launch when the user asked for it, or play on
+        // after a quick restart. The record of what plays is kept from now
         maybeAutoPlay();
+        sessionSaving = true;
+        saveSession();
     }
 
     // Keep a position inside the visible viewport, with a small margin
@@ -31434,6 +31637,11 @@
             function () { return settings.autoPlay; },
             function (v) { settings.autoPlay = v; });
 
+        const playOnRow = makeStepperRow("Play on after a quick restart, seconds",
+            function () { return settings.playOnSeconds; },
+            function (v) { settings.playOnSeconds = playOnSeconds(v); },
+            0, PLAY_ON_MAX, 5);
+
         const reportRow = makeBoolRow("Report plays to Mureka",
             function () { return settings.reportPlays; },
             function (v) { settings.reportPlays = v; });
@@ -32841,6 +33049,7 @@
         // never synced
         devicePage.appendChild(makeLabel("Playing by itself"));
         devicePage.appendChild(withHint(autoplayRow, "Starts playing as soon as the player has opened and has songs."));
+        devicePage.appendChild(withHint(playOnRow, "Opened again within this many seconds after it closed while it was playing, a reload or a restart, it plays on from the same song and second. Later than that, or set to 0, it opens paused, unless Autoplay on start is on. A browser may want a tap on Play first."));
 
         for (const el of bluetoothPlayEls) {
             devicePage.appendChild(el);
