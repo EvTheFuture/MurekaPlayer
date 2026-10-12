@@ -4872,6 +4872,7 @@
             upNext: s.showUpNext !== false,
             wave: typeof s.waveOn === "boolean" ? s.waveOn : true,
             waveSource: s.webWaveSource === "song" ? "song" : "mureka",
+            waveZoomKeep: s.waveZoomKeep === true,
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
@@ -4914,6 +4915,9 @@
         s.heatBadgeOn = typeof look.heatBadge === "boolean" ? look.heatBadge : raw.heatBadgeOn !== false;
         s.heatText = look.heatText === "word" || look.heatText === "both" || look.heatText === "temp"
             ? look.heatText : raw.heatText;
+
+        // Whether this browser opens with the zoom it had last time
+        s.waveZoomKeep = typeof look.waveZoomKeep === "boolean" ? look.waveZoomKeep : raw.waveZoomKeep === true;
 
         // Our own waveform when chosen and the phone has it ready, and
         // whether it is still being worked out there
@@ -5060,6 +5064,7 @@
         { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "choice", values: ["mureka", "song"],
             names: { mureka: "Mureka's", song: "From the song" } },
+        { label: "Remember the waveform zoom", page: "Web view", key: "waveZoomKeep", kind: "bool" },
         { label: "Lyrics", page: "Web view", key: "lyrics", kind: "cycle", values: ["off", "info", "cover"],
             names: { off: "Off", info: "Beside the cover", cover: "On the cover" } },
         { label: "Volume shown as", page: "Web view", key: "volUnit", kind: "cycle", values: ["percent", "steps"],
@@ -7357,7 +7362,8 @@
     // hooks: ready() a song to seek in, zoomable() a waveform shown,
     // playFrac() where it plays, rect() the box the waveform fills,
     // preview(frac) while dragging and preview(null) when that stops,
-    // commit(frac) to seek, redraw() after a change of the view
+    // commit(frac) to seek, redraw() after a change of the view, and when
+    // given zoomed(zoom) after the zoom changed
     function makeWaveZoom(el, hooks) {
 
         const ZOOM_MAX = 32;
@@ -7408,7 +7414,12 @@
             }
 
             if (z.zoom !== was) {
+
                 hooks.redraw();
+
+                if (hooks.zoomed) {
+                    hooks.zoomed(z.zoom);
+                }
             }
         }
 
@@ -7437,6 +7448,7 @@
         }
 
         z.span = span;
+        z.setZoom = setZoom;
 
         // The start of the part of the song in view, as a fraction, with the
         // play head at frac
@@ -13713,6 +13725,7 @@
         paintGoneAsk();
         paintNewAsk();
         paintFollowAsk();
+        followWaveZoomKeep(state);
         theaterSound();
 
         if (volOpen()) {
@@ -14379,8 +14392,56 @@
         },
         redraw: function () {
             waveShown = "";
+        },
+        zoomed: function (zoom) {
+
+            if (state && state.waveZoomKeep) {
+
+                try {
+                    localStorage.setItem(WAVE_ZOOM_KEY, String(zoom));
+                } catch (e) {
+                    // Not kept, it lasts until the page is opened again
+                }
+            }
         }
     });
+
+    // With Remember the waveform zoom on, the zoom is kept in this browser
+    // and taken up again the first time the phone says so. Switched off,
+    // what was kept goes
+    const WAVE_ZOOM_KEY = "mureka_web_wave_zoom";
+    let waveZoomTaken = false;
+
+    function followWaveZoomKeep(s) {
+
+        if (!s) {
+            return;
+        }
+
+        try {
+
+            if (!s.waveZoomKeep) {
+
+                localStorage.removeItem(WAVE_ZOOM_KEY);
+                return;
+            }
+
+            if (!waveZoomTaken) {
+
+                waveZoomTaken = true;
+
+                const kept = Number(localStorage.getItem(WAVE_ZOOM_KEY));
+
+                if (kept > 1) {
+                    waveZoomer.setZoom(kept);
+                } else {
+                    localStorage.setItem(WAVE_ZOOM_KEY, String(1 / waveZoomer.span()));
+                }
+            }
+        } catch (e) {
+            // No storage, the zoom lasts until the page is opened again
+        }
+    }
 
     // The song menu, the phone's long press menu with its choices in the
     // same order, plus adding to the end of the queue

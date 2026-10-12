@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.302";
+    const VERSION = "1.9.9.303";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2473,6 +2473,8 @@
             webUpNext: true,
             webWave: true,
             webWaveSource: "mureka",
+            waveZoomKeep: false,
+            webWaveZoomKeep: false,
             webOnlineBadge: "fade",
             webNames: false,
             webHotspotBadge: false,
@@ -2673,6 +2675,8 @@
                     webUpNext: parsed.webUpNext !== false,
                     webWave: parsed.webWave !== false,
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
+                    waveZoomKeep: parsed.waveZoomKeep === true,
+                    webWaveZoomKeep: parsed.webWaveZoomKeep === true,
                     webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
                     webNames: parsed.webNames === true,
                     webHotspotBadge: parsed.webHotspotBadge === true,
@@ -20604,7 +20608,8 @@
     // hooks: ready() a song to seek in, zoomable() a waveform shown,
     // playFrac() where it plays, rect() the box the waveform fills,
     // preview(frac) while dragging and preview(null) when that stops,
-    // commit(frac) to seek, redraw() after a change of the view
+    // commit(frac) to seek, redraw() after a change of the view, and when
+    // given zoomed(zoom) after the zoom changed
     function makeWaveZoom(el, hooks) {
 
         const ZOOM_MAX = 32;
@@ -20655,7 +20660,12 @@
             }
 
             if (z.zoom !== was) {
+
                 hooks.redraw();
+
+                if (hooks.zoomed) {
+                    hooks.zoomed(z.zoom);
+                }
             }
         }
 
@@ -20684,6 +20694,7 @@
         }
 
         z.span = span;
+        z.setZoom = setZoom;
 
         // The start of the part of the song in view, as a fraction, with the
         // play head at frac
@@ -20978,8 +20989,11 @@
         }
     }
 
-    // The zoom of the player's waveform, made with the seek row
+    // The zoom of the player's waveform, made with the seek row. With
+    // Remember the waveform zoom on, the zoom is kept in this browser under
+    // WAVE_ZOOM_KEY for the next time the player opens
     let waveZoomer = null;
+    const WAVE_ZOOM_KEY = "mureka_player_wave_zoom";
 
     function drawWave(previewFrac) {
 
@@ -22260,6 +22274,7 @@
             trimFade: settings.trimFade !== false,
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
+            waveZoomKeep: settings.webWaveZoomKeep === true,
             offline: offlineMode(),
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
@@ -25869,8 +25884,34 @@
                 }
 
                 waveLoopSoon();
+            },
+            zoomed: function (zoom) {
+
+                if (settings.waveZoomKeep) {
+
+                    try {
+                        localStorage.setItem(WAVE_ZOOM_KEY, String(zoom));
+                    } catch (e) {
+                        // Not kept, it lasts until the page is opened again
+                    }
+                }
             }
         });
+
+        // The zoom from last time, when it is to be remembered
+        if (settings.waveZoomKeep) {
+
+            try {
+
+                const kept = Number(localStorage.getItem(WAVE_ZOOM_KEY));
+
+                if (kept > 1) {
+                    waveZoomer.setZoom(kept);
+                }
+            } catch (e) {
+                // Nothing kept to read
+            }
+        }
 
         seekRow.appendChild(songDotEl);
         seekRow.appendChild(curTimeEl);
@@ -32045,7 +32086,27 @@
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
         mobilePage.appendChild(makeSubLabel("Waveform from"));
         mobilePage.appendChild(waveSourceRow);
-        mobilePage.appendChild(makeHint("Mureka's has a few points for the whole song. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
+        mobilePage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
+
+        const waveZoomKeepRow = makeBoolRow("Remember the waveform zoom",
+            function () { return settings.waveZoomKeep === true; },
+            function (v) {
+
+                settings.waveZoomKeep = v;
+
+                try {
+
+                    if (v && waveZoomer) {
+                        localStorage.setItem(WAVE_ZOOM_KEY, String(1 / waveZoomer.span()));
+                    } else {
+                        localStorage.removeItem(WAVE_ZOOM_KEY);
+                    }
+                } catch (e) {
+                    // No storage, the zoom lasts until the page is opened again
+                }
+            });
+
+        mobilePage.appendChild(withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(makeSubLabel("Online badge"));
         mobilePage.appendChild(onlineBadgeRow);
@@ -32524,7 +32585,17 @@
 
             webPage.appendChild(makeSubLabel("Waveform from"));
             webPage.appendChild(webWaveSourceRow);
-            webPage.appendChild(makeHint("Mureka's has a few points for the whole song, From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+            webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+
+            const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom",
+                function () { return settings.webWaveZoomKeep === true; },
+                function (v) {
+
+                    settings.webWaveZoomKeep = v;
+                    publishHostSoon();
+                });
+
+            webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
 
             const webOnlineBadgeRow = makeChoiceRow([
                 { label: "Fade away", value: "fade" },
