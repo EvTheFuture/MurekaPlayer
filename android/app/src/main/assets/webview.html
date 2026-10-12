@@ -18049,8 +18049,8 @@
         return false;
     }
 
-    // A swipe down on a popup on a touch screen moves it down with the
-    // finger, and far or fast enough closes it
+    // A swipe down on a popup, with a finger or the mouse, moves it down
+    // with it, and far or fast enough closes it
     function watchSwipeDown(p) {
 
         const box = $(p.box);
@@ -18064,28 +18064,20 @@
             box.style.opacity = "";
         };
 
-        box.addEventListener("touchstart", function (ev) {
+        // A press that may become a swipe, from a finger or the mouse
+        const start = function (x, y, mouse) {
+            drag = { x: x, y: y, dy: 0, on: false, gone: false, mouse: mouse, lastY: y, lastAt: Date.now(), speed: 0 };
+        };
 
-            if (ev.touches.length !== 1 || swipeBlocked(ev.target, box) || (p.when && !p.when())) {
-
-                drag = null;
-                return;
-            }
-
-            const t = ev.touches[0];
-
-            drag = { x: t.clientX, y: t.clientY, dy: 0, on: false, gone: false, at: Date.now(), lastY: t.clientY, lastAt: Date.now(), speed: 0 };
-        }, { passive: true });
-
-        box.addEventListener("touchmove", function (ev) {
+        // Returns true once the press is a swipe and its move is taken
+        const move = function (x, y) {
 
             if (!drag || drag.gone) {
-                return;
+                return false;
             }
 
-            const t = ev.touches[0];
-            const dx = t.clientX - drag.x;
-            const dy = t.clientY - drag.y;
+            const dx = x - drag.x;
+            const dy = y - drag.y;
 
             // Sideways or up first is left alone, for sliders and scrolling
             if (!drag.on && (dy < 0 || Math.abs(dx) > dy)) {
@@ -18094,34 +18086,42 @@
                     drag.gone = true;
                 }
 
-                return;
+                return false;
             }
 
-            // A tap that wobbles a little stays a tap, the touch is only
+            // A tap that wobbles a little stays a tap, the press is only
             // taken once it is a swipe, since a taken touch never becomes a
             // click in some browsers
             if (!drag.on && dy < SWIPE_START_PX) {
-                return;
-            }
-
-            if (ev.cancelable) {
-                ev.preventDefault();
+                return false;
             }
 
             const now = Date.now();
 
             if (now > drag.lastAt) {
-                drag.speed = (t.clientY - drag.lastY) / (now - drag.lastAt);
+                drag.speed = (y - drag.lastY) / (now - drag.lastAt);
             }
 
-            drag.lastY = t.clientY;
+            // Dragged with the mouse, no text is selected on the way
+            if (!drag.on && drag.mouse) {
+
+                document.documentElement.style.userSelect = "none";
+
+                if (window.getSelection) {
+                    window.getSelection().removeAllRanges();
+                }
+            }
+
+            drag.lastY = y;
             drag.lastAt = now;
             drag.on = true;
             drag.dy = Math.max(0, dy - SWIPE_START_PX);
             box.style.transition = "none";
             box.style.transform = "translateY(" + drag.dy + "px)";
             box.style.opacity = String(Math.max(0.35, 1 - drag.dy / 500));
-        }, { passive: false });
+
+            return true;
+        };
 
         const end = function () {
 
@@ -18131,6 +18131,10 @@
 
             if (!d || !d.on) {
                 return;
+            }
+
+            if (d.mouse) {
+                document.documentElement.style.userSelect = "";
             }
 
             swallowClickUntil = Date.now() + 400;
@@ -18154,8 +18158,52 @@
             setTimeout(reset, 220);
         };
 
+        box.addEventListener("touchstart", function (ev) {
+
+            if (ev.touches.length !== 1 || swipeBlocked(ev.target, box) || (p.when && !p.when())) {
+
+                drag = null;
+                return;
+            }
+
+            start(ev.touches[0].clientX, ev.touches[0].clientY, false);
+        }, { passive: true });
+
+        box.addEventListener("touchmove", function (ev) {
+
+            if (drag && !drag.mouse && move(ev.touches[0].clientX, ev.touches[0].clientY) && ev.cancelable) {
+                ev.preventDefault();
+            }
+        }, { passive: false });
+
         box.addEventListener("touchend", end);
         box.addEventListener("touchcancel", end);
+
+        // The same with the mouse: pressed, dragged down and let go. Rows
+        // that are dragged to another place are left to themselves
+        const mouseMove = function (ev) {
+            move(ev.clientX, ev.clientY);
+        };
+
+        const mouseUp = function () {
+
+            window.removeEventListener("pointermove", mouseMove, true);
+            window.removeEventListener("pointerup", mouseUp, true);
+            window.removeEventListener("pointercancel", mouseUp, true);
+            end();
+        };
+
+        box.addEventListener("pointerdown", function (ev) {
+
+            if (ev.pointerType !== "mouse" || ev.button !== 0 || swipeBlocked(ev.target, box) || (p.when && !p.when()) || ev.target.closest(".row")) {
+                return;
+            }
+
+            start(ev.clientX, ev.clientY, true);
+            window.addEventListener("pointermove", mouseMove, true);
+            window.addEventListener("pointerup", mouseUp, true);
+            window.addEventListener("pointercancel", mouseUp, true);
+        });
 
         // A tap that ends a swipe does not also press what it ended on,
         // wherever the click lands

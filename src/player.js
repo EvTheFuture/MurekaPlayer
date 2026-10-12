@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.316";
+    const VERSION = "1.9.9.318";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19277,8 +19277,8 @@
         return false;
     }
 
-    // A swipe down on an overlay on a touch screen moves it down with the
-    // finger, and far or fast enough closes it. The overlay el takes the
+    // A swipe down on an overlay, with a finger or the mouse, moves it
+    // down with it, and far or fast enough closes it. The overlay el takes the
     // touches, mover is what slides
     function swipeDownCloses(el, mover, close) {
 
@@ -19292,28 +19292,20 @@
             mover.style.opacity = "";
         };
 
-        el.addEventListener("touchstart", function (ev) {
+        // A press that may become a swipe, from a finger or the mouse
+        const start = function (x, y, mouse) {
+            drag = { x: x, y: y, dy: 0, on: false, gone: false, mouse: mouse, lastY: y, lastAt: Date.now(), speed: 0 };
+        };
 
-            if (ev.touches.length !== 1 || swipeBlocked(ev.target, el)) {
-
-                drag = null;
-                return;
-            }
-
-            const t = ev.touches[0];
-
-            drag = { x: t.clientX, y: t.clientY, dy: 0, on: false, gone: false, lastY: t.clientY, lastAt: Date.now(), speed: 0 };
-        }, { passive: true });
-
-        el.addEventListener("touchmove", function (ev) {
+        // Returns true once the press is a swipe and its move is taken
+        const move = function (x, y) {
 
             if (!drag || drag.gone) {
-                return;
+                return false;
             }
 
-            const t = ev.touches[0];
-            const dx = t.clientX - drag.x;
-            const dy = t.clientY - drag.y;
+            const dx = x - drag.x;
+            const dy = y - drag.y;
 
             // Sideways or up first is left alone, for sliders and scrolling
             if (!drag.on && (dy < 0 || Math.abs(dx) > dy)) {
@@ -19322,34 +19314,42 @@
                     drag.gone = true;
                 }
 
-                return;
+                return false;
             }
 
-            // A tap that wobbles a little stays a tap, the touch is only
+            // A tap that wobbles a little stays a tap, the press is only
             // taken once it is a swipe, since a taken touch never becomes a
             // click in some browsers
             if (!drag.on && dy < SWIPE_START_PX) {
-                return;
-            }
-
-            if (ev.cancelable) {
-                ev.preventDefault();
+                return false;
             }
 
             const now = Date.now();
 
             if (now > drag.lastAt) {
-                drag.speed = (t.clientY - drag.lastY) / (now - drag.lastAt);
+                drag.speed = (y - drag.lastY) / (now - drag.lastAt);
             }
 
-            drag.lastY = t.clientY;
+            // Dragged with the mouse, no text is selected on the way
+            if (!drag.on && drag.mouse) {
+
+                document.documentElement.style.userSelect = "none";
+
+                if (window.getSelection) {
+                    window.getSelection().removeAllRanges();
+                }
+            }
+
+            drag.lastY = y;
             drag.lastAt = now;
             drag.on = true;
             drag.dy = Math.max(0, dy - SWIPE_START_PX);
             mover.style.transition = "none";
             mover.style.transform = "translateY(" + drag.dy + "px)";
             mover.style.opacity = String(Math.max(0.35, 1 - drag.dy / 500));
-        }, { passive: false });
+
+            return true;
+        };
 
         const end = function () {
 
@@ -19359,6 +19359,10 @@
 
             if (!d || !d.on) {
                 return;
+            }
+
+            if (d.mouse) {
+                document.documentElement.style.userSelect = "";
             }
 
             swallowClickUntil = Date.now() + 400;
@@ -19382,8 +19386,52 @@
             setTimeout(reset, 220);
         };
 
+        el.addEventListener("touchstart", function (ev) {
+
+            if (ev.touches.length !== 1 || swipeBlocked(ev.target, el)) {
+
+                drag = null;
+                return;
+            }
+
+            start(ev.touches[0].clientX, ev.touches[0].clientY, false);
+        }, { passive: true });
+
+        el.addEventListener("touchmove", function (ev) {
+
+            if (drag && !drag.mouse && move(ev.touches[0].clientX, ev.touches[0].clientY) && ev.cancelable) {
+                ev.preventDefault();
+            }
+        }, { passive: false });
+
         el.addEventListener("touchend", end);
         el.addEventListener("touchcancel", end);
+
+        // The same with the mouse: pressed, dragged down and let go. Rows
+        // that are dragged to another place are left to themselves
+        const mouseMove = function (ev) {
+            move(ev.clientX, ev.clientY);
+        };
+
+        const mouseUp = function () {
+
+            window.removeEventListener("pointermove", mouseMove, true);
+            window.removeEventListener("pointerup", mouseUp, true);
+            window.removeEventListener("pointercancel", mouseUp, true);
+            end();
+        };
+
+        el.addEventListener("pointerdown", function (ev) {
+
+            if (ev.pointerType !== "mouse" || ev.button !== 0 || swipeBlocked(ev.target, el) || ev.target.closest(".row")) {
+                return;
+            }
+
+            start(ev.clientX, ev.clientY, true);
+            window.addEventListener("pointermove", mouseMove, true);
+            window.addEventListener("pointerup", mouseUp, true);
+            window.addEventListener("pointercancel", mouseUp, true);
+        });
 
         // A tap that ends a swipe does not also press what it ended on,
         // wherever the click lands
@@ -24171,7 +24219,11 @@
 
         const numberById = new Map();
 
-        if (settings.absoluteNumbers) {
+        // Another creator's songs come newest published first and are all
+        // there is of them, so they are numbered in that order. By when they
+        // were made, songs published in another order than they were made
+        // came out numbered the wrong way round, 1000 above 1001
+        if (settings.absoluteNumbers && !creatorSource) {
 
             // Rank by when the song was made. Mureka makes songs two at a
             // time with the same time on both, and of those the one the list
@@ -43158,7 +43210,8 @@
         contextMenuEl.dataset.murekaPress = "1";
         document.body.appendChild(contextMenuEl);
 
-        // A swipe down on a touch screen closes it, as the other overlays
+        // A swipe down, with a finger or the mouse, closes it, as the other
+        // overlays
         swipeDownCloses(contextMenuEl, contextMenuEl, hideContextMenu);
 
         // A click anywhere else closes the menu
