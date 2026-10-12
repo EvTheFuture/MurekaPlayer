@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.300";
+    const VERSION = "1.9.9.301";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20931,17 +20931,19 @@
         return z;
     }
 
-    // Zoomed in, the whole song as a thin, dim line along the foot of the
-    // waveform with the part in view a shade brighter, and a thin play head
+    // Zoomed in, the whole song as a thin progress line along the foot of
+    // the waveform, the part played in the accent colour and the rest dim,
+    // and a thin play head. How far it is zoomed shows in the waveform
     function drawWaveOverview(ctx, w, h, start, span, frac, dpr) {
 
         const lh = Math.max(1, Math.round(2 * dpr));
         const x = Math.round((frac - start) / span * w);
+        const done = Math.round(Math.max(0, Math.min(1, frac)) * w);
 
-        ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
-        ctx.fillRect(0, h - lh, w, lh);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.24)";
-        ctx.fillRect(Math.round(start * w), h - lh, Math.max(lh, Math.round(span * w)), lh);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+        ctx.fillRect(done, h - lh, w - done, lh);
+        ctx.fillStyle = "rgba(72, 225, 235, 0.75)";
+        ctx.fillRect(0, h - lh, done, lh);
 
         if (x >= 0 && x < w) {
 

@@ -608,8 +608,8 @@ the new settings layout and a number of smaller improvements.
 - **Zoom into the waveform**, in the player and the web views: pinch, or
   the mouse wheel over it, zooms in up to 32 times, pinch or a double tap
   zooms out. Zoomed in, the play head stays in the middle and the
-  waveform moves under it, with a thin line along the foot showing where
-  in the song the view is. Dragging past two thirds of the way to an edge
+  waveform moves under it, with a thin progress line of the whole song
+  along its foot. Dragging past two thirds of the way to an edge
   scrolls the waveform that way, faster the nearer the edge.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - Opening the app, or coming back to the page from another tab or app,
