@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.312";
+    const VERSION = "1.9.9.314";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19382,8 +19382,9 @@
         el.addEventListener("touchend", end);
         el.addEventListener("touchcancel", end);
 
-        // A tap that ends a swipe does not also press what it ended on
-        el.addEventListener("click", function (ev) {
+        // A tap that ends a swipe does not also press what it ended on,
+        // wherever the click lands
+        window.addEventListener("click", function (ev) {
 
             if (Date.now() < swallowClickUntil) {
 
@@ -25021,6 +25022,20 @@
 
         if (cmd === "toggle") {
             togglePlayPause();
+        } else if (cmd === "webDebugOff") {
+
+            // The cross on a web view's debug overlay turns it off in every
+            // browser, as the switch under Developer does
+            settings.webDebugOverlay = false;
+            saveSettings();
+            publishHostSoon();
+
+            if (settingsOpen) {
+
+                settingsRefreshers.forEach(function (fn) {
+                    fn();
+                });
+            }
         } else if (cmd === "play") {
 
             if (!audio || !audio.src || audio.paused) {
@@ -27892,6 +27907,61 @@
 
         debugOverlayEl.appendChild(debugStateEl);
         debugOverlayEl.appendChild(debugLogEl);
+        debugOverlayEl.appendChild(makeDebugCross(function () {
+
+            settings.debugOverlay = false;
+            saveSettings();
+            updateDebugOverlay();
+
+            // The switch under Developer shows it off at once when the
+            // settings are open
+            if (settingsOpen) {
+
+                settingsRefreshers.forEach(function (fn) {
+                    fn();
+                });
+            }
+        }));
+    }
+
+    // A cross in the top right corner that turns a debug overlay off. The
+    // only part of the overlay that takes a tap, the rest lets every touch
+    // through to what is underneath
+    function makeDebugCross(off) {
+
+        const x = document.createElement("button");
+
+        x.type = "button";
+        x.textContent = "\u2715";
+        x.setAttribute("aria-label", "Turn the debug overlay off");
+        x.title = "Turn the debug overlay off";
+        x.style.cssText = [
+            "position:absolute",
+            "top:calc(env(safe-area-inset-top) + 6px)",
+            "right:calc(env(safe-area-inset-right) + 6px)",
+            "width:40px",
+            "height:40px",
+            "padding:0",
+            "margin:0",
+            "border:1px solid rgba(255,255,255,0.35)",
+            "border-radius:50%",
+            "background:rgba(0,0,0,0.7)",
+            "color:#fff",
+            "font:18px/38px sans-serif",
+            "text-align:center",
+            "text-shadow:none",
+            "cursor:pointer",
+            "pointer-events:auto",
+            "-webkit-tap-highlight-color:transparent"
+        ].join(";");
+        x.addEventListener("click", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            off();
+        });
+
+        return x;
     }
 
     // Refresh the live numbers
@@ -33266,7 +33336,7 @@
             + (isApkHost() ? " In the app it also lets chrome://inspect on a computer with USB debugging look into the app's pages, signed in to Mureka, so keep it off otherwise." : "")));
         devPage.appendChild(withHint(debugLogRow, "Keeps a log of what the player does, for Copy debug log, while the player is used as usual. Mureka's requests are in it too, with anything that looks like a token, password or signature blanked out. Off, nothing is logged, except while a debug overlay is shown."));
         devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, "
-            + (isApkHost() ? "commands " : "") + "and playback as they happen, with live numbers at the top. It never takes a tap, everything goes to the player underneath."));
+            + (isApkHost() ? "commands " : "") + "and playback as they happen, with live numbers at the top. Taps go to the player underneath, except on the cross in its top right corner, which turns it off."));
         devPage.appendChild(logRow);
 
         if (isApkHost()) {
@@ -43080,6 +43150,9 @@
 
         contextMenuEl.dataset.murekaPress = "1";
         document.body.appendChild(contextMenuEl);
+
+        // A swipe down on a touch screen closes it, as the other overlays
+        swipeDownCloses(contextMenuEl, contextMenuEl, hideContextMenu);
 
         // A click anywhere else closes the menu
         document.addEventListener("click", hideContextMenu);

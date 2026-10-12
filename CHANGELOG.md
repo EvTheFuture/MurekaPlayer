@@ -675,11 +675,12 @@ the new settings layout and a number of smaller improvements.
   network is allowed.
 - **Debug overlay** replaces the debug line: a see-through layer listing keys,
   taps, media buttons, commands, setting changes and playback events live,
-  with the layout numbers at the top. It never takes a tap. **Copy debug
+  with the layout numbers at the top. Taps go through it, except on the
+  cross in its top right corner, which turns it off. **Copy debug
   log** copies it all, **Clear debug log** starts it again, in the web views
   too.
-- The settings, Information and Stats for nerds close with a swipe down on
-  a touch screen.
+- The song menu, the settings, Information and Stats for nerds close with a
+  swipe down on a touch screen.
 - **Stats for nerds** under Developer: a small ringed i after the time
   opens what the player knows about the playing song: where the sound and
   the cover come from, how long the song took to be heard, the file's size,
