@@ -248,8 +248,9 @@ the new settings layout and a number of smaller improvements.
   loaded.
 - A right click or a press and hold on a cover opens that song's menu, the
   playing song's on the middle cover, as on a row in the list.
-- Popups close with a swipe down on a touch screen, or with the quiet cross
-  in their top right corner. Typing in one on a touch screen moves it up
+- Popups, the settings and the other panels close with a swipe down on a
+  touch screen, and popups without a close button have a quiet cross in
+  their top right corner. Typing in one on a touch screen moves it up
   above the keyboard, so renaming a song shows what is typed.
 - Drag and drop in the queue, for any song including played ones. The playing
   song keeps playing wherever it goes.
@@ -677,6 +678,8 @@ the new settings layout and a number of smaller improvements.
   with the layout numbers at the top. It never takes a tap. **Copy debug
   log** copies it all, **Clear debug log** starts it again, in the web views
   too.
+- The settings, Information and Stats for nerds close with a swipe down on
+  a touch screen.
 - **Stats for nerds** under Developer: a small ringed i after the time
   opens what the player knows about the playing song: where the sound and
   the cover come from, how long the song took to be heard, the file's size,

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.309";
+    const VERSION = "1.9.9.312";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10309,6 +10309,14 @@
 
         queue.splice(to, 0, moved);
 
+        // An order set by hand is kept: a tap on a song plays it from its
+        // new place, instead of the queue being made again from the list
+        queueOwn = true;
+
+        if (resumeState && resumeState.queue === queue) {
+            resumeState.own = true;
+        }
+
         // Follow the playing song to where it is now
         if (from === queuePos) {
             queuePos = to;
@@ -17303,6 +17311,9 @@
                 chip.style.opacity = "0.25";
             };
 
+            // Dragged by itself, a swipe down on it does not close the
+            // settings
+            chip.dataset.noswipe = "1";
             chip.addEventListener("pointerdown", function (ev) {
 
                 startX = ev.clientX;
@@ -19239,6 +19250,149 @@
     let statsTimer = 0;
     let statsInfo = { id: "", file: null, cover: null, quota: null };
 
+    // How far down, or how fast, a swipe has to go to close an overlay
+    const SWIPE_CLOSE_PX = 110;
+    const SWIPE_CLOSE_SPEED = 0.6;
+    const SWIPE_START_PX = 10;
+
+    // True when the finger is on something that moves with it, or inside
+    // something scrolled down that should scroll back up first
+    function swipeBlocked(target, el) {
+
+        let at = target;
+
+        while (at && at !== el.parentNode) {
+
+            if (at.matches && at.matches("input, textarea, select, [data-noswipe]")) {
+                return true;
+            }
+
+            if (at.scrollTop > 0) {
+                return true;
+            }
+
+            at = at.parentNode;
+        }
+
+        return false;
+    }
+
+    // A swipe down on an overlay on a touch screen moves it down with the
+    // finger, and far or fast enough closes it. The overlay el takes the
+    // touches, mover is what slides
+    function swipeDownCloses(el, mover, close) {
+
+        let drag = null;
+        let swallowClickUntil = 0;
+
+        const reset = function () {
+
+            mover.style.transition = "";
+            mover.style.transform = "";
+            mover.style.opacity = "";
+        };
+
+        el.addEventListener("touchstart", function (ev) {
+
+            if (ev.touches.length !== 1 || swipeBlocked(ev.target, el)) {
+
+                drag = null;
+                return;
+            }
+
+            const t = ev.touches[0];
+
+            drag = { x: t.clientX, y: t.clientY, dy: 0, on: false, gone: false, lastY: t.clientY, lastAt: Date.now(), speed: 0 };
+        }, { passive: true });
+
+        el.addEventListener("touchmove", function (ev) {
+
+            if (!drag || drag.gone) {
+                return;
+            }
+
+            const t = ev.touches[0];
+            const dx = t.clientX - drag.x;
+            const dy = t.clientY - drag.y;
+
+            // Sideways or up first is left alone, for sliders and scrolling
+            if (!drag.on && (dy < 0 || Math.abs(dx) > dy)) {
+
+                if (Math.abs(dx) > 4 || dy < -4) {
+                    drag.gone = true;
+                }
+
+                return;
+            }
+
+            if (ev.cancelable) {
+                ev.preventDefault();
+            }
+
+            if (!drag.on && dy < SWIPE_START_PX) {
+                return;
+            }
+
+            const now = Date.now();
+
+            if (now > drag.lastAt) {
+                drag.speed = (t.clientY - drag.lastY) / (now - drag.lastAt);
+            }
+
+            drag.lastY = t.clientY;
+            drag.lastAt = now;
+            drag.on = true;
+            drag.dy = Math.max(0, dy - SWIPE_START_PX);
+            mover.style.transition = "none";
+            mover.style.transform = "translateY(" + drag.dy + "px)";
+            mover.style.opacity = String(Math.max(0.35, 1 - drag.dy / 500));
+        }, { passive: false });
+
+        const end = function () {
+
+            const d = drag;
+
+            drag = null;
+
+            if (!d || !d.on) {
+                return;
+            }
+
+            swallowClickUntil = Date.now() + 400;
+
+            if (d.dy > SWIPE_CLOSE_PX || (d.dy > 30 && d.speed > SWIPE_CLOSE_SPEED)) {
+
+                mover.style.transition = "transform 0.18s ease-in, opacity 0.18s ease-in";
+                mover.style.transform = "translateY(" + Math.round(window.innerHeight * 0.6) + "px)";
+                mover.style.opacity = "0";
+                setTimeout(function () {
+
+                    close();
+                    reset();
+                }, 180);
+                return;
+            }
+
+            mover.style.transition = "transform 0.2s ease-out, opacity 0.2s ease-out";
+            mover.style.transform = "";
+            mover.style.opacity = "";
+            setTimeout(reset, 220);
+        };
+
+        el.addEventListener("touchend", end);
+        el.addEventListener("touchcancel", end);
+
+        // A tap that ends a swipe does not also press what it ended on
+        el.addEventListener("click", function (ev) {
+
+            if (Date.now() < swallowClickUntil) {
+
+                ev.stopPropagation();
+                ev.preventDefault();
+            }
+        }, true);
+    }
+
     function openStats() {
 
         if (!panelEl) {
@@ -19271,6 +19425,7 @@
             card.appendChild(head);
             card.appendChild(statsBodyEl);
             statsEl.appendChild(card);
+            swipeDownCloses(statsEl, card, closeStats);
             statsEl.addEventListener("click", function (ev) {
 
                 if (ev.target === statsEl) {
@@ -30209,6 +30364,20 @@
                 return;
             }
 
+            // A row of the queue plays from its place in the queue, the
+            // order shown stays as it is
+            const atRow = inQueue >= 0 && listView === "queue" && queue[inQueue]
+                && queue[inQueue].song_id === song.song_id;
+
+            if (atRow && inQueue !== queuePos) {
+
+                dbgLog("Press", "queue song " + (inQueue + 1) + " played from its place");
+                resumeState = null;
+                queuePos = inQueue;
+                playCurrent();
+                return;
+            }
+
             playFrom(song.song_id);
         });
 
@@ -33435,6 +33604,7 @@
             settingsEl.appendChild(settingsPages[key]);
         }
 
+        swipeDownCloses(settingsEl, settingsEl, closeSettings);
         panelEl.appendChild(settingsEl);
 
         updateStartButtons();
@@ -38392,6 +38562,7 @@
 
         infoEl.appendChild(head);
         infoEl.appendChild(infoBodyEl);
+        swipeDownCloses(infoEl, infoEl, closeInfo);
         panelEl.appendChild(infoEl);
     }
 
@@ -43056,6 +43227,15 @@
             ["path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" }],
             ["path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }]
         ],
+        // A list with a plus at the top, for playing next, the plus the
+        // same size as in listPlus, which has it at the bottom
+        listPlusTop: [
+            ["line", { "x1": "3", "y1": "6", "x2": "11", "y2": "6" }],
+            ["line", { "x1": "3", "y1": "12", "x2": "15", "y2": "12" }],
+            ["line", { "x1": "3", "y1": "18", "x2": "15", "y2": "18" }],
+            ["line", { "x1": "18", "y1": "3", "x2": "18", "y2": "11" }],
+            ["line", { "x1": "14", "y1": "7", "x2": "22", "y2": "7" }]
+        ],
         listPlus: [
             ["line", { "x1": "3", "y1": "6", "x2": "15", "y2": "6" }],
             ["line", { "x1": "3", "y1": "12", "x2": "15", "y2": "12" }],
@@ -43262,11 +43442,11 @@
 
         addMenuRow("Play next", "#fff", function () {
             addNext(song);
-        }, "listPlus");
+        }, "listPlusTop");
 
         addMenuRow("Play last", "#fff", function () {
             addLast(song);
-        }, "queueAdd");
+        }, "listPlus");
 
         if (upcomingIndex(song) >= 0) {
 

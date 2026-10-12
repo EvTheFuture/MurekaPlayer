@@ -4111,7 +4111,7 @@
     </div>
 </div>
 <div class="sheet" id="panel">
-    <div class="sheetInner">
+    <div class="sheetInner" id="panelInner">
         <div class="sheetTop">
             <div class="sheetTitle" id="panelTitle"></div>
             <button class="chip iconOnly" id="closePanel" type="button" data-icon="close" aria-label="Close" title="Close"></button>
@@ -4538,6 +4538,15 @@
         ],
         heart: [
             ["path", { d: "M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" }]
+        ],
+        // A list with a plus at the top, for playing next, the plus the
+        // same size as in listPlus, which has it at the bottom
+        listPlusTop: [
+            ["line", { x1: "3", y1: "6", x2: "11", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "15", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "15", y2: "18" }],
+            ["line", { x1: "18", y1: "3", x2: "18", y2: "11" }],
+            ["line", { x1: "14", y1: "7", x2: "22", y2: "7" }]
         ],
         listPlus: [
             ["line", { x1: "3", y1: "6", x2: "15", y2: "6" }],
@@ -10221,7 +10230,7 @@
 
             // Grey, so it stands apart from playing all new after the
             // playing song
-            choices.push({ icon: "queueAdd", label: "Play this after the playing song", cls: "insetGrey tall", fn: function () {
+            choices.push({ icon: "listPlusTop", label: "Play this after the playing song", cls: "insetGrey tall", fn: function () {
 
                 closeSongMenu();
                 send("playWhenReady", { id: song.id, after: true }).then(function () {
@@ -10303,11 +10312,11 @@
 
         // Play next, and a second press takes it out of play next again
         const nextBtn = lineButton(song.playNext ? "Remove from play next" : "Play next",
-            song.playNext ? "check" : "listPlus", function (btn) {
+            song.playNext ? "check" : "listPlusTop", function (btn) {
 
                 song.playNext = !song.playNext;
                 send(song.playNext ? "playNext" : "unplayNext", song.id);
-                setIcon(btn, song.playNext ? "check" : "listPlus");
+                setIcon(btn, song.playNext ? "check" : "listPlusTop");
                 btn.title = song.playNext ? "Remove from play next" : "Play next";
                 btn.setAttribute("aria-label", btn.title);
             });
@@ -11781,6 +11790,8 @@
                 finish(false);
             };
 
+            // Dragged by itself, a swipe down on it does not close the panel
+            chip.dataset.noswipe = "1";
             chip.addEventListener("pointerdown", function (ev) {
 
                 if (start || (ev.button !== undefined && ev.button !== 0)) {
@@ -15145,7 +15156,7 @@
                 // Songs someone picked to share: where in the queue they go,
                 // or only the values that came with them
                 const choices = [
-                    { icon: "queueAdd", label: "Play next", fn: function () {
+                    { icon: "listPlusTop", label: "Play next", fn: function () {
                         placed("next");
                     } },
                     { icon: "listPlus", label: "Add to the end", cls: "inset", fn: function () {
@@ -15560,13 +15571,13 @@
         // The queue
         menuLine(box);
 
-        box.appendChild(menuItem("listPlus", "Play next", function () {
+        box.appendChild(menuItem("listPlusTop", "Play next", function () {
 
             songAction("playNext");
             closeSongMenu();
         }));
 
-        box.appendChild(menuItem("queueAdd", "Play last", function () {
+        box.appendChild(menuItem("listPlus", "Play last", function () {
 
             songAction("addQueue");
             closeSongMenu();
@@ -17900,7 +17911,8 @@
             $("ratePop").style.display = "none";
         }, cross: true },
         { pop: "fromPop", box: "fromBox", close: closeFrom, cross: false },
-        { pop: "volPop", box: "volBox", close: closeVol, cross: false }
+        { pop: "volPop", box: "volBox", close: closeVol, cross: false },
+        { pop: "panel", box: "panelInner", close: closePanel, cross: false }
     ];
 
     // How far down, or how fast, a swipe has to go to close the popup
@@ -17955,7 +17967,7 @@
 
         while (el && el !== box.parentNode) {
 
-            if (el.matches && el.matches("input, textarea, select, [data-noswipe]")) {
+            if (el.matches && el.matches("input, textarea, select, .rowGrip, [data-noswipe]")) {
                 return true;
             }
 
@@ -18533,10 +18545,10 @@
 
         newAsking = ask.title + ". " + ask.text;
         openChoice(newAsking, [
-            { icon: "queueAdd", label: "Play next", fn: function () {
+            { icon: "listPlusTop", label: "Play next", fn: function () {
                 answer("next");
             } },
-            { icon: "queue", label: "Add to the end", fn: function () {
+            { icon: "listPlus", label: "Add to the end", fn: function () {
                 answer("end");
             } },
             { icon: "play", label: "Replace the queue", fn: function () {
