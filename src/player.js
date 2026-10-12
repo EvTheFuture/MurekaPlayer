@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.314";
+    const VERSION = "1.9.9.315";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19325,12 +19325,15 @@
                 return;
             }
 
-            if (ev.cancelable) {
-                ev.preventDefault();
-            }
-
+            // A tap that wobbles a little stays a tap, the touch is only
+            // taken once it is a swipe, since a taken touch never becomes a
+            // click in some browsers
             if (!drag.on && dy < SWIPE_START_PX) {
                 return;
+            }
+
+            if (ev.cancelable) {
+                ev.preventDefault();
             }
 
             const now = Date.now();
@@ -27932,7 +27935,10 @@
         const x = document.createElement("button");
 
         x.type = "button";
-        x.textContent = "\u2715";
+        x.appendChild(makeSvgIcon([
+            ["line", { "x1": "18", "y1": "6", "x2": "6", "y2": "18" }],
+            ["line", { "x1": "6", "y1": "6", "x2": "18", "y2": "18" }]
+        ], 20));
         x.setAttribute("aria-label", "Turn the debug overlay off");
         x.title = "Turn the debug overlay off";
         x.style.cssText = [
@@ -27947,8 +27953,9 @@
             "border-radius:50%",
             "background:rgba(0,0,0,0.7)",
             "color:#fff",
-            "font:18px/38px sans-serif",
-            "text-align:center",
+            "display:flex",
+            "align-items:center",
+            "justify-content:center",
             "text-shadow:none",
             "cursor:pointer",
             "pointer-events:auto",
