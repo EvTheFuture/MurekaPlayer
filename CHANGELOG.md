@@ -663,9 +663,10 @@ the new settings layout and a number of smaller improvements.
   narrowing things down, ringed for all songs or something paused or running,
   plain when off. Play is filled while playing, ringed while paused and plain
   when stopped. Repeat all is filled, repeat one ringed.
-- With numbers over the whole library, the two songs Mureka makes together
-  are numbered in the order the list shows them, the upper one higher.
-  They came out the wrong way round, 4008 above 4009.
+- With numbers over the whole library, the numbers count down the list in
+  its own order, also while it is newest published first and for songs that
+  came in from another library. Songs published in another order than they
+  were made came out the wrong way round, 1000 above 1001.
 - Large play and like counts are shortened, 1.0k, 12k, 1.2M.
 - The tag list's **Popularity** sort is now called **Most songs**.
 - **About Mureka Player**, a page of its own at the end of the settings,

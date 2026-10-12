@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.318";
+    const VERSION = "1.9.9.319";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24219,40 +24219,21 @@
 
         const numberById = new Map();
 
-        // Another creator's songs come newest published first and are all
-        // there is of them, so they are numbered in that order. By when they
-        // were made, songs published in another order than they were made
-        // came out numbered the wrong way round, 1000 above 1001
-        if (settings.absoluteNumbers && !creatorSource) {
+        // Numbered from the bottom of the list up, in the list's own order,
+        // so the numbers always count down the list. Across the whole library
+        // every song counts, whatever is shown, so a song keeps its number
+        // when filters change. Otherwise only the songs shown in the
+        // published or drafts view count. Ranked by when the songs were made
+        // instead, songs published in another order than they were made came
+        // out the wrong way round in a list newest published first, 1000
+        // above 1001
+        const whole = settings.absoluteNumbers === true;
+        const scope = whole ? orderedSongs() : orderedSongs().filter(passesPublishFilter);
+        const total = scope.length;
 
-            // Rank by when the song was made. Mureka makes songs two at a
-            // time with the same time on both, and of those the one the list
-            // shows first is the newer, so a tie is broken by the list, later
-            // in it counting as older. Kept in list order, a pair came out
-            // numbered the wrong way round, 4008 above 4009
-            const place = new Map();
-
-            cache.songs.forEach(function (x, i) {
-                place.set(x.song_id, i);
-            });
-
-            const byAge = cache.songs.slice().sort(function (a, b) {
-                return ((a.generate_at || 0) - (b.generate_at || 0))
-                    || (place.get(b.song_id) - place.get(a.song_id));
-            });
-
-            byAge.forEach(function (x, i) {
-                numberById.set(x.song_id, i + 1);
-            });
-        } else {
-
-            const scope = orderedSongs().filter(passesPublishFilter);
-            const total = scope.length;
-
-            scope.forEach(function (x, i) {
-                numberById.set(x.song_id, total - i);
-            });
-        }
+        scope.forEach(function (x, i) {
+            numberById.set(x.song_id, total - i);
+        });
 
         return numberById;
     }
