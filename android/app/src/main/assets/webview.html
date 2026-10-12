@@ -4113,7 +4113,7 @@
     <div id="filterText"></div>
     <div id="counts"></div>
     <div id="libLoad"></div>
-    <div id="rowsWrap">
+    <div id="rowsWrap" data-noswipe="1">
         <div id="pullIcon"></div>
         <div id="rows"></div>
         <button id="edgeBtn" type="button" aria-label="Scroll to top" data-icon="arrowUp"></button>
@@ -17971,7 +17971,16 @@
         }, cross: true },
         { pop: "fromPop", box: "fromBox", close: closeFrom, cross: false },
         { pop: "volPop", box: "volBox", close: closeVol, cross: false },
-        { pop: "panel", box: "panelInner", close: closePanel, cross: false }
+        { pop: "panel", box: "panelInner", close: closePanel, cross: false },
+
+        // The whole song list, but not on a phone, where it is part of the
+        // main screen. The rows are left out, pulled down there loads new
+        // songs
+        { pop: "browse", box: "browse", close: function () {
+            $("browse").style.display = "none";
+        }, cross: false, when: function () {
+            return !isPhone();
+        } }
     ];
 
     // How far down, or how fast, a swipe has to go to close the popup
@@ -18057,7 +18066,7 @@
 
         box.addEventListener("touchstart", function (ev) {
 
-            if (ev.touches.length !== 1 || swipeBlocked(ev.target, box)) {
+            if (ev.touches.length !== 1 || swipeBlocked(ev.target, box) || (p.when && !p.when())) {
 
                 drag = null;
                 return;

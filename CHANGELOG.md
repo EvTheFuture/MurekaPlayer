@@ -248,8 +248,9 @@ the new settings layout and a number of smaller improvements.
   loaded.
 - A right click or a press and hold on a cover opens that song's menu, the
   playing song's on the middle cover, as on a row in the list.
-- Popups, the settings and the other panels close with a swipe down on a
-  touch screen, and popups without a close button have a quiet cross in
+- Popups, the settings, the other panels and the whole song list close with
+  a swipe down on a touch screen (on the list itself it still loads new
+  songs), and popups without a close button have a quiet cross in
   their top right corner. Typing in one on a touch screen moves it up
   above the keyboard, so renaming a song shows what is typed.
 - Drag and drop in the queue, for any song including played ones. The playing
