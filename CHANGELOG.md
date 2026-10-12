@@ -248,6 +248,9 @@ the new settings layout and a number of smaller improvements.
   loaded.
 - A right click or a press and hold on a cover opens that song's menu, the
   playing song's on the middle cover, as on a row in the list.
+- Popups close with a swipe down on a touch screen, or with the quiet cross
+  in their top right corner. Typing in one on a touch screen moves it up
+  above the keyboard, so renaming a song shows what is typed.
 - Drag and drop in the queue, for any song including played ones. The playing
   song keeps playing wherever it goes.
 - The phone's own settings, filters and artists panels, shown with large
@@ -610,7 +613,7 @@ the new settings layout and a number of smaller improvements.
   zooms in up to 32 times. Pinch, sliding down after the hold, or a double
   tap zooms out. A press that moves sideways first stays a drag. Zoomed
   in, the play head stays in the middle and the waveform moves under it,
-  with a thin progress line of the whole song along its foot. Dragging
+  easing in from the start and out toward the end, with a thin progress line of the whole song along its foot. Dragging
   along that line moves through the whole song, as zoomed out. Dragging
   past two thirds of the way to an edge scrolls the waveform that way,
   faster the nearer the edge. **Remember the waveform zoom level**, under

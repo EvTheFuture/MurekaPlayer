@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.307";
+    const VERSION = "1.9.9.309";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20710,6 +20710,7 @@
         const TAP_MOVE = 6;
         const HOLD_MS = 350;
         const HOLD_ZOOM_PX = 90;
+        const EASE_PART = 0.3;
         const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
             holdTimer: 0, holdZoom: null };
         const pointers = new Map();
@@ -20722,8 +20723,38 @@
             return Math.max(0, Math.min(1 - span(), s));
         }
 
+        // The view with the play head in the centre, eased near the ends
+        // of the song: the play head glides in from the edge to the centre
+        // and out again while the waveform speeds up and slows down to
+        // match, instead of both changing pace at once
         function follow(frac) {
-            return clampStart(frac - span() / 2);
+
+            const s = span();
+            const room = 1 - s;
+            const w = Math.min(s * EASE_PART, room / 2);
+            const u = frac - s / 2;
+
+            if (w <= 0) {
+                return clampStart(u);
+            }
+
+            if (u <= -w) {
+                return 0;
+            }
+
+            if (u < w) {
+                return (u + w) * (u + w) / (4 * w);
+            }
+
+            if (u <= room - w) {
+                return u;
+            }
+
+            if (u < room + w) {
+                return room - (room + w - u) * (room + w - u) / (4 * w);
+            }
+
+            return room;
         }
 
         // Where the pointer is across the waveform, 0 at the left edge and
@@ -20797,7 +20828,7 @@
                 return 0;
             }
 
-                // Dragging along the progress line, the view follows the play head
+            // Dragging along the progress line, the view follows the play head
             if (z.drag && z.drag.overview) {
                 return follow(frac);
             }
