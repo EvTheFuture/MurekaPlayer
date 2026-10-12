@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.303";
+    const VERSION = "1.9.9.305";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12162,7 +12162,7 @@
         if (pendingPlay.has(id)) {
 
             showToast(pendingPlay.get(id) === "after" ? "Not ready yet, it plays after the playing song once it is"
-                : "Not ready yet, it plays as soon as it is", "wait");
+                : "Not ready yet, it plays as soon as it is", true);
             return;
         }
 
@@ -19032,6 +19032,40 @@
     // When the phone took the music back from a browser that went silent
     let carGoneAt = 0;
 
+    // How long a note stays up: long enough to read its words, a little
+    // longer for what did not work
+    function toastShowMs(text, kind) {
+
+        const ms = Math.max(2800, Math.min(8000, 2200 + String(text).length * 45));
+
+        return kind === "bad" ? ms + 1500 : ms;
+    }
+
+    // The note fades away from where it is, rather than being gone at once
+    function fadeToastOut() {
+
+        if (!panelToastEl) {
+            return;
+        }
+
+        const now = getComputedStyle(panelToastEl).opacity;
+
+        try {
+
+            panelToastEl.getAnimations().forEach(function (a) {
+                a.cancel();
+            });
+        } catch (e) {
+            // Nothing running
+        }
+
+        panelToastEl.style.transition = "none";
+        panelToastEl.style.opacity = now;
+        void panelToastEl.offsetWidth;
+        panelToastEl.style.transition = "opacity 0.5s ease";
+        panelToastEl.style.opacity = "0";
+    }
+
     function showToast(text, ok) {
 
         // Three looks: "wait" while Mureka is asked, ringed with a turning
@@ -19102,28 +19136,35 @@
                 a.cancel();
             });
         } catch (e) {
+            // Nothing running
         }
 
+        // Shown at once, whatever was fading before
+        panelToastEl.style.transition = "none";
+
+        const showMs = toastShowMs(text, kind);
+
         // Waiting stays up until the answer comes, a minute at the most in
-        // case none ever does
+        // case none ever does, then fades away like any other
         if (kind === "wait" || !panelToastEl.animate) {
 
             panelToastEl.style.opacity = "1";
             panelToastEl.style.transform = "translateX(-50%)";
 
-            toastHideTimer = setTimeout(function () {
-                panelToastEl.style.opacity = "0";
-            }, kind === "wait" ? 60000 : 2800);
+            toastHideTimer = setTimeout(fadeToastOut, kind === "wait" ? 60000 : showMs);
             return;
         }
+
+        // Fully there, then half a second of fading at the end
+        const fadeAt = Math.max(0.5, 1 - 500 / showMs);
 
         panelToastEl.style.opacity = "0";
         panelToastEl.animate([
             { opacity: 1, transform: "translate(-50%, 0)", offset: 0 },
-            { opacity: 1, transform: "translate(-50%, 0)", offset: 0.85 },
+            { opacity: 1, transform: "translate(-50%, 0)", offset: fadeAt },
             { opacity: 0, transform: "translate(-50%, 0)" }
         ], {
-            duration: 2800,
+            duration: showMs,
             easing: "ease-in-out"
         });
     }
@@ -19553,20 +19594,7 @@
         }
 
         clearTimeout(toastHideTimer);
-
-        if (panelToastEl) {
-
-            try {
-
-                panelToastEl.getAnimations().forEach(function (a) {
-                    a.cancel();
-                });
-            } catch (e) {
-                // Nothing running
-            }
-
-            panelToastEl.style.opacity = "0";
-        }
+        fadeToastOut();
 
         // The web views take theirs away too
         toastSeq += 1;
@@ -20990,8 +21018,8 @@
     }
 
     // The zoom of the player's waveform, made with the seek row. With
-    // Remember the waveform zoom on, the zoom is kept in this browser under
-    // WAVE_ZOOM_KEY for the next time the player opens
+    // Remember the waveform zoom level on, the zoom is kept in this
+    // browser under WAVE_ZOOM_KEY for the next time the player opens
     let waveZoomer = null;
     const WAVE_ZOOM_KEY = "mureka_player_wave_zoom";
 
@@ -32088,7 +32116,7 @@
         mobilePage.appendChild(waveSourceRow);
         mobilePage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
 
-        const waveZoomKeepRow = makeBoolRow("Remember the waveform zoom",
+        const waveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
             function () { return settings.waveZoomKeep === true; },
             function (v) {
 
@@ -32587,7 +32615,7 @@
             webPage.appendChild(webWaveSourceRow);
             webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
 
-            const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom",
+            const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
                 function () { return settings.webWaveZoomKeep === true; },
                 function (v) {
 

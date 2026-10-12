@@ -611,9 +611,9 @@ the new settings layout and a number of smaller improvements.
   moves under it, with a thin progress line of the whole song along its
   foot. Dragging past two thirds of the way to an edge scrolls the
   waveform that way, faster the nearer the edge. **Remember the waveform
-  zoom**, under Mobile player and Web view, keeps the zoom for the next
-  time the player opens, each browser its own, and a web view can have it
-  set for itself alone.
+  zoom level**, under Mobile player and Web view, keeps the zoom for the
+  next time the player opens, each browser its own, and a web view can
+  have it set for itself alone.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - Opening the app, or coming back to the page from another tab or app,
   takes the black screen cover away as a tap would, so the player shows
