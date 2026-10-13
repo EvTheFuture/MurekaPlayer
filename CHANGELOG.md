@@ -735,8 +735,9 @@ the new settings layout and a number of smaller improvements.
 ### Known limits
 
 - Google sign in inside the app's WebView may still be refused by Google.
-- Anyone on the same network can open the web view. Turn off **Allow from
-  Wi-Fi networks** to keep it to the phone's hotspot.
+- Without a password set, anyone on the same network can open the web view.
+  Set a **Password for the web view**, or turn off **Allow from Wi-Fi
+  networks** to keep it to the phone's hotspot.
 - The Tesla greys out next and previous while a normal browser page plays the
   music. **Offer seeking to the browser**, under Developer, is there to test
   whether it changes that.

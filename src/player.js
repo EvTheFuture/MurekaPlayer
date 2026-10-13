@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.324";
+    const VERSION = "1.9.9.326";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19281,17 +19281,33 @@
 
     // A swipe down on an overlay, with a finger or the mouse, moves it
     // down with it, and far or fast enough closes it. The overlay el takes the
-    // touches, mover is what slides
-    function swipeDownCloses(el, mover, close) {
+    // touches, mover is what slides. hooks, when given, can pick another
+    // part to slide when the swipe starts (mover), make ready what is to be
+    // seen underneath it (lift), and put things back once the swipe is
+    // over, closed or not (drop). fades says whether it fades as it goes,
+    // a page sliding off another one stays solid
+    function swipeDownCloses(el, mover, close, hooks) {
 
+        const h = hooks || {};
         let drag = null;
         let swallowClickUntil = 0;
+        let moving = mover;
+        let fades = true;
 
         const reset = function () {
 
-            mover.style.transition = "";
-            mover.style.transform = "";
-            mover.style.opacity = "";
+            moving.style.transition = "";
+            moving.style.transform = "";
+            moving.style.opacity = "";
+        };
+
+        const settle = function (closed) {
+
+            reset();
+
+            if (h.drop) {
+                h.drop(closed);
+            }
         };
 
         // A press that may become a swipe, from a finger or the mouse
@@ -19332,6 +19348,17 @@
                 drag.speed = (y - drag.lastY) / (now - drag.lastAt);
             }
 
+            // The part that slides, and what shows under it, set once
+            if (!drag.on) {
+
+                moving = h.mover ? h.mover() : mover;
+                fades = !h.fades || h.fades();
+
+                if (h.lift) {
+                    h.lift();
+                }
+            }
+
             // Dragged with the mouse, no text is selected on the way
             if (!drag.on && drag.mouse) {
 
@@ -19346,9 +19373,9 @@
             drag.lastAt = now;
             drag.on = true;
             drag.dy = Math.max(0, dy - SWIPE_START_PX);
-            mover.style.transition = "none";
-            mover.style.transform = "translateY(" + drag.dy + "px)";
-            mover.style.opacity = String(Math.max(0.35, 1 - drag.dy / 500));
+            moving.style.transition = "none";
+            moving.style.transform = "translateY(" + drag.dy + "px)";
+            moving.style.opacity = fades ? String(Math.max(0.35, 1 - drag.dy / 500)) : "";
 
             return true;
         };
@@ -19371,21 +19398,23 @@
 
             if (d.dy > SWIPE_CLOSE_PX || (d.dy > 30 && d.speed > SWIPE_CLOSE_SPEED)) {
 
-                mover.style.transition = "transform 0.18s ease-in, opacity 0.18s ease-in";
-                mover.style.transform = "translateY(" + Math.round(window.innerHeight * 0.6) + "px)";
-                mover.style.opacity = "0";
+                moving.style.transition = "transform 0.18s ease-in, opacity 0.18s ease-in";
+                moving.style.transform = "translateY(" + Math.round(window.innerHeight * 0.6) + "px)";
+                moving.style.opacity = fades ? "0" : "";
                 setTimeout(function () {
 
                     close();
-                    reset();
+                    settle(true);
                 }, 180);
                 return;
             }
 
-            mover.style.transition = "transform 0.2s ease-out, opacity 0.2s ease-out";
-            mover.style.transform = "";
-            mover.style.opacity = "";
-            setTimeout(reset, 220);
+            moving.style.transition = "transform 0.2s ease-out, opacity 0.2s ease-out";
+            moving.style.transform = "";
+            moving.style.opacity = "";
+            setTimeout(function () {
+                settle(false);
+            }, 220);
         };
 
         el.addEventListener("touchstart", function (ev) {
@@ -33716,7 +33745,67 @@
             settingsEl.appendChild(settingsPages[key]);
         }
 
-        swipeDownCloses(settingsEl, settingsEl, closeSettings);
+        // On one of the pages only that page closes, back to the main one.
+        // The page then slides away on top of the main page, which is laid
+        // out underneath it for the swipe
+        let lifted = null;
+
+        swipeDownCloses(settingsEl, settingsEl, function () {
+
+            if (settingsPageNow !== "main") {
+                showSettingsPage("main");
+            } else {
+                closeSettings();
+            }
+        }, {
+            mover: function () {
+                return settingsPageNow !== "main" ? settingsPages[settingsPageNow] : settingsEl;
+            },
+            fades: function () {
+                return settingsPageNow === "main";
+            },
+            lift: function () {
+
+                if (settingsPageNow === "main") {
+                    return;
+                }
+
+                const page = settingsPages[settingsPageNow];
+                const top = page.offsetTop;
+                const left = page.offsetLeft;
+                const width = page.offsetWidth;
+
+                lifted = page;
+                page.style.position = "absolute";
+                page.style.top = top + "px";
+                page.style.left = left + "px";
+                page.style.width = width + "px";
+                page.style.minHeight = Math.max(0, settingsEl.clientHeight - top) + "px";
+                page.style.boxSizing = "border-box";
+                page.style.background = "#1d1d22";
+                page.style.zIndex = "2";
+                settingsPages.main.style.display = "flex";
+            },
+            drop: function (closed) {
+
+                const page = lifted;
+
+                lifted = null;
+
+                if (!page) {
+                    return;
+                }
+
+                for (const p of ["position", "top", "left", "width", "minHeight", "boxSizing", "background", "zIndex"]) {
+                    page.style[p] = "";
+                }
+
+                // Snapped back, the main page goes out of sight again
+                if (!closed && settingsPageNow !== "main") {
+                    settingsPages.main.style.display = "none";
+                }
+            }
+        });
         panelEl.appendChild(settingsEl);
 
         updateStartButtons();

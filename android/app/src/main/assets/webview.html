@@ -11325,9 +11325,20 @@
         }
     });
 
+    // A page of the settings swiped away, kept out of sight until the page
+    // that comes next is drawn
+    let panelShowTimer = 0;
+
     function renderPanel(items) {
 
         lastPanelItems = items;
+
+        if (panelShowTimer) {
+
+            clearTimeout(panelShowTimer);
+            panelShowTimer = 0;
+            $("panelScroll").style.opacity = "";
+        }
 
         const box = $("panelBody");
         const scroller = $("panelScroll");
@@ -18088,18 +18099,7 @@
 
         if (isShown("panel")) {
 
-            // A page of the settings goes back one level, the main page
-            // closes them
-            const back = Array.from($("panelBody").querySelectorAll("button")).find(function (b) {
-                return b.textContent.trim().indexOf("\u2039") === 0 && b.offsetParent !== null;
-            });
-
-            if (back) {
-                back.click();
-            } else {
-                closePanel();
-            }
-
+            panelBackOrClose();
             return true;
         }
 
@@ -18139,7 +18139,20 @@
         }, cross: true },
         { pop: "fromPop", box: "fromBox", close: closeFrom, cross: false },
         { pop: "volPop", box: "volBox", close: closeVol, cross: false },
-        { pop: "panel", box: "panelInner", close: closePanel, cross: false },
+        { pop: "panel", box: "panelInner", close: panelBackOrClose, cross: false, mover: function () {
+
+            // On a page of the settings only the page slides away, the
+            // sheet stays for the main page to come back into
+            return panelBackButton() ? $("panelScroll") : $("panelInner");
+        }, hideAfter: function (part) {
+
+            // The main page comes from the phone, a moment later
+            part.style.opacity = "0";
+            clearTimeout(panelShowTimer);
+            panelShowTimer = setTimeout(function () {
+                part.style.opacity = "";
+            }, 1500);
+        } },
 
         // The whole song list, but not on a phone, where it is part of the
         // main screen. The rows are left out, pulled down there loads new
@@ -18225,11 +18238,15 @@
         let drag = null;
         let swallowClickUntil = 0;
 
+        // What slides: the box, or another part when the popup picks one
+        // as the swipe starts
+        let moving = box;
+
         const reset = function () {
 
-            box.style.transition = "";
-            box.style.transform = "";
-            box.style.opacity = "";
+            moving.style.transition = "";
+            moving.style.transform = "";
+            moving.style.opacity = "";
         };
 
         // A press that may become a swipe, from a finger or the mouse
@@ -18270,6 +18287,10 @@
                 drag.speed = (y - drag.lastY) / (now - drag.lastAt);
             }
 
+            if (!drag.on) {
+                moving = p.mover ? p.mover() : box;
+            }
+
             // Dragged with the mouse, no text is selected on the way
             if (!drag.on && drag.mouse) {
 
@@ -18284,9 +18305,9 @@
             drag.lastAt = now;
             drag.on = true;
             drag.dy = Math.max(0, dy - SWIPE_START_PX);
-            box.style.transition = "none";
-            box.style.transform = "translateY(" + drag.dy + "px)";
-            box.style.opacity = String(Math.max(0.35, 1 - drag.dy / 500));
+            moving.style.transition = "none";
+            moving.style.transform = "translateY(" + drag.dy + "px)";
+            moving.style.opacity = String(Math.max(0.35, 1 - drag.dy / 500));
 
             return true;
         };
@@ -18309,20 +18330,28 @@
 
             if (d.dy > SWIPE_CLOSE_PX || (d.dy > 30 && d.speed > SWIPE_CLOSE_SPEED)) {
 
-                box.style.transition = "transform 0.18s ease-in, opacity 0.18s ease-in";
-                box.style.transform = "translateY(" + Math.round(window.innerHeight * 0.6) + "px)";
-                box.style.opacity = "0";
+                moving.style.transition = "transform 0.18s ease-in, opacity 0.18s ease-in";
+                moving.style.transform = "translateY(" + Math.round(window.innerHeight * 0.6) + "px)";
+                moving.style.opacity = "0";
                 setTimeout(function () {
+
+                    const part = moving;
 
                     p.close();
                     reset();
+
+                    // A part of the popup that slid away stays out of sight
+                    // until the popup has drawn what comes next
+                    if (part !== box && p.hideAfter) {
+                        p.hideAfter(part);
+                    }
                 }, 180);
                 return;
             }
 
-            box.style.transition = "transform 0.2s ease-out, opacity 0.2s ease-out";
-            box.style.transform = "";
-            box.style.opacity = "";
+            moving.style.transition = "transform 0.2s ease-out, opacity 0.2s ease-out";
+            moving.style.transform = "";
+            moving.style.opacity = "";
             setTimeout(reset, 220);
         };
 
@@ -18450,6 +18479,26 @@
 
     if (window.visualViewport) {
         window.visualViewport.addEventListener("resize", fitTypingRoom);
+    }
+
+    // A page of the settings goes back one level, the main page closes
+    // them, for Back and a swipe down alike
+    function panelBackButton() {
+
+        return Array.from($("panelBody").querySelectorAll("button")).find(function (b) {
+            return b.textContent.trim().indexOf("\u2039") === 0 && b.offsetParent !== null;
+        }) || null;
+    }
+
+    function panelBackOrClose() {
+
+        const back = panelBackButton();
+
+        if (back) {
+            back.click();
+        } else {
+            closePanel();
+        }
     }
 
     function withCurrentMenu(then) {
