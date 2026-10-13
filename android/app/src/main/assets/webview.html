@@ -7661,9 +7661,7 @@
     // in front of them how loud the song sounds, bright, a column per
     // screen pixel. start and span the part of the song in view, each
     // column keeping its place in the song as the view moves
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, tint) {
-
-        const colour = tint || plainColour;
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, colour) {
 
         const room = h - 1;
         const from0 = start || 0;
@@ -7685,9 +7683,9 @@
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
-            ctx.fillStyle = colour(played ? "#2a7f86" : "#3a3a3e", x, WAVE_DIM_SHADE);
+            ctx.fillStyle = colour(played, x, "dim");
             ctx.fillRect(x, (h - ph) / 2, 1, ph);
-            ctx.fillStyle = colour(played ? "#48e1eb" : "#666666", x, 1);
+            ctx.fillStyle = colour(played, x, "loud");
             ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
     }
@@ -8207,9 +8205,10 @@
     }
 
     // Zoomed in, the whole song as a thin progress line along the foot of
-    // the waveform, the part played in the accent colour, or played as the
-    // coloured waveform is, and the rest dim, and a thin play head. How far
-    // it is zoomed shows in the waveform
+    // the waveform, the part played in played, a little lighter than the
+    // played waveform or as the waveform coloured by the progress is, and
+    // the rest dim, and a thin play head. How far it is zoomed shows in the
+    // waveform
     function drawWaveOverview(ctx, w, h, start, span, frac, dpr, played) {
 
         const lh = Math.max(1, Math.round(2 * dpr));
@@ -8218,7 +8217,7 @@
 
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(done, h - lh, w - done, lh);
-        ctx.fillStyle = played || "rgba(72, 225, 235, 0.75)";
+        ctx.fillStyle = played;
         ctx.fillRect(0, h - lh, done, lh);
 
         if (x >= 0 && x < w) {
@@ -8228,13 +8227,11 @@
         }
     }
 
-    // The waveform's dim layer takes its colour this much darker, so
-    // coloured it keeps its two shades apart
-    const WAVE_DIM_SHADE = 0.55;
-
-    function plainColour(hex) {
-        return hex;
-    }
+    // How much darker the dim layer of our own waveform is than its bright
+    // layer, and Mureka's bars still to play than the colour set for them,
+    // so the waveform looks as it always did with the colours as they came
+    const WAVE_DIM_SHADE = 0.57;
+    const WAVE_BAR_REST_SHADE = 0.83;
 
     // The colour and share of an rgba() fill, to darken by hand
     function rgbaParts(text) {
@@ -8248,33 +8245,53 @@
         return { c: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) };
     }
 
-    // The waveform coloured by the song's progress: up to the play head in
-    // one colour and on to where the progress reaches in the other, as the
-    // bar would lie, each with its share, so the share sets the shade. dim
-    // darkens it for the dim layer. Each colour is worked out once a drawing
-    function waveTinter(w, frac, fill, ahead, headX) {
+    // An rgba() fill with its share scaled by k
+    function rgbaFade(text, k) {
 
-        const end = Math.round(Math.max(0, Math.min(1, frac)) * w);
+        const t = rgbaParts(text);
+
+        return "rgba(" + t.c.join(", ") + ", " + Math.round(t.a * k * 1000) / 1000 + ")";
+    }
+
+    // The colours of the waveform for one drawing: played and still to play
+    // as set, and, coloured by the song's progress, up to the play head in
+    // fill and on to where the progress reaches in ahead, as the bar would
+    // lie, each with its share. The painter takes whether a column is
+    // played, where it is and which layer: loud, dim or bar. Each colour is
+    // worked out once a drawing
+    function wavePainter(w, frac, headX, played, rest, fill, ahead) {
+
+        const end = fill ? Math.round(Math.max(0, Math.min(1, frac)) * w) : 0;
         const split = Math.max(0, Math.min(end, headX));
-        const parts = [null, rgbaParts(fill), rgbaParts(ahead)];
+        const parts = [rgbaParts(rest), rgbaParts(played), rgbaParts(fill), rgbaParts(ahead)];
         const made = new Map();
 
-        return function (hex, x, dim) {
+        return function (isPlayed, x, layer) {
 
-            const zone = x < split ? 1 : (x < end ? 2 : 0);
+            let zone = isPlayed ? 1 : 0;
 
-            if (zone === 0) {
-                return hex;
+            if (x < split) {
+                zone = 2;
+            } else if (x < end) {
+                zone = 3;
             }
 
-            const key = zone + ":" + dim;
+            const key = zone + layer;
             let out = made.get(key);
 
             if (out === undefined) {
 
                 const t = parts[zone];
+                let k = 1;
+
+                if (layer === "dim") {
+                    k = WAVE_DIM_SHADE;
+                } else if (layer === "bar" && zone === 0) {
+                    k = WAVE_BAR_REST_SHADE;
+                }
+
                 const shade = function (i) {
-                    return Math.round(t.c[i] * dim);
+                    return Math.round(t.c[i] * k);
                 };
 
                 out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + t.a + ")";
@@ -8307,9 +8324,7 @@
     // Mureka's waveform as bars, each the highest point of its slice. Each
     // bar keeps its place in the song, so zoomed in they slide along rather
     // than change height as the view moves
-    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, tint) {
-
-        const colour = tint || plainColour;
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, colour) {
 
         const pitch = barW + gap;
         const count = Math.max(1, Math.floor(w / pitch));
@@ -8327,7 +8342,7 @@
             const peak = waveSlice(data, from, Math.min(1, from + step));
             const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
 
-            ctx.fillStyle = colour(from + step / 2 <= frac ? "#48e1eb" : "#555555", x, 1);
+            ctx.fillStyle = colour(from + step / 2 <= frac, x, "bar");
             ctx.fillRect(x, (h - bh) / 2, barW, bh);
         }
     }
@@ -8369,7 +8384,9 @@
         const ahead = state && state.waveZoomProgressAhead ? state.waveZoomProgressAhead : "rgba(72, 225, 235, 0.2)";
         const headX = Math.round((frac - start) / span * w);
         const done = progress ? Math.round(frac * w) : 0;
-        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done].join(",");
+        const playedFill = state && state.wavePlayedFill ? state.wavePlayedFill : "rgba(72, 225, 235, 1)";
+        const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
+        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill, restFill].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -8391,8 +8408,10 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        // Coloured by the progress, each layer of the waveform keeps its shade
-        const tint = look === "wave" ? waveTinter(w, frac, fill, ahead, headX) : null;
+        // The waveform in the colours set, and coloured by the progress when
+        // that is the look, each layer keeping its shade
+        const wave = look === "wave";
+        const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
 
         if (loud) {
             drawLayeredWave(ctx, w, h, data, loud, frac, start, span, tint);
@@ -8406,7 +8425,7 @@
 
 
         if (span < 1) {
-            drawWaveOverview(ctx, w, h, start, span, frac, dpr, look === "wave" ? fill : null);
+            drawWaveOverview(ctx, w, h, start, span, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
     }
 

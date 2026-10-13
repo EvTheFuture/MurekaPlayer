@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.337";
+    const VERSION = "1.9.9.338";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -323,6 +323,10 @@
     // the play head, and one past it
     const PROGRESS_ALPHA_DEFAULT = 14;
     const PROGRESS_AHEAD_COLOR = "#48e1eb";
+
+    // The waveform's own colours, played and still to play
+    const WAVE_PLAYED_COLOR = "#48e1eb";
+    const WAVE_REST_COLOR = "#666666";
     const PROGRESS_AHEAD_ALPHA = 20;
     const PROGRESS_ALPHA_MAX = 100;
 
@@ -354,8 +358,12 @@
         + "as they are, or the waveform itself coloured instead. Its edge can be dragged at any height to move through "
         + "the whole song, the waveform following, as on the thin line at its foot.";
     const PROGRESS_COLOR_HINT = "The colour of the progress on the played part, left of the play head, and how much "
-        + "of it shows. Colouring the waveform, it is the waveform's own colour there, the share how strongly it shows, "
-        + "and the thin line at its foot follows it.";
+        + "of it shows. Colouring the waveform, the waveform takes it there instead of its own colours, and the thin "
+        + "line at its foot takes it too.";
+    const WAVE_COLOR_HINT = "The waveform's colour left of the play head, and how much of it shows. The quieter "
+        + "outer part of the waveform from the song takes it darker, and the thin line at its foot zoomed in takes it "
+        + "too.";
+    const WAVE_REST_HINT = "The waveform's colour right of the play head, still to play, and how much of it shows.";
     const PROGRESS_AHEAD_HINT = "The colour of the progress where it reaches past the play head, on the part still "
         + "to come in view.";
 
@@ -2565,6 +2573,14 @@
             webWaveZoomKeep: false,
             waveZoomProgressLook: "over",
             webWaveZoomProgressLook: "over",
+            waveColor: WAVE_PLAYED_COLOR,
+            webWaveColor: WAVE_PLAYED_COLOR,
+            waveAlpha: 100,
+            webWaveAlpha: 100,
+            waveRestColor: WAVE_REST_COLOR,
+            webWaveRestColor: WAVE_REST_COLOR,
+            waveRestAlpha: 100,
+            webWaveRestAlpha: 100,
             waveZoomProgressColor: "#ffffff",
             webWaveZoomProgressColor: "#ffffff",
             waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
@@ -2779,6 +2795,14 @@
                         parsed.waveZoomProgress, parsed.waveZoomProgressBelow),
                     webWaveZoomProgressLook: progressLook(parsed.webWaveZoomProgressLook,
                         parsed.webWaveZoomProgress, parsed.webWaveZoomProgressBelow),
+                    waveColor: progressColor(parsed.waveColor, WAVE_PLAYED_COLOR),
+                    webWaveColor: progressColor(parsed.webWaveColor, WAVE_PLAYED_COLOR),
+                    waveAlpha: progressAlpha(parsed.waveAlpha, 100),
+                    webWaveAlpha: progressAlpha(parsed.webWaveAlpha, 100),
+                    waveRestColor: progressColor(parsed.waveRestColor, WAVE_REST_COLOR),
+                    webWaveRestColor: progressColor(parsed.webWaveRestColor, WAVE_REST_COLOR),
+                    waveRestAlpha: progressAlpha(parsed.waveRestAlpha, 100),
+                    webWaveRestAlpha: progressAlpha(parsed.webWaveRestAlpha, 100),
                     waveZoomProgressColor: progressColor(parsed.waveZoomProgressColor),
                     webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor),
                     waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
@@ -21547,9 +21571,10 @@
     }
 
     // Zoomed in, the whole song as a thin progress line along the foot of
-    // the waveform, the part played in the accent colour, or played as the
-    // coloured waveform is, and the rest dim, and a thin play head. How far
-    // it is zoomed shows in the waveform
+    // the waveform, the part played in played, a little lighter than the
+    // played waveform or as the waveform coloured by the progress is, and
+    // the rest dim, and a thin play head. How far it is zoomed shows in the
+    // waveform
     function drawWaveOverview(ctx, w, h, start, span, frac, dpr, played) {
 
         const lh = Math.max(1, Math.round(2 * dpr));
@@ -21558,7 +21583,7 @@
 
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(done, h - lh, w - done, lh);
-        ctx.fillStyle = played || "rgba(72, 225, 235, 0.75)";
+        ctx.fillStyle = played;
         ctx.fillRect(0, h - lh, done, lh);
 
         if (x >= 0 && x < w) {
@@ -21568,13 +21593,11 @@
         }
     }
 
-    // The waveform's dim layer takes its colour this much darker, so
-    // coloured it keeps its two shades apart
-    const WAVE_DIM_SHADE = 0.55;
-
-    function plainColour(hex) {
-        return hex;
-    }
+    // How much darker the dim layer of our own waveform is than its bright
+    // layer, and Mureka's bars still to play than the colour set for them,
+    // so the waveform looks as it always did with the colours as they came
+    const WAVE_DIM_SHADE = 0.57;
+    const WAVE_BAR_REST_SHADE = 0.83;
 
     // The colour and share of an rgba() fill, to darken by hand
     function rgbaParts(text) {
@@ -21588,33 +21611,53 @@
         return { c: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) };
     }
 
-    // The waveform coloured by the song's progress: up to the play head in
-    // one colour and on to where the progress reaches in the other, as the
-    // bar would lie, each with its share, so the share sets the shade. dim
-    // darkens it for the dim layer. Each colour is worked out once a drawing
-    function waveTinter(w, frac, fill, ahead, headX) {
+    // An rgba() fill with its share scaled by k
+    function rgbaFade(text, k) {
 
-        const end = Math.round(Math.max(0, Math.min(1, frac)) * w);
+        const t = rgbaParts(text);
+
+        return "rgba(" + t.c.join(", ") + ", " + Math.round(t.a * k * 1000) / 1000 + ")";
+    }
+
+    // The colours of the waveform for one drawing: played and still to play
+    // as set, and, coloured by the song's progress, up to the play head in
+    // fill and on to where the progress reaches in ahead, as the bar would
+    // lie, each with its share. The painter takes whether a column is
+    // played, where it is and which layer: loud, dim or bar. Each colour is
+    // worked out once a drawing
+    function wavePainter(w, frac, headX, played, rest, fill, ahead) {
+
+        const end = fill ? Math.round(Math.max(0, Math.min(1, frac)) * w) : 0;
         const split = Math.max(0, Math.min(end, headX));
-        const parts = [null, rgbaParts(fill), rgbaParts(ahead)];
+        const parts = [rgbaParts(rest), rgbaParts(played), rgbaParts(fill), rgbaParts(ahead)];
         const made = new Map();
 
-        return function (hex, x, dim) {
+        return function (isPlayed, x, layer) {
 
-            const zone = x < split ? 1 : (x < end ? 2 : 0);
+            let zone = isPlayed ? 1 : 0;
 
-            if (zone === 0) {
-                return hex;
+            if (x < split) {
+                zone = 2;
+            } else if (x < end) {
+                zone = 3;
             }
 
-            const key = zone + ":" + dim;
+            const key = zone + layer;
             let out = made.get(key);
 
             if (out === undefined) {
 
                 const t = parts[zone];
+                let k = 1;
+
+                if (layer === "dim") {
+                    k = WAVE_DIM_SHADE;
+                } else if (layer === "bar" && zone === 0) {
+                    k = WAVE_BAR_REST_SHADE;
+                }
+
                 const shade = function (i) {
-                    return Math.round(t.c[i] * dim);
+                    return Math.round(t.c[i] * k);
                 };
 
                 out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + t.a + ")";
@@ -21647,9 +21690,7 @@
     // Mureka's waveform as bars, each the highest point of its slice. Each
     // bar keeps its place in the song, so zoomed in they slide along rather
     // than change height as the view moves
-    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, tint) {
-
-        const colour = tint || plainColour;
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, colour) {
 
         const pitch = barW + gap;
         const count = Math.max(1, Math.floor(w / pitch));
@@ -21667,7 +21708,7 @@
             const peak = waveSlice(data, from, Math.min(1, from + step));
             const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
 
-            ctx.fillStyle = colour(from + step / 2 <= frac ? "#48e1eb" : "#555555", x, 1);
+            ctx.fillStyle = colour(from + step / 2 <= frac, x, "bar");
             ctx.fillRect(x, (h - bh) / 2, barW, bh);
         }
     }
@@ -21723,13 +21764,17 @@
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
         const headX = Math.round((frac - start) / span * w);
+        const playedFill = progressFill(settings.waveColor, progressAlpha(settings.waveAlpha, 100));
+        const restFill = progressFill(settings.waveRestColor, progressAlpha(settings.waveRestAlpha, 100));
 
         if (look === "under") {
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        // Coloured by the progress, each layer of the waveform keeps its shade
-        const tint = look === "wave" ? waveTinter(w, frac, fill, ahead, headX) : null;
+        // The waveform in the colours set, and coloured by the progress when
+        // that is the look, each layer keeping its shade
+        const wave = look === "wave";
+        const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
 
         // Our own waveform in two layers a column per screen pixel, Mureka's
         // as bars, so the two look apart
@@ -21745,7 +21790,7 @@
 
 
         if (span < 1) {
-            drawWaveOverview(ctx, w, h, start, span, frac, dpr, look === "wave" ? fill : null);
+            drawWaveOverview(ctx, w, h, start, span, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
     }
 
@@ -21784,9 +21829,7 @@
     // song sounds, bright, a column per screen pixel. Played in the accent
     // colour, the rest grey. start and span the part of the song in view,
     // each column keeping its place in the song as the view moves
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, tint) {
-
-        const colour = tint || plainColour;
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, colour) {
 
         const room = h - 1;
         const from0 = start || 0;
@@ -21808,9 +21851,9 @@
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
-            ctx.fillStyle = colour(played ? "#2a7f86" : "#3a3a3e", x, WAVE_DIM_SHADE);
+            ctx.fillStyle = colour(played, x, "dim");
             ctx.fillRect(x, (h - ph) / 2, 1, ph);
-            ctx.fillStyle = colour(played ? "#48e1eb" : "#666666", x, 1);
+            ctx.fillStyle = colour(played, x, "loud");
             ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
     }
@@ -23033,6 +23076,8 @@
             waveZoomProgressLook: progressLook(settings.webWaveZoomProgressLook),
             waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
             waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
+            wavePlayedFill: progressFill(settings.webWaveColor, progressAlpha(settings.webWaveAlpha, 100)),
+            waveRestFill: progressFill(settings.webWaveRestColor, progressAlpha(settings.webWaveRestAlpha, 100)),
             offline: offlineMode(),
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
@@ -33296,6 +33341,29 @@
         mobilePage.appendChild(waveSourceRow);
         mobilePage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
 
+        const waveColorRow = makeColorRow("Waveform colour when played",
+            function () { return settings.waveColor; },
+            function () { return settings.waveAlpha; },
+            function (color, alpha) {
+
+                settings.waveColor = color;
+                settings.waveAlpha = alpha;
+                drawWave();
+            });
+
+        const waveRestColorRow = makeColorRow("Waveform colour still to play",
+            function () { return settings.waveRestColor; },
+            function () { return settings.waveRestAlpha; },
+            function (color, alpha) {
+
+                settings.waveRestColor = color;
+                settings.waveRestAlpha = alpha;
+                drawWave();
+            });
+
+        mobilePage.appendChild(withHint(waveColorRow, WAVE_COLOR_HINT));
+        mobilePage.appendChild(withHint(waveRestColorRow, WAVE_REST_HINT));
+
         const waveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
             function () { return settings.waveZoomKeep === true; },
             function (v) {
@@ -33828,6 +33896,29 @@
             webPage.appendChild(makeSubLabel("Waveform from"));
             webPage.appendChild(webWaveSourceRow);
             webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+
+            const webWaveColorRow = makeColorRow("Waveform colour when played",
+                function () { return settings.webWaveColor; },
+                function () { return settings.webWaveAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveColor = color;
+                    settings.webWaveAlpha = alpha;
+                    publishHostSoon();
+                });
+
+            const webWaveRestColorRow = makeColorRow("Waveform colour still to play",
+                function () { return settings.webWaveRestColor; },
+                function () { return settings.webWaveRestAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveRestColor = color;
+                    settings.webWaveRestAlpha = alpha;
+                    publishHostSoon();
+                });
+
+            webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
+            webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
 
             const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
                 function () { return settings.webWaveZoomKeep === true; },

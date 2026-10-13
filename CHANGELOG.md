@@ -615,6 +615,10 @@ the new settings layout and a number of smaller improvements.
   how loud the song sounds, bright. It is worked out once and kept, and
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
+- **Waveform colour when played** and **Waveform colour still to play**,
+  under Mobile player and Web view, each with how much of it shows, picked
+  over the settings. The quieter outer part of the waveform from the song
+  takes them darker.
 - **Zoom into the waveform**, in the player and the web views: pinch, the
   mouse wheel over it, or a press held still a moment and then slid up zooms
   in up to 32 times. Pinch, sliding down after the hold, or a double tap zooms
