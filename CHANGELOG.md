@@ -715,7 +715,8 @@ the new settings layout and a number of smaller improvements.
 ### Build
 
 - New `android/` folder and a root `Makefile`: `make all` runs the checks,
-  builds the extension packages and the release APK, `make install` installs
+  builds the browser add-ons and the release APK, `make addons` only the
+  add-ons, `make install` installs
   the release APK, `make install-debug` the debug one. The JDK is found by
   itself and the manifest is brought to the player's version first.
 - The first build asks which key signs the APKs, suggesting the one it

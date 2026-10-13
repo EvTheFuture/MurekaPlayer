@@ -52,13 +52,13 @@ KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all ext android apk debug release install install-debug signing check version bookmarklet clean distclean
+.PHONY: help all addons android apk debug release install install-debug signing check version bookmarklet clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
 	@echo
-	@echo "  make all            bump, checks, extension packages and the release APK"
-	@echo "  make ext            mureka-player-firefox.zip and -chromium.zip"
+	@echo "  make all            bump, checks, browser add-ons and the release APK"
+	@echo "  make addons         the browser add-ons, mureka-player-firefox.zip and -chromium.zip"
 	@echo "  make release        the release APK, signed with the release key, as $(DIST_APK)"
 	@echo "  make debug          the debug APK, same as make apk and make android"
 	@echo "  make install        build and install the release APK on the connected phone"
@@ -77,11 +77,12 @@ help:
 
 # The manifest is brought to the player's version first, so a build never
 # stops on a version mismatch it could have fixed itself
-all: version check ext release
+all: version check addons release
 	@echo "Built everything at version $(VERSION)"
 
-# The extension packages, including the version check build.sh does itself
-ext:
+# The browser add-on packages, including the version check build.sh does
+# itself
+addons:
 	./build.sh
 
 # Keep the manifest in step with the player on its own, and the version
