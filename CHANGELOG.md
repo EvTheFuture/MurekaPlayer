@@ -628,7 +628,8 @@ the new settings layout and a number of smaller improvements.
   when the two are close. It has one colour on the played part, left of the
   play head, and another where it reaches past it. **Song's progress when
   zoomed** picks how: a bar over the waveform, a bar behind it, the waveform
-  itself coloured, or off. **Colour up to the play head** and **Colour past
+  itself coloured, the thin line at its foot then in the same colour, or
+  off. **Colour up to the play head** and **Colour past
   the play head**, each with how much of it shows, are picked over the
   settings. All under Mobile player and Web view, the look also for each
   browser on its own.

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.336";
+    const VERSION = "1.9.9.337";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -354,7 +354,8 @@
         + "as they are, or the waveform itself coloured instead. Its edge can be dragged at any height to move through "
         + "the whole song, the waveform following, as on the thin line at its foot.";
     const PROGRESS_COLOR_HINT = "The colour of the progress on the played part, left of the play head, and how much "
-        + "of it shows. Colouring the waveform, the share is how strongly its own colour gives way to this one.";
+        + "of it shows. Colouring the waveform, it is the waveform's own colour there, the share how strongly it shows, "
+        + "and the thin line at its foot follows it.";
     const PROGRESS_AHEAD_HINT = "The colour of the progress where it reaches past the play head, on the part still "
         + "to come in view.";
 
@@ -21546,9 +21547,10 @@
     }
 
     // Zoomed in, the whole song as a thin progress line along the foot of
-    // the waveform, the part played in the accent colour and the rest dim,
-    // and a thin play head. How far it is zoomed shows in the waveform
-    function drawWaveOverview(ctx, w, h, start, span, frac, dpr) {
+    // the waveform, the part played in the accent colour, or played as the
+    // coloured waveform is, and the rest dim, and a thin play head. How far
+    // it is zoomed shows in the waveform
+    function drawWaveOverview(ctx, w, h, start, span, frac, dpr, played) {
 
         const lh = Math.max(1, Math.round(2 * dpr));
         const x = Math.round((frac - start) / span * w);
@@ -21556,7 +21558,7 @@
 
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(done, h - lh, w - done, lh);
-        ctx.fillStyle = "rgba(72, 225, 235, 0.75)";
+        ctx.fillStyle = played || "rgba(72, 225, 235, 0.75)";
         ctx.fillRect(0, h - lh, done, lh);
 
         if (x >= 0 && x < w) {
@@ -21566,15 +21568,15 @@
         }
     }
 
-    // The waveform's dim layer takes the progress colour this much darker,
-    // so coloured it keeps its two shades apart
+    // The waveform's dim layer takes its colour this much darker, so
+    // coloured it keeps its two shades apart
     const WAVE_DIM_SHADE = 0.55;
 
     function plainColour(hex) {
         return hex;
     }
 
-    // The colour and share of an rgba() fill, for mixing by hand
+    // The colour and share of an rgba() fill, to darken by hand
     function rgbaParts(text) {
 
         const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(text || "");
@@ -21586,11 +21588,10 @@
         return { c: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) };
     }
 
-    // The waveform coloured by the song's progress: a column's own colour
-    // with the progress colour mixed in by its share, up to the play head in
-    // one and on to where the progress reaches in the other, as the bar
-    // would lie. dim darkens the progress colour for the dim layer. Each
-    // colour is worked out once a drawing
+    // The waveform coloured by the song's progress: up to the play head in
+    // one colour and on to where the progress reaches in the other, as the
+    // bar would lie, each with its share, so the share sets the shade. dim
+    // darkens it for the dim layer. Each colour is worked out once a drawing
     function waveTinter(w, frac, fill, ahead, headX) {
 
         const end = Math.round(Math.max(0, Math.min(1, frac)) * w);
@@ -21606,20 +21607,17 @@
                 return hex;
             }
 
-            const key = hex + zone + dim;
+            const key = zone + ":" + dim;
             let out = made.get(key);
 
             if (out === undefined) {
 
                 const t = parts[zone];
-                const mix = function (i) {
-
-                    const own = parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
-
-                    return Math.round(own * (1 - t.a) + t.c[i] * dim * t.a);
+                const shade = function (i) {
+                    return Math.round(t.c[i] * dim);
                 };
 
-                out = "rgb(" + mix(0) + ", " + mix(1) + ", " + mix(2) + ")";
+                out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + t.a + ")";
                 made.set(key, out);
             }
 
@@ -21747,7 +21745,7 @@
 
 
         if (span < 1) {
-            drawWaveOverview(ctx, w, h, start, span, frac, dpr);
+            drawWaveOverview(ctx, w, h, start, span, frac, dpr, look === "wave" ? fill : null);
         }
     }
 
