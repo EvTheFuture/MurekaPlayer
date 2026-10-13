@@ -615,10 +615,11 @@ the new settings layout and a number of smaller improvements.
   how loud the song sounds, bright. It is worked out once and kept, and
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
-- **Waveform colour when played** and **Waveform colour still to play**,
-  under Mobile player and Web view, each with how much of it shows, picked
-  over the settings. The quieter outer part of the waveform from the song
-  takes them darker.
+- **Waveform colour when played**, **Waveform colour still to play** and
+  **Play head colour**, under Mobile player and Web view, each with how much
+  of it shows, picked over the settings. The quieter outer part of the
+  waveform from the song takes them darker. The play head shows on the
+  waveform zoomed out too.
 - **Zoom into the waveform**, in the player and the web views: pinch, the
   mouse wheel over it, or a press held still a moment and then slid up zooms
   in up to 32 times. Pinch, sliding down after the hold, or a double tap zooms
@@ -630,10 +631,10 @@ the new settings layout and a number of smaller improvements.
   whole song it is, and that edge can be dragged at any height to move
   through the whole song, the waveform following, the play head coming first
   when the two are close. It has one colour on the played part, left of the
-  play head, and another where it reaches past it. **Song's progress when
-  zoomed** picks how: a bar over the waveform, a bar behind it, the waveform
-  itself coloured, the thin line at its foot then in the same colour, or
-  off. **Colour up to the play head** and **Colour past
+  play head, and another where it reaches past it. **Song's progress on the
+  waveform** picks how: a bar over the waveform, a bar behind it, the
+  waveform itself coloured, the thin line at its foot then in the same
+  colour, or off. Zoomed out it lies on the played part, in the same colour. **Colour up to the play head** and **Colour past
   the play head**, each with how much of it shows, are picked over the
   settings. All under Mobile player and Web view, the look also for each
   browser on its own.

@@ -5254,7 +5254,7 @@
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "choice", values: ["mureka", "song"],
             names: { mureka: "Mureka's", song: "From the song" } },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
-        { label: "Song's progress when zoomed", page: "Web view", key: "waveZoomProgressLook", kind: "select",
+        { label: "Song's progress on the waveform", page: "Web view", key: "waveZoomProgressLook", kind: "select",
             values: PROGRESS_LOOKS },
         { label: "Lyrics", page: "Web view", key: "lyrics", kind: "cycle", values: ["off", "info", "cover"],
             names: { off: "Off", info: "Beside the cover", cover: "On the cover" } },
@@ -8207,23 +8207,31 @@
     // Zoomed in, the whole song as a thin progress line along the foot of
     // the waveform, the part played in played, a little lighter than the
     // played waveform or as the waveform coloured by the progress is, and
-    // the rest dim, and a thin play head. How far it is zoomed shows in the
-    // waveform
-    function drawWaveOverview(ctx, w, h, start, span, frac, dpr, played) {
+    // the rest dim. How far it is zoomed shows in the waveform
+    function drawWaveOverview(ctx, w, h, frac, dpr, played) {
 
-        const lh = Math.max(1, Math.round(2 * dpr));
-        const x = Math.round((frac - start) / span * w);
+        const lh = waveFootHeight(dpr);
         const done = Math.round(Math.max(0, Math.min(1, frac)) * w);
 
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(done, h - lh, w - done, lh);
         ctx.fillStyle = played;
         ctx.fillRect(0, h - lh, done, lh);
+    }
+
+    // The height of the thin progress line along the waveform's foot
+    function waveFootHeight(dpr) {
+        return Math.max(1, Math.round(2 * dpr));
+    }
+
+    // A thin play head across the waveform at x in its colour, down to the
+    // thin progress line when zoomed in and the full height when not
+    function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
 
         if (x >= 0 && x < w) {
 
-            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-            ctx.fillRect(x, 0, Math.max(1, Math.round(dpr)), h - lh);
+            ctx.fillStyle = fill;
+            ctx.fillRect(Math.min(x, w - Math.max(1, Math.round(dpr))), 0, Math.max(1, Math.round(dpr)), h - foot);
         }
     }
 
@@ -8376,9 +8384,10 @@
         // Drawn again only when the played part, the view or the size moved
         // on by a column or more
         const played = Math.round(frac / span * count);
-        // Zoomed in, the song's progress across the whole waveform, under it,
-        // over it or as the waveform's own colour, in the colours the phone has
-        const look = span < 1 && state ? progressLook(state.waveZoomProgressLook) : "off";
+        // The song's progress across the whole waveform, under it, over it or
+        // as the waveform's own colour, in the colours the phone has. Zoomed
+        // out it lies on the played part
+        const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
         const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(255, 255, 255, 0.14)";
         const ahead = state && state.waveZoomProgressAhead ? state.waveZoomProgressAhead : "rgba(72, 225, 235, 0.2)";
@@ -8386,7 +8395,9 @@
         const done = progress ? Math.round(frac * w) : 0;
         const playedFill = state && state.wavePlayedFill ? state.wavePlayedFill : "rgba(72, 225, 235, 1)";
         const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
-        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill, restFill].join(",");
+        const headFill = state && state.playHeadFill ? state.playHeadFill : "rgba(255, 255, 255, 0.6)";
+        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill,
+            restFill, headX, headFill].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -8423,10 +8434,11 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-
         if (span < 1) {
-            drawWaveOverview(ctx, w, h, start, span, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
+            drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
+
+        drawPlayHead(ctx, w, h, headX, dpr, span < 1 ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // The synced lyrics, rolling exactly like the phone's. Five rows, each

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.338";
+    const VERSION = "1.9.9.339";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -327,6 +327,10 @@
     // The waveform's own colours, played and still to play
     const WAVE_PLAYED_COLOR = "#48e1eb";
     const WAVE_REST_COLOR = "#666666";
+
+    // The play head's colour and share as they came
+    const PLAY_HEAD_COLOR = "#ffffff";
+    const PLAY_HEAD_ALPHA = 60;
     const PROGRESS_AHEAD_ALPHA = 20;
     const PROGRESS_ALPHA_MAX = 100;
 
@@ -353,10 +357,11 @@
         { value: "wave", label: "Colour the waveform" },
         { value: "off", label: "Off" }
     ];
-    const PROGRESS_LOOK_HINT = "Zoomed in, the waveform also shows how far into the whole song it is, from its left "
-        + "edge: a bar over the waveform across its full height, the same bar behind it so the waveform's colours stay "
-        + "as they are, or the waveform itself coloured instead. Its edge can be dragged at any height to move through "
-        + "the whole song, the waveform following, as on the thin line at its foot.";
+    const PROGRESS_LOOK_HINT = "How far into the whole song it is, from the waveform's left edge: a bar over the "
+        + "waveform across its full height, the same bar behind it so the waveform's colours stay as they are, or the "
+        + "waveform itself coloured instead. Zoomed out it lies on the played part. Zoomed in it still shows the whole "
+        + "song, and its edge can be dragged at any height to move through it, the waveform following, as on the thin "
+        + "line at its foot.";
     const PROGRESS_COLOR_HINT = "The colour of the progress on the played part, left of the play head, and how much "
         + "of it shows. Colouring the waveform, the waveform takes it there instead of its own colours, and the thin "
         + "line at its foot takes it too.";
@@ -364,6 +369,7 @@
         + "outer part of the waveform from the song takes it darker, and the thin line at its foot zoomed in takes it "
         + "too.";
     const WAVE_REST_HINT = "The waveform's colour right of the play head, still to play, and how much of it shows.";
+    const PLAY_HEAD_HINT = "The thin line across the waveform where the song is, and how much of it shows.";
     const PROGRESS_AHEAD_HINT = "The colour of the progress where it reaches past the play head, on the part still "
         + "to come in view.";
 
@@ -2581,6 +2587,10 @@
             webWaveRestColor: WAVE_REST_COLOR,
             waveRestAlpha: 100,
             webWaveRestAlpha: 100,
+            playHeadColor: PLAY_HEAD_COLOR,
+            webPlayHeadColor: PLAY_HEAD_COLOR,
+            playHeadAlpha: PLAY_HEAD_ALPHA,
+            webPlayHeadAlpha: PLAY_HEAD_ALPHA,
             waveZoomProgressColor: "#ffffff",
             webWaveZoomProgressColor: "#ffffff",
             waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
@@ -2803,6 +2813,10 @@
                     webWaveRestColor: progressColor(parsed.webWaveRestColor, WAVE_REST_COLOR),
                     waveRestAlpha: progressAlpha(parsed.waveRestAlpha, 100),
                     webWaveRestAlpha: progressAlpha(parsed.webWaveRestAlpha, 100),
+                    playHeadColor: progressColor(parsed.playHeadColor, PLAY_HEAD_COLOR),
+                    webPlayHeadColor: progressColor(parsed.webPlayHeadColor, PLAY_HEAD_COLOR),
+                    playHeadAlpha: progressAlpha(parsed.playHeadAlpha, PLAY_HEAD_ALPHA),
+                    webPlayHeadAlpha: progressAlpha(parsed.webPlayHeadAlpha, PLAY_HEAD_ALPHA),
                     waveZoomProgressColor: progressColor(parsed.waveZoomProgressColor),
                     webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor),
                     waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
@@ -21573,23 +21587,31 @@
     // Zoomed in, the whole song as a thin progress line along the foot of
     // the waveform, the part played in played, a little lighter than the
     // played waveform or as the waveform coloured by the progress is, and
-    // the rest dim, and a thin play head. How far it is zoomed shows in the
-    // waveform
-    function drawWaveOverview(ctx, w, h, start, span, frac, dpr, played) {
+    // the rest dim. How far it is zoomed shows in the waveform
+    function drawWaveOverview(ctx, w, h, frac, dpr, played) {
 
-        const lh = Math.max(1, Math.round(2 * dpr));
-        const x = Math.round((frac - start) / span * w);
+        const lh = waveFootHeight(dpr);
         const done = Math.round(Math.max(0, Math.min(1, frac)) * w);
 
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(done, h - lh, w - done, lh);
         ctx.fillStyle = played;
         ctx.fillRect(0, h - lh, done, lh);
+    }
+
+    // The height of the thin progress line along the waveform's foot
+    function waveFootHeight(dpr) {
+        return Math.max(1, Math.round(2 * dpr));
+    }
+
+    // A thin play head across the waveform at x in its colour, down to the
+    // thin progress line when zoomed in and the full height when not
+    function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
 
         if (x >= 0 && x < w) {
 
-            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-            ctx.fillRect(x, 0, Math.max(1, Math.round(dpr)), h - lh);
+            ctx.fillStyle = fill;
+            ctx.fillRect(Math.min(x, w - Math.max(1, Math.round(dpr))), 0, Math.max(1, Math.round(dpr)), h - foot);
         }
     }
 
@@ -21758,14 +21780,15 @@
         const span = waveZoomer ? waveZoomer.span() : 1;
         const start = waveZoomer ? waveZoomer.start(frac) : 0;
 
-        // Zoomed in, the song's progress across the whole waveform, under it,
-        // over it or as the waveform's own colour
-        const look = span < 1 ? progressLook(settings.waveZoomProgressLook) : "off";
+        // The song's progress across the whole waveform, under it, over it or
+        // as the waveform's own colour. Zoomed out it lies on the played part
+        const look = progressLook(settings.waveZoomProgressLook);
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
         const headX = Math.round((frac - start) / span * w);
         const playedFill = progressFill(settings.waveColor, progressAlpha(settings.waveAlpha, 100));
         const restFill = progressFill(settings.waveRestColor, progressAlpha(settings.waveRestAlpha, 100));
+        const headFill = progressFill(settings.playHeadColor, progressAlpha(settings.playHeadAlpha, PLAY_HEAD_ALPHA));
 
         if (look === "under") {
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
@@ -21788,10 +21811,11 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-
         if (span < 1) {
-            drawWaveOverview(ctx, w, h, start, span, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
+            drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
+
+        drawPlayHead(ctx, w, h, headX, dpr, span < 1 ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // A value of a waveform over a slice of it, from and to as fractions of
@@ -23078,6 +23102,7 @@
             waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
             wavePlayedFill: progressFill(settings.webWaveColor, progressAlpha(settings.webWaveAlpha, 100)),
             waveRestFill: progressFill(settings.webWaveRestColor, progressAlpha(settings.webWaveRestAlpha, 100)),
+            playHeadFill: progressFill(settings.webPlayHeadColor, progressAlpha(settings.webPlayHeadAlpha, PLAY_HEAD_ALPHA)),
             offline: offlineMode(),
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
@@ -33361,8 +33386,19 @@
                 drawWave();
             });
 
+        const playHeadColorRow = makeColorRow("Play head colour",
+            function () { return settings.playHeadColor; },
+            function () { return settings.playHeadAlpha; },
+            function (color, alpha) {
+
+                settings.playHeadColor = color;
+                settings.playHeadAlpha = alpha;
+                drawWave();
+            });
+
         mobilePage.appendChild(withHint(waveColorRow, WAVE_COLOR_HINT));
         mobilePage.appendChild(withHint(waveRestColorRow, WAVE_REST_HINT));
+        mobilePage.appendChild(withHint(playHeadColorRow, PLAY_HEAD_HINT));
 
         const waveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
             function () { return settings.waveZoomKeep === true; },
@@ -33412,7 +33448,7 @@
                 drawWave();
             });
 
-        mobilePage.appendChild(makeSubLabel("Song's progress when zoomed"));
+        mobilePage.appendChild(makeSubLabel("Song's progress on the waveform"));
         mobilePage.appendChild(waveProgressRow);
         mobilePage.appendChild(makeHint(PROGRESS_LOOK_HINT + " The play head comes first when the two are close together."));
         mobilePage.appendChild(withHint(waveProgressColorRow, PROGRESS_COLOR_HINT));
@@ -33917,8 +33953,19 @@
                     publishHostSoon();
                 });
 
+            const webPlayHeadColorRow = makeColorRow("Play head colour",
+                function () { return settings.webPlayHeadColor; },
+                function () { return settings.webPlayHeadAlpha; },
+                function (color, alpha) {
+
+                    settings.webPlayHeadColor = color;
+                    settings.webPlayHeadAlpha = alpha;
+                    publishHostSoon();
+                });
+
             webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
             webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
+            webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
 
             const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
                 function () { return settings.webWaveZoomKeep === true; },
@@ -33958,7 +34005,7 @@
                     publishHostSoon();
                 });
 
-            webPage.appendChild(makeSubLabel("Song's progress when zoomed"));
+            webPage.appendChild(makeSubLabel("Song's progress on the waveform"));
             webPage.appendChild(webWaveProgressRow);
             webPage.appendChild(makeHint(PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
             webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
