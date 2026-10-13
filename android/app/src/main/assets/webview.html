@@ -6437,6 +6437,54 @@
             + ", " + dbgDisplayMode());
     })();
 
+    // What a tap on star n makes of the current rating, the phone's own
+    // cycle: a rating inside star n steps a quarter down and after n - 0.75
+    // it is full again, any other rating becomes n. The first star runs
+    // down to 0 and round again
+    function nextRating(current, n) {
+
+        const low = n === 1 ? 0 : n - 1;
+        const inside = current !== null && current !== undefined && current <= n
+            && (n === 1 ? current >= low : current > low);
+
+        if (!inside) {
+            return n;
+        }
+
+        const next = current - 0.25;
+
+        return next < low || (n > 1 && next === low) ? n : next;
+    }
+
+    // A rating tapped here, shown until the phone's state has it too, so a
+    // state sent before the phone heard of the tap does not take it back
+    const RATING_HOLD_MS = 4000;
+    const ratingHolds = new Map();
+
+    function holdRating(id, rating) {
+        ratingHolds.set(String(id), { rating: rating, until: Date.now() + RATING_HOLD_MS });
+    }
+
+    // The rating to show for a song: the one the phone sent, or one tapped
+    // here that the phone has not caught up with yet
+    function heldRating(id, sent) {
+
+        const key = String(id);
+        const h = ratingHolds.get(key);
+
+        if (!h) {
+            return sent;
+        }
+
+        if (sent === h.rating || Date.now() > h.until) {
+
+            ratingHolds.delete(key);
+            return sent;
+        }
+
+        return h.rating;
+    }
+
     // Five stars, each with a gold copy under a clip cut at how much of it
     // is lit, in quarters, like the player. A tap on star n goes to the
     // phone, which runs the same cycle as its own stars. Used on the main
@@ -6444,6 +6492,10 @@
     function makeStarBar(box, prefix, onTap) {
 
         const bar = [];
+
+        // What the bar shows now, so a tap works out the next rating here
+        // without waiting for the phone
+        let shown = null;
 
         for (let n = 1; n <= 5; n++) {
 
@@ -6490,11 +6542,23 @@
 
                 ev.stopPropagation();
 
+                const next = nextRating(shown, n);
+
                 if (onTap) {
-                    onTap(n);
-                } else {
-                    send("rate", n);
+                    onTap(n, next);
+                    return;
                 }
+
+                // The playing song, shown at once on every star bar for it
+                // and its rows, the phone confirms with its next state
+                if (state && state.id) {
+
+                    holdRating(state.id, next);
+                    paintStars(next);
+                    paintRowRating(String(state.id), next);
+                }
+
+                send("rate", n);
             });
 
             box.appendChild(btn);
@@ -6502,6 +6566,8 @@
         }
 
         return function paint(r) {
+
+            shown = r === undefined ? null : r;
 
             bar.forEach(function (st, i) {
 
@@ -7206,7 +7272,7 @@
 
             titleLine.setText(s.title);
             subtitleLine.setText(s.subtitle || "");
-            paintStars(s.rating);
+            paintStars(heldRating(s.id, s.rating));
             $("like").classList.toggle("liked", !!s.liked);
         }
 
@@ -9434,7 +9500,13 @@
             } else if (reset && current) {
                 box.scrollTop = Math.max(0, current.offsetTop - box.clientHeight / 3);
             } else {
+
                 box.scrollTop = keep;
+
+                // Following the playing song, on to the new one
+                if (followPlaying && current) {
+                    scrollToCurrent(true);
+                }
             }
         }).catch(function () {
         });
@@ -12167,6 +12239,8 @@
             closeMini();
         }
 
+        // Opened again, it no longer follows until Now playing is pressed
+        setFollow(false);
         $("browse").style.display = "flex";
         sizeChips();
         paintViews();
@@ -13778,7 +13852,51 @@
         ].filter(Boolean));
     });
 
+    // After Now playing the list keeps the playing song in sight as the
+    // songs change, until it is scrolled by hand or closed. The button is
+    // lit meanwhile
+    let followPlaying = false;
+
+    function setFollow(on) {
+
+        followPlaying = on;
+        $("toCurrent").classList.toggle("on", on);
+    }
+
+    // The playing song brought into sight, read further down first when it
+    // is below what is loaded. Where it is comes with any page of the list
+    function followCurrent() {
+
+        if (!followPlaying || $("browse").style.display !== "flex") {
+            return;
+        }
+
+        if (listView === "queue" || $("rows").querySelector(".row.playing")) {
+
+            scrollToCurrent(true);
+            return;
+        }
+
+        fetchJson("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=0&limit=1").then(function (data) {
+
+            if (!followPlaying || !data || typeof data.playingAt !== "number") {
+                return;
+            }
+
+            listPlayingAt = data.playingAt;
+            ensureLoaded(listPlayingAt, function () {
+
+                if (followPlaying) {
+                    scrollToCurrent(true);
+                }
+            });
+        }).catch(function () {
+        });
+    }
+
     $("toCurrent").addEventListener("click", function () {
+
+        setFollow(true);
 
         if (listView === "queue" || $("rows").querySelector(".row.playing")) {
 
@@ -13791,7 +13909,42 @@
         });
     });
 
+    // Scrolled by hand: the wheel, a finger, the keys or the scroll bar,
+    // and the jump to the top or the end
+    for (const name of ["wheel", "touchmove"]) {
+
+        $("rows").addEventListener(name, function () {
+
+            if (followPlaying) {
+                setFollow(false);
+            }
+        }, { passive: true });
+    }
+
+    $("rows").addEventListener("keydown", function (ev) {
+
+        if (followPlaying && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].indexOf(ev.key) !== -1) {
+            setFollow(false);
+        }
+    });
+
+    $("rows").addEventListener("pointerdown", function (ev) {
+
+        const box = $("rows");
+
+        // A press on the scroll bar, beside the rows
+        if (followPlaying && ev.target === box && ev.offsetX >= box.clientWidth) {
+            setFollow(false);
+        }
+    });
+
+    $("edgeBtn").addEventListener("click", function () {
+        setFollow(false);
+    }, true);
+
     $("closeBrowse").addEventListener("click", function () {
+
+        setFollow(false);
         $("browse").style.display = "none";
     });
 
@@ -13986,6 +14139,8 @@
                 for (const row of $("rows").querySelectorAll(".row")) {
                     row.classList.toggle("playing", row.dataset.id === s.id);
                 }
+
+                followCurrent();
             }
         }
     }
@@ -14686,16 +14841,24 @@
     // same order, plus adding to the end of the queue
     let menuSong = null;
 
-    const paintMenuStars = makeStarBar($("menuStars"), "mhalf", function (n) {
+    const paintMenuStars = makeStarBar($("menuStars"), "mhalf", function (n, next) {
 
         if (menuSong) {
 
-            songAction("rate", n);
+            const id = String(menuSong.id);
 
-            // The phone works out the new rating, so ask again afterwards
-            setTimeout(function () {
-                refreshMenu();
-            }, 300);
+            // Shown at once, here, on its rows and over the cover when it is
+            // the playing song, the phone confirms a moment later
+            holdRating(id, next);
+            paintMenuStars(next);
+            $("menuCaption").textContent = next + " of 5";
+            paintRowRating(id, next);
+
+            if (state && String(state.id) === id) {
+                paintStars(next);
+            }
+
+            songAction("rate", n);
         }
     });
 
@@ -14706,7 +14869,7 @@
     function paintPlayingRating(s) {
 
         const id = s && s.id ? String(s.id) : "";
-        const rating = s && s.rating !== undefined ? s.rating : null;
+        const rating = s && s.rating !== undefined ? heldRating(id, s.rating) : null;
 
         if (id === ratingSeen.id && rating === ratingSeen.rating) {
             return;
@@ -15611,8 +15774,11 @@
         menuSong = m;
         box.textContent = "";
         $("menuTitle").textContent = m.title;
-        paintMenuStars(m.rating);
-        $("menuCaption").textContent = m.rating === null || m.rating === undefined ? "Not rated" : m.rating + " of 5";
+
+        const shownRating = heldRating(m.id, m.rating);
+
+        paintMenuStars(shownRating);
+        $("menuCaption").textContent = shownRating === null || shownRating === undefined ? "Not rated" : shownRating + " of 5";
 
         box.appendChild(menuItem("play", "Play", function () {
 
@@ -16792,9 +16958,11 @@
 
             if (m && menuSong && m.id === menuSong.id) {
 
-                paintMenuStars(m.rating);
-                $("menuCaption").textContent = m.rating === null || m.rating === undefined ? "Not rated" : m.rating + " of 5";
-                paintRowRating(m.id, m.rating);
+                const r = heldRating(m.id, m.rating);
+
+                paintMenuStars(r);
+                $("menuCaption").textContent = r === null || r === undefined ? "Not rated" : r + " of 5";
+                paintRowRating(m.id, r);
             }
         }).catch(function () {
         });

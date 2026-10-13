@@ -218,7 +218,7 @@ tasks.named("preBuild") {
 if (hasReleaseKey) {
     logger.lifecycle("Signing with " + releaseStore + ", key " + releaseAlias)
 } else if (releaseStore == null) {
-    logger.warn("No release key found in ~/.android, the APKs are signed with the debug key")
+    logger.warn("No release key found in ~/.android, the release APK is left unsigned and the debug APK has the debug key")
 } else {
     logger.warn("The release key " + releaseStore + " could not be used, the APKs are signed with the debug key")
 }

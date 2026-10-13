@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.323";
+    const VERSION = "1.9.9.324";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3807,7 +3807,9 @@
     // coming up, the filter applies again the next time the queue is built
     function afterRatingChange(song) {
 
-        publishHostSoon();
+        // The web views first, before the list is drawn again, which takes
+        // a moment with a large library
+        publishHostState();
         renderList();
 
         if (tagSheetOpen && tagSheetRefresh) {

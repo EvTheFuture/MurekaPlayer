@@ -248,6 +248,9 @@ the new settings layout and a number of smaller improvements.
   loaded.
 - A right click or a press and hold on a cover opens that song's menu, the
   playing song's on the middle cover, as on a row in the list.
+- **Now playing** in the song list keeps the playing song in sight as the
+  songs change, lit while it does, until the list is scrolled by hand.
+- Stars show a tap at once, the phone confirms a moment later.
 - Popups, the settings, the other panels and the whole song list close with
   a swipe down, with a finger or dragged with the mouse (on the list itself
   it still loads new songs), and popups without a close button have a quiet cross in
