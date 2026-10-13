@@ -368,8 +368,10 @@ the new settings layout and a number of smaller improvements.
   of five. Only the newest, as on open.
 - **New songs with the play queue in view** are offered to it on a Load,
   however they came in: found by the Load, done generating, or newly
-  published while only published songs are shown. As an import is: play next, add to the end, replace the queue with the playing
-  song playing on, or leave them out for now. Left out, they still show in
+  published while only published songs are shown: play now, which makes
+  them the queue and starts the first at once, play next, add to the end,
+  replace the queue with the playing song playing on, or leave them out
+  for now. Left out, they still show in
   the Mureka list. Asked on the phone and in the web view, the first answer
   anywhere counts.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
@@ -623,14 +625,17 @@ the new settings layout and a number of smaller improvements.
   zoomed out. A lighter layer from the waveform's left edge across its full
   height shows how far into the whole song it is, and its edge can be dragged
   at any height to move through the whole song, the waveform following, the
-  play head coming first when the two are close. **Song's progress when
-  zoomed**, **Progress under the waveform** and **Progress colour**, with its
-  colour and how much of it shows, under Mobile player and Web view, the first
-  two also for each browser on its own. Dragging past two thirds of the way to
-  an edge scrolls the waveform that way, faster the nearer the edge.
-  **Remember the waveform zoom level**, under Mobile player and Web view,
-  keeps the zoom for the next time the player opens, each browser its own, and
-  a web view can have it set for itself alone.
+  play head coming first when the two are close. It has one colour over the
+  played part, left of the play head, and another where it reaches past it.
+  **Song's progress when zoomed**, **Progress under the waveform**, **Progress
+  colour over the played part** and **Progress colour past the play head**,
+  each colour with how much of it shows, picked over the settings, under
+  Mobile player and Web view, the first two also for each browser on its own.
+  Dragging past two thirds of the way to an edge scrolls the waveform that
+  way, faster the nearer the edge. **Remember the waveform zoom level**, under
+  Mobile player and Web view, keeps the zoom for the next time the player
+  opens, each browser its own, and a web view can have it set for itself
+  alone.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - **Play on after a quick restart**, under This device, Playing by itself:
   opened again within that many seconds after it closed while playing, a

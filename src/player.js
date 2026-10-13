@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.329";
+    const VERSION = "1.9.9.334";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -318,20 +318,27 @@
     let settingsReadFailed = "";
     let settingsRestored = false;
 
-    // The song's progress over the zoomed waveform: its colour as #rrggbb
-    // and how much it shows, in percent
+    // The song's progress over the zoomed waveform: a colour as #rrggbb
+    // and how much it shows, in percent. One over the played part, left of
+    // the play head, and one past it
     const PROGRESS_ALPHA_DEFAULT = 14;
+    const PROGRESS_AHEAD_COLOR = "#48e1eb";
+    const PROGRESS_AHEAD_ALPHA = 20;
     const PROGRESS_ALPHA_MAX = 80;
 
-    function progressColor(v) {
-        return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : "#ffffff";
+    function progressColor(v, fallback) {
+        return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : (fallback || "#ffffff");
     }
 
-    function progressAlpha(v) {
+    function progressAlpha(v, fallback) {
 
         const n = Number(v);
 
-        return isFinite(n) && v !== null && v !== "" ? Math.max(0, Math.min(PROGRESS_ALPHA_MAX, Math.round(n))) : PROGRESS_ALPHA_DEFAULT;
+        if (isFinite(n) && v !== null && v !== undefined && v !== "") {
+            return Math.max(0, Math.min(PROGRESS_ALPHA_MAX, Math.round(n)));
+        }
+
+        return typeof fallback === "number" ? fallback : PROGRESS_ALPHA_DEFAULT;
     }
 
     // The colour and its share as one fill for the canvas
@@ -2528,6 +2535,10 @@
             webWaveZoomProgressColor: "#ffffff",
             waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
             webWaveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
+            waveZoomProgressAheadColor: PROGRESS_AHEAD_COLOR,
+            webWaveZoomProgressAheadColor: PROGRESS_AHEAD_COLOR,
+            waveZoomProgressAheadAlpha: PROGRESS_AHEAD_ALPHA,
+            webWaveZoomProgressAheadAlpha: PROGRESS_AHEAD_ALPHA,
             webOnlineBadge: "fade",
             webNames: false,
             webHotspotBadge: false,
@@ -2739,6 +2750,10 @@
                     webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor),
                     waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
                     webWaveZoomProgressAlpha: progressAlpha(parsed.webWaveZoomProgressAlpha),
+                    waveZoomProgressAheadColor: progressColor(parsed.waveZoomProgressAheadColor, PROGRESS_AHEAD_COLOR),
+                    webWaveZoomProgressAheadColor: progressColor(parsed.webWaveZoomProgressAheadColor, PROGRESS_AHEAD_COLOR),
+                    waveZoomProgressAheadAlpha: progressAlpha(parsed.waveZoomProgressAheadAlpha, PROGRESS_AHEAD_ALPHA),
+                    webWaveZoomProgressAheadAlpha: progressAlpha(parsed.webWaveZoomProgressAheadAlpha, PROGRESS_AHEAD_ALPHA),
                     webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
                     webNames: parsed.webNames === true,
                     webHotspotBadge: parsed.webHotspotBadge === true,
@@ -6983,6 +6998,9 @@
 
         newAsk = ask;
         ask.el = askChoices(title + "\n" + text, [
+            { label: "Play now", fn: function () {
+                finishNewAsk(ask.n, "now");
+            } },
             { label: "Play next", fn: function () {
                 finishNewAsk(ask.n, "next");
             } },
@@ -7006,7 +7024,7 @@
         publishHostSoon();
     }
 
-    // mode: next, end, replace or skip, which leaves them out for now.
+    // mode: now, next, end, replace or skip, which leaves them out for now.
     // Anything else, a newer question taking over, leaves things as they are
     function finishNewAsk(n, mode) {
 
@@ -7023,7 +7041,7 @@
         }
 
         // Answered, so not offered again
-        if (["next", "end", "replace", "skip"].indexOf(mode) !== -1) {
+        if (["now", "next", "end", "replace", "skip"].indexOf(mode) !== -1) {
 
             for (const s of ask.songs) {
                 unofferedNew.delete(String(s.song_id));
@@ -7038,6 +7056,7 @@
         });
         const one = songs.length === 1;
         const said = {
+            now: one ? "The new song is playing" : "The " + songs.length + " new songs are the play queue now",
             next: one ? "The new song plays next" : "The " + songs.length + " new songs play next",
             end: one ? "The new song is at the end of the queue" : "The " + songs.length + " new songs are at the end of the queue",
             replace: one ? "The new song is the play queue now" : "The " + songs.length + " new songs are the play queue now"
@@ -7052,7 +7071,7 @@
             return;
         }
 
-        if (songs.length === 0 || ["next", "end", "replace"].indexOf(mode) === -1) {
+        if (songs.length === 0 || ["now", "next", "end", "replace"].indexOf(mode) === -1) {
             return;
         }
 
@@ -7060,8 +7079,22 @@
             queueSkipIds.delete(String(s.song_id));
         }
 
-        // Replaced, the playing song plays on, with the new songs after it
-        if (mode === "replace") {
+        // Played now, the new songs are the queue and the first starts at
+        // once, as a tap on it would
+        if (mode === "now") {
+
+            applyQueueImport(songs, false);
+
+            // Nothing was sounding, so the import only set the queue
+            if (queuePos === -1) {
+
+                queuePos = 0;
+                playCurrent();
+                publishHostSoon();
+            }
+        } else if (mode === "replace") {
+
+            // Replaced, the playing song plays on, with the new songs after it
             applyQueueImport(songs, true);
         } else {
             applySharedSongs(songs, mode, true);
@@ -19509,7 +19542,9 @@
         // wherever the click lands
         window.addEventListener("click", function (ev) {
 
-            if (Date.now() < swallowClickUntil) {
+            // Only a real tap, a click made by the page itself, Back on a
+            // page of the settings say, goes through
+            if (ev.isTrusted && Date.now() < swallowClickUntil) {
 
                 ev.stopPropagation();
                 ev.preventDefault();
@@ -21191,6 +21226,16 @@
             }
 
             ev.preventDefault();
+
+            // The first finger of a new touch, or the mouse: anything left
+            // over from before is forgotten. A finger whose lifting was never
+            // heard, Safari dropping it to a system gesture or the page going
+            // out of sight, would otherwise turn every later drag into a pinch
+            // or a held zoom, and the waveform only zooms
+            if (ev.isPrimary) {
+                forget();
+            }
+
             pointers.set(ev.pointerId, ev.clientX);
 
             try {
@@ -21343,6 +21388,23 @@
             }
         });
 
+        // Every press, pinch and held zoom let go, the play head back where
+        // it was if a drag had moved it
+        const forget = function () {
+
+            pointers.clear();
+            clearTimeout(z.holdTimer);
+            z.pinch = null;
+            z.holdZoom = null;
+            z.eatUp = false;
+
+            if (z.drag) {
+
+                z.drag = null;
+                hooks.preview(null);
+            }
+        };
+
         const up = function (ev, cancelled) {
 
             if (!pointers.has(ev.pointerId)) {
@@ -21424,6 +21486,19 @@
             up(ev, true);
         });
 
+        // A finger taken away from the waveform without a lift ends like a
+        // cancel, and a page out of sight ends whatever was going on
+        el.addEventListener("lostpointercapture", function (ev) {
+            up(ev, true);
+        });
+
+        document.addEventListener("visibilitychange", function () {
+
+            if (document.hidden) {
+                forget();
+            }
+        });
+
         // The mouse wheel or a touchpad pinch over the waveform
         el.addEventListener("wheel", function (ev) {
 
@@ -21460,11 +21535,22 @@
     }
 
     // Zoomed in, how far into the whole song it is, from the left edge and
-    // the full height, as if the waveform were the song's progress bar
-    function drawWaveProgress(ctx, w, h, frac, fill) {
+    // the full height, as if the waveform were the song's progress bar. One
+    // colour over the played part, left of the play head at headX, and
+    // another where it reaches past the play head
+    function drawWaveProgress(ctx, w, h, frac, fill, ahead, headX) {
+
+        const end = Math.round(Math.max(0, Math.min(1, frac)) * w);
+        const split = Math.max(0, Math.min(end, headX));
 
         ctx.fillStyle = fill;
-        ctx.fillRect(0, 0, Math.round(Math.max(0, Math.min(1, frac)) * w), h);
+        ctx.fillRect(0, 0, split, h);
+
+        if (end > split) {
+
+            ctx.fillStyle = ahead;
+            ctx.fillRect(split, 0, end - split, h);
+        }
     }
 
     // Mureka's waveform as bars, each the highest point of its slice. Each
@@ -21543,9 +21629,11 @@
         const progress = span < 1 && settings.waveZoomProgress !== false;
         const below = settings.waveZoomProgressBelow === true;
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
+        const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
+        const headX = Math.round((frac - start) / span * w);
 
         if (progress && below) {
-            drawWaveProgress(ctx, w, h, frac, fill);
+            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
         // Our own waveform in two layers a column per screen pixel, Mureka's
@@ -21557,7 +21645,7 @@
         }
 
         if (progress && !below) {
-            drawWaveProgress(ctx, w, h, frac, fill);
+            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
         if (span < 1) {
@@ -22847,6 +22935,7 @@
             waveZoomProgress: settings.webWaveZoomProgress !== false,
             waveZoomProgressBelow: settings.webWaveZoomProgressBelow === true,
             waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
+            waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
             offline: offlineMode(),
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
@@ -26679,6 +26768,16 @@
             + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
             + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
             + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:#48e1eb}"
+            // The colour picker's sliders, drawn by the player, so the page's
+            // own look for fields and Safari's plain one do not show
+            + "input.mureka-range{-webkit-appearance:none !important;appearance:none !important;background:transparent !important;"
+            + "border:none !important;box-shadow:none !important;padding:0 !important;margin:0 !important;height:32px !important}"
+            + "input.mureka-range::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--mureka-track,#555)}"
+            + "input.mureka-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;"
+            + "border-radius:50%;background:#48e1eb;margin-top:-8px;border:none}"
+            + "input.mureka-range::-moz-range-track{height:6px;border-radius:3px;background:var(--mureka-track,#555)}"
+            + "input.mureka-range::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
+            + "input.mureka-range::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:#48e1eb}"
             // Room for the strip the system owns at the top of an iPhone in
             // fullscreen. A class rather than an inline property, because
             // clearing an inline longhand also breaks apart the padding
@@ -31113,6 +31212,7 @@
             name.style.cssText = "flex:0 0 6.5em";
             name.textContent = label;
             input.type = "range";
+            input.className = "mureka-range";
             input.min = "0";
             input.max = String(max);
             input.step = "1";
@@ -31215,6 +31315,10 @@
         box.appendChild(preview);
         box.appendChild(swatches);
         box.appendChild(slider("h", "Hue", 359, "", hsl.h));
+
+        // The hue slider shows the colours it goes through
+        sliders.h.input.style.setProperty("--mureka-track",
+            "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)");
         box.appendChild(slider("s", "Saturation", 100, " %", hsl.s));
         box.appendChild(slider("l", "Lightness", 100, " %", hsl.l));
         box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
@@ -33110,7 +33214,7 @@
                 drawWave();
             });
 
-        const waveProgressColorRow = makeColorRow("Progress colour",
+        const waveProgressColorRow = makeColorRow("Progress colour over the played part",
             function () { return settings.waveZoomProgressColor; },
             function () { return settings.waveZoomProgressAlpha; },
             function (color, alpha) {
@@ -33120,9 +33224,20 @@
                 drawWave();
             });
 
+        const waveProgressAheadRow = makeColorRow("Progress colour past the play head",
+            function () { return settings.waveZoomProgressAheadColor; },
+            function () { return settings.waveZoomProgressAheadAlpha; },
+            function (color, alpha) {
+
+                settings.waveZoomProgressAheadColor = color;
+                settings.waveZoomProgressAheadAlpha = alpha;
+                drawWave();
+            });
+
         mobilePage.appendChild(withHint(waveProgressRow, "Zoomed in, the waveform also shows how far into the whole song it is: a lighter layer from its left edge, across the full height. Its edge can be dragged at any height to move through the whole song, the waveform following, as on the thin line at its foot. The play head comes first when the two are close together."));
         mobilePage.appendChild(withHint(waveProgressBelowRow, "The layer under the waveform instead of over it, so the waveform's colours stay as they are."));
-        mobilePage.appendChild(withHint(waveProgressColorRow, "The layer's colour, and how much of it shows."));
+        mobilePage.appendChild(withHint(waveProgressColorRow, "The layer's colour where it lies on the played part of the waveform, left of the play head, and how much of it shows."));
+        mobilePage.appendChild(withHint(waveProgressAheadRow, "The layer's colour where it reaches past the play head, over the part still to come in view."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(makeSubLabel("Online badge"));
         mobilePage.appendChild(onlineBadgeRow);
@@ -33629,7 +33744,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveProgressColorRow = makeColorRow("Progress colour",
+            const webWaveProgressColorRow = makeColorRow("Progress colour over the played part",
                 function () { return settings.webWaveZoomProgressColor; },
                 function () { return settings.webWaveZoomProgressAlpha; },
                 function (color, alpha) {
@@ -33639,9 +33754,20 @@
                     publishHostSoon();
                 });
 
+            const webWaveProgressAheadRow = makeColorRow("Progress colour past the play head",
+                function () { return settings.webWaveZoomProgressAheadColor; },
+                function () { return settings.webWaveZoomProgressAheadAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveZoomProgressAheadColor = color;
+                    settings.webWaveZoomProgressAheadAlpha = alpha;
+                    publishHostSoon();
+                });
+
             webPage.appendChild(withHint(webWaveProgressRow, "Zoomed in, the waveform also shows how far into the whole song it is: a lighter layer from its left edge, across the full height. Its edge can be dragged at any height to move through the whole song. Each browser can have this set for itself."));
             webPage.appendChild(withHint(webWaveProgressBelowRow, "The layer under the waveform instead of over it. Each browser can have this set for itself."));
-            webPage.appendChild(withHint(webWaveProgressColorRow, "The layer's colour, and how much of it shows."));
+            webPage.appendChild(withHint(webWaveProgressColorRow, "The layer's colour where it lies on the played part of the waveform, left of the play head, and how much of it shows."));
+            webPage.appendChild(withHint(webWaveProgressAheadRow, "The layer's colour where it reaches past the play head, over the part still to come in view."));
 
             const webOnlineBadgeRow = makeChoiceRow([
                 { label: "Fade away", value: "fade" },

@@ -2446,6 +2446,54 @@
         inset: 0;
     }
 
+    /* The colour picker's sliders, the same in every browser */
+    input.mureka-range {
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0;
+        height: 2.2em;
+    }
+
+    input.mureka-range::-webkit-slider-runnable-track {
+        height: 8px;
+        border-radius: 4px;
+        background: var(--mureka-track, #555);
+    }
+
+    input.mureka-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 1.3em;
+        height: 1.3em;
+        margin-top: calc(4px - 0.65em);
+        border: none;
+        border-radius: 50%;
+        background: var(--accent);
+    }
+
+    input.mureka-range::-moz-range-track {
+        height: 8px;
+        border-radius: 4px;
+        background: var(--mureka-track, #555);
+    }
+
+    input.mureka-range::-moz-range-progress {
+        height: 8px;
+        border-radius: 4px;
+        background: var(--accent);
+    }
+
+    input.mureka-range::-moz-range-thumb {
+        width: 1.3em;
+        height: 1.3em;
+        border: none;
+        border-radius: 50%;
+        background: var(--accent);
+    }
+
     /* A field on a line of its own, the lock screen lines and the like,
        takes the whole width */
     #panelBody > .pField,
@@ -7813,6 +7861,16 @@
             }
 
             ev.preventDefault();
+
+            // The first finger of a new touch, or the mouse: anything left
+            // over from before is forgotten. A finger whose lifting was never
+            // heard, Safari dropping it to a system gesture or the page going
+            // out of sight, would otherwise turn every later drag into a pinch
+            // or a held zoom, and the waveform only zooms
+            if (ev.isPrimary) {
+                forget();
+            }
+
             pointers.set(ev.pointerId, ev.clientX);
 
             try {
@@ -7965,6 +8023,23 @@
             }
         });
 
+        // Every press, pinch and held zoom let go, the play head back where
+        // it was if a drag had moved it
+        const forget = function () {
+
+            pointers.clear();
+            clearTimeout(z.holdTimer);
+            z.pinch = null;
+            z.holdZoom = null;
+            z.eatUp = false;
+
+            if (z.drag) {
+
+                z.drag = null;
+                hooks.preview(null);
+            }
+        };
+
         const up = function (ev, cancelled) {
 
             if (!pointers.has(ev.pointerId)) {
@@ -8046,6 +8121,19 @@
             up(ev, true);
         });
 
+        // A finger taken away from the waveform without a lift ends like a
+        // cancel, and a page out of sight ends whatever was going on
+        el.addEventListener("lostpointercapture", function (ev) {
+            up(ev, true);
+        });
+
+        document.addEventListener("visibilitychange", function () {
+
+            if (document.hidden) {
+                forget();
+            }
+        });
+
         // The mouse wheel or a touchpad pinch over the waveform
         el.addEventListener("wheel", function (ev) {
 
@@ -8082,11 +8170,22 @@
     }
 
     // Zoomed in, how far into the whole song it is, from the left edge and
-    // the full height, as if the waveform were the song's progress bar
-    function drawWaveProgress(ctx, w, h, frac, fill) {
+    // the full height, as if the waveform were the song's progress bar. One
+    // colour over the played part, left of the play head at headX, and
+    // another where it reaches past the play head
+    function drawWaveProgress(ctx, w, h, frac, fill, ahead, headX) {
+
+        const end = Math.round(Math.max(0, Math.min(1, frac)) * w);
+        const split = Math.max(0, Math.min(end, headX));
 
         ctx.fillStyle = fill;
-        ctx.fillRect(0, 0, Math.round(Math.max(0, Math.min(1, frac)) * w), h);
+        ctx.fillRect(0, 0, split, h);
+
+        if (end > split) {
+
+            ctx.fillStyle = ahead;
+            ctx.fillRect(split, 0, end - split, h);
+        }
     }
 
     // Mureka's waveform as bars, each the highest point of its slice. Each
@@ -8149,8 +8248,10 @@
         const progress = span < 1 && !!(state && state.waveZoomProgress !== false);
         const below = !!(state && state.waveZoomProgressBelow);
         const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(255, 255, 255, 0.14)";
+        const ahead = state && state.waveZoomProgressAhead ? state.waveZoomProgressAhead : "rgba(72, 225, 235, 0.2)";
+        const headX = Math.round((frac - start) / span * w);
         const done = progress ? Math.round(frac * w) : 0;
-        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, progress, below, fill, done].join(",");
+        const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, progress, below, fill, ahead, done].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -8169,7 +8270,7 @@
         ctx.clearRect(0, 0, w, h);
 
         if (progress && below) {
-            drawWaveProgress(ctx, w, h, frac, fill);
+            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
         if (loud) {
@@ -8179,7 +8280,7 @@
         }
 
         if (progress && !below) {
-            drawWaveProgress(ctx, w, h, frac, fill);
+            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
         if (span < 1) {
@@ -11407,7 +11508,17 @@
     // that comes next is drawn
     let panelShowTimer = 0;
 
+    // A finger on the panel, maybe swiping it: a new drawing waits
+    let panelHeld = false;
+    let panelHeldAgain = false;
+
     function renderPanel(items) {
+
+        if (panelHeld) {
+
+            panelHeldAgain = true;
+            return;
+        }
 
         lastPanelItems = items;
 
@@ -12164,6 +12275,7 @@
             name.style.cssText = "flex:0 0 6.5em";
             name.textContent = label;
             input.type = "range";
+            input.className = "mureka-range";
             input.min = "0";
             input.max = String(max);
             input.step = "1";
@@ -12266,6 +12378,10 @@
         box.appendChild(preview);
         box.appendChild(swatches);
         box.appendChild(slider("h", "Hue", 359, "", hsl.h));
+
+        // The hue slider shows the colours it goes through
+        sliders.h.input.style.setProperty("--mureka-track",
+            "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)");
         box.appendChild(slider("s", "Saturation", 100, " %", hsl.s));
         box.appendChild(slider("l", "Lightness", 100, " %", hsl.l));
         box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
@@ -18525,9 +18641,25 @@
             // On a page of the settings only the page slides away, the
             // sheet stays for the main page to come back into
             return panelBackButton() ? $("panelScroll") : $("panelInner");
+        }, hold: function (on) {
+
+            // No new drawing of the page under a finger, the one held back
+            // is drawn when it lets go
+            panelHeld = on;
+
+            if (!on && panelHeldAgain) {
+
+                panelHeldAgain = false;
+                loadPanel();
+            }
         }, hideAfter: function (part) {
 
-            // The main page comes from the phone, a moment later
+            // The main page drawn at once, as seen before, needs no wait
+            if (!panelBackButton()) {
+                return;
+            }
+
+            // Otherwise it comes from the phone, a moment later
             part.style.opacity = "0";
             clearTimeout(panelShowTimer);
             panelShowTimer = setTimeout(function () {
@@ -18630,9 +18762,16 @@
             moving.style.opacity = "";
         };
 
-        // A press that may become a swipe, from a finger or the mouse
+        // A press that may become a swipe, from a finger or the mouse. The
+        // popup is told, so it does not draw itself again under the finger,
+        // which would leave the rest of the swipe with nowhere to go
         const start = function (x, y, mouse) {
+
             drag = { x: x, y: y, dy: 0, on: false, gone: false, mouse: mouse, lastY: y, lastAt: Date.now(), speed: 0 };
+
+            if (p.hold) {
+                p.hold(true);
+            }
         };
 
         // Returns true once the press is a swipe and its move is taken
@@ -18698,6 +18837,10 @@
             const d = drag;
 
             drag = null;
+
+            if (d && p.hold) {
+                p.hold(false);
+            }
 
             if (!d || !d.on) {
                 return;
@@ -18787,7 +18930,9 @@
         // wherever the click lands
         window.addEventListener("click", function (ev) {
 
-            if (Date.now() < swallowClickUntil) {
+            // Only a real tap, a click made by the page itself, Back on a
+            // page of the settings say, goes through
+            if (ev.isTrusted && Date.now() < swallowClickUntil) {
 
                 ev.stopPropagation();
                 ev.preventDefault();
@@ -19263,6 +19408,9 @@
 
         newAsking = ask.title + ". " + ask.text;
         openChoice(newAsking, [
+            { icon: "play", label: "Play now", fn: function () {
+                answer("now");
+            } },
             { icon: "listPlusTop", label: "Play next", fn: function () {
                 answer("next");
             } },
