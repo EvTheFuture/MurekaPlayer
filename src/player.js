@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.335";
+    const VERSION = "1.9.9.336";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -21566,6 +21566,67 @@
         }
     }
 
+    // The waveform's dim layer takes the progress colour this much darker,
+    // so coloured it keeps its two shades apart
+    const WAVE_DIM_SHADE = 0.55;
+
+    function plainColour(hex) {
+        return hex;
+    }
+
+    // The colour and share of an rgba() fill, for mixing by hand
+    function rgbaParts(text) {
+
+        const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(text || "");
+
+        if (!m) {
+            return { c: [255, 255, 255], a: 0 };
+        }
+
+        return { c: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) };
+    }
+
+    // The waveform coloured by the song's progress: a column's own colour
+    // with the progress colour mixed in by its share, up to the play head in
+    // one and on to where the progress reaches in the other, as the bar
+    // would lie. dim darkens the progress colour for the dim layer. Each
+    // colour is worked out once a drawing
+    function waveTinter(w, frac, fill, ahead, headX) {
+
+        const end = Math.round(Math.max(0, Math.min(1, frac)) * w);
+        const split = Math.max(0, Math.min(end, headX));
+        const parts = [null, rgbaParts(fill), rgbaParts(ahead)];
+        const made = new Map();
+
+        return function (hex, x, dim) {
+
+            const zone = x < split ? 1 : (x < end ? 2 : 0);
+
+            if (zone === 0) {
+                return hex;
+            }
+
+            const key = hex + zone + dim;
+            let out = made.get(key);
+
+            if (out === undefined) {
+
+                const t = parts[zone];
+                const mix = function (i) {
+
+                    const own = parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+
+                    return Math.round(own * (1 - t.a) + t.c[i] * dim * t.a);
+                };
+
+                out = "rgb(" + mix(0) + ", " + mix(1) + ", " + mix(2) + ")";
+                made.set(key, out);
+            }
+
+            return out;
+        };
+    }
+
     // Zoomed in, how far into the whole song it is, from the left edge and
     // the full height, as if the waveform were the song's progress bar. One
     // colour over the played part, left of the play head at headX, and
@@ -21588,7 +21649,9 @@
     // Mureka's waveform as bars, each the highest point of its slice. Each
     // bar keeps its place in the song, so zoomed in they slide along rather
     // than change height as the view moves
-    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr) {
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, tint) {
+
+        const colour = tint || plainColour;
 
         const pitch = barW + gap;
         const count = Math.max(1, Math.floor(w / pitch));
@@ -21606,7 +21669,7 @@
             const peak = waveSlice(data, from, Math.min(1, from + step));
             const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
 
-            ctx.fillStyle = from + step / 2 <= frac ? "#48e1eb" : "#555";
+            ctx.fillStyle = colour(from + step / 2 <= frac ? "#48e1eb" : "#555555", x, 1);
             ctx.fillRect(x, (h - bh) / 2, barW, bh);
         }
     }
@@ -21667,26 +21730,21 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
+        // Coloured by the progress, each layer of the waveform keeps its shade
+        const tint = look === "wave" ? waveTinter(w, frac, fill, ahead, headX) : null;
+
         // Our own waveform in two layers a column per screen pixel, Mureka's
         // as bars, so the two look apart
         if (waveOwn !== null && waveData === waveOwn && waveOwnLoud) {
-            drawLayeredWave(ctx, w, h, waveOwn, waveOwnLoud, frac, start, span);
+            drawLayeredWave(ctx, w, h, waveOwn, waveOwnLoud, frac, start, span, tint);
         } else {
-            drawWaveBars(ctx, w, h, waveData, frac, start, span, 2 * dpr, 1 * dpr, dpr);
+            drawWaveBars(ctx, w, h, waveData, frac, start, span, 2 * dpr, 1 * dpr, dpr, tint);
         }
 
         if (look === "over") {
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        // A second waveform in the progress colours laid on the first, only
-        // where the waveform is drawn, so its share sets the shade
-        if (look === "wave") {
-
-            ctx.globalCompositeOperation = "source-atop";
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
-            ctx.globalCompositeOperation = "source-over";
-        }
 
         if (span < 1) {
             drawWaveOverview(ctx, w, h, start, span, frac, dpr);
@@ -21728,7 +21786,9 @@
     // song sounds, bright, a column per screen pixel. Played in the accent
     // colour, the rest grey. start and span the part of the song in view,
     // each column keeping its place in the song as the view moves
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span) {
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, tint) {
+
+        const colour = tint || plainColour;
 
         const room = h - 1;
         const from0 = start || 0;
@@ -21750,9 +21810,9 @@
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
-            ctx.fillStyle = played ? "#2a7f86" : "#3a3a3e";
+            ctx.fillStyle = colour(played ? "#2a7f86" : "#3a3a3e", x, WAVE_DIM_SHADE);
             ctx.fillRect(x, (h - ph) / 2, 1, ph);
-            ctx.fillStyle = played ? "#48e1eb" : "#666";
+            ctx.fillStyle = colour(played ? "#48e1eb" : "#666666", x, 1);
             ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
     }
