@@ -10278,7 +10278,7 @@
             // With more than one being generated, all of them can follow
             if (state && Number(state.pendingCount) > 1) {
 
-                choices.push({ icon: "queue", label: "Play all new after the playing song", cls: "inset tall", fn: function () {
+                choices.push({ icon: "listPlusTop", label: "Play all new after the playing song", cls: "inset tall", fn: function () {
 
                     closeSongMenu();
                     send("playWhenReady", { id: song.id, after: true, all: true }).then(function () {
@@ -18671,7 +18671,7 @@
             { icon: "listPlus", label: "Add to the end", fn: function () {
                 answer("end");
             } },
-            { icon: "play", label: "Replace the queue", fn: function () {
+            { icon: "queue", label: "Replace the queue", fn: function () {
                 answer("replace");
             } },
             { icon: "close", label: "Leave out for now", fn: function () {

@@ -11,18 +11,24 @@ SHELL := /bin/sh
 # The version the whole project follows, read from the shared player
 VERSION := $(shell sed -n 's/.*const VERSION = "\([^"]*\)".*/\1/p' src/player.js | head -1)
 
-# The Android build needs a JDK 17 or newer. Unless JAVA_HOME is set
-# already, every JDK found is asked for its version and the newest one of
-# 17 or later is used: the ones under /usr/lib/jvm on Ubuntu, Alpine and
-# most other distributions, the ones on a Mac, and the one javac on the
-# PATH belongs to. Worked out once, not for every use
+# The newest JDK the build's Gradle runs on. Gradle 8.14, the one in
+# android/gradle/wrapper, stops with a newer one, so raise this together
+# with the Gradle version
+JDK_MAX := 24
+
+# The Android build needs a JDK from 17 to JDK_MAX. Unless JAVA_HOME is set
+# already, every JDK found is asked for its version and the newest one in
+# that range is used, whatever the system's default java is: the ones
+# under /usr/lib/jvm on Ubuntu, Alpine and most other distributions, the
+# ones on a Mac, and the one javac on the PATH belongs to. Worked out once,
+# not for every use
 ifeq ($(origin JAVA_HOME),undefined)
 JAVA_HOME := $(shell \
     for d in /usr/lib/jvm/* /Library/Java/JavaVirtualMachines/*/Contents/Home \
         "$$(dirname "$$(dirname "$$(readlink -f "$$(command -v javac)" 2>/dev/null)")")"; do \
         if [ -x "$$d/bin/javac" ]; then \
             v=$$("$$d/bin/javac" -version 2>&1 | sed -n 's/^javac \([0-9][0-9]*\).*/\1/p' | head -1); \
-            if [ -n "$$v" ] && [ "$$v" -ge 17 ]; then \
+            if [ -n "$$v" ] && [ "$$v" -ge 17 ] && [ "$$v" -le $(JDK_MAX) ]; then \
                 echo "$$v $$(readlink -f "$$d")"; \
             fi; \
         fi; \
@@ -126,7 +132,7 @@ android: apk
 debug: apk
 
 apk: android/local.properties $(SIGNING)
-	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
+	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 to $(JDK_MAX) found, install openjdk-21-jdk or set JAVA_HOME"; exit 1; }
 	cd android && JAVA_HOME="$(JAVA_HOME)" ./gradlew assembleDebug
 	@echo "APK: $(APK_DEBUG)"
 
@@ -134,7 +140,7 @@ apk: android/local.properties $(SIGNING)
 # the signer is shown. Only ever signed with the release key: without one
 # set, or with a debug signed result, it stops and nothing is published
 release: android/local.properties $(SIGNING)
-	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 or newer found, set JAVA_HOME"; exit 1; }
+	@test -n "$(JAVA_HOME)" || { echo "No JDK 17 to $(JDK_MAX) found, install openjdk-21-jdk or set JAVA_HOME"; exit 1; }
 	@store=$$(sed -n 's/^storeFile=//p' $(SIGNING) | head -1); \
 	if [ -z "$$store" ] || [ ! -f "$$store" ]; then \
 	    echo "make release signs with the release key only, and none is set. Run make signing"; \
