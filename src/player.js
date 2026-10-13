@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.334";
+    const VERSION = "1.9.9.335";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -324,7 +324,7 @@
     const PROGRESS_ALPHA_DEFAULT = 14;
     const PROGRESS_AHEAD_COLOR = "#48e1eb";
     const PROGRESS_AHEAD_ALPHA = 20;
-    const PROGRESS_ALPHA_MAX = 80;
+    const PROGRESS_ALPHA_MAX = 100;
 
     function progressColor(v, fallback) {
         return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : (fallback || "#ffffff");
@@ -339,6 +339,41 @@
         }
 
         return typeof fallback === "number" ? fallback : PROGRESS_ALPHA_DEFAULT;
+    }
+
+    // The ways the song's progress can show on the zoomed waveform, with
+    // what they mean, for the phone's and the web view's settings alike
+    const PROGRESS_LOOK_CHOICES = [
+        { value: "over", label: "Bar over the waveform" },
+        { value: "under", label: "Bar behind the waveform" },
+        { value: "wave", label: "Colour the waveform" },
+        { value: "off", label: "Off" }
+    ];
+    const PROGRESS_LOOK_HINT = "Zoomed in, the waveform also shows how far into the whole song it is, from its left "
+        + "edge: a bar over the waveform across its full height, the same bar behind it so the waveform's colours stay "
+        + "as they are, or the waveform itself coloured instead. Its edge can be dragged at any height to move through "
+        + "the whole song, the waveform following, as on the thin line at its foot.";
+    const PROGRESS_COLOR_HINT = "The colour of the progress on the played part, left of the play head, and how much "
+        + "of it shows. Colouring the waveform, the share is how strongly its own colour gives way to this one.";
+    const PROGRESS_AHEAD_HINT = "The colour of the progress where it reaches past the play head, on the part still "
+        + "to come in view.";
+
+    // How the song's progress shows on the zoomed waveform: a bar over it,
+    // a bar behind it, the waveform itself coloured, or not at all. A look
+    // kept from before the choice comes from the two switches it replaced
+    const PROGRESS_LOOKS = ["over", "under", "wave", "off"];
+
+    function progressLook(v, on, below) {
+
+        if (PROGRESS_LOOKS.indexOf(v) !== -1) {
+            return v;
+        }
+
+        if (on === false) {
+            return "off";
+        }
+
+        return below === true ? "under" : "over";
     }
 
     // The colour and its share as one fill for the canvas
@@ -2527,10 +2562,8 @@
             webWaveSource: "mureka",
             waveZoomKeep: false,
             webWaveZoomKeep: false,
-            waveZoomProgress: true,
-            webWaveZoomProgress: true,
-            waveZoomProgressBelow: false,
-            webWaveZoomProgressBelow: false,
+            waveZoomProgressLook: "over",
+            webWaveZoomProgressLook: "over",
             waveZoomProgressColor: "#ffffff",
             webWaveZoomProgressColor: "#ffffff",
             waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
@@ -2711,8 +2744,7 @@
                         ? parsed.carAutoBlack : 20,
                     blackoutText: typeof parsed.blackoutText === "string"
                         ? parsed.blackoutText : "\u266B",
-                    blackoutColor: typeof parsed.blackoutColor === "string"
-                        ? parsed.blackoutColor : "#333333",
+                    blackoutColor: progressColor(parsed.blackoutColor, "#333333"),
                     blackoutSize: (typeof parsed.blackoutSize === "number"
                         && parsed.blackoutSize >= 12 && parsed.blackoutSize <= 240)
                         ? parsed.blackoutSize : 64,
@@ -2742,10 +2774,10 @@
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
                     waveZoomKeep: parsed.waveZoomKeep === true,
                     webWaveZoomKeep: parsed.webWaveZoomKeep === true,
-                    waveZoomProgress: parsed.waveZoomProgress !== false,
-                    webWaveZoomProgress: parsed.webWaveZoomProgress !== false,
-                    waveZoomProgressBelow: parsed.waveZoomProgressBelow === true,
-                    webWaveZoomProgressBelow: parsed.webWaveZoomProgressBelow === true,
+                    waveZoomProgressLook: progressLook(parsed.waveZoomProgressLook,
+                        parsed.waveZoomProgress, parsed.waveZoomProgressBelow),
+                    webWaveZoomProgressLook: progressLook(parsed.webWaveZoomProgressLook,
+                        parsed.webWaveZoomProgress, parsed.webWaveZoomProgressBelow),
                     waveZoomProgressColor: progressColor(parsed.waveZoomProgressColor),
                     webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor),
                     waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
@@ -21624,15 +21656,14 @@
         const span = waveZoomer ? waveZoomer.span() : 1;
         const start = waveZoomer ? waveZoomer.start(frac) : 0;
 
-        // Zoomed in, the song's progress across the whole waveform, under it
-        // or over it
-        const progress = span < 1 && settings.waveZoomProgress !== false;
-        const below = settings.waveZoomProgressBelow === true;
+        // Zoomed in, the song's progress across the whole waveform, under it,
+        // over it or as the waveform's own colour
+        const look = span < 1 ? progressLook(settings.waveZoomProgressLook) : "off";
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
         const headX = Math.round((frac - start) / span * w);
 
-        if (progress && below) {
+        if (look === "under") {
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
@@ -21644,8 +21675,17 @@
             drawWaveBars(ctx, w, h, waveData, frac, start, span, 2 * dpr, 1 * dpr, dpr);
         }
 
-        if (progress && !below) {
+        if (look === "over") {
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+        }
+
+        // A second waveform in the progress colours laid on the first, only
+        // where the waveform is drawn, so its share sets the shade
+        if (look === "wave") {
+
+            ctx.globalCompositeOperation = "source-atop";
+            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            ctx.globalCompositeOperation = "source-over";
         }
 
         if (span < 1) {
@@ -22932,8 +22972,7 @@
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: settings.webWaveZoomKeep === true,
-            waveZoomProgress: settings.webWaveZoomProgress !== false,
-            waveZoomProgressBelow: settings.webWaveZoomProgressBelow === true,
+            waveZoomProgressLook: progressLook(settings.webWaveZoomProgressLook),
             waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
             waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
             offline: offlineMode(),
@@ -24825,7 +24864,7 @@
                 id: hostId(el, path),
                 color: el.dataset.hostColor,
                 alpha: Number(el.dataset.hostAlpha) || 0,
-                max: Number(el.dataset.hostAlphaMax) || 100
+                max: el.dataset.hostAlphaMax === "0" ? 0 : Number(el.dataset.hostAlphaMax) || 100
             });
             return;
         }
@@ -26526,7 +26565,7 @@
                 return songTimes().length > 0;
             },
             edge: function () {
-                return settings.waveZoomProgress !== false;
+                return progressLook(settings.waveZoomProgressLook) !== "off";
             },
             zoomable: function () {
                 return !!waveData && waveCanvas.style.display !== "none";
@@ -31000,40 +31039,8 @@
         btn.style.color = on ? "#000" : "#fff";
     }
 
-    // Build a labeled On / Off row backed by a getter and a setter
     // Build a settings row with a label above a full width text input, used for
     // the now playing templates. Saves and re-asserts metadata on every edit
-    // A labelled colour picker, for settings that pick a colour rather than text
-    function makeColorRow(label, get, set) {
-
-        const row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
-
-        const name = document.createElement("span");
-        name.textContent = label;
-
-        const input = document.createElement("input");
-
-        input.type = "color";
-        input.value = get();
-        input.style.cssText = "flex:0 0 auto;width:44px;height:28px;padding:0;border:1px solid #3a3a42;border-radius:6px;background:#26262c";
-
-        input.addEventListener("input", function () {
-
-            set(input.value);
-            saveSettings();
-        });
-
-        settingsRefreshers.push(function () {
-            input.value = get();
-        });
-
-        row.appendChild(name);
-        row.appendChild(input);
-
-        return row;
-    }
-
     function makeTextRow(label, get, set, previewFn) {
 
         const row = document.createElement("div");
@@ -31321,7 +31328,14 @@
             "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)");
         box.appendChild(slider("s", "Saturation", 100, " %", hsl.s));
         box.appendChild(slider("l", "Lightness", 100, " %", hsl.l));
-        box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
+
+        // A solid colour has no opacity to pick, it is always fully shown
+        if (maxAlpha > 0) {
+            box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
+        } else {
+            slider("a", "Opacity", 100, " %", 100);
+        }
+
         box.appendChild(buttons);
         back.appendChild(box);
 
@@ -31349,8 +31363,11 @@
 
     // A colour with how much of it shows: a swatch of the two together, a
     // tap on it opens the picker, and the share beside it. The web view
-    // reads the colour from the swatch and opens a picker of its own
+    // reads the colour from the swatch and opens a picker of its own.
+    // Without getAlpha it is a solid colour, set gets the colour alone
     function makeColorRow(label, getColor, getAlpha, set) {
+
+        const solid = typeof getAlpha !== "function";
 
         const row = document.createElement("div");
         const name = document.createElement("span");
@@ -31375,21 +31392,30 @@
         // The web view shows the share beside its own swatch
         pct.dataset.hostSkip = "1";
 
+        const nowAlpha = function () {
+            return solid ? 100 : progressAlpha(getAlpha());
+        };
+
         const paint = function () {
 
             const c = progressColor(getColor());
-            const a = progressAlpha(getAlpha());
+            const a = nowAlpha();
 
             fillEl.style.background = progressFill(c, a);
-            pct.textContent = a + " %";
+            pct.textContent = solid ? "" : a + " %";
             swatch.dataset.hostColor = c;
             swatch.dataset.hostAlpha = String(a);
-            swatch.dataset.hostAlphaMax = String(PROGRESS_ALPHA_MAX);
+            swatch.dataset.hostAlphaMax = solid ? "0" : String(PROGRESS_ALPHA_MAX);
         };
 
         const change = function (color, alpha) {
 
-            set(progressColor(color), progressAlpha(alpha));
+            if (solid) {
+                set(progressColor(color));
+            } else {
+                set(progressColor(color), progressAlpha(alpha));
+            }
+
             saveSettings();
             paint();
         };
@@ -31397,8 +31423,11 @@
         // Set from the web view's picker
         swatch.__setColor = change;
 
+        // Painted again after a reset elsewhere on the page
+        row.__paint = paint;
+
         swatch.addEventListener("click", function () {
-            openColorPicker(label, progressColor(getColor()), progressAlpha(getAlpha()), PROGRESS_ALPHA_MAX, change);
+            openColorPicker(label, progressColor(getColor()), nowAlpha(), solid ? 0 : PROGRESS_ALPHA_MAX, change);
         });
         paint();
         settingsRefreshers.push(paint);
@@ -31414,6 +31443,39 @@
         row.appendChild(controls);
 
         return row;
+    }
+
+    // A dropdown backed by a getter and a setter, for a choice whose names
+    // are too long for a row of buttons, full width under its name.
+    // choices are { value, label }
+    function makeSelectRow(choices, get, set) {
+
+        const sel = document.createElement("select");
+        sel.style.cssText = "display:block;width:100%;box-sizing:border-box;min-height:40px;padding:4px 10px;"
+            + "border-radius:8px;border:1px solid #555;background:#333;color:#fff;font:inherit";
+
+        for (const choice of choices) {
+
+            const opt = document.createElement("option");
+
+            opt.value = choice.value;
+            opt.textContent = choice.label;
+            sel.appendChild(opt);
+        }
+
+        sel.value = get();
+
+        sel.addEventListener("change", function () {
+
+            set(sel.value);
+            saveSettings();
+        });
+
+        settingsRefreshers.push(function () {
+            sel.value = get();
+        });
+
+        return sel;
     }
 
     function makeBoolRow(label, get, set) {
@@ -32824,8 +32886,9 @@
                 function () { return settings[keys.text]; },
                 function (v) { settings[keys.text] = v; changed(); });
 
-            const colorRow = makeColorRow("Screen off mark color",
+            const colorRow = makeColorRow("Screen off mark colour",
                 function () { return settings[keys.color]; },
+                null,
                 function (v) { settings[keys.color] = v; changed(); });
 
             const sizeRow = makeStepperRow("Screen off mark size",
@@ -32851,16 +32914,13 @@
 
                 // Put the fields back in step with what was just restored
                 const textInput = textRow.querySelector("input");
-                const colorInput = colorRow.querySelector("input");
                 const sizeInput = sizeRow.querySelector("input");
 
                 if (textInput) {
                     textInput.value = settings[keys.text];
                 }
 
-                if (colorInput) {
-                    colorInput.value = settings[keys.color];
-                }
+                colorRow.__paint();
 
                 if (sizeInput) {
                     sizeInput.value = String(settings[keys.size]);
@@ -33198,23 +33258,15 @@
 
         mobilePage.appendChild(withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."));
 
-        const waveProgressRow = makeBoolRow("Song's progress when zoomed",
-            function () { return settings.waveZoomProgress !== false; },
+        const waveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
+            function () { return progressLook(settings.waveZoomProgressLook); },
             function (v) {
 
-                settings.waveZoomProgress = v;
+                settings.waveZoomProgressLook = v;
                 drawWave();
             });
 
-        const waveProgressBelowRow = makeBoolRow("Progress under the waveform",
-            function () { return settings.waveZoomProgressBelow === true; },
-            function (v) {
-
-                settings.waveZoomProgressBelow = v;
-                drawWave();
-            });
-
-        const waveProgressColorRow = makeColorRow("Progress colour over the played part",
+        const waveProgressColorRow = makeColorRow("Colour up to the play head",
             function () { return settings.waveZoomProgressColor; },
             function () { return settings.waveZoomProgressAlpha; },
             function (color, alpha) {
@@ -33224,7 +33276,7 @@
                 drawWave();
             });
 
-        const waveProgressAheadRow = makeColorRow("Progress colour past the play head",
+        const waveProgressAheadRow = makeColorRow("Colour past the play head",
             function () { return settings.waveZoomProgressAheadColor; },
             function () { return settings.waveZoomProgressAheadAlpha; },
             function (color, alpha) {
@@ -33234,10 +33286,11 @@
                 drawWave();
             });
 
-        mobilePage.appendChild(withHint(waveProgressRow, "Zoomed in, the waveform also shows how far into the whole song it is: a lighter layer from its left edge, across the full height. Its edge can be dragged at any height to move through the whole song, the waveform following, as on the thin line at its foot. The play head comes first when the two are close together."));
-        mobilePage.appendChild(withHint(waveProgressBelowRow, "The layer under the waveform instead of over it, so the waveform's colours stay as they are."));
-        mobilePage.appendChild(withHint(waveProgressColorRow, "The layer's colour where it lies on the played part of the waveform, left of the play head, and how much of it shows."));
-        mobilePage.appendChild(withHint(waveProgressAheadRow, "The layer's colour where it reaches past the play head, over the part still to come in view."));
+        mobilePage.appendChild(makeSubLabel("Song's progress when zoomed"));
+        mobilePage.appendChild(waveProgressRow);
+        mobilePage.appendChild(makeHint(PROGRESS_LOOK_HINT + " The play head comes first when the two are close together."));
+        mobilePage.appendChild(withHint(waveProgressColorRow, PROGRESS_COLOR_HINT));
+        mobilePage.appendChild(withHint(waveProgressAheadRow, PROGRESS_AHEAD_HINT));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(makeSubLabel("Online badge"));
         mobilePage.appendChild(onlineBadgeRow);
@@ -33728,23 +33781,15 @@
 
             webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
 
-            const webWaveProgressRow = makeBoolRow("Song's progress when zoomed",
-                function () { return settings.webWaveZoomProgress !== false; },
+            const webWaveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
+                function () { return progressLook(settings.webWaveZoomProgressLook); },
                 function (v) {
 
-                    settings.webWaveZoomProgress = v;
+                    settings.webWaveZoomProgressLook = v;
                     publishHostSoon();
                 });
 
-            const webWaveProgressBelowRow = makeBoolRow("Progress under the waveform",
-                function () { return settings.webWaveZoomProgressBelow === true; },
-                function (v) {
-
-                    settings.webWaveZoomProgressBelow = v;
-                    publishHostSoon();
-                });
-
-            const webWaveProgressColorRow = makeColorRow("Progress colour over the played part",
+            const webWaveProgressColorRow = makeColorRow("Colour up to the play head",
                 function () { return settings.webWaveZoomProgressColor; },
                 function () { return settings.webWaveZoomProgressAlpha; },
                 function (color, alpha) {
@@ -33754,7 +33799,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveProgressAheadRow = makeColorRow("Progress colour past the play head",
+            const webWaveProgressAheadRow = makeColorRow("Colour past the play head",
                 function () { return settings.webWaveZoomProgressAheadColor; },
                 function () { return settings.webWaveZoomProgressAheadAlpha; },
                 function (color, alpha) {
@@ -33764,10 +33809,11 @@
                     publishHostSoon();
                 });
 
-            webPage.appendChild(withHint(webWaveProgressRow, "Zoomed in, the waveform also shows how far into the whole song it is: a lighter layer from its left edge, across the full height. Its edge can be dragged at any height to move through the whole song. Each browser can have this set for itself."));
-            webPage.appendChild(withHint(webWaveProgressBelowRow, "The layer under the waveform instead of over it. Each browser can have this set for itself."));
-            webPage.appendChild(withHint(webWaveProgressColorRow, "The layer's colour where it lies on the played part of the waveform, left of the play head, and how much of it shows."));
-            webPage.appendChild(withHint(webWaveProgressAheadRow, "The layer's colour where it reaches past the play head, over the part still to come in view."));
+            webPage.appendChild(makeSubLabel("Song's progress when zoomed"));
+            webPage.appendChild(webWaveProgressRow);
+            webPage.appendChild(makeHint(PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
+            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT));
 
             const webOnlineBadgeRow = makeChoiceRow([
                 { label: "Fade away", value: "fade" },

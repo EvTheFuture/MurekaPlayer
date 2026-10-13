@@ -622,15 +622,16 @@ the new settings layout and a number of smaller improvements.
   head stays in the middle and the waveform moves under it, easing in from the
   start and out toward the end, with a thin progress line of the whole song
   along its foot. Dragging along that line moves through the whole song, as
-  zoomed out. A lighter layer from the waveform's left edge across its full
-  height shows how far into the whole song it is, and its edge can be dragged
-  at any height to move through the whole song, the waveform following, the
-  play head coming first when the two are close. It has one colour over the
-  played part, left of the play head, and another where it reaches past it.
-  **Song's progress when zoomed**, **Progress under the waveform**, **Progress
-  colour over the played part** and **Progress colour past the play head**,
-  each colour with how much of it shows, picked over the settings, under
-  Mobile player and Web view, the first two also for each browser on its own.
+  zoomed out. From the waveform's left edge it also shows how far into the
+  whole song it is, and that edge can be dragged at any height to move
+  through the whole song, the waveform following, the play head coming first
+  when the two are close. It has one colour on the played part, left of the
+  play head, and another where it reaches past it. **Song's progress when
+  zoomed** picks how: a bar over the waveform, a bar behind it, the waveform
+  itself coloured, or off. **Colour up to the play head** and **Colour past
+  the play head**, each with how much of it shows, are picked over the
+  settings. All under Mobile player and Web view, the look also for each
+  browser on its own.
   Dragging past two thirds of the way to an edge scrolls the waveform that
   way, faster the nearer the edge. **Remember the waveform zoom level**, under
   Mobile player and Web view, keeps the zoom for the next time the player
