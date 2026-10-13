@@ -345,6 +345,11 @@ the new settings layout and a number of smaller improvements.
   with all songs for example, the queue is made again from the list around
   it, and the covers beside it follow.
 - The search box has a clear button at its right end while it holds text.
+- **Find a song by its ID**: the song's ID in Information has a copy
+  button, and the ID pasted whole into the search box, in the player or the
+  web view, finds that song. The ID is Mureka's own, the same for everyone,
+  so a friend can send it. A copy button in the web view copies in that
+  browser.
 - **On a tablet or a computer, a double tap or double click on the header**
   fills the whole window, the next one folds the player, and a tap on the
   folded header brings back your own size. On a phone it folds and unfolds
@@ -615,11 +620,12 @@ the new settings layout and a number of smaller improvements.
   how loud the song sounds, bright. It is worked out once and kept, and
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
-- **Waveform colour when played**, **Waveform colour still to play** and
-  **Play head colour**, under Mobile player and Web view, each with how much
-  of it shows, picked over the settings. The quieter outer part of the
-  waveform from the song takes them darker. The play head shows on the
-  waveform zoomed out too.
+- **Colour when played**, **Colour still to play** and **Play head colour**
+  for the waveform, under Mobile player and Web view, Waveform, each with
+  how much of it shows, picked over the settings. The quieter outer part of
+  the waveform from the song takes them darker. The play head shows on the
+  waveform zoomed out too. **Reset the waveform colours** puts all of the
+  waveform's colours back as they came.
 - **Zoom into the waveform**, in the player and the web views: pinch, the
   mouse wheel over it, or a press held still a moment and then slid up zooms
   in up to 32 times. Pinch, sliding down after the hold, or a double tap zooms
@@ -634,10 +640,11 @@ the new settings layout and a number of smaller improvements.
   play head, and another where it reaches past it. **Song's progress on the
   waveform** picks how: a bar over the waveform, a bar behind it, the
   waveform itself coloured, the thin line at its foot then in the same
-  colour, or off. Zoomed out it lies on the played part, in the same colour. **Colour up to the play head** and **Colour past
-  the play head**, each with how much of it shows, are picked over the
-  settings. All under Mobile player and Web view, the look also for each
-  browser on its own.
+  colour, or off, the waveform coloured as it comes. Zoomed out it lies on
+  the played part, in the same colour. **Progress colour up to the play
+  head** and **Progress colour past the play head**, each with how much of
+  it shows, are picked over the settings. All under Mobile player and Web
+  view, Waveform, the look also for each browser on its own.
   Dragging past two thirds of the way to an edge scrolls the waveform that
   way, faster the nearer the edge. **Remember the waveform zoom level**, under
   Mobile player and Web view, keeps the zoom for the next time the player

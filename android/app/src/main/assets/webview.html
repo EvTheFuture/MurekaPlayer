@@ -5032,6 +5032,11 @@
             return v;
         }
 
+        // Nothing kept yet, the waveform coloured
+        if (typeof on !== "boolean") {
+            return "wave";
+        }
+
         if (on === false) {
             return "off";
         }
@@ -8389,11 +8394,11 @@
         // out it lies on the played part
         const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
-        const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(255, 255, 255, 0.14)";
-        const ahead = state && state.waveZoomProgressAhead ? state.waveZoomProgressAhead : "rgba(72, 225, 235, 0.2)";
+        const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(71, 224, 235, 1)";
+        const ahead = state && state.waveZoomProgressAhead ? state.waveZoomProgressAhead : "rgba(168, 168, 168, 1)";
         const headX = Math.round((frac - start) / span * w);
         const done = progress ? Math.round(frac * w) : 0;
-        const playedFill = state && state.wavePlayedFill ? state.wavePlayedFill : "rgba(72, 225, 235, 1)";
+        const playedFill = state && state.wavePlayedFill ? state.wavePlayedFill : "rgba(72, 128, 132, 1)";
         const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
         const headFill = state && state.playHeadFill ? state.playHeadFill : "rgba(255, 255, 255, 0.6)";
         const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill,
@@ -11848,6 +11853,17 @@
             }
 
             btn.addEventListener("click", function () {
+
+                // A copy button copies its text here, in this browser, not on
+                // the phone
+                if (typeof node.copy === "string") {
+
+                    btn.textContent = copyText(node.copy) ? "Copied" : "Not copied";
+                    setTimeout(function () {
+                        btn.textContent = node.s || "?";
+                    }, 1200);
+                    return;
+                }
 
                 // An export can land here, in the browser showing this page,
                 // or on the phone. Only this page knows which one is wanted

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.339";
+    const VERSION = "1.9.9.341";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -318,21 +318,32 @@
     let settingsReadFailed = "";
     let settingsRestored = false;
 
-    // The song's progress over the zoomed waveform: a colour as #rrggbb
-    // and how much it shows, in percent. One over the played part, left of
-    // the play head, and one past it
-    const PROGRESS_ALPHA_DEFAULT = 14;
-    const PROGRESS_AHEAD_COLOR = "#48e1eb";
+    // The song's progress on the waveform: a colour as #rrggbb and how much
+    // it shows, in percent. One up to the play head, and one past it
+    const PROGRESS_COLOR = "#47e0eb";
+    const PROGRESS_ALPHA_DEFAULT = 100;
+    const PROGRESS_AHEAD_COLOR = "#a8a8a8";
+    const PROGRESS_AHEAD_ALPHA = 100;
+    const PROGRESS_ALPHA_MAX = 100;
 
     // The waveform's own colours, played and still to play
-    const WAVE_PLAYED_COLOR = "#48e1eb";
+    const WAVE_PLAYED_COLOR = "#488084";
     const WAVE_REST_COLOR = "#666666";
 
     // The play head's colour and share as they came
     const PLAY_HEAD_COLOR = "#ffffff";
     const PLAY_HEAD_ALPHA = 60;
-    const PROGRESS_AHEAD_ALPHA = 20;
-    const PROGRESS_ALPHA_MAX = 100;
+
+    // The waveform's colours as they came, by their settings: the colour,
+    // its share and their values, for the mobile player. The web view's
+    // have web before them
+    const WAVE_COLOR_DEFAULTS = [
+        ["waveColor", "waveAlpha", WAVE_PLAYED_COLOR, 100],
+        ["waveRestColor", "waveRestAlpha", WAVE_REST_COLOR, 100],
+        ["playHeadColor", "playHeadAlpha", PLAY_HEAD_COLOR, PLAY_HEAD_ALPHA],
+        ["waveZoomProgressColor", "waveZoomProgressAlpha", PROGRESS_COLOR, PROGRESS_ALPHA_DEFAULT],
+        ["waveZoomProgressAheadColor", "waveZoomProgressAheadAlpha", PROGRESS_AHEAD_COLOR, PROGRESS_AHEAD_ALPHA]
+    ];
 
     function progressColor(v, fallback) {
         return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : (fallback || "#ffffff");
@@ -382,6 +393,11 @@
 
         if (PROGRESS_LOOKS.indexOf(v) !== -1) {
             return v;
+        }
+
+        // Nothing kept yet, the waveform coloured
+        if (typeof on !== "boolean") {
+            return "wave";
         }
 
         if (on === false) {
@@ -2577,8 +2593,8 @@
             webWaveSource: "mureka",
             waveZoomKeep: false,
             webWaveZoomKeep: false,
-            waveZoomProgressLook: "over",
-            webWaveZoomProgressLook: "over",
+            waveZoomProgressLook: "wave",
+            webWaveZoomProgressLook: "wave",
             waveColor: WAVE_PLAYED_COLOR,
             webWaveColor: WAVE_PLAYED_COLOR,
             waveAlpha: 100,
@@ -2591,8 +2607,8 @@
             webPlayHeadColor: PLAY_HEAD_COLOR,
             playHeadAlpha: PLAY_HEAD_ALPHA,
             webPlayHeadAlpha: PLAY_HEAD_ALPHA,
-            waveZoomProgressColor: "#ffffff",
-            webWaveZoomProgressColor: "#ffffff",
+            waveZoomProgressColor: PROGRESS_COLOR,
+            webWaveZoomProgressColor: PROGRESS_COLOR,
             waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
             webWaveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
             waveZoomProgressAheadColor: PROGRESS_AHEAD_COLOR,
@@ -2817,8 +2833,8 @@
                     webPlayHeadColor: progressColor(parsed.webPlayHeadColor, PLAY_HEAD_COLOR),
                     playHeadAlpha: progressAlpha(parsed.playHeadAlpha, PLAY_HEAD_ALPHA),
                     webPlayHeadAlpha: progressAlpha(parsed.webPlayHeadAlpha, PLAY_HEAD_ALPHA),
-                    waveZoomProgressColor: progressColor(parsed.waveZoomProgressColor),
-                    webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor),
+                    waveZoomProgressColor: progressColor(parsed.waveZoomProgressColor, PROGRESS_COLOR),
+                    webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor, PROGRESS_COLOR),
                     waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
                     webWaveZoomProgressAlpha: progressAlpha(parsed.webWaveZoomProgressAlpha),
                     waveZoomProgressAheadColor: progressColor(parsed.waveZoomProgressAheadColor, PROGRESS_AHEAD_COLOR),
@@ -24802,6 +24818,19 @@
         return hostListMemo;
     }
 
+    // Whether a song matches search text, already lowercase: by its title,
+    // or by its song ID given whole
+    function searchMatches(song, q) {
+
+        if (!q) {
+            return true;
+        }
+
+        const title = (song.title || "").trim() || "Untitled";
+
+        return title.toLowerCase().indexOf(q) !== -1 || String(song.song_id) === q;
+    }
+
     // One page of the song list the web view asked for, the player's own filters
     // applied, then the web view's search text on top
     function hostList(req) {
@@ -24834,7 +24863,7 @@
 
             const title = (song.title || "").trim() || "Untitled";
 
-            if (q && title.toLowerCase().indexOf(q) === -1) {
+            if (!searchMatches(song, q)) {
                 continue;
             }
 
@@ -24906,9 +24935,10 @@
         for (let i = 0; i < queue.length; i++) {
 
             const song = queue[i];
+
             const title = (song.title || "").trim() || "Untitled";
 
-            if (q && title.toLowerCase().indexOf(q) === -1) {
+            if (!searchMatches(song, q)) {
                 continue;
             }
 
@@ -25007,7 +25037,8 @@
                 off: el.disabled === true,
                 exp: el.dataset.hostExport || "",
                 imp: el.dataset.hostImport === "1",
-                wide: el.style.textAlign === "left"
+                wide: el.style.textAlign === "left",
+                copy: typeof el.__copyText === "function" ? String(el.__copyText() || "") : undefined
             });
             return;
         }
@@ -31019,8 +31050,6 @@
 
         songs.forEach(function (song, i) {
 
-            const title = (song.title || "").trim() || "Untitled";
-
             // Skip rows hidden by the vocals or playlist filter
             // The queue view always shows the real queue, so it is never filtered
             if (listView !== "queue" && !isPendingSong(song) && !passesFilters(song)) {
@@ -31028,7 +31057,7 @@
             }
 
             // Skip rows that do not match the current search text
-            if (query && title.toLowerCase().indexOf(query) === -1) {
+            if (!searchMatches(song, query)) {
                 return;
             }
 
@@ -31569,6 +31598,49 @@
         controls.appendChild(pct);
         row.appendChild(name);
         row.appendChild(controls);
+
+        return row;
+    }
+
+    // Shows or hides a settings row, keeping the display it was made with
+    function showSettingsRow(el, show) {
+
+        if (el.__shownAs === undefined) {
+            el.__shownAs = el.style.display;
+        }
+
+        el.style.display = show ? el.__shownAs : "none";
+    }
+
+    // A button that puts the waveform's colours back as they came. prefix
+    // is "" for the mobile player's and "web" for the web view's, rows the
+    // colour rows to paint again and changed what runs after
+    function makeWaveColorReset(prefix, rows, changed) {
+
+        const row = document.createElement("div");
+        const key = function (name) {
+            return prefix ? prefix + name.charAt(0).toUpperCase() + name.slice(1) : name;
+        };
+
+        row.style.cssText = "display:flex";
+        row.appendChild(makeButton("Reset the waveform colours", "#444", "#fff", function (ev) {
+
+            buttonDone(ev.currentTarget, "Reset", true);
+
+            for (const d of WAVE_COLOR_DEFAULTS) {
+
+                settings[key(d[0])] = d[2];
+                settings[key(d[1])] = d[3];
+            }
+
+            saveSettings();
+
+            for (const r of rows) {
+                r.__paint();
+            }
+
+            changed();
+        }));
 
         return row;
     }
@@ -33156,9 +33228,18 @@
             paintOfflineBadge();
         });
 
+        // Shows the waveform's other rows only with the waveform on, set
+        // once they are on the page
+        let paintMobileWave = function () {};
+
         const waveRow = makeBoolRow("Waveform seek bar",
             function () { return settings.waveSeek; },
-            function (v) { settings.waveSeek = v; updateSeekMode(); });
+            function (v) {
+
+                settings.waveSeek = v;
+                updateSeekMode();
+                paintMobileWave();
+            });
 
         // Common: the rest of playback, the artwork and the library counts
         playbackPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
@@ -33360,13 +33441,8 @@
             mobilePage.appendChild(el);
         }
 
-        mobilePage.appendChild(makeLabel("Main page"));
-        mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
-        mobilePage.appendChild(makeSubLabel("Waveform from"));
-        mobilePage.appendChild(waveSourceRow);
-        mobilePage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."));
 
-        const waveColorRow = makeColorRow("Waveform colour when played",
+        const waveColorRow = makeColorRow("Colour when played",
             function () { return settings.waveColor; },
             function () { return settings.waveAlpha; },
             function (color, alpha) {
@@ -33376,7 +33452,7 @@
                 drawWave();
             });
 
-        const waveRestColorRow = makeColorRow("Waveform colour still to play",
+        const waveRestColorRow = makeColorRow("Colour still to play",
             function () { return settings.waveRestColor; },
             function () { return settings.waveRestAlpha; },
             function (color, alpha) {
@@ -33396,9 +33472,6 @@
                 drawWave();
             });
 
-        mobilePage.appendChild(withHint(waveColorRow, WAVE_COLOR_HINT));
-        mobilePage.appendChild(withHint(waveRestColorRow, WAVE_REST_HINT));
-        mobilePage.appendChild(withHint(playHeadColorRow, PLAY_HEAD_HINT));
 
         const waveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
             function () { return settings.waveZoomKeep === true; },
@@ -33418,7 +33491,6 @@
                 }
             });
 
-        mobilePage.appendChild(withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."));
 
         const waveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
             function () { return progressLook(settings.waveZoomProgressLook); },
@@ -33426,9 +33498,10 @@
 
                 settings.waveZoomProgressLook = v;
                 drawWave();
+                paintMobileWave();
             });
 
-        const waveProgressColorRow = makeColorRow("Colour up to the play head",
+        const waveProgressColorRow = makeColorRow("Progress colour up to the play head",
             function () { return settings.waveZoomProgressColor; },
             function () { return settings.waveZoomProgressAlpha; },
             function (color, alpha) {
@@ -33438,7 +33511,7 @@
                 drawWave();
             });
 
-        const waveProgressAheadRow = makeColorRow("Colour past the play head",
+        const waveProgressAheadRow = makeColorRow("Progress colour past the play head",
             function () { return settings.waveZoomProgressAheadColor; },
             function () { return settings.waveZoomProgressAheadAlpha; },
             function (color, alpha) {
@@ -33448,12 +33521,68 @@
                 drawWave();
             });
 
-        mobilePage.appendChild(makeSubLabel("Song's progress on the waveform"));
-        mobilePage.appendChild(waveProgressRow);
-        mobilePage.appendChild(makeHint(PROGRESS_LOOK_HINT + " The play head comes first when the two are close together."));
-        mobilePage.appendChild(withHint(waveProgressColorRow, PROGRESS_COLOR_HINT));
-        mobilePage.appendChild(withHint(waveProgressAheadRow, PROGRESS_AHEAD_HINT));
+
+        // The waveform: whether it shows and where it comes from, how it
+        // zooms, its colours, then how the song's progress shows on it and
+        // in which colours. Without the waveform the rest is hidden, and
+        // without the progress on it so are its colours
+        const mobileWave = [
+            makeSubLabel("Waveform from"),
+            waveSourceRow,
+            makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."),
+            withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."),
+            withHint(waveColorRow, WAVE_COLOR_HINT),
+            withHint(waveRestColorRow, WAVE_REST_HINT),
+            withHint(playHeadColorRow, PLAY_HEAD_HINT),
+            makeSubLabel("Song's progress on the waveform"),
+            waveProgressRow,
+            makeHint(PROGRESS_LOOK_HINT + " The play head comes first when the two are close together.")
+        ];
+        const mobileWaveProgress = [
+            withHint(waveProgressColorRow, PROGRESS_COLOR_HINT),
+            withHint(waveProgressAheadRow, PROGRESS_AHEAD_HINT)
+        ];
+        const mobileWaveReset = makeWaveColorReset("", [waveColorRow, waveRestColorRow, playHeadColorRow,
+            waveProgressColorRow, waveProgressAheadRow], drawWave);
+
+        paintMobileWave = function () {
+
+            const on = settings.waveSeek === true;
+            const progress = progressLook(settings.waveZoomProgressLook) !== "off";
+
+            mobileWave.forEach(function (el) {
+                showSettingsRow(el, on);
+            });
+            mobileWaveProgress.forEach(function (el) {
+                showSettingsRow(el, on && progress);
+            });
+            showSettingsRow(mobileWaveReset, on);
+        };
+
+        mobilePage.appendChild(makeLabel("Waveform"));
+        mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
+        mobileWave.concat(mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
+            mobilePage.appendChild(el);
+        });
+        paintMobileWave();
+        settingsRefreshers.push(paintMobileWave);
+
+        // What shows on the cover, the lyrics and the control buttons
+        mobilePage.appendChild(makeLabel("Cover and lyrics"));
+        mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
+        mobilePage.appendChild(lyricSizeRow);
+        mobilePage.appendChild(lyricSideRow);
+        mobilePage.appendChild(lyricSpaceRow);
+        mobilePage.appendChild(lyricShiftRow);
+        mobilePage.appendChild(lyricSideShiftRow);
+        mobilePage.appendChild(makeHint("Lyric size is the line being sung, in pixels. Side lines are the lines before and after it, in percent of that size. Line spacing is the distance between lines. Lyric position moves the whole block up or down, and side line offset moves the side lines in from the left."));
+        mobilePage.appendChild(makeLabel("Control buttons"));
+        mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
+        mobilePage.appendChild(controlOrderRow);
+
+        // The badge in the header
+        mobilePage.appendChild(makeLabel("Badges"));
         mobilePage.appendChild(makeSubLabel("Online badge"));
         mobilePage.appendChild(onlineBadgeRow);
         mobilePage.appendChild(makeHint("The red Offline badge in the header shows while there is no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the player is online."));
@@ -33509,17 +33638,6 @@
         mobileScreenOff.forEach(function (el) {
             mobilePage.appendChild(el);
         });
-        mobilePage.appendChild(makeLabel("Cover and lyrics"));
-        mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
-        mobilePage.appendChild(lyricSizeRow);
-        mobilePage.appendChild(lyricSideRow);
-        mobilePage.appendChild(lyricSpaceRow);
-        mobilePage.appendChild(lyricShiftRow);
-        mobilePage.appendChild(lyricSideShiftRow);
-        mobilePage.appendChild(makeHint("Lyric size is the line being sung, in pixels. Side lines are the lines before and after it, in percent of that size. Line spacing is the distance between lines. Lyric position moves the whole block up or down, and side line offset moves the side lines in from the left."));
-        mobilePage.appendChild(makeLabel("Control buttons"));
-        mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
-        mobilePage.appendChild(controlOrderRow);
         // The data entered by hand, song tweaks and settings, kept apart, since the
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
@@ -33915,9 +34033,6 @@
                 buildWebLoginRows(webPage);
             }
 
-            webPage.appendChild(makeLabel("Main page"));
-            webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
-            webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
 
             // The web view's own choice of waveform
             const webWaveSourceRow = makeChoiceRow([
@@ -33929,11 +34044,8 @@
                 publishHostSoon();
             });
 
-            webPage.appendChild(makeSubLabel("Waveform from"));
-            webPage.appendChild(webWaveSourceRow);
-            webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
 
-            const webWaveColorRow = makeColorRow("Waveform colour when played",
+            const webWaveColorRow = makeColorRow("Colour when played",
                 function () { return settings.webWaveColor; },
                 function () { return settings.webWaveAlpha; },
                 function (color, alpha) {
@@ -33943,7 +34055,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveRestColorRow = makeColorRow("Waveform colour still to play",
+            const webWaveRestColorRow = makeColorRow("Colour still to play",
                 function () { return settings.webWaveRestColor; },
                 function () { return settings.webWaveRestAlpha; },
                 function (color, alpha) {
@@ -33963,9 +34075,6 @@
                     publishHostSoon();
                 });
 
-            webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
-            webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
-            webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
 
             const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
                 function () { return settings.webWaveZoomKeep === true; },
@@ -33975,7 +34084,6 @@
                     publishHostSoon();
                 });
 
-            webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
 
             const webWaveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
                 function () { return progressLook(settings.webWaveZoomProgressLook); },
@@ -33985,7 +34093,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveProgressColorRow = makeColorRow("Colour up to the play head",
+            const webWaveProgressColorRow = makeColorRow("Progress colour up to the play head",
                 function () { return settings.webWaveZoomProgressColor; },
                 function () { return settings.webWaveZoomProgressAlpha; },
                 function (color, alpha) {
@@ -33995,7 +34103,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveProgressAheadRow = makeColorRow("Colour past the play head",
+            const webWaveProgressAheadRow = makeColorRow("Progress colour past the play head",
                 function () { return settings.webWaveZoomProgressAheadColor; },
                 function () { return settings.webWaveZoomProgressAheadAlpha; },
                 function (color, alpha) {
@@ -34005,11 +34113,6 @@
                     publishHostSoon();
                 });
 
-            webPage.appendChild(makeSubLabel("Song's progress on the waveform"));
-            webPage.appendChild(webWaveProgressRow);
-            webPage.appendChild(makeHint(PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
-            webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
-            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT));
 
             const webOnlineBadgeRow = makeChoiceRow([
                 { label: "Fade away", value: "fade" },
@@ -34020,11 +34123,6 @@
                 publishHostSoon();
             });
 
-            webPage.appendChild(makeSubLabel("Online badge"));
-            webPage.appendChild(webOnlineBadgeRow);
-            webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
-            webPage.appendChild(withHint(webHotspotRow, "A badge after the heat badge, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
-            webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
             const heatTextRow = makeChoiceRow([
                 { label: "Cool", value: "word" },
                 { label: "Cool 37 \u00B0C", value: "both" },
@@ -34035,6 +34133,52 @@
                 publishHostSoon();
             });
 
+            webPage.appendChild(makeLabel("Main page"));
+            webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
+            webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
+
+            // The waveform: whether it shows and where it comes from, how it
+            // zooms, its colours, then how the song's progress shows on it and
+            // in which colours
+            const webWaveReset = makeWaveColorReset("web", [webWaveColorRow, webWaveRestColorRow, webPlayHeadColorRow,
+                webWaveProgressColorRow, webWaveProgressAheadRow], publishHostSoon);
+
+            webPage.appendChild(makeLabel("Waveform"));
+            webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
+            webPage.appendChild(makeSubLabel("Waveform from"));
+            webPage.appendChild(webWaveSourceRow);
+            webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+            webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
+            webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
+            webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
+            webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
+            webPage.appendChild(makeSubLabel("Song's progress on the waveform"));
+            webPage.appendChild(webWaveProgressRow);
+            webPage.appendChild(makeHint(PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
+            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT));
+            webPage.appendChild(webWaveReset);
+
+            // The synced lyrics and how they are laid out
+            webPage.appendChild(makeLabel("Lyrics"));
+            webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
+            webPage.appendChild(webLyricSizeRow);
+            webPage.appendChild(webLyricSideRow);
+            webPage.appendChild(webLyricSpaceRow);
+            webPage.appendChild(webLyricSideShiftRow);
+            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
+
+            webPage.appendChild(makeLabel("Control buttons"));
+            webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
+            webPage.appendChild(webControlRow);
+
+            // The badges along the top
+            webPage.appendChild(makeLabel("Badges"));
+            webPage.appendChild(makeSubLabel("Online badge"));
+            webPage.appendChild(webOnlineBadgeRow);
+            webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
+            webPage.appendChild(withHint(webHotspotRow, "A badge after the heat badge, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
+            webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
             webPage.appendChild(makeSubLabel("Heat badge shows"));
             webPage.appendChild(heatTextRow);
             webPage.appendChild(makeHint("The word, the word and the battery's temperature, or the temperature alone. The colour follows the limits below either way."));
@@ -34042,16 +34186,6 @@
             webPage.appendChild(heatHotRow);
             webPage.appendChild(heatVeryHotRow);
             webPage.appendChild(makeHint("Below the warm temperature the heat badge says cool. Android's own heat level counts from moderate up and can make the badge say more."));
-            webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
-            webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
-            webPage.appendChild(webLyricSizeRow);
-            webPage.appendChild(webLyricSideRow);
-            webPage.appendChild(webLyricSpaceRow);
-            webPage.appendChild(webLyricSideShiftRow);
-            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
-            webPage.appendChild(makeLabel("Control buttons"));
-            webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
-            webPage.appendChild(webControlRow);
 
             // The web view's own screen off, apart from the mobile player's
             webPage.appendChild(makeLabel("Screen off"));
@@ -39431,6 +39565,9 @@
         btn.style.cssText = "flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:none;border-radius:6px;background:#333;color:#fff;cursor:pointer";
         btn.appendChild(makeCopyIcon());
 
+        // A web view copies the text in its own browser instead
+        btn.__copyText = getText;
+
         let timer = 0;
 
         btn.addEventListener("click", async function (ev) {
@@ -39728,7 +39865,14 @@
 
         addInfoRow("Created", fmtDate(song.generate_at));
         addInfoRow("Published", song.publish_at ? fmtDate(song.publish_at) : "-");
-        addInfoRow("Song ID", String(song.song_id));
+        // The song's own number on Mureka, the same for everyone, so a
+        // friend can copy it and it can be searched for
+        const idEl = addInfoRow("Song ID", String(song.song_id));
+
+        idEl.parentNode.style.alignItems = "center";
+        idEl.parentNode.appendChild(makeCopyButton(function () {
+            return String(song.song_id);
+        }));
 
         // Style prompt and lyrics come from the detail fetch
         const promptBlock = addCopyBlock("Style prompt", false);
