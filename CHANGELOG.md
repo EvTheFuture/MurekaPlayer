@@ -614,17 +614,23 @@ the new settings layout and a number of smaller improvements.
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
 - **Zoom into the waveform**, in the player and the web views: pinch, the
-  mouse wheel over it, or a press held still a moment and then slid up
-  zooms in up to 32 times. Pinch, sliding down after the hold, or a double
-  tap zooms out. A press that moves sideways first stays a drag. Zoomed
-  in, the play head stays in the middle and the waveform moves under it,
-  easing in from the start and out toward the end, with a thin progress line of the whole song along its foot. Dragging
-  along that line moves through the whole song, as zoomed out. Dragging
-  past two thirds of the way to an edge scrolls the waveform that way,
-  faster the nearer the edge. **Remember the waveform zoom level**, under
-  Mobile player and Web view, keeps the zoom for the next time the player
-  opens, each browser its own, and a web view can have it set for itself
-  alone.
+  mouse wheel over it, or a press held still a moment and then slid up zooms
+  in up to 32 times. Pinch, sliding down after the hold, or a double tap zooms
+  out. A press that moves sideways first stays a drag. Zoomed in, the play
+  head stays in the middle and the waveform moves under it, easing in from the
+  start and out toward the end, with a thin progress line of the whole song
+  along its foot. Dragging along that line moves through the whole song, as
+  zoomed out. A lighter layer from the waveform's left edge across its full
+  height shows how far into the whole song it is, and its edge can be dragged
+  at any height to move through the whole song, the waveform following, the
+  play head coming first when the two are close. **Song's progress when
+  zoomed**, **Progress under the waveform** and **Progress colour**, with its
+  colour and how much of it shows, under Mobile player and Web view, the first
+  two also for each browser on its own. Dragging past two thirds of the way to
+  an edge scrolls the waveform that way, faster the nearer the edge.
+  **Remember the waveform zoom level**, under Mobile player and Web view,
+  keeps the zoom for the next time the player opens, each browser its own, and
+  a web view can have it set for itself alone.
 - **Autoplay on start** moved to This device, under Playing by itself.
 - **Play on after a quick restart**, under This device, Playing by itself:
   opened again within that many seconds after it closed while playing, a

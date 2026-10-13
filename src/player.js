@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.326";
+    const VERSION = "1.9.9.329";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -317,6 +317,31 @@
     // brought back
     let settingsReadFailed = "";
     let settingsRestored = false;
+
+    // The song's progress over the zoomed waveform: its colour as #rrggbb
+    // and how much it shows, in percent
+    const PROGRESS_ALPHA_DEFAULT = 14;
+    const PROGRESS_ALPHA_MAX = 80;
+
+    function progressColor(v) {
+        return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : "#ffffff";
+    }
+
+    function progressAlpha(v) {
+
+        const n = Number(v);
+
+        return isFinite(n) && v !== null && v !== "" ? Math.max(0, Math.min(PROGRESS_ALPHA_MAX, Math.round(n))) : PROGRESS_ALPHA_DEFAULT;
+    }
+
+    // The colour and its share as one fill for the canvas
+    function progressFill(color, alpha) {
+
+        const c = progressColor(color);
+
+        return "rgba(" + parseInt(c.slice(1, 3), 16) + ", " + parseInt(c.slice(3, 5), 16) + ", "
+            + parseInt(c.slice(5, 7), 16) + ", " + (progressAlpha(alpha) / 100) + ")";
+    }
 
     let settings = loadSettings();
 
@@ -2495,6 +2520,14 @@
             webWaveSource: "mureka",
             waveZoomKeep: false,
             webWaveZoomKeep: false,
+            waveZoomProgress: true,
+            webWaveZoomProgress: true,
+            waveZoomProgressBelow: false,
+            webWaveZoomProgressBelow: false,
+            waveZoomProgressColor: "#ffffff",
+            webWaveZoomProgressColor: "#ffffff",
+            waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
+            webWaveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
             webOnlineBadge: "fade",
             webNames: false,
             webHotspotBadge: false,
@@ -2698,6 +2731,14 @@
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
                     waveZoomKeep: parsed.waveZoomKeep === true,
                     webWaveZoomKeep: parsed.webWaveZoomKeep === true,
+                    waveZoomProgress: parsed.waveZoomProgress !== false,
+                    webWaveZoomProgress: parsed.webWaveZoomProgress !== false,
+                    waveZoomProgressBelow: parsed.waveZoomProgressBelow === true,
+                    webWaveZoomProgressBelow: parsed.webWaveZoomProgressBelow === true,
+                    waveZoomProgressColor: progressColor(parsed.waveZoomProgressColor),
+                    webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor),
+                    waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
+                    webWaveZoomProgressAlpha: progressAlpha(parsed.webWaveZoomProgressAlpha),
                     webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
                     webNames: parsed.webNames === true,
                     webHotspotBadge: parsed.webHotspotBadge === true,
@@ -20948,6 +20989,7 @@
         const TAP_MOVE = 6;
         const HOLD_MS = 350;
         const HOLD_ZOOM_PX = 90;
+        const GRAB_PX = 24;
         const EASE_PART = 0.3;
         const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
             holdTimer: 0, holdZoom: null };
@@ -21206,7 +21248,23 @@
             // runs, moves through the whole song as the waveform does zoomed
             // out. Elsewhere it moves the play head in the part in view
             const box = el.getBoundingClientRect();
-            const overview = span() < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            const sp = span();
+            let overview = sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+
+            // Zoomed in with the song's progress over the waveform, its edge
+            // is grabbed at any height to move through the whole song. The
+            // play head comes first when the two are close together
+            if (!overview && sp < 1 && hooks.edge && hooks.edge()) {
+
+                const r = hooks.rect();
+                const pf = hooks.playFrac();
+                const headX = r.left + (pf - z.start(pf)) / sp * r.width;
+                const edgeX = r.left + pf * r.width;
+
+                if (r.width > 0 && Math.abs(ev.clientX - headX) > GRAB_PX && Math.abs(ev.clientX - edgeX) <= GRAB_PX) {
+                    overview = true;
+                }
+            }
 
             z.drag = { start: z.start(hooks.playFrac()), px: across(ev), at: now, t0: now, x: ev.clientX, moved: false,
                 overview: overview, y: ev.clientY, lastY: ev.clientY, movedY: false };
@@ -21401,6 +21459,14 @@
         }
     }
 
+    // Zoomed in, how far into the whole song it is, from the left edge and
+    // the full height, as if the waveform were the song's progress bar
+    function drawWaveProgress(ctx, w, h, frac, fill) {
+
+        ctx.fillStyle = fill;
+        ctx.fillRect(0, 0, Math.round(Math.max(0, Math.min(1, frac)) * w), h);
+    }
+
     // Mureka's waveform as bars, each the highest point of its slice. Each
     // bar keeps its place in the song, so zoomed in they slide along rather
     // than change height as the view moves
@@ -21472,12 +21538,26 @@
         const span = waveZoomer ? waveZoomer.span() : 1;
         const start = waveZoomer ? waveZoomer.start(frac) : 0;
 
+        // Zoomed in, the song's progress across the whole waveform, under it
+        // or over it
+        const progress = span < 1 && settings.waveZoomProgress !== false;
+        const below = settings.waveZoomProgressBelow === true;
+        const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
+
+        if (progress && below) {
+            drawWaveProgress(ctx, w, h, frac, fill);
+        }
+
         // Our own waveform in two layers a column per screen pixel, Mureka's
         // as bars, so the two look apart
         if (waveOwn !== null && waveData === waveOwn && waveOwnLoud) {
             drawLayeredWave(ctx, w, h, waveOwn, waveOwnLoud, frac, start, span);
         } else {
             drawWaveBars(ctx, w, h, waveData, frac, start, span, 2 * dpr, 1 * dpr, dpr);
+        }
+
+        if (progress && !below) {
+            drawWaveProgress(ctx, w, h, frac, fill);
         }
 
         if (span < 1) {
@@ -22764,6 +22844,9 @@
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: settings.webWaveZoomKeep === true,
+            waveZoomProgress: settings.webWaveZoomProgress !== false,
+            waveZoomProgressBelow: settings.webWaveZoomProgressBelow === true,
+            waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
             offline: offlineMode(),
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
@@ -24646,6 +24729,18 @@
             return;
         }
 
+        if (tag === "BUTTON" && el.dataset.hostColor) {
+
+            out.push({
+                t: "color",
+                id: hostId(el, path),
+                color: el.dataset.hostColor,
+                alpha: Number(el.dataset.hostAlpha) || 0,
+                max: Number(el.dataset.hostAlphaMax) || 100
+            });
+            return;
+        }
+
         if (tag === "BUTTON") {
 
             out.push({
@@ -25381,6 +25476,14 @@
 
             if (el) {
                 el.click();
+            }
+        } else if (cmd === "hcolor") {
+
+            // A colour picked in the web view, for a swatch in the settings
+            const el = arg ? hostElement(arg.id) : null;
+
+            if (el && typeof el.__setColor === "function") {
+                el.__setColor(String(arg.color || ""), Number(arg.alpha));
             }
         } else if (cmd === "hset") {
 
@@ -26332,6 +26435,9 @@
         waveZoomer = makeWaveZoom(waveCanvas, {
             ready: function () {
                 return songTimes().length > 0;
+            },
+            edge: function () {
+                return settings.waveZoomProgress !== false;
             },
             zoomable: function () {
                 return !!waveData && waveCanvas.style.display !== "none";
@@ -30903,6 +31009,309 @@
         return row;
     }
 
+    // A colour and how much of it shows, picked over the page: hue,
+    // saturation, lightness and opacity sliders, a few ready colours and a
+    // swatch of the result over a chequer. Each change is handed to change
+    // at once, Cancel or a tap beside it hands back the colour it opened with
+    const PICK_SWATCHES = ["#ffffff", "#c8c8d0", "#48e1eb", "#7ee787", "#ffd166", "#ff9f43", "#ff6b9a", "#a78bfa"];
+
+    function hexToHsl(hex) {
+
+        const r = parseInt(hex.slice(1, 3), 16) / 255;
+        const g = parseInt(hex.slice(3, 5), 16) / 255;
+        const b = parseInt(hex.slice(5, 7), 16) / 255;
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const l = (max + min) / 2;
+        let h = 0;
+        let s = 0;
+
+        if (max !== min) {
+
+            const d = max - min;
+
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+
+            if (max === r) {
+                h = (g - b) / d + (g < b ? 6 : 0);
+            } else if (max === g) {
+                h = (b - r) / d + 2;
+            } else {
+                h = (r - g) / d + 4;
+            }
+
+            h *= 60;
+        }
+
+        return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) };
+    }
+
+    function hslToHex(h, s, l) {
+
+        const sat = s / 100;
+        const lig = l / 100;
+        const k = function (n) {
+            return (n + h / 30) % 12;
+        };
+        const a = sat * Math.min(lig, 1 - lig);
+        const f = function (n) {
+
+            const v = lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+
+            return Math.round(v * 255).toString(16).padStart(2, "0");
+        };
+
+        return "#" + f(0) + f(8) + f(4);
+    }
+
+    function openColorPicker(title, color, alpha, maxAlpha, change) {
+
+        const startColor = color;
+        const startAlpha = alpha;
+        const hsl = hexToHsl(color);
+        let nowAlpha = alpha;
+
+        // A colour given as it is, the one opened with or a ready one, kept
+        // exactly until a colour slider moves
+        let exact = color;
+
+        const back = document.createElement("div");
+        const box = document.createElement("div");
+        const head = document.createElement("div");
+        const preview = document.createElement("div");
+        const fill = document.createElement("div");
+        const swatches = document.createElement("div");
+        const buttons = document.createElement("div");
+
+        back.style.cssText = "position:fixed;inset:0;z-index:2147483600;background:rgba(0,0,0,0.6);display:flex;"
+            + "align-items:center;justify-content:center;padding:12px;box-sizing:border-box";
+        box.style.cssText = "background:#26262c;color:#fff;border:1px solid #3a3a42;border-radius:14px;padding:16px;"
+            + "width:min(max(420px,42vw),100%);box-sizing:border-box;display:flex;flex-direction:column;gap:12px;"
+            + "font:clamp(15px,1.8vw,24px)/1.4 sans-serif;box-shadow:0 8px 28px rgba(0,0,0,0.5)";
+        head.style.cssText = "font-weight:600";
+        head.textContent = title;
+        preview.style.cssText = "height:2.9em;border-radius:8px;border:1px solid #555;position:relative;overflow:hidden;"
+            + "background-color:#1d1d22;background-image:linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%),"
+            + "linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%);"
+            + "background-size:14px 14px;background-position:0 0,7px 7px";
+        fill.style.cssText = "position:absolute;inset:0";
+        preview.appendChild(fill);
+        swatches.style.cssText = "display:flex;flex-wrap:wrap;gap:8px";
+        buttons.style.cssText = "display:flex;justify-content:flex-end;gap:10px";
+
+        const sliders = {};
+
+        // One labelled slider, its value beside it
+        const slider = function (key, label, max, unit, value) {
+
+            const row = document.createElement("label");
+            const name = document.createElement("span");
+            const input = document.createElement("input");
+            const shown = document.createElement("span");
+
+            row.style.cssText = "display:flex;align-items:center;gap:10px";
+            name.style.cssText = "flex:0 0 6.5em";
+            name.textContent = label;
+            input.type = "range";
+            input.min = "0";
+            input.max = String(max);
+            input.step = "1";
+            input.value = String(value);
+            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:#48e1eb";
+            shown.style.cssText = "flex:0 0 3.6em;text-align:right;font-variant-numeric:tabular-nums";
+            shown.textContent = value + unit;
+            input.addEventListener("input", function () {
+
+                if (key !== "a") {
+                    exact = null;
+                }
+
+                shown.textContent = input.value + unit;
+                apply();
+            });
+            row.appendChild(name);
+            row.appendChild(input);
+            row.appendChild(shown);
+            sliders[key] = { input: input, shown: shown, unit: unit };
+
+            return row;
+        };
+
+        const nowColor = function () {
+            return exact || hslToHex(Number(sliders.h.input.value), Number(sliders.s.input.value), Number(sliders.l.input.value));
+        };
+
+        const paint = function () {
+
+            const c = nowColor();
+
+            fill.style.background = "rgba(" + parseInt(c.slice(1, 3), 16) + ", " + parseInt(c.slice(3, 5), 16) + ", "
+                + parseInt(c.slice(5, 7), 16) + ", " + (nowAlpha / 100) + ")";
+        };
+
+        const apply = function () {
+
+            nowAlpha = Number(sliders.a.input.value);
+            paint();
+            change(nowColor(), nowAlpha);
+        };
+
+        // A ready colour sets the three colour sliders, the opacity stays
+        const setColor = function (hex) {
+
+            const v = hexToHsl(hex);
+
+            for (const key of ["h", "s", "l"]) {
+
+                sliders[key].input.value = String(v[key]);
+                sliders[key].shown.textContent = v[key] + sliders[key].unit;
+            }
+
+            exact = hex;
+            apply();
+        };
+
+        for (const hex of PICK_SWATCHES) {
+
+            const sw = document.createElement("button");
+
+            sw.type = "button";
+            sw.setAttribute("aria-label", hex);
+            sw.style.cssText = "width:2.4em;height:2.4em;border-radius:8px;border:1px solid #555;cursor:pointer;padding:0;background:" + hex;
+            sw.addEventListener("click", function () {
+                setColor(hex);
+            });
+            swatches.appendChild(sw);
+        }
+
+        const close = function (keep) {
+
+            if (!keep) {
+                change(startColor, startAlpha);
+            }
+
+            back.remove();
+        };
+
+        const button = function (label, keep, accent) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.textContent = label;
+            b.style.cssText = "min-height:2.9em;padding:0 1.2em;border-radius:10px;border:none;cursor:pointer;font:inherit;"
+                + (accent ? "background:#48e1eb;color:#000" : "background:#3a3a42;color:#fff");
+            b.addEventListener("click", function () {
+                close(keep);
+            });
+
+            return b;
+        };
+
+        buttons.appendChild(button("Cancel", false, false));
+        buttons.appendChild(button("Done", true, true));
+
+        box.appendChild(head);
+        box.appendChild(preview);
+        box.appendChild(swatches);
+        box.appendChild(slider("h", "Hue", 359, "", hsl.h));
+        box.appendChild(slider("s", "Saturation", 100, " %", hsl.s));
+        box.appendChild(slider("l", "Lightness", 100, " %", hsl.l));
+        box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
+        box.appendChild(buttons);
+        back.appendChild(box);
+
+        // A tap beside it is Cancel
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close(false);
+            }
+        });
+
+        // Nothing in it reaches what lies under it
+        for (const name of ["pointerdown", "touchstart", "keydown"]) {
+
+            back.addEventListener(name, function (ev) {
+                ev.stopPropagation();
+            });
+        }
+
+        paint();
+
+        // In fullscreen only what is inside the fullscreen part shows
+        (document.fullscreenElement || document.body).appendChild(back);
+    }
+
+    // A colour with how much of it shows: a swatch of the two together, a
+    // tap on it opens the picker, and the share beside it. The web view
+    // reads the colour from the swatch and opens a picker of its own
+    function makeColorRow(label, getColor, getAlpha, set) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const swatch = document.createElement("button");
+        const fillEl = document.createElement("span");
+        const pct = document.createElement("span");
+
+        row.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+        name.textContent = label;
+        name.style.cssText = "flex:1;min-width:0";
+        swatch.type = "button";
+        swatch.setAttribute("aria-label", "Pick the colour");
+        swatch.style.cssText = "flex:0 0 auto;width:64px;height:36px;border-radius:8px;border:1px solid #555;padding:0;"
+            + "cursor:pointer;position:relative;overflow:hidden;background-color:#1d1d22;"
+            + "background-image:linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%),"
+            + "linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%);"
+            + "background-size:10px 10px;background-position:0 0,5px 5px";
+        fillEl.style.cssText = "position:absolute;inset:0";
+        swatch.appendChild(fillEl);
+        pct.style.cssText = "flex:0 0 auto;font-variant-numeric:tabular-nums";
+
+        // The web view shows the share beside its own swatch
+        pct.dataset.hostSkip = "1";
+
+        const paint = function () {
+
+            const c = progressColor(getColor());
+            const a = progressAlpha(getAlpha());
+
+            fillEl.style.background = progressFill(c, a);
+            pct.textContent = a + " %";
+            swatch.dataset.hostColor = c;
+            swatch.dataset.hostAlpha = String(a);
+            swatch.dataset.hostAlphaMax = String(PROGRESS_ALPHA_MAX);
+        };
+
+        const change = function (color, alpha) {
+
+            set(progressColor(color), progressAlpha(alpha));
+            saveSettings();
+            paint();
+        };
+
+        // Set from the web view's picker
+        swatch.__setColor = change;
+
+        swatch.addEventListener("click", function () {
+            openColorPicker(label, progressColor(getColor()), progressAlpha(getAlpha()), PROGRESS_ALPHA_MAX, change);
+        });
+        paint();
+        settingsRefreshers.push(paint);
+
+        // The swatch and the share on a line of their own under the name
+        // and its hint
+        const controls = document.createElement("div");
+
+        controls.style.cssText = "display:flex;align-items:center;gap:10px;flex:1 1 100%";
+        controls.appendChild(swatch);
+        controls.appendChild(pct);
+        row.appendChild(name);
+        row.appendChild(controls);
+
+        return row;
+    }
+
     function makeBoolRow(label, get, set) {
 
         const row = document.createElement("div");
@@ -32684,6 +33093,36 @@
             });
 
         mobilePage.appendChild(withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."));
+
+        const waveProgressRow = makeBoolRow("Song's progress when zoomed",
+            function () { return settings.waveZoomProgress !== false; },
+            function (v) {
+
+                settings.waveZoomProgress = v;
+                drawWave();
+            });
+
+        const waveProgressBelowRow = makeBoolRow("Progress under the waveform",
+            function () { return settings.waveZoomProgressBelow === true; },
+            function (v) {
+
+                settings.waveZoomProgressBelow = v;
+                drawWave();
+            });
+
+        const waveProgressColorRow = makeColorRow("Progress colour",
+            function () { return settings.waveZoomProgressColor; },
+            function () { return settings.waveZoomProgressAlpha; },
+            function (color, alpha) {
+
+                settings.waveZoomProgressColor = color;
+                settings.waveZoomProgressAlpha = alpha;
+                drawWave();
+            });
+
+        mobilePage.appendChild(withHint(waveProgressRow, "Zoomed in, the waveform also shows how far into the whole song it is: a lighter layer from its left edge, across the full height. Its edge can be dragged at any height to move through the whole song, the waveform following, as on the thin line at its foot. The play head comes first when the two are close together."));
+        mobilePage.appendChild(withHint(waveProgressBelowRow, "The layer under the waveform instead of over it, so the waveform's colours stay as they are."));
+        mobilePage.appendChild(withHint(waveProgressColorRow, "The layer's colour, and how much of it shows."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(makeSubLabel("Online badge"));
         mobilePage.appendChild(onlineBadgeRow);
@@ -33173,6 +33612,36 @@
                 });
 
             webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
+
+            const webWaveProgressRow = makeBoolRow("Song's progress when zoomed",
+                function () { return settings.webWaveZoomProgress !== false; },
+                function (v) {
+
+                    settings.webWaveZoomProgress = v;
+                    publishHostSoon();
+                });
+
+            const webWaveProgressBelowRow = makeBoolRow("Progress under the waveform",
+                function () { return settings.webWaveZoomProgressBelow === true; },
+                function (v) {
+
+                    settings.webWaveZoomProgressBelow = v;
+                    publishHostSoon();
+                });
+
+            const webWaveProgressColorRow = makeColorRow("Progress colour",
+                function () { return settings.webWaveZoomProgressColor; },
+                function () { return settings.webWaveZoomProgressAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveZoomProgressColor = color;
+                    settings.webWaveZoomProgressAlpha = alpha;
+                    publishHostSoon();
+                });
+
+            webPage.appendChild(withHint(webWaveProgressRow, "Zoomed in, the waveform also shows how far into the whole song it is: a lighter layer from its left edge, across the full height. Its edge can be dragged at any height to move through the whole song. Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveProgressBelowRow, "The layer under the waveform instead of over it. Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveProgressColorRow, "The layer's colour, and how much of it shows."));
 
             const webOnlineBadgeRow = makeChoiceRow([
                 { label: "Fade away", value: "fade" },
