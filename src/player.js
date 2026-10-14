@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.347";
+    const VERSION = "1.9.9.348";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11331,7 +11331,7 @@
         const from = listEl.scrollTop;
         const to = Math.max(0, Math.min(target, listEl.scrollHeight - listEl.clientHeight));
         const path = easePath(from, to, listEl.clientHeight);
-        const length = Math.min(900, 350 + path.length / 8);
+        const length = Math.min(1600, 600 + path.length / 4);
         const start = nowMs();
 
         const step = function () {

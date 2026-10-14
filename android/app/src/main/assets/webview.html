@@ -10202,7 +10202,7 @@
         const from = box.scrollTop;
         const to = Math.max(0, Math.min(target, box.scrollHeight - box.clientHeight));
         const path = easePath(from, to, box.clientHeight);
-        const length = duration || Math.min(900, 350 + path.length / 8);
+        const length = duration || Math.min(1600, 600 + path.length / 4);
         const start = performance.now();
 
         quietUntil = Date.now() + length + 400;
