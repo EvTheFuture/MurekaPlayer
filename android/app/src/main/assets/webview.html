@@ -2399,6 +2399,13 @@
         opacity: 0.4;
     }
 
+    /* The hint in an empty field grey in every browser, also one that
+       draws its fields as on a light page */
+    ::placeholder {
+        color: var(--muted);
+        opacity: 1;
+    }
+
     .pField,
     .pSelect {
         min-height: var(--ctl-h);

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.341";
+    const VERSION = "1.9.9.342";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -26958,6 +26958,14 @@
             + ":fullscreen{background:" + PANEL_BACKGROUND + "}"
             + ":-webkit-full-screen{background:" + PANEL_BACKGROUND + "}"
             + "#mureka-search-input::placeholder{color:#aaa !important;opacity:1 !important}"
+
+            // The player is dark, whatever the page around it is, so the
+            // browser draws its fields, pickers and hints for a dark page.
+            // The hint in an empty field is grey in all of them, also where
+            // the page styles its own fields' hints
+            + "#mureka-player-panel,[data-mureka-notice],[data-mureka-press],.mureka-ask{color-scheme:dark}"
+            + "#mureka-player-panel ::placeholder,[data-mureka-notice] ::placeholder,[data-mureka-press] ::placeholder,"
+            + ".mureka-ask ::placeholder{color:#8a8a94 !important;opacity:1 !important}"
             + "#mureka-search-input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}"
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}"
