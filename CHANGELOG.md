@@ -153,8 +153,9 @@ the new settings layout and a number of smaller improvements.
   next or add to the queue from there; closing the list clears it.
 - The jumps to the top, the end and the playing song in every song list,
   the player's, the web view's and its small list, ease in and out as one
-  movement, the same in every browser. A finger, the mouse or the wheel on
-  the list stops it where it is.
+  movement, the same in every browser. A long way skips the middle while it
+  moves fastest, so it still slows gently at the end. A finger, the mouse or
+  the wheel on the list stops it where it is.
 - Play counts and sorting by plays, a switch under Library, Play counts, on
   in the app and off by default in the bookmarklet and the extension. On,
   the mobile list gets a **Plays** view with each song's count, and the web

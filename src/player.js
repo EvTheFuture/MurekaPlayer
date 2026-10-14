@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.346";
+    const VERSION = "1.9.9.347";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11296,6 +11296,29 @@
         }
     }
 
+    // The way an eased scroll goes. A long way would race past at the end
+    // and seem to stop dead, so only a few screens of it are travelled: the
+    // first half of them from where it starts, the second half up to where
+    // it ends, the part between skipped while it moves fastest. length is
+    // how far it seems to go, at(eased) where it is for 0 to 1 of the way
+    function easePath(from, to, view) {
+
+        const way = Math.abs(to - from);
+        const dir = to < from ? -1 : 1;
+        const seen = Math.min(way, Math.max(400, view * 4));
+
+        return {
+            length: seen,
+            at: function (eased) {
+
+                const v = seen * eased;
+                const done = v <= seen / 2 ? v : way - (seen - v);
+
+                return from + dir * done;
+            }
+        };
+    }
+
     function easeListTo(target) {
 
         if (!listEl) {
@@ -11307,7 +11330,8 @@
 
         const from = listEl.scrollTop;
         const to = Math.max(0, Math.min(target, listEl.scrollHeight - listEl.clientHeight));
-        const length = Math.min(900, 350 + Math.abs(to - from) / 8);
+        const path = easePath(from, to, listEl.clientHeight);
+        const length = Math.min(900, 350 + path.length / 8);
         const start = nowMs();
 
         const step = function () {
@@ -11321,7 +11345,7 @@
             const k = Math.min(1, (nowMs() - start) / length);
             const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
 
-            listEl.scrollTop = from + (to - from) * eased;
+            listEl.scrollTop = path.at(eased);
 
             if (k < 1) {
                 listEaseFrame = requestAnimationFrame(step);
