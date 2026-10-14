@@ -5028,27 +5028,12 @@
         }
     }
 
-    // How the song's progress shows on the zoomed waveform: a bar over it,
-    // a bar behind it, the waveform itself coloured, or not at all. Older
-    // values come from the two switches it replaced
+    // How the song's progress shows on the waveform: a bar over it, a bar
+    // behind it, the waveform itself coloured, or not at all
     const PROGRESS_LOOKS = ["over", "under", "wave", "off"];
 
-    function progressLook(v, on, below) {
-
-        if (PROGRESS_LOOKS.indexOf(v) !== -1) {
-            return v;
-        }
-
-        // Nothing kept yet, the waveform coloured
-        if (typeof on !== "boolean") {
-            return "wave";
-        }
-
-        if (on === false) {
-            return "off";
-        }
-
-        return below === true ? "under" : "over";
+    function progressLook(v) {
+        return PROGRESS_LOOKS.indexOf(v) !== -1 ? v : "wave";
     }
 
     // The look as the phone has it, where this browser starts from
@@ -5062,7 +5047,7 @@
             wave: typeof s.waveOn === "boolean" ? s.waveOn : true,
             waveSource: s.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: s.waveZoomKeep === true,
-            waveZoomProgressLook: progressLook(s.waveZoomProgressLook),
+            progressLook: progressLook(s.waveZoomProgressLook),
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
@@ -5109,16 +5094,10 @@
         // Whether this browser opens with the zoom it had last time
         s.waveZoomKeep = typeof look.waveZoomKeep === "boolean" ? look.waveZoomKeep : raw.waveZoomKeep === true;
 
-        // What shows on the waveform while zoomed in. A look kept from
-        // before the choice has the two switches it replaced, and one from
-        // before those follows the phone
-        if (PROGRESS_LOOKS.indexOf(look.waveZoomProgressLook) !== -1) {
-            s.waveZoomProgressLook = look.waveZoomProgressLook;
-        } else if (typeof look.waveZoomProgress === "boolean") {
-            s.waveZoomProgressLook = progressLook(null, look.waveZoomProgress, look.waveZoomProgressBelow);
-        } else {
-            s.waveZoomProgressLook = progressLook(raw.waveZoomProgressLook);
-        }
+        // How the song's progress shows on the waveform. A look kept before
+        // it could be set follows the phone
+        s.waveZoomProgressLook = PROGRESS_LOOKS.indexOf(look.progressLook) !== -1
+            ? look.progressLook : progressLook(raw.waveZoomProgressLook);
 
         // Our own waveform when chosen and the phone has it ready, and
         // whether it is still being worked out there
@@ -5266,7 +5245,7 @@
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "choice", values: ["mureka", "song"],
             names: { mureka: "Mureka's", song: "From the song" } },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
-        { label: "Song's progress on the waveform", page: "Web view", key: "waveZoomProgressLook", kind: "select",
+        { label: "Song's progress on the waveform", page: "Web view", key: "progressLook", kind: "select",
             values: PROGRESS_LOOKS },
         { label: "Lyrics", page: "Web view", key: "lyrics", kind: "cycle", values: ["off", "info", "cover"],
             names: { off: "Off", info: "Beside the cover", cover: "On the cover" } },
@@ -5310,14 +5289,6 @@
 
         const local = localSettings();
         const look = Object.assign(phoneLook(rawState), local && local.look ? local.look : {});
-
-        // A look kept from before the dropdown has the two switches instead
-        const own = local && local.look ? local.look : {};
-
-        if (def.key === "waveZoomProgressLook" && PROGRESS_LOOKS.indexOf(own.waveZoomProgressLook) === -1
-            && typeof own.waveZoomProgress === "boolean") {
-            return progressLook(null, own.waveZoomProgress, own.waveZoomProgressBelow);
-        }
 
         return look[def.key];
     }

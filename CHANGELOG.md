@@ -625,7 +625,8 @@ the new settings layout and a number of smaller improvements.
   how much of it shows, picked over the settings. The quieter outer part of
   the waveform from the song takes them darker. The play head shows on the
   waveform zoomed out too. **Reset the waveform colours** puts all of the
-  waveform's colours back as they came.
+  waveform's colours back as they came, and the waveform coloured as the way
+  the song's progress shows.
 - **Zoom into the waveform**, in the player and the web views: pinch, the
   mouse wheel over it, or a press held still a moment and then slid up zooms
   in up to 32 times. Pinch, sliding down after the hold, or a double tap zooms

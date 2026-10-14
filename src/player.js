@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.342";
+    const VERSION = "1.9.9.344";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -384,27 +384,14 @@
     const PROGRESS_AHEAD_HINT = "The colour of the progress where it reaches past the play head, on the part still "
         + "to come in view.";
 
-    // How the song's progress shows on the zoomed waveform: a bar over it,
-    // a bar behind it, the waveform itself coloured, or not at all. A look
-    // kept from before the choice comes from the two switches it replaced
+    // How the song's progress shows on the waveform: a bar over it, a bar
+    // behind it, the waveform itself coloured, or not at all. Kept under a
+    // name of its own since 1.9.9.343, so a look saved while a bar was what
+    // came is not kept, and the waveform coloured is what comes
     const PROGRESS_LOOKS = ["over", "under", "wave", "off"];
 
-    function progressLook(v, on, below) {
-
-        if (PROGRESS_LOOKS.indexOf(v) !== -1) {
-            return v;
-        }
-
-        // Nothing kept yet, the waveform coloured
-        if (typeof on !== "boolean") {
-            return "wave";
-        }
-
-        if (on === false) {
-            return "off";
-        }
-
-        return below === true ? "under" : "over";
+    function progressLook(v) {
+        return PROGRESS_LOOKS.indexOf(v) !== -1 ? v : "wave";
     }
 
     // The colour and its share as one fill for the canvas
@@ -2593,8 +2580,8 @@
             webWaveSource: "mureka",
             waveZoomKeep: false,
             webWaveZoomKeep: false,
-            waveZoomProgressLook: "wave",
-            webWaveZoomProgressLook: "wave",
+            waveProgressLook: "wave",
+            webWaveProgressLook: "wave",
             waveColor: WAVE_PLAYED_COLOR,
             webWaveColor: WAVE_PLAYED_COLOR,
             waveAlpha: 100,
@@ -2817,10 +2804,8 @@
                     webWaveSource: parsed.webWaveSource === "song" ? "song" : "mureka",
                     waveZoomKeep: parsed.waveZoomKeep === true,
                     webWaveZoomKeep: parsed.webWaveZoomKeep === true,
-                    waveZoomProgressLook: progressLook(parsed.waveZoomProgressLook,
-                        parsed.waveZoomProgress, parsed.waveZoomProgressBelow),
-                    webWaveZoomProgressLook: progressLook(parsed.webWaveZoomProgressLook,
-                        parsed.webWaveZoomProgress, parsed.webWaveZoomProgressBelow),
+                    waveProgressLook: progressLook(parsed.waveProgressLook),
+                    webWaveProgressLook: progressLook(parsed.webWaveProgressLook),
                     waveColor: progressColor(parsed.waveColor, WAVE_PLAYED_COLOR),
                     webWaveColor: progressColor(parsed.webWaveColor, WAVE_PLAYED_COLOR),
                     waveAlpha: progressAlpha(parsed.waveAlpha, 100),
@@ -21798,7 +21783,7 @@
 
         // The song's progress across the whole waveform, under it, over it or
         // as the waveform's own colour. Zoomed out it lies on the played part
-        const look = progressLook(settings.waveZoomProgressLook);
+        const look = progressLook(settings.waveProgressLook);
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
         const headX = Math.round((frac - start) / span * w);
@@ -23113,7 +23098,7 @@
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: settings.webWaveZoomKeep === true,
-            waveZoomProgressLook: progressLook(settings.webWaveZoomProgressLook),
+            waveZoomProgressLook: progressLook(settings.webWaveProgressLook),
             waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
             waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
             wavePlayedFill: progressFill(settings.webWaveColor, progressAlpha(settings.webWaveAlpha, 100)),
@@ -26724,7 +26709,7 @@
                 return songTimes().length > 0;
             },
             edge: function () {
-                return progressLook(settings.waveZoomProgressLook) !== "off";
+                return progressLook(settings.waveProgressLook) !== "off";
             },
             zoomable: function () {
                 return !!waveData && waveCanvas.style.display !== "none";
@@ -31620,9 +31605,10 @@
         el.style.display = show ? el.__shownAs : "none";
     }
 
-    // A button that puts the waveform's colours back as they came. prefix
-    // is "" for the mobile player's and "web" for the web view's, rows the
-    // colour rows to paint again and changed what runs after
+    // A button that puts the waveform's colours back as they came, and the
+    // waveform coloured as the way the song's progress shows. prefix is ""
+    // for the mobile player's and "web" for the web view's, rows the rows
+    // to show again and changed what runs after
     function makeWaveColorReset(prefix, rows, changed) {
 
         const row = document.createElement("div");
@@ -31640,6 +31626,8 @@
                 settings[key(d[0])] = d[2];
                 settings[key(d[1])] = d[3];
             }
+
+            settings[key("waveProgressLook")] = "wave";
 
             saveSettings();
 
@@ -31672,6 +31660,11 @@
         }
 
         sel.value = get();
+
+        // Shown again after a reset elsewhere on the page
+        sel.__paint = function () {
+            sel.value = get();
+        };
 
         sel.addEventListener("change", function () {
 
@@ -33501,10 +33494,10 @@
 
 
         const waveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
-            function () { return progressLook(settings.waveZoomProgressLook); },
+            function () { return progressLook(settings.waveProgressLook); },
             function (v) {
 
-                settings.waveZoomProgressLook = v;
+                settings.waveProgressLook = v;
                 drawWave();
                 paintMobileWave();
             });
@@ -33551,12 +33544,16 @@
             withHint(waveProgressAheadRow, PROGRESS_AHEAD_HINT)
         ];
         const mobileWaveReset = makeWaveColorReset("", [waveColorRow, waveRestColorRow, playHeadColorRow,
-            waveProgressColorRow, waveProgressAheadRow], drawWave);
+            waveProgressRow, waveProgressColorRow, waveProgressAheadRow], function () {
+
+            drawWave();
+            paintMobileWave();
+        });
 
         paintMobileWave = function () {
 
             const on = settings.waveSeek === true;
-            const progress = progressLook(settings.waveZoomProgressLook) !== "off";
+            const progress = progressLook(settings.waveProgressLook) !== "off";
 
             mobileWave.forEach(function (el) {
                 showSettingsRow(el, on);
@@ -34094,10 +34091,10 @@
 
 
             const webWaveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
-                function () { return progressLook(settings.webWaveZoomProgressLook); },
+                function () { return progressLook(settings.webWaveProgressLook); },
                 function (v) {
 
-                    settings.webWaveZoomProgressLook = v;
+                    settings.webWaveProgressLook = v;
                     publishHostSoon();
                 });
 
@@ -34149,7 +34146,7 @@
             // zooms, its colours, then how the song's progress shows on it and
             // in which colours
             const webWaveReset = makeWaveColorReset("web", [webWaveColorRow, webWaveRestColorRow, webPlayHeadColorRow,
-                webWaveProgressColorRow, webWaveProgressAheadRow], publishHostSoon);
+                webWaveProgressRow, webWaveProgressColorRow, webWaveProgressAheadRow], publishHostSoon);
 
             webPage.appendChild(makeLabel("Waveform"));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
