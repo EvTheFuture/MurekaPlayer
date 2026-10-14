@@ -1330,6 +1330,48 @@
         font-size: 1em;
     }
 
+    /* Search in the small list, its own apart from the big list's */
+    #miniSearchRow {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: clamp(12px, 1.2vw, 18px);
+    }
+
+    #miniSearch {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 2.4em;
+        font: inherit;
+        font-size: max(16px, 1em);
+        padding: 0 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+    }
+
+    /* The list's own clear button is beside it, not the browser's */
+    #miniSearch::-webkit-search-cancel-button {
+        -webkit-appearance: none;
+        appearance: none;
+        display: none;
+    }
+
+    #miniSearchRow .chip {
+        height: 2.4em;
+        font-size: 1em;
+    }
+
+    #miniClearSearch {
+        display: none;
+    }
+
+    #miniSearchRow.has #miniClearSearch {
+        display: inline-flex;
+    }
+
     #miniCount {
         flex: 1 1 auto;
         min-width: 0;
@@ -4100,6 +4142,10 @@
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
                 <button class="chip iconOnly" id="miniClose" type="button" data-icon="close" aria-label="Close the list" title="Close the list"></button>
+            </div>
+            <div id="miniSearchRow">
+                <input id="miniSearch" type="search" placeholder="Search songs" autocomplete="off">
+                <button class="chip iconOnly" id="miniClearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
             </div>
             <div id="miniWork"></div>
             <div id="miniWrap"><div id="miniPull"></div><div id="miniRows"></div><button id="miniLocate" type="button" data-icon="target" aria-label="Show the playing song" title="Show the playing song"></button><button id="miniEdge" type="button" data-icon="arrowUp" aria-label="Scroll to top" title="Scroll to top"></button></div>
@@ -13282,7 +13328,7 @@
             return;
         }
 
-        fetchJson("/list?q=&view=" + (listSort || "mureka") + "&offset=0&limit="
+        fetchJson("/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + "&offset=0&limit="
             + Math.min(200, Math.max(PAGE, miniLoaded))).then(function (data) {
 
             const found = new Map();
@@ -13681,6 +13727,10 @@
     let miniToken = 0;
     let miniLoaded = 0;
     let miniTotal = 0;
+
+    // What the small list is searched for, apart from the big list
+    let miniQuery = "";
+    let miniSearchTimer = null;
     let miniBusy = false;
     let miniPlaying = "";
 
@@ -13766,6 +13816,7 @@
         $("browseBtn").classList.remove("on");
         $("miniBtn").classList.remove("on");
         $("mini").style.display = "none";
+        setMiniQuery("");
         clearMiniRows();
         hideMiniEdge();
         updateMiniLocate();
@@ -13786,6 +13837,45 @@
     $("miniBtn").addEventListener("click", toggleMini);
 
     $("miniClose").addEventListener("click", closeMini);
+
+    // The small list's search: the field, the clear button beside it while
+    // there is text, and the list read again. Opened at the top when
+    // searched, at the playing song again when cleared
+    function setMiniQuery(text) {
+
+        clearTimeout(miniSearchTimer);
+        $("miniSearch").value = text;
+        $("miniSearchRow").classList.toggle("has", text !== "");
+
+        if (miniQuery === text.trim()) {
+            return;
+        }
+
+        miniQuery = text.trim();
+        miniStayTop = miniQuery !== "";
+
+        if (miniOpen) {
+            loadMini(true);
+        }
+    }
+
+    $("miniSearch").addEventListener("input", function () {
+
+        const text = $("miniSearch").value;
+
+        $("miniSearchRow").classList.toggle("has", text !== "");
+        clearTimeout(miniSearchTimer);
+
+        miniSearchTimer = setTimeout(function () {
+            setMiniQuery(text);
+        }, 350);
+    });
+
+    $("miniClearSearch").addEventListener("click", function () {
+
+        setMiniQuery("");
+        $("miniSearch").focus();
+    });
 
     // A tap on the main page outside the small list closes it. Not a drag,
     // a swipe of the covers, a long press, a button or anything else that
@@ -13926,7 +14016,7 @@
 
         miniBusy = true;
 
-        fetchJson("/queue?q=").then(function (data) {
+        fetchJson("/queue?q=" + esc(miniQuery)).then(function (data) {
 
             if (token !== miniToken) {
                 return;
@@ -13955,9 +14045,9 @@
                 row.classList.toggle("past", item.index < data.pos);
 
                 // A handle to drag the song to another place, in the
-                // queue's own order only
+                // queue's own order only, all of it shown
                 const grip = document.createElement("span");
-                const movable = !listSort;
+                const movable = !listSort && !miniQuery;
 
                 grip.className = "rowGrip" + (movable ? "" : " off");
                 grip.appendChild(icon("grip"));
@@ -13969,7 +14059,7 @@
                         startQueueDrag(row, ev, false, box);
                     });
                 } else {
-                    grip.title = "Turn sorting off to move songs";
+                    grip.title = miniQuery ? "Clear the search to move songs" : "Turn sorting off to move songs";
                 }
 
                 row.insertBefore(grip, row.firstChild);
@@ -14025,8 +14115,9 @@
 
             miniTotal = items.length;
             miniLoaded = items.length;
-            $("miniCount").textContent = data.pos < 0 ? "Queue, " + data.total + " to play"
-                : "Queue, " + (data.pos + 1) + " of " + data.total;
+            $("miniCount").textContent = (data.pos < 0 ? "Queue, " + data.total + " to play"
+                : "Queue, " + (data.pos + 1) + " of " + data.total)
+                + (miniQuery ? ", " + data.items.length + " matching" : "");
 
             if (first && stayTop) {
 
@@ -14097,7 +14188,8 @@
 
         miniBusy = true;
 
-        const miniUrl = "/list?q=&view=" + (listSort || "mureka") + "&offset=" + miniLoaded + "&limit=" + (limit || PAGE);
+        const miniUrl = "/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + "&offset=" + miniLoaded
+            + "&limit=" + (limit || PAGE);
 
         fetchJson(miniUrl).then(function (data) {
 
@@ -14381,7 +14473,7 @@
             return;
         }
 
-        $("miniCount").textContent = miniTotal + " song" + (miniTotal === 1 ? "" : "s");
+        $("miniCount").textContent = miniTotal + " song" + (miniTotal === 1 ? "" : "s") + (miniQuery ? " matching" : "");
     }
 
     // Each state: the playing row lit, and the count or the work shown. A

@@ -148,7 +148,9 @@ the new settings layout and a number of smaller improvements.
   song when it is out of sight. **Sort** at its top picks Mureka order, A to Z,
   Z to A, or most or fewest stars or plays first, the same sorting as the
   big list. Sorted by plays, both lists show each song's plays, in the
-  small list in place of the stars.
+  small list in place of the stars. A search field of its own under its top
+  finds songs in it, the queue too, by title or a song's whole ID, to play
+  next or add to the queue from there; closing the list clears it.
 - Play counts and sorting by plays, a switch under Library, Play counts, on
   in the app and off by default in the bookmarklet and the extension. On,
   the mobile list gets a **Plays** view with each song's count, and the web
