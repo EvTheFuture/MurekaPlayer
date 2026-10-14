@@ -151,6 +151,10 @@ the new settings layout and a number of smaller improvements.
   small list in place of the stars. A search field of its own under its top
   finds songs in it, the queue too, by title or a song's whole ID, to play
   next or add to the queue from there; closing the list clears it.
+- The jumps to the top, the end and the playing song in every song list,
+  the player's, the web view's and its small list, ease in and out as one
+  movement, the same in every browser. A finger, the mouse or the wheel on
+  the list stops it where it is.
 - Play counts and sorting by plays, a switch under Library, Play counts, on
   in the app and off by default in the bookmarklet and the extension. On,
   the mobile list gets a **Plays** view with each song's count, and the web

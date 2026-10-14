@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.345";
+    const VERSION = "1.9.9.346";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11281,6 +11281,58 @@
         locateBtn.style.pointerEvents = show ? "auto" : "none";
     }
 
+    // The song list scrolled to a place with an ease in and out, as the web
+    // view's lists do, the same in every browser and as one movement however
+    // far it goes. A finger, the mouse or the wheel on the list stops it
+    // where it is. Returns how long it takes, in milliseconds
+    let listEaseFrame = 0;
+
+    function stopListEase() {
+
+        if (listEaseFrame) {
+
+            cancelAnimationFrame(listEaseFrame);
+            listEaseFrame = 0;
+        }
+    }
+
+    function easeListTo(target) {
+
+        if (!listEl) {
+            return 0;
+        }
+
+        stopListEase();
+        stopGlide();
+
+        const from = listEl.scrollTop;
+        const to = Math.max(0, Math.min(target, listEl.scrollHeight - listEl.clientHeight));
+        const length = Math.min(900, 350 + Math.abs(to - from) / 8);
+        const start = nowMs();
+
+        const step = function () {
+
+            listEaseFrame = 0;
+
+            if (!listEl) {
+                return;
+            }
+
+            const k = Math.min(1, (nowMs() - start) / length);
+            const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+
+            listEl.scrollTop = from + (to - from) * eased;
+
+            if (k < 1) {
+                listEaseFrame = requestAnimationFrame(step);
+            }
+        };
+
+        listEaseFrame = requestAnimationFrame(step);
+
+        return length;
+    }
+
     // Glide to the playing song and put it in the middle of the list
     function showPlayingInList() {
 
@@ -11292,8 +11344,7 @@
 
         fadeToTopBtn();
         programmaticScrollAt = Date.now();
-        edgeJumpUntil = Date.now() + 1500;
-        listEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+        edgeJumpUntil = Date.now() + easeListTo(target) + 400;
     }
 
     // Point the scroll button at the matching edge for the scroll direction,
@@ -11361,12 +11412,10 @@
 
         const target = toTopDir === "down" ? listEl.scrollHeight : 0;
 
-        // The button has done its job, and the smooth scroll that follows is
+        // The button has done its job, and the eased scroll that follows is
         // not the user, so it must not bring the button straight back
         fadeToTopBtn();
-        edgeJumpUntil = Date.now() + 2500;
-
-        listEl.scrollTo({ top: target, behavior: "smooth" });
+        edgeJumpUntil = Date.now() + easeListTo(target) + 400;
     }
 
     // How far the list must be pulled before a release triggers a refresh
@@ -27391,6 +27440,10 @@
         });
 
         // Pull to refresh, touch only so the desktop is unaffected
+        // A hand on the list stops an eased scroll where it is
+        listEl.addEventListener("pointerdown", stopListEase);
+        listEl.addEventListener("wheel", stopListEase, { passive: true });
+        listEl.addEventListener("touchstart", stopListEase, { passive: true });
         listEl.addEventListener("touchstart", onListTouchStart, { passive: true });
         listEl.addEventListener("touchmove", onListTouchMove, { passive: false });
         listEl.addEventListener("touchend", onListTouchEnd);
