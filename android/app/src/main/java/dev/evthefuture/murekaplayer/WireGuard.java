@@ -279,6 +279,46 @@ final class WireGuard {
         send(c, true, tried);
     }
 
+    // Turning the tunnel on or off by hand from the settings, to try the
+    // hand over without moving the hotspot. The same commands, the same
+    // look afterwards and the same notes
+    static void test(Context c, boolean up) {
+
+        final Context app = c.getApplicationContext();
+
+        if (WebViewSettings.wgTunnel(app).isEmpty()) {
+
+            tell(app, "Type the WireGuard tunnel's name first", false);
+            return;
+        }
+
+        MAIN.removeCallbacksAndMessages(null);
+        downBusy = false;
+        stayAwake(app);
+        wakeScreen(app);
+        quiet();
+
+        if (up) {
+
+            say(app, "Turning WireGuard on", "wait");
+            send(app, true, 0);
+            return;
+        }
+
+        say(app, "Turning WireGuard off", "wait");
+        send(app, false);
+        MAIN.postDelayed(() -> {
+
+            letSleep();
+
+            if (vpnUp(app)) {
+                tell(app, "WireGuard did not turn off", false);
+            } else {
+                tell(app, "WireGuard is off", true);
+            }
+        }, CHECK_MS);
+    }
+
     // A tunnel named and WireGuard there to take it, with the permission
     private static boolean usable(Context c) {
         return !WebViewSettings.wgTunnel(c).isEmpty() && installed(c) && allowed(c);

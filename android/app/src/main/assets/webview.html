@@ -1735,8 +1735,14 @@
         user-select: none;
     }
 
-    .row.pressing {
-        background: #2a2a31;
+    /* The row being pressed, lit a little, and the row whose menu is open,
+       so it is plain which song a tap or a hold is for. A shadow inside
+       the row, so the playing row keeps its own look under it */
+    .row.pressing,
+    .row.menuFor {
+        border-radius: 6px;
+        box-shadow: inset 0 0 0 999px rgba(72, 225, 235, 0.16);
+        box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--accent) 16%, transparent);
     }
 
     /* Where a song is in the list shown, #1 at the top, small and faint in
@@ -2446,6 +2452,21 @@
 
     .pBtn:disabled {
         opacity: 0.4;
+    }
+
+    /* The widths the settings' buttons come in, see tidyPanelButtons */
+    .pBtn.pVal,
+    .pBtn.pAct,
+    .pBtn.pChoice {
+        flex: 0 0 auto;
+        max-width: 100%;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    /* On and Off the same width on every page, whatever the switch says */
+    .pBtn.pVal {
+        min-width: 5em;
     }
 
     /* The hint in an empty field grey in every browser, also one that
@@ -3993,6 +4014,12 @@
 
     .trimStatus {
         color: #ffb0b0;
+        font-size: 0.85em;
+        display: none;
+    }
+
+    .trimWhere {
+        color: var(--accent);
         font-size: 0.85em;
         display: none;
     }
@@ -10797,6 +10824,37 @@
     let rowPress = null;
     let rowSwallow = false;
 
+    // A finger lights its row only after resting a moment, so a flick
+    // through the list does not light every row it starts on. A tap keeps
+    // the light a moment, long enough to be seen
+    const PRESS_LIGHT_MS = 90;
+    const TAP_LIGHT_MS = 180;
+    let rowLightTimer = 0;
+
+    // The song whose menu is open, lit until the menu closes, also when
+    // the list is drawn again meanwhile
+    let menuRowId = null;
+
+    function markMenuRow(id) {
+
+        menuRowId = id;
+
+        for (const el of document.querySelectorAll(".row.menuFor")) {
+            el.classList.remove("menuFor");
+        }
+
+        if (id === null) {
+            return;
+        }
+
+        for (const el of document.querySelectorAll(".row")) {
+
+            if (el.dataset.id === id) {
+                el.classList.add("menuFor");
+            }
+        }
+    }
+
     // A row of a queue list knows its place in the queue, any other -1
     function rowQueueIndex(row) {
 
@@ -10814,7 +10872,20 @@
             }
 
             rowPress = { x: ev.clientX, y: ev.clientY, row: row };
-            row.classList.add("pressing");
+            clearTimeout(rowLightTimer);
+
+            if (ev.pointerType === "touch") {
+
+                rowLightTimer = setTimeout(function () {
+
+                    if (rowPress && rowPress.row === row) {
+                        row.classList.add("pressing");
+                    }
+                }, PRESS_LIGHT_MS);
+            } else {
+                row.classList.add("pressing");
+            }
+
             clearTimeout(rowPressTimer);
 
             rowPressTimer = setTimeout(function () {
@@ -10831,16 +10902,43 @@
                     rowSwallow = false;
                 }, 700);
 
+                markMenuRow(id);
                 openSongMenu(id, false, false, rowQueueIndex(row));
             }, 550);
         });
 
+        // Moved away or taken over by a scroll, the light goes at once
         const cancel = function () {
 
             clearTimeout(rowPressTimer);
+            clearTimeout(rowLightTimer);
             row.classList.remove("pressing");
             rowPress = null;
         };
+
+        // Let go after a tap, the light stays a moment
+        const release = function () {
+
+            const tapped = rowPress && rowPress.row === row;
+
+            clearTimeout(rowPressTimer);
+            clearTimeout(rowLightTimer);
+            rowPress = null;
+
+            if (!tapped) {
+                return;
+            }
+
+            row.classList.add("pressing");
+
+            setTimeout(function () {
+                row.classList.remove("pressing");
+            }, TAP_LIGHT_MS);
+        };
+
+        if (menuRowId === id) {
+            row.classList.add("menuFor");
+        }
 
         row.addEventListener("pointermove", function (ev) {
 
@@ -10849,14 +10947,22 @@
             }
         });
 
-        row.addEventListener("pointerup", cancel);
+        row.addEventListener("pointerup", release);
         row.addEventListener("pointercancel", cancel);
-        row.addEventListener("pointerleave", cancel);
+
+        row.addEventListener("pointerleave", function () {
+
+            // A finger leaves its row as it lifts, after the tap was seen
+            if (rowPress && rowPress.row === row) {
+                cancel();
+            }
+        });
 
         row.addEventListener("contextmenu", function (ev) {
 
             ev.preventDefault();
             cancel();
+            markMenuRow(id);
             openSongMenu(id, false, false, rowQueueIndex(row));
         });
 
@@ -11869,6 +11975,87 @@
 
     // How wide the column of switches and steppers is, from the widest one
     // beside a label, so the explanations wrap before it
+    // The settings' buttons in a few widths only, so a page of them lines
+    // up and a button keeps its width when its words change. On a page,
+    // every switch or value beside its name is as wide as the widest of
+    // them, and so is every action on a line of its own or with others.
+    // The buttons of a choice, one of them lit, are each as wide as the
+    // widest of that choice
+    function tidyPanelButtons(box) {
+
+        const values = [];
+        const actions = [];
+
+        for (const row of box.querySelectorAll(".pRow")) {
+
+            const buttons = Array.from(row.children).filter(function (el) {
+                return el.classList.contains("pBtn") && !el.classList.contains("wide")
+                    && !/^\u2039/.test(el.textContent.trim());
+            });
+
+            if (buttons.length === 0) {
+                continue;
+            }
+
+            // The minus and plus of a stepper stay as they are
+            if (buttons.every(function (b) {
+                return /^[-+]$/.test(b.textContent.trim());
+            })) {
+                continue;
+            }
+
+            const named = Array.from(row.children).some(function (el) {
+                return el.classList.contains("pText") || el.classList.contains("pCol");
+            });
+            const choice = buttons.length > 1 && buttons.some(function (b) {
+                return b.classList.contains("on");
+            });
+
+            for (const b of buttons) {
+                b.style.minWidth = "";
+            }
+
+            if (named && buttons.length === 1) {
+
+                buttons[0].classList.add("pVal");
+                values.push(buttons[0]);
+            } else if (choice) {
+
+                let widest = 0;
+
+                for (const b of buttons) {
+
+                    b.classList.add("pChoice");
+                    widest = Math.max(widest, b.getBoundingClientRect().width);
+                }
+
+                for (const b of buttons) {
+                    b.style.minWidth = Math.ceil(widest) + "px";
+                }
+            } else {
+
+                for (const b of buttons) {
+
+                    b.classList.add("pAct");
+                    actions.push(b);
+                }
+            }
+        }
+
+        for (const kind of [values, actions]) {
+
+            let widest = 0;
+
+            for (const b of kind) {
+                widest = Math.max(widest, b.getBoundingClientRect().width);
+            }
+
+            for (const b of kind) {
+                b.style.minWidth = Math.ceil(widest) + "px";
+            }
+        }
+    }
+
     function measureControlColumn() {
 
         const box = $("panelBody");
@@ -11963,6 +12150,7 @@
         }
 
         addLocalSection(box);
+        tidyPanelButtons(box);
         measureControlColumn();
 
         // Kept for drawing this page at once next time, and as the one the
@@ -15953,6 +16141,7 @@
 
     function closeSongMenu() {
 
+        markMenuRow(null);
         $("songMenu").style.display = "none";
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
@@ -18026,6 +18215,8 @@
         fetchJson("/menu?id=" + esc(id)).then(function (m) {
 
             if (!m || !m.id) {
+
+                markMenuRow(null);
                 return;
             }
 
@@ -18040,6 +18231,7 @@
                 showTitleField(m);
             }
         }).catch(function () {
+            markMenuRow(null);
         });
     }
 
@@ -21366,6 +21558,11 @@
         ui.status = document.createElement("div");
         ui.status.className = "trimStatus";
 
+        // While the music plays on the phone, the preview still plays here
+        ui.where = document.createElement("div");
+        ui.where.className = "trimWhere";
+        ui.where.textContent = "The preview plays in this browser, not on the phone or its Bluetooth";
+
         // The whole song, the kept part lit, the ends to drag
         ui.overview = document.createElement("canvas");
         ui.overview.className = "trimCanvas trimOverview";
@@ -21573,6 +21770,7 @@
 
         box.appendChild(head);
         box.appendChild(ui.info);
+        box.appendChild(ui.where);
         box.appendChild(ui.status);
         box.appendChild(ui.loading);
         box.appendChild(ui.overview);
@@ -21664,6 +21862,9 @@
         if (!trimUi) {
             buildTrimmer();
         }
+
+        // Said when the music plays on the phone, the preview does not
+        trimUi.where.style.display = state && !state.carAudio ? "block" : "none";
 
         // The preview needs the sound to itself, the music pauses, shown
         // at once, the next state from the phone confirms it. The phone

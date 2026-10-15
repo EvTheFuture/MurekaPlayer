@@ -694,7 +694,9 @@ the new settings layout and a number of smaller improvements.
 - **Remove ; from lyrics** takes Mureka's pause marks out of the lyrics
   everywhere they show.
 - The song menu, from a long press or a right click, shows the song's number
-  and title at the top, so it is clear which song it opened on.
+  and title at the top, so it is clear which song it opened on. The row
+  being pressed lights up, and stays lit while its menu is open, in the
+  player and in the web view's lists.
 - A **Stars** view sorts the list by rating.
 - **How much of the song is here**, as in the web view: a small cyan pie
   before the time by the seek bar, solid once the playing song is stored on

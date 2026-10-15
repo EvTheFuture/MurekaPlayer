@@ -986,6 +986,20 @@ final class PlayerWeb {
             return BtWatch.devices(appContext);
         }
 
+        // The WireGuard tunnel named in the settings on or off by hand, to
+        // try the hand over. "1" for on
+        @JavascriptInterface
+        public boolean wireGuard(String on) {
+
+            if (!onMureka || appContext == null) {
+                return false;
+            }
+
+            MAIN.post(() -> WireGuard.test(appContext, "1".equals(on)));
+
+            return true;
+        }
+
         // Android's question whether the app may see Bluetooth devices,
         // asked by the app on screen. False when it is not on screen
         @JavascriptInterface

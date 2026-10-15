@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.375";
+    const VERSION = "1.9.9.379";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31213,11 +31213,38 @@
         let pressTimer = null;
         let longPressed = false;
 
+        let lightTimer = null;
+
         const cancelPress = function () {
 
             if (pressTimer) {
                 clearTimeout(pressTimer);
                 pressTimer = null;
+            }
+        };
+
+        // The light goes when the finger moves on or leaves, unless the
+        // menu opened for this row, which keeps it until it closes. A tap
+        // keeps it a moment, long enough to be seen
+        const unlight = function (later) {
+
+            clearTimeout(lightTimer);
+            lightTimer = null;
+
+            if (pressedRowEl !== item || longPressed || songMenuOpen()) {
+                return;
+            }
+
+            if (later) {
+
+                setTimeout(function () {
+
+                    if (pressedRowEl === item && !longPressed && !songMenuOpen()) {
+                        markPressedRow(null);
+                    }
+                }, 180);
+            } else {
+                markPressedRow(null);
             }
         };
 
@@ -31260,8 +31287,26 @@
         }
 
         item.addEventListener("contextmenu", function (ev) {
+
             ev.preventDefault();
             showContextMenu(ev.clientX, ev.clientY, song, inQueue);
+            markPressedRow(item);
+        });
+
+        // A mouse lights the row while its button is down
+        item.addEventListener("mousedown", function (ev) {
+
+            if (ev.button === 0) {
+                markPressedRow(item);
+            }
+        });
+
+        item.addEventListener("mouseup", function () {
+            unlight(true);
+        });
+
+        item.addEventListener("mouseleave", function () {
+            unlight(false);
         });
 
         item.addEventListener("touchstart", function (ev) {
@@ -31276,16 +31321,37 @@
             const y = ev.touches[0].clientY;
 
             cancelPress();
+            clearTimeout(lightTimer);
+
+            lightTimer = setTimeout(function () {
+                markPressedRow(item);
+            }, PRESS_LIGHT_MS);
 
             pressTimer = setTimeout(function () {
+
                 longPressed = true;
                 showContextMenu(x, y, song, inQueue);
+                markPressedRow(item);
             }, 500);
         }, { passive: true });
 
-        item.addEventListener("touchmove", cancelPress, { passive: true });
-        item.addEventListener("touchend", cancelPress);
-        item.addEventListener("touchcancel", cancelPress);
+        item.addEventListener("touchmove", function () {
+
+            cancelPress();
+            unlight(false);
+        }, { passive: true });
+
+        item.addEventListener("touchend", function () {
+
+            cancelPress();
+            unlight(true);
+        });
+
+        item.addEventListener("touchcancel", function () {
+
+            cancelPress();
+            unlight(false);
+        });
 
         return item;
     }
@@ -34181,6 +34247,35 @@
                 function (v) { setPref("vpnHotspotOnly", v); });
 
             const wgRow = makeCarTextRow("WireGuard tunnel to turn on again, blank for none", "wgTunnel", "");
+
+            // The tunnel on or off by hand, to try the hand over without
+            // moving the hotspot. The app's notes say how it went
+            const wgTestRow = document.createElement("div");
+            const wgTestName = document.createElement("span");
+            const wgTestBtns = document.createElement("div");
+
+            wgTestRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            wgTestName.textContent = "WireGuard";
+            wgTestName.style.cssText = "flex:1;min-width:0";
+            wgTestBtns.style.cssText = "display:flex;gap:8px;flex:0 0 auto";
+
+            for (const pair of [["On", "1"], ["Off", "0"]]) {
+
+                const b = makeButton(pair[0], "#333", "#fff", function () {
+
+                    if (typeof window.MurekaHost.wireGuard === "function") {
+                        window.MurekaHost.wireGuard(pair[1]);
+                    }
+                });
+
+                b.style.flex = "0 0 auto";
+                b.style.minWidth = "56px";
+                b.style.padding = "6px 12px";
+                wgTestBtns.appendChild(b);
+            }
+
+            wgTestRow.appendChild(wgTestName);
+            wgTestRow.appendChild(wgTestBtns);
             const nameRow = makeCarTextRow("Local name for other devices, .local is added", "mdnsName", "murekaplayer");
 
             // Android's battery saving can freeze the app after the phone has
@@ -34286,7 +34381,7 @@
                 }
             }, 2000);
 
-            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, hotspotOnlyRow, wgRow, nameRow, carStatusEl, carHint, netHint,
+            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, hotspotOnlyRow, wgRow, wgTestRow, nameRow, carStatusEl, carHint, netHint,
                 vpnHint, batteryRow].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
@@ -34726,6 +34821,7 @@
             connPage.appendChild(addressRow);
             connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the phone's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
             connPage.appendChild(withHint(wgRow, "When the public address goes, this WireGuard tunnel is turned on again, and off before it comes. WireGuard needs Allow remote control apps switched on, in its advanced settings, and Android asks once whether this app may control tunnels."));
+            connPage.appendChild(withHint(wgTestRow, "Turns the tunnel on or off now, the way the hand over does, to try it without the hotspot. Turning it on takes Android's one VPN from the public address."));
             connPage.appendChild(nameRow);
             connPage.appendChild(carStatusEl);
             connPage.appendChild(carHint);
@@ -44795,7 +44891,38 @@
         if (contextMenuEl) {
             contextMenuEl.style.display = "none";
         }
+
+        markPressedRow(null);
     }
+
+    // The row being pressed, lit a little, so it is plain which song a tap
+    // or a long press is for. It stays lit while that song's menu is open.
+    // A shadow inside the row, so the row's own background and the look
+    // of picked rows are left alone
+    let pressedRowEl = null;
+
+    function markPressedRow(el) {
+
+        if (pressedRowEl && pressedRowEl !== el) {
+            pressedRowEl.style.boxShadow = "";
+        }
+
+        pressedRowEl = el;
+
+        if (el) {
+
+            el.style.borderRadius = "6px";
+            el.style.boxShadow = "inset 0 0 0 999px rgba(72, 225, 235, 0.16)";
+        }
+    }
+
+    function songMenuOpen() {
+        return !!contextMenuEl && contextMenuEl.style.display !== "none";
+    }
+
+    // Lit only after the finger has rested a moment, so a flick through the
+    // list does not light every row it starts on
+    const PRESS_LIGHT_MS = 90;
 
     // Add one clickable row to the options popup
     // A row that states something rather than offering an action. Greyed and
