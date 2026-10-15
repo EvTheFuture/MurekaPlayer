@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.359";
+    const VERSION = "1.9.9.360";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -318,6 +318,11 @@
     // brought back
     let settingsReadFailed = "";
     let settingsRestored = false;
+
+    // The stored settings put aside after a failed read, and a save that
+    // did not go through, so it is said once
+    let settingsKeptAside = false;
+    let settingsSaveFailed = false;
 
     // The song's progress on the waveform: a colour as #rrggbb and how much
     // it shows, in percent. One up to the play head, and one past it
@@ -1763,6 +1768,9 @@
     let viewMenuEl = null;
     let viewMenuBar = null;
 
+    // The name of the view on that bar, the counts go beside it on a phone
+    let viewMenuLabel = null;
+
     // The playlists overlay, its list container and the open button
     let playlistsEl = null;
     let playlistsListEl = null;
@@ -2624,6 +2632,7 @@
             webLyricSideMul: 0,
             webLyricLineMul: 0,
             webLyricSideShift: null,
+            webLyricShift: 0,
             metaTitle: "${title}",
             metaSubtitle: "${genre}",
             debugOverlay: false,
@@ -2860,6 +2869,8 @@
                         ? parsed.webLyricLineMul : 0,
                     webLyricSideShift: (typeof parsed.webLyricSideShift === "number" && parsed.webLyricSideShift >= -40 && parsed.webLyricSideShift <= 40)
                         ? parsed.webLyricSideShift : null,
+                    webLyricShift: (typeof parsed.webLyricShift === "number" && parsed.webLyricShift >= -80 && parsed.webLyricShift <= 80)
+                        ? parsed.webLyricShift : 0,
                     metaTitle: typeof parsed.metaTitle === "string"
                         ? parsed.metaTitle
                         : "${title}",
@@ -2913,9 +2924,57 @@
 
         logSettingChanges();
 
+        // After a start that could not read them, the stored settings are
+        // kept aside before anything is saved over them. When that cannot be
+        // made sure of, nothing is saved, so one bad read never turns into
+        // settings lost for good
+        if (settingsReadFailed && !settingsKeptAside) {
+
+            try {
+
+                const raw = localStorage.getItem(SETTINGS_KEY);
+
+                if (raw && !localStorage.getItem(SETTINGS_KEY + "_unread")) {
+                    localStorage.setItem(SETTINGS_KEY + "_unread", raw);
+                }
+
+                settingsKeptAside = true;
+            } catch (e) {
+
+                dbgLog("Settings", "not saved, the stored ones could not be kept aside first: " + (e && e.message || e));
+                return;
+            }
+        }
+
+        const text = JSON.stringify(settings);
+
         try {
-            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+            localStorage.setItem(SETTINGS_KEY, text);
+            settingsSaveFailed = false;
         } catch (e) {
+
+            // Most likely the browser's storage is full. What an old version
+            // left behind is given up and it is tried once more
+            try {
+
+                localStorage.removeItem(LEGACY_PUBLISHED_KEY);
+                localStorage.setItem(SETTINGS_KEY, text);
+                settingsSaveFailed = false;
+                return;
+            } catch (e2) {
+                // Still no room
+            }
+
+            dbgLog("Settings", "could not be saved: " + (e && e.message || e));
+
+            // Said once until a save works again, a change that is lost on
+            // the next start must not go by unnoticed
+            if (!settingsSaveFailed) {
+
+                settingsSaveFailed = true;
+                setStatus("Settings could not be saved, the browser's storage is full");
+            }
         }
     }
 
@@ -12133,6 +12192,66 @@
         label.textContent = parts.join("  \u00B7  ") + "  \u25BE";
 
         viewMenuBar.appendChild(label);
+        viewMenuLabel = label;
+        placeCounts();
+    }
+
+    // On a phone the counts go in the bar, to the right of the view, which
+    // gives the list the line they took under it. As much of them as fits
+    // beside the view's name is shown, the bar keeps its one line. In a
+    // wider panel they stay a line of their own under the bar
+    function placeCounts() {
+
+        if (!countsEl || !viewMenuBar) {
+            return;
+        }
+
+        const inBar = window.innerWidth <= 640;
+        const ways = countsEl.__ways || [countsEl.textContent];
+
+        if (!inBar) {
+
+            if (countsEl.parentNode !== bodyEl || countsEl.previousSibling !== viewMenuBar) {
+                viewMenuBar.insertAdjacentElement("afterend", countsEl);
+            }
+
+            countsEl.style.cssText = "margin-top:6px;color:#888;font-size:12px";
+            countsEl.textContent = ways[0];
+            viewMenuBar.style.justifyContent = "center";
+            viewMenuBar.style.padding = "7px 4px";
+
+            if (viewMenuLabel) {
+                viewMenuLabel.style.cssText = "";
+            }
+
+            return;
+        }
+
+        if (countsEl.parentNode !== viewMenuBar) {
+            viewMenuBar.appendChild(countsEl);
+        }
+
+        countsEl.style.cssText = "flex:0 0 auto;margin-left:auto;padding-left:8px;color:#888;font-size:12px;font-weight:400;white-space:nowrap";
+        viewMenuBar.style.justifyContent = "flex-start";
+        viewMenuBar.style.padding = "7px 10px";
+
+        if (viewMenuLabel) {
+            viewMenuLabel.style.cssText = "flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left";
+        }
+
+        // The longest way of putting the counts that leaves the view's name
+        // whole, or the shortest one when even that does not
+        const room = viewMenuBar.clientWidth - 20;
+        const name = viewMenuLabel ? viewMenuLabel.scrollWidth : 0;
+
+        for (let i = 0; i < ways.length; i++) {
+
+            countsEl.textContent = ways[i];
+
+            if (i === ways.length - 1 || name + countsEl.offsetWidth + 6 <= room) {
+                break;
+            }
+        }
     }
 
     // The songs to show for the current view
@@ -23378,7 +23497,8 @@
             line: settings.webLyricLineMul || settings.lyricLineMul || 1.5,
             sideShift: typeof settings.webLyricSideShift === "number"
                 ? settings.webLyricSideShift
-                : Math.round((settings.lyricSideShift || 0) * size / mobileSize)
+                : Math.round((settings.lyricSideShift || 0) * size / mobileSize),
+            shift: settings.webLyricShift || 0
         };
     }
 
@@ -27555,6 +27675,9 @@
         bodyEl.appendChild(searchRow);
         bodyEl.appendChild(viewMenuBar);
         bodyEl.appendChild(countsEl);
+
+        // Turned or resized, the counts go where the width wants them
+        window.addEventListener("resize", placeCounts);
         bodyEl.appendChild(buildSelBar());
         bodyEl.appendChild(buildProgress());
         bodyEl.appendChild(listWrapEl);
@@ -31158,7 +31281,6 @@
 
         listEl.appendChild(frag);
         lazyRendered = end;
-        lazyKeep = Math.max(lazyKeep, end);
         noteSeenStubs();
     }
 
@@ -31179,6 +31301,15 @@
         // The same numbers as the web view's list and the song menu, one
         // way of counting for all of them
         const numberById = hostNumbers();
+
+        // How many rows reach down to what is on screen now, so a redraw of
+        // the same view builds that far again, and no further. Once at the
+        // end of a long list and back up, a redraw no longer builds all of it
+        const builtRows = listEl.children.length;
+        const seenTo = listEl.scrollTop + listEl.clientHeight;
+        const rowsSeen = builtRows > 0 && listEl.scrollHeight > 0
+            ? Math.ceil(seenTo / (listEl.scrollHeight / builtRows))
+            : 0;
 
         listEl.textContent = "";
         playingItemEl = null;
@@ -31223,6 +31354,8 @@
 
             lazyKey = key;
             lazyKeep = 0;
+        } else {
+            lazyKeep = rowsSeen > 0 ? rowsSeen + Math.floor(RENDER_CHUNK / 2) : 0;
         }
 
         lazyRows = visible;
@@ -31276,7 +31409,20 @@
                 text = scope.join("  \u00B7  ") + "  \u00B7  " + text;
             }
 
+            // Shorter ways of saying the same, for the bar on a phone
+            const of = shown + " of " + cache.songs.length;
+            const lead = scope.length > 0 ? scope.join(" \u00B7 ") + " \u00B7 " : "";
+
+            countsEl.__ways = [
+                text,
+                lead + of + " \u00B7 Public " + publicTotal + " \u00B7 Queue " + queue.length,
+                of + " \u00B7 Public " + publicTotal + " \u00B7 Queue " + queue.length,
+                of + " \u00B7 Queue " + queue.length,
+                of,
+                String(shown)
+            ];
             countsEl.textContent = text;
+            placeCounts();
         }
 
         // Amnesty, pin the playing song on top when this view does not contain it
@@ -34177,6 +34323,11 @@
                 function () { return hostLyricLayout().sideShift; },
                 function (v) { settings.webLyricSideShift = v; publishHostSoon(); }, -40, 40, 1);
 
+            // Up or down from where the lyrics sit, beside the cover and on it
+            const webLyricShiftRow = makeStepperRow("Lyric position",
+                function () { return settings.webLyricShift || 0; },
+                function (v) { settings.webLyricShift = v; publishHostSoon(); }, -80, 80, 2);
+
             // The way back and the word on what the page holds are its head
             const webHead = [makeBackRow("Web view"),
                 makeHint("How the web view looks in a desktop or tablet browser, apart from the mobile player.")];
@@ -34325,6 +34476,7 @@
             webPage.appendChild(webLyricSideRow);
             webPage.appendChild(webLyricSpaceRow);
             webPage.appendChild(webLyricSideShiftRow);
+            webPage.appendChild(webLyricShiftRow);
             webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
 
             webPage.appendChild(makeLabel("Control buttons"));

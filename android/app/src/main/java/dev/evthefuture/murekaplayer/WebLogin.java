@@ -67,6 +67,17 @@ final class WebLogin {
     private static final Map<String, long[]> TRIES = new HashMap<>();
     private static final int MAX_DEVICES = 256;
 
+    // Wrong passwords from all devices together. Someone with many
+    // addresses gets a few tries from each, so past a number of wrong ones
+    // in all, every device waits, doubling up to ten minutes. The app's own
+    // screen needs no password and is never held back by this. The count
+    // starts over a quarter of an hour after the last wrong one
+    private static final int ALL_FREE = 10;
+    private static final long ALL_FORGET_MS = 15 * 60 * 1000L;
+    private static long allWrong = 0;
+    private static long allLast = 0;
+    private static long allUntil = 0;
+
     private WebLogin() {
     }
 
@@ -119,8 +130,9 @@ final class WebLogin {
     // Seconds a device waits before its next try, 0 when it may try now
     static synchronized long waitSeconds(String who) {
 
+        long now = System.currentTimeMillis();
         long[] t = TRIES.get(who);
-        long left = t == null ? 0 : t[1] - System.currentTimeMillis();
+        long left = Math.max(t == null ? 0 : t[1] - now, allUntil - now);
 
         return left > 0 ? (left + 999) / 1000 : 0;
     }
@@ -160,26 +172,46 @@ final class WebLogin {
             return true;
         }
 
-        // Many devices at once, the oldest counts are let go
+        long now = System.currentTimeMillis();
+
+        // Counted for all devices together first, so even a device that
+        // cannot be counted on its own below is held back
+        if (now - allLast > ALL_FORGET_MS) {
+            allWrong = 0;
+        }
+
+        allWrong += 1;
+        allLast = now;
+
+        if (allWrong >= ALL_FREE) {
+            allUntil = now + Math.min(600000L, 5000L << Math.min(allWrong - ALL_FREE, 7));
+        }
+
+        // Many devices at once, the ones no longer waiting are let go. The
+        // ones still waiting are kept, so new addresses cannot wipe them
         if (TRIES.size() >= MAX_DEVICES && !TRIES.containsKey(who)) {
-            TRIES.clear();
+            TRIES.values().removeIf(v -> v[1] <= now);
         }
 
         long[] t = TRIES.get(who);
 
-        if (t == null) {
+        if (t == null && TRIES.size() < MAX_DEVICES) {
 
             t = new long[2];
             TRIES.put(who, t);
         }
 
-        t[0] += 1;
+        if (t != null) {
 
-        if (t[0] >= 3) {
-            t[1] = System.currentTimeMillis() + Math.min(600000L, 5000L << Math.min(t[0] - 3, 7));
+            t[0] += 1;
+
+            if (t[0] >= 3) {
+                t[1] = now + Math.min(600000L, 5000L << Math.min(t[0] - 3, 7));
+            }
         }
 
-        Hub.note("Web view", "a wrong password from " + who + ", " + t[0] + " in a row");
+        Hub.note("Web view", "a wrong password from " + who + ", "
+            + (t != null ? t[0] + " in a row, " : "") + allWrong + " from all devices");
 
         return false;
     }

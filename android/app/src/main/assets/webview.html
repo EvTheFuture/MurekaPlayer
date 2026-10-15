@@ -5116,6 +5116,20 @@
 
             return v && typeof v === "object" ? v : null;
         } catch (e) {
+
+            // Settings that could not be read are kept aside, the first time
+            // only, before anything new is saved over them
+            try {
+
+                const raw = localStorage.getItem(LOCAL_KEY);
+
+                if (raw && !localStorage.getItem(LOCAL_KEY + "_unread")) {
+                    localStorage.setItem(LOCAL_KEY + "_unread", raw);
+                }
+            } catch (e2) {
+                // No storage to keep them in
+            }
+
             return null;
         }
     }
@@ -8589,6 +8603,9 @@
         ];
         box.roll.style.height = (nextY + half + lineH) + "px";
 
+        // Up or down as the phone's web view settings ask
+        box.roll.style.transform = layout.shift ? "translateY(" + layout.shift + "px)" : "";
+
         for (let i = 0; i < 5; i++) {
 
             const g = box.geo[i];
@@ -8707,7 +8724,8 @@
             size: Math.round((typeof l.size === "number" ? l.size : 26) * scale),
             side: typeof l.side === "number" ? l.side : 0.8,
             line: typeof l.line === "number" ? l.line : 1.5,
-            sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale)
+            sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale),
+            shift: Math.round((typeof l.shift === "number" ? l.shift : 0) * scale)
         };
     }
 
@@ -8729,7 +8747,7 @@
 
                 const box = lyricBoxes.info;
                 const layout = lyricLayout();
-                const key = [layout.size, layout.side, layout.line, layout.sideShift].join(",");
+                const key = [layout.size, layout.side, layout.line, layout.sideShift, layout.shift].join(",");
 
                 if (!box.geo || key !== box.key) {
 
@@ -8779,7 +8797,7 @@
             layout.size = Math.round(layout.size * 0.85);
         }
 
-        const key = [layout.size, layout.side, layout.line, layout.sideShift].join(",");
+        const key = [layout.size, layout.side, layout.line, layout.sideShift, layout.shift].join(",");
 
         other.style.display = "none";
         el.style.display = "block";

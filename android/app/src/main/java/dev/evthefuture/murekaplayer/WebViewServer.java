@@ -1801,10 +1801,24 @@ final class WebViewServer {
         sendCookie(out, "{\"ok\":true}", key);
     }
 
-    // The device a request came from, to count its wrong passwords
+    // The device a request came from, to count its wrong passwords. An IPv6
+    // device can make up new addresses at will inside its network, so there
+    // the first half of the address, the network, is what is counted
     private static String who(Socket c) {
 
         InetAddress a = c.getInetAddress() == null ? null : plainV4(c.getInetAddress());
+
+        if (a instanceof Inet6Address) {
+
+            byte[] b = a.getAddress();
+            StringBuilder sb = new StringBuilder("v6:");
+
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format(Locale.ROOT, "%02x", b[i] & 0xff));
+            }
+
+            return sb.toString();
+        }
 
         return a == null ? "" : a.getHostAddress();
     }

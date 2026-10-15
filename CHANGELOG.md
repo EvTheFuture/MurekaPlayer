@@ -331,6 +331,12 @@ the new settings layout and a number of smaller improvements.
 
 ### Mobile player, add-on and bookmarklet
 
+- **The counts on a phone** sit in the bar with the list's view, to the
+  right, as much of them as fits, which leaves the song list one row more.
+- **Settings are never lost to a bad read or full storage.** Settings that
+  could not be read are kept aside before anything is saved over them, and
+  when the browser's storage is full the player says the settings could not
+  be saved.
 - **Settings in pages.** The main settings page is a list of pages in
   groups: Views (Mobile player, and Web view in the app), Device (This device,
   and Connections in the app), Music (Library, Playback, Now playing), Data
@@ -450,7 +456,12 @@ the new settings layout and a number of smaller improvements.
   removing it needs the current one. A browser asks for it once and stays
   signed in until the password changes or all browsers are signed out, the
   app's own screen never asks. While none is set, the app and each browser
-  ask at every start whether to set one, with Never show again.
+  ask at every start whether to set one, with Never show again. Wrong
+  passwords make the device wait longer each time, and past ten wrong ones
+  from all devices together every browser waits, so many addresses do not
+  help someone guessing.
+- **Lyric position** for the web view, under Web view in the settings,
+  moves the lyrics up or down, beside the cover and on it.
 - **Signed in account** in the web view, beside the badges, and on a phone
   on a second line of the header together with the badges.
 - **Hotspot badge** in the web view, off by default, under Web view display
