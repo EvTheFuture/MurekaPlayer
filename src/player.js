@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.372";
+    const VERSION = "1.9.9.373";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24361,6 +24361,11 @@
     let netQuietUntil = 0;
     let netQuietTimer = 0;
 
+    // How long the internet has to stay gone before it is said, and
+    // whether it was, so back online is only said after it
+    const NET_SAY_MS = 4000;
+    let offlineSaid = false;
+
     // What follows going offline or coming back, whichever told it
     function offlineChanged(wasOffline) {
 
@@ -24379,28 +24384,33 @@
             return;
         }
 
-        // Kept quiet while the app moves things around. Once that is over
-        // a lasting loss is still said, a short one never was one
-        const quiet = Date.now() < netQuietUntil;
+        // Said only once it has lasted a few seconds, a network changing
+        // over drops the internet for a blink, and longer while the app
+        // moves its hotspot or VPNs. Back before it was said, nothing is
+        // said either way
+        if (now) {
 
-        if (quiet && now) {
+            const wait = Math.max(NET_SAY_MS, netQuietUntil - Date.now() + 500);
 
-            dbgLog("Offline", "the internet went while the app changes networks, said later if it lasts");
+            dbgLog("Offline", "said in " + Math.round(wait / 1000) + " s if it lasts");
             clearTimeout(netQuietTimer);
             netQuietTimer = setTimeout(function () {
 
                 if (offlineMode()) {
+
+                    offlineSaid = true;
                     showToast("No internet, only stored songs play", false);
                 }
-            }, Math.max(0, netQuietUntil - Date.now()) + 500);
-        } else if (now) {
-            showToast("No internet, only stored songs play", false);
+            }, wait);
         } else {
 
-            if (!quiet) {
+            clearTimeout(netQuietTimer);
+
+            if (offlineSaid) {
                 showToast("Back online", "online");
             }
 
+            offlineSaid = false;
             setTimeout(flushReports, 3000);
             keepMissingCovers();
             reloadWhenIdle();

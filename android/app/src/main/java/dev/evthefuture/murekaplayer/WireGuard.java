@@ -96,6 +96,33 @@ final class WireGuard {
         }
     }
 
+    // The screen on for a moment, for a try after the first did not work.
+    // Some phones hold an app in the background back further while the
+    // screen is off than a wake lock alone lifts
+    private static final long SCREEN_MS = 10000;
+
+    @SuppressWarnings("deprecation")
+    private static void wakeScreen(Context c) {
+
+        try {
+
+            PowerManager pm = c.getSystemService(PowerManager.class);
+
+            if (pm == null || pm.isInteractive()) {
+                return;
+            }
+
+            PowerManager.WakeLock screen = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK
+                | PowerManager.ACQUIRE_CAUSES_WAKEUP, "MurekaPlayer:wireguard-screen");
+
+            screen.setReferenceCounted(false);
+            screen.acquire(SCREEN_MS);
+            Hub.note("WireGuard", "the screen is turned on for this try");
+        } catch (RuntimeException e) {
+            Hub.note("WireGuard", "the screen could not be turned on: " + e.getMessage());
+        }
+    }
+
     private static void letSleep() {
 
         try {
@@ -243,6 +270,10 @@ final class WireGuard {
     private static final long RESET_MS = 1500;
 
     private static void resetThenUp(Context c, int tried) {
+
+        if (tried > 0) {
+            wakeScreen(c);
+        }
 
         send(c, false);
         MAIN.postDelayed(() -> send(c, true, tried), RESET_MS);

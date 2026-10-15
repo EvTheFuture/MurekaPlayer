@@ -31,6 +31,10 @@
          is named in the settings -->
     <uses-permission android:name="com.wireguard.android.permission.CONTROL_TUNNELS" />
 
+    <!-- A retry of turning WireGuard on wakes the screen for a moment,
+         Android 14 and later ask for this to do it -->
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
+
     <!-- Lets the app switch wireless debugging on for a start of the
          hotspot helper and off again. Only adb can give it, the helper's
          first start through wireless debugging does -->
