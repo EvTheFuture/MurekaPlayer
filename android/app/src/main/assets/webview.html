@@ -2502,6 +2502,16 @@
         inset: 0;
     }
 
+    /* The share always as wide as 100 %, right aligned, and kept empty for
+       a solid colour, so every swatch in the settings lines up */
+    .pColorPct {
+        flex: 0 0 auto;
+        width: 4.2em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
     /* The colour picker's sliders, the same in every browser */
     input.mureka-range {
         -webkit-appearance: none;
@@ -5173,7 +5183,8 @@
             size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26,
             sidePct: s.lyricLayout && typeof s.lyricLayout.side === "number" ? Math.round(s.lyricLayout.side * 100) : 80,
             linePct: s.lyricLayout && typeof s.lyricLayout.line === "number" ? Math.round(s.lyricLayout.line * 100) : 150,
-            sideShift: s.lyricLayout && typeof s.lyricLayout.sideShift === "number" ? s.lyricLayout.sideShift : 0
+            sideShift: s.lyricLayout && typeof s.lyricLayout.sideShift === "number" ? s.lyricLayout.sideShift : 0,
+            shift: s.lyricLayout && typeof s.lyricLayout.shift === "number" ? s.lyricLayout.shift : 0
         };
     }
 
@@ -5254,7 +5265,8 @@
                 size: typeof look.size === "number" ? look.size : (raw.lyricLayout || {}).size,
                 side: typeof look.sidePct === "number" ? look.sidePct / 100 : (raw.lyricLayout || {}).side,
                 line: typeof look.linePct === "number" ? look.linePct / 100 : (raw.lyricLayout || {}).line,
-                sideShift: typeof look.sideShift === "number" ? look.sideShift : (raw.lyricLayout || {}).sideShift
+                sideShift: typeof look.sideShift === "number" ? look.sideShift : (raw.lyricLayout || {}).sideShift,
+                shift: typeof look.shift === "number" ? look.shift : (raw.lyricLayout || {}).shift
             });
         }
 
@@ -5376,6 +5388,7 @@
         { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
         { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
         { label: "Side line offset", page: "Web view", key: "sideShift", kind: "step", step: 1, min: -40, max: 40 },
+        { label: "Lyric position", page: "Web view", key: "shift", kind: "step", step: 2, min: -80, max: 80 },
         { label: "Screen off overlay", page: "Web view", screen: true, key: "on", kind: "bool" },
         { label: "Screen off after seconds", page: "Web view", screen: true, key: "after", kind: "step", step: 5, min: 0, max: 300 },
         { label: "Screen off mark, blank for none", page: "Web view", screen: true, key: "text", kind: "text" },
@@ -8603,8 +8616,11 @@
         ];
         box.roll.style.height = (nextY + half + lineH) + "px";
 
-        // Up or down as the phone's web view settings ask
-        box.roll.style.transform = layout.shift ? "translateY(" + layout.shift + "px)" : "";
+        // Up or down as the settings ask. On the cover the roll itself moves,
+        // beside it the lyric box does, see placeInfo, so the fade at the
+        // foot of the cover is worked out from where the lyrics really are
+        box.roll.style.transform = box === lyricBoxes.cover && layout.shift
+            ? "translateY(" + layout.shift + "px)" : "";
 
         for (let i = 0; i < 5; i++) {
 
@@ -12842,7 +12858,7 @@
         swatch.setAttribute("aria-label", "Pick the colour");
         fillEl.className = "pColorFill";
         swatch.appendChild(fillEl);
-        pct.className = "pText";
+        pct.className = "pText pColorPct";
 
         const paint = function () {
 
@@ -18521,7 +18537,7 @@
             $("title").style.marginTop = "";
             $("subtitle").style.marginTop = "";
             $("rateRow").style.marginTop = "";
-            lyrics.style.marginTop = "";
+            lyrics.style.marginTop = lyricLayout().shift ? lyricLayout().shift + "px" : "";
             lyrics.style.webkitMaskImage = "";
             lyrics.style.maskImage = "";
             $("upNext").style.maxWidth = "";
@@ -18559,7 +18575,7 @@
         // moves up by that much here, closer to the line above
         const geo = lyricBoxes.info.geo;
 
-        lyrics.style.marginTop = geo ? (-geo[1].y) + "px" : "";
+        lyrics.style.marginTop = ((geo ? -geo[1].y : 0) + lyricLayout().shift) + "px";
 
         // The lyrics keep their height, so the title and stars do not move
         // when a song has none. What would run past the foot of the cover

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.360";
+    const VERSION = "1.9.9.363";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8142,16 +8142,24 @@
     // never overwrite each other
     function fileName(song) {
 
-        const base = (song.title || "track").replace(/[\\/:*?"<>|]+/g, "_").trim();
+        const base = fileBase(song.title) || "track";
 
         return base + " [" + song.song_id + "].mp3";
+    }
+
+    // A name without characters a file system refuses, and not starting
+    // with a dot, which hides a file and which the browser may refuse. Dots
+    // anywhere else are fine, the name always goes on with more after them
+    function fileBase(text) {
+
+        return String(text || "").replace(/[\\/:*?"<>|]+/g, "_").trim().replace(/^[.\s]+/, "");
     }
 
     // A file name typed by hand made safe to save: no characters a file
     // system refuses, and ending in .mp3. Empty when nothing usable is left
     function cleanFileName(typed) {
 
-        const base = String(typed || "").replace(/[\\/:*?"<>|]+/g, "_").trim().replace(/\.mp3$/i, "").trim();
+        const base = fileBase(String(typed || "").trim().replace(/\.mp3$/i, ""));
 
         return base ? base + ".mp3" : "";
     }

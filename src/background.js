@@ -57,7 +57,10 @@ function murekaHost(value) {
 
 // Only songs from Mureka, saved as mp3 files straight in the Mureka folder.
 // Any script on the page can post to the content script, so nothing else is
-// downloaded however it is asked for
+// downloaded however it is asked for. The name can hold no slash, so it can
+// never lead out of that folder, and dots inside it are fine, a title like
+// "Wait.. what" included. Only a name starting with a dot is refused, the
+// player never makes one
 function allowedItem(item) {
 
     if (!item || typeof item !== "object" || typeof item.url !== "string" || typeof item.filename !== "string") {
@@ -68,7 +71,7 @@ function allowedItem(item) {
         return false;
     }
 
-    return /^Mureka\/[^\/\\]+\.mp3$/i.test(item.filename) && item.filename.indexOf("..") === -1;
+    return /^Mureka\/(?!\.)[^\/\\]+\.mp3$/i.test(item.filename);
 }
 
 // Chromium stops a service worker after roughly thirty seconds of inactivity,

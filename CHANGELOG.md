@@ -461,7 +461,8 @@ the new settings layout and a number of smaller improvements.
   from all devices together every browser waits, so many addresses do not
   help someone guessing.
 - **Lyric position** for the web view, under Web view in the settings,
-  moves the lyrics up or down, beside the cover and on it.
+  moves the lyrics up or down, beside the cover and on it. Each browser can
+  have its own.
 - **Signed in account** in the web view, beside the badges, and on a phone
   on a second line of the header together with the badges.
 - **Hotspot badge** in the web view, off by default, under Web view display
