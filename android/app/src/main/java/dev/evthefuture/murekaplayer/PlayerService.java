@@ -26,7 +26,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -97,6 +100,10 @@ public class PlayerService extends Service implements Hub.Listener {
 
     private MediaSession session;
     private WebViewServer server;
+
+    // Android's word on each hotspot change, for the public address that
+    // follows the hotspot
+    private BroadcastReceiver hotspotWatcher;
     private MdnsResponder mdns;
     private WifiManager.MulticastLock multicastLock;
     private PowerManager.WakeLock wakeLock;
@@ -319,6 +326,55 @@ public class PlayerService extends Service implements Hub.Listener {
         // hotspot settings need it, after a restart of the phone too
         HelperStart.atStart(this);
 
+        // The public address can follow the hotspot, so each change to it
+        // brings the settings in line again
+        hotspotWatcher = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+
+                // A hotspot going off with a tunnel named, but the public
+                // address set to stay on, says so, else nothing happens
+                // and nothing says why. Not for the last state Android
+                // hands over when the watch starts
+                int st = intent.getIntExtra("wifi_state", -1);
+
+                // The hotspot changing takes the internet away for a moment,
+                // which the player does not need to announce
+                if (!isInitialStickyBroadcast()) {
+                    WireGuard.quiet();
+                }
+
+                if (st == 11 && !isInitialStickyBroadcast() && !WebViewSettings.wgTunnel(context).isEmpty()
+                    && WebViewSettings.vpnEnabled(context) && !WebViewSettings.vpnHotspotOnly(context)) {
+
+                    WireGuard.tell(context, "The hotspot is off, but the public address stays on, so WireGuard"
+                        + " stays off. Switch on Only while the hotspot is on in the settings", false);
+                }
+
+                // Off with the public address down already, it never came
+                // or went some other way, WireGuard still comes back
+                if (st == 11 && !isInitialStickyBroadcast() && WebViewSettings.vpnHotspotOnly(context)
+                    && CarVpn.activeAddress() == null) {
+                    WireGuard.upSoon(context);
+                }
+
+                applySettings();
+            }
+        };
+
+        try {
+
+            IntentFilter filter = new IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED");
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(hotspotWatcher, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                registerReceiver(hotspotWatcher, filter);
+            }
+        } catch (RuntimeException e) {
+            hotspotWatcher = null;
+        }
+
         // The local name for other devices and the web view's fixed address
         applySettings();
 
@@ -490,17 +546,40 @@ public class PlayerService extends Service implements Hub.Listener {
             mdns.start();
         }
 
-        if (WebViewSettings.vpnEnabled(this)) {
+        // The public address, all the time or only while the hotspot is on
+        boolean hotspotOnly = WebViewSettings.vpnHotspotOnly(this);
+        boolean wanted = WebViewSettings.vpnEnabled(this)
+            && (!hotspotOnly || "on".equals(Hotspot.liveState(this)));
+
+        if (wanted) {
 
             // Without the permission the settings panel asks for it, a
             // service cannot show the question itself
             if (VpnService.prepare(this) == null) {
-                startCarVpn(CarVpn.ACTION_START);
+
+                // WireGuard is asked to step aside first, and the public
+                // address starts once its VPN has gone. Already up, the
+                // address is only moved when it changed
+                if (CarVpn.activeAddress() == null) {
+                    WireGuard.downThen(this, () -> startCarVpn(CarVpn.ACTION_START));
+                } else {
+                    startCarVpn(CarVpn.ACTION_START);
+                }
             } else if (CarVpn.activeAddress() == null) {
                 CarVpn.setStatus("needs permission, switch it off and on in the settings");
             }
         } else if (CarVpn.activeAddress() != null) {
+
+            // Gone, so the WireGuard tunnel comes back
+            Hub.note("WireGuard", hotspotOnly ? "the hotspot is off, the public address goes"
+                : "the public address is switched off");
             startCarVpn(CarVpn.ACTION_STOP);
+            WireGuard.upSoon(this);
+        } else if (WebViewSettings.vpnEnabled(this) && hotspotOnly) {
+
+            if (!"waiting for the hotspot".equals(CarVpn.status())) {
+                CarVpn.setStatus("waiting for the hotspot");
+            }
         } else if (!"off".equals(CarVpn.status())) {
             CarVpn.setStatus("off");
         }
@@ -608,8 +687,22 @@ public class PlayerService extends Service implements Hub.Listener {
         }
         instance = null;
 
+        if (hotspotWatcher != null) {
+
+            try {
+                unregisterReceiver(hotspotWatcher);
+            } catch (RuntimeException e) {
+                // Not registered after all
+            }
+
+            hotspotWatcher = null;
+        }
+
+        // The app ends, WireGuard gets the phone's VPN back
         if (CarVpn.activeAddress() != null) {
+
             startCarVpn(CarVpn.ACTION_STOP);
+            WireGuard.upSoon(this);
         }
 
         if (server != null) {

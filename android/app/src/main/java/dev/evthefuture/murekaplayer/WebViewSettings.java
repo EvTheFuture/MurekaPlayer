@@ -35,6 +35,16 @@ final class WebViewSettings {
 
     static final String ALLOW_HOTSPOT = "allowHotspot";
     static final String ALLOW_WIFI = "allowWifi";
+
+    // Browsers reaching the phone through a VPN, such as WireGuard, from a
+    // private address only. Off unless switched on
+    static final String ALLOW_VPN = "allowVpn";
+
+    // The public address only while the phone's hotspot is on, so another
+    // VPN can run the rest of the time, and the WireGuard tunnel that takes
+    // over then, by its name. Empty for none
+    static final String VPN_HOTSPOT_ONLY = "vpnHotspotOnly";
+    static final String WG_TUNNEL = "wgTunnel";
     static final String VPN = "carVpn";
     static final String VPN_ADDRESS = "vpnAddress";
     static final String MDNS_NAME = "mdnsName";
@@ -112,6 +122,18 @@ final class WebViewSettings {
 
     static boolean vpnEnabled(Context c) {
         return "1".equals(prefs(c).getString(VPN, "0"));
+    }
+
+    static boolean vpnHotspotOnly(Context c) {
+        return "1".equals(prefs(c).getString(VPN_HOTSPOT_ONLY, "0"));
+    }
+
+    static boolean allowVpn(Context c) {
+        return "1".equals(prefs(c).getString(ALLOW_VPN, "0"));
+    }
+
+    static String wgTunnel(Context c) {
+        return prefs(c).getString(WG_TUNNEL, "");
     }
 
     static String vpnAddress(Context c) {
@@ -213,6 +235,18 @@ final class WebViewSettings {
             return true;
         }
 
+        // A WireGuard tunnel's name as WireGuard allows it, or none
+        if (WG_TUNNEL.equals(key)) {
+
+            if (!v.isEmpty() && !v.matches("[a-zA-Z0-9_=+.-]{1,15}")) {
+                return false;
+            }
+
+            prefs(c).edit().putString(key, v).apply();
+
+            return true;
+        }
+
         if (VPN_ADDRESS.equals(key)) {
 
             v = v.isEmpty() ? DEFAULT_ADDRESS : cleanAddress(v);
@@ -220,6 +254,7 @@ final class WebViewSettings {
 
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
+            || ALLOW_VPN.equals(key) || VPN_HOTSPOT_ONLY.equals(key)
             || FULLSCREEN.equals(key) || TABLET_VIEW.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
             || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)) {
 

@@ -26,12 +26,22 @@
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!-- Turns a WireGuard tunnel back on when the public address goes
+         away, Android runs one VPN at a time. Asked for only when a tunnel
+         is named in the settings -->
+    <uses-permission android:name="com.wireguard.android.permission.CONTROL_TUNNELS" />
+
     <!-- Lets the app switch wireless debugging on for a start of the
          hotspot helper and off again. Only adb can give it, the helper's
          first start through wireless debugging does -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
+
+    <!-- Whether WireGuard is installed, for the settings -->
+    <queries>
+        <package android:name="com.wireguard.android" />
+    </queries>
 
     <application
         android:allowBackup="false"

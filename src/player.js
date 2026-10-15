@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.363";
+    const VERSION = "1.9.9.370";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23306,7 +23306,7 @@
             songShared: !!(song && song.shared === true),
 
             // The latest note, while it is fresh, for the web view to show
-            toast: lastToast && Date.now() - lastToast.at < 8000 ? lastToast : null,
+            toast: lastToast && Date.now() - lastToast.at < (lastToast.life || 8000) ? lastToast : null,
 
             // When the phone last took the music back from a silent browser,
             // so that browser can say so once it is heard from again
@@ -24356,6 +24356,11 @@
         offlineChanged(wasOffline);
     }
 
+    // Until when the internet coming and going is kept quiet about, while
+    // the app moves its hotspot or VPNs, and the look afterwards
+    let netQuietUntil = 0;
+    let netQuietTimer = 0;
+
     // What follows going offline or coming back, whichever told it
     function offlineChanged(wasOffline) {
 
@@ -24374,11 +24379,28 @@
             return;
         }
 
-        if (now) {
+        // Kept quiet while the app moves things around. Once that is over
+        // a lasting loss is still said, a short one never was one
+        const quiet = Date.now() < netQuietUntil;
+
+        if (quiet && now) {
+
+            dbgLog("Offline", "the internet went while the app changes networks, said later if it lasts");
+            clearTimeout(netQuietTimer);
+            netQuietTimer = setTimeout(function () {
+
+                if (offlineMode()) {
+                    showToast("No internet, only stored songs play", false);
+                }
+            }, Math.max(0, netQuietUntil - Date.now()) + 500);
+        } else if (now) {
             showToast("No internet, only stored songs play", false);
         } else {
 
-            showToast("Back online", "online");
+            if (!quiet) {
+                showToast("Back online", "online");
+            }
+
             setTimeout(flushReports, 3000);
             keepMissingCovers();
             reloadWhenIdle();
@@ -26094,6 +26116,26 @@
             noteUnplug(Number(arg));
         } else if (cmd === "network") {
             setNetOffline(arg === false);
+        } else if (cmd === "netQuiet") {
+
+            // The app is moving its hotspot or VPNs, the internet coming
+            // and going meanwhile is not worth a note
+            netQuietUntil = Math.max(netQuietUntil, Date.now() + Math.min(60000, Math.max(0, Number(arg) || 0)));
+        } else if (cmd === "appToast") {
+
+            // A note from the app itself, here and in the web views
+            const note = arg && typeof arg === "object" ? arg : {};
+
+            if (typeof note.text === "string" && note.text) {
+
+                showToast(note.text.slice(0, 300), note.kind === "wait" ? "wait" : note.ok !== false);
+
+                // Kept for the web views a minute, a browser that lost the
+                // phone while its networks changed hands sees it once back
+                if (lastToast) {
+                    lastToast.life = 60000;
+                }
+            }
         } else if (cmd === "netCheck") {
             checkNet(String(arg || "asked by the app"), true);
         } else if (cmd === "hotspotAuto") {
@@ -34099,6 +34141,12 @@
                 function () { return pref("allowWifi"); },
                 function (v) { setPref("allowWifi", v); });
 
+            // Through a VPN the phone is on, WireGuard for one, off unless
+            // switched on
+            const vpnInRow = makeBoolRow("Allow from a VPN",
+                function () { return window.MurekaHost.getPref("allowVpn", "0") === "1"; },
+                function (v) { setPref("allowVpn", v); });
+
             // Tesla's browser refuses private addresses, and the hotspot only
             // hands out private ones. The app can run a VPN that carries no
             // traffic and only gives the phone this one extra address, which
@@ -34111,6 +34159,18 @@
                 function (v) { setPref("carVpn", v); });
 
             const addressRow = makeCarTextRow("Public address, not a private one", "vpnAddress", "3.3.3.3");
+
+            // Android runs one VPN at a time. Following the hotspot, the
+            // public address leaves the phone's VPN to WireGuard, or another
+            // VPN app, the rest of the time
+            const hotspotOnlyGet = function () {
+                return window.MurekaHost.getPref("vpnHotspotOnly", "0") === "1";
+            };
+
+            const hotspotOnlyRow = makeBoolRow("Only while the hotspot is on", hotspotOnlyGet,
+                function (v) { setPref("vpnHotspotOnly", v); });
+
+            const wgRow = makeCarTextRow("WireGuard tunnel to turn on again, blank for none", "wgTunnel", "");
             const nameRow = makeCarTextRow("Local name for other devices, .local is added", "mdnsName", "murekaplayer");
 
             // Android's battery saving can freeze the app after the phone has
@@ -34181,6 +34241,17 @@
                     lines.push("Public address is off, browsers that refuse private addresses cannot open the web view");
                 }
 
+                if (st.wg === "not installed") {
+                    lines.push("WireGuard is not installed");
+                } else if (st.wg === "needs permission") {
+                    lines.push("WireGuard: allow the app to control tunnels, type the tunnel's name again to be asked");
+                } else if (st.wg === "battery restricted") {
+                    lines.push("WireGuard: set its battery use to Unrestricted in Android's app settings, else Android"
+                        + " may not let it turn the tunnel on in the background");
+                } else if (st.wg === "ready") {
+                    lines.push("WireGuard comes back on when the public address goes" + (st.wgLast ? ", last " + st.wgLast : ""));
+                }
+
                 if (st.mdns) {
                     lines.push("Local name: " + st.mdns);
                 }
@@ -34190,6 +34261,7 @@
                 carStatusEl.textContent = lines.join("\n");
                 paintBattery();
                 updateToggleButton(vpnRow.querySelector("button"), vpnGet());
+                updateToggleButton(hotspotOnlyRow.querySelector("button"), hotspotOnlyGet());
             };
 
             renderCarStatus();
@@ -34204,7 +34276,8 @@
                 }
             }, 2000);
 
-            [hotspotRow, wifiRow, vpnRow, addressRow, nameRow, carStatusEl, carHint, netHint, vpnHint, batteryRow].forEach(function (el) {
+            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, hotspotOnlyRow, wgRow, nameRow, carStatusEl, carHint, netHint,
+                vpnHint, batteryRow].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
 
@@ -34638,8 +34711,11 @@
             connPage.appendChild(netHint);
             connPage.appendChild(hotspotRow);
             connPage.appendChild(wifiRow);
+            connPage.appendChild(withHint(vpnInRow, "A device reaching the phone through a VPN the phone is on, WireGuard for one. Only from a private address, so a VPN that carries everything does not open the web view to the internet."));
             connPage.appendChild(withHint(vpnRow, vpnHint.textContent));
             connPage.appendChild(addressRow);
+            connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the phone's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
+            connPage.appendChild(withHint(wgRow, "When the public address goes, this WireGuard tunnel is turned on again, and off before it comes. WireGuard needs Allow remote control apps switched on, in its advanced settings, and Android asks once whether this app may control tunnels."));
             connPage.appendChild(nameRow);
             connPage.appendChild(carStatusEl);
             connPage.appendChild(carHint);
@@ -35265,14 +35341,19 @@
 
     // The settings the Android app keeps itself, with what they are when
     // never changed, as the app reads them
-    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName", "appFullscreen", "tabletView"];
+    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "allowVpn", "carVpn", "vpnHotspotOnly", "vpnAddress", "mdnsName",
+        "wgTunnel", "appFullscreen", "tabletView"];
 
     // Those of them that decide who can reach the web view
-    const WEB_VIEW_ACCESS_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName"];
+    const WEB_VIEW_ACCESS_KEYS = ["allowHotspot", "allowWifi", "allowVpn", "carVpn", "vpnHotspotOnly", "vpnAddress",
+        "mdnsName", "wgTunnel"];
     const APP_PREF_DEFAULTS = {
         allowHotspot: "1",
         allowWifi: "1",
+        allowVpn: "0",
         carVpn: "0",
+        vpnHotspotOnly: "0",
+        wgTunnel: "",
         vpnAddress: "3.3.3.3",
         mdnsName: "murekaplayer",
         appFullscreen: "1",
@@ -37257,9 +37338,12 @@
         const names = {
             allowHotspot: "allow from the phone's hotspot",
             allowWifi: "allow from Wi-Fi networks",
+            allowVpn: "allow from a VPN",
             carVpn: "public address (VPN)",
+            vpnHotspotOnly: "public address only while the hotspot is on",
             vpnAddress: "public address",
-            mdnsName: "local name"
+            mdnsName: "local name",
+            wgTunnel: "WireGuard tunnel"
         };
         const parts = [];
 
@@ -37269,7 +37353,8 @@
                 continue;
             }
 
-            const onOff = key === "vpnAddress" || key === "mdnsName" ? app[key] : (app[key] === "1" ? "on" : "off");
+            const onOff = key === "vpnAddress" || key === "mdnsName" || key === "wgTunnel"
+                ? (app[key] || "none") : (app[key] === "1" ? "on" : "off");
 
             parts.push(names[key] + " " + onOff);
         }

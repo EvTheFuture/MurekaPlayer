@@ -61,6 +61,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
     private static final int ASK_VPN = 8;
     private static final int SAVE_FILE = 9;
     private static final int ASK_BLUETOOTH = 10;
+    private static final int ASK_WIREGUARD = 11;
 
     private FrameLayout root;
     private WebView web;
@@ -741,6 +742,13 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
         }
 
         requestPermissions(new String[] { Manifest.permission.BLUETOOTH_CONNECT }, ASK_BLUETOOTH);
+    }
+
+    // Whether the app may turn WireGuard tunnels on and off. The settings
+    // show the answer
+    @Override
+    public void askWireGuardPermission() {
+        requestPermissions(new String[] { WireGuard.PERMISSION }, ASK_WIREGUARD);
     }
 
     // Given or not, the Bluetooth watch starts again, and the player's

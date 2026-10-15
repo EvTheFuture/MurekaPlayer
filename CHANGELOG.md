@@ -115,11 +115,16 @@ the new settings layout and a number of smaller improvements.
 
 - Served by the app on port 8080. Only the phone's hotspot and Wi-Fi networks
   may open it, never the mobile network, and **Allow from the phone's
-  hotspot** and **Allow from Wi-Fi networks** choose which.
+  hotspot** and **Allow from Wi-Fi networks** choose which. **Allow from a
+  VPN**, off by default, lets devices in through a VPN the phone is on, such
+  as WireGuard, from private addresses only.
 - **Public address (VPN)** gives the phone the fixed address 3.3.3.3, since
   Tesla's browser refuses private addresses: `http://3.3.3.3:8080` works
   every time. Other devices can use `http://murekaplayer.local:8080`, and the
-  name can be changed.
+  name can be changed. **Only while the hotspot is on** leaves Android's one
+  VPN to another app the rest of the time, and a **WireGuard tunnel** named
+  in the settings is turned off before the public address comes and on again
+  when it goes.
 - Now playing like the phone: sliding covers with the neighbours peeking out,
   synced rolling lyrics beside or on the cover, quarter stars, like with the
   number of hearts (left out when the one heart is your own), plays, a

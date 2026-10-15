@@ -372,7 +372,29 @@ final class WebViewServer {
         NetworkInterface ni = interfaceFor(r);
         String name = ni != null && ni.getName() != null ? ni.getName() : "";
 
-        return !name.isEmpty() && !wifiInterfaces.contains(name) && !isCell(name);
+        return !name.isEmpty() && !wifiInterfaces.contains(name) && !isCell(name) && !vpnInterface(name);
+    }
+
+    // An interface a VPN app made: WireGuard's own, or the tunnel Android
+    // gives a VPN app
+    private static boolean vpnInterface(String name) {
+
+        String n = name == null ? "" : name;
+
+        return n.startsWith("tun") || n.startsWith("wg") || n.startsWith("ppp") || n.startsWith("ipsec");
+    }
+
+    // A private IPv4 address, or one of the shared range many VPNs and
+    // carriers hand out, 100.64.0.0/10
+    private static boolean privateAddress(InetAddress a) {
+
+        if (!(a instanceof Inet4Address)) {
+            return false;
+        }
+
+        byte[] b = a.getAddress();
+
+        return a.isSiteLocalAddress() || ((b[0] & 0xff) == 100 && (b[1] & 0xc0) == 64);
     }
 
     // How many browsers are here now, into the state so each of them can
@@ -1269,6 +1291,29 @@ final class WebViewServer {
             return false;
         }
 
+        // A browser coming through a VPN the phone is on, WireGuard and the
+        // like, asks for the address the phone has inside it. Only when
+        // allowed, and only from a private address, so a VPN that carries
+        // all of the phone's traffic does not open the web view to the
+        // internet. The public address is a VPN too, but the car comes to
+        // it over the hotspot, which the checks further down handle
+        String car = CarVpn.activeAddress();
+
+        if (car == null || !car.equals(local.getHostAddress())) {
+
+            NetworkInterface arrived;
+
+            try {
+                arrived = NetworkInterface.getByInetAddress(local);
+            } catch (IOException e) {
+                arrived = null;
+            }
+
+            if (arrived != null && vpnInterface(arrived.getName())) {
+                return WebViewSettings.allowVpn(context) && privateAddress(remote);
+            }
+        }
+
         // Where the sender is. The interface whose network holds its address
         NetworkInterface ni = interfaceFor(remote);
 
@@ -1288,7 +1333,6 @@ final class WebViewServer {
         // one on the mobile network. The car on the hotspot asks for the
         // address the phone has on another network, such as the one an
         // ESP32 access point hands out, or the VPN's car address
-        String car = CarVpn.activeAddress();
         boolean carAddress = car != null && car.equals(local.getHostAddress());
 
         if (!carAddress) {

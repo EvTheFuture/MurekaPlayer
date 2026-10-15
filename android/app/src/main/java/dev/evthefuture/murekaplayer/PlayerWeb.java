@@ -125,6 +125,10 @@ final class PlayerWeb {
         // which only an activity can show
         void askBluetoothPermission();
 
+        // Android's question whether the app may turn WireGuard tunnels on
+        // and off, which only an activity can show
+        void askWireGuardPermission();
+
         // The web view as the screen on a tablet, or the Mureka page, as
         // the settings now say
         void applyScreen();
@@ -714,6 +718,18 @@ final class PlayerWeb {
                 MAIN.post(PlayerWeb::askVpnIfNeeded);
             }
 
+            // A WireGuard tunnel named, the permission to switch it is asked
+            // for at once, while the app is on screen
+            if (WebViewSettings.WG_TUNNEL.equals(key) && !WebViewSettings.wgTunnel(appContext).isEmpty()
+                && WireGuard.installed(appContext) && !WireGuard.allowed(appContext)) {
+
+                Host host = hostRef.get();
+
+                if (host != null) {
+                    MAIN.post(host::askWireGuardPermission);
+                }
+            }
+
             if (WebViewSettings.FULLSCREEN.equals(key)) {
                 MAIN.post(PlayerWeb::tellFullscreen);
             }
@@ -1219,6 +1235,8 @@ final class PlayerWeb {
 
                 o.put("vpnEnabled", WebViewSettings.vpnEnabled(appContext));
                 o.put("vpn", CarVpn.status());
+                o.put("wg", WireGuard.status(appContext));
+                o.put("wgLast", WireGuard.last());
                 o.put("carUrl", publicAddr != null ? "http://" + publicAddr + ":" + PlayerService.PORT : "");
                 o.put("name", name);
                 o.put("localUrl", "http://" + name + ":" + PlayerService.PORT);
