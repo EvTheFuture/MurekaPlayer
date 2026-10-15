@@ -121,6 +121,7 @@
 
     #title,
     #subtitle,
+    #playingPill,
     #upNext {
         text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
     }
@@ -1312,6 +1313,7 @@
     #app.miniOpen #rateRow,
     #app.miniOpen #fromLine,
     #app.miniOpen #lyrics,
+    #app.miniOpen #upNext,
     #app.miniOpen #workMain {
         visibility: hidden;
     }
@@ -2571,14 +2573,11 @@
         font-variant-numeric: tabular-nums;
     }
 
-    /* What plays next, in the lower left corner of the playing cover, on a
-       dark pill so it reads on any picture. It moves with the cover and
-       fades while the covers slide */
+    /* What is playing, in the lower left corner of the playing cover, and
+       what plays next, under the text beside it, each on a dark pill so it
+       reads on any picture. Both fade while the covers slide */
+    #playingPill,
     #upNext {
-        position: absolute;
-        left: 4%;
-        bottom: 4%;
-        max-width: 92%;
         z-index: 3;
         display: none;
         align-items: center;
@@ -2592,6 +2591,69 @@
         font-size: clamp(13px, 1.4vw, 20px);
         color: var(--muted);
         pointer-events: none;
+    }
+
+    #playingPill {
+        position: absolute;
+        left: 4%;
+        bottom: 4%;
+        max-width: 92%;
+    }
+
+    /* With little room the label gives way to a play mark, so the title
+       still fits, and with less still the mark is all there is */
+    #playingMark {
+        display: none;
+        flex: 0 0 auto;
+        color: var(--accent);
+    }
+
+    #playingMark .ico {
+        width: 1em;
+        height: 1em;
+    }
+
+    #playingPill.tight .upLabel,
+    #playingPill.tiny .upLabel,
+    #playingPill.tiny #playTitle {
+        display: none;
+    }
+
+    #playingPill.tight #playingMark,
+    #playingPill.tiny #playingMark {
+        display: block;
+    }
+
+    #playingPill.tight,
+    #playingPill.tiny {
+        gap: 0.4em;
+    }
+
+    /* Under the text, the last line of it when the cover is above */
+    #upNext {
+        position: relative;
+        align-self: flex-start;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Beside the cover the text starts level with its top and the up next
+       pill ends level with the playing pill. The script sets the height,
+       the place and the lift */
+    #main.sideInfo #info {
+        align-self: flex-start;
+        position: relative;
+    }
+
+    /* Held at their own height, what does not fit runs under the pill */
+    #main.sideInfo #info > * {
+        flex-shrink: 0;
+    }
+
+    #main.sideInfo #upNext {
+        position: absolute;
+        left: 0;
+        bottom: var(--pillLift, 0px);
     }
 
     /* Lyrics on the cover make room for it */
@@ -2790,6 +2852,7 @@
         font-size: 0.85em;
     }
 
+    #playingPill .upLabel,
     #upNext .upLabel {
         flex: 0 0 auto;
         text-transform: uppercase;
@@ -2798,6 +2861,7 @@
         color: var(--accent);
     }
 
+    #playTitle,
     #upTitle {
         flex: 1;
         min-width: 0;
@@ -3613,6 +3677,7 @@
     }
 
     html.phone #coverSpace,
+    html.phone #playingPill,
     html.phone #upNext {
         display: none !important;
     }
@@ -4123,7 +4188,7 @@
             <div class="tile empty" id="tilePrev"></div>
             <div class="tile empty" id="tileNext"></div>
             <div class="tile empty" id="tileNext2"></div>
-            <div class="tile" id="cover"><div id="coverShade"></div><div id="upNext"><span class="upLabel">Up next</span><span id="upTitle" class="marquee"></span></div><div id="lyricsOver"><div class="lyricRoll"></div></div></div>
+            <div class="tile" id="cover"><div id="coverShade"></div><div id="playingPill"><span class="upLabel">Playing</span><span id="playingMark" data-icon="play" aria-label="Playing"></span><span id="playTitle" class="marquee"></span></div><div id="lyricsOver"><div class="lyricRoll"></div></div></div>
         </div>
         <div id="coverSpace"></div>
         <div id="info">
@@ -4138,6 +4203,7 @@
             </div>
             <button id="fromLine" type="button" aria-label="Playing from, change the list and the filters"><span class="upLabel">Playing from</span><span id="fromText" class="marquee"></span><span id="fromMore" data-icon="chevronDown"></span></button>
             <div id="lyrics"><div class="lyricRoll"></div></div>
+            <div id="upNext"><span class="upLabel">Up next</span><span id="upTitle" class="marquee"></span></div>
         </div>
         <div id="workMain"><div id="workMainBar"><div id="workMainFill"></div></div><span id="workMainSpin" data-icon="refresh"></span></div>
         <div id="mini">
@@ -6959,6 +7025,7 @@
     const titleLine = makeMarquee($("title"));
     const subtitleLine = makeMarquee($("subtitle"));
     const upLine = makeMarquee($("upTitle"));
+    const playLine = makeMarquee($("playTitle"));
     const statusLine = makeMarquee($("status"));
     const fromLine = makeMarquee($("fromText"));
 
@@ -7471,12 +7538,22 @@
         $("lyrics").dataset.where = isPhone() ? "info" : (s && s.lyricsWhere ? s.lyricsWhere : "info");
         $("phoneVer").textContent = s && s.version ? "v" + s.version : "";
 
-        // What plays after this one, when the phone's settings ask for it
+        // What plays after this one, when the phone's settings ask for it.
+        // With it the playing song gets a label of its own on its cover, so
+        // the one next is never read as the one playing
         const next = s && s.upNext && s.showUpNext !== false ? s.upNext : null;
+        const upShown = $("upNext").style.display === "flex";
 
         $("upNext").style.display = next ? "flex" : "none";
+        $("playingPill").style.display = next ? "flex" : "none";
         $("lyricsOver").classList.toggle("hasUp", !!next);
         upLine.setText(next ? next.title : "");
+        playLine.setText(next && s.title ? s.title : "");
+
+        // The text beside the cover makes room for the pill or gives it back
+        if (upShown !== !!next) {
+            placeFlow(flowOffset);
+        }
 
         // The waveform replaces the plain bar when the phone sends one
         const wave = s && s.wave && s.wave.length ? s.wave : null;
@@ -8541,6 +8618,11 @@
             el.style.color = g.color;
             el.style.zIndex = String(g.z);
             el.style.fontWeight = String(g.w);
+        }
+
+        // Beside the cover the lyrics are placed by their rows' size
+        if (box === lyricBoxes.info && flowGeo) {
+            placeFlow(flowOffset);
         }
     }
 
@@ -18144,7 +18226,7 @@
         }
 
         tiles[2].appendChild($("coverShade"));
-        tiles[2].appendChild($("upNext"));
+        tiles[2].appendChild($("playingPill"));
         tiles[2].appendChild($("lyricsOver"));
     }
 
@@ -18418,6 +18500,122 @@
         return left;
     }
 
+    // Beside the cover the text is as tall as the cover and starts level
+    // with its top, and the up next pill sits at its foot, level with the
+    // playing pill on the cover. Lyrics that would reach down to the pill are
+    // cut short above it. Above or over the cover all of that is undone
+    function placeInfo(g, portrait) {
+
+        const main = $("main");
+        const info = $("info");
+        const lyrics = $("lyrics");
+        const side = !portrait && !isPhone();
+
+        main.classList.toggle("sideInfo", side);
+
+        if (!side) {
+
+            info.style.marginTop = "";
+            info.style.height = "";
+            $("title").style.marginTop = "";
+            $("subtitle").style.marginTop = "";
+            $("rateRow").style.marginTop = "";
+            lyrics.style.marginTop = "";
+            lyrics.style.webkitMaskImage = "";
+            lyrics.style.maskImage = "";
+            $("playingPill").style.maxWidth = "";
+            fitPlayingPill(g.size * 0.92);
+            return;
+        }
+
+        const lift = Math.round(g.size * 0.04);
+
+        info.style.marginTop = Math.max(0, Math.round(g.top - g.size / 2)) + "px";
+        info.style.height = Math.round(g.size) + "px";
+        info.style.setProperty("--pillLift", lift + "px");
+        // The title sits a little below the top of the cover, level it looks
+        // as if it stuck out above. The subtitle moves down half as far and
+        // the stars not at all, the gaps between them take it up, though
+        // never down to less than a few pixels
+        const title = $("title");
+        const step = parseFloat(getComputedStyle(info).rowGap) || 0;
+        const drop = Math.round((parseFloat(getComputedStyle(title).fontSize) || 0) * 0.12);
+        const first = Math.max(0, Math.min(Math.round(drop / 2), Math.floor(step - 4)));
+        const second = Math.max(0, Math.min(drop - Math.round(drop / 2), Math.floor(step - 4)));
+
+        title.style.marginTop = (-6 - capGap(title) + first + second) + "px";
+        $("subtitle").style.marginTop = (-6 - first) + "px";
+        $("rateRow").style.marginTop = (-second) + "px";
+
+        // Where the text reaches in over the cover, the playing pill stops
+        // short of it
+        const coverLeft = g.xC;
+        const infoLeft = info.offsetLeft;
+        const room = infoLeft - coverLeft - lift - 12;
+
+        $("playingPill").style.maxWidth = room < g.size * 0.92 ? Math.max(40, Math.round(room)) + "px" : "";
+        fitPlayingPill(room);
+
+        // The roll starts with half a row that is always faded out, so it
+        // moves up by that much here, closer to the line above
+        const geo = lyricBoxes.info.geo;
+
+        lyrics.style.marginTop = geo ? (-geo[1].y) + "px" : "";
+
+        // The lyrics keep their height, so the title and stars do not move
+        // when a song has none. What would run under the pill fades out
+        // just above it
+        const up = $("upNext");
+        const upTop = up.style.display === "flex" ? up.offsetTop - 6 : info.clientHeight;
+        const end = upTop - lyrics.offsetTop;
+        const fade = end < lyrics.offsetHeight
+            ? "linear-gradient(to bottom, #000 0px, #000 " + Math.max(0, end - 26) + "px, transparent " + Math.max(0, end) + "px)"
+            : "";
+
+        lyrics.style.webkitMaskImage = fade;
+        lyrics.style.maskImage = fade;
+    }
+
+    // The playing pill in the room it has: the label and the title, a play
+    // mark and the title when the label would leave the title too little,
+    // and the mark alone when even that is too tight
+    function fitPlayingPill(room) {
+
+        const pill = $("playingPill");
+        const em = parseFloat(getComputedStyle(pill).fontSize) || 14;
+
+        pill.classList.toggle("tight", room < em * 15 && room >= em * 7);
+        pill.classList.toggle("tiny", room < em * 7);
+    }
+
+    // How far below the top of its line a box's capital letters start, from
+    // the font itself, so the title can be lifted to start level with the
+    // top of the cover whatever font the browser ends up using
+    let capCanvas = null;
+
+    function capGap(el) {
+
+        const cs = getComputedStyle(el);
+        const size = parseFloat(cs.fontSize) || 0;
+        const line = parseFloat(cs.lineHeight) || size * 1.2;
+
+        if (!capCanvas) {
+            capCanvas = document.createElement("canvas").getContext("2d");
+        }
+
+        capCanvas.font = cs.fontWeight + " " + size + "px " + cs.fontFamily;
+
+        const m = capCanvas.measureText("H");
+
+        if (!(m.fontBoundingBoxAscent > 0) || !(m.actualBoundingBoxAscent > 0)) {
+            return Math.round(size * 0.23);
+        }
+
+        const content = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent;
+
+        return Math.max(0, Math.round((line - content) / 2 + m.fontBoundingBoxAscent - m.actualBoundingBoxAscent));
+    }
+
     // Lay the covers out for a swipe of drag pixels, 0 at rest
     function placeFlow(drag) {
 
@@ -18447,6 +18645,7 @@
         const portrait = window.matchMedia("(max-aspect-ratio: 1/1)").matches;
 
         $("coverSpace").style.width = portrait ? "100%" : g.space + "px";
+        placeInfo(g, portrait);
 
         const travel = drag < 0 ? g.xC - g.xL : g.xR - g.xC;
         const p = travel > 0 ? Math.max(-1, Math.min(1, drag / travel)) : 0;
@@ -18470,6 +18669,7 @@
         const stay = 1 - Math.min(1, Math.abs(p) * 2);
 
         $("coverShade").style.opacity = String((g.shade * stay).toFixed(3));
+        $("playingPill").style.opacity = stay.toFixed(3);
         $("upNext").style.opacity = stay.toFixed(3);
     }
 
