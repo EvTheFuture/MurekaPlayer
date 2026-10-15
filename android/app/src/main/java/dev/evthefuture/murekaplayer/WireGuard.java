@@ -67,6 +67,47 @@ final class WireGuard {
     // started on top of it
     private static volatile boolean downBusy = false;
 
+    // The phone kept awake for a hand over. With the screen off the CPU
+    // sleeps, and the waits between the steps, here and in WireGuard,
+    // stood still until the screen came on again. Let go when the hand
+    // over is done, or after the longest one can take
+    private static final long AWAKE_MS = 90000;
+    private static PowerManager.WakeLock awake;
+
+    private static void stayAwake(Context c) {
+
+        try {
+
+            if (awake == null) {
+
+                PowerManager pm = c.getSystemService(PowerManager.class);
+
+                if (pm == null) {
+                    return;
+                }
+
+                awake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MurekaPlayer:wireguard");
+                awake.setReferenceCounted(false);
+            }
+
+            awake.acquire(AWAKE_MS);
+        } catch (RuntimeException e) {
+            // Without it the hand over still happens, once the phone wakes
+        }
+    }
+
+    private static void letSleep() {
+
+        try {
+
+            if (awake != null && awake.isHeld()) {
+                awake.release();
+            }
+        } catch (RuntimeException e) {
+            // Let go by its time limit anyway
+        }
+    }
+
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     // What was last asked of WireGuard, for the settings
@@ -154,6 +195,7 @@ final class WireGuard {
 
         downBusy = true;
         MAIN.removeCallbacksAndMessages(null);
+        stayAwake(app);
         quiet();
         say(app, "Turning WireGuard off", "wait");
         send(app, false);
@@ -170,6 +212,9 @@ final class WireGuard {
             }
 
             then.run();
+
+            // A moment for the public address to come up before sleeping
+            MAIN.postDelayed(WireGuard::letSleep, 5000);
         });
     }
 
@@ -186,6 +231,7 @@ final class WireGuard {
         // A hand over asked for again replaces one still waiting
         MAIN.removeCallbacksAndMessages(null);
         downBusy = false;
+        stayAwake(app);
         quiet();
         say(app, "Turning WireGuard on", "wait");
         whenNoVpn(app, () -> resetThenUp(app, 0));
@@ -312,6 +358,7 @@ final class WireGuard {
             if (vpnUp(c)) {
 
                 tell(c, "WireGuard turned " + tunnel + " on" + (tried > 0 ? ", on try " + (tried + 1) : ""), true);
+                letSleep();
                 return;
             }
 
@@ -322,6 +369,7 @@ final class WireGuard {
                 return;
             }
 
+            letSleep();
             tell(c, "WireGuard did not turn " + tunnel + " on after " + (tried + 1) + " tries. Check that Allow"
                 + " remote control apps is on in WireGuard, that the name is the same as there, and that"
                 + " WireGuard's battery use is Unrestricted, so Android lets it start in the background", false);
