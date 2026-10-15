@@ -10236,7 +10236,13 @@
         const to = Math.max(0, Math.min(target, box.scrollHeight - box.clientHeight));
         const path = easePath(from, to, box.clientHeight);
         const length = duration || Math.min(1600, 600 + path.length / 4);
-        const start = performance.now();
+
+        // The way is gone through frame by frame rather than by the clock,
+        // a slow frame counting as a short one, so a long list that takes a
+        // while to draw still shows the whole movement instead of turning
+        // up near the end of it
+        let travelled = 0;
+        let lastFrame = 0;
 
         quietUntil = Date.now() + length + 900;
         dbgLog("Scroll", "eased " + box.id + " from " + Math.round(from) + " to " + Math.round(to));
@@ -10257,10 +10263,23 @@
 
             box.removeEventListener("pointerdown", stop);
             box.removeEventListener("wheel", stop);
+
+            // A newer movement of the same list keeps its scrolling off
+            if (box.__easeToken === token) {
+                box.style.overflowY = "";
+            }
         };
 
         box.addEventListener("pointerdown", stop);
         box.addEventListener("wheel", stop, { passive: true });
+
+        // While the list is moved by itself the browser's own scrolling is
+        // off. Safari on an iPhone keeps a fling going after the finger has
+        // left, and while it lasts it overrides every place set from here,
+        // so the list showed nothing and then turned up at the end. Turning
+        // its scrolling off ends the fling at once
+        box.__easeToken = token;
+        box.style.overflowY = "hidden";
 
         // Once there it is held there a moment, since a fling the finger
         // left behind or the browser keeping a row in place can still move
@@ -10270,10 +10289,23 @@
         const frame = function (now) {
 
             if (token !== easeToken) {
+
+                done();
                 return;
             }
 
-            const k = Math.min(1, (now - start) / length);
+            travelled += lastFrame ? Math.min(now - lastFrame, 34) : 0;
+            lastFrame = now;
+
+            // Slow frames make it take longer than planned, and all of it is
+            // the list moving by itself, not a scroll that brings the buttons
+            quietUntil = Math.max(quietUntil, Date.now() + 400);
+
+            if (box.id === "miniRows") {
+                miniQuietUntil = Math.max(miniQuietUntil, Date.now() + 400);
+            }
+
+            const k = Math.min(1, travelled / length);
             const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
 
             if (k < 1) {

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.351";
+    const VERSION = "1.9.9.353";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11287,6 +11287,10 @@
     // where it is. Returns how long it takes, in milliseconds
     let listEaseFrame = 0;
 
+    // The most time one frame of an eased scroll may move it on by, in
+    // milliseconds, about two frames at 60 a second
+    const EASE_FRAME_MAX = 34;
+
     function stopListEase(ev) {
 
         if (listEaseFrame) {
@@ -11297,6 +11301,21 @@
             if (ev && ev.type && listEl) {
                 dbgLog("Scroll", "eased list stopped by " + ev.type + " at " + Math.round(listEl.scrollTop));
             }
+        }
+
+        holdListScroll(false);
+    }
+
+    // While the list is moved by itself the browser's own scrolling is off.
+    // Safari on an iPhone keeps a fling going after the finger has left,
+    // and while it lasts it overrides every place set from here, so the
+    // list showed nothing and then turned up at the end. Turning its
+    // scrolling off ends the fling at once, and it comes back on when the
+    // movement is done or a finger stops it
+    function holdListScroll(on) {
+
+        if (listEl) {
+            listEl.style.overflow = on ? "hidden" : "auto";
         }
     }
 
@@ -11336,9 +11355,16 @@
         const to = Math.max(0, Math.min(target, listEl.scrollHeight - listEl.clientHeight));
         const path = easePath(from, to, listEl.clientHeight);
         const length = Math.min(1600, 600 + path.length / 4);
-        const start = nowMs();
+
+        // The way is gone through frame by frame rather than by the clock,
+        // a slow frame counting as a short one, so a long list that takes a
+        // while to draw still shows the whole movement instead of turning
+        // up near the end of it
+        let travelled = 0;
+        let lastFrame = 0;
 
         dbgLog("Scroll", "eased list from " + Math.round(from) + " to " + Math.round(to));
+        holdListScroll(true);
 
         // Once there it is held there a moment, since a fling the finger
         // left behind or the browser keeping a row in place can still move
@@ -11354,7 +11380,15 @@
             }
 
             const now = nowMs();
-            const k = Math.min(1, (now - start) / length);
+
+            travelled += lastFrame ? Math.min(now - lastFrame, EASE_FRAME_MAX) : 0;
+            lastFrame = now;
+
+            // Slow frames make it take longer than planned, and all of it is
+            // the list moving by itself, not a scroll that brings the buttons
+            edgeJumpUntil = Math.max(edgeJumpUntil, Date.now() + 400);
+
+            const k = Math.min(1, travelled / length);
             const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
 
             if (k < 1) {
@@ -11375,8 +11409,12 @@
             listEl.scrollTop = end;
 
             if (now < heldUntil) {
+
                 listEaseFrame = requestAnimationFrame(step);
+                return;
             }
+
+            holdListScroll(false);
         };
 
         listEaseFrame = requestAnimationFrame(step);
