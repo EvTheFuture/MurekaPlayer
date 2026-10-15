@@ -124,10 +124,10 @@ the new settings layout and a number of smaller improvements.
   synced rolling lyrics beside or on the cover, quarter stars, like with the
   number of hearts (left out when the one heart is your own), plays, a
   Public or Draft badge, **Playing from** with the source and filters, the
-  waveform seek bar and the status line. Beside the cover the title starts
-  just below its top. With up next on, the cover is labelled **Playing**
-  (a play mark where room is tight) and **Up next** sits under the text,
-  level with it. A dot by the time
+  waveform seek bar and the status line. Beside the cover the text starts
+  a little below its top. With up next on, the cover names the song playing,
+  with a play mark or a pause mark fading in and out, and under it, smaller
+  and dimmer, the one up next with the next mark. A dot by the time
   shows how much of the playing song is there, in the browser when the
   music plays there, on the phone otherwise: a cyan pie fading in and out
   while it fills, solid once all of it has come.
