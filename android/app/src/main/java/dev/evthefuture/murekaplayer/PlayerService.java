@@ -102,8 +102,10 @@ public class PlayerService extends Service implements Hub.Listener {
     private WebViewServer server;
 
     // Android's word on each hotspot change, for the public address that
-    // follows the hotspot
+    // follows the hotspot, and the state it last gave: on, off, or empty
+    // before it has said anything
     private BroadcastReceiver hotspotWatcher;
+    private volatile String apState = "";
     private MdnsResponder mdns;
     private WifiManager.MulticastLock multicastLock;
     private PowerManager.WakeLock wakeLock;
@@ -338,6 +340,19 @@ public class PlayerService extends Service implements Hub.Listener {
                 // hands over when the watch starts
                 int st = intent.getIntExtra("wifi_state", -1);
 
+                // The state from Android's own word, taken as it is. Asked
+                // for again later, the hotspot's network can still look up
+                // while it is being switched off, which took switching it
+                // off for switching it on. Switching on counts as on,
+                // switching off as off
+                if (st == 12 || st == 13) {
+                    apState = "on";
+                } else if (st == 10 || st == 11 || st == 14) {
+                    apState = "off";
+                }
+
+                Hub.note("Hotspot", "Android says the hotspot is " + apWord(st));
+
                 // The hotspot changing takes the internet away for a moment,
                 // which the player does not need to announce
                 if (!isInitialStickyBroadcast()) {
@@ -530,6 +545,25 @@ public class PlayerService extends Service implements Hub.Listener {
         return s != null && s.mdns != null ? s.mdns.status() : "off";
     }
 
+    // Android's hotspot states in words, for the debug log
+    private static String apWord(int st) {
+
+        switch (st) {
+            case 10:
+                return "switching off";
+            case 11:
+                return "off";
+            case 12:
+                return "switching on";
+            case 13:
+                return "on";
+            case 14:
+                return "failed";
+            default:
+                return "in state " + st;
+        }
+    }
+
     // Bring the name and the VPN in line with the settings. Only what
     // changed is restarted
     private void applySettings() {
@@ -548,8 +582,13 @@ public class PlayerService extends Service implements Hub.Listener {
 
         // The public address, all the time or only while the hotspot is on
         boolean hotspotOnly = WebViewSettings.vpnHotspotOnly(this);
-        boolean wanted = WebViewSettings.vpnEnabled(this)
-            && (!hotspotOnly || "on".equals(Hotspot.liveState(this)));
+        String ap = apState.isEmpty() ? Hotspot.liveState(this) : apState;
+        boolean wanted = WebViewSettings.vpnEnabled(this) && (!hotspotOnly || "on".equals(ap));
+
+        if (hotspotOnly && WebViewSettings.vpnEnabled(this)) {
+            Hub.note("WireGuard", "the hotspot is " + (ap.isEmpty() ? "unknown" : ap) + ", the public address is "
+                + (CarVpn.activeAddress() != null ? "up" : "down") + (wanted ? " and wanted" : " and not wanted"));
+        }
 
         if (wanted) {
 

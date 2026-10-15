@@ -96,10 +96,13 @@ final class WireGuard {
         }
     }
 
-    // The screen on for a moment, for a try after the first did not work.
-    // Some phones hold an app in the background back further while the
-    // screen is off than a wake lock alone lifts
-    private static final long SCREEN_MS = 10000;
+    // The screen on for a moment while WireGuard is asked anything. With
+    // the screen off Android can freeze WireGuard in the background as
+    // soon as it has taken a command in, and it then carries the command
+    // out only once something wakes it again, the next command or the
+    // screen. A turn on done at the next turn off and the other way round
+    // looks like the hand over working the wrong way round
+    private static final long SCREEN_MS = 15000;
 
     @SuppressWarnings("deprecation")
     private static void wakeScreen(Context c) {
@@ -117,7 +120,7 @@ final class WireGuard {
 
             screen.setReferenceCounted(false);
             screen.acquire(SCREEN_MS);
-            Hub.note("WireGuard", "the screen is turned on for this try");
+            Hub.note("WireGuard", "the screen is turned on while WireGuard is asked");
         } catch (RuntimeException e) {
             Hub.note("WireGuard", "the screen could not be turned on: " + e.getMessage());
         }
@@ -223,6 +226,7 @@ final class WireGuard {
         downBusy = true;
         MAIN.removeCallbacksAndMessages(null);
         stayAwake(app);
+        wakeScreen(app);
         quiet();
         say(app, "Turning WireGuard off", "wait");
         send(app, false);
@@ -259,24 +263,20 @@ final class WireGuard {
         MAIN.removeCallbacksAndMessages(null);
         downBusy = false;
         stayAwake(app);
+        wakeScreen(app);
         quiet();
         say(app, "Turning WireGuard on", "wait");
         whenNoVpn(app, () -> resetThenUp(app, 0));
     }
 
-    // Down first, then up. WireGuard may still count the tunnel as up after
-    // Android gave its VPN to the public address, and then takes turning
-    // it on as nothing to do. Down on a tunnel that is down does nothing
-    private static final long RESET_MS = 1500;
-
+    // Up, with the screen on again for a retry
     private static void resetThenUp(Context c, int tried) {
 
         if (tried > 0) {
             wakeScreen(c);
         }
 
-        send(c, false);
-        MAIN.postDelayed(() -> send(c, true, tried), RESET_MS);
+        send(c, true, tried);
     }
 
     // A tunnel named and WireGuard there to take it, with the permission
