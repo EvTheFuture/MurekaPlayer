@@ -6386,7 +6386,7 @@
             if (Date.now() - theaterHintAt > 30000) {
 
                 theaterHintAt = Date.now();
-                toast("Tap the screen to start the music here");
+                toast("Tap the screen to start the music here", "ok");
             }
 
             render();
@@ -6493,7 +6493,7 @@
         if (navigator.clipboard && window.isSecureContext) {
 
             navigator.clipboard.writeText(text).then(function () {
-                toast("Debug log copied");
+                toast("Debug log copied", "ok");
             }, function () {
                 copyTheOldWay(text);
             });
@@ -6522,7 +6522,7 @@
         }
 
         area.remove();
-        toast(done ? "Debug log copied" : "This browser cannot copy, send it to the phone instead");
+        toast(done ? "Debug log copied" : "This browser cannot copy, send it to the phone instead", done ? "ok" : "bad");
     }
 
     // To the phone, where Copy debug log in the settings takes it along. The
@@ -6536,7 +6536,7 @@
         }
 
         send("webDebugLog", lines.join("\n"));
-        toast("Debug log sent to the phone");
+        toast("Debug log sent to the phone", "ok");
     }
 
     // What the page receives, written to the log. Only ever listens: every
@@ -11621,11 +11621,11 @@
 
         if (value === 0) {
 
-            toast("Sound off");
+            toast("Sound off", "ok");
             return;
         }
 
-        toast("Volume " + volText(value));
+        toast("Volume " + volText(value), "ok");
     }
 
     function volStep(by) {
@@ -13104,7 +13104,7 @@
         } catch (e) {
         }
 
-        toast("Fullscreen does not work in this browser");
+        toast("Fullscreen does not work in this browser", "bad");
     }
 
     $("fullBtn").addEventListener("click", function () {
@@ -13295,7 +13295,7 @@
     function loadNewSongs(reload) {
 
         send("refresh", { queue: queueInView() });
-        toast("Loading songs from Mureka");
+        loadToast("Loading songs from Mureka", "Songs loaded from Mureka");
 
         setTimeout(function () {
 
@@ -13842,7 +13842,7 @@
             // Already loading, nothing more to ask for
             if (far && state && state.loading) {
 
-                toast("Already loading from Mureka");
+                loadToast("Already loading from Mureka", "Songs loaded from Mureka");
                 endPull();
                 return;
             }
@@ -14172,7 +14172,7 @@
 
         if (state && state.loading) {
 
-            toast("Already loading from Mureka");
+            loadToast("Already loading from Mureka", "Songs loaded from Mureka");
             return;
         }
 
@@ -14185,14 +14185,14 @@
 
         if (state && state.loading) {
 
-            toast("Already loading from Mureka");
+            loadToast("Already loading from Mureka", "Songs loaded from Mureka");
             return;
         }
 
         askConfirm("Read the whole library from Mureka again? It takes a while.", "Rescan", false, function () {
 
             send("rescan");
-            toast("Rescanning the library");
+            loadToast("Rescanning the library", "The library is rescanned");
         });
     });
 
@@ -14832,7 +14832,7 @@
                 askConfirm("Read the whole library from Mureka again? It takes a while.", "Rescan", false, function () {
 
                     send("rescan");
-                    toast("Rescanning the library");
+                    loadToast("Rescanning the library", "The library is rescanned");
                     again();
                 });
             } },
@@ -15098,6 +15098,7 @@
         paintHotspotWarn(s);
         watchMini(s);
         watchToast(s);
+        followLoadToast(s);
         watchCarGone(s);
         trimFollow(s);
         setDebugOverlay(s.debugOverlay === true);
@@ -15705,12 +15706,12 @@
         // Alone here, turning the sound off would leave nothing playing it
         if (!state || Number(state.clients) < 2) {
 
-            toast("Only this browser is connected, so there is nothing else to play it");
+            toast("Only this browser is connected, so there is nothing else to play it", "bad");
             return;
         }
 
         setLocalMute(true);
-        toast("No music in this browser");
+        toast("No music in this browser", "bad");
     });
 
     $("resume").addEventListener("click", function () {
@@ -16045,7 +16046,7 @@
         }, 550);
     }
 
-    function toast(text, kind) {
+    function toast(text, kind, waitMs) {
 
         const el = $("toast");
 
@@ -16071,8 +16072,45 @@
         el.classList.add("shown");
         clearTimeout(toastTimer);
 
-        // Waiting stays until the answer replaces it, a minute at the most
-        toastTimer = setTimeout(fadeToastOut, kind === "wait" ? 60000 : toastShowMs(text, kind));
+        // Waiting stays until the answer replaces it, a minute at the most,
+        // or as long as asked when no answer ever comes, a download for one
+        toastTimer = setTimeout(fadeToastOut, kind === "wait" ? (waitMs || 60000) : toastShowMs(text, kind));
+    }
+
+    // Loading from Mureka asked for here: under way until the phone's state
+    // says it has started and ended, then done. Never started in a few
+    // seconds, the note just goes
+    let loadNote = null;
+
+    function loadToast(text, doneText) {
+
+        loadNote = { done: doneText, at: Date.now(), seen: false };
+        toast(text, "wait");
+    }
+
+    function followLoadToast(s) {
+
+        if (!loadNote) {
+            return;
+        }
+
+        if (s && s.loading) {
+
+            loadNote.seen = true;
+            return;
+        }
+
+        if (loadNote.seen) {
+
+            const text = loadNote.done;
+
+            loadNote = null;
+            toast(text, "ok");
+        } else if (Date.now() - loadNote.at > 8000) {
+
+            loadNote = null;
+            fadeToastOut();
+        }
     }
 
     // The song menu's box used for a plain question, with no song behind it
@@ -16702,7 +16740,7 @@
                 // which the answer marks as a file to save, so the page stays.
                 // The browser takes the name from the answer, or from the end
                 // of the address
-                toast("Downloading " + name);
+                toast("Downloading " + name, "wait", 4000);
                 window.location.href = "/download/" + encodeURIComponent(name) + "?kind=" + esc(kind);
             });
         });
@@ -17389,7 +17427,7 @@
                     // clipboard, in the same tap, as on the phone, when the
                     // phone's Publishing settings ask for it
                     if (!m.published && m.link && m.copyOnPublish !== false) {
-                        toast(copyText(m.link) ? "Publishing, link copied" : "Publishing, the link could not be copied");
+                        toast(copyText(m.link) ? "Publishing, link copied" : "Publishing, the link could not be copied", "wait");
                     }
 
                     act(m.published ? "unpublish" : "publish");

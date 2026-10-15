@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.370";
+    const VERSION = "1.9.9.371";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12487,7 +12487,7 @@
 
                 if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
 
-                    showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), "wait");
+                    showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), true);
 
                     // Gone again once it plays, by a tap or by the browser
                     // itself when the page is back in view
@@ -14081,7 +14081,7 @@
         const job = { stop: false };
 
         playsJob = job;
-        showToast("Reading the plays of " + todo.length + " songs", true);
+        showToast("Reading the plays of " + todo.length + " songs", "wait");
         runPlaysJob(job, todo);
     }
 

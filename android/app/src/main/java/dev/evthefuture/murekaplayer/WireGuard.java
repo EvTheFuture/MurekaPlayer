@@ -155,11 +155,20 @@ final class WireGuard {
         downBusy = true;
         MAIN.removeCallbacksAndMessages(null);
         quiet();
-        tell(app, "Turning WireGuard off", true);
+        say(app, "Turning WireGuard off", "wait");
         send(app, false);
         whenNoVpn(app, () -> {
 
             downBusy = false;
+
+            // Android takes it from WireGuard anyway when the public
+            // address comes, so it goes on either way
+            if (vpnUp(app)) {
+                tell(app, "WireGuard did not turn off, the public address takes over", false);
+            } else {
+                tell(app, "WireGuard is off", true);
+            }
+
             then.run();
         });
     }
