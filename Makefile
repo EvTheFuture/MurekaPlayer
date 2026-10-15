@@ -93,10 +93,15 @@ addons:
 
 # Keep the manifest in step with the player on its own, and the version
 # file F-Droid reads to notice a new release. The code is the one the app
-# gets, two digits per part, 2.0.0 is 2000000
-VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '{ c = 0; for (i = 1; i <= 4; i++) c = c * 100 + ($$i + 0); print c }')
+# gets, two digits for each of the first three parts and four for the
+# build, 2.0.0 is 200000000. Empty when a part is too large for its digits
+VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '{ c = 0; for (i = 1; i <= 4; i++) { w = (i == 4) ? 10000 : 100; p = $$i + 0; if (p >= w) { c = ""; break } c = c * w + p } print c }')
 
 version:
+	@if [ -z "$(VERSION_CODE)" ]; then \
+	    echo "Version $(VERSION) has a part too large for the version code"; \
+	    exit 1; \
+	fi
 	./update-manifest-version.sh
 	@printf 'versionName=%s\nversionCode=%s\n' "$(VERSION)" "$(VERSION_CODE)" > android/version.properties
 	@echo "android/version.properties at $(VERSION), code $(VERSION_CODE)"
@@ -204,7 +209,7 @@ android/local.properties:
 	@test -d "$(ANDROID_HOME)" || { echo "No Android SDK at $(ANDROID_HOME), set ANDROID_HOME"; exit 1; }
 	echo "sdk.dir=$(ANDROID_HOME)" > $@
 
-# Both builds carry the same app id and the same debug key, so either one
+# Both builds carry the same app id and the same release key, so either one
 # replaces the other on the phone and the app's data stays
 install: release
 	adb install -r $(APK_RELEASE)

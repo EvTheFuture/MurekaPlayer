@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.348";
+    const VERSION = "1.9.9.351";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -207,7 +207,8 @@
     // wave_list, so it is persisted here as feed pages arrive and read on play
     const WAVE_STORE = "mureka_wave_cache_v1";
 
-    // Default number of upcoming songs to cache ahead, now also a user setting
+    // Default number of upcoming songs to cache ahead, until a number is set
+    // in the settings
     const PREFETCH_DEFAULT = 3;
 
     // Minutes since the last look for new songs before the player or a web
@@ -959,7 +960,6 @@
     // hidden ones, and without a match it falls back to the page background,
     // which mureka.ai sets to black. The panel alone did not qualify, so this
     // strip gives Safari a fixed element with a plain colour at the edge.
-    // Confirmed on an iPhone with a blue strip before it was made grey.
     // It sits above the panel so it is the one found, is 11 pixels tall so
     // it is not skipped, covers only the panel's own bottom padding, and
     // never takes a tap. Folded, the site shows its own bar, so it goes
@@ -11287,12 +11287,16 @@
     // where it is. Returns how long it takes, in milliseconds
     let listEaseFrame = 0;
 
-    function stopListEase() {
+    function stopListEase(ev) {
 
         if (listEaseFrame) {
 
             cancelAnimationFrame(listEaseFrame);
             listEaseFrame = 0;
+
+            if (ev && ev.type && listEl) {
+                dbgLog("Scroll", "eased list stopped by " + ev.type + " at " + Math.round(listEl.scrollTop));
+            }
         }
     }
 
@@ -11334,6 +11338,13 @@
         const length = Math.min(1600, 600 + path.length / 4);
         const start = nowMs();
 
+        dbgLog("Scroll", "eased list from " + Math.round(from) + " to " + Math.round(to));
+
+        // Once there it is held there a moment, since a fling the finger
+        // left behind or the browser keeping a row in place can still move
+        // the list a little after the last step
+        let heldUntil = 0;
+
         const step = function () {
 
             listEaseFrame = 0;
@@ -11342,19 +11353,35 @@
                 return;
             }
 
-            const k = Math.min(1, (nowMs() - start) / length);
+            const now = nowMs();
+            const k = Math.min(1, (now - start) / length);
             const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
 
-            listEl.scrollTop = path.at(eased);
-
             if (k < 1) {
+
+                listEl.scrollTop = path.at(eased);
+                listEaseFrame = requestAnimationFrame(step);
+                return;
+            }
+
+            const end = Math.max(0, Math.min(to, listEl.scrollHeight - listEl.clientHeight));
+
+            if (!heldUntil) {
+                heldUntil = now + 500;
+            } else if (Math.abs(listEl.scrollTop - end) > 2) {
+                dbgLog("Scroll", "eased list pulled back from " + Math.round(listEl.scrollTop) + " to " + Math.round(end));
+            }
+
+            listEl.scrollTop = end;
+
+            if (now < heldUntil) {
                 listEaseFrame = requestAnimationFrame(step);
             }
         };
 
         listEaseFrame = requestAnimationFrame(step);
 
-        return length;
+        return length + 500;
     }
 
     // Glide to the playing song and put it in the middle of the list
@@ -23728,7 +23755,7 @@
 
     // Starts the helper, with a note that it is starting and one with how
     // it went. Without a pairing it cannot start, which is said once unless
-    // asked for now. Now also skips the wait between tries
+    // asked for now. With now set it also skips the wait between tries
     function startHotspotHelper(now) {
 
         if (!isApkHost() || typeof window.MurekaHost.hotspotStartHelper !== "function" || helperTrying) {
@@ -25329,7 +25356,10 @@
         return { name: name, items: items };
     }
 
-    // Find a control the web view picked from a panel copy
+    // Find a control the web view picked from a panel copy. Only one the
+    // copy can hold: nothing on the way to it hidden or kept from the web
+    // view, as the connections are, so a browser cannot reach them by
+    // naming their place
     function hostElement(id) {
 
         const m = /^([a-z]+):([0-9.]+)$/.exec(String(id));
@@ -25342,7 +25372,12 @@
         const steps = m[2].split(".");
 
         for (let i = 0; i < steps.length && el; i++) {
+
             el = el.children[Number(steps[i])] || null;
+
+            if (el && (el.style.display === "none" || el.dataset.hostSkip)) {
+                return null;
+            }
         }
 
         return el;
@@ -27052,6 +27087,10 @@
             // See updateFullscreenScrollLock for why the list refuses the
             // browser own gestures while fullscreen is on
             + "#mureka-player-list.mureka-hand-scroll{touch-action:none !important;-webkit-overflow-scrolling:auto !important}"
+
+            // The list keeps where it is scrolled to itself, rather than the
+            // browser moving it to keep a row in place
+            + "#mureka-player-list{overflow-anchor:none}"
             + ".mureka-resize-handle{background:transparent;transition:background 0.12s ease}"
             + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
 
@@ -28912,8 +28951,8 @@
         // iOS 26 leaves the visible viewport a little short, and its offset a
         // little off zero, once the keyboard has gone, and never corrects
         // either. A panel sized from those numbers stops short of the bottom
-        // and can be dragged around, which is exactly what was seen after a
-        // search. With the keyboard down and no pinch zoom in play the panel
+        // and can be dragged around, after a search for example. With the
+        // keyboard down and no pinch zoom in play the panel
         // owns the whole screen, so the larger of the two heights is the
         // honest one and the offset is zero. Nothing is assumed about how big
         // the discrepancy is, only which of the two numbers to believe
@@ -28923,11 +28962,11 @@
         // out of fullscreen it is legitimately as tall as the screen, and
         // rejecting it left the panel short after the keyboard went away
         //
-        // innerHeight is not always the honest one either. Measured on an
-        // iPhone after the keyboard closed, the visible viewport and
-        // innerHeight both settled 13 pixels short, and the page was left
-        // scrolled by those same 13 pixels, so the panel came out short and
-        // sat too high by as much again. The document client height is the
+        // innerHeight is not always the honest one either. On an iPhone,
+        // once the keyboard has closed, the visible viewport and innerHeight
+        // can both settle some pixels short with the page left scrolled by
+        // as much, so the panel comes out short and sits too high by as much
+        // again. The document client height is the
         // one that held its value through the whole keyboard round trip, so
         // it is a third candidate for the larger of the heights
         if (vv && isIosLike() && !keyboardUp && vv.scale === 1) {
@@ -35029,6 +35068,9 @@
     // The settings the Android app keeps itself, with what they are when
     // never changed, as the app reads them
     const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName", "appFullscreen", "tabletView"];
+
+    // Those of them that decide who can reach the web view
+    const WEB_VIEW_ACCESS_KEYS = ["allowHotspot", "allowWifi", "carVpn", "vpnAddress", "mdnsName"];
     const APP_PREF_DEFAULTS = {
         allowHotspot: "1",
         allowWifi: "1",
@@ -38844,9 +38886,11 @@
         const out = { ok: true, key: key, kind: p.kind };
 
         if (p.kind === "settings") {
+
             const net = appPrefChanges(p.appSettings);
 
-            out.what = "Settings saved " + when + (net ? ". It also changes who can reach the web view: " + net : "");
+            out.what = "Settings saved " + when + (net
+                ? ". Who can reach the web view stays as it is, that is only imported on the phone" : "");
         } else if (p.kind === "queue") {
 
             const found = queueImportSongs(p);
@@ -38967,6 +39011,20 @@
                 entry.p.tweakAnswers = Array.isArray(ask.tweakAnswers) ? ask.tweakAnswers.map(function (a) {
                     return a === true;
                 }) : [];
+            }
+
+            // Who can reach the web view is never changed from it, so a
+            // browser cannot let itself or others in. That part of a
+            // settings file is only imported on the phone
+            if (entry.p.kind === "settings" && entry.p.appSettings && typeof entry.p.appSettings === "object") {
+
+                const app = Object.assign({}, entry.p.appSettings);
+
+                for (const key of WEB_VIEW_ACCESS_KEYS) {
+                    delete app[key];
+                }
+
+                entry.p.appSettings = app;
             }
 
             importParsed(entry.p, entry.source, "Imported", true);

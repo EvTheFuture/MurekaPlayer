@@ -62,6 +62,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -101,6 +102,17 @@ final class WebViewServer {
 
     // How long an upload may take as a whole, a cover over a slow hotspot
     private static final long BODY_MS = 60000;
+
+    // How much of the large uploads, covers and imports, may be read at
+    // once by all requests together, so a few of them cannot use up the
+    // app's memory. Those over it are told to come back later
+    private static final long MAX_BIG_TOTAL = 40L * 1024 * 1024;
+    private static final AtomicLong BIG_READING = new AtomicLong();
+
+    // How deep a JSON body may nest. Android reads JSON by calling itself
+    // for every level, so a body nested thousands deep would overflow the
+    // stack. A real one nests a handful of levels
+    private static final int MAX_JSON_DEPTH = 64;
 
     // The sortings of the song list the player knows, anything else is
     // Mureka's own order
@@ -405,6 +417,10 @@ final class WebViewServer {
     // One request per connection, then close. Plenty for one car browser
     private void handle(Socket client) {
 
+        // The share of the large upload room this request holds, given back
+        // when it is done
+        long bigReserved = 0;
+
         try (Socket c = client) {
 
             // Anything that did not come from an allowed local network is
@@ -543,12 +559,41 @@ final class WebViewServer {
                 return;
             }
 
-            byte[] body = readBody(in, length, System.currentTimeMillis() + BODY_MS);
-
             // With a password set, all but the page itself and signing in
-            // needs a browser that has signed in. The app's own screen never
+            // and out needs a browser that has signed in. The app's own
+            // screen never. Checked before the body is read, so a browser
+            // that is not allowed in cannot make the app hold an upload
             String key = WebLogin.fromCookie(cookie);
             boolean pageItself = "GET".equals(method) && ("/".equals(path) || "/index.html".equals(path));
+            boolean signing = "POST".equals(method) && ("/login".equals(path) || "/logout".equals(path));
+
+            if (!appScreen && !pageItself && !signing && WebLogin.on(context) && !WebLogin.valid(context, key)) {
+
+                send(out, 401, "application/json", bytes("{\"login\":true}"));
+                return;
+            }
+
+            // A large upload only while there is room for it in memory
+            if (big && length > 0) {
+
+                if (BIG_READING.addAndGet(length) > MAX_BIG_TOTAL) {
+
+                    BIG_READING.addAndGet(-length);
+                    send(out, 503, "text/plain", bytes("Busy, try again"));
+                    return;
+                }
+
+                bigReserved = length;
+            }
+
+            byte[] body = readBody(in, length, System.currentTimeMillis() + BODY_MS);
+
+            // A cover is a picture, not JSON, every other body is read as JSON
+            if (!"/setCover".equals(path) && tooDeep(body)) {
+
+                send(out, 400, "text/plain", bytes("Nested too deep"));
+                return;
+            }
 
             if ("POST".equals(method) && "/login".equals(path)) {
 
@@ -560,12 +605,6 @@ final class WebViewServer {
 
                 WebLogin.signOut(context, key);
                 sendCookie(out, "{\"ok\":true}", "");
-                return;
-            }
-
-            if (!appScreen && !pageItself && WebLogin.on(context) && !WebLogin.valid(context, key)) {
-
-                send(out, 401, "application/json", bytes("{\"login\":true}"));
                 return;
             }
 
@@ -711,9 +750,59 @@ final class WebViewServer {
             // A request the code did not expect, broken escapes in the
             // address say. The connection is closed, the app runs on
             Hub.note("Server", "A request could not be read: " + e.getClass().getSimpleName());
+        } catch (StackOverflowError | OutOfMemoryError e) {
+
+            // A request too large or too deep to work on. Only this
+            // connection is given up, the app runs on
+            Hub.note("Server", "A request was too much to work on: " + e.getClass().getSimpleName());
         } finally {
+
+            if (bigReserved > 0) {
+                BIG_READING.addAndGet(-bigReserved);
+            }
+
             APP_REQUEST.remove();
         }
+    }
+
+    // Whether a body nests brackets deeper than a JSON body ever should.
+    // Brackets inside strings, escaped quotes among them, do not count
+    private static boolean tooDeep(byte[] body) {
+
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (byte b : body) {
+
+            if (inString) {
+
+                if (escaped) {
+                    escaped = false;
+                } else if (b == '\\') {
+                    escaped = true;
+                } else if (b == '"') {
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            if (b == '"') {
+                inString = true;
+            } else if (b == '[' || b == '{') {
+
+                depth += 1;
+
+                if (depth > MAX_JSON_DEPTH) {
+                    return true;
+                }
+            } else if (b == ']' || b == '}') {
+                depth -= 1;
+            }
+        }
+
+        return false;
     }
 
     // The sorting asked for when the player knows it, otherwise Mureka's order

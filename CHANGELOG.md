@@ -764,6 +764,10 @@ the new settings layout and a number of smaller improvements.
   publishes nothing. Debug builds use the same key, so both install over
   each other.
 - `adb-reconnect.sh` reconnects adb to a phone over the network.
+- The app's version code has two digits for each of the first three parts
+  of the version and four for the build, so 2.0.0 is 200000000 and a
+  build number up to 9999 never sorts past the next version. A version
+  too large for that stops the build.
 
 ### Known limits
 

@@ -53,7 +53,7 @@ import java.util.function.Supplier;
 // on -> on, or refused <error>, or the state when it did not come on
 // off -> off, or the state when it did not go off
 //
-// No lambdas, kept the same as the tested version run from a plain dex
+// No lambdas, since it runs from a plain dex without desugaring
 public final class HotspotHelper {
 
     private static final String SHELL = "com.android.shell";

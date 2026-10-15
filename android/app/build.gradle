@@ -2,32 +2,52 @@ plugins {
     id "com.android.application"
 }
 
-// The version string in the shared player, for example 1.6.0.1
+// The version string in the shared player, for example 1.6.0.1. Without
+// it the app would be built as version 0, so the build stops instead
 def playerVersion() {
 
     def file = rootProject.file("../src/player.js")
 
     if (!file.exists()) {
-        return "0.0.0"
+        throw new GradleException("src/player.js is missing, the app takes its version from it")
     }
 
     def found = (file.getText("UTF-8") =~ /const VERSION = "([^"]+)"/)
 
-    return found ? found[0][1] : "0.0.0"
+    if (!found) {
+        throw new GradleException("No VERSION in src/player.js")
+    }
+
+    return found[0][1]
 }
 
-// The same version as one increasing number, two digits per part, so
-// 1.6.0.1 becomes 1060001. Anything but digits and dots is ignored
+// The same version as one increasing number: two digits for each of the
+// first three parts and four for the build, so 2.0.0 becomes 200000000 and
+// 2.0.0.150 sorts below 2.0.1. A part too large for its digits would sort
+// wrongly, and Android refuses an update to a lower number, so the build
+// stops. Anything but digits and dots is ignored
 def playerVersionCode() {
 
     def parts = playerVersion().replaceAll(/[^0-9.]/, "").tokenize(".")
-    def code = 0
+    def widths = [100, 100, 100, 10000]
+    def code = 0L
 
     for (int i = 0; i < 4; i++) {
-        code = code * 100 + (i < parts.size() ? (parts[i] as int) : 0)
+
+        def part = i < parts.size() ? (parts[i] as long) : 0L
+
+        if (part >= widths[i]) {
+            throw new GradleException("Version " + playerVersion() + " has a part too large for the version code")
+        }
+
+        code = code * widths[i] + part
     }
 
-    return code
+    if (code > 2100000000L) {
+        throw new GradleException("Version " + playerVersion() + " is past the largest version code Android takes")
+    }
+
+    return code as int
 }
 
 // A path from gradle.properties with ~, $HOME or ${HOME} turned into the
@@ -120,8 +140,8 @@ def findKeyAlias(File store, String password) {
     }
 }
 
-// Without a store or a password the APKs are signed with the debug key,
-// which only suits a phone of your own
+// Without a store or a password the release APK is left unsigned and the
+// debug APK has the debug key, which only suits testing on one phone
 def releaseStore = findReleaseStore()
 def releasePassword = keySetting("MUREKA_STORE_PASSWORD")
 def releaseAlias = releaseStore && releasePassword ? findKeyAlias(releaseStore, releasePassword) : null
@@ -220,5 +240,5 @@ if (hasReleaseKey) {
 } else if (releaseStore == null) {
     logger.warn("No release key found in ~/.android, the release APK is left unsigned and the debug APK has the debug key")
 } else {
-    logger.warn("The release key " + releaseStore + " could not be used, the APKs are signed with the debug key")
+    logger.warn("The release key " + releaseStore + " could not be used, the release APK is left unsigned and the debug APK has the debug key")
 }
