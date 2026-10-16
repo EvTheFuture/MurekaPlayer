@@ -489,7 +489,7 @@ the new settings layout and a number of smaller improvements.
   it or not on its own. A tap opens a panel with how the hotspot stands,
   how this browser reaches the phone, and a note before a switch that
   would cut this browser off.
-- **WireGuard badge** in the web view, off by default: after the hotspot
+- **WireGuard badge** in the web view, off by default: before the hotspot
   badge, a white shield ringed in WireGuard's red while its tunnel is up
   and grey while it is down. A tap opens the same kind of panel to turn
   the tunnel on or off, with a note for a browser on the public address

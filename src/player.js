@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.394";
+    const VERSION = "1.9.9.395";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34890,8 +34890,8 @@
             webPage.appendChild(makeSubLabel("Online badge"));
             webPage.appendChild(webOnlineBadgeRow);
             webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
-            webPage.appendChild(withHint(webHotspotRow, "A badge after the heat badge, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
-            webPage.appendChild(withHint(webWgRow, "A badge after the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
+            webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
+            webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
             webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
             webPage.appendChild(makeSubLabel("Heat badge shows"));
             webPage.appendChild(heatTextRow);
