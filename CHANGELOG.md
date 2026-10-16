@@ -14,15 +14,15 @@ the new settings layout and a number of smaller improvements.
   app, the add-on and the bookmarklet are the same player.
 - Keeps playing with the screen off and with the app closed. A foreground
   service owns the media session, so the lock screen, Bluetooth, steering
-  wheel buttons and the car's own now playing screen control it. The
-  notification shows the web view's address and has Quit.
-- Starts by itself when the phone starts and after an update, so the web view
+  wheel buttons and any Bluetooth media buttons can control it. A
+  notification shows the web view's address and has a Quit button.
+- Starts by itself when the device starts and after an update, so the web view
   is there without opening the app. Posts a "Sign in to Mureka" notification
   when Mureka turns the session down.
 - On a tablet the app shows the web view as its screen, the same page other
   browsers get, so it gains whatever the web view gains. The Mureka page with
   the player stays behind it, a tap away in the actions menu for signing in,
-  and Back or Web view in the player's menu return. Exports and song
+  and Back or Web view in the player's menu to return. Exports and song
   downloads use Android's save dialog. Can be turned off under Mobile player.
 - Fullscreen by default: Android's status and navigation bars are hidden
   while the player is on screen, using the whole screen including the strip
@@ -32,20 +32,20 @@ the new settings layout and a number of smaller improvements.
 - Exported settings include the app's own: Connections, the public address
   (VPN) and the local name, and Fullscreen. Importing them brings them back,
   asking about the VPN as when switched on by hand.
-- Stays reachable when the phone lies still for a long time: the page's
+- Stays reachable when the device lies still for a long time: the page's
   process is kept important, the player loads again by itself if Android ends
   it anyway, and **Run freely in the background** takes the app out of
   battery saving.
-- Play, next and previous from Bluetooth, the steering wheel or the lock
-  screen start the music with the screen off and the phone locked.
+- Play, next and previous from Bluetooth or the lock screen start the music
+  with the screen off and the device locked.
 - **Resend art on resume** sends the cover again when playback picks up, for
   head units that drop it: first a loading ring as the cover, then the
   song's own cover two seconds later. The loading step goes out with an
-  invisible change to the title, since Android only tells the car about a
-  new cover when the song's text changes. **How the cover is sent again**,
-  beside it, can also send the picture only or change just the song's id.
-  A Bluetooth device that connects gets the song and cover again a moment
-  later.
+  invisible change to the title, since Android only tells the Bluetooth
+  device about a new cover when the song's text changes.
+  **How the cover is sent again**, beside it, can also send the picture only
+  or change just the song's id. A Bluetooth device that connects gets the
+  song and cover again a moment later.
 - **Play when Bluetooth connects**: Never, If it was playing (only when the
   music was playing as the last Bluetooth device went away) or Always.
 - **Pause when Bluetooth disconnects**, so the music does not carry on from
@@ -55,10 +55,9 @@ the new settings layout and a number of smaller improvements.
   browser it played in, and a song that was playing plays on from about
   where it was, whatever **Autoplay on start** says. A paused player stays
   paused.
-- A play, skip or seek from Bluetooth, the steering wheel or the lock screen
-  takes the sound back from a browser to the phone, so a car that falls back
-  to Bluetooth is never left silent.
-
+- A play, skip or seek from Bluetooth or the lock screen takes the sound
+  back from a browser to the phone, so a device that falls back to
+  Bluetooth is never left silent.
 - The online checks, the Offline and Online badge and playing only the
   stored songs while offline work in the bookmarklet and the add-on too,
   following the browser's own word on its connection. In the background,
@@ -73,38 +72,35 @@ the new settings layout and a number of smaller improvements.
 - A song stored on the device plays from the stored copy once a song has
   played, even with Stream direct URL on, so a slow or patchy connection
   no longer holds up changing songs.
-- **Plays offline.** Without internet, or when Mureka cannot be reached,
-  the app opens the player on a page of its own at Mureka's address, so
-  the library, the stored songs, covers, waveforms and lyrics are all
-  there. Only songs stored on the device play: the others are dimmed in
-  the list, a tap on one says it is not stored, and next and previous pass
-  over them. Nothing is asked of Mureka while offline, so nothing waits for
-  a request that cannot succeed. Plays are kept and reported to Mureka once it can be reached
-  again. The internet going while the player runs works the same way, and
-  so does a connection the phone calls online but that does not reach
-  Mureka: a song that will not load makes the player check whether Mureka
-  answers, and without an answer it goes offline and plays on from the
-  next stored song, checking again every 30 seconds. The same check runs
-  whenever any request to Mureka gets no answer, play reports and
-  background work included, when the connection drops or changes over,
-  when a browser of the web view goes away, and once a minute when
-  nothing has been heard from Mureka. A play report that gets no answer
-  is kept and sent later. The covers beside the
-  playing one show the stored songs that play next and before. A small
-  red **Offline** mark shows in the header. When the internet is back the
-  mark turns green and says **Online**, then fades away after a few
-  seconds, or stays while online with **Online badge** set to Always.
-  A double tap on the badge, or on the Power saving mark, folds or opens
-  the player, as on the header.
-  The web view shows the same badge for the phone's connection, with an
-  **Online badge** setting of its own that each browser can also have
-  for itself. It also checks its own browser's connection, once a minute,
-  when the browser says its connection came or went and when a song will
-  not load: **Browser offline** when that browser cannot reach Mureka,
-  and **No phone** when it has lost the phone.
-  Every song plays again at once, and the app returns to Mureka's site as
-  soon as the music is paused. The stored songs are asked to be kept
-  for good, so they are not cleared when the phone runs low on space.
+- **Plays offline.** Without internet, or when Mureka cannot be reached, the
+  app opens the player on a page of its own at Mureka's address, so the
+  library, the stored songs, covers, waveforms and lyrics are all there. Only
+  songs stored on the device play: the others are dimmed in the list, a tap on
+  one says it is not stored, and next and previous pass over them. Nothing is
+  asked of Mureka while offline, so nothing waits for a request that cannot
+  succeed. Plays are kept and reported to Mureka once it can be reached again.
+  The internet going while the player runs works the same way, and so does a
+  connection the phone calls online but that does not reach Mureka: a song
+  that will not load makes the player check whether Mureka answers, and
+  without an answer it goes offline and plays on from the next stored song,
+  checking again every 30 seconds. The same check runs whenever any request to
+  Mureka gets no answer, play reports and background work included, when the
+  connection drops or changes over, when a browser of the web view goes away,
+  and once a minute when nothing has been heard from Mureka. A play report
+  that gets no answer is kept and sent later. The covers beside the playing
+  one show the stored songs that play next and before. A small red **Offline**
+  mark shows in the header. When the internet is back the mark turns green and
+  says **Online**, then fades away after a few seconds, or stays while online
+  with **Online badge** set to Always. A double tap on the badge, or on the
+  Power saving mark, folds or opens the player, as on the header. The web view
+  shows the same badge for the phone's connection, with an **Online badge**
+  setting of its own that each browser can also have for itself. It also
+  checks its own browser's connection, once a minute, when the browser says
+  its connection came or went and when a song will not load: **Browser
+  offline** when that browser cannot reach Mureka, and **No phone** when it
+  has lost the phone. Every song plays again at once, and the app returns to
+  Mureka's site as soon as the music is paused. The stored songs are asked to
+  be kept for good, so they are not cleared when the device runs low on space.
 - **Every stored song keeps its cover.** However a song gets stored,
   played, cached ahead or cached one by one, its cover is kept with it,
   and songs stored earlier without one get it in the background while
@@ -203,39 +199,37 @@ the new settings layout and a number of smaller improvements.
   straight from Mureka. The trimmer and Save as read a stored song from
   the phone too, instead of downloading it again.
 - Covers in the web view come from the phone, which keeps them in its own
-  cache and fetches the covers of the playing song and of the next ones in
-  the queue ahead (**Covers ahead**, 5 by default), and those of every song
-  stored ahead even beyond that, whether or not a browser is open. A cover on its way pulses with a cyan pie filling as it comes
-  in, then fades in, three at a time, a cover that stops coming is asked
-  for again and in the end fetched straight from Mureka. **Cover cache in
-  MB** (200 by default) sets how much
-  room they may take, those shown longest ago go first, and the settings
-  show how many there are, with **Clear cover cache** and its progress.
+  cache and fetches the covers of the playing song and of the next ones in the
+  queue ahead (**Covers ahead**, 5 by default), and those of every song stored
+  ahead even beyond that, whether or not a browser is open. A cover on its way
+  pulses with a cyan pie filling as it comes in, then fades in, three at a
+  time, a cover that stops coming is asked for again and in the end fetched
+  straight from Mureka. **Cover cache in MB** (200 by default) sets how much
+  room they may take, those shown longest ago go first, and the settings show
+  how many there are, with **Clear cover cache** and its progress.
 - The song lists in the web view follow the phone: the queue is read again
   when it is shuffled, rebuilt or moves on, and the song list when the
   filters change.
-- **Charger and power**, a settings page in the app, for saving power
-  when the phone is left alone. **What starts it** is either the phone
-  going **On battery** (the charger pulled out) or **Bluetooth
-  disconnects**: the last of the ticked Bluetooth devices, a car's for
-  one, disconnecting. The paired devices are listed with whether each is
-  connected, which needs Android's Nearby devices permission, asked for
-  with **Allow Bluetooth access**. After a grace time (60 seconds by
-  default) the music can pause and all background work stop, so a phone
-  left somewhere warm stays cooler. A note counts down on the phone and in
-  the web view, saying "Running on battery" or "Bluetooth disconnected",
-  with **Skip shutdown**, and the charger or a ticked device coming back in
-  time stops it. When it comes back, the background work starts again.
-  The web view stays reachable all along, and while a browser is
-  connected to it, from a computer at home say, nothing is stopped.
-  **Browsers on the hotspot** chooses what happens when the hotspot is to
-  go off while browsers of the web view use it: **Turn off anyway**, the
-  default, or **Wait for them**, which turns it off once the last of them
-  has gone. **Power saving** under What the debug overlays log shows all
-  of it as it happens.
-  While the background work is stopped, a small **Power saving** mark
-  shows in the player's header, and a tap on it opens the page. The names
-  and explanations of the settings follow what starts it.
+- **Charger and power**, a settings page in the app, for saving power when the
+  phone is left alone. **What starts it** is either the phone going **On
+  battery** (the charger pulled out) or **Bluetooth disconnects**: the last of
+  the ticked Bluetooth devices disconnecting. The paired devices are listed
+  with whether each is connected, which needs Android's Nearby devices
+  permission, asked for with **Allow Bluetooth access**. After a grace time
+  (60 seconds by default) the music can pause and all background work stop, so
+  a device left somewhere warm stays cooler. A note counts down on the phone
+  and in the web view, saying "Running on battery" or "Bluetooth
+  disconnected", with **Skip shutdown**, and the charger or a ticked device
+  coming back in time stops it. When it comes back, the background work starts
+  again. The web view stays reachable all along, and while a browser is
+  connected to it, from a computer at home say, nothing is stopped. **Browsers
+  on the hotspot** chooses what happens when the hotspot is to go off while
+  browsers of the web view use it: **Turn off anyway**, the default, or **Wait
+  for them**, which turns it off once the last of them has gone. **Power
+  saving** under What the debug overlays log shows all of it as it happens.
+  While the background work is stopped, a small **Power saving** mark shows in
+  the player's header, and a tap on it opens the page. The names and
+  explanations of the settings follow what starts it.
 - **Hotspot**, an experimental and advanced section at the end of Charger
   and power: **Turn off hotspot when on battery** and **Turn on hotspot
   when charging**, or when disconnected and connected with Bluetooth.
@@ -248,7 +242,7 @@ the new settings layout and a number of smaller improvements.
   debugging** once, the code typed into its notification while the pairing
   dialog stays open, and from then on runs the helper by itself, switching
   wireless debugging on for each switch and off again afterwards (the
-  phone has to be on Wi-Fi). It may not work on every phone. A command for
+  phone has to be on Wi-Fi). It may not work on every device. A command for
   a computer with adb is there for a phone that is not on Wi-Fi. The page
   shows the pairing, the hotspot's last known state and what the last
   command did, and **Turn on hotspot** and **Turn off hotspot** try it,
@@ -277,11 +271,11 @@ the new settings layout and a number of smaller improvements.
   scrolled away from the playing song, the list stays put when the next
   song starts, until the button that finds the playing song is pressed.
 - Stars show a tap at once, the phone confirms a moment later.
-- Popups, the settings, the other panels and the whole song list close with
-  a swipe down, with a finger or dragged with the mouse (on the list itself
-  it still loads new songs), and popups without a close button have a quiet cross in
-  their top right corner. Typing in one on a touch screen moves it up
-  above the keyboard, so renaming a song shows what is typed.
+- Popups, the settings, the other panels and the whole song list close with a
+  swipe down, with a finger or dragged with the mouse (on the list itself it
+  still loads new songs), and popups without a close button have a quiet cross
+  in their top right corner. Typing in one on a touch screen moves it up above
+  the keyboard, so renaming a song shows what is typed.
 - Drag and drop in the queue, for any song including played ones. The playing
   song keeps playing wherever it goes.
 - The phone's own settings, filters and artists panels, shown with large
@@ -297,14 +291,14 @@ the new settings layout and a number of smaller improvements.
   note on the phone and in that browser once it is back. When the music is
   set to play in a browser that still needs a tap to start it, Space or
   Enter plays it there and Escape puts the question away.
-- The phone's sound choice shows a Bluetooth icon with the device's name
-  while the phone's music goes out over Bluetooth, and a phone otherwise.
-  From Android 13 it follows where Android actually sends media, so a car
-  that is connected but not playing the music shows the phone.
+- The phone's sound choice shows a Bluetooth icon with the device's name while
+  the phone's music goes out over Bluetooth, and a phone otherwise. From
+  Android 13 it follows where Android actually sends media, so a Bluetooth
+  device that is connected but not playing the music shows the phone.
 - Volume slider for the phone's media volume, in Android's own steps, which
-  over Bluetooth is usually the car stereo's level. The speaker icon follows
-  the level, shown as a percentage or as steps. With the music in the browser
-  it is the browser's own level.
+  over Bluetooth is usually the Bluetooth device's own level. The speaker icon
+  follows the level, shown as a percentage or as steps. With the music in the
+  browser it is the browser's own level.
 - Keyboard shortcuts, including volume and mute, `?` lists them. Ctrl with
   left or right skips to the previous or next song, Shift with left goes to
   the start of the song and Shift with right to a second before its end.
@@ -404,12 +398,12 @@ the new settings layout and a number of smaller improvements.
   new songs each time the last look is older than the minutes set, in steps
   of five. Only the newest, as on open.
 - **New songs with the play queue in view** are offered to it on a Load,
-  however they came in: found by the Load, done generating, or newly
-  published while only published songs are shown: play now, which puts
-  them after the playing song and starts the first at once, the rest of
-  the queue following them, play next, add to the end, replace the queue
-  with the playing song playing on, or leave them out for now. Left out,
-  they still show in the Mureka list. Asked on the phone and in the web view, the first answer
+  however they came in: found by the Load, done generating, or newly published
+  while only published songs are shown: play now, which puts them after the
+  playing song and starts the first at once, the rest of the queue following
+  them, play next, add to the end, replace the queue with the playing song
+  playing on, or leave them out for now. Left out, they still show in the
+  Mureka list. Asked on the phone and in the web view, the first answer
   anywhere counts.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
   instrumental marks, ignored songs and saved creators each have a switch,
@@ -459,13 +453,13 @@ the new settings layout and a number of smaller improvements.
 - **Mureka song links in Import**: pasted share links from Mureka's site,
   one or many, mixed with other text, are read from Mureka and taken in as
   shared songs, also songs not yet published.
-- **Heat badge** in the web view, from the Android app: how warm the phone
-  is, cool in blue below 40 °C battery, warm in yellow from 40, hot in
-  orange from 45, very hot in red from 50, or worse when Android's own heat level says so. The limits can
-  be set under Web view display. A tap shows the battery's temperature,
-  Android's heat level with the limits behind it, and, while the hotspot is
-  on, a button that switches it off. It can show the word, the word and
-  the temperature, or the temperature alone. On by default, and each
+- **Heat badge** in the web view, from the Android app: how warm the phone is,
+  cool in blue below 40 °C battery, warm in yellow from 40, hot in orange from
+  45, very hot in red from 50, or worse when Android's own heat level says so.
+  The limits can be set under Web view display. A tap shows the battery's
+  temperature, Android's heat level with the limits behind it, and, while the
+  hotspot is on, a button that switches it off. It can show the word, the word
+  and the temperature, or the temperature alone. On by default, and each
   browser can have its own choice.
 - **Password for the web view**, optional, at the top of the Web view page
   in the settings, on the phone or in the web view, where changing or
@@ -525,11 +519,11 @@ the new settings layout and a number of smaller improvements.
   together by hand: it holds only the songs put in, Play starts it, Repeat
   all goes round those songs and the list does not fill it up. A tap on one
   of its songs plays from there.
-- **Copy tweaks, Copy songs, Copy queue and Import** at the foot of the menu under the
-  three lines, in the player and in the web view. Copy puts the song tweaks
-  or the song library on the clipboard at once and says so, and Import opens
-  the box to paste an export into, with any differences asked about as in
-  Import.
+- **Copy tweaks, Copy songs, Copy queue and Import** at the foot of the menu
+  under the three lines, in the player and in the web view. Copy puts the song
+  tweaks or the song library on the clipboard at once and says so, and Import
+  opens the box to paste an export into, with any differences asked about as
+  in Import.
 - **The play queue exported and imported**: Copy queue at the foot of the
   menu under the three lines, and Export play queue under Backup and restore,
   in the player and in the web view. Imported, it replaces the queue here as
@@ -600,12 +594,12 @@ the new settings layout and a number of smaller improvements.
   feed button and the web view's button and chips go through all three, a
   pencil marks Drafts.
 - **Rename**, **Publish** and **Unpublish** in the song menu for your own
-  songs, and **Allow remixing** or **Disallow remixing**, instrumentals included.
-  Publishing copies the song's link to the clipboard, in the web view to
-  that browser's, and a short note on the page says it is published and the
-  link copied. A title Mureka does not accept, when publishing or renaming,
-  is said plainly, with a field to change it and try again, on the phone
-  and in the web view.
+  songs, and **Allow remixing** or **Disallow remixing**, instrumentals
+  included. Publishing copies the song's link to the clipboard, in the web
+  view to that browser's, and a short note on the page says it is published
+  and the link copied. A title Mureka does not accept, when publishing or
+  renaming, is said plainly, with a field to change it and try again, on the
+  phone and in the web view.
 - **Set cover** in the song menu for your own songs, in the web view too:
   pick a picture and choose the square in the cover editor, dragging to
   move it and zooming with two fingers, the mouse wheel or the slider.
@@ -633,8 +627,8 @@ the new settings layout and a number of smaller improvements.
   A paused player no longer keeps the screen on for good.
 - **Previous restarts the song**, with **Seconds before it restarts** (3 to
   start with). Applies to every previous button, from the player, the lock
-  screen, Bluetooth, a steering wheel and the web view. Turn it off to always
-  go to the previous song.
+  screen, Bluetooth and the web view. Turn it off to always go to the previous
+  song.
 - **Report plays to Mureka** also takes Mureka's new mark off a song played
   for the first time, as Mureka's own player does. Before, a song played
   here stayed marked as new on Mureka.
@@ -784,11 +778,11 @@ the new settings layout and a number of smaller improvements.
   site reads marks as new.
 - **Cover test** under Developer replaces the artwork test button over the
   cover: **Send loading cover** and **Send real cover** send the playing song
-  with a loading ring as its cover or with its own, to find out what a car or
-  the lock screen takes. A button rings briefly when it has sent, red if
-  nothing was playing. The debug overlay lists every cover sent and whether
-  the cover downloaded. In the app the buttons send the way chosen under
-  **How the cover is sent again**.
+  with a loading ring as its cover or with its own, to find out what a
+  Bluetooth device or the lock screen takes. A button rings briefly when it
+  has sent, red if nothing was playing. The debug overlay lists every cover
+  sent and whether the cover downloaded. In the app the buttons send the way
+  chosen under **How the cover is sent again**.
 
 ### Build
 
@@ -805,7 +799,7 @@ the new settings layout and a number of smaller improvements.
   only: without one set, or with a debug signed result, it stops and
   publishes nothing. Debug builds use the same key, so both install over
   each other.
-- `adb-reconnect.sh` reconnects adb to a phone over the network.
+- `adb-reconnect.sh` reconnects adb to an Android device over the network.
 - The app's version code has two digits for each of the first three parts
   of the version and four for the build, so 2.0.0 is 200000000 and a
   build number up to 9999 never sorts past the next version. A version

@@ -2,52 +2,79 @@
 
 [![Latest release](https://img.shields.io/github/v/release/EvTheFuture/MurekaPlayer?display_name=tag&label=Latest%20release)](https://github.com/EvTheFuture/MurekaPlayer/releases/latest)
 
-A Firefox / LibreWolf add-on that loads all of your published Mureka songs into
-one panel on mureka.ai and plays them with a full player. The same player also
-runs on browsers without add-on support, such as Safari on iPhone, through a
-small bookmarklet.
+A player for your whole Mureka library, on mureka.ai. It comes as an Android
+app, as a browser add-on for Firefox, LibreWolf and Chromium based browsers,
+and as a bookmarklet for browsers without add-ons, such as Safari on iPhone.
+All three run the same player. The Android app also serves a web view, so any
+browser on the phone's hotspot or Wi-Fi, a laptop, a tablet or a car's
+browser, can show what plays and control it.
 
 [![buy-me-a-coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/EvTheFuture)
 
 ## Features
 
-- Loads your entire published library through the Mureka API, page by page,
-  and caches the list so it opens instantly next time
-- Full player with album art, a draggable seek bar, elapsed and remaining time,
-  and previous, play/pause, next, shuffle and stop controls
-- Audio caching: a played or cached song is stored in the browser for instant,
-  offline replay, shown by a dot next to the song
-- Folder downloads: saves mp3 files into a Mureka subfolder of your download
-  directory with no Save As dialog, one song or the whole library (add-on only)
-- Three list views, switchable at any time:
-  - Mureka: the published order, numbered
-  - Queue: the current song and what plays next
-  - A-Z: alphabetical by title
-  The number shown for a song is always its position in the Mureka order, so it
-  stays the same in every view
-- Search box to filter the list by title
-- Shuffle as a mode: turning it on while playing keeps the current song and only
-  randomizes the upcoming queue
-- Media keys and Linux playerctl support through the Media Session API
-- Runs on iPhone and other browsers without add-on support via a bookmarklet
-- On a phone the player fills the screen, on the desktop it is a draggable
-  floating panel
+- Loads your whole library, published songs and drafts, page by page, and
+  keeps it, so the player opens at once the next time
+- Sliding covers, synced lyrics, a waveform seek bar that zooms, quarter
+  star ratings, likes, shuffle and repeat
+- A play queue with play next, play last and songs dragged to another place
+- Views for Mureka's order, the queue, A to Z, stars and plays, a search by
+  title or by a song's ID, and filters for style, mood, tempo, rating and
+  more
+- Your own songs can be renamed, published and unpublished, given a new
+  cover, trimmed and deleted on Mureka
+- Songs stored on the device play offline, with their covers and lyrics
+- Song tweaks, settings, the library and the play queue export and import,
+  as a file or as a short line to paste, and songs can be shared with
+  someone on another account
+- Media keys, the lock screen and Bluetooth control it through the media
+  session, and playerctl works on Linux
+- On a phone the player fills the screen, on a larger screen it is a panel
+  that can be moved and resized
 
-## Files
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-- manifest.json              Extension manifest
-- src/player.js              The player
-- src/content.js             Injects the player and relays downloads
-- src/background.js          Saves downloads into the Mureka folder
-- web/bookmarklet.js         The bookmarklet loader (readable source)
-- web/bookmarklet.min.js     Bookmarklet for the latest release
-- web/bookmarklet-dev.min.js Bookmarklet for the newest in-development version
-- icons/                     Add-on icons
+## The Android app
 
-## Install the add-on (Firefox / LibreWolf)
+Download the APK from the
+[latest release](https://github.com/EvTheFuture/MurekaPlayer/releases/latest)
+and open it on the device. Android asks once to allow installing apps from
+where it came from. Open the app once after installing and sign in to
+Mureka.
 
-Load the extension for Firefox or LibreWolf, on desktop or on Firefox for
-Android. The player appears on mureka.ai automatically.
+- Keeps playing with the screen off and the app closed, controlled from the
+  lock screen and any Bluetooth device.
+- Starts by itself when the device starts and after an update.
+- Serves the web view on port 8080, to the phone's hotspot and Wi-Fi
+  networks, never the mobile network. The addresses are in the notification
+  and under About Mureka Player in the settings. A password for the web view
+  can be set under Web view.
+- **Public address (VPN)** gives the phone the fixed address 3.3.3.3 for
+  browsers that refuse private addresses, Tesla's among them. Other devices
+  can use `http://murekaplayer.local:8080`.
+- **Charger and power** can pause the music and stop the background work
+  when the device goes on battery or a Bluetooth device disconnects, and
+  switch the phone's hotspot with a small helper of its own (experimental).
+- A WireGuard tunnel can be handed over to and from the public address as
+  the hotspot goes on and off.
+
+How the app is built and signed is described in
+[android/README.md](android/README.md).
+
+## The web view
+
+Open the address the app shows in any browser on the same hotspot or Wi-Fi.
+It shows what plays with its cover, lyrics and waveform, the song list and
+the queue, and the phone's own settings, filters and artists. The music can
+play on the phone and its Bluetooth device, in that browser, or not at all
+in a second browser. Each browser can keep its own look under **Settings for
+this browser**.
+
+## Install the add-on
+
+Load the add-on in Firefox or LibreWolf, on the desktop or in Firefox for
+Android, or in a Chromium based browser such as Chrome or Vivaldi. The player
+appears on mureka.ai by itself. `make addons` builds both packages.
 
 ## Use without the add-on (iPhone and other browsers)
 
@@ -62,7 +89,8 @@ bookmarklet to your bookmarks toolbar.
 
 ### Latest release (recommended)
 
-Loads the latest released version. The browser can cache it, so it opens fast.
+Loads the released version. The browser checks it against its hash, so it
+runs exactly the released code. A new release comes with a new one-liner here.
 
 ```
 javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@latest/src/player.js";document.body.appendChild(s)})();
@@ -70,9 +98,9 @@ javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerTogg
 
 ### Newest in-development version
 
-Loads the most recent committed code, re-fetched on every run so it is never
-stale. Use this only if you want the bleeding edge, as it is a little slower to
-open.
+Loads the most recent committed code, fetched again on every run so it is
+never stale. Use this only if you want the bleeding edge, as it is a little
+slower to open.
 
 ```
 javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement("script");s.src="https://evthefuture.github.io/MurekaPlayer/src/player.js?v="+Date.now();document.body.appendChild(s)})();
@@ -80,27 +108,47 @@ javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerTogg
 
 ## Downloads and caching
 
-Downloads and the playback cache are two separate stores. Download saves real
-files to disk, and the playback cache lives inside the browser for instant
-replay and is what the dot beside a song reflects. The browser cannot read the
-contents of the disk download folder, so the dot tracks the cache, not the
-folder.
+Downloads and the song cache are two separate stores. Download saves a real
+file, asking for its name first, and the song cache lives inside the browser
+or the app for instant and offline playing. The dot beside a song shows the
+cache, not the files downloaded.
 
-In the add-on, Download saves into a Mureka subfolder of your download directory
-with no dialog. In the bookmarklet, playback always works, but the audio cache
-and the download buttons depend on the audio host allowing the files to be
-fetched, and folder downloads are not available, so the bookmarklet falls back
-to a normal browser download.
+In the add-on, Download saves into a Mureka subfolder of your download
+directory with no dialog. In the app it uses Android's save dialog, and where
+the browser can hand files to other apps, **Share** sends the song on. In the
+bookmarklet, playing always works, but the cache and downloads depend on the
+audio host allowing the files to be fetched, and a download is a normal
+browser download.
 
-## Permissions
+## Permissions of the add-on
 
 - downloads: to save songs into the Mureka folder
 - access to mureka.ai: to run the player and load the song list
 - access to static-cos.mureka.ai: the host that serves the audio files
 
-[![buy-me-a-coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/EvTheFuture)
+## Files
 
-# Development
-To run on firefox in Android
+- src/player.js              The player, shared by the app, the add-on and the bookmarklet
+- src/content.js             Injects the player and relays downloads
+- src/background.js          Saves downloads into the Mureka folder
+- manifest.json              The add-on's manifest
+- icons/                     The add-on's icons
+- web/bookmarklet.js         The bookmarklet loader, readable source
+- web/bookmarklet.min.js     Bookmarklet for the latest release
+- web/bookmarklet-dev.min.js Bookmarklet for the newest in-development version
+- android/                   The Android app
+- fastlane/, fdroid/         Store texts and the F-Droid build recipe
+- Makefile                   Checks, add-on packages, the APK and releases
+- build.sh                   Builds the add-on packages
+- release-bookmarklet.sh     Pins the release bookmarklet to a tag
+- privacy.html               The privacy policy
+
+## Development
+
+`make help` lists what the Makefile does: `make check`, `make addons`,
+`make release`, `make install` and `make bookmarklet` among others.
+
+To run the add-on in Firefox on Android:
 `web-ext run -t firefox-android --adb-device IP_ADDRESS:5555 --firefox-apk org.mozilla.firefox`
 
+[![buy-me-a-coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/EvTheFuture)
