@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.379";
+    const VERSION = "1.9.9.392";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -497,7 +497,7 @@
             hint: "The screen, fullscreen, the page showing or hiding, and its size." },
         { id: "settings", name: "Setting changes", kinds: ["Setting"],
             hint: "Each setting changed, from what to what." },
-        { id: "power", name: "Power saving", kinds: ["Power", "Hotspot"], app: true,
+        { id: "power", name: "Power saving", kinds: ["Power", "Hotspot", "WireGuard"], app: true,
             hint: "The charger and the chosen Bluetooth devices coming and going, the countdown, the hotspot and the background work stopping and starting." },
         { id: "network", name: "Network", kinds: ["Net", "Offline"],
             hint: "Going online and offline, and the phone not answering the web view.",
@@ -1091,6 +1091,11 @@
     // A jump to either end scrolls smoothly for a while, and none of that
     // scrolling is the user, so the edge button must not react to it
     let edgeJumpUntil = 0;
+
+    // Whether the list goes along to the next song when it starts. On until
+    // the playing song is scrolled out of sight by hand, on again with the
+    // button that finds it
+    let listFollow = true;
 
     // Direction aware scroll button state
     let toTopDir = "up";
@@ -2613,6 +2618,7 @@
             webOnlineBadge: "fade",
             webNames: false,
             webHotspotBadge: false,
+            webWgBadge: false,
             webHeatBadge: true,
             heatText: "word",
             heatWarm: 40,
@@ -2838,6 +2844,7 @@
                     webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
                     webNames: parsed.webNames === true,
                     webHotspotBadge: parsed.webHotspotBadge === true,
+                    webWgBadge: parsed.webWgBadge === true,
                     webHeatBadge: parsed.webHeatBadge !== false,
                     heatText: parsed.heatText === "both" || parsed.heatText === "temp" ? parsed.heatText : "word",
                     heatWarm: numberIn(parsed.heatWarm, 20, 70, 40),
@@ -7187,7 +7194,7 @@
         });
         const one = songs.length === 1;
         const said = {
-            now: one ? "The new song is playing" : "The " + songs.length + " new songs are the play queue now",
+            now: one ? "The new song is playing" : "The " + songs.length + " new songs play now",
             next: one ? "The new song plays next" : "The " + songs.length + " new songs play next",
             end: one ? "The new song is at the end of the queue" : "The " + songs.length + " new songs are at the end of the queue",
             replace: one ? "The new song is the play queue now" : "The " + songs.length + " new songs are the play queue now"
@@ -7210,19 +7217,31 @@
             queueSkipIds.delete(String(s.song_id));
         }
 
-        // Played now, the new songs are the queue and the first starts at
-        // once, as a tap on it would
+        // Played now, the new songs go in after the playing song, as with
+        // Play next, and the first starts at once. The rest of the queue
+        // follows them
         if (mode === "now") {
 
-            applyQueueImport(songs, false);
+            const held = heldQueue().resumed;
 
-            // Nothing was sounding, so the import only set the queue
-            if (queuePos === -1) {
+            applySharedSongs(songs, "next", true);
+            playNextMarks.delete(String(songs[0].song_id));
 
-                queuePos = 0;
-                playCurrent();
-                publishHostSoon();
+            // Stopped, the queue Play resumes took them after its place,
+            // and it goes on from the first of them
+            if (held && resumeState) {
+
+                queue = resumeState.queue;
+                queueOwn = resumeState.own === true;
+                resumeState = null;
             }
+
+            // Copies after the playing song were taken out, so the last
+            // copy of the first new song is the one just put in
+            queuePos = Math.max(0, queue.lastIndexOf(songs[0]));
+            queueMoveDir = 1;
+            playCurrent();
+            publishHostSoon();
         } else if (mode === "replace") {
 
             // Replaced, the playing song plays on, with the new songs after it
@@ -11301,6 +11320,7 @@
 
         renderList();
         scrollToPlaying();
+        listFollow = true;
 
         lastListScroll = listEl ? listEl.scrollTop : 0;
     }
@@ -11499,6 +11519,7 @@
         const target = playingItemEl.offsetTop - (listEl.clientHeight / 2) + (playingItemEl.offsetHeight / 2);
 
         fadeToTopBtn();
+        listFollow = true;
         programmaticScrollAt = Date.now();
         edgeJumpUntil = Date.now() + easeListTo(target) + 400;
     }
@@ -13232,7 +13253,14 @@
             if (token === playToken) {
 
                 renderList();
-                scrollToPlaying();
+
+                // Scrolled away from the playing song, the list stays where
+                // it is and the button that finds the song shows
+                if (listFollow) {
+                    scrollToPlaying();
+                } else {
+                    updateLocateBtn();
+                }
             }
         }, 60);
 
@@ -23380,6 +23408,9 @@
             hotspotBadge: isApkHost() && typeof window.MurekaHost.hotspotStatus === "function"
                 ? hotspotBadgeState() : null,
             hotspotBadgeOn: settings.webHotspotBadge === true,
+            wgBadge: isApkHost() && typeof window.MurekaHost.wireGuardState === "function"
+                ? wgBadgeState() : null,
+            wgBadgeOn: settings.webWgBadge === true,
 
             // How warm the phone is, for the heat badge: Android's heat level
             // and the battery's temperature
@@ -23837,6 +23868,32 @@
     // hotspot helper's last answer
     let hotspotBadgeRead = null;
     let hotspotBadgeAt = 0;
+
+    // WireGuard's tunnel for the web view's badge, read at most every two
+    // seconds: on, off, or null when no tunnel is named or WireGuard is
+    // not installed
+    let wgBadgeRead = null;
+    let wgBadgeAt = 0;
+
+    function wgBadgeState() {
+
+        if (Date.now() - wgBadgeAt < 2000) {
+            return wgBadgeRead;
+        }
+
+        let st = "";
+
+        try {
+            st = String(window.MurekaHost.wireGuardState() || "");
+        } catch (e) {
+            st = "";
+        }
+
+        wgBadgeRead = st === "on" || st === "off" ? st : null;
+        wgBadgeAt = Date.now();
+
+        return wgBadgeRead;
+    }
 
     function hotspotBadgeState() {
 
@@ -25318,6 +25375,7 @@
                 s: hostText(el) || el.title || el.getAttribute("aria-label") || "",
                 on: hostOn(el),
                 off: el.disabled === true,
+                now: el.dataset.hostNow === "1",
                 exp: el.dataset.hostExport || "",
                 imp: el.dataset.hostImport === "1",
                 wide: el.style.textAlign === "left",
@@ -25859,6 +25917,18 @@
                 hotspotBadgeAt = 0;
                 setTimeout(publishHostSoon, 2000);
                 setTimeout(publishHostSoon, 6000);
+            }
+        } else if (cmd === "wireGuardSwitch") {
+
+            // The web view's WireGuard badge turned the tunnel on or off. The
+            // app's notes say how it went
+            if (isApkHost() && typeof window.MurekaHost.wireGuard === "function") {
+
+                dbgLog("WireGuard", "turned " + (arg === true ? "on" : "off") + " from the web view");
+                window.MurekaHost.wireGuard(arg === true ? "1" : "0");
+                wgBadgeAt = 0;
+                setTimeout(publishHostSoon, 3000);
+                setTimeout(publishHostSoon, 9000);
             }
         } else if (cmd === "trimFade") {
 
@@ -27695,6 +27765,12 @@
             // Ignore programmatic scrolls, view switches and song changes
             if (Date.now() - programmaticScrollAt < 400 || Date.now() < edgeJumpUntil) {
                 return;
+            }
+
+            // Scrolled by hand: the list follows the songs only while the
+            // playing one is still in sight
+            if (playingItemEl && playingItemEl.isConnected) {
+                listFollow = playingRowInView();
             }
 
             // Ignore jitter and lists too short to be worth jumping around
@@ -34248,34 +34324,108 @@
 
             const wgRow = makeCarTextRow("WireGuard tunnel to turn on again, blank for none", "wgTunnel", "");
 
+            // A name with an On and an Off button, for what is switched now
+            // rather than set. The one lit says how it stands, when known
+            const makeOnOffRow = function (name, fn) {
+
+                const row = document.createElement("div");
+                const label = document.createElement("span");
+                const btns = document.createElement("div");
+                const made = {};
+
+                row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+                label.textContent = name;
+                label.style.cssText = "flex:1;min-width:0";
+                btns.style.cssText = "display:flex;gap:8px;flex:0 0 auto";
+
+                for (const pair of [["On", true], ["Off", false]]) {
+
+                    const b = makeButton(pair[0], "#333", "#fff", function () {
+                        fn(pair[1]);
+                    });
+
+                    b.style.flex = "0 0 auto";
+                    b.style.minWidth = "56px";
+                    b.style.padding = "6px 12px";
+
+                    // Switched now rather than set, the web view shows it
+                    // being worked on instead of flipping it
+                    b.dataset.hostNow = "1";
+                    made[pair[0]] = b;
+                    btns.appendChild(b);
+                }
+
+                row.appendChild(label);
+                row.appendChild(btns);
+
+                // on: true, false, or null for not known
+                row.paintState = function (on) {
+
+                    for (const pair of [["On", true], ["Off", false]]) {
+
+                        const lit = on === pair[1];
+
+                        made[pair[0]].style.background = lit ? "#48e1eb" : "#333";
+                        made[pair[0]].style.color = lit ? "#000" : "#fff";
+                    }
+                };
+
+                return row;
+            };
+
+            // The phone's hotspot on or off now, through the same helper as
+            // the power saving uses. Its notes say how it went
+            const hotspotNowRow = makeOnOffRow("Hotspot", function (on) {
+
+                if (typeof window.MurekaHost.hotspotSwitch === "function") {
+
+                    window.MurekaHost.hotspotSwitch(on);
+                    showToast(on ? "Turning the hotspot on" : "Turning the hotspot off", "wait");
+                }
+            });
+
             // The tunnel on or off by hand, to try the hand over without
             // moving the hotspot. The app's notes say how it went
-            const wgTestRow = document.createElement("div");
-            const wgTestName = document.createElement("span");
-            const wgTestBtns = document.createElement("div");
+            const wgTestRow = makeOnOffRow("WireGuard", function (on) {
 
-            wgTestRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
-            wgTestName.textContent = "WireGuard";
-            wgTestName.style.cssText = "flex:1;min-width:0";
-            wgTestBtns.style.cssText = "display:flex;gap:8px;flex:0 0 auto";
+                if (typeof window.MurekaHost.wireGuard === "function") {
+                    window.MurekaHost.wireGuard(on ? "1" : "0");
+                }
+            });
+            // Android starts WireGuard's tunnel from the background only
+            // when its battery use is Unrestricted. Android asks that only
+            // for the app itself, so WireGuard's own settings are opened
+            const wgFreeRow = document.createElement("div");
+            const wgFreeName = document.createElement("span");
+            const wgFreeBtn = makeButton("Open settings", "#333", "#fff", function () {
 
-            for (const pair of [["On", "1"], ["Off", "0"]]) {
+                if (typeof window.MurekaHost.openWireGuardSettings === "function") {
+                    window.MurekaHost.openWireGuardSettings();
+                }
+            });
 
-                const b = makeButton(pair[0], "#333", "#fff", function () {
+            wgFreeRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            wgFreeName.textContent = "WireGuard's battery use";
+            wgFreeName.style.cssText = "flex:1;min-width:0";
+            wgFreeBtn.style.flex = "0 0 auto";
+            wgFreeBtn.style.minWidth = "56px";
+            wgFreeBtn.style.padding = "6px 12px";
+            wgFreeRow.appendChild(wgFreeName);
+            wgFreeRow.appendChild(wgFreeBtn);
 
-                    if (typeof window.MurekaHost.wireGuard === "function") {
-                        window.MurekaHost.wireGuard(pair[1]);
-                    }
-                });
+            const paintWgFree = function () {
 
-                b.style.flex = "0 0 auto";
-                b.style.minWidth = "56px";
-                b.style.padding = "6px 12px";
-                wgTestBtns.appendChild(b);
-            }
+                const free = typeof window.MurekaHost.wireGuardFree === "function" ? window.MurekaHost.wireGuardFree() : "";
 
-            wgTestRow.appendChild(wgTestName);
-            wgTestRow.appendChild(wgTestBtns);
+                // Without WireGuard there is nothing to set
+                wgFreeRow.style.display = free === "" ? "none" : "flex";
+                wgFreeBtn.textContent = free === "1" ? "Unrestricted" : "Open settings";
+                wgFreeBtn.style.background = free === "1" ? "#48e1eb" : "#333";
+                wgFreeBtn.style.color = free === "1" ? "#000" : "#fff";
+            };
+
+            paintWgFree();
+
             const nameRow = makeCarTextRow("Local name for other devices, .local is added", "mdnsName", "murekaplayer");
 
             // Android's battery saving can freeze the app after the phone has
@@ -34313,7 +34463,7 @@
             paintBattery();
 
             const carStatusEl = document.createElement("div");
-            carStatusEl.style.cssText = "font-size:12px;color:#48e1eb;line-height:1.5;white-space:pre-line";
+            carStatusEl.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:2px 0";
 
             const netHint = makeHint("Who may open the web view. A device can join the phone's hotspot, or use a Wi-Fi the phone is on.");
             const vpnHint = makeHint("Some browsers, Tesla's among them, refuse private addresses, and a hotspot only hands those out. This gives the phone one extra public address to open with :8080 after it. No traffic goes through it.");
@@ -34334,37 +34484,95 @@
                     st = {};
                 }
 
-                // How things stand, not the phone's own addresses, which
-                // About lists with the network each one is on
+                // How things stand, a grey name and its value on each line,
+                // not the phone's own addresses, which About lists with the
+                // network each one is on
                 const lines = [];
+                const hs = typeof window.MurekaHost.hotspotStatus === "function" ? hotspotInfoNow() : {};
+                const hsState = hs.live === "on" || hs.live === "off" ? hs.live : hs.state;
+                const cap = function (text) {
+                    return String(text).charAt(0).toUpperCase() + String(text).slice(1);
+                };
 
-                if (st.carUrl) {
-                    lines.push("Public address is on");
-                } else if (st.vpnEnabled) {
-                    lines.push("Public address: " + (st.vpn && st.vpn !== "off" ? st.vpn : "starting"));
-                } else {
-                    lines.push("Public address is off, browsers that refuse private addresses cannot open the web view");
+                hotspotNowRow.paintState(hsState === "on" ? true : hsState === "off" ? false : null);
+
+                // A VPN up that is not the public address is WireGuard's,
+                // Android runs only one at a time
+                if (typeof st.wgUp === "boolean" && st.wg !== "not installed") {
+                    wgTestRow.paintState(st.wgUp);
                 }
 
+                if (hs.helper === "stopped") {
+                    lines.push(["Hotspot", "Its helper is not running, see Charger and power"]);
+                } else if (hsState === "on" || hsState === "off") {
+                    lines.push(["Hotspot", hsState === "on" ? "On" : "Off"]);
+                }
+
+                if (st.carUrl) {
+                    lines.push(["Public address", "On"]);
+                } else if (st.vpnEnabled) {
+                    lines.push(["Public address", st.vpn ? cap(st.vpn) : "Starting"]);
+                } else {
+                    lines.push(["Public address", "Off, browsers that refuse private addresses cannot open the web view"]);
+                }
+
+                // WireGuard's tunnel up or down, and what keeps the hand over
+                // from working, if anything
+                const wgWords = {
+                    "not installed": "Not installed",
+                    "needs permission": "may not be controlled yet, type the tunnel's name again to be asked",
+                    "battery restricted": "its battery use is not Unrestricted, so it cannot turn on in the background"
+                };
+                const wgUpWord = st.wgUp === true ? "Tunnel up" : "Tunnel down";
+
                 if (st.wg === "not installed") {
-                    lines.push("WireGuard is not installed");
-                } else if (st.wg === "needs permission") {
-                    lines.push("WireGuard: allow the app to control tunnels, type the tunnel's name again to be asked");
-                } else if (st.wg === "battery restricted") {
-                    lines.push("WireGuard: set its battery use to Unrestricted in Android's app settings, else Android"
-                        + " may not let it turn the tunnel on in the background");
+                    lines.push(["WireGuard", wgWords[st.wg]]);
+                } else if (wgWords[st.wg]) {
+                    lines.push(["WireGuard", wgUpWord + ", " + wgWords[st.wg]]);
                 } else if (st.wg === "ready") {
-                    lines.push("WireGuard comes back on when the public address goes" + (st.wgLast ? ", last " + st.wgLast : ""));
+                    lines.push(["WireGuard", wgUpWord + (st.wgUp === true ? "" : ", comes back on when the public address goes")]);
+                }
+
+                if (st.wg === "ready" && st.wgLast) {
+                    lines.push(["Last", cap(st.wgLast)]);
                 }
 
                 if (st.mdns) {
-                    lines.push("Local name: " + st.mdns);
+                    lines.push(["Local name", cap(st.mdns)]);
                 }
 
-                lines.push("The addresses to open the web view on are under About");
+                // Drawn again only when something changed, so a selection
+                // on it is not lost every two seconds
+                const key = JSON.stringify(lines);
 
-                carStatusEl.textContent = lines.join("\n");
+                if (carStatusEl.dataset.key !== key) {
+
+                    carStatusEl.dataset.key = key;
+                    carStatusEl.textContent = "";
+
+                    for (const pair of lines) {
+
+                        const row = document.createElement("div");
+                        const name = document.createElement("span");
+                        const value = document.createElement("span");
+
+                        row.style.cssText = "display:flex;align-items:baseline;gap:10px";
+                        name.textContent = pair[0];
+                        name.style.cssText = "flex:0 0 8.5em;font-size:11px;color:#888";
+                        value.textContent = pair[1];
+                        value.style.cssText = "flex:1;min-width:0;font-size:13px;color:#48e1eb;line-height:1.4";
+                        row.appendChild(name);
+                        row.appendChild(value);
+                        carStatusEl.appendChild(row);
+                    }
+
+                    const about = makeHint("The addresses to open the web view on are under About.");
+
+                    about.style.marginTop = "2px";
+                    carStatusEl.appendChild(about);
+                }
                 paintBattery();
+                paintWgFree();
                 updateToggleButton(vpnRow.querySelector("button"), vpnGet());
                 updateToggleButton(hotspotOnlyRow.querySelector("button"), hotspotOnlyGet());
             };
@@ -34381,7 +34589,11 @@
                 }
             }, 2000);
 
-            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, hotspotOnlyRow, wgRow, wgTestRow, nameRow, carStatusEl, carHint, netHint,
+            // Who may reach the web view, and the settings for it, only on
+            // the phone, so a browser cannot lock itself out or let others
+            // in. Turning WireGuard on or off now, and how things stand, are
+            // in the web view too
+            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, hotspotOnlyRow, wgRow, wgFreeRow, nameRow, carHint, netHint,
                 vpnHint, batteryRow].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
@@ -34428,6 +34640,10 @@
             const webHotspotRow = makeBoolRow("Hotspot badge",
                 function () { return settings.webHotspotBadge === true; },
                 function (v) { settings.webHotspotBadge = v; publishHostSoon(); });
+
+            const webWgRow = makeBoolRow("WireGuard badge",
+                function () { return settings.webWgBadge === true; },
+                function (v) { settings.webWgBadge = v; publishHostSoon(); });
 
             const webControlRow = buildControlEditor("webControlOrder");
 
@@ -34675,6 +34891,7 @@
             webPage.appendChild(webOnlineBadgeRow);
             webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
             webPage.appendChild(withHint(webHotspotRow, "A badge after the heat badge, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
+            webPage.appendChild(withHint(webWgRow, "A badge after the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
             webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
             webPage.appendChild(makeSubLabel("Heat badge shows"));
             webPage.appendChild(heatTextRow);
@@ -34821,8 +35038,11 @@
             connPage.appendChild(addressRow);
             connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the phone's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
             connPage.appendChild(withHint(wgRow, "When the public address goes, this WireGuard tunnel is turned on again, and off before it comes. WireGuard needs Allow remote control apps switched on, in its advanced settings, and Android asks once whether this app may control tunnels."));
-            connPage.appendChild(withHint(wgTestRow, "Turns the tunnel on or off now, the way the hand over does, to try it without the hotspot. Turning it on takes Android's one VPN from the public address."));
+            connPage.appendChild(withHint(hotspotNowRow, "Switches the phone's hotspot now, with the helper under Charger and power. Browsers on the hotspot lose the web view when it goes off."));
+            connPage.appendChild(withHint(wgTestRow, "Switches the tunnel now, as the hand over does. On takes Android's one VPN from the public address. Browsers that came through the one going off lose the web view."));
+            connPage.appendChild(withHint(wgFreeRow, "Android lets WireGuard start its tunnel from the background only when its battery use is Unrestricted. Open settings shows WireGuard's app info, set it under Battery."));
             connPage.appendChild(nameRow);
+            connPage.appendChild(makeSubLabel("How it stands"));
             connPage.appendChild(carStatusEl);
             connPage.appendChild(carHint);
 
@@ -34852,9 +35072,6 @@
             webPageBtn = makePageButton("Web view", "web");
             connPageBtn = makePageButton("Connections", "connections");
 
-            // A browser could lock itself out from here, so the web view's
-            // copy of the settings never offers the page
-            connPageBtn.dataset.hostSkip = "1";
         }
 
         // Everything that starts or stops the music by itself, together.
@@ -35049,7 +35266,8 @@
                 const netNames = {
                     Hotspot: "Phone's hotspot",
                     "Wi-Fi": "Joined Wi-Fi",
-                    USB: "USB tethering"
+                    USB: "USB tethering",
+                    VPN: "VPN local address"
                 };
 
                 for (const n of (Array.isArray(st.nets) ? st.nets : [])) {

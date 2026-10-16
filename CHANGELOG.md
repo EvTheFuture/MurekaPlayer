@@ -124,7 +124,14 @@ the new settings layout and a number of smaller improvements.
   name can be changed. **Only while the hotspot is on** leaves Android's one
   VPN to another app the rest of the time, and a **WireGuard tunnel** named
   in the settings is turned off before the public address comes and on again
-  when it goes.
+  when it goes. **Hotspot** and **WireGuard** On and Off turn the hotspot or
+  the tunnel on or off at once, on the phone and in the web view, which also
+  shows how the connections stand. The lit button says whether the hotspot
+  is on and whether the tunnel is up, a button pressed in the web view shows
+  inset until the phone has switched. Who may reach the web view is only set
+  on the phone. **WireGuard's battery use** shows whether it is Unrestricted,
+  which Android needs before WireGuard may start its tunnel from the
+  background, and opens WireGuard's app settings to set it.
 - Now playing like the phone: sliding covers with the neighbours peeking out,
   synced rolling lyrics beside or on the cover, quarter stars, like with the
   number of hearts (left out when the one heart is your own), plays, a
@@ -264,7 +271,11 @@ the new settings layout and a number of smaller improvements.
 - A right click or a press and hold on a cover opens that song's menu, the
   playing song's on the middle cover, as on a row in the list.
 - **Now playing** in the song list keeps the playing song in sight as the
-  songs change, lit while it does, until the list is scrolled by hand.
+  songs change, lit while it does, until the playing song is scrolled out
+  of sight by hand. The small list does the same from when it opens at the
+  playing song or its button finds it, and so does the phone's own list:
+  scrolled away from the playing song, the list stays put when the next
+  song starts, until the button that finds the playing song is pressed.
 - Stars show a tap at once, the phone confirms a moment later.
 - Popups, the settings, the other panels and the whole song list close with
   a swipe down, with a finger or dragged with the mouse (on the list itself
@@ -394,11 +405,11 @@ the new settings layout and a number of smaller improvements.
   of five. Only the newest, as on open.
 - **New songs with the play queue in view** are offered to it on a Load,
   however they came in: found by the Load, done generating, or newly
-  published while only published songs are shown: play now, which makes
-  them the queue and starts the first at once, play next, add to the end,
-  replace the queue with the playing song playing on, or leave them out
-  for now. Left out, they still show in
-  the Mureka list. Asked on the phone and in the web view, the first answer
+  published while only published songs are shown: play now, which puts
+  them after the playing song and starts the first at once, the rest of
+  the queue following them, play next, add to the end, replace the queue
+  with the playing song playing on, or leave them out for now. Left out,
+  they still show in the Mureka list. Asked on the phone and in the web view, the first answer
   anywhere counts.
 - **Choose what an import of song tweaks brings**: ratings, tempos,
   instrumental marks, ignored songs and saved creators each have a switch,
@@ -475,7 +486,14 @@ the new settings layout and a number of smaller improvements.
   phone's hotspot is on, grey while it is off and dashed when the phone
   cannot tell, read from Android itself. A tap offers to switch the hotspot
   on or off, which goes through the hotspot helper. Each browser can show
-  it or not on its own.
+  it or not on its own. A browser on the hotspot is asked first before it
+  switches the hotspot off.
+- **WireGuard badge** in the web view, off by default: a shield after the
+  hotspot badge, a white shield ringed in WireGuard's red while its tunnel
+  is up and grey while it is down. A tap turns the tunnel on or off. A browser on the public
+  address is asked first before WireGuard takes the phone's one VPN from
+  it, and one that came through the VPN before the tunnel goes. Each
+  browser can show it or not on its own.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,
