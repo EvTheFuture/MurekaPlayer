@@ -777,6 +777,39 @@
         opacity: 0.6;
     }
 
+    /* WireGuard's tunnel, when asked for in the settings: a ring in
+       WireGuard's own red round a white shield while it is up, quiet like
+       the hotspot badge rather than a filled warning, grey while down */
+    #wgBadge {
+        display: none;
+        flex: 0 0 auto;
+        margin-left: 0.4em;
+        padding: 0.05em 0.45em;
+        border: 1px solid var(--line);
+        border-radius: 0.6em;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: 0.75em;
+        cursor: pointer;
+        font-weight: 400;
+        line-height: 1.5;
+        white-space: nowrap;
+    }
+
+    /* A darker, quieter take on WireGuard's red, and a soft white */
+    #wgBadge.on {
+        border-color: #642326;
+        box-shadow: inset 0 0 0 1px #642326;
+        color: #dcdce0;
+    }
+
+    #wgBadge .ico {
+        display: block;
+        width: 1.25em;
+        height: 1.25em;
+    }
+
     /* How warm the phone is, a tap tells the battery's temperature */
     #heatBadge {
         display: none;
@@ -828,7 +861,8 @@
         vertical-align: 1px;
     }
 
-    html.phone #hotspotBadge {
+    html.phone #hotspotBadge,
+    html.phone #wgBadge {
         margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
@@ -2139,6 +2173,163 @@
         opacity: 0.4;
     }
 
+    /* The hotspot's and WireGuard's panel: how it stands, what it does,
+       a note when switching cuts this browser off, and the buttons at the
+       foot. Narrower than the song menu, one column */
+    #menuBox.switchBox {
+        width: min(520px, 92vw);
+        padding: 20px 22px;
+    }
+
+    #menuBox.switchBox #menuItems {
+        grid-template-columns: 1fr;
+    }
+
+    .swPanel {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 6px 4px 0;
+    }
+
+    .swState {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .swRing {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 2px var(--line);
+        color: var(--muted);
+    }
+
+    .swRing .ico {
+        width: 28px;
+        height: 28px;
+    }
+
+    .swRing.hotspot {
+        box-shadow: inset 0 0 0 2px rgba(72, 225, 235, 0.6);
+        color: var(--accent);
+    }
+
+    .swRing.wireguard {
+        box-shadow: inset 0 0 0 2px #642326;
+        color: #dcdce0;
+    }
+
+    .swWords {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .swWord {
+        font-size: clamp(20px, 2vw, 26px);
+        font-weight: 600;
+    }
+
+    .swVia {
+        color: var(--muted);
+        font-size: 14px;
+    }
+
+    .swAbout {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.5;
+    }
+
+    /* What switching does to this browser, before it is done */
+    .swWarn {
+        display: flex;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(245, 197, 24, 0.08);
+        box-shadow: inset 3px 0 0 var(--gold);
+        color: #f2dc8c;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+
+    .swWarn .ico {
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        margin-top: 1px;
+        color: var(--gold);
+    }
+
+    .swButtons {
+        display: flex;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+    }
+
+    .swBtn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: var(--ctl-h);
+        padding: 0 20px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: none;
+        color: var(--text);
+        font: inherit;
+        font-size: 16px;
+        cursor: pointer;
+    }
+
+    .swBtn .ico {
+        width: 18px;
+        height: 18px;
+    }
+
+    .swBtn.go {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    .swBtn.stop {
+        border-color: rgba(255, 138, 138, 0.6);
+        color: #ff8a8a;
+    }
+
+    .swBtn:hover {
+        filter: brightness(1.12);
+    }
+
+    /* On a narrow screen the buttons take the whole width, the switch on
+       top and Close under it */
+    @media (max-width: 520px) {
+
+        .swButtons {
+            flex-direction: column-reverse;
+        }
+
+        .swBtn {
+            justify-content: center;
+            width: 100%;
+        }
+    }
+
     .menuItem .ico {
         width: 1.3em;
         height: 1.3em;
@@ -2452,6 +2643,18 @@
 
     .pBtn:disabled {
         opacity: 0.4;
+    }
+
+    /* Something switched on the phone now, the hotspot or WireGuard, while
+       the phone works on it: the same word, inset, until the phone says
+       how it went */
+    .pBtn.waiting,
+    .pBtn.on.waiting {
+        background: var(--card);
+        border-color: var(--accent);
+        color: var(--text);
+        font-weight: normal;
+        box-shadow: inset 0 0 0 1.5px var(--accent);
     }
 
     /* The widths the settings' buttons come in, see tidyPanelButtons */
@@ -4288,6 +4491,7 @@
             <span id="netBadge"></span>
             <button id="heatBadge" type="button"></button>
             <button id="hotspotBadge" type="button"></button>
+            <button id="wgBadge" type="button"></button>
         </span>
         <div id="status" class="marquee"></div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
@@ -4981,12 +5185,28 @@
             ["path", { d: "M18.4 5.6a9 9 0 0 1 0 12.8" }],
             ["line", { x1: "3", y1: "3", x2: "21", y2: "21" }]
         ],
+        vpn: [
+            ["path", { d: "M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z" }],
+            ["circle", { cx: "12", cy: "10.5", r: "1.8" }],
+            ["line", { x1: "12", y1: "12.3", x2: "12", y2: "15.5" }]
+        ],
+        vpnOff: [
+            ["path", { d: "M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z" }],
+            ["circle", { cx: "12", cy: "10.5", r: "1.8" }],
+            ["line", { x1: "12", y1: "12.3", x2: "12", y2: "15.5" }],
+            ["line", { x1: "3", y1: "3", x2: "21", y2: "21" }]
+        ],
         hotspotUnknown: [
             ["circle", { cx: "12", cy: "12", r: "1.5" }],
             ["path", { d: "M8.5 15.5a5 5 0 0 1 0-7", "stroke-dasharray": "2 2.5" }],
             ["path", { d: "M15.5 8.5a5 5 0 0 1 0 7", "stroke-dasharray": "2 2.5" }],
             ["path", { d: "M5.6 18.4a9 9 0 0 1 0-12.8", "stroke-dasharray": "2 2.5" }],
             ["path", { d: "M18.4 5.6a9 9 0 0 1 0 12.8", "stroke-dasharray": "2 2.5" }]
+        ],
+        alert: [
+            ["path", { d: "M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" }],
+            ["line", { x1: "12", y1: "9", x2: "12", y2: "13" }],
+            ["line", { x1: "12", y1: "17", x2: "12.01", y2: "17" }]
         ],
         info: [
             ["circle", { cx: "12", cy: "12", r: "10" }],
@@ -5204,6 +5424,7 @@
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
             hotspotBadge: s.hotspotBadgeOn === true,
+            wgBadge: s.wgBadgeOn === true,
             heatBadge: s.heatBadgeOn !== false,
             heatText: s.heatText === "both" || s.heatText === "temp" ? s.heatText : "word",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
@@ -5240,6 +5461,7 @@
         // The hotspot and heat badges and what the heat badge says. A look
         // kept before they could be set follows the phone
         s.hotspotBadgeOn = typeof look.hotspotBadge === "boolean" ? look.hotspotBadge : raw.hotspotBadgeOn === true;
+        s.wgBadgeOn = typeof look.wgBadge === "boolean" ? look.wgBadge : raw.wgBadgeOn === true;
         s.heatBadgeOn = typeof look.heatBadge === "boolean" ? look.heatBadge : raw.heatBadgeOn !== false;
         s.heatText = look.heatText === "word" || look.heatText === "both" || look.heatText === "temp"
             ? look.heatText : raw.heatText;
@@ -5408,6 +5630,7 @@
         { label: "Online badge", page: "Web view", key: "onlineBadge", kind: "choice", values: ["fade", "always"],
             names: { fade: "Fade away", always: "Always" } },
         { label: "Hotspot badge", page: "Web view", key: "hotspotBadge", kind: "bool" },
+        { label: "WireGuard badge", page: "Web view", key: "wgBadge", kind: "bool" },
         { label: "Heat badge", page: "Web view", key: "heatBadge", kind: "bool" },
         { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "choice", values: ["word", "both", "temp"],
             names: { word: "Cool", both: "Cool 37 \u00B0C", temp: "37 \u00B0C" } },
@@ -7163,7 +7386,7 @@
     // keeps no gap for it
     function syncBadges() {
 
-        const any = ["whoName", "netBadge", "hotspotBadge", "heatBadge"].some(function (id) {
+        const any = ["whoName", "netBadge", "hotspotBadge", "wgBadge", "heatBadge"].some(function (id) {
             return $(id).style.display !== "" && $(id).style.display !== "none";
         });
 
@@ -7342,10 +7565,7 @@
 
         if (heatHotspot === "on") {
 
-            items.push({ icon: "close", label: "Switch off hotspot", cls: "danger", fn: function () {
-
-                switchHotspot(false);
-            } });
+            items.push({ icon: "hotspot", label: "Hotspot", cls: "accent", fn: openHotspotPanel });
         }
 
         openChoice("Phone heat", items);
@@ -7393,20 +7613,200 @@
         }, 40000);
     }
 
-    $("hotspotBadge").addEventListener("click", function () {
+    // How this browser reaches the phone, as the phone saw it: public, the
+    // public address over the hotspot, hotspot, vpn, or wifi
+    function reachedVia() {
+        return rawState && typeof rawState.via === "string" ? rawState.via : "";
+    }
 
-        const st = hotspotShown;
-        const items = [];
+    // How this browser reaches the phone, in a line for the panels
+    const VIA_WORDS = {
+        hotspot: "This browser is on the phone's hotspot",
+        public: "This browser is on the hotspot, through the public address",
+        vpn: "This browser comes through a VPN",
+        wifi: "This browser shares a Wi-Fi with the phone"
+    };
+
+    // The panel for something switched on the phone: a ringed icon with how
+    // it stands, a line on how this browser gets here, what it is, a note
+    // when switching cuts this browser off, and the buttons at the foot.
+    // p: title, icon, ring, word, about, warn, buttons [{ label, icon, kind, fn }]
+    function openSwitchPanel(p) {
+
+        const box = $("menuItems");
+        const panel = document.createElement("div");
+        const stateRow = document.createElement("div");
+        const ring = document.createElement("div");
+        const words = document.createElement("div");
+        const word = document.createElement("div");
+        const about = document.createElement("p");
+        const buttons = document.createElement("div");
+        const via = VIA_WORDS[reachedVia()] || "";
+
+        openChoice(p.title, []);
+        $("menuBox").classList.add("switchBox");
+
+        panel.className = "swPanel";
+        stateRow.className = "swState";
+        ring.className = "swRing" + (p.ring ? " " + p.ring : "");
+        ring.appendChild(icon(p.icon));
+        words.className = "swWords";
+        word.className = "swWord";
+        word.textContent = p.word;
+        words.appendChild(word);
+
+        if (via) {
+
+            const viaLine = document.createElement("div");
+
+            viaLine.className = "swVia";
+            viaLine.textContent = via;
+            words.appendChild(viaLine);
+        }
+
+        stateRow.appendChild(ring);
+        stateRow.appendChild(words);
+        panel.appendChild(stateRow);
+
+        about.className = "swAbout";
+        about.textContent = p.about;
+        panel.appendChild(about);
+
+        if (p.warn) {
+
+            const warn = document.createElement("div");
+            const text = document.createElement("span");
+
+            warn.className = "swWarn";
+            warn.appendChild(icon("alert"));
+            text.textContent = p.warn;
+            warn.appendChild(text);
+            panel.appendChild(warn);
+        }
+
+        buttons.className = "swButtons";
+
+        const close = document.createElement("button");
+
+        close.type = "button";
+        close.className = "swBtn";
+        close.textContent = "Close";
+        close.addEventListener("click", closeSongMenu);
+        buttons.appendChild(close);
+
+        for (const b of p.buttons) {
+
+            const btn = document.createElement("button");
+            const label = document.createElement("span");
+
+            btn.type = "button";
+            btn.className = "swBtn " + b.kind;
+            btn.appendChild(icon(b.icon));
+            label.textContent = b.label;
+            btn.appendChild(label);
+            btn.addEventListener("click", b.fn);
+            buttons.appendChild(btn);
+        }
+
+        panel.appendChild(buttons);
+        box.appendChild(panel);
+    }
+
+    // The hotspot's panel, from its badge or the heat badge's panel
+    function openHotspotPanel() {
+
+        const st = hotspotShown || heatHotspot || "unknown";
+        const onHere = reachedVia() === "hotspot" || reachedVia() === "public";
+        const buttons = [];
 
         if (st !== "on") {
-            items.push({ icon: "hotspot", label: "Switch on hotspot", cls: "accent", fn: function () { switchHotspot(true); } });
+            buttons.push({ label: "Switch on", icon: "hotspot", kind: "go", fn: function () { switchHotspot(true); } });
         }
 
         if (st !== "off") {
-            items.push({ icon: "hotspotOff", label: "Switch off hotspot", cls: "danger", fn: function () { switchHotspot(false); } });
+            buttons.push({ label: onHere ? "Switch off anyway" : "Switch off", icon: "hotspotOff", kind: "stop",
+                fn: function () { switchHotspot(false); } });
         }
 
-        openChoice(st === "on" ? "Hotspot is on" : (st === "off" ? "Hotspot is off" : "Hotspot, not known"), items);
+        openSwitchPanel({
+            title: "Phone's hotspot",
+            icon: st === "on" ? "hotspot" : (st === "off" ? "hotspotOff" : "hotspotUnknown"),
+            ring: st === "on" ? "hotspot" : "",
+            word: st === "on" ? "On" : (st === "off" ? "Off" : "Not known"),
+            about: "Devices join the phone's hotspot to open the web view. It is switched by the hotspot helper on"
+                + " the phone, the way the quick settings tile does it.",
+            warn: st !== "off" && onHere
+                ? "Switched off, this browser loses the web view until the hotspot is on again." : "",
+            buttons: buttons
+        });
+    }
+
+    $("hotspotBadge").addEventListener("click", openHotspotPanel);
+
+    // WireGuard's tunnel as the badge last said it: on, off, or null while
+    // the badge is not shown
+    let wgShown = null;
+
+    function paintWgBadge(s) {
+
+        const el = $("wgBadge");
+        const known = s && (s.wgBadge === "on" || s.wgBadge === "off") ? s.wgBadge : null;
+        const st = s && s.wgBadgeOn === true ? known : null;
+
+        if (!el) {
+            return;
+        }
+
+        el.style.display = st ? "inline-block" : "none";
+        wgShown = st;
+
+        if (!st || el.className === st) {
+            return;
+        }
+
+        el.className = st;
+        el.textContent = "";
+        el.appendChild(icon(st === "on" ? "vpn" : "vpnOff"));
+        el.setAttribute("aria-label", st === "on" ? "WireGuard on" : "WireGuard off");
+        el.title = st === "on" ? "WireGuard's tunnel is up" : "WireGuard's tunnel is down";
+    }
+
+    // The phone's notes say how it went, so only the asking is done here
+    function switchWireGuard(on) {
+
+        closeSongMenu();
+        send("wireGuardSwitch", on);
+    }
+
+    // WireGuard's panel. On takes Android's one VPN from the public address,
+    // Off ends the tunnel, and the note says when that cuts this browser off
+    $("wgBadge").addEventListener("click", function () {
+
+        const up = wgShown === "on";
+        const via = reachedVia();
+        let warn = "";
+
+        if (!up && via === "public") {
+            warn = "WireGuard takes Android's one VPN from the public address, so this browser loses the web view"
+                + " until the public address is back.";
+        } else if (up && via === "vpn") {
+            warn = "Turned off, this browser loses the web view until it can reach the phone another way.";
+        }
+
+        openSwitchPanel({
+            title: "WireGuard",
+            icon: up ? "vpn" : "vpnOff",
+            ring: up ? "wireguard" : "",
+            word: up ? "Tunnel up" : "Tunnel down",
+            about: "The phone's WireGuard tunnel. Android runs one VPN at a time, so it gives way to the public"
+                + " address while the hotspot is on and comes back once it is off.",
+            warn: warn,
+            buttons: [up
+                ? { label: warn ? "Turn off anyway" : "Turn off", icon: "vpnOff", kind: "stop",
+                    fn: function () { switchWireGuard(false); } }
+                : { label: warn ? "Turn on anyway" : "Turn on", icon: "vpn", kind: "go",
+                    fn: function () { switchWireGuard(true); } }]
+        });
     });
 
     // The account signed in on the phone, before the badges
@@ -7542,6 +7942,7 @@
         paintWho(s);
         paintNetBadge(s);
         paintHotspotBadge(s);
+        paintWgBadge(s);
         paintHeatBadge(s);
 
         if (!s || !s.id) {
@@ -12199,6 +12600,12 @@
         return out;
     }
 
+    // Buttons that switch something on the phone now, by their place, and
+    // which of them was lit when pressed. A switch of the hotspot settles
+    // within about 25 s
+    const NOW_WAIT_MS = 25000;
+    const nowWaits = new Map();
+
     function panelNode(node, hasButtons, top) {
 
         // A setting's name with its explanation under it, one column
@@ -12275,6 +12682,17 @@
                 + (node.wide ? " wide" : "");
             btn.disabled = node.off === true;
 
+            // Still being switched, also when the settings are drawn again
+            // meanwhile, until the phone's lit button changes or a while
+            // has gone by
+            const wait = nowWaits.get(node.id);
+
+            if (wait && (Date.now() > wait.until || node.on !== wait.on)) {
+                nowWaits.delete(node.id);
+            } else if (wait) {
+                btn.classList.add("waiting");
+            }
+
             // A tag and its count, the count kept to the right
             if (node.parts && node.parts.length > 1) {
 
@@ -12317,6 +12735,22 @@
                 if (node.imp) {
 
                     importChoice(node.id);
+                    return;
+                }
+
+                // Switched on the phone now, not a setting: the button goes
+                // inset with its word, and the phone's answer lights the one
+                // that stands
+                if (node.now) {
+
+                    nowWaits.set(node.id, { on: node.on === true, until: Date.now() + NOW_WAIT_MS });
+                    btn.classList.add("waiting");
+                    panelAction("hclick", node.id);
+
+                    // No answer meanwhile, the word goes back to how it was
+                    setTimeout(function () {
+                        btn.classList.remove("waiting");
+                    }, NOW_WAIT_MS);
                     return;
                 }
 
@@ -14389,6 +14823,12 @@
     let miniPlayingAt = -1;
     let miniPlayingAtId = "";
 
+    // The small list goes along to the next song as it starts, from when it
+    // opens at the playing song or its button finds it, until the playing
+    // song is scrolled out of sight by hand
+    let miniFollow = false;
+    let miniHandAt = 0;
+
     // The small list shows Mureka's songs or the queue, switched with its
     // button and kept for the next visit
     let miniView = "mureka";
@@ -14537,15 +14977,25 @@
 
             if (first && stayTop) {
 
+                miniFollow = false;
                 miniQuietUntil = Date.now() + 400;
                 box.scrollTop = 0;
 
             } else if (first) {
+
+                miniFollow = true;
                 showMiniPlaying();
             } else {
 
                 miniQuietUntil = Date.now() + 400;
                 box.scrollTop = keep;
+
+                // Following, on to the song now playing
+                const row = box.querySelector(".row.playing");
+
+                if (miniFollow && row && !rowInSight(box, row)) {
+                    showMiniPlaying(true);
+                }
             }
 
             updateMiniLocate();
@@ -14661,6 +15111,7 @@
             // Read again at the top, it stays there
             if (reset && stayTop) {
 
+                miniFollow = false;
                 miniQuietUntil = Date.now() + 400;
                 $("miniRows").dataset.seeking = "";
                 $("miniRows").scrollTop = 0;
@@ -14679,6 +15130,7 @@
                 }
 
                 $("miniRows").dataset.seeking = "";
+                miniFollow = true;
                 showMiniPlaying(seeking === "smooth");
             }
 
@@ -14844,6 +15296,8 @@
     $("miniLocate").addEventListener("click", function () {
 
         hideMiniEdge();
+        miniHandAt = 0;
+        miniFollow = true;
 
         if ($("miniRows").querySelector(".row.playing")) {
 
@@ -14857,6 +15311,17 @@
 
     // More songs as the end comes near, and the two buttons follow the
     // scrolling
+
+    const miniByHand = function () {
+        miniHandAt = Date.now();
+    };
+
+    for (const name of ["wheel", "touchmove", "touchend"]) {
+        $("miniRows").addEventListener(name, miniByHand, { passive: true });
+    }
+
+    $("miniRows").addEventListener("keydown", miniByHand);
+
     $("miniRows").addEventListener("scroll", function () {
 
         const box = $("miniRows");
@@ -14864,6 +15329,17 @@
         const delta = top - miniLastTop;
 
         miniLastTop = top;
+
+        if (miniFollow && Date.now() - miniHandAt <= HAND_SCROLL_MS) {
+
+            const row = box.querySelector(".row.playing");
+
+            miniHandAt = Date.now();
+
+            if (!row || !rowInSight(box, row)) {
+                miniFollow = false;
+            }
+        }
 
         if (miniLoaded < miniTotal && top + box.clientHeight > box.scrollHeight - 400) {
             loadMini(false);
@@ -14925,6 +15401,19 @@
 
             for (const row of $("miniRows").querySelectorAll(".row")) {
                 row.classList.toggle("playing", row.dataset.id === id);
+            }
+
+            // Still following, on to the new song. A queue is read again
+            // for the new place first, which then goes there
+            if (miniFollow && id && miniView !== "queue") {
+
+                if ($("miniRows").querySelector(".row.playing")) {
+                    showMiniPlaying(true);
+                } else {
+
+                    $("miniRows").dataset.seeking = "smooth";
+                    loadMini(false);
+                }
             }
 
             updateMiniLocate();
@@ -15033,9 +15522,21 @@
     });
 
     // After Now playing the list keeps the playing song in sight as the
-    // songs change, until it is scrolled by hand or closed. The button is
-    // lit meanwhile
+    // songs change, until the song is scrolled out of sight by hand or the
+    // list is closed. The button is lit meanwhile
     let followPlaying = false;
+
+    // How long after the last touch, wheel or key a scroll still counts as
+    // by hand, long enough for a flick to glide to a stop
+    const HAND_SCROLL_MS = 1500;
+
+    // Whether a row is at least partly in sight in its list
+    function rowInSight(box, row) {
+
+        const top = row.offsetTop - box.offsetTop - box.scrollTop;
+
+        return top + row.offsetHeight > 8 && top < box.clientHeight - 8;
+    }
 
     function setFollow(on) {
 
@@ -15076,6 +15577,8 @@
 
     $("toCurrent").addEventListener("click", function () {
 
+        // The easing there is not a scroll by hand
+        listHandAt = 0;
         setFollow(true);
 
         if (listView === "queue" || $("rows").querySelector(".row.playing")) {
@@ -15089,22 +15592,24 @@
         });
     });
 
-    // Scrolled by hand: the wheel, a finger, the keys or the scroll bar,
-    // and the jump to the top or the end
-    for (const name of ["wheel", "touchmove"]) {
+    // Scrolled by hand: the wheel, a finger, the keys or the scroll bar.
+    // The scrolling that follows, a flick gliding on included, counts as
+    // by hand, and only once the playing song is out of sight does the
+    // list stop following it
+    let listHandAt = 0;
 
-        $("rows").addEventListener(name, function () {
+    const listByHand = function () {
+        listHandAt = Date.now();
+    };
 
-            if (followPlaying) {
-                setFollow(false);
-            }
-        }, { passive: true });
+    for (const name of ["wheel", "touchmove", "touchend"]) {
+        $("rows").addEventListener(name, listByHand, { passive: true });
     }
 
     $("rows").addEventListener("keydown", function (ev) {
 
-        if (followPlaying && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].indexOf(ev.key) !== -1) {
-            setFollow(false);
+        if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].indexOf(ev.key) !== -1) {
+            listByHand();
         }
     });
 
@@ -15113,10 +15618,26 @@
         const box = $("rows");
 
         // A press on the scroll bar, beside the rows
-        if (followPlaying && ev.target === box && ev.offsetX >= box.clientWidth) {
-            setFollow(false);
+        if (ev.target === box && ev.offsetX >= box.clientWidth) {
+            listByHand();
         }
     });
+
+    $("rows").addEventListener("scroll", function () {
+
+        if (!followPlaying || Date.now() - listHandAt > HAND_SCROLL_MS) {
+            return;
+        }
+
+        listHandAt = Date.now();
+
+        // A playing song not read into the list yet is out of sight too
+        const row = $("rows").querySelector(".row.playing");
+
+        if (!row || !rowInSight($("rows"), row)) {
+            setFollow(false);
+        }
+    }, { passive: true });
 
     $("edgeBtn").addEventListener("click", function () {
         setFollow(false);
@@ -16142,6 +16663,7 @@
     function closeSongMenu() {
 
         markMenuRow(null);
+        $("menuBox").classList.remove("switchBox");
         $("songMenu").style.display = "none";
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
@@ -16315,6 +16837,7 @@
 
         menuSong = null;
         box.textContent = "";
+        $("menuBox").classList.remove("switchBox");
         $("menuTitle").textContent = title;
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
@@ -18220,6 +18743,7 @@
                 return;
             }
 
+            $("menuBox").classList.remove("switchBox");
             drawMenu(m, typeof queueIndex === "number" ? queueIndex : -1);
             $("bpmRow").style.display = "none";
             $("songMenu").style.display = "flex";

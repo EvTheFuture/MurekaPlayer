@@ -807,6 +807,62 @@ final class PlayerWeb {
             return pm != null && pm.isIgnoringBatteryOptimizations(appContext.getPackageName()) ? "1" : "0";
         }
 
+        // Whether WireGuard is left out of battery optimisation. Android
+        // lets it start its tunnel from the background only then
+        @JavascriptInterface
+        public String wireGuardFree() {
+
+            if (!onMureka || appContext == null) {
+                return "";
+            }
+
+            if (!WireGuard.installed(appContext)) {
+                return "";
+            }
+
+            return WireGuard.unrestricted(appContext) ? "1" : "0";
+        }
+
+        // WireGuard's tunnel for the web view's badge: on or off, empty
+        // when no tunnel is named or WireGuard is not installed
+        @JavascriptInterface
+        public String wireGuardState() {
+
+            if (!onMureka || appContext == null) {
+                return "";
+            }
+
+            if (WebViewSettings.wgTunnel(appContext).isEmpty() || !WireGuard.installed(appContext)) {
+                return "";
+            }
+
+            return WireGuard.tunnelUp(appContext) ? "on" : "off";
+        }
+
+        // WireGuard's own app settings, where its battery use is set.
+        // Android asks only for the app itself, never for another one
+        @JavascriptInterface
+        public void openWireGuardSettings() {
+
+            if (!onMureka || appContext == null) {
+                return;
+            }
+
+            try {
+                appContext.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + WireGuard.PACKAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (ActivityNotFoundException e) {
+
+                // No page for it, the list of battery settings instead
+                try {
+                    appContext.startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (ActivityNotFoundException e2) {
+                    // Nothing to open
+                }
+            }
+        }
+
         // Ask Android to leave the app out of battery optimisation, a
         // question Android shows itself
         @JavascriptInterface
@@ -1251,6 +1307,7 @@ final class PlayerWeb {
                 o.put("vpn", CarVpn.status());
                 o.put("wg", WireGuard.status(appContext));
                 o.put("wgLast", WireGuard.last());
+                o.put("wgUp", WireGuard.tunnelUp(appContext));
                 o.put("carUrl", publicAddr != null ? "http://" + publicAddr + ":" + PlayerService.PORT : "");
                 o.put("name", name);
                 o.put("localUrl", "http://" + name + ":" + PlayerService.PORT);

@@ -394,6 +394,15 @@ final class WireGuard {
             return;
         }
 
+        // Android refuses WireGuard's VPN service from the background
+        // unless its battery use is Unrestricted, so asking again would
+        // not help. Asked once all the same, in case it is in front
+        boolean held = up && !unrestricted(c);
+
+        if (held && tried > 0) {
+            return;
+        }
+
         try {
 
             Intent i = new Intent(up ? UP : DOWN);
@@ -433,6 +442,14 @@ final class WireGuard {
                 return;
             }
 
+            if (held) {
+
+                letSleep();
+                tell(c, "WireGuard did not turn " + tunnel + " on, Android does not let it start in the background."
+                    + " Set WireGuard's battery use to Unrestricted, under Connections", false);
+                return;
+            }
+
             if (tried < RETRIES) {
 
                 Hub.note("WireGuard", "no VPN up after try " + (tried + 1) + ", asking again");
@@ -448,6 +465,13 @@ final class WireGuard {
     }
 
     // Whether any VPN is up, WireGuard's when the public address is not
+    // Whether WireGuard's tunnel is up, as near as the app can tell.
+    // Android does not say whose a VPN is, but it runs one at a time, so
+    // a VPN up while the public address is not is taken to be WireGuard's
+    static boolean tunnelUp(Context c) {
+        return installed(c) && CarVpn.activeAddress() == null && vpnUp(c);
+    }
+
     private static boolean vpnUp(Context c) {
 
         ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);

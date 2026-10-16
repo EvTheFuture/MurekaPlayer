@@ -353,6 +353,48 @@ final class WebViewServer {
         countClients();
     }
 
+    // How this browser reaches the phone, so the web view can warn before
+    // a switch that cuts it off: public, the public address over the
+    // hotspot, hotspot, vpn, or wifi
+    private static String reachedVia(InetAddress localAddr, boolean viaHotspot) {
+
+        String publicAddr = CarVpn.activeAddress();
+        InetAddress v4 = plainV4(localAddr);
+        InetAddress local = v4 != null ? v4 : localAddr;
+
+        if (local != null && publicAddr != null && publicAddr.equals(local.getHostAddress())) {
+            return "public";
+        }
+
+        try {
+
+            NetworkInterface arrived = local != null ? NetworkInterface.getByInetAddress(local) : null;
+
+            if (arrived != null && vpnInterface(arrived.getName())) {
+                return "vpn";
+            }
+        } catch (IOException e) {
+            // Taken as the network it came from below
+        }
+
+        return viaHotspot ? "hotspot" : "wifi";
+    }
+
+    // The state with how this browser reaches the phone added, the state
+    // itself being the same for every browser
+    private static String withVia(String json, String via) {
+
+        String t = json == null ? "" : json.trim();
+
+        if (!t.startsWith("{") || !t.endsWith("}")) {
+            return json;
+        }
+
+        String inner = t.substring(1, t.length() - 1).trim();
+
+        return "{" + inner + (inner.isEmpty() ? "" : ",") + "\"via\":\"" + via + "\"}";
+    }
+
     // How many browsers of the web view are on the phone's hotspot now
     static int hotspotBrowsers() {
         return hotspotBrowsers;
@@ -676,7 +718,7 @@ final class WebViewServer {
                 }
 
                 markPoll();
-                send(out, 200, "application/json", bytes(json));
+                send(out, 200, "application/json", bytes(withVia(json, reachedVia(c.getLocalAddress(), viaHotspot))));
             } else if ("GET".equals(method) && "/list".equals(path)) {
                 sendList(out, query);
             } else if ("GET".equals(method) && "/queue".equals(path)) {
@@ -2124,11 +2166,50 @@ final class WebViewServer {
                     out.put(o);
                 }
             }
+
+            addVpnAddresses(out, port, "1".equals(prefs.getString(WebViewSettings.ALLOW_VPN, "0")));
         } catch (IOException | JSONException e) {
             // What was found so far
         }
 
         return out;
+    }
+
+    // The phone's own address in a VPN it is on, WireGuard's for one, which
+    // devices at the other end of the tunnel open the page on. Only private
+    // ones, as only those are let in, and never the public address, which
+    // About lists by itself
+    private static void addVpnAddresses(JSONArray out, int port, boolean allowVpn) throws IOException, JSONException {
+
+        String publicAddr = CarVpn.activeAddress();
+        java.util.Enumeration<NetworkInterface> all = NetworkInterface.getNetworkInterfaces();
+
+        if (all == null) {
+            return;
+        }
+
+        for (NetworkInterface ni : Collections.list(all)) {
+
+            String name = ni.getName() == null ? "" : ni.getName();
+
+            if (!ni.isUp() || !vpnInterface(name)) {
+                continue;
+            }
+
+            for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+
+                if (!privateAddress(a) || a.getHostAddress().equals(publicAddr)) {
+                    continue;
+                }
+
+                JSONObject o = new JSONObject();
+
+                o.put("url", "http://" + a.getHostAddress() + ":" + port);
+                o.put("net", "VPN");
+                o.put("allowed", allowVpn);
+                out.put(o);
+            }
+        }
     }
 
     // The addresses other devices can reach the page on, on the hotspot or

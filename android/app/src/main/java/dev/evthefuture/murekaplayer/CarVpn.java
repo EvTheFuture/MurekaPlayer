@@ -22,6 +22,7 @@
 package dev.evthefuture.murekaplayer;
 
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.VpnService;
@@ -59,6 +60,14 @@ public class CarVpn extends VpnService {
         return active;
     }
 
+    // What it is when down by choice: waiting for the hotspot when it only
+    // runs while the hotspot is on, else off
+    static String idleStatus(Context c) {
+
+        return WebViewSettings.vpnEnabled(c) && WebViewSettings.vpnHotspotOnly(c)
+            ? "waiting for the hotspot" : "off";
+    }
+
     // Set from outside, when the permission question was answered no
     static void setStatus(String text) {
 
@@ -74,7 +83,7 @@ public class CarVpn extends VpnService {
         if (ACTION_STOP.equals(action)) {
 
             close();
-            status = "off";
+            status = idleStatus(this);
             PlayerService.carChanged();
             stopSelf();
 
@@ -170,7 +179,7 @@ public class CarVpn extends VpnService {
         close();
 
         if ("on".equals(status)) {
-            status = "off";
+            status = idleStatus(this);
         }
 
         PlayerService.carChanged();
