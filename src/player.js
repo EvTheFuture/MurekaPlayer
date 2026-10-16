@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.398";
+    const VERSION = "1.9.9.399";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -560,6 +560,26 @@
     let brokenLibraryNote = "";
 
     // Cached data, loaded once on startup
+    // A song list of thousands of songs outgrows what a browser keeps for a
+    // site, about 5 MB on Safari, shared with Mureka's own page. From this
+    // size on it is stored packed, about a ninth of the room. Smaller lists
+    // stay plain text
+    const PACK_FROM = 250000;
+    const PACK_MARK = "\u0001W1";
+    const PACK_DELAY_MS = 1000;
+
+    // LZW over the text's UTF-8 bytes, 15 bit codes kept as one character
+    // each. The codes are moved up past the control characters and stay
+    // below the surrogate range, so the stored text is plain valid UTF-16.
+    // A full table starts again with the reset code
+    const LZW_MAX = 32768;
+    const LZW_RESET = 256;
+    const LZW_BASE = 0x20;
+
+    // A large list waiting to be packed and stored, see flushPackedSave
+    let packedSave = null;
+    let packedSaveTimer = 0;
+
     let cache = loadCache();
 
     // Set of song_ids that have been requested for download to disk
@@ -2121,12 +2141,14 @@
 
         let raw = null;
 
+        flushPackedSave();
+
         try {
             raw = localStorage.getItem(feed().cacheKey);
 
             if (raw) {
 
-                const parsed = JSON.parse(raw);
+                const parsed = JSON.parse(unpackStored(raw));
 
                 // Fill in fields that older cache versions may be missing
                 if (!Array.isArray(parsed.songs)) {
@@ -2241,20 +2263,238 @@
         }
     }
 
-    // Persist the cache to localStorage
-    // If storage is full, drop other creator caches and retry once so the
-    // active library always saves and survives a restart
+    function packStored(text) {
+
+        if (text.length < PACK_FROM) {
+            return text;
+        }
+
+        const bytes = new TextEncoder().encode(text);
+        const codes = new Uint16Array(bytes.length + 2);
+        let n = 0;
+        let dict = new Map();
+        let next = 257;
+        let w = -1;
+
+        for (let i = 0; i < bytes.length; i++) {
+
+            const c = bytes[i];
+
+            if (w < 0) {
+
+                w = c;
+                continue;
+            }
+
+            const hit = dict.get(w * 256 + c);
+
+            if (hit !== undefined) {
+
+                w = hit;
+                continue;
+            }
+
+            codes[n++] = w;
+
+            if (next < LZW_MAX) {
+
+                dict.set(w * 256 + c, next);
+                next += 1;
+            } else {
+
+                codes[n++] = LZW_RESET;
+                dict = new Map();
+                next = 257;
+            }
+
+            w = c;
+        }
+
+        if (w >= 0) {
+            codes[n++] = w;
+        }
+
+        const parts = [PACK_MARK];
+
+        for (let i = 0; i < n; i += 8192) {
+
+            const slice = codes.subarray(i, Math.min(n, i + 8192));
+            const shifted = new Array(slice.length);
+
+            for (let k = 0; k < slice.length; k++) {
+                shifted[k] = slice[k] + LZW_BASE;
+            }
+
+            parts.push(String.fromCharCode.apply(null, shifted));
+        }
+
+        return parts.join("");
+    }
+
+    // The text back from what packStored made. Plain text, as stored by
+    // earlier versions and for small lists, comes back as it is
+    function unpackStored(raw) {
+
+        if (typeof raw !== "string" || raw.indexOf(PACK_MARK) !== 0) {
+            return raw;
+        }
+
+        const prefix = new Int32Array(LZW_MAX);
+        const suffix = new Uint8Array(LZW_MAX);
+        const first = new Uint8Array(LZW_MAX);
+        const len = new Int32Array(LZW_MAX);
+        let out = new Uint8Array(Math.max(1024, raw.length * 4));
+        let pos = 0;
+        let next = 257;
+        let prev = -1;
+
+        for (let c = 0; c < 256; c++) {
+
+            prefix[c] = -1;
+            suffix[c] = c;
+            first[c] = c;
+            len[c] = 1;
+        }
+
+        // Room for this many more bytes
+        const room = function (more) {
+
+            if (pos + more <= out.length) {
+                return;
+            }
+
+            const bigger = new Uint8Array(Math.max(out.length * 2, pos + more));
+
+            bigger.set(out.subarray(0, pos));
+            out = bigger;
+        };
+
+        // A table entry's bytes, written from its end back along its prefixes
+        const write = function (code) {
+
+            const l = len[code];
+            let k = code;
+
+            room(l);
+
+            for (let i = pos + l - 1; i >= pos; i--) {
+
+                out[i] = suffix[k];
+                k = prefix[k];
+            }
+
+            pos += l;
+        };
+
+        for (let i = PACK_MARK.length; i < raw.length; i++) {
+
+            const code = raw.charCodeAt(i) - LZW_BASE;
+            let head;
+
+            if (code === LZW_RESET) {
+
+                next = 257;
+                prev = -1;
+                continue;
+            }
+
+            if (code >= 0 && code < next) {
+
+                write(code);
+                head = first[code];
+            } else if (code === next && prev >= 0) {
+
+                write(prev);
+                room(1);
+                out[pos++] = first[prev];
+                head = first[prev];
+            } else {
+                throw new Error("The stored song list is damaged");
+            }
+
+            if (prev >= 0 && next < LZW_MAX) {
+
+                prefix[next] = prev;
+                suffix[next] = head;
+                first[next] = first[prev];
+                len[next] = len[prev] + 1;
+                next += 1;
+            }
+
+            prev = code;
+        }
+
+        return new TextDecoder().decode(out.subarray(0, pos));
+    }
+
+    // A large list waiting to be packed and stored, written when the page
+    // is hidden or closed too, and before any list is read back. Declared
+    // with the list itself
+    function flushPackedSave() {
+
+        clearTimeout(packedSaveTimer);
+        packedSaveTimer = 0;
+
+        if (!packedSave) {
+            return;
+        }
+
+        const job = packedSave;
+
+        packedSave = null;
+        writeLibrary(job.key, packStored(JSON.stringify(job.list)));
+    }
+
+    // A save of the list as it is replaces one still waiting to be packed
+    function dropPackedSave(key) {
+
+        if (packedSave && packedSave.key === key) {
+
+            packedSave = null;
+            clearTimeout(packedSaveTimer);
+            packedSaveTimer = 0;
+        }
+    }
+
+    window.addEventListener("pagehide", flushPackedSave);
+    document.addEventListener("visibilitychange", function () {
+
+        if (document.visibilityState === "hidden") {
+            flushPackedSave();
+        }
+    });
+
+
+    // Persist the cache to localStorage. A large list is stored packed, a
+    // moment later so changes coming close together are packed once
     function saveCache() {
 
         exportsVersion += 1;
 
         const key = feed().cacheKey;
-        const payload = JSON.stringify(cache);
+        const text = JSON.stringify(cache);
+
+        if (text.length < PACK_FROM) {
+
+            dropPackedSave(key);
+            writeLibrary(key, text);
+            return;
+        }
+
+        packedSave = { key: key, list: cache };
+        clearTimeout(packedSaveTimer);
+        packedSaveTimer = setTimeout(flushPackedSave, PACK_DELAY_MS);
+    }
+
+    // Store a song list, as it is or packed. If storage is full, drop other
+    // creator caches and retry once so the active library always saves and
+    // survives a restart
+    function writeLibrary(key, payload) {
 
         try {
             localStorage.setItem(key, payload);
             storageSaved();
-            return;
+            return true;
         } catch (e) {
         }
 
@@ -2263,8 +2503,10 @@
         try {
             localStorage.setItem(key, payload);
             storageSaved();
+            return true;
         } catch (e) {
             storageFailed();
+            return false;
         }
     }
 
@@ -35599,7 +35841,10 @@
 
         try {
 
-            const kept = JSON.parse(localStorage.getItem(OWN_FEED.cacheKey));
+            flushPackedSave();
+
+            const raw = localStorage.getItem(OWN_FEED.cacheKey);
+            const kept = raw ? JSON.parse(unpackStored(raw)) : null;
 
             if (kept && Array.isArray(kept.songs)) {
                 return kept;
@@ -35655,7 +35900,7 @@
         }
 
         try {
-            localStorage.setItem(OWN_FEED.cacheKey, JSON.stringify(merged));
+            localStorage.setItem(OWN_FEED.cacheKey, packStored(JSON.stringify(merged)));
         } catch (e) {
             return -1;
         }
