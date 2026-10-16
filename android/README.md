@@ -2,10 +2,11 @@
 
 A small app that runs mureka.ai in its own WebView with the shared
 `src/player.js`, keeps playing with the screen off, and serves a web view on
-the phone's hotspot. A browser in the car opens that page and becomes the
-remote: now playing, cover, stars, like, play and pause, previous and next,
-seeking, shuffle and repeat, the queue, a song list with search and Play
-next, and the player's own settings, all the filters and the artists.
+the phone's hotspot and Wi-Fi. Any browser there, a car's, a laptop's or a
+tablet's, opens that page and becomes the remote: now playing, cover, stars,
+like, play and pause, previous and next, seeking, shuffle and repeat, the
+queue, a song list with search and Play next, and the player's own settings,
+all the filters and the artists.
 
 ## How it fits together
 
@@ -16,31 +17,45 @@ next, and the player's own settings, all the filters and the artists.
   The WebView belongs to the app, not to the screen, so it keeps running with
   the app closed.
 - **PlayerService** is a foreground service and creates the WebView. It owns
-  the Android media session (lock screen, Bluetooth, steering wheel buttons,
-  the vehicle's own now playing), runs the web view server and shows its address
-  in the notification. When Mureka turns the session down, it posts a "Sign
-  in to Mureka" notification that opens the app.
-- **BootReceiver** starts the service when the phone starts and after the
+  the Android media session (lock screen, Bluetooth media buttons and the
+  now playing screen of a Bluetooth device), runs the web view server and
+  shows its address in the notification. When Mureka turns the session down,
+  it posts a "Sign in to Mureka" notification that opens the app.
+- **BootReceiver** starts the service when the device starts and after the
   app is updated, so the web view is there without opening the app.
 - **MainActivity** only shows the WebView. Closing it leaves the music and
   the web view running, Quit in the notification ends everything.
 - **CarVpn** is a VPN that carries no traffic. It only gives the phone one
-  extra address that is not private, 3.3.3.3 unless changed, since Tesla's
-  browser refuses private addresses. See "Use in the car".
+  extra address that is not private, 3.3.3.3 unless changed, since some
+  browsers, Tesla's among them, refuse private addresses. See "A fixed public
+  address".
 - **MdnsResponder** answers to `murekaplayer.local`, or the name set in the
   settings, so laptops and tablets on the hotspot or Wi-Fi find the page by
   name. Tesla's browser does not look up local names. It is plain Java, no
   Android classes, and answers with the phone's address on whichever network
   the question came from.
-- **CarSettings** holds the web view settings and checks every value.
-- **CarServer** listens on port 8080, retrying every 5 seconds if the port is
-  busy, and the notification says so when it is not listening. `GET /` is the
-  web view, `GET /state?since=` the now
-  playing state, answered as soon as there is a newer one than `since`, `GET /list?q=&offset=&limit=` a page of the song
-  list, `GET /queue?q=` the whole queue,
-  `GET /panel?name=settings|filters|creators` a copy of one of the player's
-  panels, and `POST /cmd` runs a command in the player.
+- **WebViewSettings** holds the web view settings and checks every value.
+- **WebViewServer** listens on port 8080, retrying every 5 seconds if the
+  port is busy, and the notification says so when it is not listening.
+  `GET /` is the web view, `GET /state?since=` the now playing state,
+  answered as soon as there is a newer one than `since`,
+  `GET /list?q=&offset=&limit=` a page of the song list, `GET /queue?q=` the
+  whole queue, `GET /panel?name=settings|filters|creators` a copy of one of
+  the player's panels, and `POST /cmd` runs a command in the player.
 - **Hub** passes the player's state out and the commands back in.
+- **WebLogin** checks the optional password for the web view and makes a
+  device wait longer after each wrong one.
+- **CoverCache** keeps covers on the phone for the web view, within the size
+  set in the settings.
+- **AppScreen** shows the web view as the app's own screen on a tablet.
+- **SysVolume** reads and sets the phone's media volume for the web view.
+- **ChargeWatch** and **BtWatch** follow the charger and the chosen Bluetooth
+  devices for the power saving under Charger and power.
+- **Hotspot**, **HotspotHelper**, **HelperStart**, **AdbLink** and
+  **PairReply** switch the phone's hotspot through a small helper that runs
+  as the debugging shell, paired once with wireless debugging.
+- **WireGuard** hands Android's one VPN over between a WireGuard tunnel and
+  the public address.
 
 Android only delivers the boot broadcast to an app that has been opened at
 least once since it was installed, so open it once after installing.
@@ -70,8 +85,9 @@ least once since it was installed, so open it once after installing.
   was in the queue. The heart in each row likes or unlikes the song, as on
   the phone.
 - The transport row has its own order, set under Settings, Web view, with
-  the same buttons the phone offers: stop, published, vocals and rate. Press and hold a button to move it, or use the
-  transport bar editor in Settings to move, add and take out buttons.
+  the same buttons the phone offers: stop, published, vocals and rate. Press
+  and hold a button to move it, or use the transport bar editor in Settings
+  to move, add and take out buttons.
 - Press and hold a song, or right click it, for the phone's song menu: play,
   play next, add to queue, refresh, download, copy link, information,
   instrumental, set BPM, cache or remove from cache, delete from the list and
@@ -99,9 +115,9 @@ least once since it was installed, so open it once after installing.
   edge, so the scrollbar never lies over the buttons.
 - **Remove ; from lyrics** in the settings takes the semicolons out of the
   lyrics everywhere they show.
-- Song rows look like the phone's list: the cache dot, the number, the cover, the title,
-  the rating once any song is rated, the heart, the length, and public or
-  draft when both are listed.
+- Song rows look like the phone's list: the cache dot, the number, the
+  cover, the title, the rating once any song is rated, the heart, the
+  length, and public or draft when both are listed.
 - The covers slide like the phone's, blurred and blended at the sides. The
   next cover peeks out behind the title and stars, with up next under the
   title. Five covers take part, so while one moves in the next one behind
@@ -168,8 +184,10 @@ Only the local network, never the mobile network:
 - Requests arriving on a cellular interface are refused, IPv6 included.
 - In the app's settings, under Connections, "Allow from the phone's hotspot"
   and "Allow from Wi-Fi networks" pick which of the two are allowed. Both
-  are on from the start. These two rows are not shown on the web view, so
-  a browser cannot lock itself out.
+  are on from the start. "Allow from a VPN", off from the start, also lets
+  in devices from the private addresses of a VPN the phone is on, WireGuard
+  for one. These rows are not shown on the web view, so a browser cannot
+  lock itself out or let others in.
 
 ## Fullscreen
 
@@ -177,17 +195,18 @@ The player's fullscreen works in the app. The status and navigation bars
 step aside and a swipe from the edge brings them back for a moment. Back
 leaves fullscreen.
 
-## Sound in the car
+## Where the sound plays
 
 The web view has a Sound switch:
 
-- **Phone / Bluetooth**, the phone plays and the car speakers get it over
-  Bluetooth. The web view is only the remote.
+- **Phone / Bluetooth**, the phone plays, on its own speaker or a Bluetooth
+  device such as a car stereo or headphones. The web view is only the
+  remote.
 - **This browser**, the browser plays the song itself. The phone keeps
   playing at a volume too low to hear and stays in charge of the queue, the
   web view follows its position. Not muted, since Android stops muted media
-  in the background, which paused the song and broke the next one. If the web view goes away for 8 seconds, the phone takes the
-  sound back.
+  in the background, which paused the song and broke the next one. If the
+  web view goes away for 25 seconds, the phone takes the sound back.
 
 ## Build
 
@@ -259,31 +278,35 @@ a debug signed build has to be uninstalled once before the first release
 signed one goes on, which clears its data, so export the song tweaks, the
 settings and the song library first.
 
-## Use in the car
+## A fixed public address
 
-Tesla's browser has refused private addresses (10.x, 172.16 to 31.x,
-192.168.x) since at least 2015, and a hotspot only hands out private ones.
-So the app can give the phone a fixed address that is not private:
+Some browsers refuse private addresses (10.x, 172.16 to 31.x, 192.168.x),
+Tesla's among them since at least 2015, and a hotspot only hands out private
+ones. So the app can give the phone a fixed address that is not private:
 
 1. In the player's settings, under Connections, switch on "Public address
    (VPN)". Android asks once whether the app may run a VPN.
-2. Switch on the phone's hotspot and connect the car to it.
-3. In the car's own browser open `http://3.3.3.3:8080` and bookmark it. It is the
-   same every time, whatever address the hotspot picked.
+2. Switch on the phone's hotspot and connect the other device to it.
+3. In that device's browser open `http://3.3.3.3:8080` and bookmark it. It is
+   the same every time, whatever address the hotspot picked.
 
 How it works: the VPN has no traffic and only this app inside it. It exists
-so Android assigns the address to the phone. The car sends requests for
-3.3.3.3 to its gateway, the phone, and since the address is the phone's own
-they go straight to the web view server. The hotspot, the car's internet and
-every other app are not touched. The Android Auto in the browser apps have
-used the same address for years.
+so Android assigns the address to the phone. The other device sends requests
+for 3.3.3.3 to its gateway, the phone, and since the address is the phone's
+own they go straight to the web view server. The hotspot, the other device's
+internet and every other app are not touched. The Android Auto in the
+browser apps have used the same address for years.
 
 - The address can be changed in the settings. Private, loopback, carrier
   grade NAT and multicast addresses are refused. 198.18.0.1 is a clean
   alternative nobody uses, but it is not confirmed to work in a Tesla.
 - Android allows one VPN at a time. Starting another VPN app turns this one
   off, and the settings say so. Switch it off and on to get it back, Android
-  asks again.
+  asks again. "Only while the hotspot is on" keeps the address to the times
+  the hotspot is on and leaves the VPN to another app the rest of the time.
+  A WireGuard tunnel named under Connections is turned off before the
+  address comes and on again when it goes, and needs its battery use set to
+  Unrestricted for Android to let it start in the background.
 - The notification shows the public address when it is up, and the local name
   and addresses for other devices.
 
@@ -297,9 +320,10 @@ name can be changed in the settings, `.local` is added.
 
 - Google sign in runs in the app's WebView with the WebView markers taken
   out of the user agent. Google may still refuse it.
-- Anyone on the same network can open the web view and control the player.
-  On the phone's own hotspot that is only the car. Turn off "Allow from
-  Wi-Fi networks" to keep it to the hotspot.
+- Without a password set, anyone on the same network can open the web view
+  and control the player. On the phone's own hotspot that is only the
+  devices joined to it. Set a password under Web view, or turn off "Allow
+  from Wi-Fi networks" to keep it to the hotspot.
 
 ## Publishing and renaming
 
@@ -417,12 +441,12 @@ without trying to put it back.
 The old on and off switch, Keep the screen on when paused, carries over:
 on becomes Always, off takes the new start value.
 
-A play, next or previous from Bluetooth, the steering wheel or the lock
-screen used to wait, with the screen dark and the music paused, until the
-phone was unlocked: the phone handed the command to the page and went back to
-sleep before the page could act on it. Each command now holds the phone
-awake for a minute and a half, long enough for the page to start the music,
-after which playing keeps it awake by itself.
+A play, next or previous from Bluetooth or the lock screen used to wait,
+with the screen dark and the music paused, until the phone was unlocked: the
+phone handed the command to the page and went back to sleep before the page
+could act on it. Each command now holds the phone awake for a minute and a
+half, long enough for the page to start the music, after which playing keeps
+it awake by itself.
 
 That was not all of it. With the screen off, Android tells the page's
 WebView that its window is hidden, and the page's paused song then does not
@@ -449,58 +473,59 @@ With it on the page uses the whole screen, the
 strip beside a camera cutout included, so nothing is left over. The
 keyboard is still kept clear, or it would cover what is being typed.
 
-## The cover on the car screen
+## The cover on a Bluetooth device's screen
 
-The app's own media session is what the lock screen, the car stereo and
-Bluetooth see, and it used to skip an update whose title, second line and
-cover were the same as the last one. Picking up again after a pause is
-exactly that case, so a head unit that had forgotten the cover never got it
-back until the song changed. With **Resend art on resume** on in the
+The app's own media session is what the lock screen and Bluetooth devices, a
+car stereo for one, see, and it used to skip an update whose title, second
+line and cover were the same as the last one. Picking up again after a pause
+is exactly that case, so a head unit that had forgotten the cover never got
+it back until the song changed. With **Resend art on resume** on in the
 settings, the song is now sent again when playback picks up. Sending it
-first without a cover did not help, some head units skip a song without
-one, so it goes out first with a loading ring as its cover, a real picture
-the head unit has not shown before, and two seconds later with its own
-cover, time for the head unit to fetch the first. A Bluetooth device that
-connects gets the same treatment a second and a half later, whatever the
-setting says, because that is when a car stereo asks for the song and some
-ask too early.
+first without a cover did not help, some head units skip a song without one,
+so it goes out first with a loading ring as its cover, a real picture the
+head unit has not shown before, and two seconds later with its own cover,
+time for the head unit to fetch the first. A Bluetooth device that connects
+gets the same treatment a second and a half later, whatever the setting
+says, because that is when a Bluetooth device asks for the song and some ask
+too early.
 
 Settings, Developer, **Cover test**, has **Send loading cover** and **Send
 real cover** to try it by hand: the first sends the playing song with only
 the loading ring, the second with its own cover again. Either stays until
-the song changes. If the loading ring never shows in the car, the car does
-not take a new cover for the same song at all. The debug overlay lists
-every cover sent, and whether the song's cover could be downloaded. That
-download happens once per song, when it starts, so the buttons show no
+the song changes. If the loading ring never shows on the Bluetooth device,
+it does not take a new cover for the same song at all. The debug overlay
+lists every cover sent, and whether the song's cover could be downloaded.
+That download happens once per song, when it starts, so the buttons show no
 download line; they send the cover already held.
 
-A car fetches the cover when it is told the song changed. When only the
-picture changes, Android may not tell it, or the car keeps the cover it has
-for that song. **How the cover is sent again**, on the Now playing page
-beside Resend art on resume, chooses what is sent:
+A Bluetooth device fetches the cover when it is told the song changed. When
+only the picture changes, Android may not tell it, or the device keeps the
+cover it has for that song. **How the cover is sent again**, on the Now
+playing page beside Resend art on resume, chooses what is sent:
 
 - **Cover only**: just the picture changes, as before.
 - **New song**: the loading cover goes out with another song id, the real
   cover with the song's own id again, so Android sees the song change twice.
   The song then carries its id in every update.
 - **New title**, the default: as New song, and the title gets a space at its
-  end with the loading cover. The space does not show. In a car tried, only
-  this way brought the new cover: Android tells the car about a new cover
-  only when the song's text changes. Skipping between two songs with the
-  same title but different second lines updated the cover too.
+  end with the loading cover. The space does not show. In a car stereo
+  tried, only this way brought the new cover: Android tells the Bluetooth
+  device about a new cover only when the song's text changes. Skipping
+  between two songs with the same title but different second lines updated
+  the cover too.
 
 The buttons, the resend on resume and the resend when Bluetooth connects all
-send the way chosen, so the buttons show which way works in the car.
+send the way chosen, so the buttons show which way works with the device.
 
 ## Volume
 
 The speaker at the bottom left of the web view opens a volume slider. With
 the music on the phone it is the phone's own media volume, the one its
 volume buttons move, in Android's own steps. Over Bluetooth with absolute
-volume, which most car stereos and every recent Android have, that is the
-car stereo's level, so the number in the car follows the slider and the
-other way round: turning the knob in the car moves the slider within a few
-seconds. Do not disturb can refuse a change, and then the slider goes back
+volume, which most Bluetooth devices and every recent Android have, that is
+the device's own level, so the number on a car stereo, say, follows the
+slider and the other way round: turning its knob moves the slider within a
+few seconds. Do not disturb can refuse a change, and then the slider goes back
 to where the phone is.
 
 The number of steps is Android's own, read with getStreamMaxVolume, never a
@@ -638,7 +663,7 @@ In the car's normal browser with the music in the browser, the Tesla greys
 out next and previous and shows the page's address. Pausing there makes the
 car go back to Bluetooth, and its next play reached the phone while the
 music was still set to the browser, so nothing was heard. Play, next,
-previous and seek from Bluetooth, a steering wheel or the lock screen now
+previous and seek from Bluetooth or the lock screen now
 take the sound back to the phone first, and the web view follows. Pause
 does not, so a car pausing the phone as it switches to the browser cannot
 undo the switch.
@@ -683,15 +708,14 @@ count. The debug overlay notes each disconnect and what was done.
 ## Previous restarts the song
 
 Under Music, Playback, **Previous restarts the song** decides how every
-previous button behaves: the player's own, the lock screen, Bluetooth, a
-steering wheel, the Tesla's wheel in its fullscreen and the web view's
-button.
+previous button behaves: the player's own, the lock screen, Bluetooth, the
+Tesla's wheel in its fullscreen and the web view's button.
 
 - On, which is how it starts, previous first goes back to the start of the
   song, the way a car stereo does. Only a press within the first
   **Seconds before it restarts** goes to the previous song. That is 3 to
-  start with and can be set from 1 to 30, higher for a car or phone that is
-  slow to react.
+  start with and can be set from 1 to 30, higher for a Bluetooth device or phone
+  that is slow to react.
 - Off, previous always goes straight to the previous song, as the player
   used to, and the seconds are hidden.
 
@@ -727,18 +751,17 @@ long press as a right click as well opens the menu only once.
 
 In the web view's song list, pulling the list down at its very top and
 letting go loads new songs from Mureka, with a finger or, in a browser on a
-computer, by pressing the mouse at the top of the list and dragging down.
-A drag that turns into a pull does not also play the song it started on.
-It is the same as **Load new songs** under
-the Update chip and the same gesture as in the mobile player. A ring shows
-above the list as it comes down and lights up once a release will load; a
-shorter pull springs back without loading. After the release the list stays
-open with the ring turning until the phone has loaded, and the progress
-line over the list shows how far it has come. Then the list is read again
-and shown from the top, where the songs just loaded are. The gesture only starts at
-the top of the list, never from the handle that drags a song in the queue,
-and the browser's own pull to refresh, which would reload the whole page,
-is kept away.
+computer, by pressing the mouse at the top of the list and dragging down. A
+drag that turns into a pull does not also play the song it started on. It is
+the same as **Load new songs** under the Update chip and the same gesture as
+in the mobile player. A ring shows above the list as it comes down and
+lights up once a release will load; a shorter pull springs back without
+loading. After the release the list stays open with the ring turning until
+the phone has loaded, and the progress line over the list shows how far it
+has come. Then the list is read again and shown from the top, where the
+songs just loaded are. The gesture only starts at the top of the list, never
+from the handle that drags a song in the queue, and the browser's own pull
+to refresh, which would reload the whole page, is kept away.
 
 ## The web view on a phone
 
@@ -763,17 +786,17 @@ this browser, and a choice closes them again. Fullscreen is in the actions
 menu. Up next is not shown, the mobile player has no such pill either, and
 Songs is left out of the transport, the list is always there.
 
-The phone's choice shows where the phone's sound goes: a Bluetooth icon
-and the device's name while it goes out over Bluetooth, a phone otherwise.
-From Android 13 the app asks Android where media is sent right now, so a
-car that is connected but not playing the music, during a call or with the
-sound switched to the phone by hand, shows the phone. On older versions a
-connected Bluetooth audio device counts as where the music goes. This
-shows in the large layout too.
+The phone's choice shows where the phone's sound goes: a Bluetooth icon and
+the device's name while it goes out over Bluetooth, a phone otherwise. From
+Android 13 the app asks Android where media is sent right now, so a
+Bluetooth device that is connected but not playing the music, during a call
+or with the sound switched to the phone by hand, shows the phone. On older
+versions a connected Bluetooth audio device counts as where the music goes.
+This shows in the large layout too.
 
 It is the same page with the same parts, placed and sized differently, so
 everything works the same way. Turned sideways, and on a computer, a
-tablet or the car's screen, the page keeps the large layout. The debug
+tablet or a car's screen, the page keeps the large layout. The debug
 overlay shows which layout is in use.
 
 Upright on other screens, the cover takes the room the title, stars and
@@ -848,21 +871,20 @@ settings as well.
 **Mureka requests** lists every request the page makes to Mureka's server:
 the player's own, and those of Mureka's site under it, with the query and
 the body of a request that sends one, beacons included, which sites often
-use for play and listening events. The player runs in Mureka's page, so it sees what
-Mureka's own player sends, which is how to find out what Mureka does when a
-song is played there. A play report from the player is followed by what
-Mureka answered, taken or not, and so is any request that changes something
-(a POST and the like, reports left out), and the song check and song info
-reads Mureka's trim screen makes first, the first 800 characters of the
-answer. Bluetooth and Commands are only offered in the app, where those
-lines come from. Only watched, every request goes through
-untouched; the same read again within ten seconds is left out.
-Each page of your own songs read from Mureka adds a line counting how many
-songs it marks as new, as played, and without the played flag at all, with
-the titles of the new and unflagged ones and any other field that looks
-like a played or new mark. The song lists Mureka's own site reads get the
-same line, so the two can be compared when the new badge and Mureka's
-disagree.
+use for play and listening events. The player runs in Mureka's page, so it
+sees what Mureka's own player sends, which is how to find out what Mureka
+does when a song is played there. A play report from the player is followed
+by what Mureka answered, taken or not, and so is any request that changes
+something (a POST and the like, reports left out), and the song check and
+song info reads Mureka's trim screen makes first, the first 800 characters
+of the answer. Bluetooth and Commands are only offered in the app, where
+those lines come from. Only watched, every request goes through untouched;
+the same read again within ten seconds is left out. Each page of your own
+songs read from Mureka adds a line counting how many songs it marks as new,
+as played, and without the played flag at all, with the titles of the new
+and unflagged ones and any other field that looks like a played or new mark.
+The song lists Mureka's own site reads get the same line, so the two can be
+compared when the new badge and Mureka's disagree.
 
 Neither layer can take a tap or a click: nothing in it receives pointer
 events, every listener only watches, and characters typed in a text field
