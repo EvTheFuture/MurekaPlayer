@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.401";
+    const VERSION = "1.9.9.402";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20180,7 +20180,7 @@
 
             card.style.cssText = "background:rgba(22,22,27,0.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);"
                 + "box-shadow:0 6px 24px rgba(0,0,0,0.45);border-radius:12px;padding:12px;width:100%;"
-                + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px";
+                + "max-width:540px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px";
             head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
             title.textContent = "Stats for nerds";
             title.style.cssText = "font-weight:600";
@@ -20259,14 +20259,14 @@
     function libraryCounts() {
 
         const tests = [
-            [publishFilter === "drafts" ? "drafts only" : "published only", passesPublishFilter],
-            ["vocals", passesVocalFilter],
-            ["playlist", passesPlaylist],
-            ["styles and moods", passesTagFilter],
-            ["tempo", passesBpmFilter],
-            ["model", passesModelFilter],
-            ["date", passesDateFilter],
-            ["stars", passesRatingFilter]
+            [publishFilter === "drafts" ? "By drafts only" : "By published only", passesPublishFilter],
+            ["By vocals", passesVocalFilter],
+            ["By playlist", passesPlaylist],
+            ["By styles and moods", passesTagFilter],
+            ["By tempo", passesBpmFilter],
+            ["By model", passesModelFilter],
+            ["By date", passesDateFilter],
+            ["By stars", passesRatingFilter]
         ];
         const out = { total: 0, published: 0, drafts: 0, shown: 0, by: [], ignoredShown: 0, pending: 0, shared: 0 };
         const by = tests.map(function () {
@@ -20315,7 +20315,7 @@
         for (let i = 0; i < tests.length; i++) {
 
             if (by[i] > 0) {
-                out.by.push(tests[i][0] + " " + by[i]);
+                out.by.push([tests[i][0], by[i]]);
             }
         }
 
@@ -20548,7 +20548,10 @@
 
                 line.style.cssText = "display:flex;gap:8px";
                 k.textContent = r[0];
-                k.style.cssText = "flex:0 0 96px;color:#8a8a94";
+
+                // A detail of the line above sits indented under its name
+                k.style.cssText = "flex:0 0 150px;color:#8a8a94;box-sizing:border-box"
+                    + (r[2] ? ";padding-left:14px;font-size:0.92em" : "");
                 v.textContent = r[1];
                 v.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
                 line.appendChild(k);
@@ -20568,8 +20571,16 @@
         const add = function (key, value) {
             rows.push([key, value === undefined || value === null || value === "" ? "-" : String(value)]);
         };
+
+        // A detail of the line above it, shown indented under it
+        const sub = function (key, value) {
+            rows.push([key, value === undefined || value === null || value === "" ? "-" : String(value), 1]);
+        };
         const part = function (name) {
             rows.push([name, null]);
+        };
+        const yesNo = function (on) {
+            return on ? "Yes" : "No";
         };
 
         if (song && statsInfo.id !== String(song.song_id)) {
@@ -20579,27 +20590,44 @@
         const info = song && statsInfo.id === String(song.song_id) ? statsInfo : null;
 
         part("Song");
-        add("title", song ? (song.title || "Untitled") : "nothing playing");
+        add("Title", song ? (song.title || "Untitled") : "Nothing playing");
 
         if (song) {
 
-            add("id", song.song_id);
-            add("model", song.model);
-            add("length", formatTime((song.duration_milliseconds || 0) / 1000));
-            add("tempo", effectiveBpm(song) ? effectiveBpm(song) + " BPM" + (manualBpm.has(String(song.song_id)) ? ", set by hand" : "") : "");
-            add("trimmed", isTrimmed(song) ? "yes" : "no");
+            const bpm = effectiveBpm(song);
+
+            add("ID", song.song_id);
+            add("Model", song.model);
+            add("Length", formatTime((song.duration_milliseconds || 0) / 1000));
+            add("Tempo", bpm ? bpm + " BPM" : "Not known");
+
+            if (bpm) {
+                sub("Set by", manualBpm.has(String(song.song_id)) ? "Hand" : "Mureka");
+            }
+
+            add("Trimmed", yesNo(isTrimmed(song)));
         }
 
         part("Audio");
 
         const src = audio ? String(audio.currentSrc || audio.src || "") : "";
 
-        add("plays from", src.indexOf("blob:") === 0 ? "a copy in memory, " + (trackHeardFrom || "") : (src ? src.replace(/^https?:\/\/([^/]+).*$/, "$1") + ", streamed" : "nothing loaded"));
+        if (src.indexOf("blob:") === 0) {
+
+            add("Plays from", "A copy in memory");
+
+            if (trackHeardFrom) {
+                sub("Copy of", trackHeardFrom);
+            }
+        } else {
+            add("Plays from", src ? src.replace(/^https?:\/\/([^/]+).*$/, "$1") + ", streamed" : "Nothing loaded");
+        }
 
         if (hostCarAudio) {
-            add("heard in", "a web view, the phone plays along silently");
+            add("Heard in", "A web view, the phone plays along silently");
         }
-        add("heard after", trackHeardMs ? trackHeardMs + " ms" : "");
+
+        add("Time to first sound", trackHeardMs ? trackHeardMs + " ms" : "");
 
         if (audio && src) {
 
@@ -20607,49 +20635,66 @@
             const b = audio.buffered;
             const loaded = b && b.length > 0 && isFinite(d) && d > 0 ? Math.round(b.end(b.length - 1) * 100 / d) : 0;
 
-            add("position", formatTime(audio.currentTime || 0) + " of " + formatTime(isFinite(d) ? d : 0));
-            add("loaded", loaded + " %");
-            add("ready state", ["nothing", "metadata", "current data", "future data", "enough data"][audio.readyState] || audio.readyState);
-            add("network", ["empty", "idle", "loading", "no source"][audio.networkState] || audio.networkState);
-            add("volume", hostCarAudio ? "silent here, the web view sets its own"
-                : Math.round((audio.volume || 0) * 100) + " %" + (audio.muted ? ", muted" : ""));
+            add("Position", formatTime(audio.currentTime || 0) + " of " + formatTime(isFinite(d) ? d : 0));
+            add("Loaded", loaded + " %");
+            add("Ready state", ["Nothing", "Metadata", "Current data", "Future data", "Enough data"][audio.readyState] || audio.readyState);
+            add("Network state", ["Empty", "Idle", "Loading", "No source"][audio.networkState] || audio.networkState);
+            add("Volume", hostCarAudio ? "Silent here, the web view sets its own" : Math.round((audio.volume || 0) * 100) + " %");
+
+            if (!hostCarAudio && audio.muted) {
+                sub("Muted", "Yes");
+            }
         }
 
         part("File");
 
         if (info && info.file) {
 
-            add("from", info.file.where);
-            add("size", bytesText(info.file.size));
-            add("format", info.file.head ? info.file.head.text : "not read");
+            add("Comes from", info.file.where);
+            add("Size", bytesText(info.file.size));
+            add("Format", info.file.head ? info.file.head.text : "Not read");
 
             const secs = song ? (song.duration_milliseconds || 0) / 1000 : 0;
 
             if (info.file.size > 0 && secs > 0) {
-                add("average", Math.round(info.file.size * 8 / secs / 1000) + " kb/s");
+                add("Average bit rate", Math.round(info.file.size * 8 / secs / 1000) + " kb/s");
             }
         } else {
-            add("from", song ? "being read" : "");
+            add("Comes from", song ? "Being read" : "");
         }
 
-        add("stored here", song && cachedIds.has(song.song_id) ? "yes" : "no");
-        add("being stored", song && cachingIds.has(song.song_id) ? cachingPercent(song.song_id) + " %" : "no");
+        add("Stored on the device", yesNo(song && cachedIds.has(song.song_id)));
+        add("Being stored", song && cachingIds.has(song.song_id) ? cachingPercent(song.song_id) + " %" : "No");
 
-        part("Next");
+        part("Next song");
 
         const next = neighborSong(1);
+        let ready = "No";
 
-        add("song", next ? (next.title || "Untitled") : "none");
-        add("made ready", nextReady ? "yes, " + (String(nextReady.url).indexOf("blob:") === 0 ? "from the store" : "a link") : "no");
-        add("cached ahead", settings.prefetchCount + " songs");
+        if (nextReady) {
+            ready = String(nextReady.url).indexOf("blob:") === 0 ? "Yes, from the device's store" : "Yes, as a link";
+        }
+
+        add("Title", next ? (next.title || "Untitled") : "None");
+        add("Prepared", ready);
+        add("Cache ahead", settings.prefetchCount + (settings.prefetchCount === 1 ? " song" : " songs"));
 
         part("Waveform");
-        add("showing", settings.waveSource === "song" && waveOwn ? "own, from the song" : (waveMureka ? "Mureka's" : "none"));
-        add("Mureka's", waveMureka ? waveMureka.length + " points" : "none");
-        add("own", waveOwn ? waveOwn.length + " points" : (ownWaveWorking() ? "being worked out" : "none"));
+
+        let showing = "None";
+
+        if (settings.waveSource === "song" && waveOwn) {
+            showing = "From the song";
+        } else if (waveMureka) {
+            showing = "Mureka's";
+        }
+
+        add("Showing", showing);
+        add("Points from Mureka", waveMureka ? waveMureka.length : "None");
+        add("Points from the song", waveOwn ? waveOwn.length : (ownWaveWorking() ? "Being worked out" : "None"));
 
         if (song && ownWaveInfo && ownWaveInfo.id === String(song.song_id)) {
-            add("own made", ownWaveInfo.text);
+            sub("Worked out", ownWaveInfo.text);
         }
 
         part("Cover");
@@ -20657,18 +20702,28 @@
         const tile = artTiles[ART_SIDE_TILES];
         const cover = song ? coverUrl(song) : "";
 
-        add("from", cover ? cover.replace(/^https?:\/\/([^/]+).*$/, "$1") : "none");
-        add("shown at", tile && tile.naturalWidth ? tile.naturalWidth + " x " + tile.naturalHeight : "");
-        add("stored here", info && info.cover ? "yes, " + bytesText(info.cover.size) + ", " + info.cover.type : (song && artCachedIds.has(String(song.song_id)) ? "yes" : "no"));
+        add("Comes from", cover ? cover.replace(/^https?:\/\/([^/]+).*$/, "$1") : "None");
+        add("Shown at", tile && tile.naturalWidth ? tile.naturalWidth + " x " + tile.naturalHeight : "");
+        add("Stored on the device", yesNo((info && info.cover) || (song && artCachedIds.has(String(song.song_id)))));
 
-        part("Store");
-        add("songs stored", cachedIds.size);
-        add("covers stored", artCachedIds.size);
-        add("state", storeBroken ? "not answering, reload the page" : "answering");
-        add("tried anew", storeCounts.retried + ", worked " + storeCounts.recovered + ", failed " + storeCounts.failed);
+        if (info && info.cover) {
+
+            sub("Size", bytesText(info.cover.size));
+            sub("Type", info.cover.type);
+        }
+
+        part("Device store");
+        add("Songs stored", cachedIds.size);
+        add("Covers stored", artCachedIds.size);
+        add("State", storeBroken ? "Not answering, reload the page" : "Answering");
+        add("Retries", storeCounts.retried);
+        sub("Worked", storeCounts.recovered);
+        sub("Failed", storeCounts.failed);
 
         if (info && info.quota) {
-            add("used", bytesText(info.quota.usage) + " of " + bytesText(info.quota.quota));
+
+            add("Space used", bytesText(info.quota.usage));
+            sub("Allowed", bytesText(info.quota.quota));
         }
 
         // The song list itself is kept in the browser's small store for the
@@ -20680,55 +20735,86 @@
 
         const l = statsList;
 
-        part("Song list");
-        add("as text", charsText(l.text));
+        part("Song list storage");
+        add("Size as text", charsText(l.text));
 
         if (l.stored === 0) {
-            add("stored", "not yet, or it did not fit");
-        } else if (l.packed) {
-            add("stored", "packed, " + charsText(l.stored) + (l.stored > 0 && l.text > 0
-                ? ", " + (l.text / l.stored).toFixed(1) + " times smaller" : ""));
+            add("Stored", "Not yet, or it did not fit");
         } else {
-            add("stored", "as text, " + charsText(l.stored));
+
+            add("Stored", l.packed ? "Packed" : "As text");
+            sub("Size stored", charsText(l.stored));
+
+            if (l.packed && l.stored > 0 && l.text > 0) {
+                sub("Smaller by", (l.text / l.stored).toFixed(1) + " times");
+            }
         }
 
-        add("site store", charsText(l.site) + " in all, Mureka's page included");
+        add("Site store in all", charsText(l.site));
+        sub("Includes", "Mureka's own page");
 
-        // What the library holds and what of it is in play, counted with the
-        // sizes above
+        // What the library holds and what of it gets through the filters,
+        // counted with the sizes above
         const lib = l.lib;
-        let source = creatorSource ? creatorSource.stage_name : "your library";
-
-        if (activePlaylist) {
-            source += ", playlist " + activePlaylist.name;
-        }
 
         part("Library");
-        add("source", source);
-        add("songs", lib.total + ", published " + lib.published + ", drafts " + lib.drafts);
-        add("through the filters", lib.shown + (searchQuery ? ", searching for \"" + searchQuery + "\"" : ""));
-        add("filtered out", (lib.total - lib.shown) + (lib.by.length ? ": " + lib.by.join(", ") : ""));
-        add("ignored", ignoredIds.size + (lib.ignoredShown ? ", " + lib.ignoredShown + " of them through the filters" : ""));
-        add("in the queue", queue.length + (queue.length && queuePos >= 0 && queuePos < queue.length
-            ? ", at " + (queuePos + 1) + ", " + (queue.length - queuePos - 1) + " to come" : "")
-            + (queueOwn ? ", put together by hand" : ", made from the list"));
-        add("generating", lib.pending);
-        add("shared in", lib.shared);
-        add("rated", ratings.size + ", tempo set " + manualBpm.size + ", instrumental marks " + manualInstrumental.size);
+        add("Source", creatorSource ? creatorSource.stage_name : "Your library");
+
+        if (activePlaylist) {
+            sub("Playlist", activePlaylist.name);
+        }
+
+        add("Before filters", lib.total);
+        sub("Published", lib.published);
+        sub("Drafts", lib.drafts);
+        add("After filters", lib.shown);
+
+        if (searchQuery) {
+            sub("Search", "\"" + searchQuery + "\"");
+        }
+
+        add("Filtered out", lib.total - lib.shown);
+
+        for (const one of lib.by) {
+            sub(one[0], one[1]);
+        }
+
+        add("Ignored", ignoredIds.size);
+
+        if (ignoredIds.size > 0) {
+            sub("After filters", lib.ignoredShown);
+        }
+
+        add("Still generating", lib.pending);
+        add("Shared from others", lib.shared);
+        add("Rated", ratings.size);
+        add("Tempo set by hand", manualBpm.size);
+        add("Marked instrumental", manualInstrumental.size);
+
+        part("Queue");
+
+        const playing = queue.length > 0 && queuePos >= 0 && queuePos < queue.length;
+
+        add("Songs in the queue", queue.length);
+        add("Playing song", playing ? "Number " + (queuePos + 1) : "None");
+        add("Played", playing ? queuePos : 0);
+        add("Still to come", playing ? queue.length - queuePos - 1 : queue.length);
+        add("Built from", queueOwn ? "Songs added by hand" : "The list");
+        add("Shuffle", shuffleMode ? "On" : "Off");
 
         part("Player");
 
-        let host = "bookmarklet";
+        let host = "Bookmarklet";
 
         if (isApkHost()) {
-            host = "app";
+            host = "App";
         } else if (isExtensionHost()) {
-            host = "extension";
+            host = "Add-on";
         }
 
-        add("version", VERSION + ", " + host);
-        add("queue", (queuePos + 1) + " of " + queue.length + (shuffleMode ? ", shuffled" : ""));
-        add("network", offlineMode() ? "offline" : (navigator.onLine === false ? "browser says offline" : "online"));
+        add("Version", VERSION);
+        add("Runs as", host);
+        add("Network", offlineMode() ? "Offline" : (navigator.onLine === false ? "The browser says offline" : "Online"));
 
         return rows;
     }

@@ -1925,8 +1925,9 @@
         background: transparent;
     }
 
+    /* Wide, so a name and its value each have room on one line */
     #statsBox {
-        width: min(760px, 94vw);
+        width: min(1100px, 96vw);
         background: rgba(22, 22, 27, 0.72);
         -webkit-backdrop-filter: blur(10px);
         backdrop-filter: blur(10px);
@@ -1966,8 +1967,23 @@
     }
 
     .statsKey {
-        flex: 0 0 9em;
+        flex: 0 0 13em;
         color: var(--muted);
+    }
+
+    /* A detail of the line above, indented under its name, the values
+       staying in line with the others */
+    .statsLine.sub .statsKey {
+        padding-left: 1.2em;
+        box-sizing: border-box;
+        opacity: 0.85;
+    }
+
+    @media (max-width: 600px) {
+
+        .statsKey {
+            flex-basis: 10em;
+        }
     }
 
     .statsValue {
@@ -19807,11 +19823,11 @@
                 const k = document.createElement("span");
                 const v = document.createElement("span");
 
-                line.className = "statsLine";
+                line.className = "statsLine" + (r[2] ? " sub" : "");
                 k.className = "statsKey";
                 k.textContent = String(r[0]);
                 v.className = "statsValue";
-                v.textContent = r[0] === "volume" ? statsVolume(String(r[1])) : String(r[1]);
+                v.textContent = r[0] === "Volume" || r[0] === "volume" ? statsVolume(String(r[1])) : String(r[1]);
                 line.appendChild(k);
                 line.appendChild(v);
             }
@@ -19825,14 +19841,14 @@
     function statsVolume(phone) {
 
         if (volHere()) {
-            return "this browser " + Math.round(webVolume() * 100) + " %" + (localMute ? ", muted" : "");
+            return "This browser " + Math.round(webVolume() * 100) + " %" + (localMute ? ", muted" : "");
         }
 
         const max = state && state.volMax > 0 ? state.volMax : 0;
         const media = max > 0 && typeof state.vol === "number" && state.vol >= 0
             ? ", media volume " + state.vol + " of " + max : "";
 
-        return "player " + phone + media;
+        return "Player " + phone + media;
     }
 
     $("statsBtn").addEventListener("click", function (ev) {
