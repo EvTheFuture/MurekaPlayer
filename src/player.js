@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.399";
+    const VERSION = "1.9.9.400";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19932,6 +19932,7 @@
     let statsBodyEl = null;
     let statsTimer = 0;
     let statsInfo = { id: "", file: null, cover: null, quota: null };
+    let statsList = null;
 
     // How far down, or how fast, a swipe has to go to close an overlay
     const SWIPE_CLOSE_PX = 110;
@@ -20218,6 +20219,58 @@
     }
 
     // A size in bytes for people
+    // How large the song list is as text and as it is stored, and how much
+    // the site keeps in that store altogether, Mureka's own page included.
+    // Counted in characters, as the browser's limit for a site is
+    function songListSizes() {
+
+        const out = { text: -1, stored: -1, packed: false, site: -1 };
+
+        try {
+
+            out.text = JSON.stringify(cache).length;
+
+            const raw = localStorage.getItem(feed().cacheKey);
+
+            out.stored = raw ? raw.length : 0;
+            out.packed = !!raw && raw.indexOf(PACK_MARK) === 0;
+
+            let site = 0;
+
+            for (let i = 0; i < localStorage.length; i += 1) {
+
+                const k = localStorage.key(i) || "";
+                const v = localStorage.getItem(k);
+
+                site += k.length + (v ? v.length : 0);
+            }
+
+            out.site = site;
+        } catch (e) {
+            // The store cannot be read here
+        }
+
+        return out;
+    }
+
+    // A count of characters, short, as 1.4 M or 139 K
+    function charsText(n) {
+
+        if (!(n >= 0)) {
+            return "not known";
+        }
+
+        if (n < 1000) {
+            return n + " characters";
+        }
+
+        if (n < 1000000) {
+            return (n / 1000).toFixed(n < 10000 ? 1 : 0) + " K characters";
+        }
+
+        return (n / 1000000).toFixed(2) + " M characters";
+    }
+
     function bytesText(n) {
 
         if (!(n >= 0)) {
@@ -20548,6 +20601,29 @@
         if (info && info.quota) {
             add("used", bytesText(info.quota.usage) + " of " + bytesText(info.quota.quota));
         }
+
+        // The song list itself is kept in the browser's small store for the
+        // site, packed once it is large. Measured again every ten seconds at
+        // most, the list being thousands of songs
+        if (!statsList || Date.now() - statsList.at > 10000) {
+            statsList = Object.assign(songListSizes(), { at: Date.now() });
+        }
+
+        const l = statsList;
+
+        part("Song list");
+        add("as text", charsText(l.text));
+
+        if (l.stored === 0) {
+            add("stored", "not yet, or it did not fit");
+        } else if (l.packed) {
+            add("stored", "packed, " + charsText(l.stored) + (l.stored > 0 && l.text > 0
+                ? ", " + (l.text / l.stored).toFixed(1) + " times smaller" : ""));
+        } else {
+            add("stored", "as text, " + charsText(l.stored));
+        }
+
+        add("site store", charsText(l.site) + " in all, Mureka's page included");
 
         part("Player");
 
