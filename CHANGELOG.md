@@ -347,6 +347,9 @@ the new settings layout and a number of smaller improvements.
   could not be read are kept aside before anything is saved over them, and
   when the browser's storage is full the player says the settings could not
   be saved.
+  A large song list is stored packed, in about a ninth of the room, so a
+  library of thousands of songs fits in what a browser keeps for a site,
+  Safari's included.
 - **Settings in pages.** The main settings page is a list of pages in
   groups: Views (Mobile player, and Web view in the app), Device (This device,
   and Connections in the app), Music (Library, Playback, Now playing), Data
@@ -760,7 +763,11 @@ the new settings layout and a number of smaller improvements.
   the cover come from, how long the song took to be heard, the file's size,
   format and bit rate, how much of it is loaded, the cover's size and
   resolution, which waveform shows and how it was made, the next song made
-  ready, and how much is stored and how full the store is. The web views
+  ready, how much is stored and how full the store is, the song list's
+  size as text and as stored, and the library: its source, songs published
+  and drafts, how many get through the filters and which filter leaves how
+  many out, ignored songs, the queue, songs still generating, shared songs
+  and how many are rated or have a tempo or instrumental mark. The web views
   show the same for the song on the phone, behind the same i.
 - **Debug log** under Developer: the log is kept only while it is switched
   on or a debug overlay is shown, so a log can be made while the player is
