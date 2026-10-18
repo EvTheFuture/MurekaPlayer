@@ -254,7 +254,9 @@ the new settings layout and a number of smaller improvements.
   while it switches and then whether it worked. When one of the
   hotspot settings is on and the helper is not running, the player starts
   it by itself, with a note that it is starting and one saying whether it
-  started, and the web view shows the same. Without a pairing it says
+  started, and the web view shows the same. It tries again as soon as the
+  device joins a Wi-Fi, which wireless debugging needs, and the web view's
+  notice about it has **Start the helper now**. Without a pairing it says
   that pairing is needed.
 - **Cache control**, a settings page of its own under Data, gathers what the
   player keeps on the device: Cache ahead, the songs stored with **Cache

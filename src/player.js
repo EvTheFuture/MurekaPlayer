@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.413";
+    const VERSION = "1.9.9.415";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -26309,6 +26309,13 @@
             return;
         }
 
+        // The hotspot helper started from a web view's notice about it
+        if (cmd === "startHotspotHelper") {
+
+            startHotspotHelper(true);
+            return;
+        }
+
         // A web view that could not reach the phone for a while, said once
         // it can again
         if (cmd === "webLostPhone") {
@@ -46156,10 +46163,45 @@
     // Expose a toggle so a second bookmarklet tap minimizes or restores the panel
     window.__murekaPlayerToggle = toggleMinimize;
 
+    // Safari on iPhone shows Mureka's "Open in the Mureka app" banner while
+    // the page names its app in a meta tag. The tag is taken out, and again
+    // should the page put it back. Safari may keep a banner it already
+    // shows until the page is loaded again
+    function dropAppBanner() {
+
+        const drop = function () {
+
+            for (const m of document.querySelectorAll('meta[name="apple-itunes-app"]')) {
+                m.remove();
+            }
+        };
+
+        drop();
+
+        try {
+
+            new MutationObserver(function (changes) {
+
+                for (const ch of changes) {
+
+                    for (const n of ch.addedNodes) {
+
+                        if (n.nodeType === 1 && n.tagName === "META" && n.getAttribute("name") === "apple-itunes-app") {
+                            n.remove();
+                        }
+                    }
+                }
+            }).observe(document.head || document.documentElement, { childList: true });
+        } catch (e) {
+            // Without it the banner stays, nothing else changes
+        }
+    }
+
     // Build the player, then hold the screen on right away if it is always
     // meant to be
     function startPlayer() {
 
+        dropAppBanner();
         installDebugWatchers();
         installTrimKeys();
         buildPanel();

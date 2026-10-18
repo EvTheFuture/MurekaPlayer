@@ -34,6 +34,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Icon;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -87,7 +91,68 @@ final class HelperStart {
     private static volatile String startText = "";
     private static volatile boolean starting = false;
 
+    // A Wi-Fi with the internet joined while the helper is not running is
+    // a chance to start it, since wireless debugging needs Wi-Fi. Not more
+    // often than this, and a moment after joining for the network to settle
+    private static final long WIFI_TRY_GAP_MS = 60000L;
+    private static final long WIFI_SETTLE_MS = 5000L;
+    private static boolean wifiWatched = false;
+    private static long wifiTriedAt = 0;
+
     private HelperStart() {
+    }
+
+    // Whether the hotspot settings want the helper
+    private static boolean wanted(Context c) {
+
+        return paired(c) && WebViewSettings.on(c, WebViewSettings.CHARGE_SAVE)
+            && (WebViewSettings.on(c, WebViewSettings.UNPLUG_HOTSPOT) || WebViewSettings.on(c, WebViewSettings.PLUG_HOTSPOT));
+    }
+
+    // Started on joining a Wi-Fi, when wanted and not running. The phone's
+    // own hotspot is a Wi-Fi network too from Android 15, but one without
+    // the internet, so it does not count
+    private static void watchWifi(Context c) {
+
+        if (wifiWatched) {
+            return;
+        }
+
+        ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
+
+        if (cm == null) {
+            return;
+        }
+
+        NetworkRequest req = new NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build();
+
+        try {
+
+            cm.registerNetworkCallback(req, new ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    MAIN.postDelayed(() -> startOnWifi(c), WIFI_SETTLE_MS);
+                }
+            });
+            wifiWatched = true;
+        } catch (RuntimeException e) {
+            Hub.note("Helper", "could not follow the Wi-Fi: " + e.getMessage());
+        }
+    }
+
+    private static void startOnWifi(Context c) {
+
+        if (!wanted(c) || starting || !"stopped".equals(Hotspot.helper(c))
+            || System.currentTimeMillis() - wifiTriedAt < WIFI_TRY_GAP_MS) {
+            return;
+        }
+
+        wifiTriedAt = System.currentTimeMillis();
+        Hub.note("Helper", "on Wi-Fi with the helper not running, starting it");
+        start(c);
     }
 
     static boolean paired(Context c) {
@@ -240,8 +305,11 @@ final class HelperStart {
 
         final Context c = context.getApplicationContext();
 
-        if (!paired(c) || !WebViewSettings.on(c, WebViewSettings.CHARGE_SAVE)
-            || !(WebViewSettings.on(c, WebViewSettings.UNPLUG_HOTSPOT) || WebViewSettings.on(c, WebViewSettings.PLUG_HOTSPOT))) {
+        // Followed whatever the settings are now, they are looked at again
+        // each time a Wi-Fi is joined
+        watchWifi(c);
+
+        if (!wanted(c)) {
             return;
         }
 

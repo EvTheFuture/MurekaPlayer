@@ -1178,6 +1178,46 @@
         cursor: pointer;
     }
 
+    /* On a narrow screen the button and the cross go under the words,
+       the cross at the right end */
+    #hotspotPop {
+        flex-wrap: wrap;
+        width: min(90vw, 44em);
+        box-sizing: border-box;
+    }
+
+    #hotspotText {
+        flex: 1 1 14em;
+        order: 1;
+    }
+
+    #hotspotStart {
+        order: 2;
+    }
+
+    #hotspotClose {
+        order: 3;
+        margin-left: auto;
+    }
+
+    /* Starting the helper from the notice, on the phone */
+    #hotspotStart {
+        flex: 0 0 auto;
+        padding: 0.5em 1em;
+        border: 1px solid #e57373;
+        border-radius: 20px;
+        background: rgba(229, 115, 115, 0.18);
+        color: #ffd0d0;
+        font: inherit;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    #hotspotPop.starting #hotspotStart {
+        display: none;
+    }
+
     #unplugSkip {
         flex: 0 0 auto;
         padding: 0.5em 1em;
@@ -4575,7 +4615,7 @@
     <button class="chip" id="pickDone" type="button">Done</button>
 </div>
 <div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
-<div id="hotspotPop"><span id="hotspotText"></span><button id="hotspotClose" type="button" data-icon="close" aria-label="Close" title="Close"></button></div>
+<div id="hotspotPop"><span id="hotspotText"></span><button id="hotspotStart" type="button">Start the helper now</button><button id="hotspotClose" type="button" data-icon="close" aria-label="Close" title="Close"></button></div>
 <div id="songMenu">
     <div id="menuBox">
         <div id="menuTitle"></div>
@@ -14464,7 +14504,7 @@
 
         const why = s && typeof s.hotspotWarn === "string" ? s.hotspotWarn : "";
         const words = {
-            nohelper: "The hotspot helper is not running on the phone, so the hotspot cannot be turned on or off by the power saving. The phone tries to start it by itself, see Charger and power on the phone.",
+            nohelper: "The hotspot helper is not running on the phone, so the hotspot cannot be turned on or off by the power saving. The phone starts it by itself on Wi-Fi.",
             starting: "Starting the hotspot helper on the phone."
         };
 
@@ -14480,6 +14520,14 @@
 
         $("hotspotPop").style.display = why && words[why] && !hotspotClosed ? "flex" : "none";
     }
+
+    // The phone is asked to start it now. Its notes say how it went
+    $("hotspotStart").addEventListener("click", function () {
+
+        send("startHotspotHelper");
+        $("hotspotPop").classList.add("starting");
+        $("hotspotText").textContent = "Starting the hotspot helper on the phone.";
+    });
 
     $("hotspotClose").addEventListener("click", function () {
 
