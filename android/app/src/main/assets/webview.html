@@ -4455,7 +4455,7 @@
                 <button class="chip iconOnly" id="miniClearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
             </div>
             <div id="miniWork"></div>
-            <div id="miniWrap"><div id="miniPull"></div><div id="miniRows"></div><button id="miniLocate" type="button" data-icon="target" aria-label="Show the playing song" title="Show the playing song"></button><button id="miniEdge" type="button" data-icon="arrowUp" aria-label="Scroll to top" title="Scroll to top"></button></div>
+            <div id="miniWrap" data-noswipe="1"><div id="miniPull"></div><div id="miniRows"></div><button id="miniLocate" type="button" data-icon="target" aria-label="Show the playing song" title="Show the playing song"></button><button id="miniEdge" type="button" data-icon="arrowUp" aria-label="Scroll to top" title="Scroll to top"></button></div>
         </div>
     </div>
     <div id="seek">
@@ -20051,6 +20051,11 @@
             $("browse").style.display = "none";
         }, cross: false, when: function () {
             return !isPhone();
+        } },
+
+        // The small list over the main page, anywhere but its rows
+        { pop: "mini", box: "mini", close: closeMini, cross: false, when: function () {
+            return miniOpen;
         } }
     ];
 
@@ -20099,14 +20104,20 @@
     }
 
     // True when the finger is on something that moves with it, or inside
-    // something scrolled down that should scroll back up first
+    // something scrolled down that should scroll back up first. A field
+    // being typed in keeps the press for its text, one not in use yet,
+    // a search field say, can be swiped from like the rest
     function swipeBlocked(target, box) {
 
         let el = target;
 
         while (el && el !== box.parentNode) {
 
-            if (el.matches && el.matches("input, textarea, select, .rowGrip, [data-noswipe]")) {
+            if (el.matches && el.matches("textarea, select, .rowGrip, [data-noswipe]")) {
+                return true;
+            }
+
+            if (el.matches && el.matches("input") && (el === document.activeElement || el.type === "range")) {
                 return true;
             }
 

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.402";
+    const VERSION = "1.9.9.404";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -20254,8 +20254,8 @@
     }
 
     // How the library splits up, for the stats: published and drafts, what
-    // the filters let through and which filter left how many out, ignored,
-    // still generating and shared songs
+    // the filters let through and which filter left how many out, ignored
+    // and shared songs
     function libraryCounts() {
 
         const tests = [
@@ -20268,7 +20268,7 @@
             ["By date", passesDateFilter],
             ["By stars", passesRatingFilter]
         ];
-        const out = { total: 0, published: 0, drafts: 0, shown: 0, by: [], ignoredShown: 0, pending: 0, shared: 0 };
+        const out = { total: 0, published: 0, drafts: 0, shown: 0, by: [], ignoredShown: 0, shared: 0 };
         const by = tests.map(function () {
             return 0;
         });
@@ -20283,10 +20283,6 @@
                 out.published += 1;
             } else {
                 out.drafts += 1;
-            }
-
-            if (isPendingSong(song)) {
-                out.pending += 1;
             }
 
             if (song.shared === true) {
@@ -20785,7 +20781,8 @@
             sub("After filters", lib.ignoredShown);
         }
 
-        add("Still generating", lib.pending);
+        // Songs still being made are kept apart from the library until done
+        add("Still generating", pendingCount());
         add("Shared from others", lib.shared);
         add("Rated", ratings.size);
         add("Tempo set by hand", manualBpm.size);

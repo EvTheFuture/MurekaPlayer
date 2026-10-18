@@ -271,11 +271,13 @@ the new settings layout and a number of smaller improvements.
   scrolled away from the playing song, the list stays put when the next
   song starts, until the button that finds the playing song is pressed.
 - Stars show a tap at once, the phone confirms a moment later.
-- Popups, the settings, the other panels and the whole song list close with a
-  swipe down, with a finger or dragged with the mouse (on the list itself it
-  still loads new songs), and popups without a close button have a quiet cross
-  in their top right corner. Typing in one on a touch screen moves it up above
-  the keyboard, so renaming a song shows what is typed.
+- Popups, the settings, the other panels, the whole song list and the small
+  one close with a swipe down from anywhere but their rows, buttons and a
+  search field not in use included, with a finger or dragged with the mouse
+  (on the list itself it still loads new songs), and popups without a close
+  button have a quiet cross in their top right corner. Typing in one on a
+  touch screen moves it up above the keyboard, so renaming a song shows what
+  is typed.
 - Drag and drop in the queue, for any song including played ones. The playing
   song keeps playing wherever it goes.
 - The phone's own settings, filters and artists panels, shown with large
