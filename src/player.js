@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.405";
+    const VERSION = "1.9.9.411";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -497,7 +497,7 @@
             hint: "The screen, fullscreen, the page showing or hiding, and its size." },
         { id: "settings", name: "Setting changes", kinds: ["Setting"],
             hint: "Each setting changed, from what to what." },
-        { id: "power", name: "Power saving", kinds: ["Power", "Hotspot", "WireGuard"], app: true,
+        { id: "power", name: "Power saving", kinds: ["Power", "Hotspot", "WireGuard", "VPN"], app: true,
             hint: "The charger and the chosen Bluetooth devices coming and going, the countdown, the hotspot and the background work stopping and starting." },
         { id: "network", name: "Network", kinds: ["Net", "Offline"],
             hint: "Going online and offline, and the phone not answering the web view.",
@@ -2861,6 +2861,7 @@
             webNames: false,
             webHotspotBadge: false,
             webWgBadge: false,
+            webWhoName: true,
             webHeatBadge: true,
             heatText: "word",
             heatWarm: 40,
@@ -3087,6 +3088,7 @@
                     webNames: parsed.webNames === true,
                     webHotspotBadge: parsed.webHotspotBadge === true,
                     webWgBadge: parsed.webWgBadge === true,
+                    webWhoName: parsed.webWhoName !== false,
                     webHeatBadge: parsed.webHeatBadge !== false,
                     heatText: parsed.heatText === "both" || parsed.heatText === "temp" ? parsed.heatText : "word",
                     heatWarm: numberIn(parsed.heatWarm, 20, 70, 40),
@@ -23902,6 +23904,7 @@
             wgBadge: isApkHost() && typeof window.MurekaHost.wireGuardState === "function"
                 ? wgBadgeState() : null,
             wgBadgeOn: settings.webWgBadge === true,
+            whoNameOn: settings.webWhoName !== false,
 
             // How warm the phone is, for the heat badge: Android's heat level
             // and the battery's temperature
@@ -26303,6 +26306,17 @@
         if (cmd === "webDebugLog") {
 
             receiveWebViewLog(arg);
+            return;
+        }
+
+        // A web view that could not reach the phone for a while, said once
+        // it can again
+        if (cmd === "webLostPhone") {
+
+            const gap = arg && typeof arg === "object" ? arg : {};
+
+            dbgLog("Net", "a web view could not reach the phone for " + Number(gap.s || 0) + " s, "
+                + String(gap.why || "").slice(0, 80));
             return;
         }
 
@@ -29437,11 +29451,10 @@
         setStatus("Web view log received, Copy debug log includes it");
     }
 
-    // Copy the live numbers and the whole log, so they can be pasted rather
-    // than read off the screen
-    function copyDebugLog(ev) {
-
-        const btn = ev && ev.currentTarget ? ev.currentTarget : null;
+    // The live numbers, the whole log and the web view's log as one text,
+    // to paste rather than read off the screen. For Copy debug log here and
+    // in the web view's copy of the settings
+    function debugLogText() {
 
         const lines = debugStateLines();
 
@@ -29465,7 +29478,13 @@
             lines.push(webViewDebugLog);
         }
 
-        const text = lines.join("\n");
+        return lines.join("\n");
+    }
+
+    function copyDebugLog(ev) {
+
+        const btn = ev && ev.currentTarget ? ev.currentTarget : null;
+        const text = debugLogText();
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
 
@@ -32986,6 +33005,11 @@
         let lastSeen = null;
         let lastStartSeen = null;
 
+        // When the page was last painted while shown. A result that came
+        // while it was not, a switch by the power saving say, is only put
+        // in the table, not said again as news when the page is opened
+        let shownPaintAt = 0;
+
         // Where the power saving stands, for the status table
         const powerWords = function (info) {
 
@@ -33048,9 +33072,17 @@
                 commandEl.textContent = command;
             }
 
-            // A hotspot command answered, said with a note as well, unless a
-            // switch by the power saving already says so
-            if (lastSeen !== null && !hotspotAutoFollowing && info.last && info.last !== lastSeen) {
+            const shown = !!settingsEl && page.style.display !== "none" && settingsEl.offsetParent !== null;
+            const watching = shown && Date.now() - shownPaintAt < 2500;
+
+            if (shown) {
+                shownPaintAt = Date.now();
+            }
+
+            // A hotspot command answered while the page is watched, said
+            // with a note as well, unless a switch by the power saving
+            // already says so
+            if (watching && lastSeen !== null && !hotspotAutoFollowing && info.last && info.last !== lastSeen) {
                 showToast(info.last, info.last.indexOf("Switched") === 0);
             }
 
@@ -33058,7 +33090,7 @@
 
             // A start of the helper finished, said with a note too, unless
             // the start being followed already says so
-            if (lastStartSeen !== null && !helperTrying && info.starting !== true && info.startText && info.startText !== lastStartSeen) {
+            if (watching && lastStartSeen !== null && !helperTrying && info.starting !== true && info.startText && info.startText !== lastStartSeen) {
                 showToast(info.startText, info.startText === "The helper is running"
                     ? true : (info.startText === "Starting the helper" ? "wait" : false));
             }
@@ -33817,6 +33849,9 @@
             });
 
         const copyLogBtn = makeButton("Copy debug log", "#333", "#fff", copyDebugLog);
+
+        // A web view copies the phone's log into its own browser
+        copyLogBtn.__copyText = debugLogText;
 
         // Beside it, starting the log again. From the web view's copy of the
         // settings too, where copying has no clipboard to go to
@@ -34815,6 +34850,10 @@
 
             const wgRow = makeCarTextRow("WireGuard tunnel to turn on again, blank for none", "wgTunnel", "");
 
+            const wgAwakeRow = makeBoolRow("Keep WireGuard reachable with the screen off",
+                function () { return window.MurekaHost.getPref("wgKeepAwake", "0") === "1"; },
+                function (v) { setPref("wgKeepAwake", v); });
+
             // A name with an On and an Off button, for what is switched now
             // rather than set. The one lit says how it stands, when known
             const makeOnOffRow = function (name, fn) {
@@ -35136,6 +35175,10 @@
                 function () { return settings.webWgBadge === true; },
                 function (v) { settings.webWgBadge = v; publishHostSoon(); });
 
+            const webWhoRow = makeBoolRow("Account name",
+                function () { return settings.webWhoName !== false; },
+                function (v) { settings.webWhoName = v; publishHostSoon(); });
+
             const webControlRow = buildControlEditor("webControlOrder");
 
             const webLyricLabels = { off: "Off", info: "Beside the cover", cover: "On the cover" };
@@ -35383,6 +35426,7 @@
             webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
             webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
             webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
+            webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
             webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
             webPage.appendChild(makeSubLabel("Heat badge shows"));
             webPage.appendChild(heatTextRow);
@@ -35532,6 +35576,7 @@
             connPage.appendChild(withHint(hotspotNowRow, "Switches the phone's hotspot now, with the helper under Charger and power. Browsers on the hotspot lose the web view when it goes off."));
             connPage.appendChild(withHint(wgTestRow, "Switches the tunnel now, as the hand over does. On takes Android's one VPN from the public address. Browsers that came through the one going off lose the web view."));
             connPage.appendChild(withHint(wgFreeRow, "Android lets WireGuard start its tunnel from the background only when its battery use is Unrestricted. Open settings shows WireGuard's app info, set it under Battery."));
+            connPage.appendChild(withHint(wgAwakeRow, "A sleeping phone stops sending WireGuard's keepalives, the mobile network then forgets it after a minute or two, and the web view cannot reach it through the tunnel until it wakes. On, the phone stays awake while WireGuard holds the tunnel. It costs some battery, only while the tunnel is WireGuard's."));
             connPage.appendChild(nameRow);
             connPage.appendChild(makeSubLabel("How it stands"));
             connPage.appendChild(carStatusEl);
@@ -35613,10 +35658,9 @@
 
             devPage.appendChild(withHint(webSeekRow, "The web view offers the browser seeking by ten seconds and to a place, next to play, pause, next and previous. A Tesla greys out next and previous while a page plays the music, and this is to try whether it gives them back once seeking is not offered."));
 
-            // The phone's own overlay and its clipboard are no use from a
-            // browser, so the web view's copy of the page leaves them out
+            // The phone's own overlay is no use from a browser, so the web
+            // view's copy of the page leaves it out
             debugOverlayRow.dataset.hostSkip = "1";
-            copyLogBtn.dataset.hostSkip = "1";
         }
         // Which groups the overlays log, a switch each, for the phone's
         // overlay and the web view's alike

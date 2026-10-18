@@ -140,6 +140,60 @@ final class WireGuard {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
+    // The phone kept awake while WireGuard holds the tunnel, when switched
+    // on. Asleep, the processor stops and WireGuard's keepalives with it,
+    // the mobile network then forgets the phone after a minute or two and
+    // nothing from the tunnel reaches it until it wakes. Held for a while
+    // at a time and looked at again before that runs out, on a handler of
+    // its own, since the hand over clears all of MAIN's
+    private static final long REACH_HOLD_MS = 15 * 60 * 1000L;
+    private static final long REACH_LOOK_MS = 5 * 60 * 1000L;
+    private static final Handler REACH = new Handler(Looper.getMainLooper());
+    private static PowerManager.WakeLock reach;
+
+    // Holds or lets go as things stand now. Main thread only
+    static void keepReachable(Context c) {
+
+        final Context app = c.getApplicationContext();
+        boolean want = WebViewSettings.wgKeepAwake(app) && !WebViewSettings.wgTunnel(app).isEmpty()
+            && tunnelUp(app);
+        boolean held = reach != null && reach.isHeld();
+
+        REACH.removeCallbacksAndMessages(null);
+
+        try {
+
+            if (want) {
+
+                if (reach == null) {
+
+                    PowerManager pm = app.getSystemService(PowerManager.class);
+
+                    if (pm == null) {
+                        return;
+                    }
+
+                    reach = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MurekaPlayer:wireguard-reach");
+                    reach.setReferenceCounted(false);
+                }
+
+                reach.acquire(REACH_HOLD_MS);
+
+                if (!held) {
+                    Hub.note("WireGuard", "keeping the phone awake, so the tunnel stays reachable");
+                }
+
+                REACH.postDelayed(() -> keepReachable(app), REACH_LOOK_MS);
+            } else if (held) {
+
+                reach.release();
+                Hub.note("WireGuard", "the phone may sleep again, the tunnel is not WireGuard's now or the switch is off");
+            }
+        } catch (RuntimeException e) {
+            Hub.note("WireGuard", "could not keep the phone awake: " + e.getMessage());
+        }
+    }
+
     // What was last asked of WireGuard, for the settings
     private static volatile String last = "";
 
@@ -302,6 +356,7 @@ final class WireGuard {
 
             say(app, "Turning WireGuard on", "wait");
             send(app, true, 0);
+            REACH.postDelayed(() -> keepReachable(app), CHECK_MS);
             return;
         }
 
@@ -310,6 +365,7 @@ final class WireGuard {
         MAIN.postDelayed(() -> {
 
             letSleep();
+            keepReachable(app);
 
             if (vpnUp(app)) {
                 tell(app, "WireGuard did not turn off", false);
@@ -439,6 +495,7 @@ final class WireGuard {
 
                 tell(c, "WireGuard turned " + tunnel + " on" + (tried > 0 ? ", on try " + (tried + 1) : ""), true);
                 letSleep();
+                keepReachable(c);
                 return;
             }
 

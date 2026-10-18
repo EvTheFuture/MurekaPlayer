@@ -490,12 +490,15 @@ public class PlayerService extends Service implements Hub.Listener {
         });
     }
 
-    // The VPN came up, went down or changed, show it in the notification
+    // The VPN came up, went down or changed, show it in the notification.
+    // The phone stays awake for WireGuard only while the tunnel is its
     static void carChanged() {
 
         MAIN.post(() -> {
 
             if (instance != null) {
+
+                WireGuard.keepReachable(instance);
                 instance.updateNotification();
             }
         });
@@ -623,6 +626,7 @@ public class PlayerService extends Service implements Hub.Listener {
             CarVpn.setStatus("off");
         }
 
+        WireGuard.keepReachable(this);
         updateNotification();
     }
 

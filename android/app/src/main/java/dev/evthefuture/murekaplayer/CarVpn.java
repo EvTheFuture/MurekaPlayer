@@ -70,6 +70,16 @@ public class CarVpn extends VpnService {
 
     // Set from outside, when the permission question was answered no
     static void setStatus(String text) {
+        changeStatus(text);
+    }
+
+    // A new status, written to the debug log when it differs, so a public
+    // address that would not come up says why there too
+    private static void changeStatus(String text) {
+
+        if (!text.equals(status)) {
+            Hub.note("VPN", "the public address is " + (active != null && "on".equals(text) ? "on, " + active : text));
+        }
 
         status = text;
         PlayerService.carChanged();
@@ -83,8 +93,7 @@ public class CarVpn extends VpnService {
         if (ACTION_STOP.equals(action)) {
 
             close();
-            status = idleStatus(this);
-            PlayerService.carChanged();
+            changeStatus(idleStatus(this));
             stopSelf();
 
             return START_NOT_STICKY;
@@ -147,9 +156,8 @@ public class CarVpn extends VpnService {
 
             // No tunnel without an error means the permission is missing,
             // it was never given or another VPN app took over since
-            status = error != null ? error : "needs permission, switch it off and on in the settings";
             active = null;
-            PlayerService.carChanged();
+            changeStatus(error != null ? error : "needs permission, switch it off and on in the settings");
             stopSelf();
 
             return;
@@ -157,8 +165,7 @@ public class CarVpn extends VpnService {
 
         tunAddress = address;
         active = address;
-        status = "on";
-        PlayerService.carChanged();
+        changeStatus("on");
     }
 
     // Another VPN app started, or the user turned this one off in Android's
@@ -167,8 +174,7 @@ public class CarVpn extends VpnService {
     public void onRevoke() {
 
         close();
-        status = "turned off by Android or another VPN";
-        PlayerService.carChanged();
+        changeStatus("turned off by Android or another VPN");
 
         super.onRevoke();
     }
@@ -179,10 +185,10 @@ public class CarVpn extends VpnService {
         close();
 
         if ("on".equals(status)) {
-            status = idleStatus(this);
+            changeStatus(idleStatus(this));
+        } else {
+            PlayerService.carChanged();
         }
-
-        PlayerService.carChanged();
 
         super.onDestroy();
     }

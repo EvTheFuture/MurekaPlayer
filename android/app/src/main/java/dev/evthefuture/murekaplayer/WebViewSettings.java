@@ -45,6 +45,10 @@ final class WebViewSettings {
     // over then, by its name. Empty for none
     static final String VPN_HOTSPOT_ONLY = "vpnHotspotOnly";
     static final String WG_TUNNEL = "wgTunnel";
+
+    // The phone kept awake while WireGuard holds the tunnel, so its
+    // keepalives go out with the screen off too. Off unless switched on
+    static final String WG_AWAKE = "wgKeepAwake";
     static final String VPN = "carVpn";
     static final String VPN_ADDRESS = "vpnAddress";
     static final String MDNS_NAME = "mdnsName";
@@ -134,6 +138,10 @@ final class WebViewSettings {
 
     static String wgTunnel(Context c) {
         return prefs(c).getString(WG_TUNNEL, "");
+    }
+
+    static boolean wgKeepAwake(Context c) {
+        return "1".equals(prefs(c).getString(WG_AWAKE, "0"));
     }
 
     static String vpnAddress(Context c) {
@@ -254,7 +262,7 @@ final class WebViewSettings {
 
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
-            || ALLOW_VPN.equals(key) || VPN_HOTSPOT_ONLY.equals(key)
+            || ALLOW_VPN.equals(key) || VPN_HOTSPOT_ONLY.equals(key) || WG_AWAKE.equals(key)
             || FULLSCREEN.equals(key) || TABLET_VIEW.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
             || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)) {
 

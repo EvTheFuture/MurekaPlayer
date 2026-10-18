@@ -127,7 +127,10 @@ the new settings layout and a number of smaller improvements.
   inset until the phone has switched. Who may reach the web view is only set
   on the phone. **WireGuard's battery use** shows whether it is Unrestricted,
   which Android needs before WireGuard may start its tunnel from the
-  background, and opens WireGuard's app settings to set it.
+  background, and opens WireGuard's app settings to set it. **Keep
+  WireGuard reachable with the screen off**, off by default, keeps the
+  device awake while WireGuard holds the tunnel, since a sleeping device
+  stops its keepalives and the mobile network soon forgets it.
 - Now playing like the phone: sliding covers with the neighbours peeking out,
   synced rolling lyrics beside or on the cover, quarter stars, like with the
   number of hearts (left out when the one heart is your own), plays, a
@@ -495,6 +498,9 @@ the new settings layout and a number of smaller improvements.
   before WireGuard takes the phone's one VPN from it, and for one that came
   through the VPN before the tunnel goes. Each browser can show it or not
   on its own.
+- **Account name** in the web view can be switched off under Web view
+  display, for each browser on its own, leaving more room on a narrow
+  screen.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,

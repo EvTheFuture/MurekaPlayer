@@ -5441,6 +5441,7 @@
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
             hotspotBadge: s.hotspotBadgeOn === true,
             wgBadge: s.wgBadgeOn === true,
+            whoName: s.whoNameOn !== false,
             heatBadge: s.heatBadgeOn !== false,
             heatText: s.heatText === "both" || s.heatText === "temp" ? s.heatText : "word",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
@@ -5478,6 +5479,7 @@
         // kept before they could be set follows the phone
         s.hotspotBadgeOn = typeof look.hotspotBadge === "boolean" ? look.hotspotBadge : raw.hotspotBadgeOn === true;
         s.wgBadgeOn = typeof look.wgBadge === "boolean" ? look.wgBadge : raw.wgBadgeOn === true;
+        s.whoNameOn = typeof look.whoName === "boolean" ? look.whoName : raw.whoNameOn !== false;
         s.heatBadgeOn = typeof look.heatBadge === "boolean" ? look.heatBadge : raw.heatBadgeOn !== false;
         s.heatText = look.heatText === "word" || look.heatText === "both" || look.heatText === "temp"
             ? look.heatText : raw.heatText;
@@ -5647,6 +5649,7 @@
             names: { fade: "Fade away", always: "Always" } },
         { label: "Hotspot badge", page: "Web view", key: "hotspotBadge", kind: "bool" },
         { label: "WireGuard badge", page: "Web view", key: "wgBadge", kind: "bool" },
+        { label: "Account name", page: "Web view", key: "whoName", kind: "bool" },
         { label: "Heat badge", page: "Web view", key: "heatBadge", kind: "bool" },
         { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "choice", values: ["word", "both", "temp"],
             names: { word: "Cool", both: "Cool 37 \u00B0C", temp: "37 \u00B0C" } },
@@ -7860,11 +7863,12 @@
         });
     });
 
-    // The account signed in on the phone, before the badges
+    // The account signed in on the phone, before the badges, unless
+    // switched off for a narrow screen
     function paintWho(s) {
 
         const el = $("whoName");
-        const name = s && typeof s.selfName === "string" ? s.selfName.trim() : "";
+        const name = s && s.whoNameOn !== false && typeof s.selfName === "string" ? s.selfName.trim() : "";
 
         if (el.textContent !== name) {
             el.textContent = name;
@@ -15811,6 +15815,17 @@
             dbgLog("Net", "phone reached");
         }
 
+        // A gap, long or short, said on the phone too, where it lands
+        // among what the phone was doing meanwhile
+        if (lostSince) {
+
+            const secs = Math.round((Date.now() - lostSince) / 100) / 10;
+
+            dbgLog("Net", "the phone answers again after " + secs + " s");
+            send("webLostPhone", { s: secs, why: lostWhy });
+            lostSince = 0;
+        }
+
         notePhoneClock(s);
 
         // The phone's own values kept, what this browser shows may differ,
@@ -15954,7 +15969,16 @@
         }
     }, 60000);
 
+    // Since when the phone has not answered, from the start of the first
+    // request that failed, and why. No phone shows only once it lasts, a
+    // moment's gap is written to the logs instead, the phone's included
+    const LOST_SHOW_MS = 3000;
+    let lostSince = 0;
+    let lostWhy = "";
+
     function poll() {
+
+        const askedAt = Date.now();
 
         // A request the network swallowed is given up, and the next asked
         const abort = window.AbortController ? new AbortController() : null;
@@ -15997,13 +16021,23 @@
                 return;
             }
 
-            if (online) {
-                dbgLog("Net", "lost the phone");
+            if (!lostSince) {
+
+                lostSince = askedAt;
+                lostWhy = err && err.name === "AbortError" ? "no answer in 10 s"
+                    : String((err && err.message) || err || "failed");
+                dbgLog("Net", "the phone did not answer: " + lostWhy);
             }
 
             seq = -1;
-            online = false;
-            render();
+
+            if (online && Date.now() - lostSince >= LOST_SHOW_MS) {
+
+                dbgLog("Net", "lost the phone");
+                online = false;
+                render();
+            }
+
             nextPoll(1000);
         });
     }
