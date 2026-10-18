@@ -3861,6 +3861,18 @@
         height: 22px;
     }
 
+    /* The badges' icons keep to the badges' own size, so the icon badges
+       are as tall as the text ones beside them */
+    html.phone #bottom #badges .ico {
+        width: 1.3em;
+        height: 1.3em;
+    }
+
+    html.phone #hotspotBadge,
+    html.phone #wgBadge {
+        padding: 0.1em 0.45em;
+    }
+
     /* Fullscreen is in the actions menu, the header has no room for it */
     html.phone #bottom #fullBtn {
         display: none;

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.415";
+    const VERSION = "1.9.9.419";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -974,9 +974,16 @@
     // backgrounds it takes over, so the three can never drift apart
     const PANEL_BACKGROUND = "#1d1d22";
 
-    // A thin strip in the panel colour pinned to the bottom edge while the
-    // panel is open on a phone, see updateEdgeStrip
+    // Thin strips in the panel colour pinned to the bottom and top edges
+    // while the panel is open on a phone, see updateEdgeStrip
     let edgeStripEl = null;
+    let topStripEl = null;
+
+    // The panel's top padding while the top strip is shown, a little more
+    // than the strip is tall, and the gap under the header then, smaller by
+    // the same 5 pixels
+    const TOP_STRIP_ROOM = "13px";
+    const TOP_STRIP_GAP = "2px";
 
     // Safari 26 on iOS ignores theme-color. It takes the colour of its bottom
     // toolbar from the first fixed or sticky element it finds 8 pixels inside
@@ -986,38 +993,72 @@
     // which mureka.ai sets to black. The panel alone did not qualify, so this
     // strip gives Safari a fixed element with a plain colour at the edge.
     // It sits above the panel so it is the one found, is 11 pixels tall so
-    // it is not skipped, covers only the panel's own bottom padding, and
-    // never takes a tap. Folded, the site shows its own bar, so it goes
+    // it is not skipped, and never takes a tap. The top bar is coloured the
+    // same way from the top edge, which shows once a banner of Safari's own
+    // above the page has gone, so a strip goes there too. Folded, the site
+    // shows its own bars, so they go
     function updateEdgeStrip(show) {
+
+        // The panel's content starts below the top strip, so the strip,
+        // drawn above the panel, never covers its first row. The room it
+        // takes is given back from the gap under the header, so everything
+        // below it stays where it was
+        if (panelEl) {
+
+            if (show) {
+
+                panelEl.style.setProperty("padding-top", TOP_STRIP_ROOM, "important");
+                panelEl.style.setProperty("gap", TOP_STRIP_GAP, "important");
+            } else {
+
+                panelEl.style.removeProperty("padding-top");
+                panelEl.style.removeProperty("gap");
+            }
+        }
 
         if (!show) {
 
-            if (edgeStripEl) {
-                edgeStripEl.style.display = "none";
+            for (const el of [edgeStripEl, topStripEl]) {
+
+                if (el) {
+                    el.style.display = "none";
+                }
             }
 
             return;
         }
 
-        if (!edgeStripEl) {
+        const strip = function (id, edge) {
 
-            edgeStripEl = document.createElement("div");
-            edgeStripEl.id = "mureka-player-edge-strip";
-            edgeStripEl.style.cssText = [
+            const el = document.createElement("div");
+
+            el.id = id;
+            el.style.cssText = [
                 "position:fixed",
                 "left:0",
                 "right:0",
-                "bottom:0",
+                edge + ":0",
                 "height:11px",
                 "z-index:2147483000",
                 "pointer-events:none",
                 "background-color:" + PANEL_BACKGROUND
             ].join(";");
 
-            (document.body || document.documentElement).appendChild(edgeStripEl);
+            (document.body || document.documentElement).appendChild(el);
+
+            return el;
+        };
+
+        if (!edgeStripEl) {
+            edgeStripEl = strip("mureka-player-edge-strip", "bottom");
+        }
+
+        if (!topStripEl) {
+            topStripEl = strip("mureka-player-top-strip", "top");
         }
 
         edgeStripEl.style.display = "block";
+        topStripEl.style.display = "block";
     }
 
     // The padding the phone layout gives the panel
@@ -46163,45 +46204,10 @@
     // Expose a toggle so a second bookmarklet tap minimizes or restores the panel
     window.__murekaPlayerToggle = toggleMinimize;
 
-    // Safari on iPhone shows Mureka's "Open in the Mureka app" banner while
-    // the page names its app in a meta tag. The tag is taken out, and again
-    // should the page put it back. Safari may keep a banner it already
-    // shows until the page is loaded again
-    function dropAppBanner() {
-
-        const drop = function () {
-
-            for (const m of document.querySelectorAll('meta[name="apple-itunes-app"]')) {
-                m.remove();
-            }
-        };
-
-        drop();
-
-        try {
-
-            new MutationObserver(function (changes) {
-
-                for (const ch of changes) {
-
-                    for (const n of ch.addedNodes) {
-
-                        if (n.nodeType === 1 && n.tagName === "META" && n.getAttribute("name") === "apple-itunes-app") {
-                            n.remove();
-                        }
-                    }
-                }
-            }).observe(document.head || document.documentElement, { childList: true });
-        } catch (e) {
-            // Without it the banner stays, nothing else changes
-        }
-    }
-
     // Build the player, then hold the screen on right away if it is always
     // meant to be
     function startPlayer() {
 
-        dropAppBanner();
         installDebugWatchers();
         installTrimKeys();
         buildPanel();
