@@ -5428,8 +5428,13 @@
     function phoneLook(raw) {
 
         const s = raw || {};
+        const swatches = {};
 
-        return {
+        for (const w of WAVE_SWATCHES) {
+            swatches[w.key] = swatchFrom(s[w.field], w);
+        }
+
+        return Object.assign(swatches, {
             names: s.names === true,
             upNext: s.showUpNext !== false,
             wave: typeof s.waveOn === "boolean" ? s.waveOn : true,
@@ -5450,7 +5455,7 @@
             linePct: s.lyricLayout && typeof s.lyricLayout.line === "number" ? Math.round(s.lyricLayout.line * 100) : 150,
             sideShift: s.lyricLayout && typeof s.lyricLayout.sideShift === "number" ? s.lyricLayout.sideShift : 0,
             shift: s.lyricLayout && typeof s.lyricLayout.shift === "number" ? s.lyricLayout.shift : 0
-        };
+        });
     }
 
     // A look of this browser's own, started from the phone's. The phone's
@@ -5480,6 +5485,15 @@
         s.hotspotBadgeOn = typeof look.hotspotBadge === "boolean" ? look.hotspotBadge : raw.hotspotBadgeOn === true;
         s.wgBadgeOn = typeof look.wgBadge === "boolean" ? look.wgBadge : raw.wgBadgeOn === true;
         s.whoNameOn = typeof look.whoName === "boolean" ? look.whoName : raw.whoNameOn !== false;
+
+        // The waveform's colours. A look kept before they could be set
+        // follows the phone
+        for (const w of WAVE_SWATCHES) {
+
+            if (swatchOk(look[w.key])) {
+                s[w.field] = swatchFill(look[w.key]);
+            }
+        }
         s.heatBadgeOn = typeof look.heatBadge === "boolean" ? look.heatBadge : raw.heatBadgeOn !== false;
         s.heatText = look.heatText === "word" || look.heatText === "both" || look.heatText === "temp"
             ? look.heatText : raw.heatText;
@@ -5629,6 +5643,46 @@
         relook();
     }
 
+    // The waveform's colours a browser can have of its own: the key in its
+    // look, the field in the phone's state, and the colour and share they
+    // come with, the same as the phone's
+    const WAVE_SWATCHES = [
+        { label: "Colour when played", key: "wavePlayed", field: "wavePlayedFill", c: "#488084", a: 100 },
+        { label: "Colour still to play", key: "waveRest", field: "waveRestFill", c: "#666666", a: 100 },
+        { label: "Play head colour", key: "playHead", field: "playHeadFill", c: "#ffffff", a: 60 },
+        { label: "Progress colour up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
+        { label: "Progress colour past the play head", key: "progressAhead", field: "waveZoomProgressAhead", c: "#a8a8a8", a: 100 }
+    ];
+
+    // A colour and its share from the phone's rgba text, or the default
+    function swatchFrom(text, def) {
+
+        const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(String(text || "").trim());
+
+        if (!m) {
+            return { c: def.c, a: def.a };
+        }
+
+        const hex = function (n) {
+            return ("0" + Math.max(0, Math.min(255, Number(n))).toString(16)).slice(-2);
+        };
+
+        return {
+            c: "#" + hex(m[1]) + hex(m[2]) + hex(m[3]),
+            a: Math.round((m[4] === undefined ? 1 : Number(m[4])) * 100)
+        };
+    }
+
+    function swatchOk(v) {
+        return !!v && typeof v === "object" && /^#[0-9a-f]{6}$/i.test(v.c) && typeof v.a === "number" && v.a >= 0 && v.a <= 100;
+    }
+
+    function swatchFill(v) {
+
+        return "rgba(" + parseInt(v.c.slice(1, 3), 16) + ", " + parseInt(v.c.slice(3, 5), 16) + ", "
+            + parseInt(v.c.slice(5, 7), 16) + ", " + (v.a / 100) + ")";
+    }
+
     // The settings a browser can have of its own, found on the phone's Web
     // view page by their names. Each gets a dot, and while Settings for this
     // browser is on, a change made here is kept here instead of on the phone
@@ -5653,6 +5707,11 @@
         { label: "Heat badge", page: "Web view", key: "heatBadge", kind: "bool" },
         { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "choice", values: ["word", "both", "temp"],
             names: { word: "Cool", both: "Cool 37 \u00B0C", temp: "37 \u00B0C" } },
+        { label: "Colour when played", page: "Web view", key: "wavePlayed", kind: "swatch" },
+        { label: "Colour still to play", page: "Web view", key: "waveRest", kind: "swatch" },
+        { label: "Play head colour", page: "Web view", key: "playHead", kind: "swatch" },
+        { label: "Progress colour up to the play head", page: "Web view", key: "progressFill", kind: "swatch" },
+        { label: "Progress colour past the play head", page: "Web view", key: "progressAhead", kind: "swatch" },
         { label: "Lyric size", page: "Web view", key: "size", kind: "step", step: 1, min: 10, max: 60 },
         { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
         { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
@@ -5897,6 +5956,8 @@
                 ? (below.tagName === "SELECT" || below.querySelector("select") !== null)
                 : def.kind === "choice"
                 ? below.querySelector("button") !== null
+                : def.kind === "swatch"
+                ? below.querySelector(".pColor") !== null
                 : (below.tagName === "INPUT" || below.querySelector("input") !== null));
 
             if (!row && !fits) {
@@ -5912,6 +5973,31 @@
             }
 
             localRow(row || below, def);
+        }
+
+        // The waveform's colours put back as they came, here alone while
+        // this browser keeps its own
+        if (local && page === "Web view") {
+
+            for (const b of box.querySelectorAll("button")) {
+
+                if (b.textContent.trim() !== "Reset the waveform colours") {
+                    continue;
+                }
+
+                b.addEventListener("click", function (ev) {
+
+                    ev.stopPropagation();
+                    ev.preventDefault();
+
+                    for (const w of WAVE_SWATCHES) {
+                        changeLocalLook(w.key, { c: w.c, a: w.a });
+                    }
+
+                    changeLocalLook("progressLook", "wave");
+                    renderPanelAgain();
+                }, true);
+            }
         }
     }
 
@@ -6029,6 +6115,56 @@
 
                 catchAll(ev, function () {
                     setLocalValue(def, Math.max(def.min, Math.min(def.max, v + (up ? def.step : -def.step))));
+                });
+            }, true);
+        } else if (def.kind === "swatch") {
+
+            // This browser's colour on the swatch, the picker changing it
+            // here alone
+            const sw = row.querySelector(".pColor");
+            const w = WAVE_SWATCHES.find(function (x) {
+                return x.key === def.key;
+            });
+            const v = swatchOk(value) ? value : { c: w.c, a: w.a };
+
+            if (!sw) {
+                return;
+            }
+
+            const fillEl = sw.querySelector(".pColorFill");
+            const pct = sw.parentElement ? sw.parentElement.querySelector(".pColorPct") : null;
+
+            if (fillEl) {
+                fillEl.style.background = swatchFill(v);
+            }
+
+            if (pct) {
+                pct.textContent = v.a + " %";
+            }
+
+            row.addEventListener("click", function (ev) {
+
+                if (!sw.contains(ev.target)) {
+                    return;
+                }
+
+                catchAll(ev, function () {
+
+                    openColorPicker(def.label, v.c, v.a, 100, function (c, a) {
+
+                        v.c = c;
+                        v.a = a;
+
+                        if (fillEl) {
+                            fillEl.style.background = swatchFill(v);
+                        }
+
+                        if (pct) {
+                            pct.textContent = a + " %";
+                        }
+
+                        changeLocalLook(def.key, { c: c, a: a });
+                    });
                 });
             }, true);
         } else if (def.kind === "text" || def.kind === "color") {
@@ -21195,15 +21331,17 @@
             return b;
         };
 
+        // Song tweaks and the play queue as the short line, with what goes
+        // along chosen first, as in the player. The library as its file
         tiles.className = "copyRow";
         tiles.appendChild(tile("copy", "Copy tweaks", function () {
-            copyExportNow("songs");
+            askCopy("tweaks", [], "copy");
         }));
         tiles.appendChild(tile("copy", "Copy songs", function () {
             copyExportNow("library");
         }));
         tiles.appendChild(tile("copy", "Copy queue", function () {
-            copyExportNow("queue");
+            askCopy("queue", [], "copy");
         }));
         tiles.appendChild(tile("paste", "Import", pasteImportHere));
         box.appendChild(tiles);
@@ -21254,7 +21392,7 @@
     function fetchExports() {
 
         const key = state && typeof state.exportsKey === "string" ? state.exportsKey : null;
-        const have = ["songs", "library", "queue"].every(function (kind) {
+        const have = ["library"].every(function (kind) {
             return !!exportsHere[kind];
         });
 
@@ -21268,7 +21406,9 @@
         // would otherwise put back what was there before a change
         const round = ++exportsRound;
 
-        for (const kind of ["songs", "library", "queue"]) {
+        // Only the library, the tweaks and the queue are copied as the
+        // short line, asked for when copied
+        for (const kind of ["library"]) {
 
             exportsHere[kind] = null;
 

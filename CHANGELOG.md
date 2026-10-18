@@ -335,7 +335,7 @@ the new settings layout and a number of smaller improvements.
 - **Settings for this browser**, at the top of the settings, lets one
   browser keep its own look. The settings it covers are marked with a dot
   where they always are, all under Web view, the order of the buttons
-  included. While it is on, a change
+  and the waveform's colours included. While it is on, a change
   made in that browser applies there only, and the phone and other
   browsers keep theirs. Off by default: switched on, the settings are kept
   in that browser only, never sent anywhere, and switching it off deletes
