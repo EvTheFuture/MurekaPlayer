@@ -6751,7 +6751,8 @@
     }
 
     // Onto this browser's clipboard. A page on a plain http address has no
-    // clipboard API, so the old copy command is the way there
+    // clipboard API, so copyText and the old copy command do it there, while
+    // the tap still counts. Safari copies nothing from a read only box
     function copyDebugLog() {
 
         const text = debugText();
@@ -6761,34 +6762,18 @@
             navigator.clipboard.writeText(text).then(function () {
                 toast("Debug log copied", "ok");
             }, function () {
-                copyTheOldWay(text);
+
+                const ok = copyText(text);
+
+                toast(ok ? "Debug log copied" : "This browser cannot copy, send it to the phone instead", ok ? "ok" : "bad");
             });
 
             return;
         }
 
-        copyTheOldWay(text);
-    }
+        const ok = copyText(text);
 
-    function copyTheOldWay(text) {
-
-        const area = document.createElement("textarea");
-        let done = false;
-
-        area.value = text;
-        area.setAttribute("readonly", "");
-        area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
-        document.body.appendChild(area);
-        area.select();
-
-        try {
-            done = document.execCommand("copy");
-        } catch (e) {
-            done = false;
-        }
-
-        area.remove();
-        toast(done ? "Debug log copied" : "This browser cannot copy, send it to the phone instead", done ? "ok" : "bad");
+        toast(ok ? "Debug log copied" : "This browser cannot copy, send it to the phone instead", ok ? "ok" : "bad");
     }
 
     // To the phone, where Copy debug log in the settings takes it along. The
@@ -7337,9 +7322,54 @@
     let browserNetAt = 0;
     let browserNetOkAt = 0;
 
-    // Asked with a request the browser may not read, which is all it takes:
-    // any answer means Mureka was reached, no answer at all means it was not.
-    // Unforced, a check in the last 10 seconds is enough
+    // Misses in a row, offline only from the second one, so one slow or
+    // lost answer does not show the badge
+    let browserNetMisses = 0;
+
+    // Mureka's page and its audio host, asked at the same time
+    const NET_PROBES = [
+        "https://www.mureka.ai/favicon.ico",
+        "https://static-cos.mureka.ai/favicon.ico"
+    ];
+    const NET_PROBE_MS = 12000;
+
+    // One host asked with a request the browser may not read, which is all
+    // it takes: any answer means it was reached. Gives null when reached,
+    // else why not
+    function probeNet(url) {
+
+        const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        const timer = setTimeout(function () {
+
+            if (ctrl) {
+                ctrl.abort();
+            }
+        }, NET_PROBE_MS);
+
+        return fetch(url + "?t=" + Date.now(), {
+            mode: "no-cors",
+            cache: "no-store",
+            signal: ctrl ? ctrl.signal : undefined
+        }).then(function () {
+
+            clearTimeout(timer);
+            return null;
+        }, function (e) {
+
+            clearTimeout(timer);
+
+            const host = url.split("/")[2];
+
+            if (e && e.name === "AbortError") {
+                return host + " gave no answer in " + (NET_PROBE_MS / 1000) + " s";
+            }
+
+            return host + " " + String((e && e.message) || e || "failed");
+        });
+    }
+
+    // Whether this browser reaches Mureka, either host will do. Unforced, a
+    // check in the last 10 seconds is enough
     function checkBrowserNet(why, force) {
 
         if (browserNetBusy || (!force && Date.now() - browserNetAt < 10000)) {
@@ -7349,37 +7379,42 @@
         browserNetBusy = true;
         browserNetAt = Date.now();
 
-        const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-        const timer = setTimeout(function () {
+        Promise.all(NET_PROBES.map(probeNet)).then(function (fails) {
 
-            if (ctrl) {
-                ctrl.abort();
-            }
-        }, 8000);
+            const ok = fails.some(function (f) {
+                return f === null;
+            });
 
-        fetch("https://www.mureka.ai/favicon.ico?t=" + Date.now(), {
-            mode: "no-cors",
-            cache: "no-store",
-            signal: ctrl ? ctrl.signal : undefined
-        }).then(function () {
-            return true;
-        }, function () {
-            return false;
-        }).then(function (ok) {
-
-            clearTimeout(timer);
             browserNetBusy = false;
             browserNetAt = Date.now();
 
             if (ok) {
+
                 browserNetOkAt = Date.now();
+                browserNetMisses = 0;
+            } else {
+
+                browserNetMisses++;
+                dbgLog("Net", "Mureka not reached (" + why + "), miss " + browserNetMisses + ": " + fails.join(", "));
             }
 
-            if (ok !== browserNet) {
+            // The second miss in a row before offline, unless the browser
+            // itself says it has no connection
+            const now = ok ? true : (browserNetMisses >= 2 || navigator.onLine === false ? false : browserNet);
 
-                dbgLog("Net", ok ? "this browser reaches Mureka" : "this browser cannot reach Mureka, " + why);
-                browserNet = ok;
+            if (now !== browserNet) {
+
+                dbgLog("Net", now ? "this browser reaches Mureka" : "this browser cannot reach Mureka");
+                browserNet = now;
                 render();
+            }
+
+            // A first miss is asked again soon instead of in a minute
+            if (!ok && browserNetMisses === 1) {
+
+                setTimeout(function () {
+                    checkBrowserNet("asking again after a miss", true);
+                }, 5000);
             }
         });
     }
