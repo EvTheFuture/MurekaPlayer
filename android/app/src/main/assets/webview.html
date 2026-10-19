@@ -15170,7 +15170,14 @@
             return;
         }
 
-        const from = info.getBoundingClientRect();
+        // Each part of the text, where it is and how big, so it can slide
+        // and grow or shrink to where it goes
+        const parts = ["title", "subtitle", "rateRow", "fromLine", "lyrics", "upNext"].map($).filter(function (el) {
+            return el && el.getClientRects().length > 0;
+        });
+        const before = parts.map(function (el) {
+            return el.getBoundingClientRect();
+        });
         const titleWas = $("title").getBoundingClientRect().top;
 
         app.classList.toggle("miniSide", on);
@@ -15187,13 +15194,38 @@
             info.style.setProperty("--sidePad", pad + "px");
         }
 
-        const to = info.getBoundingClientRect();
+        if (!info.animate) {
+            return;
+        }
 
-        if (info.animate) {
+        // Every part from its old place and size to its new, the way the
+        // stars and the text shrink onto the cover and grow back beside it
+        parts.forEach(function (el, i) {
+
+            const was = before[i];
+            const now = el.getBoundingClientRect();
+
+            if (!was.height || !now.height) {
+                return;
+            }
+
+            const scale = was.height / now.height;
+
+            el.animate([
+                {
+                    transformOrigin: "0 0",
+                    transform: "translate(" + Math.round(was.left - now.left) + "px, " + Math.round(was.top - now.top) + "px) scale(" + scale.toFixed(3) + ")"
+                },
+                { transformOrigin: "0 0", transform: "none" }
+            ], { duration: SIDE_MS, easing: SIDE_EASE });
+        });
+
+        // The panel behind the text fades in as it arrives
+        if (on) {
 
             info.animate([
-                { transform: "translate(" + Math.round(from.left - to.left) + "px, " + Math.round(from.top - to.top) + "px)" },
-                { transform: "none" }
+                { backgroundColor: "rgba(22, 22, 27, 0)", backdropFilter: "blur(0px)" },
+                { backgroundColor: "rgba(22, 22, 27, 0.62)", backdropFilter: "blur(10px)" }
             ], { duration: SIDE_MS, easing: SIDE_EASE });
         }
     }
@@ -15296,10 +15328,11 @@
         $("browseBtn").classList.remove("on");
         $("miniBtn").classList.remove("on");
 
-        // Beside the song the list slides out as the text slides back
+        // Beside the song the list slides out as the text slides back,
+        // unless a swipe already took it away
         const box = $("mini");
 
-        if ($("app").classList.contains("miniSide") && box.animate) {
+        if ($("app").classList.contains("miniSide") && box.animate && !box.style.transform) {
 
             box.animate([
                 { transform: "none", opacity: 1 },
