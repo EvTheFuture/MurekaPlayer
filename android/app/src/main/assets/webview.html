@@ -4237,22 +4237,16 @@
         border-bottom: 1px solid var(--line);
     }
 
-    /* Playing from as the first chip of the row, in a dock of the page's
-       colour that stays at the left while the views scroll under it and
-       fade out at its edge, its round corners included */
+    /* Playing from as the first chip of the row, scrolling with the views
+       like any other chip */
     #fromDock {
         display: none;
     }
 
     html.phone #fromDock {
-        position: sticky;
-        left: 0;
-        z-index: 2;
         display: flex;
         flex: 0 0 auto;
         max-width: 45%;
-        background: var(--bg);
-        box-shadow: 8px 0 6px -4px var(--bg);
     }
 
     html.phone #fromDock #fromLine {
