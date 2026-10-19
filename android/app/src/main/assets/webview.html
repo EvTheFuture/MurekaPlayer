@@ -1426,6 +1426,12 @@
         font-size: clamp(14px, 1.3vw, 22px);
     }
 
+    #app.miniSide #fromLine {
+        min-height: 32px;
+        margin-top: 0;
+        font-size: clamp(13px, 1.25vw, 19px);
+    }
+
     #app.miniSide #rateRow,
     #app.miniSide #fromLine,
     #app.miniSide #lyrics {
@@ -15175,9 +15181,27 @@
         const parts = ["title", "subtitle", "rateRow", "fromLine", "lyrics", "upNext"].map($).filter(function (el) {
             return el && el.getClientRects().length > 0;
         });
+        // How big a part is drawn: its letters, the stars' size for their
+        // row, the height of the lyric roll
+        const sizeOf = function (el) {
+
+            if (el.id === "rateRow") {
+
+                const star = el.querySelector(".star svg");
+
+                return star ? star.getBoundingClientRect().height : el.getBoundingClientRect().height;
+            }
+
+            if (el.id === "lyrics") {
+                return el.getBoundingClientRect().height;
+            }
+
+            return parseFloat(getComputedStyle(el).fontSize) || 0;
+        };
         const before = parts.map(function (el) {
             return el.getBoundingClientRect();
         });
+        const sizesBefore = parts.map(sizeOf);
         const titleWas = $("title").getBoundingClientRect().top;
 
         app.classList.toggle("miniSide", on);
@@ -15204,12 +15228,13 @@
 
             const was = before[i];
             const now = el.getBoundingClientRect();
+            const sizeNow = sizeOf(el);
 
-            if (!was.height || !now.height) {
+            if (!was.height || !now.height || !sizeNow) {
                 return;
             }
 
-            const scale = was.height / now.height;
+            const scale = sizesBefore[i] / sizeNow;
 
             el.animate([
                 {
