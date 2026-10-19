@@ -2182,6 +2182,10 @@
         color: var(--accent);
     }
 
+    .menuItem.green {
+        color: #5fd38d;
+    }
+
     .menuItem.cool {
         color: #7ab8ff;
     }
@@ -3125,9 +3129,10 @@
         gap: 1vw;
     }
 
+    /* The word on the filters, in the online badge's green */
     .fromNote {
         padding: 0 6px;
-        color: var(--muted);
+        color: #5fd38d;
         font-size: 0.85em;
     }
 
@@ -18538,6 +18543,9 @@
         // The song on Mureka, only the account's own songs
         menuLine(box);
 
+        // What changes the song on Mureka itself is in cyan, what takes it
+        // away there, Unpublish and Delete on Mureka, in red. Remixing is a
+        // setting of the song, in the plain colour
         if (m.mine) {
 
             box.appendChild(menuItem("pencil", "Rename", function () {
@@ -18552,7 +18560,7 @@
                 }
 
                 showTitleField(m);
-            }));
+            }, "accent"));
 
             // Cut the start or the end off, Mureka makes a new song of it
             if (m.canTrim) {
@@ -18561,14 +18569,14 @@
 
                     close();
                     openTrimmer(m);
-                }));
+                }, "accent"));
             }
 
             box.appendChild(menuItem("image", "Set cover", function () {
 
                 close();
                 pickCover(m);
-            }));
+            }, "accent"));
 
             box.appendChild(menuItem(m.published ? "close" : "check",
                 m.published ? "Unpublish" : "Publish", function () {
@@ -18582,7 +18590,7 @@
 
                     act(m.published ? "unpublish" : "publish");
                     close();
-                }));
+                }, m.published ? "danger" : "accent"));
 
             // Instrumentals can be remixed too, so every song of the account's own
             // offers it
@@ -18669,7 +18677,7 @@
             setTimeout(function () {
                 showPanel("info");
             }, 400);
-        }));
+        }, "green"));
 
         box.appendChild(menuItem("refresh", "Refresh", function () {
 

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.422";
+    const VERSION = "1.9.9.425";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -46037,28 +46037,31 @@
         }
 
         // The song on Mureka, only the account's own songs. Another creator's
-        // library is theirs
+        // library is theirs. What changes the song on Mureka itself is in
+        // cyan, as in the web view, what takes it away there, Unpublish and
+        // Delete on Mureka, in red. Remixing is a setting of the song, in the
+        // plain colour
         if (mine) {
 
             menuGroup();
 
-            addMenuRow("Rename", "#fff", function () {
+            addMenuRow("Rename", CTRL_ACCENT, function () {
                 promptRename(song);
             }, "pencil");
 
             // Cut the start or the end off, Mureka makes a new song of it
             if (songUrl(song)) {
 
-                addMenuRow("Trim", "#fff", function () {
+                addMenuRow("Trim", CTRL_ACCENT, function () {
                     openTrimmer(song);
                 }, "scissors");
             }
 
-            addMenuRow("Set cover", "#fff", function () {
+            addMenuRow("Set cover", CTRL_ACCENT, function () {
                 pickCover(song);
             }, "image");
 
-            addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", "#fff", function () {
+            addMenuRow(song.publish_state === 1 ? "Unpublish" : "Publish", song.publish_state === 1 ? "#ff8a8a" : CTRL_ACCENT, function () {
                 setPublished(song, song.publish_state !== 1, true);
             }, song.publish_state === 1 ? "close" : "check");
 
@@ -46102,7 +46105,7 @@
         // About the song and passing it on
         menuGroup();
 
-        addMenuRow("Information", "#fff", function () {
+        addMenuRow("Information", "#5fd38d", function () {
             openInfo(song);
         }, "info");
 
