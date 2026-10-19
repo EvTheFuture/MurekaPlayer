@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.438";
+    const VERSION = "1.9.9.441";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -165,6 +165,16 @@
     // Mureka needs plain text instructions in the lyrics prompt sometimes, so a
     // track can carry lyrics text while still being an instrumental
     const MANUAL_INSTRUMENTAL_KEY = "mureka_manual_instrumental_v1";
+
+    // localStorage key for how long each song's lyrics are, in characters
+    // without spaces, from the song details read so far. A song with very
+    // short lyrics, a note such as [Instrumental] in the prompt, can count
+    // as instrumental
+    const LYRIC_LEN_KEY = "mureka_lyric_len_v1";
+
+    // How long a song with no lyrics at all is given before that counts, its
+    // lyrics may not be in its details yet just after it was made
+    const LYRIC_EMPTY_GRACE_MS = 3600000;
 
     // localStorage key for songs made by trimming in the player, which the
     // list marks with a small T on their badge
@@ -2779,6 +2789,15 @@
     // Play on after a quick restart, in seconds: 0 turns it off, otherwise
     // in steps of 5 up to ten minutes. Missing, it is half a minute. The
     // limits are declared near the top, the settings are read before this
+    // The lyrics length under which a song counts as instrumental, 0 for
+    // never, 20 when not set
+    function lyricLimit(v) {
+
+        const n = Number(v);
+
+        return Number.isFinite(n) && n >= 0 ? Math.min(500, Math.round(n)) : 20;
+    }
+
     function playOnSeconds(v) {
 
         const n = Number(v);
@@ -2799,6 +2818,7 @@
             refreshOnReturn: false,
             refreshOnReturnMin: REFRESH_RETURN_DEFAULT,
             absoluteNumbers: false,
+            autoInstrumentalChars: 20,
             autoPlay: false,
             playOnSeconds: 30,
             shuffle: false,
@@ -2994,6 +3014,7 @@
                     refreshOnReturn: parsed.refreshOnReturn === true,
                     refreshOnReturnMin: returnMinutes(parsed.refreshOnReturnMin),
                     absoluteNumbers: parsed.absoluteNumbers === true,
+                    autoInstrumentalChars: lyricLimit(parsed.autoInstrumentalChars),
                     autoPlay: parsed.autoPlay === true,
                     playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
@@ -3980,6 +4001,11 @@
     // Song ids the user marked as instrumental by hand, loaded once on startup
     let manualInstrumental = loadManualInstrumental();
 
+    // Song id to the length of its lyrics, as far as read
+    const lyricLengths = loadLyricLengths();
+    let lyricLenSaveTimer = 0;
+    let lyricRenderTimer = 0;
+
     // Songs marked ignored: a queue made from the list leaves them out,
     // asked for by name they play all the same
     let ignoredIds = loadIgnored();
@@ -4691,6 +4717,149 @@
         return new Set();
     }
 
+    function loadLyricLengths() {
+
+        const out = new Map();
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(LYRIC_LEN_KEY) || "{}");
+
+            for (const id of Object.keys(raw)) {
+
+                if (typeof raw[id] === "number" && raw[id] >= 0) {
+                    out.set(id, raw[id]);
+                }
+            }
+        } catch (e) {
+            // Nothing kept, the lengths are read again as details come in
+        }
+
+        return out;
+    }
+
+    // Kept a moment after the last change, details often come in bunches
+    function saveLyricLengthsSoon() {
+
+        if (lyricLenSaveTimer) {
+            return;
+        }
+
+        lyricLenSaveTimer = setTimeout(function () {
+
+            const out = {};
+
+            lyricLenSaveTimer = 0;
+
+            for (const [id, n] of lyricLengths) {
+                out[id] = n;
+            }
+
+            try {
+                localStorage.setItem(LYRIC_LEN_KEY, JSON.stringify(out));
+            } catch (e) {
+                // Full, kept for this visit only
+            }
+        }, 2000);
+    }
+
+    // The characters of lyrics in any of the shapes Mureka or the stored
+    // details hold them, spaces and line breaks not counted
+    function lyricChars(lyrics) {
+
+        if (typeof lyrics === "string") {
+            return lyrics.replace(/\s+/g, "").length;
+        }
+
+        if (!Array.isArray(lyrics)) {
+            return 0;
+        }
+
+        let n = 0;
+
+        for (const part of lyrics) {
+
+            if (typeof part === "string") {
+                n += lyricChars(part);
+            } else if (part && Array.isArray(part.rows)) {
+                n += lyricChars(part.rows);
+            } else if (part && typeof part.text === "string") {
+                n += lyricChars(part.text);
+            }
+        }
+
+        return n;
+    }
+
+    // A song's details came in, from Mureka or the store: its lyrics'
+    // length is noted, and the list drawn again when that makes it an
+    // instrumental or no longer one
+    function noteLyricLength(id, data, quiet) {
+
+        if (!data) {
+            return;
+        }
+
+        let lyrics = data.lyrics;
+
+        if ((lyrics === undefined || lyrics === null) && data.song) {
+            lyrics = data.song.lyrics;
+        }
+
+        if (lyrics === undefined || lyrics === null) {
+            return;
+        }
+
+        const key = String(id);
+        const n = lyricChars(lyrics);
+        const song = cache.songs.find(function (x) {
+            return String(x.song_id) === key;
+        });
+
+        if (n === 0 && song && song.generate_at > 0 && Date.now() - song.generate_at * 1000 < LYRIC_EMPTY_GRACE_MS) {
+            return;
+        }
+
+        if (lyricLengths.get(key) === n) {
+            return;
+        }
+
+        const before = song ? isShortLyrics(song) : false;
+
+        lyricLengths.set(key, n);
+        saveLyricLengthsSoon();
+
+        if (quiet || !song || isShortLyrics(song) === before || lyricRenderTimer) {
+            return;
+        }
+
+        lyricRenderTimer = setTimeout(function () {
+
+            lyricRenderTimer = 0;
+            renderList();
+            publishHostSoon();
+
+            if (currentSong) {
+                refreshNowPlayingMeta();
+            }
+        }, 500);
+    }
+
+    // Whether a song's lyrics are shorter than the setting asks of a song
+    // with words, so it counts as instrumental. Off at 0
+    function isShortLyrics(song) {
+
+        const limit = settings.autoInstrumentalChars;
+
+        if (!(limit > 0) || !song) {
+            return false;
+        }
+
+        const n = lyricLengths.get(String(song.song_id));
+
+        return typeof n === "number" && n < limit;
+    }
+
     function saveManualInstrumental() {
 
         exportsVersion += 1;
@@ -4920,10 +5089,11 @@
     // True when a song has no vocals
     // Mureka encodes this as generation_method 7, every other value, including
     // the remix and studio methods, counts as having vocals. A song the user
-    // marked by hand counts as instrumental whatever the server says
+    // marked by hand counts as instrumental whatever the server says, and so
+    // does one with lyrics shorter than the setting asks
     function isInstrumental(song) {
 
-        return song.generation_method === 7 || isManualInstrumental(song);
+        return song.generation_method === 7 || isManualInstrumental(song) || isShortLyrics(song);
     }
 
     // Whether a song passes the current vocals filter
@@ -6107,8 +6277,15 @@
 
         const wasTrimmed = old.trimmed === true;
         const pageCursor = old.page_cursor;
+        const publishAt = old.publish_at;
 
         Object.assign(old, fresh);
+
+        // A song just published may come back without its date for a while,
+        // the one noted when it was published here stands meanwhile
+        if (old.publish_state === 1 && !(old.publish_at > 0) && publishAt > 0) {
+            old.publish_at = publishAt;
+        }
 
         if (wasTrimmed) {
             old.trimmed = true;
@@ -9207,6 +9384,7 @@
         }
 
         const before = song.publish_state;
+        const beforeAt = song.publish_at;
         const body = publish
             ? {
                 time: Date.now(),
@@ -9221,8 +9399,11 @@
                 type: 2
             };
 
-        // Shown at once, put back if Mureka refuses
+        // Shown at once, put back if Mureka refuses. Published now, so it
+        // takes its place at the top of the published songs, and a draft
+        // has no publish date
         song.publish_state = publish ? 1 : 2;
+        song.publish_at = publish ? Math.floor(Date.now() / 1000) : 0;
         noteChangedHere(song);
         renderList();
         publishHostSoon();
@@ -9275,6 +9456,7 @@
                 }
 
                 song.publish_state = before;
+                song.publish_at = beforeAt;
                 renderList();
                 publishHostSoon();
                 setStatus((publish ? "Not published: " : "Not unpublished: ") + name);
@@ -12575,12 +12757,24 @@
     // newest published first, matching the Mureka website, so a freshly
     // published older song appears at the top. Every other case keeps the
     // creation order the API returns
+    // When a song was published, for the order of the published songs. A
+    // published song with no date yet, as just after publishing it here,
+    // counts from when it was made, so it does not sink among the drafts
+    function publishedAt(song) {
+
+        if (song.publish_at > 0) {
+            return song.publish_at;
+        }
+
+        return song.publish_state === 1 && song.generate_at > 0 ? song.generate_at : 0;
+    }
+
     function orderedSongs() {
 
         if (!creatorSource && publishFilter === "published" && cache.complete) {
 
             return cache.songs.slice().sort(function (a, b) {
-                return (b.publish_at || 0) - (a.publish_at || 0);
+                return publishedAt(b) - publishedAt(a);
             });
         }
 
@@ -14303,6 +14497,8 @@
     // A song's plays from any detail Mureka sent, data holding play_count
     function notePlayCount(id, data) {
 
+        noteLyricLength(id, data, false);
+
         if (!data || typeof data.play_count !== "number") {
             return;
         }
@@ -14922,6 +15118,8 @@
                 const key = decodeURIComponent(url.slice(prefix.length));
                 const at = entry && typeof entry.t === "number" ? entry.t : 0;
 
+                noteLyricLength(key, entry, true);
+
                 // A count kept since then, or a newer one, stays
                 if (entry && typeof entry.play_count === "number" && (!playCountAt.has(key) || at > playCountAt.get(key))) {
 
@@ -14932,6 +15130,11 @@
 
             hostListStamp += 1;
             playCountStamp += 1;
+
+            // The instrumentals by their lyrics, known from the start
+            if (settings.autoInstrumentalChars > 0) {
+                renderList();
+            }
         } catch (e) {
         }
     }
@@ -15099,7 +15302,7 @@
         // hours looking fresh. Ask again rather than trust it
         const lyricsMissing = stored
             && (!Array.isArray(stored.lyrics) || stored.lyrics.length === 0)
-            && !isInstrumental(song);
+            && song.generation_method !== 7 && !isManualInstrumental(song);
 
         // The counts are read anew every time a song starts, unless they were
         // read in the last minute, a song tapped again or just prepared
@@ -25487,14 +25690,15 @@
 
         // Numbered from the bottom of the list up, in the list's own order,
         // so the numbers always count down the list. Across the whole library
-        // every song counts, whatever is shown, so a song keeps its number
-        // when filters change. Otherwise only the songs shown in the
+        // every song counts in the order the songs were made, whatever is
+        // shown, so a song keeps its number when filters or the list change
+        // and the newest song has the highest. Otherwise only the songs shown in the
         // published or drafts view count. Ranked by when the songs were made
         // instead, songs published in another order than they were made came
         // out the wrong way round in a list newest published first, 1000
         // above 1001
         const whole = settings.absoluteNumbers === true;
-        const scope = whole ? orderedSongs() : orderedSongs().filter(passesPublishFilter);
+        const scope = whole ? cache.songs : orderedSongs().filter(passesPublishFilter);
         const total = scope.length;
 
         scope.forEach(function (x, i) {
@@ -25504,13 +25708,43 @@
         return numberById;
     }
 
+    // Whether a row carries its badge. A song shared from another account
+    // says so wherever it shows, it may not be public. In the list, the
+    // account's own songs carry one while both published songs and drafts
+    // are listed. In the queue, which can hold songs of any kind: a new one
+    // always, one made by trimming for its T, every song while all are
+    // listed, and otherwise one the filter would not list, as a draft in
+    // the queue while the published songs are listed
+    function rowBadgeShown(song, inQueue) {
+
+        if (song.shared === true) {
+            return true;
+        }
+
+        if (creatorSource) {
+            return false;
+        }
+
+        if (!inQueue) {
+            return publishFilter !== "published";
+        }
+
+        if (song.is_played === false || isTrimmed(song) || publishFilter === "all") {
+            return true;
+        }
+
+        return (publishFilter === "published") !== (song.publish_state === 1);
+    }
+
     // What the phone's list shows beside each title: the number, the rating
-    // column once any song is rated, and public or draft when both are listed
+    // column once any song is rated, and which songs carry a badge, by the
+    // list shown: published, drafts, all, or another artist's songs
     function hostRowMeta() {
 
         return {
             anyRated: ratings.size > 0,
-            badges: !creatorSource && publishFilter !== "published"
+            badges: !creatorSource && publishFilter !== "published",
+            pubFilter: creatorSource ? "creator" : publishFilter
         };
     }
 
@@ -31890,14 +32124,9 @@
             item.appendChild(dur);
         }
 
-        // Mark each song as published or still a draft, but only when the list
-        // is showing both. Under the published filter every row would carry the
-        // same badge, which tells the reader nothing. A song Mureka still marks
-        // as new says new instead, it goes once Mureka has taken the played
-        // report and the badge falls back to public or draft
-        // A song shared from another account's player says so wherever it
-        // shows, it may not be public
-        if ((!creatorSource && publishFilter !== "published") || song.shared === true) {
+        // Mark a song as public, draft or new where that tells something,
+        // see rowBadgeShown
+        if (rowBadgeShown(song, listView === "queue")) {
 
             const published = song.publish_state === 1;
             const isNew = song.is_played === false && song.shared !== true;
@@ -33924,6 +34153,19 @@
             settings.goneOnMureka = v;
         });
 
+        const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
+            function () { return settings.autoInstrumentalChars; },
+            function (v) {
+
+                settings.autoInstrumentalChars = lyricLimit(v);
+                renderList();
+                publishHostSoon();
+
+                if (currentSong) {
+                    refreshNowPlayingMeta();
+                }
+            }, 0, 200, 5);
+
         const allRow = makeBoolRow("Number across the whole library",
             function () { return settings.absoluteNumbers; },
             function (v) { settings.absoluteNumbers = v; renderList(); });
@@ -34030,6 +34272,8 @@
         libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when the player or a web view opens or comes back into view, and again while it stays in view, each time the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         libraryPage.appendChild(withHint(goneRow, "Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
+        libraryPage.appendChild(makeLabel("Instrumental songs"));
+        libraryPage.appendChild(withHint(lyricLimitRow, "A song whose lyrics have fewer characters than this, spaces not counted, counts as instrumental, for the vocals filter and everywhere else. Mureka's prompt often holds only a short note such as [Instrumental] for one. The lyrics are known for songs played, coming up next, opened in Information or read for the play counts. 0 switches it off."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
         // Cache control: the songs kept on this device, the details of
         // songs, and in the app the covers for the web view
@@ -46138,6 +46382,11 @@
         if (song.generation_method === 7) {
 
             addDisabledMenuRow("Instrumental", "instrumental");
+
+        } else if (isShortLyrics(song) && !isManualInstrumental(song)) {
+
+            // Counted by its short lyrics, the setting decides that
+            addDisabledMenuRow("Instrumental, short lyrics", "instrumental");
 
         } else {
 

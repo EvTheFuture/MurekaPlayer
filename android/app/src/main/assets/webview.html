@@ -11820,8 +11820,9 @@
         row.appendChild(heart);
         row.appendChild(time);
 
-        // A song shared from another account says so wherever it shows
-        if (rowMeta.badges || song.shared) {
+        // The badge where it tells something, as on the phone. A row of the
+        // queue carries its place in it
+        if (badgeShown(song, typeof song.index === "number")) {
 
             const badge = document.createElement("span");
 
@@ -11859,6 +11860,35 @@
         mark.setAttribute("title", "Ignored, queues made from the list leave it out");
 
         return mark;
+    }
+
+    // Whether a row carries its badge, by the same rule as the phone: shared
+    // always. In the list, while both published songs and drafts are
+    // listed. In the queue, a new one, one made by trimming, every song
+    // when all are listed, and otherwise one the filter would not list, a
+    // draft among the published songs say
+    function badgeShown(song, inQueue) {
+
+        if (song.shared) {
+            return true;
+        }
+
+        const f = rowMeta.pubFilter;
+
+        // The list, or a phone that does not say yet
+        if (!inQueue || !f) {
+            return !!rowMeta.badges;
+        }
+
+        if (f === "creator") {
+            return false;
+        }
+
+        if (song.isNew || song.trimmed || f === "all") {
+            return true;
+        }
+
+        return (f === "published") !== !!song.published;
     }
 
     // The badge at the end of a line: new for a song not played yet, else

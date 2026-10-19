@@ -379,6 +379,24 @@ the new settings layout and a number of smaller improvements.
   level through a sound engine of its own.
 - **Tapping the playing song in the queue** leaves it playing where it is,
   as in the list, instead of starting it over.
+- **A song published from the player** takes its place at the top of the
+  published songs at once, with today's publish date, instead of sinking
+  below them with a number among the drafts.
+- **Numbers across the whole library** follow the order the songs were
+  made in every list, so the newest song has the highest number and a song
+  keeps its number when the list switches between published, drafts and
+  all.
+- **Badges in the queue.** On the phone and in the web view, a song in the
+  queue carries its badge whenever it tells something: new while not
+  played yet, a draft while the published songs are listed, public while
+  the drafts are listed, every song while all are listed, and a song made
+  by trimming with its T.
+- **Instrumental by short lyrics.** A Library setting counts a song as
+  instrumental when its lyrics are shorter than a number of characters, 20
+  unless changed, spaces not counted, as with a prompt holding only a note
+  such as [Instrumental]. The lyrics are known for songs played, coming up
+  next, opened in Information or read for the play counts. 0 switches it
+  off.
 - **A note for everything asked of Mureka**: publishing, unpublishing,
   renaming, remixing, likes, refreshing a song, trimming and deleting each
   show a ringed note with a turning ring as soon as Mureka is asked, which
