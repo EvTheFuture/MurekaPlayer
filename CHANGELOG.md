@@ -363,6 +363,10 @@ the new settings layout and a number of smaller improvements.
   (Backup and restore) and Troubleshooting (Developer), with Your songs
   (Publishing) between Music and Data. Each group and most
   settings have a short explanation, and each section heading is underlined.
+- **Drop-downs for every choice.** A setting with more than on and off is
+  a drop-down beside its name, in place of a row of buttons or a button
+  that changed its word on each tap, in the web view's copy of the settings
+  too.
 - **A note for everything asked of Mureka**: publishing, unpublishing,
   renaming, remixing, likes, refreshing a song, trimming and deleting each
   show a ringed note with a turning ring as soon as Mureka is asked, which
@@ -503,6 +507,11 @@ the new settings layout and a number of smaller improvements.
 - **Account name** in the web view can be switched off under Web view
   display, for each browser on its own, leaving more room on a narrow
   screen.
+- **Song list beside the song.** With room beside the cover, the small song
+  list slides in over the whole column beside it, and the title, stars,
+  heart and lyrics slide over the dimmed cover, so they stay in reach.
+  Closing the list slides both back. When there is room, Always or Never,
+  under Web view display, for each browser on its own.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,

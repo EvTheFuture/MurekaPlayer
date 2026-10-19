@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.427";
+    const VERSION = "1.9.9.428";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1822,9 +1822,7 @@
             settingsEl.scrollTop = 0;
         }
     }
-    let startPublishedBtn = null;
-    let startAllBtn = null;
-    let startLastBtn = null;
+    let startDropRow = null;
 
     // The collapsible top action menu and its toggle in the header
     let actionsWrapEl = null;
@@ -2903,6 +2901,7 @@
             webHotspotBadge: false,
             webWgBadge: false,
             webWhoName: true,
+            webListSide: "auto",
             webHeatBadge: true,
             heatText: "word",
             heatWarm: 40,
@@ -3130,6 +3129,7 @@
                     webHotspotBadge: parsed.webHotspotBadge === true,
                     webWgBadge: parsed.webWgBadge === true,
                     webWhoName: parsed.webWhoName !== false,
+                    webListSide: parsed.webListSide === "always" || parsed.webListSide === "never" ? parsed.webListSide : "auto",
                     webHeatBadge: parsed.webHeatBadge !== false,
                     heatText: parsed.heatText === "both" || parsed.heatText === "temp" ? parsed.heatText : "word",
                     heatWarm: numberIn(parsed.heatWarm, 20, 70, 40),
@@ -23946,6 +23946,7 @@
                 ? wgBadgeState() : null,
             wgBadgeOn: settings.webWgBadge === true,
             whoNameOn: settings.webWhoName !== false,
+            listSide: settings.webListSide === "always" || settings.webListSide === "never" ? settings.webListSide : "auto",
 
             // How warm the phone is, for the heat badge: Android's heat level
             // and the battery's temperature
@@ -32311,25 +32312,11 @@
         }
     }
 
-    // Highlight the start feed buttons to match the saved choice
+    // The start list's drop-down showing the saved choice
     function updateStartButtons() {
 
-        if (!startPublishedBtn || !startAllBtn || !startLastBtn) {
-            return;
-        }
-
-        const pick = [
-            [startPublishedBtn, "published"],
-            [startAllBtn, "all"],
-            [startLastBtn, "last"]
-        ];
-
-        for (const [btn, value] of pick) {
-
-            const on = settings.startFeed === value;
-
-            btn.style.background = on ? "#48e1eb" : "#333";
-            btn.style.color = on ? "#000" : "#fff";
+        if (startDropRow) {
+            startDropRow.__paint();
         }
     }
 
@@ -33038,7 +33025,7 @@
 
         // With browsers of the web view on the hotspot: off anyway, which cuts
         // them off, or once they have all gone
-        const hotspotWaitRow = makeChoiceRow([
+        const hotspotWaitRow = makeDropRow("Browsers on the hotspot", [
             { label: "Turn off anyway", value: "force" },
             { label: "Wait for them", value: "wait" }
         ], function () {
@@ -33285,7 +33272,7 @@
         };
 
         // What starts it, the charger or Bluetooth
-        const triggerRow = makeChoiceRow([
+        const triggerRow = makeDropRow("Starts when", [
             { label: "On battery", value: "charger" },
             { label: "Bluetooth disconnects", value: "bluetooth" }
         ], function () {
@@ -33479,7 +33466,6 @@
         add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It turns the phone's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(warnEl);
         add(withHint(hotspotOffRow, WORDS.charger.hotspotOff[1]));
-        add(makeSubLabel("Browsers on the hotspot"));
         add(hotspotWaitRow);
         add(makeHint("When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the phone's Wi-Fi never count."));
         add(withHint(hotspotOnRow, WORDS.charger.hotspotOn[1]));
@@ -33527,42 +33513,56 @@
     }
 
     // Build a row of mutually exclusive choice buttons backed by getter / setter
-    function makeChoiceRow(choices, get, set) {
+    // A name with a drop-down of choices beside it, the way every setting
+    // with more than on and off is chosen. choices are { label, value },
+    // values may be words or numbers
+    function makeDropRow(label, choices, get, set) {
 
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;gap:6px";
+        const name = document.createElement("span");
+        const sel = document.createElement("select");
 
-        const buttons = [];
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        name.textContent = label;
+        name.style.cssText = "flex:1;min-width:0";
+        sel.style.cssText = "flex:0 1 auto;max-width:62%;min-height:32px;padding:4px 8px;box-sizing:border-box;"
+            + "border-radius:8px;border:1px solid #555;background:#333;color:#fff;font:inherit;cursor:pointer";
 
-        const highlight = function () {
+        for (const choice of choices) {
 
-            const current = get();
+            const opt = document.createElement("option");
 
-            buttons.forEach(function (entry) {
+            opt.value = String(choice.value);
+            opt.textContent = choice.label;
+            sel.appendChild(opt);
+        }
 
-                const on = entry.value === current;
-
-                entry.btn.style.background = on ? "#48e1eb" : "#333";
-                entry.btn.style.color = on ? "#000" : "#fff";
-            });
+        const paint = function () {
+            sel.value = String(get());
         };
 
-        choices.forEach(function (choice) {
+        sel.addEventListener("change", function () {
 
-            const btn = makeButton(choice.label, "#333", "#fff", function () {
-                set(choice.value);
-                saveSettings();
-                highlight();
+            const picked = choices.find(function (c) {
+                return String(c.value) === sel.value;
             });
 
-            buttons.push({ btn: btn, value: choice.value });
-            row.appendChild(btn);
+            if (picked) {
+
+                set(picked.value);
+                saveSettings();
+            }
         });
 
-        highlight();
+        paint();
+        settingsRefreshers.push(paint);
 
-        // Settings read again from storage show on the row as well
-        settingsRefreshers.push(highlight);
+        // Shown again after a reset elsewhere on the page
+        row.__paint = paint;
+        row.__select = sel;
+
+        row.appendChild(name);
+        row.appendChild(sel);
 
         return row;
     }
@@ -33860,35 +33860,19 @@
         };
 
         // Start feed section, which list the player opens on
-        const startLabel = document.createElement("div");
-        startLabel.textContent = "Start with";
-        startLabel.style.cssText = "color:#bbb";
-        startLabel.dataset.section = "1";
+        const startLabel = makeLabel("When the player opens");
 
-        const startRow = document.createElement("div");
-        startRow.style.cssText = "display:flex;gap:6px";
-
-        startPublishedBtn = makeButton("Published", "#333", "#fff", function () {
-            settings.startFeed = "published";
-            saveSettings();
-            updateStartButtons();
+        const startRow = makeDropRow("Start with", [
+            { label: "Published", value: "published" },
+            { label: "All", value: "all" },
+            { label: "As last time", value: "last" }
+        ], function () {
+            return settings.startFeed === "all" || settings.startFeed === "last" ? settings.startFeed : "published";
+        }, function (v) {
+            settings.startFeed = v;
         });
 
-        startAllBtn = makeButton("All", "#333", "#fff", function () {
-            settings.startFeed = "all";
-            saveSettings();
-            updateStartButtons();
-        });
-
-        startLastBtn = makeButton("As last time", "#333", "#fff", function () {
-            settings.startFeed = "last";
-            saveSettings();
-            updateStartButtons();
-        });
-
-        startRow.appendChild(startPublishedBtn);
-        startRow.appendChild(startAllBtn);
-        startRow.appendChild(startLastBtn);
+        startDropRow = startRow;
 
         const pubRow = makeBoolRow("Refresh on open",
             function () { return settings.refreshOnStart; },
@@ -33903,7 +33887,7 @@
             function (v) { settings.refreshOnReturnMin = returnMinutes(v); },
             REFRESH_RETURN_STEP, REFRESH_RETURN_MAX, REFRESH_RETURN_STEP);
 
-        const goneRow = makeChoiceRow([
+        const goneRow = makeDropRow("Songs deleted on Mureka", [
             { label: "Ask", value: "ask" },
             { label: "Remove", value: "remove" },
             { label: "Rescan only", value: "rescan" }
@@ -34017,7 +34001,6 @@
         libraryPage.appendChild(returnRow);
         libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when the player or a web view opens or comes back into view, and again while it stays in view, each time the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
-        libraryPage.appendChild(makeSubLabel("Songs deleted on Mureka"));
         libraryPage.appendChild(goneRow);
         libraryPage.appendChild(makeHint("Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
@@ -34194,25 +34177,17 @@
         nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
         // Three way art overlay mode, also cycled by double tapping the art
-        const overlayLabels = { none: "None", info: "Info", all: "Info + lyrics" };
+        const overlayRow = makeDropRow("Art overlays", [
+            { label: "None", value: "none" },
+            { label: "Info", value: "info" },
+            { label: "Info + lyrics", value: "all" }
+        ], function () {
+            return settings.artOverlayMode;
+        }, function (v) {
 
-        const overlayRow = document.createElement("div");
-        overlayRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
-
-        const overlayName = document.createElement("span");
-        overlayName.textContent = "Art overlays";
-
-        const overlayBtnWrap = document.createElement("div");
-        overlayBtnWrap.style.cssText = "flex:0 0 auto;min-width:110px;display:flex";
-
-        const overlayBtn = makeButton(overlayLabels[settings.artOverlayMode], "#333", "#fff", function () {
-            cycleOverlayMode();
-            overlayBtn.textContent = overlayLabels[settings.artOverlayMode];
+            settings.artOverlayMode = v;
+            updateLyricLine(true);
         });
-
-        overlayBtnWrap.appendChild(overlayBtn);
-        overlayRow.appendChild(overlayName);
-        overlayRow.appendChild(overlayBtnWrap);
 
         const lyricSizeRow = makeStepperRow("Lyric size",
             function () { return settings.lyricSize; },
@@ -34374,7 +34349,7 @@
             });
 
         // Which waveform: Mureka's few points, or our own from the song
-        const waveSourceRow = makeChoiceRow([
+        const waveSourceRow = makeDropRow("Waveform from", [
             { label: "Mureka's", value: "mureka" },
             { label: "From the song", value: "song" }
         ], function () { return settings.waveSource || "mureka"; }, function (v) {
@@ -34388,7 +34363,7 @@
             }
         });
 
-        const onlineBadgeRow = makeChoiceRow([
+        const onlineBadgeRow = makeDropRow("Online badge", [
             { label: "Fade away", value: "fade" },
             { label: "Always", value: "always" }
         ], function () { return settings.onlineBadge || "fade"; }, function (v) {
@@ -34421,7 +34396,7 @@
         // connects. Only the app sends to a car itself
         if (isApkHost()) {
 
-            const resendRow = makeChoiceRow([
+            const resendRow = makeDropRow("How the cover is sent again", [
                 { label: "Cover only", value: "art" },
                 { label: "New song", value: "id" },
                 { label: "New title", value: "title" }
@@ -34431,7 +34406,6 @@
                 publishHostSoon();
             });
 
-            nowPage.appendChild(makeSubLabel("How the cover is sent again"));
             nowPage.appendChild(resendRow);
             nowPage.appendChild(makeHint("The cover goes out twice: first a loading picture, then the song's own two seconds later. Android only tells the car about a new cover when the song's text changes, so New title, the one to use, adds an invisible space to the title with the loading picture. New song changes only the song's id, Cover only just the picture. Used on resume, when Bluetooth connects and by the cover test under Developer."));
         }
@@ -34471,7 +34445,7 @@
                 trickleFails = 0;
             });
 
-        const paceRow = makeChoiceRow([
+        const paceRow = makeDropRow("Catching up, one song every", [
             { label: "5-10 s", value: 5 },
             { label: "10-30 s", value: 10 },
             { label: "30-60 s", value: 30 }
@@ -34479,7 +34453,7 @@
             settings.playsTrickleSecs = v;
         });
 
-        const keepRow = makeChoiceRow([
+        const keepRow = makeDropRow("Keeping up, one song every", [
             { label: "1-3 min", value: 1 },
             { label: "3-10 min", value: 3 },
             { label: "10-30 min", value: 10 },
@@ -34488,7 +34462,7 @@
             settings.playsKeepMins = v;
         });
 
-        const ageRow = makeChoiceRow([
+        const ageRow = makeDropRow("Counts are up to date for", [
             { label: "6 hours", value: 6 },
             { label: "1 day", value: 24 },
             { label: "3 days", value: 72 },
@@ -34578,11 +34552,8 @@
         addPlays(playsStatusEl);
         addPlays(fetchNowRow);
         addPlays(withHint(trickleRow, "While the player is open, play counts are read one song at a time. Catching up while counts are missing or older than the age below, then keeping up, far slower, with only the songs gaining plays. It waits while songs are loaded or cached."));
-        addPlays(makeSubLabel("Counts are up to date for"));
         addPlays(ageRow);
-        addPlays(makeSubLabel("Catching up, one song every"));
         addPlays(paceRow);
-        addPlays(makeSubLabel("Keeping up, one song every"));
         addPlays(keepRow);
         addPlays(makeHint("Each wait is a random time in the range. Keeping up reads a song only once it has most likely gained a play, at most every 15 minutes, a song that barely moves waits until its count is older than the age above. Off waits for that alone."));
         addPlays(readRow);
@@ -34696,7 +34667,6 @@
         // in which colours. Without the waveform the rest is hidden, and
         // without the progress on it so are its colours
         const mobileWave = [
-            makeSubLabel("Waveform from"),
             waveSourceRow,
             makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."),
             withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."),
@@ -34756,13 +34726,12 @@
 
         // The badge in the header
         mobilePage.appendChild(makeLabel("Badges"));
-        mobilePage.appendChild(makeSubLabel("Online badge"));
         mobilePage.appendChild(onlineBadgeRow);
         mobilePage.appendChild(makeHint("The red Offline badge in the header shows while there is no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the player is online."));
 
         // The screen stays on while music plays. This keeps it on when the
         // music is paused or stopped too, so the phone never locks
-        const keepOnRow = makeChoiceRow([
+        const keepOnRow = makeDropRow("Keep the screen on", [
             { label: "Never", value: "never" },
             { label: "While playing", value: "playing" },
             { label: "Always", value: "always" }
@@ -34771,7 +34740,6 @@
             syncWakeLock();
         });
 
-        devicePage.appendChild(makeLabel("Keep the screen on"));
         devicePage.appendChild(keepOnRow);
         devicePage.appendChild(makeHint("Never leaves the screen to the phone's own timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the phone never locks and Bluetooth buttons always reach it."));
 
@@ -35321,65 +35289,30 @@
 
             const webControlRow = buildControlEditor("webControlOrder");
 
-            const webLyricLabels = { off: "Off", info: "Beside the cover", cover: "On the cover" };
-            const webLyricRow = document.createElement("div");
-            webLyricRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            const webLyricRow = makeDropRow("Lyrics", [
+                { label: "Off", value: "off" },
+                { label: "Beside the cover", value: "info" },
+                { label: "On the cover", value: "cover" }
+            ], function () {
+                return settings.webLyrics || "info";
+            }, function (v) {
 
-            const webLyricName = document.createElement("span");
-            webLyricName.textContent = "Lyrics";
-            webLyricName.style.cssText = "flex:1;min-width:0";
-
-            const webLyricBtn = makeButton(webLyricLabels[settings.webLyrics || "info"], "#333", "#fff", function () {
-
-                const order = ["off", "info", "cover"];
-                const at = order.indexOf(settings.webLyrics || "info");
-
-                settings.webLyrics = order[(at + 1) % order.length];
-                webLyricBtn.textContent = webLyricLabels[settings.webLyrics];
-                saveSettings();
+                settings.webLyrics = v;
                 publishHostSoon();
             });
-
-            webLyricBtn.style.flex = "0 0 auto";
-            webLyricBtn.style.minWidth = "56px";
-            webLyricBtn.style.padding = "6px 12px";
-
-            settingsRefreshers.push(function () {
-                webLyricBtn.textContent = webLyricLabels[settings.webLyrics || "info"];
-            });
-
-            webLyricRow.appendChild(webLyricName);
-            webLyricRow.appendChild(webLyricBtn);
 
             // How the web view writes the volume, as a percentage or as the
             // step Android counts
-            const webVolumeRow = document.createElement("div");
-            webVolumeRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            const webVolumeRow = makeDropRow("Volume shown as", [
+                { label: "Percent", value: "percent" },
+                { label: "Steps", value: "steps" }
+            ], function () {
+                return settings.webVolumeUnit || "percent";
+            }, function (v) {
 
-            const webVolumeName = document.createElement("span");
-            webVolumeName.textContent = "Volume shown as";
-            webVolumeName.style.cssText = "flex:1;min-width:0";
-
-            const webVolumeLabels = { percent: "Percent", steps: "Steps" };
-
-            const webVolumeBtn = makeButton(webVolumeLabels[settings.webVolumeUnit || "percent"], "#333", "#fff", function () {
-
-                settings.webVolumeUnit = (settings.webVolumeUnit || "percent") === "percent" ? "steps" : "percent";
-                webVolumeBtn.textContent = webVolumeLabels[settings.webVolumeUnit];
-                saveSettings();
+                settings.webVolumeUnit = v;
                 publishHostSoon();
             });
-
-            webVolumeBtn.style.flex = "0 0 auto";
-            webVolumeBtn.style.minWidth = "56px";
-            webVolumeBtn.style.padding = "6px 12px";
-
-            settingsRefreshers.push(function () {
-                webVolumeBtn.textContent = webVolumeLabels[settings.webVolumeUnit || "percent"];
-            });
-
-            webVolumeRow.appendChild(webVolumeName);
-            webVolumeRow.appendChild(webVolumeBtn);
 
             // The web view's lyric roll, laid out like the mobile player's. Side
             // lines and spacing start out as the mobile player has them
@@ -35421,7 +35354,7 @@
 
 
             // The web view's own choice of waveform
-            const webWaveSourceRow = makeChoiceRow([
+            const webWaveSourceRow = makeDropRow("Waveform from", [
                 { label: "Mureka's", value: "mureka" },
                 { label: "From the song", value: "song" }
             ], function () { return settings.webWaveSource || "mureka"; }, function (v) {
@@ -35500,7 +35433,7 @@
                 });
 
 
-            const webOnlineBadgeRow = makeChoiceRow([
+            const webOnlineBadgeRow = makeDropRow("Online badge", [
                 { label: "Fade away", value: "fade" },
                 { label: "Always", value: "always" }
             ], function () { return settings.webOnlineBadge || "fade"; }, function (v) {
@@ -35509,7 +35442,7 @@
                 publishHostSoon();
             });
 
-            const heatTextRow = makeChoiceRow([
+            const heatTextRow = makeDropRow("Heat badge shows", [
                 { label: "Cool", value: "word" },
                 { label: "Cool 37 \u00B0C", value: "both" },
                 { label: "37 \u00B0C", value: "temp" }
@@ -35531,7 +35464,6 @@
 
             webPage.appendChild(makeLabel("Waveform"));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
-            webPage.appendChild(makeSubLabel("Waveform from"));
             webPage.appendChild(webWaveSourceRow);
             webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
             webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
@@ -35544,6 +35476,23 @@
             webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
             webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT));
             webPage.appendChild(webWaveReset);
+
+            // Where the small song list opens on a wide screen
+            const webListSideRow = makeSelectRow([
+                { value: "auto", label: "When there is room" },
+                { value: "always", label: "Always" },
+                { value: "never", label: "Never" }
+            ], function () {
+                return settings.webListSide === "always" || settings.webListSide === "never" ? settings.webListSide : "auto";
+            }, function (v) {
+
+                settings.webListSide = v;
+                publishHostSoon();
+            });
+
+            webPage.appendChild(makeSubLabel("Song list beside the song"));
+            webPage.appendChild(webListSideRow);
+            webPage.appendChild(makeHint("With room beside the cover, the small song list takes the whole column beside it, and the title, stars and lyrics move over the cover, so they stay in reach. Never keeps the list under the title. Each browser can have this set for itself."));
 
             // The synced lyrics and how they are laid out
             webPage.appendChild(makeLabel("Lyrics"));
@@ -35561,14 +35510,12 @@
 
             // The badges along the top
             webPage.appendChild(makeLabel("Badges"));
-            webPage.appendChild(makeSubLabel("Online badge"));
             webPage.appendChild(webOnlineBadgeRow);
             webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
             webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
             webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
             webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
             webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
-            webPage.appendChild(makeSubLabel("Heat badge shows"));
             webPage.appendChild(heatTextRow);
             webPage.appendChild(makeHint("The word, the word and the battery's temperature, or the temperature alone. The colour follows the limits below either way."));
             webPage.appendChild(heatWarmRow);
@@ -35730,7 +35677,7 @@
                 function () { return settings.pauseOnDisconnect === true; },
                 function (v) { settings.pauseOnDisconnect = v; publishHostSoon(); });
 
-            const playBtRow = makeChoiceRow([
+            const playBtRow = makeDropRow("Play when Bluetooth connects", [
                 { label: "Never", value: "never" },
                 { label: "If it was playing", value: "resume" },
                 { label: "Always", value: "always" }
@@ -35740,7 +35687,6 @@
                 publishHostSoon();
             });
 
-            bluetoothPlayEls.push(makeSubLabel("Play when Bluetooth connects"));
             bluetoothPlayEls.push(playBtRow);
             bluetoothPlayEls.push(makeHint("Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
             bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the phone's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));

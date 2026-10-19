@@ -1390,6 +1390,68 @@
         visibility: hidden;
     }
 
+    /* With room, the small list takes the whole column beside the cover,
+       and the song's text moves over the dimmed cover, the stars and the
+       lyrics with it. Where it goes is set by the script */
+    #app.miniSide #info {
+        position: absolute !important;
+        z-index: 2;
+        left: var(--sideL) !important;
+        top: var(--sideT) !important;
+        width: var(--sideW) !important;
+        height: var(--sideH) !important;
+        margin-top: 0 !important;
+        box-sizing: border-box;
+        justify-content: center;
+        gap: 1.2vh;
+        padding: 2.4vh 1.8vw;
+        overflow: hidden;
+        border-radius: 14px;
+        background: rgba(22, 22, 27, 0.62);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+    }
+
+    #app.miniSide #title,
+    #app.miniSide #subtitle,
+    #app.miniSide #rateRow {
+        margin-top: 0 !important;
+    }
+
+    #app.miniSide #title {
+        font-size: clamp(22px, 2.6vw, 44px);
+    }
+
+    #app.miniSide #subtitle {
+        font-size: clamp(14px, 1.3vw, 22px);
+    }
+
+    #app.miniSide #rateRow,
+    #app.miniSide #fromLine,
+    #app.miniSide #lyrics {
+        visibility: visible;
+    }
+
+    /* The stars and the heart a little smaller there, still easy to tap,
+       the counts going under them when the row runs out */
+    #app.miniSide #rateRow {
+        flex-wrap: wrap;
+        gap: 0.6vw 1vw;
+    }
+
+    #app.miniSide .star svg,
+    #app.miniSide #like .ico {
+        width: clamp(34px, 3.4vw, 56px);
+        height: clamp(34px, 3.4vw, 56px);
+    }
+
+    #app.miniSide #lyrics {
+        flex: 0 1 auto;
+        min-height: 0;
+        -webkit-mask-image: none !important;
+        mask-image: none !important;
+    }
+
     #miniTop {
         flex: 0 0 auto;
         display: flex;
@@ -2750,6 +2812,13 @@
         color: var(--text);
         margin: 4px 0;
         max-width: 100%;
+    }
+
+    /* A drop-down beside its name, as on the phone */
+    .pRow > .pSelect {
+        flex: 0 1 auto;
+        max-width: 62%;
+        margin: 0;
     }
 
     .pField {
@@ -5618,6 +5687,7 @@
             hotspotBadge: s.hotspotBadgeOn === true,
             wgBadge: s.wgBadgeOn === true,
             whoName: s.whoNameOn !== false,
+            listSide: s.listSide === "always" || s.listSide === "never" ? s.listSide : "auto",
             heatBadge: s.heatBadgeOn !== false,
             heatText: s.heatText === "both" || s.heatText === "temp" ? s.heatText : "word",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
@@ -5656,6 +5726,8 @@
         s.hotspotBadgeOn = typeof look.hotspotBadge === "boolean" ? look.hotspotBadge : raw.hotspotBadgeOn === true;
         s.wgBadgeOn = typeof look.wgBadge === "boolean" ? look.wgBadge : raw.wgBadgeOn === true;
         s.whoNameOn = typeof look.whoName === "boolean" ? look.whoName : raw.whoNameOn !== false;
+        s.listSide = ["auto", "always", "never"].indexOf(look.listSide) !== -1 ? look.listSide
+            : (raw.listSide === "always" || raw.listSide === "never" ? raw.listSide : "auto");
 
         // The waveform's colours. A look kept before they could be set
         // follows the phone
@@ -5861,23 +5933,19 @@
         { label: "Show up next", page: "Web view", key: "upNext", kind: "bool" },
         { label: "Waveform seek bar", page: "Web view", key: "wave", kind: "bool" },
         { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
-        { label: "Waveform from", page: "Web view", key: "waveSource", kind: "choice", values: ["mureka", "song"],
-            names: { mureka: "Mureka's", song: "From the song" } },
+        { label: "Waveform from", page: "Web view", key: "waveSource", kind: "select", values: ["mureka", "song"] },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
         { label: "Song's progress on the waveform", page: "Web view", key: "progressLook", kind: "select",
             values: PROGRESS_LOOKS },
-        { label: "Lyrics", page: "Web view", key: "lyrics", kind: "cycle", values: ["off", "info", "cover"],
-            names: { off: "Off", info: "Beside the cover", cover: "On the cover" } },
-        { label: "Volume shown as", page: "Web view", key: "volUnit", kind: "cycle", values: ["percent", "steps"],
-            names: { percent: "Percent", steps: "Steps" } },
-        { label: "Online badge", page: "Web view", key: "onlineBadge", kind: "choice", values: ["fade", "always"],
-            names: { fade: "Fade away", always: "Always" } },
+        { label: "Lyrics", page: "Web view", key: "lyrics", kind: "select", values: ["off", "info", "cover"] },
+        { label: "Volume shown as", page: "Web view", key: "volUnit", kind: "select", values: ["percent", "steps"] },
+        { label: "Online badge", page: "Web view", key: "onlineBadge", kind: "select", values: ["fade", "always"] },
         { label: "Hotspot badge", page: "Web view", key: "hotspotBadge", kind: "bool" },
         { label: "WireGuard badge", page: "Web view", key: "wgBadge", kind: "bool" },
         { label: "Account name", page: "Web view", key: "whoName", kind: "bool" },
+        { label: "Song list beside the song", page: "Web view", key: "listSide", kind: "select", values: ["auto", "always", "never"] },
         { label: "Heat badge", page: "Web view", key: "heatBadge", kind: "bool" },
-        { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "choice", values: ["word", "both", "temp"],
-            names: { word: "Cool", both: "Cool 37 \u00B0C", temp: "37 \u00B0C" } },
+        { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "select", values: ["word", "both", "temp"] },
         { label: "Colour when played", page: "Web view", key: "wavePlayed", kind: "swatch" },
         { label: "Colour still to play", page: "Web view", key: "waveRest", kind: "swatch" },
         { label: "Play head colour", page: "Web view", key: "playHead", kind: "swatch" },
@@ -8334,7 +8402,12 @@
         $("controls").classList.toggle("names", !!(s && s.names));
         // On a phone the lyrics roll above the title on the covers, where
         // the mobile player has them
-        $("lyrics").dataset.where = isPhone() ? "info" : (s && s.lyricsWhere ? s.lyricsWhere : "info");
+        // With the list beside the song the lyrics go along with the text
+        // over the cover, wherever they were
+        const where = s && s.lyricsWhere ? s.lyricsWhere : "info";
+
+        $("lyrics").dataset.where = isPhone() || ($("app").classList.contains("miniSide") && where !== "off")
+            ? "info" : where;
         $("phoneVer").textContent = s && s.version ? "v" + s.version : "";
 
         // What plays after this one, when the phone's settings ask for it.
@@ -9598,9 +9671,12 @@
         // size is for a cover about 360 pixels wide
         const layout = lyricLayout();
 
-        // On the cover a little smaller, it shares the picture
+        // On the cover a little smaller, it shares the picture, and smaller
+        // still over the cover with the list beside it
         if (onCover) {
             layout.size = Math.round(layout.size * 0.85);
+        } else if ($("app").classList.contains("miniSide")) {
+            layout.size = Math.round(layout.size * 0.75);
         }
 
         const key = [layout.size, layout.side, layout.line, layout.sideShift, layout.shift].join(",");
@@ -15006,8 +15082,66 @@
         $("miniRows").textContent = "";
     }
 
+    // The cover at least this big for the list to go beside the song
+    const SIDE_MIN_W = 380;
+    const SIDE_MIN_H = 300;
+    const SIDE_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
+    const SIDE_MS = 380;
+
+    // The song's text over the cover, or back beside it, sliding from where
+    // it was to where it goes
+    function setSide(on) {
+
+        const app = $("app");
+        const info = $("info");
+        const was = app.classList.contains("miniSide");
+        const main = $("main").getBoundingClientRect();
+        const cover = $("cover").getBoundingClientRect();
+        const from = info.getBoundingClientRect();
+
+        if (on) {
+
+            info.style.setProperty("--sideL", Math.round(cover.left - main.left) + "px");
+            info.style.setProperty("--sideT", Math.round(cover.top - main.top) + "px");
+            info.style.setProperty("--sideW", Math.round(cover.width) + "px");
+            info.style.setProperty("--sideH", Math.round(cover.height) + "px");
+        }
+
+        if (on === was) {
+            return;
+        }
+
+        app.classList.toggle("miniSide", on);
+        render();
+
+        const to = info.getBoundingClientRect();
+
+        if (info.animate) {
+
+            info.animate([
+                { transform: "translate(" + Math.round(from.left - to.left) + "px, " + Math.round(from.top - to.top) + "px)" },
+                { transform: "none" }
+            ], { duration: SIDE_MS, easing: SIDE_EASE });
+        }
+    }
+
+    // Whether this browser wants the list beside the song and has room
+    function sideWanted(main, space) {
+
+        const mode = state && (state.listSide === "always" || state.listSide === "never") ? state.listSide : "auto";
+        const cover = $("cover").getBoundingClientRect();
+        const portrait = space.width >= main.width - 4;
+
+        if (portrait || mode === "never") {
+            return false;
+        }
+
+        return mode === "always" || (cover.width >= SIDE_MIN_W && cover.height >= SIDE_MIN_H);
+    }
+
     // From the top of the stars to just above the seek bar, as wide as the
-    // song's text beside the cover
+    // song's text beside the cover. With room, the whole column beside the
+    // cover, the song's text moving over the cover
     function placeMini() {
 
         if (!miniOpen) {
@@ -15021,12 +15155,35 @@
             return;
         }
 
+        const seek = $("seek").getBoundingClientRect();
+        const box = $("mini");
+        const mainEl = $("main");
+        const main = mainEl.getBoundingClientRect();
+        const space = $("coverSpace").getBoundingClientRect();
+        const side = sideWanted(main, space);
+
+        setSide(side);
+
+        if (side) {
+
+            // Clear of the cover, which can reach a little past its space
+            const gap = parseFloat(getComputedStyle(mainEl).columnGap) || 0;
+            const cover = $("cover").getBoundingClientRect();
+            const left = Math.max(space.right + gap, cover.right + 20);
+            const sideBottom = seek.top - 10;
+
+            box.style.left = Math.round(left - 8) + "px";
+            box.style.width = Math.round(main.right - left + 16) + "px";
+            box.style.top = Math.round(main.top) + "px";
+            box.style.height = Math.max(100, Math.round(sideBottom - main.top)) + "px";
+
+            return;
+        }
+
         const info = $("info").getBoundingClientRect();
         const stars = $("rateRow").getBoundingClientRect();
-        const seek = $("seek").getBoundingClientRect();
         const bottom = seek.top - 10;
         const top = Math.min(stars.top, bottom - 140);
-        const box = $("mini");
 
         box.style.left = Math.round(info.left - 8) + "px";
         box.style.width = Math.round(info.width + 16) + "px";
@@ -15046,6 +15203,16 @@
         $("mini").style.display = "flex";
         placeMini();
         loadMini(true);
+
+        // Beside the song the list slides in from its side as the text
+        // slides over the cover
+        if ($("app").classList.contains("miniSide") && $("mini").animate) {
+
+            $("mini").animate([
+                { transform: "translateX(40px)", opacity: 0 },
+                { transform: "none", opacity: 1 }
+            ], { duration: SIDE_MS, easing: SIDE_EASE });
+        }
     }
 
     function closeMini() {
@@ -15055,7 +15222,26 @@
         $("app").classList.remove("miniOpen");
         $("browseBtn").classList.remove("on");
         $("miniBtn").classList.remove("on");
-        $("mini").style.display = "none";
+
+        // Beside the song the list slides out as the text slides back
+        const box = $("mini");
+
+        if ($("app").classList.contains("miniSide") && box.animate) {
+
+            box.animate([
+                { transform: "none", opacity: 1 },
+                { transform: "translateX(40px)", opacity: 0 }
+            ], { duration: SIDE_MS, easing: SIDE_EASE }).onfinish = function () {
+
+                if (!miniOpen) {
+                    box.style.display = "none";
+                }
+            };
+        } else {
+            box.style.display = "none";
+        }
+
+        setSide(false);
         setMiniQuery("");
         clearMiniRows();
         hideMiniEdge();
