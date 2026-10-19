@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.434";
+    const VERSION = "1.9.9.436";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25974,12 +25974,29 @@
 
             const col = [];
 
+            // The controls floating beside the words follow the column, as
+            // a switch beside its name always has
+            const after = [];
+
             kids.forEach(function (k) {
-                hostWalk(k.el, col, k.path);
+
+                if (!k.el.dataset.hostFloat) {
+
+                    hostWalk(k.el, col, k.path);
+                    return;
+                }
+
+                Array.from(k.el.children).forEach(function (c, i) {
+                    hostWalk(c, after, k.path + "." + i);
+                });
             });
 
             if (col.length > 0) {
                 out.push({ t: "col", c: col });
+            }
+
+            for (const node of after) {
+                out.push(node);
             }
 
             return;
@@ -32952,7 +32969,7 @@
 
             const col = row.firstElementChild;
 
-            col.firstElementChild.textContent = label;
+            col.querySelector(":scope > [data-host-label]").textContent = label;
             col.lastElementChild.textContent = hint;
         };
 
@@ -33777,20 +33794,45 @@
         // explanation become one column on the left, the switch or stepper
         // stays on the right, and the two line up at the top. The row is
         // handed back, so it can be appended where it was
+        // The name with its explanation under it, the switch or drop-down
+        // floating at their right, so the explanation runs on under the
+        // control once past it. The web view gets the name, the
+        // explanation and the controls as before
         const withHint = function (row, text) {
 
             const label = row.firstElementChild;
             const col = document.createElement("div");
+            const ctl = document.createElement("div");
             const hint = makeHint(text);
 
-            col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:3px";
+            col.style.cssText = "flex:1;min-width:0;display:flow-root";
             col.dataset.hostCol = "1";
-            hint.style.marginTop = "0";
+            ctl.style.cssText = "float:right;display:flex;flex-wrap:wrap;align-items:center;"
+                + "justify-content:flex-end;gap:8px;max-width:62%;margin:0 0 8px 12px";
+            ctl.dataset.hostFloat = "1";
+            label.dataset.hostLabel = "1";
+            hint.style.marginTop = "3px";
+
+            while (label.nextSibling) {
+
+                const el = label.nextSibling;
+
+                // A share of the row's width now a share of the group's,
+                // which is itself kept to a share of the row
+                if (el.nodeType === 1 && /%$/.test(el.style.maxWidth)) {
+                    el.style.maxWidth = "100%";
+                }
+
+                ctl.appendChild(el);
+            }
+
             row.insertBefore(col, label);
+            col.appendChild(ctl);
             col.appendChild(label);
             col.appendChild(hint);
 
             label.style.flex = "none";
+            label.style.display = "block";
             row.style.alignItems = "flex-start";
 
             return row;

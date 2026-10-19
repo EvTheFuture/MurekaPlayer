@@ -367,7 +367,9 @@ the new settings layout and a number of smaller improvements.
   a drop-down beside its name, in place of a row of buttons or a button
   that changed its word on each tap, in the web view's copy of the settings
   too. Every switch, button, drop-down and colour swatch in the settings has
-  the same height, and a control stays beside its name and explanation.
+  the same height. A setting's control sits at the right of its name, and
+  the explanation runs on under the control once past it. A choice too long
+  for a narrow screen fades out at its end in the web view.
 - **A note for everything asked of Mureka**: publishing, unpublishing,
   renaming, remixing, likes, refreshing a song, trimming and deleting each
   show a ringed note with a turning ring as soon as Mureka is asked, which

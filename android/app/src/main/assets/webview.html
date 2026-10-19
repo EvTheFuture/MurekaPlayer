@@ -2690,11 +2690,10 @@
         font-size: 0.8em;
     }
 
-    /* An explanation keeps to the label column and wraps before the
-       switches and steppers on the right. The script measures how wide
-       their column is */
+    /* An explanation on a line of its own, under the controls it is
+       about, runs the whole width */
     #panelBody > .pText.small {
-        padding-right: calc(var(--ctl-col, 0px) + 1vw);
+        padding-right: 4px;
     }
 
     .pRow {
@@ -2920,8 +2919,7 @@
         height: var(--pctl-h);
     }
 
-    /* A name with its explanation keeps its control beside it, the text
-       running round it, also when the control is wide */
+    /* A name with its explanation keeps its control beside it */
     #panelBody .pRow.top {
         flex-wrap: nowrap;
     }
@@ -2930,8 +2928,107 @@
         flex: 1 1 0;
     }
 
-    #panelBody .pRow.top > .pSelect {
-        max-width: 50%;
+    /* The control floats at the right of the name and its explanation,
+       the words running on under it once past it, with room kept round it */
+    #panelBody .pRow.float {
+        display: block;
+    }
+
+    #panelBody .pRow.float > .pCol {
+        display: flow-root;
+    }
+
+    #panelBody .pRow.float > .pCol > .pText + .pText {
+        margin-top: 4px;
+    }
+
+    #panelBody .pCtl {
+        float: right;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        max-width: 62%;
+        margin: 0 0 12px 18px;
+    }
+
+    #panelBody .pCtl > * {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    html.phone #panelBody .pCtl {
+        max-width: 58%;
+        margin: 0 0 10px 14px;
+    }
+
+    /* The drawn drop-down: a box like the buttons with the chosen word and
+       an arrow, the browser's drop-down invisible over all of it */
+    .pSelBox {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        box-sizing: border-box;
+        height: var(--pctl-h, var(--ctl-h));
+        max-width: 100%;
+        min-width: 0;
+        padding: 0 12px 0 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        color: var(--text);
+    }
+
+    .pSelBox:focus-within {
+        border-color: var(--accent);
+    }
+
+    .pRow > .pSelBox {
+        flex: 0 1 auto;
+        max-width: 62%;
+    }
+
+    .pSelWords {
+        display: grid;
+        grid-template-columns: minmax(0, max-content);
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .pSelWord {
+        grid-area: 1 / 1;
+        white-space: nowrap;
+        visibility: hidden;
+    }
+
+    .pSelWord.chosen {
+        visibility: visible;
+    }
+
+    .pSelArrow {
+        flex: 0 0 auto;
+        display: flex;
+        color: var(--muted);
+    }
+
+    .pSelArrow .ico {
+        width: 1em;
+        height: 1em;
+    }
+
+    #panelBody .pSelBox > .pSelect {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        max-width: none;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+        font-size: 16px;
     }
 
     .pField {
@@ -3460,8 +3557,11 @@
         overscroll-behavior-y: none;
     }
 
+    /* The list's own buttons stay inside it, never over a page opened on
+       top of the list such as the settings */
     #rowsWrap {
         position: relative;
+        isolation: isolate;
         flex: 1;
         min-height: 0;
         display: flex;
@@ -12960,7 +13060,10 @@
 
         for (const row of box.querySelectorAll(".pRow")) {
 
-            const buttons = Array.from(row.children).filter(function (el) {
+            // The controls of a floated row sit in their own group
+            const ctl = row.querySelector(":scope > .pCol > .pCtl");
+            const kids = ctl ? Array.from(ctl.children) : Array.from(row.children);
+            const buttons = kids.filter(function (el) {
                 return el.classList.contains("pBtn") && !el.classList.contains("wide")
                     && !/^\u2039/.test(el.textContent.trim());
             });
@@ -12976,7 +13079,7 @@
                 continue;
             }
 
-            const named = Array.from(row.children).some(function (el) {
+            const named = ctl !== null || Array.from(row.children).some(function (el) {
                 return el.classList.contains("pText") || el.classList.contains("pCol");
             });
             const choice = buttons.length > 1 && buttons.some(function (b) {
@@ -13036,7 +13139,8 @@
         for (const row of box.querySelectorAll(":scope > .pRow")) {
 
             const first = row.firstElementChild;
-            const control = first ? first.nextElementSibling : null;
+            const floated = row.querySelector(":scope > .pCol > .pCtl");
+            const control = floated || (first ? first.nextElementSibling : null);
 
             // A name and its value, as in the play counts table, or a word at
             // the right edge, has no switch beside it
@@ -13052,7 +13156,7 @@
             const c = control.getBoundingClientRect();
 
             // A control that wrapped below its label is not beside it
-            if (c.top >= first.getBoundingClientRect().bottom) {
+            if (!floated && c.top >= first.getBoundingClientRect().bottom) {
                 continue;
             }
 
@@ -13070,6 +13174,10 @@
 
         if ($("panel").style.display === "flex") {
             measureControlColumn();
+
+            for (const sb of $("panelBody").querySelectorAll(".pSelBox")) {
+                paintSelectBox(sb);
+            }
         }
     });
 
@@ -13136,6 +13244,7 @@
         addLocalSection(box);
         tidyPanelButtons(box);
         measureControlColumn();
+        floatPanelRows(box);
 
         // Kept for drawing this page at once next time, and as the one the
         // panel showed last
@@ -13212,6 +13321,110 @@
     // within about 25 s
     const NOW_WAIT_MS = 25000;
     const nowWaits = new Map();
+
+    // A drop-down of the settings drawn by the page: the chosen word with
+    // an arrow, as wide as the longest choice, and the browser's own
+    // drop-down laid invisibly over it, so a tap opens the usual list.
+    // A word cut short by a narrow screen fades out at its end
+    function selectBox(sel) {
+
+        const box = document.createElement("span");
+        const words = document.createElement("span");
+        const arrow = document.createElement("span");
+
+        box.className = "pSelBox";
+        words.className = "pSelWords";
+        arrow.className = "pSelArrow";
+        arrow.appendChild(icon("chevronDown"));
+
+        // Every choice in the same place, only the chosen one seen, so the
+        // box keeps the width of the longest
+        for (const opt of sel.options) {
+
+            const w = document.createElement("span");
+
+            w.className = "pSelWord";
+            w.textContent = opt.textContent;
+            words.appendChild(w);
+        }
+
+        box.appendChild(words);
+        box.appendChild(arrow);
+        box.appendChild(sel);
+        sel.addEventListener("input", function () {
+            paintSelectBox(box);
+        });
+        paintSelectBox(box);
+
+        return box;
+    }
+
+    // The chosen word shown, and faded at its end when it does not fit
+    function paintSelectBox(box) {
+
+        const sel = box.querySelector("select");
+        const words = box.querySelector(".pSelWords");
+
+        if (!sel || !words) {
+            return;
+        }
+
+        let shown = null;
+
+        for (let i = 0; i < words.children.length; i++) {
+
+            const w = words.children[i];
+
+            w.classList.toggle("chosen", i === sel.selectedIndex);
+
+            if (i === sel.selectedIndex) {
+                shown = w;
+            }
+        }
+
+        const cut = shown !== null && words.clientWidth > 0 && shown.scrollWidth > words.clientWidth + 1;
+        const mask = cut ? "linear-gradient(to right, #000 calc(100% - 2em), transparent)" : "";
+
+        words.style.webkitMaskImage = mask;
+        words.style.maskImage = mask;
+    }
+
+    // A name with its explanation and a control beside it: the control is
+    // moved into the text's column and floats at its right, so the
+    // explanation runs on under the control once past it
+    function floatPanelRows(box) {
+
+        for (const row of box.querySelectorAll(".pRow.top")) {
+
+            const col = row.firstElementChild;
+
+            if (!col || !col.classList.contains("pCol") || !col.nextElementSibling) {
+                continue;
+            }
+
+            // Only a name and words, a field under them keeps the row as it is
+            if (Array.from(col.children).some(function (el) {
+                return !el.classList.contains("pText");
+            })) {
+                continue;
+            }
+
+            const ctl = document.createElement("div");
+
+            ctl.className = "pCtl";
+
+            while (col.nextElementSibling) {
+                ctl.appendChild(col.nextElementSibling);
+            }
+
+            col.insertBefore(ctl, col.firstChild);
+            row.classList.add("float");
+        }
+
+        for (const sb of box.querySelectorAll(".pSelBox")) {
+            paintSelectBox(sb);
+        }
+    }
 
     function panelNode(node, hasButtons, top) {
 
@@ -13399,7 +13612,7 @@
                 panelAction("hset", { id: node.id, value: sel.value });
             });
 
-            return sel;
+            return selectBox(sel);
         }
 
         if (node.t === "input") {
