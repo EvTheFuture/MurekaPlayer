@@ -375,6 +375,8 @@ the new settings layout and a number of smaller improvements.
   system, with this browser marked as such, and each can be set from any of
   them. The volume button and keys change it where the song is heard: the
   phone, this browser, or another browser playing it.
+  Safari on an iPhone or iPad, which ignores a page's own volume, gets its
+  level through a sound engine of its own.
 - **Tapping the playing song in the queue** leaves it playing where it is,
   as in the list, instead of starting it over.
 - **A note for everything asked of Mureka**: publishing, unpublishing,

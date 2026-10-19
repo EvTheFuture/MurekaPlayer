@@ -6703,6 +6703,15 @@
         // A song that would not load may mean this browser lost the internet
         checkBrowserNet("a song would not load", false);
 
+        // Led through the gain for the volume, a song straight from Mureka
+        // would only be silence, the browser keeps another site's sound
+        // from the page
+        if (direct && gainNode && audio.src.indexOf("/song?") !== -1) {
+
+            dbgLog("Audio", "the phone could not give the song, and with the volume set here it cannot come straight from Mureka");
+            return;
+        }
+
         if (direct && audio.src.indexOf("/song?") !== -1 && audio.dataset.direct !== direct) {
 
             audio.dataset.direct = direct;
@@ -10194,6 +10203,7 @@
     function unlockAudio() {
 
         unlocked = true;
+        gainWake();
         applyWebVolume();
 
         if (state && state.src) {
@@ -12569,11 +12579,91 @@
         return isFinite(saved) && saved >= 0 && saved <= 1 ? saved : 1;
     }
 
+    // Safari on an iPhone or iPad leaves the volume of a page to the
+    // phone's own buttons, a sound's volume set by the page is ignored.
+    // There the sound goes through a gain of its own instead, put in the
+    // first time this browser's level is set below full. The sound engine
+    // can only be started from a tap, so one is made and woken on each tap
+    const volumeFixed = trimIosLike();
+    let gainCtx = null;
+    let gainNode = null;
+
+    function gainWake() {
+
+        if (!volumeFixed) {
+            return;
+        }
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+
+        if (!gainCtx && Ctx) {
+
+            try {
+
+                // Heard as music, also with the ring switch on silent
+                if (navigator.audioSession) {
+                    navigator.audioSession.type = "playback";
+                }
+
+                gainCtx = new Ctx();
+            } catch (e) {
+                gainCtx = null;
+            }
+        }
+
+        if (gainCtx && gainCtx.state !== "running") {
+
+            gainCtx.resume().then(function () {
+                applyWebVolume();
+            }, function () {
+                // Asleep until the next tap
+            });
+        }
+    }
+
+    // The song's sound led through the gain, once and for good. Only with
+    // the engine awake, an asleep one would silence the song
+    function wireGain() {
+
+        if (gainNode) {
+            return true;
+        }
+
+        if (!gainCtx || gainCtx.state !== "running" || audio.src.indexOf("/song?") === -1) {
+            return false;
+        }
+
+        try {
+
+            const source = gainCtx.createMediaElementSource(audio);
+
+            gainNode = gainCtx.createGain();
+            source.connect(gainNode);
+            gainNode.connect(gainCtx.destination);
+            audio.volume = 1;
+            dbgLog("Audio", "the volume here goes through a gain, Safari ignores a page's own volume");
+        } catch (e) {
+
+            dbgLog("Audio", "no gain for the volume: " + (e && e.message ? e.message : e));
+            gainNode = null;
+        }
+
+        return gainNode !== null;
+    }
+
+    window.addEventListener("pointerdown", gainWake, true);
+    window.addEventListener("keydown", gainWake, true);
+
     function applyWebVolume() {
 
         const want = webVolume();
 
-        if (audio.volume !== want) {
+        if (volumeFixed && (gainNode || (want < 1 && wireGain()))) {
+
+            if (gainNode.gain.value !== want) {
+                gainNode.gain.value = want;
+            }
+        } else if (audio.volume !== want) {
             audio.volume = want;
         }
 
