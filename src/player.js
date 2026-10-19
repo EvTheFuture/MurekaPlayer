@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.425";
+    const VERSION = "1.9.9.427";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31325,6 +31325,63 @@
         }
     }
 
+    // Mureka turns down a like that comes right after another, with HTTP 429
+    // and code 9008, "Too frequently". Likes therefore go out one at a time:
+    // the next is sent only once the one before has its answer, and a
+    // moment after that. One turned down that way anyway is sent again by
+    // itself a little later, a few times, before the question whether to
+    // try again. A request that never answers lets the next go after a while
+    const LIKE_GAP_MS = 1000;
+    const LIKE_HOLD_MS = 20000;
+    const LIKE_BUSY_WAITS = [2000, 4000, 6000];
+    let likeChain = Promise.resolve();
+    let likeDoneAt = 0;
+
+    // Waits for this like's turn and gives the way to let the next one go,
+    // to be called once the answer is in
+    function likeTurn() {
+
+        let letGo = null;
+        const done = new Promise(function (resolve) {
+            letGo = resolve;
+        });
+        const before = likeChain;
+
+        likeChain = done;
+
+        return before.then(function () {
+
+            return new Promise(function (resolve) {
+                setTimeout(resolve, Math.max(0, likeDoneAt + LIKE_GAP_MS - Date.now()));
+            });
+        }).then(function () {
+
+            let over = false;
+            let timer = 0;
+
+            const finish = function () {
+
+                if (over) {
+                    return;
+                }
+
+                over = true;
+                clearTimeout(timer);
+                likeDoneAt = Date.now();
+                letGo();
+            };
+
+            timer = setTimeout(finish, LIKE_HOLD_MS);
+
+            return finish;
+        });
+    }
+
+    // Whether Mureka's answer means only "not so fast"
+    function likeTooSoon(res, json) {
+        return (res && res.status === 429) || (json && json.code === 9008);
+    }
+
     // Like or unlike a song through the Mureka favorite endpoint
     // The heart flips immediately. When the request fails, the question
     // whether to try again comes first, only Cancel puts it back
@@ -31352,11 +31409,22 @@
         paintHeart(heartEl, makeLiked);
         shiftLikes(song, makeLiked ? 1 : -1);
 
+        let busyTries = 0;
+
+        // This like's turn, kept through the waits after a "too frequently"
+        // and given up once the answer that counts is in
+        let turn = null;
+
         for (;;) {
 
             showToast(makeLiked ? "Liking" : "Removing the like", "wait");
 
             try {
+
+                if (!turn) {
+                    turn = await likeTurn();
+                }
+
                 const res = await murekaFetch("/api/pgc/user/song/favorite", {
                     method: "POST",
                     credentials: "include",
@@ -31373,6 +31441,24 @@
                 const json = await res.json().catch(function () {
                     return null;
                 });
+
+                // Too soon after another like: sent again by itself after a
+                // wait, the heart staying as tapped meanwhile
+                if (likeTooSoon(res, json) && busyTries < LIKE_BUSY_WAITS.length) {
+
+                    const wait = LIKE_BUSY_WAITS[busyTries];
+
+                    busyTries += 1;
+                    dbgLog("Mureka", "too many likes at once, " + (song.title || song.song_id) + " is sent again in " + (wait / 1000) + " s");
+                    showToast(makeLiked ? "Liking in a moment" : "Removing the like in a moment", "wait");
+                    await new Promise(function (resolve) {
+                        setTimeout(resolve, wait);
+                    });
+                    continue;
+                }
+
+                turn();
+                turn = null;
 
                 if (!res.ok || !json || json.code !== 0) {
                     throw refusedError(res, json);
@@ -31417,6 +31503,12 @@
                 return;
 
             } catch (e) {
+
+                if (turn) {
+
+                    turn();
+                    turn = null;
+                }
 
                 if (await askRetry(makeLiked ? "Could not like" : "Could not remove the like",
                     "\"" + ((song.title || "").trim() || "Untitled") + "\" was not "
@@ -43975,6 +44067,8 @@
     // Answers whether Mureka took it
     async function likeOnMureka(id) {
 
+        const turn = await likeTurn();
+
         try {
 
             const res = await timedFetch("/api/pgc/user/song/favorite", {
@@ -43993,12 +44087,16 @@
                 return null;
             });
 
+            turn();
+
             if (res.ok && json && json.code === 0) {
                 return true;
             }
 
             dbgLog("Trim", "the like of " + id + " was refused: " + (json && json.msg ? String(json.msg) : "HTTP " + res.status));
         } catch (e) {
+
+            turn();
             dbgLog("Trim", "the like of " + id + " could not reach Mureka");
         }
 
