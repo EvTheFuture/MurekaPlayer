@@ -370,6 +370,13 @@ the new settings layout and a number of smaller improvements.
   the same height. A setting's control sits at the right of its name, and
   the explanation runs on under the control once past it. A choice too long
   for a narrow screen fades out at its end in the web view.
+- **A volume for every browser playing.** The web view's volume popup has a
+  bar for each browser the song is heard out of, named by browser and
+  system, with this browser marked as such, and each can be set from any of
+  them. The volume button and keys change it where the song is heard: the
+  phone, this browser, or another browser playing it.
+- **Tapping the playing song in the queue** leaves it playing where it is,
+  as in the list, instead of starting it over.
 - **A note for everything asked of Mureka**: publishing, unpublishing,
   renaming, remixing, likes, refreshing a song, trimming and deleting each
   show a ringed note with a turning ring as soon as Mureka is asked, which

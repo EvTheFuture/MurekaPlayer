@@ -175,6 +175,29 @@ final class WebViewServer {
     // the request. Two browsers on one page each count once
     private final java.util.Map<String, Long> clients = new java.util.concurrent.ConcurrentHashMap<>();
 
+    // What each browser says of its own sound with every request for the
+    // state: its name, its volume and whether the song is heard out of it,
+    // so each browser can show and set the others' volumes
+    private static final class Sound {
+        volatile String name = "";
+        volatile int vol = -1;
+        volatile boolean playing = false;
+        volatile String via = "";
+        volatile long at = 0;
+    }
+
+    private final java.util.Map<String, Sound> sounds = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // A volume one browser asked for another, handed to that browser with
+    // its next state, numbered so it is taken once
+    private final java.util.Map<String, long[]> volAsks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong volAskCount = new java.util.concurrent.atomic.AtomicLong();
+
+    // How long a browser's word on its sound stands, and an asked volume
+    // waits for it
+    private static final long SOUND_STALE_MS = 6000;
+    private static final long VOL_ASK_MS = 10000;
+
     // Those of them that came over the phone's hotspot, and how many of them
     // are here now, for the power saving that may wait for them to go
     private final java.util.Set<String> hotspotIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -395,6 +418,117 @@ final class WebViewServer {
         return "{" + inner + (inner.isEmpty() ? "" : ",") + "\"via\":\"" + via + "\"}";
     }
 
+    // A browser's word on its own sound, kept with its id
+    private void noteSound(String id, String query, String via) {
+
+        if (id == null || id.isEmpty() || id.length() > 64) {
+            return;
+        }
+
+        Sound snd = sounds.get(id);
+
+        if (snd == null) {
+
+            snd = new Sound();
+            sounds.put(id, snd);
+        }
+
+        String name = param(query, "nm").trim();
+
+        snd.name = name.length() > 60 ? name.substring(0, 60) : name;
+        snd.vol = Math.max(-1, Math.min(100, number(param(query, "vol"), -1)));
+        snd.playing = "1".equals(param(query, "snd"));
+        snd.via = via == null ? "" : via;
+        snd.at = System.currentTimeMillis();
+    }
+
+    // The browsers heard from lately with their sound, and a volume asked
+    // for this one when there is one waiting, for the state of one browser
+    private String soundsFor(String id) {
+
+        long now = System.currentTimeMillis();
+        StringBuilder sb = new StringBuilder("\"browsers\":[");
+        boolean first = true;
+
+        for (java.util.Map.Entry<String, Sound> e : sounds.entrySet()) {
+
+            Sound snd = e.getValue();
+
+            if (now - snd.at > SOUND_STALE_MS) {
+                continue;
+            }
+
+            if (!first) {
+                sb.append(',');
+            }
+
+            first = false;
+            sb.append("{\"id\":").append(JSONObject.quote(e.getKey()))
+                .append(",\"name\":").append(JSONObject.quote(snd.name))
+                .append(",\"vol\":").append(snd.vol)
+                .append(",\"playing\":").append(snd.playing)
+                .append(",\"via\":").append(JSONObject.quote(snd.via))
+                .append('}');
+        }
+
+        sb.append(']');
+
+        long[] ask = id == null || id.isEmpty() ? null : volAsks.get(id);
+
+        if (ask != null && now - ask[2] > VOL_ASK_MS) {
+
+            volAsks.remove(id);
+            ask = null;
+        }
+
+        if (ask != null) {
+            sb.append(",\"volAsk\":{\"v\":").append(ask[0]).append(",\"n\":").append(ask[1]).append('}');
+        }
+
+        return sb.toString();
+    }
+
+    // More fields put into the state's object
+    private static String withExtra(String json, String extra) {
+
+        String t = json == null ? "" : json.trim();
+
+        if (extra == null || extra.isEmpty() || !t.startsWith("{") || !t.endsWith("}")) {
+            return json;
+        }
+
+        String inner = t.substring(1, t.length() - 1).trim();
+
+        return "{" + inner + (inner.isEmpty() ? "" : ",") + extra + "}";
+    }
+
+    // One browser setting the volume of another, kept until that browser
+    // asks for the state next
+    private void askVolume(Object arg) {
+
+        if (!(arg instanceof JSONObject)) {
+            return;
+        }
+
+        JSONObject a = (JSONObject) arg;
+        String id = a.optString("cid", "");
+        int v = a.optInt("v", -1);
+
+        if (id.isEmpty() || id.length() > 64 || v < 0 || v > 100 || !sounds.containsKey(id)) {
+            return;
+        }
+
+        volAsks.put(id, new long[] { v, volAskCount.incrementAndGet(), System.currentTimeMillis() });
+
+        if (a.optBoolean("last", false)) {
+
+            Sound snd = sounds.get(id);
+
+            Hub.note("Command", "From a web view: the volume of " + (snd != null && !snd.name.isEmpty() ? snd.name : "another browser")
+                + " to " + v + " %");
+        }
+    }
+
     // How many browsers of the web view are on the phone's hotspot now
     static int hotspotBrowsers() {
         return hotspotBrowsers;
@@ -456,6 +590,8 @@ final class WebViewServer {
 
                 clients.remove(e.getKey());
                 hotspotIds.remove(e.getKey());
+                sounds.remove(e.getKey());
+                volAsks.remove(e.getKey());
                 left = true;
             } else {
 
@@ -708,7 +844,9 @@ final class WebViewServer {
 
                 markPoll();
                 if (!appScreen) {
+
                     noteClient(param(query, "cid"), viaHotspot);
+                    noteSound(param(query, "cid"), query, reachedVia(c.getLocalAddress(), viaHotspot));
                 }
 
                 if (since.isEmpty()) {
@@ -718,7 +856,8 @@ final class WebViewServer {
                 }
 
                 markPoll();
-                send(out, 200, "application/json", bytes(withVia(json, reachedVia(c.getLocalAddress(), viaHotspot))));
+                send(out, 200, "application/json", bytes(withExtra(withVia(json, reachedVia(c.getLocalAddress(), viaHotspot)),
+                    soundsFor(appScreen ? "" : param(query, "cid")))));
             } else if ("GET".equals(method) && "/list".equals(path)) {
                 sendList(out, query);
             } else if ("GET".equals(method) && "/queue".equals(path)) {
@@ -1713,6 +1852,14 @@ final class WebViewServer {
 
                 SysVolume.set(arg instanceof Number ? ((Number) arg).intValue()
                     : number(String.valueOf(arg), 0));
+                send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
+            // One browser's volume set from another, handed on with the state
+            if ("browserVol".equals(cmd)) {
+
+                askVolume(arg);
                 send(out, 200, "application/json", bytes("{\"ok\":true}"));
                 return;
             }

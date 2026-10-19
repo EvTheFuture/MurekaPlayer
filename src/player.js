@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.436";
+    const VERSION = "1.9.9.437";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -26665,8 +26665,25 @@
         } else if (cmd === "queueJump") {
 
             const i = Number(arg);
+            const same = i === queuePos && currentSong && queue[i]
+                && queue[i].song_id === currentSong.song_id && audio && audio.src;
 
-            if (i >= 0 && i < queue.length) {
+            // The song already playing tapped in the queue goes on as it
+            // was, as a tap on it in the list does. Paused, it carries on
+            if (same) {
+
+                const stuck = !userPaused && Date.now() - trackAskedAt > 500
+                    && Date.now() - Math.max(clockMovedAt, trackAskedAt) > 600;
+
+                if (stuck) {
+
+                    dbgLog("Song", "tapped in the queue while stuck at " + dbgNum(audio.currentTime) + ", loading it again");
+                    pendingSeek = audio.currentTime > 1 ? audio.currentTime : 0;
+                    playCurrent();
+                } else if (audio.paused) {
+                    startAudioPlayback();
+                }
+            } else if (i >= 0 && i < queue.length) {
 
                 queuePos = i;
                 playCurrent();

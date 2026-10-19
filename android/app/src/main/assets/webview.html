@@ -3321,6 +3321,9 @@
         border-radius: 18px;
         padding: 2vh 2vw;
         width: min(700px, 92vw);
+        max-height: 90vh;
+        overflow-y: auto;
+        box-sizing: border-box;
         display: flex;
         flex-direction: column;
         gap: 1.4vh;
@@ -3338,19 +3341,44 @@
         font-weight: 600;
     }
 
-    #volRow {
+    /* One bar for each place the song is heard: its name, the slider and
+       what it is */
+    #volBars {
+        display: flex;
+        flex-direction: column;
+        gap: 2.2vh;
+    }
+
+    .volBar {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6vh;
+    }
+
+    .volName {
+        font-size: clamp(16px, 1.6vw, 24px);
+        font-weight: 600;
+    }
+
+    .volMe {
+        color: var(--accent);
+        font-weight: 400;
+    }
+
+    .volRow {
         display: flex;
         align-items: center;
         gap: 2vw;
     }
 
-    #volSlider {
+    .volSlider {
         flex: 1 1 auto;
+        min-width: 0;
         height: 42px;
         accent-color: var(--accent);
     }
 
-    #volNow {
+    .volNow {
         min-width: 3.2em;
         text-align: right;
         font-variant-numeric: tabular-nums;
@@ -5063,13 +5091,7 @@
             <div id="volTitle">Volume</div>
             <button class="chip iconOnly" id="closeVol" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
-        <div id="volRow">
-            <button class="chip iconOnly" id="volDown" type="button" data-icon="arrowDown" aria-label="Quieter" title="Quieter"></button>
-            <input id="volSlider" type="range" min="0" max="15" step="1" value="0" aria-label="Volume">
-            <button class="chip iconOnly" id="volUp" type="button" data-icon="arrowUp" aria-label="Louder" title="Louder"></button>
-            <span id="volNow"></span>
-        </div>
-        <div id="volWhere" class="ceLabel"></div>
+        <div id="volBars"></div>
     </div>
 </div>
 <div id="actionsPop">
@@ -12526,10 +12548,10 @@
     // sound, this page's own level when the sound is here. The phone's is
     // one of Android's steps, and over Bluetooth with absolute volume it is
     // the audio system's own level
-    let volMode = "phone";
-    let volSending = 0;
-    let volPending = 0;
-    let volWanted = -1;
+    // Each target's last move of our own, kept for a moment so an older
+    // answer does not pull the slider back, and when it was last sent
+    const volMoves = {};
+    const volSending = {};
     let volBefore = -1;
 
     function webVolume() {
@@ -12590,7 +12612,6 @@
 
     function openVol() {
 
-        volMode = state && state.carAudio ? "here" : "phone";
         paintVol(true);
         $("volPop").style.display = "flex";
     }
@@ -12603,81 +12624,341 @@
         return $("volPop").style.display === "flex";
     }
 
-    // The slider and the number, from this page when the sound is here and
-    // from the phone's last word when it is there. A move of our own stands
-    // for a moment, so an older answer does not pull the slider back
-    function paintVol(force) {
+    // This browser's name for the others, the browser and what it runs
+    // on, read from what the browser says about itself
+    function browserName() {
 
-        const slider = $("volSlider");
-        const here = volMode === "here";
-        const max = here ? 100 : (state && state.volMax > 0 ? state.volMax : 0);
-        const known = here || (state && typeof state.vol === "number" && state.vol >= 0 && max > 0);
+        const ua = navigator.userAgent || "";
 
-        $("volWhere").textContent = here
-            ? "This browser, the audio system's volume is on top of it"
-            : (known ? "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
-                + ", the one its volume buttons move"
-                : "The phone did not say what its volume is");
-        slider.style.display = known ? "" : "none";
-        $("volDown").style.display = known ? "" : "none";
-        $("volUp").style.display = known ? "" : "none";
-
-        if (!known) {
-
-            $("volNow").textContent = "";
-            return;
+        if (teslaBrowser) {
+            return "Tesla";
         }
 
-        slider.max = String(max);
-        slider.step = here ? "5" : "1";
+        let os = "";
 
-        if (force || Date.now() > volPending) {
-
-            const level = here ? Math.round(webVolume() * 100) : state.vol;
-
-            slider.value = String(level);
-            volWanted = level;
+        if (/iPhone|iPod/.test(ua)) {
+            os = "iPhone";
+        } else if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) {
+            os = "iPad";
+        } else if (/Android/.test(ua)) {
+            os = "Android";
+        } else if (/CrOS/.test(ua)) {
+            os = "ChromeOS";
+        } else if (/Macintosh|Mac OS X/.test(ua)) {
+            os = "Mac";
+        } else if (/Windows/.test(ua)) {
+            os = "Windows";
+        } else if (/Linux/.test(ua)) {
+            os = "Linux";
         }
 
-        const value = Number(slider.value);
+        let name = "Browser";
 
-        $("volNow").textContent = volText(value);
+        if (/Edg(e|A|iOS)?\//.test(ua)) {
+            name = "Edge";
+        } else if (/Firefox|FxiOS/.test(ua)) {
+            name = "Firefox";
+        } else if (/OPR\//.test(ua)) {
+            name = "Opera";
+        } else if (/CriOS|Chrome\//.test(ua)) {
+            name = "Chrome";
+        } else if (/Safari/.test(ua)) {
+            name = "Safari";
+        }
+
+        return os ? name + " on " + os : name;
     }
 
-    // Whether the sound comes out of this browser rather than the phone
+    // Whether the song is heard out of this browser now
+    function soundHere() {
+        return hereAudible() && !localMute;
+    }
+
+    // The other browsers the song is heard out of now, as the phone last
+    // listed them. Two with the same name are numbered
+    function otherPlayers() {
+
+        const list = state && Array.isArray(state.browsers) ? state.browsers.filter(function (b) {
+            return b && b.playing && b.id !== clientId;
+        }) : [];
+        const seen = {};
+
+        list.sort(function (a, b) {
+            return String(a.id) < String(b.id) ? -1 : 1;
+        });
+
+        return list.map(function (b) {
+
+            const base = String(b.name || "Browser");
+
+            seen[base] = (seen[base] || 0) + 1;
+
+            return {
+                key: "b:" + b.id,
+                kind: "other",
+                cid: String(b.id),
+                vol: typeof b.vol === "number" ? b.vol : -1,
+                via: String(b.via || ""),
+                name: base,
+                nth: seen[base]
+            };
+        }).map(function (t, i, all) {
+
+            const twins = all.filter(function (x) {
+                return x.name === t.name;
+            }).length;
+
+            if (twins > 1) {
+                t.name += " " + t.nth;
+            }
+
+            return t;
+        });
+    }
+
+    // Everything the volume can be set for: the phone while it makes the
+    // sound, otherwise each browser the song is heard out of, this one
+    // first. With none heard yet, this browser's own level
+    function volTargets() {
+
+        if (!state || !state.carAudio) {
+            return [{ key: "phone", kind: "phone", name: "The phone" }];
+        }
+
+        const list = otherPlayers();
+        const here = { key: "here", kind: "here", name: browserName() };
+
+        if (soundHere() || list.length === 0) {
+            list.unshift(here);
+        }
+
+        return list;
+    }
+
+    // The one the volume button, the keys and the speaker icon are for:
+    // where the song is heard, this browser first
+    function volTarget() {
+        return volTargets()[0];
+    }
+
+    // Whether the volume of this browser is the one changed
     function volHere() {
-        return !!(state && state.carAudio);
+        return volTarget().kind === "here";
     }
 
-    // The loudest step there is, 100 for this browser's own level
-    function volTop() {
+    // The loudest step there is, 100 for a browser's own level
+    function volTopOf(t) {
 
-        if (volHere()) {
+        if (t.kind !== "phone") {
             return 100;
         }
 
         return state && state.volMax > 0 ? state.volMax : 0;
     }
 
-    // Where the volume is now, our own move first while it still stands
-    function volLevel() {
+    function volTop() {
+        return volTopOf(volTarget());
+    }
 
-        if (volHere()) {
+    // Where the volume is now, our own move first while it still stands,
+    // as the answer from the phone or the other browser is on its way
+    function volLevelOf(t) {
+
+        if (t.kind === "here") {
             return Math.round(webVolume() * 100);
         }
 
-        if (volWanted >= 0 && Date.now() < volPending) {
-            return volWanted;
+        const mine = volMoves[t.key];
+
+        if (mine && Date.now() < mine.until) {
+            return mine.v;
+        }
+
+        if (t.kind === "other") {
+            return t.vol;
         }
 
         return state && typeof state.vol === "number" ? state.vol : -1;
     }
 
-    // Put the volume at this step. The phone is told at most a few times a
-    // second, and always when the move is the last one
-    function volSet(level, last) {
+    function volLevel() {
+        return volLevelOf(volTarget());
+    }
 
-        const top = volTop();
+    // What a bar is, under its name
+    function volWhereText(t) {
+
+        if (t.kind === "here") {
+            return "The volume here, the audio system's volume is on top of it";
+        }
+
+        if (t.kind === "other") {
+
+            const via = { hotspot: "over the phone's hotspot", wifi: "on Wi-Fi", vpn: "over a VPN", public: "over the public address" }[t.via];
+
+            return "Its own volume" + (via ? ", " + via : "");
+        }
+
+        const max = volTopOf(t);
+
+        if (max <= 0 || !state || typeof state.vol !== "number" || state.vol < 0) {
+            return "The phone did not say what its volume is";
+        }
+
+        return "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
+            + ", the one its volume buttons move";
+    }
+
+    // One bar of the popup: the name, the slider with a step down and up
+    // beside it, and the level
+    function volBar(t) {
+
+        const bar = document.createElement("div");
+        const name = document.createElement("div");
+        const row = document.createElement("div");
+        const down = document.createElement("button");
+        const slider = document.createElement("input");
+        const up = document.createElement("button");
+        const now = document.createElement("span");
+        const where = document.createElement("div");
+
+        bar.className = "volBar";
+        bar.dataset.key = t.key;
+        name.className = "volName";
+        row.className = "volRow";
+        now.className = "volNow";
+        where.className = "ceLabel volWhere";
+
+        down.type = "button";
+        down.className = "chip iconOnly";
+        down.setAttribute("aria-label", "Quieter");
+        down.title = "Quieter";
+        down.appendChild(icon("arrowDown"));
+        up.type = "button";
+        up.className = "chip iconOnly";
+        up.setAttribute("aria-label", "Louder");
+        up.title = "Louder";
+        up.appendChild(icon("arrowUp"));
+
+        slider.type = "range";
+        slider.className = "volSlider";
+        slider.min = "0";
+        slider.setAttribute("aria-label", "Volume, " + t.name);
+
+        // The bar's target looked up again on each move, the list may have
+        // changed since it was drawn
+        const target = function () {
+
+            return volTargets().find(function (x) {
+                return x.key === t.key;
+            }) || t;
+        };
+
+        slider.addEventListener("input", function () {
+            volSetFor(target(), Number(slider.value), false);
+        });
+        slider.addEventListener("change", function () {
+            volSetFor(target(), Number(slider.value), true);
+        });
+
+        const nudge = function (by) {
+
+            const x = target();
+            const level = volLevelOf(x);
+
+            if (level >= 0) {
+                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
+            }
+        };
+
+        down.addEventListener("click", function () {
+            nudge(-1);
+        });
+        up.addEventListener("click", function () {
+            nudge(1);
+        });
+
+        row.appendChild(down);
+        row.appendChild(slider);
+        row.appendChild(up);
+        row.appendChild(now);
+        bar.appendChild(name);
+        bar.appendChild(row);
+        bar.appendChild(where);
+
+        return bar;
+    }
+
+    // The bars, one for each place the song is heard, drawn again only when
+    // that list changes. A slider being moved keeps its place
+    function paintVol(force) {
+
+        const box = $("volBars");
+        const list = volTargets();
+        const keys = list.map(function (t) {
+            return t.key;
+        }).join(",");
+
+        if (force || box.dataset.keys !== keys) {
+
+            box.textContent = "";
+            box.dataset.keys = keys;
+
+            for (const t of list) {
+                box.appendChild(volBar(t));
+            }
+        }
+
+        for (const t of list) {
+
+            const bar = box.querySelector(".volBar[data-key=\"" + t.key + "\"]");
+
+            if (!bar) {
+                continue;
+            }
+
+            const name = bar.querySelector(".volName");
+            const slider = bar.querySelector(".volSlider");
+            const top = volTopOf(t);
+            const level = volLevelOf(t);
+            const known = top > 0 && level >= 0;
+
+            name.textContent = t.name;
+
+            if (t.kind === "here") {
+
+                const me = document.createElement("span");
+
+                me.className = "volMe";
+                me.textContent = " (this browser)";
+                name.appendChild(me);
+            }
+
+            bar.querySelector(".volWhere").textContent = volWhereText(t);
+            bar.querySelector(".volRow").style.display = known ? "" : "none";
+
+            if (!known) {
+                continue;
+            }
+
+            slider.max = String(top);
+            slider.step = t.kind === "phone" ? "1" : "5";
+
+            if (force || document.activeElement !== slider || volMoves[t.key] === undefined
+                || Date.now() > volMoves[t.key].until) {
+                slider.value = String(level);
+            }
+
+            bar.querySelector(".volNow").textContent = volTextOf(t, Number(slider.value));
+        }
+    }
+
+    // Put a volume at this step: this browser's own at once, the phone's or
+    // another browser's through the phone, at most a few times a second
+    // and always when the move is the last one
+    function volSetFor(t, level, last) {
+
+        const top = volTopOf(t);
 
         if (top <= 0) {
             return;
@@ -12685,18 +12966,13 @@
 
         const value = Math.max(0, Math.min(top, Math.round(level)));
 
-        volWanted = value;
-        volPending = Date.now() + 1500;
+        volMoves[t.key] = { v: value, until: Date.now() + (t.kind === "other" ? 3000 : 1500) };
 
         if (volOpen()) {
-
-            $("volSlider").value = String(value);
             paintVol(false);
         }
 
-        paintVolIcon();
-
-        if (volHere()) {
+        if (t.kind === "here") {
 
             try {
                 localStorage.setItem("murekaCarVolume", String(value / 100));
@@ -12708,23 +12984,57 @@
             return;
         }
 
-        if (!last && Date.now() - volSending < 150) {
+        paintVolIcon();
+
+        if (!last && Date.now() - (volSending[t.key] || 0) < 150) {
             return;
         }
 
-        volSending = Date.now();
-        send("sysVolume", value);
+        volSending[t.key] = Date.now();
+
+        if (t.kind === "phone") {
+            send("sysVolume", value);
+        } else {
+            send("browserVol", { cid: t.cid, v: value, last: last === true });
+        }
     }
 
-    // Move the volume where the slider now is
-    function volChanged(last) {
-
-        volMode = volHere() ? "here" : "phone";
-        volSet(Number($("volSlider").value), last);
+    function volSet(level, last) {
+        volSetFor(volTarget(), level, last);
     }
 
-    // A step up or down from a key or the buttons beside the slider, and
-    // a word about where it landed when the slider is not on screen
+    // A level another browser asked for this one, handed on by the phone.
+    // Each is taken once
+    let volAskTaken = 0;
+
+    function takeVolAsk(s) {
+
+        const ask = s && s.volAsk;
+
+        if (!ask || typeof ask.n !== "number" || ask.n <= volAskTaken || typeof ask.v !== "number") {
+            return;
+        }
+
+        volAskTaken = ask.n;
+
+        const value = Math.max(0, Math.min(100, Math.round(ask.v)));
+
+        try {
+            localStorage.setItem("murekaCarVolume", String(value / 100));
+        } catch (e) {
+            // A browser that keeps nothing, the level lasts this visit
+        }
+
+        dbgLog("Phone", "another browser set the volume here to " + value + " %");
+        applyWebVolume();
+
+        if (volOpen()) {
+            paintVol(false);
+        }
+    }
+
+    // A step up or down from a key, for where the song is heard, and a
+    // word about where it landed when the popup is not open
     function volNudge(by) {
 
         const top = volTop();
@@ -12736,7 +13046,7 @@
             return;
         }
 
-        const step = volHere() ? 5 : 1;
+        const step = volTarget().kind === "phone" ? 1 : 5;
 
         volSet(now + by * step, true);
         volSay();
@@ -12767,11 +13077,11 @@
     }
 
     // A level written the way the settings ask for, a percentage or the
-    // step the phone counts. This browser's own level is a percentage
-    // either way, since that is what it is
-    function volText(level) {
+    // step the phone counts. A browser's own level is a percentage either
+    // way, since that is what it is
+    function volTextOf(t, level) {
 
-        const top = volTop();
+        const top = volTopOf(t);
 
         if (level < 0 || top <= 0) {
             return "";
@@ -12781,11 +13091,15 @@
             return "Off";
         }
 
-        if (volHere() || !state || state.volUnit !== "steps") {
+        if (t.kind !== "phone" || !state || state.volUnit !== "steps") {
             return Math.round(level / top * 100) + "%";
         }
 
         return level + " of " + top;
+    }
+
+    function volText(level) {
+        return volTextOf(volTarget(), level);
     }
 
     // The level in a word, for when the slider is not open
@@ -12857,22 +13171,6 @@
         if (ev.target === $("volPop")) {
             closeVol();
         }
-    });
-
-    $("volSlider").addEventListener("input", function () {
-        volChanged(false);
-    });
-
-    $("volSlider").addEventListener("change", function () {
-        volChanged(true);
-    });
-
-    $("volDown").addEventListener("click", function () {
-        volStep(-1);
-    });
-
-    $("volUp").addEventListener("click", function () {
-        volStep(1);
     });
 
     function paintFilters(f) {
@@ -16880,6 +17178,7 @@
         trimFollow(s);
         setDebugOverlay(s.debugOverlay === true);
         offerSeek(s.seekActions !== false);
+        takeVolAsk(s);
         paintVolIcon();
         render();
         paintForceAsk();
@@ -16991,7 +17290,13 @@
             }
         }, 10000);
 
-        fetch("/state?since=" + seq + "&cid=" + esc(clientId), { cache: "no-store", signal: abort ? abort.signal : undefined }).then(function (res) {
+        // What this browser says of itself, so the others can show its
+        // volume beside theirs and set it: its name, its level and whether
+        // the song is heard out of it
+        const self = "&nm=" + esc(browserName()) + "&vol=" + Math.round(webVolume() * 100)
+            + "&snd=" + (soundHere() ? "1" : "0");
+
+        fetch("/state?since=" + seq + "&cid=" + esc(clientId) + self, { cache: "no-store", signal: abort ? abort.signal : undefined }).then(function (res) {
 
             // Not signed in, or an answer that is not the state: no state to
             // show, and asked again only after a pause
@@ -21733,7 +22038,7 @@
         // The volume keys work with the slider under the finger too, only
         // the arrows are left to the slider itself there. In a field every
         // key is the field's own
-        const onSlider = typing && target.id === "volSlider";
+        const onSlider = typing && !!target.classList && target.classList.contains("volSlider");
 
         if ((!typing || onSlider) && volumeKey(ev.key, onSlider)) {
 
