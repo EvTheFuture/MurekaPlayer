@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.432";
+    const VERSION = "1.9.9.434";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24163,6 +24163,10 @@
             link: song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "",
             src: songUrl(song) || "",
 
+            // The cover at its full size, without Mureka's resizing, for the
+            // web view to show it to copy or save
+            cover: song.cover ? String(song.cover).split("?")[0] : "",
+
             // What the web view's trimmer needs: the account's own song with a file
             canTrim: !creatorSource && !!songUrl(song),
             durationMs: Number(song.duration_milliseconds) || 0,
@@ -30232,6 +30236,8 @@
         b.textContent = label;
         b.style.cssText = [
             "flex:1",
+            "min-height:30px",
+            "box-sizing:border-box",
             "padding:7px 4px",
             "border:none",
             "border-radius:6px",
@@ -32345,6 +32351,7 @@
         input.value = get();
         input.style.cssText = [
             "width:100%",
+            "height:30px",
             "box-sizing:border-box",
             "padding:6px 8px",
             "border:1px solid #3a3a42",
@@ -32669,7 +32676,7 @@
         name.style.cssText = "flex:1;min-width:0";
         swatch.type = "button";
         swatch.setAttribute("aria-label", "Pick the colour");
-        swatch.style.cssText = "flex:0 0 auto;width:64px;height:36px;border-radius:8px;border:1px solid #555;padding:0;"
+        swatch.style.cssText = "flex:0 0 auto;width:64px;height:30px;box-sizing:border-box;border-radius:6px;border:1px solid #555;padding:0;"
             + "cursor:pointer;position:relative;overflow:hidden;background-color:#1d1d22;"
             + "background-image:linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%),"
             + "linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%);"
@@ -32780,44 +32787,6 @@
         return row;
     }
 
-    // A dropdown backed by a getter and a setter, for a choice whose names
-    // are too long for a row of buttons, full width under its name.
-    // choices are { value, label }
-    function makeSelectRow(choices, get, set) {
-
-        const sel = document.createElement("select");
-        sel.style.cssText = "display:block;width:100%;box-sizing:border-box;min-height:40px;padding:4px 10px;"
-            + "border-radius:8px;border:1px solid #555;background:#333;color:#fff;font:inherit";
-
-        for (const choice of choices) {
-
-            const opt = document.createElement("option");
-
-            opt.value = choice.value;
-            opt.textContent = choice.label;
-            sel.appendChild(opt);
-        }
-
-        sel.value = get();
-
-        // Shown again after a reset elsewhere on the page
-        sel.__paint = function () {
-            sel.value = get();
-        };
-
-        sel.addEventListener("change", function () {
-
-            set(sel.value);
-            saveSettings();
-        });
-
-        settingsRefreshers.push(function () {
-            sel.value = get();
-        });
-
-        return sel;
-    }
-
     function makeBoolRow(label, get, set) {
 
         const row = document.createElement("div");
@@ -32874,6 +32843,7 @@
         input.value = window.MurekaHost.getPref(key, fallback);
         input.style.cssText = [
             "width:100%",
+            "height:30px",
             "box-sizing:border-box",
             "padding:6px 8px",
             "border:1px solid #3a3a42",
@@ -33450,8 +33420,7 @@
 
         page.appendChild(masterLabelRow);
         add(makeLabel("What starts it"));
-        add(triggerRow);
-        add(makeHint("On battery follows the charger. Bluetooth disconnects follows the devices ticked below, for a phone that stays on a charger."));
+        add(withHint(triggerRow, "On battery follows the charger. Bluetooth disconnects follows the devices ticked below, for a phone that stays on a charger."));
         add(btOnly(makeSubLabel("Bluetooth devices")));
         add(btOnly(devAskRow));
         add(btOnly(devList));
@@ -33466,8 +33435,7 @@
         add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It turns the phone's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(warnEl);
         add(withHint(hotspotOffRow, WORDS.charger.hotspotOff[1]));
-        add(hotspotWaitRow);
-        add(makeHint("When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the phone's Wi-Fi never count."));
+        add(withHint(hotspotWaitRow, "When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the phone's Wi-Fi never count."));
         add(withHint(hotspotOnRow, WORDS.charger.hotspotOn[1]));
         add(statusEl);
         add(tryRow);
@@ -33525,8 +33493,8 @@
         row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
         name.textContent = label;
         name.style.cssText = "flex:1;min-width:0";
-        sel.style.cssText = "flex:0 1 auto;max-width:62%;min-height:32px;padding:4px 8px;box-sizing:border-box;"
-            + "border-radius:8px;border:1px solid #555;background:#333;color:#fff;font:inherit;cursor:pointer";
+        sel.style.cssText = "flex:0 0 auto;max-width:62%;height:30px;padding:0 8px;box-sizing:border-box;"
+            + "border-radius:6px;border:1px solid #555;background:#333;color:#fff;font:inherit;cursor:pointer";
 
         for (const choice of choices) {
 
@@ -33601,6 +33569,8 @@
         value.step = String(st);
         value.style.cssText = [
             "width:56px",
+            "height:30px",
+            "box-sizing:border-box",
             "flex:0 0 auto",
             "text-align:center",
             "font-variant-numeric:tabular-nums",
@@ -33994,15 +33964,13 @@
 
         settingsEl.appendChild(head);
         libraryPage.appendChild(startLabel);
-        libraryPage.appendChild(startRow);
-        libraryPage.appendChild(makeHint("Which list the player opens on: only your published songs, all of them including drafts, or the same list as when it was last used, an artist included."));
+        libraryPage.appendChild(withHint(startRow, "Which list the player opens on: only your published songs, all of them including drafts, or the same list as when it was last used, an artist included."));
         libraryPage.appendChild(makeLabel("Updates and numbers"));
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(returnRow);
         libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when the player or a web view opens or comes back into view, and again while it stays in view, each time the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
-        libraryPage.appendChild(goneRow);
-        libraryPage.appendChild(makeHint("Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
+        libraryPage.appendChild(withHint(goneRow, "Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
         // Cache control: the songs kept on this device, the details of
         // songs, and in the app the covers for the web view
@@ -34406,8 +34374,7 @@
                 publishHostSoon();
             });
 
-            nowPage.appendChild(resendRow);
-            nowPage.appendChild(makeHint("The cover goes out twice: first a loading picture, then the song's own two seconds later. Android only tells the car about a new cover when the song's text changes, so New title, the one to use, adds an invisible space to the title with the loading picture. New song changes only the song's id, Cover only just the picture. Used on resume, when Bluetooth connects and by the cover test under Developer."));
+            nowPage.appendChild(withHint(resendRow, "The cover goes out twice: first a loading picture, then the song's own two seconds later. Android only tells the car about a new cover when the song's text changes, so New title, the one to use, adds an invisible space to the title with the loading picture. New song changes only the song's id, Cover only just the picture. Used on resume, when Bluetooth connects and by the cover test under Developer."));
         }
 
         // Play counts: Mureka's lists carry none, each song is asked for
@@ -34632,7 +34599,7 @@
             });
 
 
-        const waveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
+        const waveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
             function () { return progressLook(settings.waveProgressLook); },
             function (v) {
 
@@ -34667,15 +34634,12 @@
         // in which colours. Without the waveform the rest is hidden, and
         // without the progress on it so are its colours
         const mobileWave = [
-            waveSourceRow,
-            makeHint("Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."),
+            withHint(waveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."),
             withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."),
             withHint(waveColorRow, WAVE_COLOR_HINT),
             withHint(waveRestColorRow, WAVE_REST_HINT),
             withHint(playHeadColorRow, PLAY_HEAD_HINT),
-            makeSubLabel("Song's progress on the waveform"),
-            waveProgressRow,
-            makeHint(PROGRESS_LOOK_HINT + " The play head comes first when the two are close together.")
+            withHint(waveProgressRow, PROGRESS_LOOK_HINT + " The play head comes first when the two are close together.")
         ];
         const mobileWaveProgress = [
             withHint(waveProgressColorRow, PROGRESS_COLOR_HINT),
@@ -34726,8 +34690,7 @@
 
         // The badge in the header
         mobilePage.appendChild(makeLabel("Badges"));
-        mobilePage.appendChild(onlineBadgeRow);
-        mobilePage.appendChild(makeHint("The red Offline badge in the header shows while there is no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the player is online."));
+        mobilePage.appendChild(withHint(onlineBadgeRow, "The red Offline badge in the header shows while there is no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the player is online."));
 
         // The screen stays on while music plays. This keeps it on when the
         // music is paused or stopped too, so the phone never locks
@@ -34740,8 +34703,7 @@
             syncWakeLock();
         });
 
-        devicePage.appendChild(keepOnRow);
-        devicePage.appendChild(makeHint("Never leaves the screen to the phone's own timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the phone never locks and Bluetooth buttons always reach it."));
+        devicePage.appendChild(withHint(keepOnRow, "Never leaves the screen to the phone's own timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the phone never locks and Bluetooth buttons always reach it."));
 
         // Fullscreen and the screen off of this screen alone, the web view
         // has its own on its page
@@ -35404,7 +35366,7 @@
                 });
 
 
-            const webWaveProgressRow = makeSelectRow(PROGRESS_LOOK_CHOICES,
+            const webWaveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
                 function () { return progressLook(settings.webWaveProgressLook); },
                 function (v) {
 
@@ -35464,21 +35426,18 @@
 
             webPage.appendChild(makeLabel("Waveform"));
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
-            webPage.appendChild(webWaveSourceRow);
-            webPage.appendChild(makeHint("Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+            webPage.appendChild(withHint(webWaveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
             webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
             webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
             webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
             webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
-            webPage.appendChild(makeSubLabel("Song's progress on the waveform"));
-            webPage.appendChild(webWaveProgressRow);
-            webPage.appendChild(makeHint(PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveProgressRow, PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
             webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
             webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT));
             webPage.appendChild(webWaveReset);
 
             // Where the small song list opens on a wide screen
-            const webListSideRow = makeSelectRow([
+            const webListSideRow = makeDropRow("Song list beside the song", [
                 { value: "auto", label: "When there is room" },
                 { value: "always", label: "Always" },
                 { value: "never", label: "Never" }
@@ -35490,9 +35449,7 @@
                 publishHostSoon();
             });
 
-            webPage.appendChild(makeSubLabel("Song list beside the song"));
-            webPage.appendChild(webListSideRow);
-            webPage.appendChild(makeHint("With room beside the cover, the small song list takes the whole column beside it, and the title, stars and lyrics move over the cover, so they stay in reach. Never keeps the list under the title. Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webListSideRow, "With room beside the cover, the small song list takes the whole column beside it, and the title, stars and lyrics move over the cover, so they stay in reach. Never keeps the list under the title. Each browser can have this set for itself."));
 
             // The synced lyrics and how they are laid out
             webPage.appendChild(makeLabel("Lyrics"));
@@ -35510,14 +35467,12 @@
 
             // The badges along the top
             webPage.appendChild(makeLabel("Badges"));
-            webPage.appendChild(webOnlineBadgeRow);
-            webPage.appendChild(makeHint("A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
+            webPage.appendChild(withHint(webOnlineBadgeRow, "A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
             webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
             webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
             webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
             webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
-            webPage.appendChild(heatTextRow);
-            webPage.appendChild(makeHint("The word, the word and the battery's temperature, or the temperature alone. The colour follows the limits below either way."));
+            webPage.appendChild(withHint(heatTextRow, "The word, the word and the battery's temperature, or the temperature alone. The colour follows the limits below either way."));
             webPage.appendChild(heatWarmRow);
             webPage.appendChild(heatHotRow);
             webPage.appendChild(heatVeryHotRow);
@@ -35687,8 +35642,7 @@
                 publishHostSoon();
             });
 
-            bluetoothPlayEls.push(playBtRow);
-            bluetoothPlayEls.push(makeHint("Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
+            bluetoothPlayEls.push(withHint(playBtRow, "Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
             bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the phone's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));
 
             webPageBtn = makePageButton("Web view", "web");

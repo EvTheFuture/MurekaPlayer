@@ -2283,6 +2283,47 @@
         color: #5fd38d;
     }
 
+    /* A song's cover on its own, large, where the browser's own menu for
+       a held or right clicked picture copies or saves it */
+    #coverView {
+        position: fixed;
+        inset: 0;
+        z-index: 90;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2vh;
+        padding: 4vh 4vw;
+        box-sizing: border-box;
+        background: rgba(10, 10, 12, 0.92);
+    }
+
+    #coverView img {
+        max-width: 100%;
+        max-height: 76vh;
+        object-fit: contain;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+        -webkit-touch-callout: default;
+        -webkit-user-select: auto;
+        user-select: auto;
+        pointer-events: auto;
+    }
+
+    #coverView .cvNote {
+        max-width: 40em;
+        color: var(--muted);
+        font-size: clamp(13px, 1.3vw, 18px);
+        text-align: center;
+    }
+
+    #coverView .cvClose {
+        position: absolute;
+        top: max(12px, env(safe-area-inset-top));
+        right: 12px;
+    }
+
     .menuItem.cool {
         color: #7ab8ff;
     }
@@ -2854,6 +2895,43 @@
         flex: 0 1 auto;
         max-width: 62%;
         margin: 0;
+    }
+
+    /* Every control of the settings as tall as the others: switches,
+       buttons, drop-downs and colour swatches */
+    #panelBody {
+        --pctl-h: var(--ctl-h);
+    }
+
+    html.phone #panelBody {
+        --pctl-h: 40px;
+    }
+
+    #panelBody .pBtn,
+    #panelBody .pClick,
+    #panelBody .pSelect,
+    #panelBody .pColor {
+        box-sizing: border-box;
+        min-height: var(--pctl-h);
+    }
+
+    #panelBody .pSelect,
+    #panelBody .pColor {
+        height: var(--pctl-h);
+    }
+
+    /* A name with its explanation keeps its control beside it, the text
+       running round it, also when the control is wide */
+    #panelBody .pRow.top {
+        flex-wrap: nowrap;
+    }
+
+    #panelBody .pRow.top > .pCol {
+        flex: 1 1 0;
+    }
+
+    #panelBody .pRow.top > .pSelect {
+        max-width: 50%;
     }
 
     .pField {
@@ -13003,7 +13081,19 @@
     let panelHeld = false;
     let panelHeldAgain = false;
 
+    // A reading that came while a drop-down of the settings was open, drawn
+    // once it closes. Drawn under it, the browser closed the open list
+    let selectHeldItems = null;
+
     function renderPanel(items) {
+
+        const active = document.activeElement;
+
+        if (active && active.tagName === "SELECT" && $("panelBody").contains(active)) {
+
+            selectHeldItems = items;
+            return;
+        }
 
         if (panelHeld) {
 
@@ -13053,6 +13143,30 @@
         panelPages[panelName + ":last"] = items;
         scroller.scrollTop = keep;
     }
+
+    $("panelBody").addEventListener("change", function (ev) {
+
+        if (ev.target.tagName === "SELECT") {
+
+            setTimeout(function () {
+                ev.target.blur();
+            }, 0);
+        }
+    }, true);
+
+    $("panelBody").addEventListener("blur", function (ev) {
+
+        if (ev.target.tagName !== "SELECT" || !selectHeldItems) {
+            return;
+        }
+
+        const items = selectHeldItems;
+
+        selectHeldItems = null;
+        setTimeout(function () {
+            renderPanel(items);
+        }, 0);
+    }, true);
 
     // The phone's own Done buttons close its panel, here Close does that, so
     // they are left out. A row left with one thing is just that thing
@@ -17420,6 +17534,56 @@
         return send("songAction", { id: menuSong.id, action: action, value: value === undefined ? null : value });
     }
 
+    // The cover shown large, through the phone, so the browser treats it as
+    // a picture of this page. A tap beside it, the cross or Escape closes it
+    function showCoverView(url, title) {
+
+        let box = $("coverView");
+
+        if (!box) {
+
+            box = document.createElement("div");
+            box.id = "coverView";
+
+            const img = document.createElement("img");
+            const note = document.createElement("div");
+            const shut = document.createElement("button");
+
+            img.alt = "";
+            note.className = "cvNote";
+            note.textContent = "Press and hold the picture, or right-click it, to copy or save it.";
+            shut.type = "button";
+            shut.className = "chip iconOnly cvClose";
+            shut.setAttribute("aria-label", "Close");
+            shut.appendChild(icon("close"));
+
+            box.appendChild(img);
+            box.appendChild(note);
+            box.appendChild(shut);
+            document.body.appendChild(box);
+
+            box.addEventListener("click", function (ev) {
+
+                if (ev.target !== img) {
+                    box.style.display = "none";
+                }
+            });
+
+            document.addEventListener("keydown", function (ev) {
+
+                if (ev.key === "Escape" && box.style.display === "flex") {
+                    box.style.display = "none";
+                }
+            });
+        }
+
+        const img = box.querySelector("img");
+
+        img.alt = title ? "Cover of " + title : "Cover";
+        img.src = coverAt(url);
+        box.style.display = "flex";
+    }
+
     function closeSongMenu() {
 
         markMenuRow(null);
@@ -18995,6 +19159,17 @@
                 showPanel("info");
             }, 400);
         }, "green"));
+
+        // The cover large on its own, to copy or save with the browser's own
+        // menu, as on the phone
+        if (m.cover) {
+
+            box.appendChild(menuItem("image", "Show cover", function () {
+
+                close();
+                showCoverView(m.cover, m.title);
+            }));
+        }
 
         box.appendChild(menuItem("refresh", "Refresh", function () {
 

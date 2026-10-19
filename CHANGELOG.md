@@ -366,7 +366,8 @@ the new settings layout and a number of smaller improvements.
 - **Drop-downs for every choice.** A setting with more than on and off is
   a drop-down beside its name, in place of a row of buttons or a button
   that changed its word on each tap, in the web view's copy of the settings
-  too.
+  too. Every switch, button, drop-down and colour swatch in the settings has
+  the same height, and a control stays beside its name and explanation.
 - **A note for everything asked of Mureka**: publishing, unpublishing,
   renaming, remixing, likes, refreshing a song, trimming and deleting each
   show a ringed note with a turning ring as soon as Mureka is asked, which
@@ -512,6 +513,9 @@ the new settings layout and a number of smaller improvements.
   heart and lyrics slide over the dimmed cover, so they stay in reach.
   Closing the list slides both back. When there is room, Always or Never,
   under Web view display, for each browser on its own.
+- **Show cover** in the web view's song menu shows the song's cover large,
+  at its full size, where pressing and holding it, or a right click, gives
+  the browser's own menu to copy or save it.
 - **Ignore in queues** in the song menu marks a song that a queue made from
   the list leaves out, by Play, shuffle, a tap on another song or new songs
   coming in. It still plays when tapped itself, and Play next, Play last,
