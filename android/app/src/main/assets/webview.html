@@ -3799,6 +3799,22 @@
         vertical-align: 0;
     }
 
+    /* On a phone the badges start right under the title, an even gap
+       between them, and the account name comes after them, shortened
+       when the line is too short for it */
+    html.phone #phoneSub #badges {
+        gap: 6px;
+    }
+
+    html.phone #phoneSub #badges > * {
+        margin-left: 0;
+    }
+
+    html.phone #phoneSub #whoName {
+        order: 9;
+        margin-right: 0;
+    }
+
     #phoneVer {
         margin-left: 6px;
         font-size: 11px;
