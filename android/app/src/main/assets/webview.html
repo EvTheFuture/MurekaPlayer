@@ -3301,6 +3301,37 @@
         transition: opacity 0.3s;
     }
 
+    /* The way back to the playing song, above the jump to an end, shown
+       only while that song is out of sight */
+    #rowsLocate {
+        position: absolute;
+        right: calc(2vw + var(--ctl-h) * 0.1);
+        bottom: calc(2vh + var(--ctl-h) * 1.2 + 10px);
+        z-index: 2;
+        width: var(--ctl-h);
+        height: var(--ctl-h);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid var(--accent);
+        border-radius: 50%;
+        background: rgba(38, 38, 44, 0.94);
+        color: var(--accent);
+        font: inherit;
+        font-size: 1.3em;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s;
+    }
+
+    #rowsLocate .ico {
+        width: 1.1em;
+        height: 1.1em;
+    }
+
     .chip:disabled {
         opacity: 0.4;
     }
@@ -4179,10 +4210,81 @@
         flex: 0 1 auto;
     }
 
+    /* The count inside the search field at its right end, dimmed, where
+       it stays in sight while typing. The field leaves room for it */
+    html.phone #browseTop {
+        position: relative;
+    }
+
     html.phone #counts {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        max-width: 55%;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        pointer-events: none;
+    }
+
+    /* The views and the filter in one row, the line under it where the
+       count used to be */
+    html.phone #viewRow {
         padding-bottom: 6px;
         border-bottom: 1px solid var(--line);
-        font-size: 12px;
+    }
+
+    /* Playing from as the first chip of the row, in a dock of the page's
+       colour that stays at the left while the views scroll under it and
+       fade out at its edge, its round corners included */
+    #fromDock {
+        display: none;
+    }
+
+    html.phone #fromDock {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        display: flex;
+        flex: 0 0 auto;
+        max-width: 45%;
+        background: var(--bg);
+        box-shadow: 8px 0 6px -4px var(--bg);
+    }
+
+    html.phone #fromDock #fromLine {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        height: 30px;
+        padding: 0 10px 0 12px;
+        border: 1px solid transparent;
+        border-radius: 15px;
+        font-size: 13px;
+    }
+
+    /* Lit while the list shows less than every song */
+    html.phone #fromDock #fromLine.narrowed,
+    html.phone #fromDock #fromLine.narrowed #fromText {
+        border-color: var(--accent);
+        color: var(--accent);
+    }
+
+    html.phone #fromDock #fromLine.narrowed {
+        background: #1f3a3d;
+    }
+
+    html.phone #fromDock #fromText {
+        min-width: 0;
+    }
+
+    /* The floating button does it on a phone, the chip is out of sight at
+       the end of the row there */
+    html.phone #toCurrent {
+        display: none;
     }
 
     html.phone .row {
@@ -4589,7 +4691,8 @@
         <button class="chip iconOnly" id="clearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
         <button class="chip iconOnly" id="closeBrowse" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
-    <div class="chipRow">
+    <div class="chipRow" id="viewRow">
+        <span id="fromDock"></span>
         <span class="chipGroup">List</span>
         <button class="chip" id="viewMureka" type="button" data-icon="mureka"><span class="lbl">Mureka</span></button>
         <button class="chip" id="viewQueue" type="button" data-icon="queue"><span class="lbl">Queue</span></button>
@@ -4623,6 +4726,7 @@
     <div id="rowsWrap" data-noswipe="1">
         <div id="pullIcon"></div>
         <div id="rows"></div>
+        <button id="rowsLocate" type="button" data-icon="target" aria-label="Show the playing song" title="Show the playing song"></button>
         <button id="edgeBtn" type="button" aria-label="Scroll to top" data-icon="arrowUp"></button>
     </div>
 </div>
@@ -10499,6 +10603,7 @@
             $("counts").textContent = listTotal + " song" + (listTotal === 1 ? "" : "s")
                 + (listQuery ? " matching " + listQuery : "")
                 + (listLoaded < listTotal ? ", showing " + listLoaded : "");
+            sizeCountRoom();
 
             if (done) {
                 done();
@@ -10673,6 +10778,7 @@
             $("counts").textContent = (data.pos < 0 ? "Queue, " + data.total + " to play"
                 : "Queue, " + (data.pos + 1) + " of " + data.total)
                 + (listQuery ? ", " + data.items.length + " matching " + listQuery : "");
+            sizeCountRoom();
 
             quietScroll();
 
@@ -11149,6 +11255,17 @@
 
     // The row a song plays from, a third down the list. Eased when asked
     // for with Now playing, straight there when the list opens
+    // On a phone the count sits inside the search field, which keeps what
+    // is typed clear of it
+    function sizeCountRoom() {
+
+        const count = $("counts");
+        const room = isPhone() && count.parentNode === $("browseTop") && count.textContent
+            ? Math.ceil(count.getBoundingClientRect().width) + 18 : 0;
+
+        $("search").style.paddingRight = room ? room + "px" : "";
+    }
+
     function scrollToCurrent(smooth) {
 
         const box = $("rows");
@@ -11930,6 +12047,12 @@
         }
     }
 
+    // Whether the list shows less than every song
+    function fromNarrowed(f) {
+        return !!(f.creator || f.playlist || pubNow(f) !== "all" || f.vocals === "vocal"
+            || f.vocals === "instrumental" || (f.smart && f.smartAny));
+    }
+
     // The line under up next: where the queue comes from, in the same words
     // as the phone's view bar
     function fromSummary(f) {
@@ -11962,6 +12085,7 @@
     function paintFrom(f) {
 
         fromLine.setText(fromSummary(f));
+        $("fromLine").classList.toggle("narrowed", fromNarrowed(f));
 
         if (isShown("fromPop")) {
             drawFrom(f);
@@ -15909,6 +16033,29 @@
     $("edgeBtn").addEventListener("click", function () {
         setFollow(false);
     }, true);
+
+    // The way back to the playing song, shown while it is out of sight,
+    // or further down than the pages read so far
+    function updateRowsLocate() {
+
+        const box = $("rows");
+        const row = box.querySelector(".row.playing");
+        let show = false;
+
+        if ($("browse").style.display === "flex" && state && state.id) {
+            show = row ? !rowInSight(box, row) : listView !== "queue" && listPlayingAt >= listLoaded;
+        }
+
+        $("rowsLocate").style.opacity = show ? "1" : "0";
+        $("rowsLocate").style.pointerEvents = show ? "auto" : "none";
+    }
+
+    $("rowsLocate").addEventListener("click", function () {
+        $("toCurrent").click();
+    });
+
+    $("rows").addEventListener("scroll", updateRowsLocate, { passive: true });
+    setInterval(updateRowsLocate, 700);
 
     $("closeBrowse").addEventListener("click", function () {
 
@@ -20717,7 +20864,8 @@
     // and the playing from line over the song list as its filter button
     const PHONE_MOVES = [
         { id: "status", parent: "main", before: null },
-        { id: "fromLine", parent: "browse", before: "search" }
+        { id: "fromLine", parent: "fromDock", first: true },
+        { id: "counts", parent: "browseTop", before: null }
     ];
     const phoneHomes = {};
     let phoneArranged = false;
@@ -20740,10 +20888,15 @@
 
                 phoneHomes[move.id] = { parent: el.parentNode, next: el.nextSibling };
 
-                // Placed after the row the named part sits in
+                // First in its new place, or after the row the named part
+                // sits in, or last
                 const after = move.before ? $(move.before).parentNode : null;
 
-                $(move.parent).insertBefore(el, after ? after.nextSibling : null);
+                if (move.first) {
+                    $(move.parent).insertBefore(el, $(move.parent).firstChild);
+                } else {
+                    $(move.parent).insertBefore(el, after ? after.nextSibling : null);
+                }
             } else {
 
                 const home = phoneHomes[move.id];
@@ -20753,6 +20906,7 @@
         }
 
         $("sound").classList.remove("open");
+        sizeCountRoom();
 
         // The list is open under the player on a phone, and closes with the
         // phone layout, a large screen opens it with the Songs button
