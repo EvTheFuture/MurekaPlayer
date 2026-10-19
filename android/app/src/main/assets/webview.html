@@ -1432,22 +1432,37 @@
         visibility: visible;
     }
 
-    /* The stars and the heart a little smaller there, still easy to tap,
-       the counts going under them when the row runs out */
+    /* The stars and the heart smaller there, still easy to tap, so the
+       counts and the Public or Draft badge fit on the same row. Should it
+       run out all the same, they go under them */
     #app.miniSide #rateRow {
         flex-wrap: wrap;
-        gap: 0.6vw 1vw;
+        gap: 0.6vw 0.8vw;
+    }
+
+    #app.miniSide .star {
+        padding: 5px;
+    }
+
+    #app.miniSide #like {
+        margin-left: 0;
+        padding: 5px;
     }
 
     #app.miniSide .star svg,
     #app.miniSide #like .ico {
-        width: clamp(34px, 3.4vw, 56px);
-        height: clamp(34px, 3.4vw, 56px);
+        width: clamp(26px, 2.4vw, 42px);
+        height: clamp(26px, 2.4vw, 42px);
     }
 
     /* The count close to the heart, as with the wider gap beside the cover */
     #app.miniSide #likeCount {
-        margin-left: calc(-1vw + 2px);
+        margin-left: calc(-0.8vw + 1px);
+    }
+
+    #app.miniSide #playCount,
+    #app.miniSide #pubBadge {
+        margin-left: 0.4vw;
     }
 
     /* Up next at the foot of the text over the cover, on top of it, still
@@ -14965,7 +14980,9 @@
         // pull does not also play the song it started on
         target.rows.addEventListener("pointerdown", function (ev) {
 
-            if (ev.pointerType === "touch" || ev.button !== 0 || pullHeld) {
+            // In the small list a mouse drag down closes the list instead,
+            // which has its own buttons to load new songs
+            if (ev.pointerType === "touch" || ev.button !== 0 || pullHeld || target.noMousePull) {
                 return;
             }
 
@@ -15064,7 +15081,7 @@
     let miniBusy = false;
     let miniPlaying = "";
 
-    installPull({ rows: $("miniRows"), ring: $("miniPull"), reload: function () {
+    installPull({ rows: $("miniRows"), ring: $("miniPull"), noMousePull: true, reload: function () {
         refreshMini();
     } });
 
@@ -20730,7 +20747,7 @@
         } },
 
         // The small list over the main page, anywhere but its rows
-        { pop: "mini", box: "mini", close: closeMini, cross: false, when: function () {
+        { pop: "mini", box: "mini", close: closeMini, cross: false, mouseRows: true, when: function () {
             return miniOpen;
         } }
     ];
@@ -20980,7 +20997,14 @@
 
         box.addEventListener("pointerdown", function (ev) {
 
-            if (ev.pointerType !== "mouse" || ev.button !== 0 || swipeBlocked(ev.target, box) || (p.when && !p.when()) || ev.target.closest(".row")) {
+            // The mouse does not scroll a list by dragging, so in a popup
+            // that says so a drag on a song closes it too, only the handles
+            // that move a song keep the press
+            const blocked = p.mouseRows
+                ? !!ev.target.closest("textarea, select, .rowGrip, input[type=range]")
+                : swipeBlocked(ev.target, box) || ev.target.closest(".row");
+
+            if (ev.pointerType !== "mouse" || ev.button !== 0 || blocked || (p.when && !p.when())) {
                 return;
             }
 
