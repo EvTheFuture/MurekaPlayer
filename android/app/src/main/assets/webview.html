@@ -1402,9 +1402,9 @@
         height: var(--sideH) !important;
         margin-top: 0 !important;
         box-sizing: border-box;
-        justify-content: center;
+        justify-content: flex-start;
         gap: 1.2vh;
-        padding: 2.4vh 1.8vw;
+        padding: var(--sidePad, 2.4vh) 1.8vw calc(2.4vh + 4 * clamp(13px, 1.4vw, 20px));
         overflow: hidden;
         border-radius: 14px;
         background: rgba(22, 22, 27, 0.62);
@@ -1443,6 +1443,20 @@
     #app.miniSide #like .ico {
         width: clamp(34px, 3.4vw, 56px);
         height: clamp(34px, 3.4vw, 56px);
+    }
+
+    /* The count close to the heart, as with the wider gap beside the cover */
+    #app.miniSide #likeCount {
+        margin-left: calc(-1vw + 2px);
+    }
+
+    /* Up next at the foot of the text over the cover, on top of it, still
+       while a cover slides to the next song */
+    #app.miniSide #upNext {
+        left: 1.8vw;
+        bottom: 2.4vh;
+        max-width: calc(100% - 3.6vw) !important;
+        opacity: 1 !important;
     }
 
     #app.miniSide #lyrics {
@@ -15090,29 +15104,71 @@
 
     // The song's text over the cover, or back beside it, sliding from where
     // it was to where it goes
-    function setSide(on) {
+    // Where the text over the cover goes, in the page, worked out when it
+    // moves there and when the page changes size, never while a cover is
+    // sliding to the next song
+    let sideBox = null;
+
+    // The up next pill, on the playing cover, or over the text there while
+    // the cover is covered
+    function placeUpNext(side) {
+
+        const up = $("upNext");
+
+        if (side) {
+            $("info").appendChild(up);
+        } else if (up.parentNode !== $("cover")) {
+            $("cover").insertBefore(up, $("lyricsOver"));
+        }
+    }
+
+    function setSide(on, relayout) {
 
         const app = $("app");
         const info = $("info");
         const was = app.classList.contains("miniSide");
-        const main = $("main").getBoundingClientRect();
-        const cover = $("cover").getBoundingClientRect();
-        const from = info.getBoundingClientRect();
 
-        if (on) {
+        if (on && (!was || relayout)) {
 
-            info.style.setProperty("--sideL", Math.round(cover.left - main.left) + "px");
-            info.style.setProperty("--sideT", Math.round(cover.top - main.top) + "px");
-            info.style.setProperty("--sideW", Math.round(cover.width) + "px");
-            info.style.setProperty("--sideH", Math.round(cover.height) + "px");
+            const main = $("main").getBoundingClientRect();
+            const cover = $("cover").getBoundingClientRect();
+            const seek = $("seek").getBoundingClientRect();
+
+            // As tall as the list beside it, and a little wider than the
+            // cover, so no edge of a bright cover shows round its corners
+            sideBox = {
+                left: cover.left - 3,
+                right: cover.right + 3,
+                top: main.top,
+                bottom: seek.top - 10
+            };
+
+            info.style.setProperty("--sideL", Math.round(sideBox.left - main.left) + "px");
+            info.style.setProperty("--sideT", "0px");
+            info.style.setProperty("--sideW", Math.round(sideBox.right - sideBox.left) + "px");
+            info.style.setProperty("--sideH", Math.round(sideBox.bottom - sideBox.top) + "px");
         }
 
         if (on === was) {
             return;
         }
 
+        const from = info.getBoundingClientRect();
+        const titleWas = $("title").getBoundingClientRect().top;
+
         app.classList.toggle("miniSide", on);
+        placeUpNext(on);
         render();
+
+        // The title stays at its height, the text only moves sideways
+        if (on) {
+
+            info.style.setProperty("--sidePad", "0px");
+
+            const pad = Math.max(8, Math.round(titleWas - $("title").getBoundingClientRect().top));
+
+            info.style.setProperty("--sidePad", pad + "px");
+        }
 
         const to = info.getBoundingClientRect();
 
@@ -15129,20 +15185,19 @@
     function sideWanted(main, space) {
 
         const mode = state && (state.listSide === "always" || state.listSide === "never") ? state.listSide : "auto";
-        const cover = $("cover").getBoundingClientRect();
         const portrait = space.width >= main.width - 4;
 
         if (portrait || mode === "never") {
             return false;
         }
 
-        return mode === "always" || (cover.width >= SIDE_MIN_W && cover.height >= SIDE_MIN_H);
+        return mode === "always" || (space.width >= SIDE_MIN_W && main.height >= SIDE_MIN_H);
     }
 
     // From the top of the stars to just above the seek bar, as wide as the
     // song's text beside the cover. With room, the whole column beside the
     // cover, the song's text moving over the cover
-    function placeMini() {
+    function placeMini(relayout) {
 
         if (!miniOpen) {
             return;
@@ -15162,14 +15217,13 @@
         const space = $("coverSpace").getBoundingClientRect();
         const side = sideWanted(main, space);
 
-        setSide(side);
+        setSide(side, relayout === true);
 
         if (side) {
 
-            // Clear of the cover, which can reach a little past its space
+            // Clear of the text over the cover
             const gap = parseFloat(getComputedStyle(mainEl).columnGap) || 0;
-            const cover = $("cover").getBoundingClientRect();
-            const left = Math.max(space.right + gap, cover.right + 20);
+            const left = Math.max(space.right + gap, (sideBox ? sideBox.right : space.right) + 16);
             const sideBottom = seek.top - 10;
 
             box.style.left = Math.round(left - 8) + "px";
@@ -15191,7 +15245,9 @@
         box.style.height = Math.max(100, Math.round(bottom - top)) + "px";
     }
 
-    window.addEventListener("resize", placeMini);
+    window.addEventListener("resize", function () {
+        placeMini(true);
+    });
 
     function openMini() {
 
@@ -19630,7 +19686,11 @@
         }
 
         tiles[2].appendChild($("coverShade"));
-        tiles[2].appendChild($("upNext"));
+
+        if (!$("app").classList.contains("miniSide")) {
+            tiles[2].appendChild($("upNext"));
+        }
+
         tiles[2].appendChild($("lyricsOver"));
     }
 
