@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.444";
+    const VERSION = "1.9.9.446";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2789,6 +2789,15 @@
     // Play on after a quick restart, in seconds: 0 turns it off, otherwise
     // in steps of 5 up to ten minutes. Missing, it is half a minute. The
     // limits are declared near the top, the settings are read before this
+    // The seconds a song fades out for a new one ready to play, 0 to 10,
+    // 2 when not set
+    function readyFadeSeconds(v) {
+
+        const n = Number(v);
+
+        return Number.isFinite(n) && n >= 0 ? Math.min(10, Math.round(n)) : 2;
+    }
+
     // The lyrics length under which a song counts as instrumental, 0 for
     // never, 20 when not set
     function lyricLimit(v) {
@@ -2819,6 +2828,7 @@
             refreshOnReturnMin: REFRESH_RETURN_DEFAULT,
             absoluteNumbers: false,
             autoInstrumentalChars: 20,
+            readyFadeSeconds: 2,
             autoPlay: false,
             playOnSeconds: 30,
             shuffle: false,
@@ -3015,6 +3025,7 @@
                     refreshOnReturnMin: returnMinutes(parsed.refreshOnReturnMin),
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoInstrumentalChars: lyricLimit(parsed.autoInstrumentalChars),
+                    readyFadeSeconds: readyFadeSeconds(parsed.readyFadeSeconds),
                     autoPlay: parsed.autoPlay === true,
                     playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
@@ -4840,7 +4851,9 @@
             publishHostSoon();
 
             if (currentSong) {
+
                 refreshNowPlayingMeta();
+                updateLyricLine(true);
             }
         }, 500);
     }
@@ -4932,6 +4945,12 @@
     }
 
     // Whether the user marked this song as instrumental by hand
+    // Whether a song's lyrics are left unshown: marked instrumental by hand,
+    // or counted instrumental by its short lyrics, both only prompt notes
+    function lyricsHidden(song) {
+        return !!song && (isManualInstrumental(song) || isShortLyrics(song));
+    }
+
     function isManualInstrumental(song) {
 
         return manualInstrumental.has(String(song.song_id));
@@ -12917,6 +12936,112 @@
 
     // Songs that were being generated and are in the library now: no longer
     // shown as such, and played when that was asked for
+    // The fade before a newly made song asked to play at once: the playing
+    // song goes quiet over the seconds set, then the new one starts at the
+    // usual level. The web view's browsers playing the music are told, so
+    // they fade along. A song changed or paused meanwhile calls it off
+    let readyFade = null;
+    let readyFadeCount = 0;
+
+    // While a fade runs, for the browsers: its number and its length
+    let hostFade = null;
+
+    function fadeThen(ms, then, quit) {
+
+        endReadyFade();
+
+        if (!(ms > 0) || !audio || !audio.src || audio.paused) {
+
+            then();
+            return;
+        }
+
+        const start = audio.volume;
+
+        // Safari on an iPhone ignores a page's volume, a fade would only
+        // hold the new song back
+        const probe = start > 0.5 ? start - 0.01 : start + 0.01;
+
+        audio.volume = probe;
+
+        const settable = Math.abs(audio.volume - probe) < 0.001;
+
+        audio.volume = start;
+
+        if (!settable) {
+
+            then();
+            return;
+        }
+
+        const from = currentSong ? currentSong.song_id : null;
+        const t0 = Date.now();
+        const fade = {};
+
+        readyFadeCount += 1;
+        hostFade = { n: readyFadeCount, ms: ms };
+        publishHostSoon();
+        dbgLog("Song", "fading out over " + (ms / 1000) + " s for the new song");
+
+        fade.timer = setInterval(function () {
+
+            // Another song or a pause meanwhile: the fade is called off and
+            // the new song left for a tap
+            if ((currentSong ? currentSong.song_id : null) !== from || audio.paused) {
+
+                dbgLog("Song", "fade called off, the song changed or was paused");
+                endReadyFade();
+                quit();
+                return;
+            }
+
+            const k = Math.min(1, (Date.now() - t0) / ms);
+
+            audio.volume = Math.max(0, start * (1 - k));
+
+            if (k < 1) {
+                return;
+            }
+
+            clearInterval(fade.timer);
+            readyFade = null;
+            hostFade = null;
+
+            // The level back once the new song is loading, so the old one is
+            // not heard again for the moment before it goes
+            const back = function () {
+
+                clearTimeout(fade.safety);
+                applyCarAudioVolume();
+            };
+
+            audio.addEventListener("loadstart", back, { once: true });
+            fade.safety = setTimeout(function () {
+
+                audio.removeEventListener("loadstart", back);
+                applyCarAudioVolume();
+            }, 5000);
+
+            then();
+        }, 40);
+
+        readyFade = fade;
+    }
+
+    // A fade under way stopped, the level put back
+    function endReadyFade() {
+
+        if (!readyFade) {
+            return;
+        }
+
+        clearInterval(readyFade.timer);
+        readyFade = null;
+        hostFade = null;
+        applyCarAudioVolume();
+        publishHostSoon();
+    }
+
     function settlePending() {
 
         if (pendingSongs.size === 0) {
@@ -12974,30 +13099,36 @@
             return;
         }
 
-        // As if it was tapped just now: a song playing stops for it
+        // As if it was tapped just now: a song playing fades out and stops
+        // for it, over the seconds the setting asks
         if (wanted !== null) {
 
             showToast("Ready, playing " + (wanted.title || "Untitled"), true);
-            dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
-            playFrom(wanted.song_id);
+            fadeThen(Math.round((settings.readyFadeSeconds || 0) * 1000), function () {
 
-            // A browser that does not let a page start sound by itself keeps
-            // it loaded and paused, then a tap on Play starts it
-            setTimeout(function () {
+                dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
+                playFrom(wanted.song_id);
 
-                if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
+                // A browser that does not let a page start sound by itself
+                // keeps it loaded and paused, then a tap on Play starts it
+                setTimeout(function () {
 
-                    showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), true);
+                    if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
 
-                    // Gone again once it plays, by a tap or by the browser
-                    // itself when the page is back in view
-                    const seq = toastSeq;
+                        showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), true);
 
-                    audio.addEventListener("playing", function () {
-                        hideToast(seq);
-                    }, { once: true });
-                }
-            }, 2500);
+                        // Gone again once it plays, by a tap or by the
+                        // browser itself when the page is back in view
+                        const seq = toastSeq;
+
+                        audio.addEventListener("playing", function () {
+                            hideToast(seq);
+                        }, { once: true });
+                    }
+                }, 2500);
+            }, function () {
+                showToast("Ready to play: " + (wanted.title || "Untitled"), true);
+            });
         }
 
         if (afters.length === 0) {
@@ -15195,7 +15326,9 @@
         };
 
         // The lyrics ride along in the same entry, so a stored one needs no
-        // request at all and the rows appear as soon as the song starts
+        // request at all and the rows appear as soon as the song starts.
+        // Their length first, short ones are not shown
+        noteLyricLength(song.song_id, entry, false);
         lyricRows = Array.isArray(entry.lyrics) ? entry.lyrics : [];
         lyricIdx = -1;
         updateLyricLine(true);
@@ -21227,12 +21360,13 @@
             return;
         }
 
-        // A song marked instrumental by hand has lyrics text only because
-        // Mureka needs instructions in the prompt, so never show them
+        // A song marked instrumental by hand, or counted one by its short
+        // lyrics, has lyrics text only because Mureka needs instructions in
+        // the prompt, so never show them
         const active = settings.artOverlayMode === "all"
             && lyricRows.length > 0
             && audio
-            && !(currentSong && isManualInstrumental(currentSong));
+            && !lyricsHidden(currentSong);
 
         refreshOverlay(active);
 
@@ -24103,6 +24237,7 @@
             shuffle: shuffleMode,
             repeat: repeatMode,
             carAudio: hostCarAudio,
+            fade: hostFade,
             signedIn: authState,
 
             // The account signed in on the phone, for the web view's header
@@ -24250,7 +24385,7 @@
         // Sent whatever the phone's own Lyrics choice, lyricsWhere says
         // where they go, and a browser with its own settings may differ
         const active = lyricRows.length > 0
-            && !(currentSong && isManualInstrumental(currentSong));
+            && !lyricsHidden(currentSong);
 
         if (!active) {
             return null;
@@ -24354,6 +24489,7 @@
             cached: cachedIds.has(song.song_id),
             serverInstrumental: song.generation_method === 7,
             manualInstrumental: isManualInstrumental(song),
+            shortLyrics: isShortLyrics(song) && !isManualInstrumental(song),
             ignored: isIgnored(song),
             bpm: effectiveBpm(song) || 0,
             canSetBpm: true,
@@ -34153,6 +34289,10 @@
             settings.goneOnMureka = v;
         });
 
+        const readyFadeRow = makeStepperRow("Fade out for a new song, seconds",
+            function () { return settings.readyFadeSeconds; },
+            function (v) { settings.readyFadeSeconds = readyFadeSeconds(v); }, 0, 10, 1);
+
         const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
             function () { return settings.autoInstrumentalChars; },
             function (v) {
@@ -34162,7 +34302,9 @@
                 publishHostSoon();
 
                 if (currentSong) {
+
                     refreshNowPlayingMeta();
+                    updateLyricLine(true);
                 }
             }, 0, 200, 5);
 
@@ -34444,6 +34586,8 @@
                 publishHostSoon();
             });
 
+        nowPage.appendChild(makeLabel("New songs"));
+        nowPage.appendChild(withHint(readyFadeRow, "A song still being made, asked to play as soon as it is ready, comes in with the playing song fading out over these seconds instead of cutting it off. Browsers playing the music fade along, except Safari on an iPhone or iPad at full volume. 0 cuts at once."));
         nowPage.appendChild(makeLabel("Lyrics"));
         nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 

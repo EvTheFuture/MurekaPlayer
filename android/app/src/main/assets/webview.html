@@ -10037,6 +10037,7 @@
 
             audio.dataset.src = s.src;
             audio.src = songAt(s.src);
+            fadeDone();
         }
 
         const want = phonePosition();
@@ -12746,11 +12747,79 @@
     window.addEventListener("pointerdown", gainWake, true);
     window.addEventListener("keydown", gainWake, true);
 
+    // The phone fading its song out for a new one: this browser fades along,
+    // its level times this share, back to whole with the new song
+    let fadeShare = 1;
+    let fadeSeen = 0;
+    let fadeTimer = 0;
+    let fadeAt = 0;
+    let fadeMs = 0;
+
+    function followFade(s) {
+
+        const f = s && s.fade;
+
+        if (f && typeof f.n === "number" && f.n !== fadeSeen && f.ms > 0) {
+
+            fadeSeen = f.n;
+
+            if (!sessionHere()) {
+                return;
+            }
+
+            // A little shorter, the word took a moment to come
+            const ms = Math.max(300, f.ms - 300);
+            const t0 = Date.now();
+
+            fadeAt = t0;
+            fadeMs = ms;
+            clearInterval(fadeTimer);
+            dbgLog("Audio", "fading out with the phone over " + (ms / 1000) + " s");
+
+            fadeTimer = setInterval(function () {
+
+                const k = Math.min(1, (Date.now() - t0) / ms);
+
+                fadeShare = 1 - k;
+                applyWebVolume();
+
+                if (k >= 1) {
+
+                    clearInterval(fadeTimer);
+                    fadeTimer = 0;
+                }
+            }, 40);
+
+            return;
+        }
+
+        // Faded and no new song came, the fade was called off: the level
+        // back after a while
+        if (!f && fadeShare < 1 && !fadeTimer && Date.now() - fadeAt > fadeMs + 4000) {
+            fadeDone();
+        }
+    }
+
+    // The level whole again, as a new song comes
+    function fadeDone() {
+
+        clearInterval(fadeTimer);
+        fadeTimer = 0;
+
+        if (fadeShare !== 1) {
+
+            fadeShare = 1;
+            applyWebVolume();
+        }
+    }
+
     function applyWebVolume() {
 
-        const want = webVolume();
+        const want = webVolume() * fadeShare;
 
-        if (volumeFixed && (gainNode || (want < 1 && wireGain()))) {
+        // Led through the gain only for a level set below full, never for a
+        // fade alone, which on an iPhone then cuts as before
+        if (volumeFixed && (gainNode || (webVolume() < 1 && wireGain()))) {
 
             if (gainNode.gain.value !== want) {
                 gainNode.gain.value = want;
@@ -17389,6 +17458,7 @@
         setDebugOverlay(s.debugOverlay === true);
         offerSeek(s.seekActions !== false);
         takeVolAsk(s);
+        followFade(s);
         paintVolIcon();
         render();
         paintForceAsk();
@@ -19815,13 +19885,15 @@
         // What is noted about the song: instrumental, its tempo, its stars
         menuLine(box);
 
+        // Instrumental by Mureka, or by its short lyrics, cannot be marked
         box.appendChild(menuItem("instrumental",
-            m.serverInstrumental ? "Instrumental" : (m.manualInstrumental ? "Unmark instrumental" : "Mark instrumental"),
+            m.serverInstrumental ? "Instrumental" : (m.shortLyrics ? "Instrumental, short lyrics"
+                : (m.manualInstrumental ? "Unmark instrumental" : "Mark instrumental")),
             function () {
 
                 act("instrumental");
                 close();
-            }, "", m.serverInstrumental));
+            }, "", m.serverInstrumental || m.shortLyrics === true));
 
         // Left out of queues made from the list, played only when asked for
         box.appendChild(menuItem("ignore", m.ignored ? "Stop ignoring" : "Ignore in queues", function () {
