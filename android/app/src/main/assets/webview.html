@@ -1282,6 +1282,14 @@
         box-shadow: inset 0 0 0 2px var(--accent), 0 6px 20px rgba(0, 0, 0, 0.5);
     }
 
+    /* A choice made here and nothing gone wrong: ringed in cyan, no ring
+       turning */
+    #toast.note {
+        color: var(--accent);
+        font-weight: 600;
+        box-shadow: inset 0 0 0 2px var(--accent), 0 6px 20px rgba(0, 0, 0, 0.5);
+    }
+
     .toastRing {
         display: inline-block;
         width: 0.8em;
@@ -12892,7 +12900,8 @@
 
     // Everything the volume can be set for: the phone while it makes the
     // sound, otherwise each browser the song is heard out of, this one
-    // first. With none heard yet, this browser's own level
+    // first. With none heard yet, this browser's own level, unless it is
+    // set to play no music, then none at all
     function volTargets() {
 
         if (!state || !state.carAudio) {
@@ -12902,7 +12911,7 @@
         const list = otherPlayers();
         const here = { key: "here", kind: "here", name: browserName() };
 
-        if (soundHere() || list.length === 0) {
+        if (soundHere() || (list.length === 0 && !localMute)) {
             list.unshift(here);
         }
 
@@ -12910,9 +12919,10 @@
     }
 
     // The one the volume button, the keys and the speaker icon are for:
-    // where the song is heard, this browser first
+    // where the song is heard, this browser first. None, the music meant
+    // for browsers and none of them playing it
     function volTarget() {
-        return volTargets()[0];
+        return volTargets()[0] || { key: "none", kind: "none", name: "" };
     }
 
     // Whether the volume of this browser is the one changed
@@ -12922,6 +12932,10 @@
 
     // The loudest step there is, 100 for a browser's own level
     function volTopOf(t) {
+
+        if (t.kind === "none") {
+            return 0;
+        }
 
         if (t.kind !== "phone") {
             return 100;
@@ -12937,6 +12951,10 @@
     // Where the volume is now, our own move first while it still stands,
     // as the answer from the phone or the other browser is on its way
     function volLevelOf(t) {
+
+        if (t.kind === "none") {
+            return -1;
+        }
 
         if (t.kind === "here") {
             return Math.round(webVolume() * 100);
@@ -12981,6 +12999,14 @@
 
         return "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
             + ", the one its volume buttons move";
+    }
+
+    // Why the volume cannot be set now
+    function volNoneText() {
+
+        return volTarget().kind === "none"
+            ? "No browser plays the music now, and this one is set to play none"
+            : "The phone did not say what its volume is";
     }
 
     // One bar of the popup: the name, the slider with a step down and up
@@ -13080,6 +13106,16 @@
 
             for (const t of list) {
                 box.appendChild(volBar(t));
+            }
+
+            // Nothing to set, and why
+            if (list.length === 0) {
+
+                const none = document.createElement("div");
+
+                none.className = "ceLabel volWhere";
+                none.textContent = volNoneText();
+                box.appendChild(none);
             }
         }
 
@@ -13216,7 +13252,7 @@
 
         if (top <= 0 || now < 0) {
 
-            toast("The phone did not say what its volume is");
+            toast(volNoneText());
             return;
         }
 
@@ -13235,7 +13271,7 @@
 
         if (top <= 0 || now < 0) {
 
-            toast("The phone did not say what its volume is");
+            toast(volNoneText());
             return;
         }
 
@@ -17986,7 +18022,7 @@
         }
 
         setLocalMute(true);
-        toast("No music in this browser", "bad");
+        toast("No music in this browser", "note");
     });
 
     $("resume").addEventListener("click", function () {
@@ -18382,6 +18418,7 @@
         el.classList.toggle("bad", kind === "bad");
         el.classList.toggle("wait", kind === "wait");
         el.classList.toggle("online", kind === "online");
+        el.classList.toggle("note", kind === "note");
 
         // While the phone waits for Mureka, a turning ring before the words,
         // and the note stays until the answer replaces it
