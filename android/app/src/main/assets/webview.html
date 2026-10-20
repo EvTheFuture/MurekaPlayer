@@ -2735,6 +2735,25 @@
         font-variant-numeric: tabular-nums;
     }
 
+    /* The number of a stepper, typed in as well */
+    input.pNumIn {
+        width: 3.6em;
+        min-width: 0;
+        box-sizing: border-box;
+        height: var(--pctl-h, var(--ctl-h));
+        padding: 0 4px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        color: var(--text);
+        font: inherit;
+    }
+
+    input.pNumIn:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
     /* Spread out: the first part on the left, the last at the right edge */
     .pRow.spread {
         flex-wrap: nowrap;
@@ -2964,6 +2983,18 @@
     #panelBody .pCtl > * {
         margin-top: 0;
         margin-bottom: 0;
+    }
+
+    /* A row of controls in the group, a stepper with its switch, kept to
+       the right edge, wrapping there when narrow */
+    #panelBody .pCtl > .pRow {
+        padding: 0;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+
+    html.phone #panelBody .pCtl .pBtn {
+        padding: 8px 14px;
     }
 
     html.phone #panelBody .pCtl {
@@ -6581,9 +6612,29 @@
             const shown = row.querySelector(".pNum");
             const v = typeof value === "number" ? value : def.min;
 
-            if (shown) {
+            if (shown && shown.tagName === "INPUT") {
+                shown.value = String(v);
+            } else if (shown) {
                 shown.textContent = String(v);
             }
+
+            // A typed value kept here alone, caught before the phone hears
+            row.addEventListener("change", function (ev) {
+
+                if (ev.target !== shown) {
+                    return;
+                }
+
+                ev.stopImmediatePropagation();
+
+                const typed = Number(String(shown.value).trim().replace(",", "."));
+
+                if (isFinite(typed)) {
+                    setLocalValue(def, Math.max(def.min, Math.min(def.max, typed)));
+                } else {
+                    shown.value = String(v);
+                }
+            }, true);
 
             row.addEventListener("click", function (ev) {
 
@@ -13673,9 +13724,11 @@
             // The controls of a floated row sit in their own group
             const ctl = row.querySelector(":scope > .pCol > .pCtl");
             const kids = ctl ? Array.from(ctl.children) : Array.from(row.children);
+            // The minus and plus of a stepper stay as they are, a switch
+            // beside them is lined up like any other
             const buttons = kids.filter(function (el) {
                 return el.classList.contains("pBtn") && !el.classList.contains("wide")
-                    && !/^\u2039/.test(el.textContent.trim());
+                    && !/^\u2039/.test(el.textContent.trim()) && !/^[-+]$/.test(el.textContent.trim());
             });
 
             if (buttons.length === 0) {
@@ -13689,7 +13742,10 @@
                 continue;
             }
 
-            const named = ctl !== null || Array.from(row.children).some(function (el) {
+            // Beside a name: its own, or the row of controls beside one
+            const inner = row.parentElement && row.parentElement.classList.contains("pRow")
+                && row.parentElement.classList.contains("top");
+            const named = ctl !== null || inner || row.closest(".pCtl") !== null || Array.from(row.children).some(function (el) {
                 return el.classList.contains("pText") || el.classList.contains("pCol");
             });
             const choice = buttons.length > 1 && buttons.some(function (b) {
@@ -13807,7 +13863,8 @@
 
         const active = document.activeElement;
 
-        if (active && active.tagName === "SELECT" && $("panelBody").contains(active)) {
+        // An open drop-down, or a field being typed in, is not drawn over
+        if (active && /^(SELECT|INPUT|TEXTAREA)$/.test(active.tagName) && $("panelBody").contains(active)) {
 
             selectHeldItems = items;
             return;
@@ -13875,7 +13932,7 @@
 
     $("panelBody").addEventListener("blur", function (ev) {
 
-        if (ev.target.tagName !== "SELECT" || !selectHeldItems) {
+        if (!/^(SELECT|INPUT|TEXTAREA)$/.test(ev.target.tagName) || !selectHeldItems) {
             return;
         }
 
@@ -14091,7 +14148,49 @@
             return row;
         }
 
-        if (node.t === "input" && hasButtons && (node.type === "number" || node.type === "range")) {
+        // A number with the phone's minus and plus beside it can be typed
+        // in too, as on the phone, a quarter of a second say
+        if (node.t === "input" && hasButtons && node.type === "number") {
+
+            const field = document.createElement("input");
+            const was = node.value === "" ? "" : String(node.value);
+
+            field.type = "text";
+            field.inputMode = "decimal";
+            field.className = "pText pNum pNumIn";
+            field.style.flex = "0 0 auto";
+            field.value = was;
+            field.setAttribute("aria-label", "Value");
+
+            field.addEventListener("change", function () {
+
+                const typed = field.value.trim().replace(",", ".");
+
+                if (typed === "" || !isFinite(Number(typed))) {
+
+                    field.value = was;
+                    return;
+                }
+
+                if (Number(typed) !== Number(was)) {
+                    panelAction("hset", { id: node.id, value: typed });
+                }
+            });
+
+            // Enter takes it, and the page's own keys leave the typing alone
+            field.addEventListener("keydown", function (ev) {
+
+                ev.stopPropagation();
+
+                if (ev.key === "Enter") {
+                    field.blur();
+                }
+            });
+
+            return field;
+        }
+
+        if (node.t === "input" && hasButtons && node.type === "range") {
 
             const shown = document.createElement("div");
 
@@ -21289,7 +21388,7 @@
                     flowPending = null;
                     glideFlow(flowOffset, 0);
                 }
-            }, 6000);
+            }, 12000);
         });
     }
 

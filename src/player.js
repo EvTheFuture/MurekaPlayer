@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.451";
+    const VERSION = "1.9.9.452";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2797,13 +2797,17 @@
     // Play on after a quick restart, in seconds: 0 turns it off, otherwise
     // in steps of 5 up to ten minutes. Missing, it is half a minute. The
     // limits are declared near the top, the settings are read before this
-    // The seconds a song fades out before another, 0 to 10 in half
-    // seconds, 1.5 when not set
-    function readyFadeSeconds(v) {
+    // The seconds a song fades out before another, 0 to 10 to a hundredth,
+    // the default given when not set
+    function fadeSeconds(v, fallback) {
 
         const n = Number(v);
 
-        return Number.isFinite(n) && n >= 0 ? Math.min(10, Math.round(n * 2) / 2) : 1.5;
+        return Number.isFinite(n) && n >= 0 ? Math.min(10, Math.round(n * 100) / 100) : fallback;
+    }
+
+    function readyFadeSeconds(v) {
+        return fadeSeconds(v, 1.5);
     }
 
     // The lyrics length under which a song counts as instrumental, 0 for
@@ -2839,8 +2843,13 @@
             readyFadeSeconds: 1.5,
             fadeOnReady: true,
             fadeOnTap: false,
+            fadeOnSwipe: false,
             fadeOnMedia: false,
             fadeOnKey: false,
+            fadeTapSec: 0.5,
+            fadeSwipeSec: 0.5,
+            fadeMediaSec: 0.5,
+            fadeKeySec: 0.5,
             autoPlay: false,
             playOnSeconds: 30,
             shuffle: false,
@@ -3040,8 +3049,13 @@
                     readyFadeSeconds: readyFadeSeconds(parsed.readyFadeSeconds),
                     fadeOnReady: parsed.fadeOnReady !== false,
                     fadeOnTap: parsed.fadeOnTap === true,
+                    fadeOnSwipe: parsed.fadeOnSwipe === true,
                     fadeOnMedia: parsed.fadeOnMedia === true,
                     fadeOnKey: parsed.fadeOnKey === true,
+                    fadeTapSec: fadeSeconds(parsed.fadeTapSec, 0.5),
+                    fadeSwipeSec: fadeSeconds(parsed.fadeSwipeSec, 0.5),
+                    fadeMediaSec: fadeSeconds(parsed.fadeMediaSec, 0.5),
+                    fadeKeySec: fadeSeconds(parsed.fadeKeySec, 0.5),
                     autoPlay: parsed.autoPlay === true,
                     playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
@@ -13152,26 +13166,37 @@
         readyFade = fade;
     }
 
-    // Whether a switch asked for this way fades: a new song ready to play
-    // ("ready"), a song tapped or Next or Previous on the screen ("tap"),
-    // the lock screen, the notification, Bluetooth or
-    // a browser's media keys ("media"), or the keyboard ("key")
-    function fadeFor(kind) {
+    // The settings of the fade for each way of switching: a new song ready
+    // to play, a song tapped or Next or Previous on the screen, a swipe on
+    // the cover, the lock screen, the notification, Bluetooth or a
+    // browser's media keys, and the keyboard. Each switched on or off and
+    // with its own length
+    const FADE_KINDS = {
+        ready: { on: "fadeOnReady", sec: "readyFadeSeconds", onFirst: true, secFirst: 1.5 },
+        tap: { on: "fadeOnTap", sec: "fadeTapSec", onFirst: false, secFirst: 0.5 },
+        swipe: { on: "fadeOnSwipe", sec: "fadeSwipeSec", onFirst: false, secFirst: 0.5 },
+        media: { on: "fadeOnMedia", sec: "fadeMediaSec", onFirst: false, secFirst: 0.5 },
+        key: { on: "fadeOnKey", sec: "fadeKeySec", onFirst: false, secFirst: 0.5 }
+    };
 
-        if (!(settings.readyFadeSeconds > 0)) {
-            return false;
+    // How long a switch asked for this way fades, in ms, 0 for not at all
+    function fadeMs(kind) {
+
+        const k = FADE_KINDS[kind];
+
+        if (!k) {
+            return 0;
         }
 
-        return kind === "ready" ? settings.fadeOnReady !== false
-            : kind === "tap" ? settings.fadeOnTap === true
-            : kind === "media" ? settings.fadeOnMedia === true
-            : kind === "key" ? settings.fadeOnKey === true
-            : false;
+        const on = k.onFirst ? settings[k.on] !== false : settings[k.on] === true;
+        const sec = fadeSeconds(settings[k.sec], k.secFirst);
+
+        return on && sec > 0 ? Math.round(sec * 1000) : 0;
     }
 
     // Another song, after a fade when the setting for this way asks for
     // one. A second switch while a fade runs goes at once, the fade dropped
-    function switchSong(kind, go) {
+    function switchSong(kind, go, quit) {
 
         if (readyFade) {
 
@@ -13180,15 +13205,53 @@
             return;
         }
 
-        if (!fadeFor(kind)) {
+        const ms = fadeMs(kind);
+
+        if (!ms) {
 
             go();
             return;
         }
 
-        fadeThen(Math.round(settings.readyFadeSeconds * 1000), go, function () {
+        fadeThen(ms, go, quit || function () {
             // Changed or paused meanwhile, that stands
         });
+    }
+
+    // A swipe on the cover: the song after its fade, and only once the
+    // cover has glided all the way, whichever comes last. The fade starts
+    // with the glide. Called off, the covers go back
+    function swipeSwitch(go) {
+
+        let landed = false;
+        let faded = false;
+
+        const tryGo = function () {
+
+            if (landed && faded) {
+
+                artSwipeLanded = true;
+                go();
+            }
+        };
+
+        switchSong("swipe", function () {
+
+            faded = true;
+            tryGo();
+        }, function () {
+
+            currentSwipeOffset = 0;
+            setArtSources();
+            positionArt(0);
+        });
+
+        return function () {
+
+            currentSwipeOffset = 0;
+            landed = true;
+            tryGo();
+        };
     }
 
     // A tapped song after a fade, unless it is the one playing, which
@@ -13288,7 +13351,7 @@
             const startWanted = function () {
 
                 showToast("Ready, playing " + (wanted.title || "Untitled"), true);
-                fadeThen(fadeFor("ready") ? Math.round(settings.readyFadeSeconds * 1000) : 0, function () {
+                fadeThen(fadeMs("ready"), function () {
 
                     dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
                     playFrom(wanted.song_id);
@@ -19569,22 +19632,13 @@
 
         if (moved <= -threshold && neighborSong(1)) {
 
-            // Glide fully to the next cover, then play it on landing
-            animateArt(moved, -step, function () {
-
-                currentSwipeOffset = 0;
-                artSwipeLanded = true;
-                playNext();
-            });
+            // Glide fully to the next cover, then play it on landing, after
+            // its fade when one is set for swipes
+            animateArt(moved, -step, swipeSwitch(playNext));
 
         } else if (moved >= threshold && neighborSong(-1)) {
 
-            animateArt(moved, step, function () {
-
-                currentSwipeOffset = 0;
-                artSwipeLanded = true;
-                playPrevSong();
-            });
+            animateArt(moved, step, swipeSwitch(playPrevSong));
 
         } else {
 
@@ -27014,18 +27068,22 @@
             // instead, the cover that came in is the song that plays
             const step = arg && arg.step < 0 ? -1 : 1;
 
-            // The cover is already there, so the song follows at once
+            // The cover is already there, the song follows after its fade
+            // when one is set for swipes
             if (neighborSong(step)) {
 
-                if (step < 0) {
-                    playPrevSong();
-                } else {
+                switchSong("swipe", function () {
 
-                    // Which way to look for a stored song when offline
-                    queueMoveDir = 1;
-                    queuePos = queuePos + 1 >= queue.length ? 0 : queuePos + 1;
-                    playCurrent();
-                }
+                    if (step < 0) {
+                        playPrevSong();
+                    } else {
+
+                        // Which way to look for a stored song when offline
+                        queueMoveDir = 1;
+                        queuePos = queuePos + 1 >= queue.length ? 0 : queuePos + 1;
+                        playCurrent();
+                    }
+                });
             }
         } else if (cmd === "seek") {
             seekToTime(Number(arg) || 0);
@@ -34278,6 +34336,40 @@
         return row;
     }
 
+    // A fade for one way of switching songs: its seconds, stepped by half a
+    // second or typed, and its own switch beside them
+    function makeFadeRow(label, kind) {
+
+        const k = FADE_KINDS[kind];
+        const on = function () {
+            return k.onFirst ? settings[k.on] !== false : settings[k.on] === true;
+        };
+        const row = makeStepperRow(label, function () {
+            return fadeSeconds(settings[k.sec], k.secFirst);
+        }, function (v) {
+            settings[k.sec] = fadeSeconds(v, k.secFirst);
+        }, 0, 10, 0.5);
+        const controls = row.lastElementChild;
+
+        const btn = makeButton("Off", "#333", "#fff", function () {
+
+            settings[k.on] = !on();
+            saveSettings();
+            updateToggleButton(btn, on());
+        });
+
+        btn.style.flex = "0 0 auto";
+        btn.style.minWidth = "56px";
+        btn.style.padding = "6px 12px";
+        updateToggleButton(btn, on());
+        settingsRefreshers.push(function () {
+            updateToggleButton(btn, on());
+        });
+        controls.appendChild(btn);
+
+        return row;
+    }
+
     // Build the settings overlay once, it covers the panel until closed
     function buildSettings() {
 
@@ -34518,21 +34610,11 @@
             settings.goneOnMureka = v;
         });
 
-        const readyFadeRow = makeStepperRow("Fade length, seconds",
-            function () { return settings.readyFadeSeconds; },
-            function (v) { settings.readyFadeSeconds = readyFadeSeconds(v); }, 0, 10, 0.5);
-        const fadeReadyRow = makeBoolRow("Fade for a new song when ready",
-            function () { return settings.fadeOnReady !== false; },
-            function (v) { settings.fadeOnReady = v; });
-        const fadeTapRow = makeBoolRow("Fade for a song tapped",
-            function () { return settings.fadeOnTap === true; },
-            function (v) { settings.fadeOnTap = v; });
-        const fadeMediaRow = makeBoolRow("Fade for media controls",
-            function () { return settings.fadeOnMedia === true; },
-            function (v) { settings.fadeOnMedia = v; });
-        const fadeKeyRow = makeBoolRow("Fade for keyboard shortcuts",
-            function () { return settings.fadeOnKey === true; },
-            function (v) { settings.fadeOnKey = v; });
+        const fadeReadyRow = makeFadeRow("A new song when ready, seconds", "ready");
+        const fadeTapRow = makeFadeRow("A song tapped, seconds", "tap");
+        const fadeSwipeRow = makeFadeRow("A swipe on the cover, seconds", "swipe");
+        const fadeMediaRow = makeFadeRow("Media controls, seconds", "media");
+        const fadeKeyRow = makeFadeRow("Keyboard shortcuts, seconds", "key");
 
         const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
             function () { return settings.autoInstrumentalChars; },
@@ -34828,9 +34910,10 @@
             });
 
         nowPage.appendChild(makeLabel("Fades"));
-        nowPage.appendChild(withHint(readyFadeRow, "How long the playing song fades out before another one starts, for the ways switched on below. Browsers playing the music fade along. 0 never fades."));
+        nowPage.appendChild(makeHint("The playing song fades out before another one starts, for each way of switching that is on, over its own seconds. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
         nowPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready."));
-        nowPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen. A swipe on the cover switches at once, the cover is already there."));
+        nowPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen."));
+        nowPage.appendChild(withHint(fadeSwipeRow, "A swipe on the cover, here or in the web view. The fade starts as the cover glides."));
         nowPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
         nowPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
         nowPage.appendChild(makeLabel("Lyrics"));
