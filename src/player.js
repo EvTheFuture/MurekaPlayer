@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.450";
+    const VERSION = "1.9.9.451";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2797,13 +2797,13 @@
     // Play on after a quick restart, in seconds: 0 turns it off, otherwise
     // in steps of 5 up to ten minutes. Missing, it is half a minute. The
     // limits are declared near the top, the settings are read before this
-    // The seconds a song fades out for a new one ready to play, 0 to 10,
-    // 2 when not set
+    // The seconds a song fades out before another, 0 to 10 in half
+    // seconds, 1.5 when not set
     function readyFadeSeconds(v) {
 
         const n = Number(v);
 
-        return Number.isFinite(n) && n >= 0 ? Math.min(10, Math.round(n)) : 2;
+        return Number.isFinite(n) && n >= 0 ? Math.min(10, Math.round(n * 2) / 2) : 1.5;
     }
 
     // The lyrics length under which a song counts as instrumental, 0 for
@@ -2836,7 +2836,7 @@
             refreshOnReturnMin: REFRESH_RETURN_DEFAULT,
             absoluteNumbers: false,
             autoInstrumentalChars: 20,
-            readyFadeSeconds: 2,
+            readyFadeSeconds: 1.5,
             fadeOnReady: true,
             fadeOnTap: false,
             fadeOnMedia: false,
@@ -34520,7 +34520,7 @@
 
         const readyFadeRow = makeStepperRow("Fade length, seconds",
             function () { return settings.readyFadeSeconds; },
-            function (v) { settings.readyFadeSeconds = readyFadeSeconds(v); }, 0, 10, 1);
+            function (v) { settings.readyFadeSeconds = readyFadeSeconds(v); }, 0, 10, 0.5);
         const fadeReadyRow = makeBoolRow("Fade for a new song when ready",
             function () { return settings.fadeOnReady !== false; },
             function (v) { settings.fadeOnReady = v; });

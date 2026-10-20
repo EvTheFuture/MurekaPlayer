@@ -388,7 +388,8 @@ the new settings layout and a number of smaller improvements.
   all.
 - **A fade for a new song.** A song still being made, asked to play as
   soon as it is ready, comes in with the playing song fading out first,
-  2 seconds unless set otherwise under Now playing, 0 to cut at once.
+  1.5 seconds unless set otherwise under Now playing, in half seconds, 0
+  to cut at once.
   Browsers playing the music fade along. On an iPhone or iPad, where Safari
   ignores a page's volume, the song goes through a sound engine of its own
   for the fade, which plays on with the screen locked. A song changed or
