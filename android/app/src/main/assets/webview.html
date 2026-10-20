@@ -10021,6 +10021,7 @@
                 audio.pause();
             }
 
+            releaseAudio();
             return;
         }
 
@@ -10059,6 +10060,37 @@
         } else if (!s.playing && !audio.paused) {
             audio.pause();
         }
+    }
+
+    // With the music not here, the song is let go of altogether. A paused
+    // song still held makes the phone's system count this browser as its
+    // player, and a call, a notification or another app taking the sound
+    // then pauses it, which went on to pause the music on the phone or in
+    // another browser. Asked to play here again, the song is loaded anew
+    function releaseAudio() {
+
+        if (!audio.getAttribute("src")) {
+            return;
+        }
+
+        dbgLog("Audio", "the song let go of here, the music plays elsewhere");
+        audio.removeAttribute("src");
+        delete audio.dataset.src;
+        delete audio.dataset.direct;
+
+        try {
+            audio.load();
+        } catch (e) {
+            // Nothing loaded to drop
+        }
+
+        syncSession();
+    }
+
+    // Whether this browser is where the music is meant to be heard, so its
+    // media controls belong to it
+    function sessionHere() {
+        return !!(state && state.carAudio && unlocked && !localMute);
     }
 
     // The song ran out here while the phone was still stuck in it, so the
@@ -10126,7 +10158,16 @@
             }
         });
 
+        // A pause from the system while the music is not heard here is the
+        // system taking the sound for something else, not a press for the
+        // music elsewhere
         sessionAction("pause", function () {
+
+            if (!sessionHere()) {
+
+                dbgLog("Media", "a pause from the system left alone, the music is not here");
+                return;
+            }
 
             if (state && state.playing) {
                 $("play").click();
@@ -10158,9 +10199,22 @@
 
         const s = state;
 
-        if (!s || !s.id) {
+        // Nothing is shown to the system while the music is elsewhere, so it
+        // never takes this browser for the player
+        if (!s || !s.id || !sessionHere()) {
 
-            navigator.mediaSession.playbackState = "none";
+            if (navigator.mediaSession.playbackState !== "none" || sessionKey) {
+
+                navigator.mediaSession.playbackState = "none";
+                sessionKey = "";
+
+                try {
+                    navigator.mediaSession.metadata = null;
+                } catch (e) {
+                    // Kept by this browser, it shows nothing playing anyway
+                }
+            }
+
             return;
         }
 

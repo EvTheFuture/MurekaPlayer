@@ -386,6 +386,10 @@ the new settings layout and a number of smaller improvements.
   made in every list, so the newest song has the highest number and a song
   keeps its number when the list switches between published, drafts and
   all.
+- **A browser without the music lets go of it.** With No music in this
+  browser chosen, or the music on the phone, the web view drops the song
+  and its media controls, so a call, a notification or another app taking
+  the sound no longer pauses the music on the phone or in another browser.
 - **Badges in the queue.** On the phone and in the web view, a song in the
   queue carries its badge whenever it tells something: new while not
   played yet, a draft while the published songs are listed, public while
