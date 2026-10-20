@@ -389,8 +389,10 @@ the new settings layout and a number of smaller improvements.
 - **A fade for a new song.** A song still being made, asked to play as
   soon as it is ready, comes in with the playing song fading out first,
   2 seconds unless set otherwise under Now playing, 0 to cut at once.
-  Browsers playing the music fade along, except Safari on an iPhone or iPad
-  at full volume. A song changed or paused meanwhile calls the fade off.
+  Browsers playing the music fade along. On an iPhone or iPad, where Safari
+  ignores a page's volume, the song goes through a sound engine of its own
+  for the fade, which plays on with the screen locked. A song changed or
+  paused meanwhile calls the fade off.
 - **A browser without the music lets go of it.** With No music in this
   browser chosen, or the music on the phone, the web view drops the song
   and its media controls, so a call, a notification or another app taking

@@ -10267,13 +10267,16 @@
 
         unlocked = true;
         gainWake();
-        applyWebVolume();
 
         if (state && state.src) {
 
             audio.dataset.src = state.src;
             audio.src = songAt(state.src);
         }
+
+        // The level, and on an iPhone the gain put in before the song is
+        // heard rather than while it plays
+        applyWebVolume();
 
         audio.play().catch(function () {
         });
@@ -12674,8 +12677,8 @@
 
     // Safari on an iPhone or iPad leaves the volume of a page to the
     // phone's own buttons, a sound's volume set by the page is ignored.
-    // There the sound goes through a gain of its own instead, put in the
-    // first time this browser's level is set below full. The sound engine
+    // There the sound goes through a gain of its own instead, put in as
+    // soon as the song is loaded and the engine is awake. The sound engine
     // can only be started from a tap, so one is made and woken on each tap
     const volumeFixed = trimIosLike();
     let gainCtx = null;
@@ -12817,9 +12820,10 @@
 
         const want = webVolume() * fadeShare;
 
-        // Led through the gain only for a level set below full, never for a
-        // fade alone, which on an iPhone then cuts as before
-        if (volumeFixed && (gainNode || (webVolume() < 1 && wireGain()))) {
+        // On an iPhone or iPad led through the gain as soon as it can be, so
+        // the level and the fades with the phone are heard. Safari plays on
+        // through it with the screen locked
+        if (volumeFixed && (gainNode || wireGain())) {
 
             if (gainNode.gain.value !== want) {
                 gainNode.gain.value = want;

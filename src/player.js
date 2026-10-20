@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.446";
+    const VERSION = "1.9.9.448";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -843,6 +843,11 @@
 
     // Shared audio element for the built in player
     let audio = null;
+
+    // The sound engine and the gain a song goes through on an iPhone or iPad
+    // for a fade, see wireIosGain
+    let iosCtx = null;
+    let iosGain = null;
 
     // True once any song has played in this session
     // Guards against wiping the cache when the audio base URL is wrong
@@ -12936,6 +12941,89 @@
 
     // Songs that were being generated and are in the library now: no longer
     // shown as such, and played when that was asked for
+    // Safari on an iPhone or iPad leaves the volume of a page's sound to the
+    // phone's buttons. For a fade the song goes through a gain of its own
+    // instead, put in once and kept, as nothing can take it out again. The
+    // sound engine only starts from a tap, so one is made and woken on each
+    // tap, and the gain goes in only with it awake, an asleep one would
+    // silence the song. A song from Mureka is then asked for openly, so the
+    // gain may read it, as the stored copies already are
+    function wakeIosCtx() {
+
+        if (!isIosLike()) {
+            return;
+        }
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+
+        if (!iosCtx && Ctx) {
+
+            try {
+
+                // Heard as music, also with the ring switch on silent
+                if (navigator.audioSession) {
+                    navigator.audioSession.type = "playback";
+                }
+
+                iosCtx = new Ctx();
+            } catch (e) {
+                iosCtx = null;
+            }
+        }
+
+        if (iosCtx && iosCtx.state !== "running") {
+
+            iosCtx.resume().catch(function () {
+                // Asleep until the next tap
+            });
+        }
+    }
+
+    function wireIosGain() {
+
+        if (iosGain) {
+            return true;
+        }
+
+        if (!audio || !iosCtx || iosCtx.state !== "running" || String(audio.src).indexOf("blob:") !== 0) {
+            return false;
+        }
+
+        try {
+
+            const source = iosCtx.createMediaElementSource(audio);
+
+            iosGain = iosCtx.createGain();
+            source.connect(iosGain);
+            iosGain.connect(iosCtx.destination);
+            audio.crossOrigin = "anonymous";
+            dbgLog("Audio", "the song goes through a gain for fades, Safari ignores a page's own volume");
+        } catch (e) {
+
+            dbgLog("Audio", "no gain for fades: " + errText(e));
+            iosGain = null;
+        }
+
+        return iosGain !== null;
+    }
+
+    // The level a fade moves, the gain where there is one
+    function fadeLevel() {
+        return iosGain ? iosGain.gain.value : audio.volume;
+    }
+
+    function setFadeLevel(v) {
+
+        if (iosGain) {
+            iosGain.gain.value = v;
+        } else {
+            audio.volume = v;
+        }
+    }
+
+    document.addEventListener("pointerdown", wakeIosCtx, true);
+    document.addEventListener("keydown", wakeIosCtx, true);
+
     // The fade before a newly made song asked to play at once: the playing
     // song goes quiet over the seconds set, then the new one starts at the
     // usual level. The web view's browsers playing the music are told, so
@@ -12956,22 +13044,35 @@
             return;
         }
 
-        const start = audio.volume;
+        // Safari on an iPhone or iPad ignores a page's volume while it keeps
+        // the number set, so it cannot be told by trying. There the song
+        // fades through a gain of its own, and without one it switches at
+        // once rather than hold the new song back
+        if (isIosLike() && !wireIosGain()) {
 
-        // Safari on an iPhone ignores a page's volume, a fade would only
-        // hold the new song back
-        const probe = start > 0.5 ? start - 0.01 : start + 0.01;
-
-        audio.volume = probe;
-
-        const settable = Math.abs(audio.volume - probe) < 0.001;
-
-        audio.volume = start;
-
-        if (!settable) {
-
+            dbgLog("Song", "no fade, Safari on an iPhone or iPad ignores a page's volume and the gain could not be put in");
             then();
             return;
+        }
+
+        const start = fadeLevel();
+
+        // Another browser that ignores it, as far as trying tells
+        if (!iosGain) {
+
+            const probe = start > 0.5 ? start - 0.01 : start + 0.01;
+
+            audio.volume = probe;
+
+            const settable = Math.abs(audio.volume - probe) < 0.001;
+
+            audio.volume = start;
+
+            if (!settable) {
+
+                then();
+                return;
+            }
         }
 
         const from = currentSong ? currentSong.song_id : null;
@@ -12997,7 +13098,7 @@
 
             const k = Math.min(1, (Date.now() - t0) / ms);
 
-            audio.volume = Math.max(0, start * (1 - k));
+            setFadeLevel(Math.max(0, start * (1 - k)));
 
             if (k < 1) {
                 return;
@@ -24136,6 +24237,11 @@
 
         audio.muted = false;
         audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
+
+        // The gain of a fade on an iPhone back to whole
+        if (iosGain) {
+            iosGain.gain.value = 1;
+        }
     }
 
     // The state handed to the app, everything the web view shows
@@ -34587,7 +34693,7 @@
             });
 
         nowPage.appendChild(makeLabel("New songs"));
-        nowPage.appendChild(withHint(readyFadeRow, "A song still being made, asked to play as soon as it is ready, comes in with the playing song fading out over these seconds instead of cutting it off. Browsers playing the music fade along, except Safari on an iPhone or iPad at full volume. 0 cuts at once."));
+        nowPage.appendChild(withHint(readyFadeRow, "A song still being made, asked to play as soon as it is ready, comes in with the playing song fading out over these seconds instead of cutting it off. Browsers playing the music fade along. 0 cuts at once."));
         nowPage.appendChild(makeLabel("Lyrics"));
         nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
