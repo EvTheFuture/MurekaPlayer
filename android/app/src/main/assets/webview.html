@@ -6693,6 +6693,11 @@
     let phoneStillSince = 0;
     let phoneKickAt = 0;
 
+    // The phone's count of jumps in the song last followed here, and the
+    // difference past which this browser follows the phone anyway
+    let seeksFollowed = -1;
+    const DRIFT_FOLLOW_S = 8;
+
     // The sound element. It only plays once a tap in this page has allowed it
     const audio = $("audio");
 
@@ -7223,7 +7228,7 @@
     // the song is the phone's setting under Playback, the same for every
     // previous button
     function wheelSkip(dir) {
-        send(dir > 0 ? "next" : "prev");
+        send(dir > 0 ? "next" : "prev", { by: "media" });
     }
 
     // In the Tesla's fullscreen the music is moved to this browser once,
@@ -10054,10 +10059,34 @@
             }
         } else if (audio.readyState > 0 && Math.abs(audio.currentTime - want) > 1.2) {
 
-            try {
-                audio.currentTime = want;
-            } catch (e) {
+            const drift = audio.currentTime - want;
+            const jumped = typeof s.seeks !== "number" || s.seeks !== seeksFollowed;
+
+            // A jump on the phone, a big difference, or the music not heard
+            // here yet: this browser goes to the phone's place
+            if (!hereAudible() || jumped || Math.abs(drift) > DRIFT_FOLLOW_S) {
+
+                dbgLog("Audio", "to the phone's place, " + (drift > 0 ? "back " : "on ") + Math.abs(drift).toFixed(1)
+                    + " s" + (jumped ? ", the phone jumped" : ""));
+
+                try {
+                    audio.currentTime = want;
+                } catch (e) {
+                }
+            } else if (Date.now() - phoneKickAt > 5000) {
+
+                // The phone's silent copy drifted while the music is heard
+                // here: the phone is set to the place heard, the music here
+                // never jumps back for it
+                phoneKickAt = Date.now();
+                dbgLog("Audio", "the phone drifted " + drift.toFixed(1) + " s, set to the place heard here");
+                send("seek", audio.currentTime);
             }
+        }
+
+        // A jump seen is followed once
+        if (typeof s.seeks === "number" && s.seeks !== seeksFollowed && Math.abs(audio.currentTime - want) <= 1.2) {
+            seeksFollowed = s.seeks;
         }
 
         applyWebVolume();
@@ -10107,7 +10136,7 @@
     audio.addEventListener("ended", function () {
 
         if (phoneFrozen() && state && audio.dataset.src === state.src) {
-            send("next");
+            send("next", { by: "end" });
         }
     });
 
@@ -10188,11 +10217,11 @@
         });
 
         sessionAction("nexttrack", function () {
-            send("next");
+            send("next", { by: "media" });
         });
 
         sessionAction("previoustrack", function () {
-            send("prev");
+            send("prev", { by: "media" });
         });
 
         sessionAction("seekto", SEEK_ACTIONS.seekto);
@@ -17966,11 +17995,11 @@
     });
 
     $("prev").addEventListener("click", function () {
-        send("prev");
+        send("prev", { by: "tap" });
     });
 
     $("next").addEventListener("click", function () {
-        send("next");
+        send("next", { by: "tap" });
     });
 
     $("shuffle").addEventListener("click", function () {
@@ -22360,9 +22389,9 @@
         } else if (key === " ") {
             $("play").click();
         } else if (key === "n") {
-            send("next");
+            send("next", { by: "key" });
         } else if (key === "p") {
-            send("prev");
+            send("prev", { by: "key" });
         } else if ((key === "ArrowRight" || key === "ArrowLeft") && teslaTheater) {
 
             // The steering wheel. Held down it repeats, which would skip

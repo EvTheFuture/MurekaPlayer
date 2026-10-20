@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.448";
+    const VERSION = "1.9.9.450";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -848,6 +848,9 @@
     // for a fade, see wireIosGain
     let iosCtx = null;
     let iosGain = null;
+
+    // How many jumps the song made, see ensureAudio
+    let hostSeeks = 0;
 
     // True once any song has played in this session
     // Guards against wiping the cache when the audio base URL is wrong
@@ -2834,6 +2837,10 @@
             absoluteNumbers: false,
             autoInstrumentalChars: 20,
             readyFadeSeconds: 2,
+            fadeOnReady: true,
+            fadeOnTap: false,
+            fadeOnMedia: false,
+            fadeOnKey: false,
             autoPlay: false,
             playOnSeconds: 30,
             shuffle: false,
@@ -3031,6 +3038,10 @@
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoInstrumentalChars: lyricLimit(parsed.autoInstrumentalChars),
                     readyFadeSeconds: readyFadeSeconds(parsed.readyFadeSeconds),
+                    fadeOnReady: parsed.fadeOnReady !== false,
+                    fadeOnTap: parsed.fadeOnTap === true,
+                    fadeOnMedia: parsed.fadeOnMedia === true,
+                    fadeOnKey: parsed.fadeOnKey === true,
                     autoPlay: parsed.autoPlay === true,
                     playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
@@ -10005,6 +10016,12 @@
 
         audio = new Audio();
 
+        // Every jump in the song counted, so a browser playing the music can
+        // tell a jump asked for from the phone's place drifting
+        audio.addEventListener("seeking", function () {
+            hostSeeks += 1;
+        });
+
         // Attach the element to the page. Firefox only exposes a media element
         // to the OS media controls and MPRIS, where playerctl can see it, when
         // it is connected to the document. A detached element is not registered
@@ -13109,24 +13126,84 @@
             hostFade = null;
 
             // The level back once the new song is loading, so the old one is
-            // not heard again for the moment before it goes
+            // not heard again for the moment before it goes, or once the
+            // song starts over or stops, as previous may do
+            const BACK_ON = ["loadstart", "emptied", "seeked", "pause"];
             const back = function () {
 
                 clearTimeout(fade.safety);
+
+                for (const name of BACK_ON) {
+                    audio.removeEventListener(name, back);
+                }
+
                 applyCarAudioVolume();
             };
 
-            audio.addEventListener("loadstart", back, { once: true });
-            fade.safety = setTimeout(function () {
+            for (const name of BACK_ON) {
+                audio.addEventListener(name, back);
+            }
 
-                audio.removeEventListener("loadstart", back);
-                applyCarAudioVolume();
-            }, 5000);
+            fade.safety = setTimeout(back, 5000);
 
             then();
         }, 40);
 
         readyFade = fade;
+    }
+
+    // Whether a switch asked for this way fades: a new song ready to play
+    // ("ready"), a song tapped or Next or Previous on the screen ("tap"),
+    // the lock screen, the notification, Bluetooth or
+    // a browser's media keys ("media"), or the keyboard ("key")
+    function fadeFor(kind) {
+
+        if (!(settings.readyFadeSeconds > 0)) {
+            return false;
+        }
+
+        return kind === "ready" ? settings.fadeOnReady !== false
+            : kind === "tap" ? settings.fadeOnTap === true
+            : kind === "media" ? settings.fadeOnMedia === true
+            : kind === "key" ? settings.fadeOnKey === true
+            : false;
+    }
+
+    // Another song, after a fade when the setting for this way asks for
+    // one. A second switch while a fade runs goes at once, the fade dropped
+    function switchSong(kind, go) {
+
+        if (readyFade) {
+
+            endReadyFade();
+            go();
+            return;
+        }
+
+        if (!fadeFor(kind)) {
+
+            go();
+            return;
+        }
+
+        fadeThen(Math.round(settings.readyFadeSeconds * 1000), go, function () {
+            // Changed or paused meanwhile, that stands
+        });
+    }
+
+    // A tapped song after a fade, unless it is the one playing, which
+    // goes on as it is
+    function playFromTapped(songId) {
+
+        if (currentSong && currentSong.song_id === songId) {
+
+            playFrom(songId);
+            return;
+        }
+
+        switchSong("tap", function () {
+            playFrom(songId);
+        });
     }
 
     // A fade under way stopped, the level put back
@@ -13142,6 +13219,10 @@
         applyCarAudioVolume();
         publishHostSoon();
     }
+
+    // How long a new song ready to play may take to download whole before
+    // it streams instead
+    const READY_FETCH_MS = 20000;
 
     function settlePending() {
 
@@ -13204,31 +13285,54 @@
         // for it, over the seconds the setting asks
         if (wanted !== null) {
 
-            showToast("Ready, playing " + (wanted.title || "Untitled"), true);
-            fadeThen(Math.round((settings.readyFadeSeconds || 0) * 1000), function () {
+            const startWanted = function () {
 
-                dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
-                playFrom(wanted.song_id);
+                showToast("Ready, playing " + (wanted.title || "Untitled"), true);
+                fadeThen(fadeFor("ready") ? Math.round(settings.readyFadeSeconds * 1000) : 0, function () {
 
-                // A browser that does not let a page start sound by itself
-                // keeps it loaded and paused, then a tap on Play starts it
-                setTimeout(function () {
+                    dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
+                    playFrom(wanted.song_id);
 
-                    if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
+                    // A browser that does not let a page start sound by itself
+                    // keeps it loaded and paused, then a tap on Play starts it
+                    setTimeout(function () {
 
-                        showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), true);
+                        if (currentSong && currentSong.song_id === wanted.song_id && audio && audio.paused) {
 
-                        // Gone again once it plays, by a tap or by the
-                        // browser itself when the page is back in view
-                        const seq = toastSeq;
+                            showToast("Ready, tap Play to start " + (wanted.title || "Untitled"), true);
 
-                        audio.addEventListener("playing", function () {
-                            hideToast(seq);
-                        }, { once: true });
-                    }
-                }, 2500);
-            }, function () {
-                showToast("Ready to play: " + (wanted.title || "Untitled"), true);
+                            // Gone again once it plays, by a tap or by the
+                            // browser itself when the page is back in view
+                            const seq = toastSeq;
+
+                            audio.addEventListener("playing", function () {
+                                hideToast(seq);
+                            }, { once: true });
+                        }
+                    }, 2500);
+                }, function () {
+                    showToast("Ready to play: " + (wanted.title || "Untitled"), true);
+                });
+            };
+
+            // Downloaded whole first, so it plays from the device rather
+            // than streaming from Mureka, which Safari's sound engine for
+            // the fades on an iPhone does not take well. The playing song
+            // goes on meanwhile. Not done in time, it streams after all
+            showToast("Ready, getting " + (wanted.title || "Untitled"), "wait");
+            dbgLog("Song", "ready, downloading it whole before it plays: " + (wanted.title || "Untitled"));
+
+            withinTime(fetchToCache(wanted, false), READY_FETCH_MS).then(function (ok) {
+
+                dbgLog("Song", ok ? "downloaded, it plays from the device: " + (wanted.title || "Untitled")
+                    : "not downloaded in time, it streams: " + (wanted.title || "Untitled"));
+
+                // Started meanwhile, by a tap say
+                if (currentSong && currentSong.song_id === wanted.song_id) {
+                    return;
+                }
+
+                startWanted();
             });
         }
 
@@ -17483,14 +17587,14 @@
 
             if (key === "n") {
 
-                playNext();
+                switchSong("key", playNext);
                 handled();
                 return;
             }
 
             if (key === "p") {
 
-                playPrev();
+                switchSong("key", playPrev);
                 handled();
                 return;
             }
@@ -23329,11 +23433,11 @@
         });
 
         setHandler("previoustrack", function () {
-            playPrev();
+            switchSong("media", playPrev);
         });
 
         setHandler("nexttrack", function () {
-            playNext();
+            switchSong("media", playNext);
         });
 
         setHandler("stop", function () {
@@ -24344,6 +24448,7 @@
             repeat: repeatMode,
             carAudio: hostCarAudio,
             fade: hostFade,
+            seeks: hostSeeks,
             signedIn: authState,
 
             // The account signed in on the phone, for the web view's header
@@ -26787,7 +26892,7 @@
         const act = String(a.action || "");
 
         if (act === "play") {
-            playFrom(song.song_id);
+            playFromTapped(song.song_id);
         } else if (act === "playOnly") {
             playOnlyThis(song);
         } else if (act === "playNext") {
@@ -26896,9 +27001,12 @@
                 togglePlayPause();
             }
         } else if (cmd === "next") {
-            playNext();
+
+            // Said by the web view, how it was asked for. The app's own
+            // notification and Bluetooth say nothing, those are media keys
+            switchSong(arg && arg.by ? String(arg.by) : "media", playNext);
         } else if (cmd === "prev") {
-            playPrev();
+            switchSong(arg && arg.by ? String(arg.by) : "media", playPrev);
         } else if (cmd === "coverStep") {
 
             // A swipe on the web view's covers goes to the song on that cover and
@@ -26906,6 +27014,7 @@
             // instead, the cover that came in is the song that plays
             const step = arg && arg.step < 0 ? -1 : 1;
 
+            // The cover is already there, so the song follows at once
             if (neighborSong(step)) {
 
                 if (step < 0) {
@@ -27115,7 +27224,7 @@
             });
 
             if (song) {
-                playFrom(song.song_id);
+                playFromTapped(song.song_id);
             }
         } else if (cmd === "playWhenReady") {
 
@@ -27161,8 +27270,11 @@
                 }
             } else if (i >= 0 && i < queue.length) {
 
-                queuePos = i;
-                playCurrent();
+                switchSong("tap", function () {
+
+                    queuePos = i;
+                    playCurrent();
+                });
             }
         } else if (cmd === "queueMove") {
             moveInQueue(Number(arg && arg.from), Number(arg && arg.to));
@@ -27983,8 +28095,12 @@
                 return btn;
             };
 
-            artBox.appendChild(makeArtNav("left", "\u2039", "Previous", playPrev));
-            artBox.appendChild(makeArtNav("right", "\u203A", "Next", playNext));
+            artBox.appendChild(makeArtNav("left", "\u2039", "Previous", function () {
+                switchSong("tap", playPrev);
+            }));
+            artBox.appendChild(makeArtNav("right", "\u203A", "Next", function () {
+                switchSong("tap", playNext);
+            }));
         }
 
         // Now playing title, overlaid at the bottom of the art over a scrim
@@ -28324,10 +28440,14 @@
         });
 
         controlButtons = {
-            prev: makeIconButton(iconPrev(), "Previous", playPrev),
+            prev: makeIconButton(iconPrev(), "Previous", function () {
+                switchSong("tap", playPrev);
+            }),
             play: playPauseBtn,
             stop: makeIconButton(iconStopTransport(), "Stop", stopPlay),
-            next: makeIconButton(iconNext(), "Next", playNext),
+            next: makeIconButton(iconNext(), "Next", function () {
+                switchSong("tap", playNext);
+            }),
             shuffle: shuffleBtn,
             repeat: repeatBtn,
             published: publishedCtrlBtn,
@@ -32511,13 +32631,16 @@
             if (atRow && inQueue !== queuePos) {
 
                 dbgLog("Press", "queue song " + (inQueue + 1) + " played from its place");
-                resumeState = null;
-                queuePos = inQueue;
-                playCurrent();
+                switchSong("tap", function () {
+
+                    resumeState = null;
+                    queuePos = inQueue;
+                    playCurrent();
+                });
                 return;
             }
 
-            playFrom(song.song_id);
+            playFromTapped(song.song_id);
         });
 
         if (selectMode) {
@@ -34395,9 +34518,21 @@
             settings.goneOnMureka = v;
         });
 
-        const readyFadeRow = makeStepperRow("Fade out for a new song, seconds",
+        const readyFadeRow = makeStepperRow("Fade length, seconds",
             function () { return settings.readyFadeSeconds; },
             function (v) { settings.readyFadeSeconds = readyFadeSeconds(v); }, 0, 10, 1);
+        const fadeReadyRow = makeBoolRow("Fade for a new song when ready",
+            function () { return settings.fadeOnReady !== false; },
+            function (v) { settings.fadeOnReady = v; });
+        const fadeTapRow = makeBoolRow("Fade for a song tapped",
+            function () { return settings.fadeOnTap === true; },
+            function (v) { settings.fadeOnTap = v; });
+        const fadeMediaRow = makeBoolRow("Fade for media controls",
+            function () { return settings.fadeOnMedia === true; },
+            function (v) { settings.fadeOnMedia = v; });
+        const fadeKeyRow = makeBoolRow("Fade for keyboard shortcuts",
+            function () { return settings.fadeOnKey === true; },
+            function (v) { settings.fadeOnKey = v; });
 
         const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
             function () { return settings.autoInstrumentalChars; },
@@ -34692,8 +34827,12 @@
                 publishHostSoon();
             });
 
-        nowPage.appendChild(makeLabel("New songs"));
-        nowPage.appendChild(withHint(readyFadeRow, "A song still being made, asked to play as soon as it is ready, comes in with the playing song fading out over these seconds instead of cutting it off. Browsers playing the music fade along. 0 cuts at once."));
+        nowPage.appendChild(makeLabel("Fades"));
+        nowPage.appendChild(withHint(readyFadeRow, "How long the playing song fades out before another one starts, for the ways switched on below. Browsers playing the music fade along. 0 never fades."));
+        nowPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready."));
+        nowPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen. A swipe on the cover switches at once, the cover is already there."));
+        nowPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
+        nowPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
         nowPage.appendChild(makeLabel("Lyrics"));
         nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
@@ -46515,7 +46654,7 @@
 
         // Playing it now
         addMenuRow("Play", "#fff", function () {
-            playFrom(song.song_id);
+            playFromTapped(song.song_id);
         }, "play");
 
         addMenuRow("Play only this", "#fff", function () {

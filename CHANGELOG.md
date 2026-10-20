@@ -393,6 +393,19 @@ the new settings layout and a number of smaller improvements.
   ignores a page's volume, the song goes through a sound engine of its own
   for the fade, which plays on with the screen locked. A song changed or
   paused meanwhile calls the fade off.
+- **A new song is downloaded before it plays.** A song asked to play as
+  soon as it is ready is fetched whole onto the device first, while the
+  playing song goes on, and then fades in from there rather than streaming
+  from Mureka. Not fetched within 20 seconds, it streams as before.
+- **Fades for every way of switching songs.** Under Now playing, besides
+  the fade length, four switches: a new song when ready (on), a song tapped
+  or Next and Previous on the screen, media controls such as the lock
+  screen, Bluetooth or a steering wheel, and keyboard shortcuts. A second
+  switch while a fade runs goes at once.
+- **No jumping back in a browser playing the music.** When the phone's
+  silent copy of the song drifts, the phone is set to the place heard in
+  the browser instead of the browser jumping back to it. A jump made on
+  purpose, or a difference of more than 8 seconds, is still followed.
 - **A browser without the music lets go of it.** With No music in this
   browser chosen, or the music on the phone, the web view drops the song
   and its media controls, so a call, a notification or another app taking
