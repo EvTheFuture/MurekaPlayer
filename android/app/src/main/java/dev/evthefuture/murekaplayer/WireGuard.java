@@ -249,6 +249,18 @@ final class WireGuard {
         }
     }
 
+    // The figures started over, asked for from the settings
+    static void resetPingStats() {
+
+        synchronized (PINGS) {
+            PINGS.clear();
+        }
+
+        pingMisses = 0;
+        pingOk = true;
+        Hub.note("WireGuard", "the ping figures were started over");
+    }
+
     // The pings in figures for the settings: whether they run, the last
     // answer, and the loss and the time of the answers over the last five
     // minutes and the last hour

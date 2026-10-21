@@ -398,7 +398,8 @@ the new settings layout and a number of smaller improvements.
   so traffic goes through it all the time. The phone is kept awake for it
   on a charger, or always or never as chosen. How it stands shows the last
   answer and the loss and answer time over the last five minutes and the
-  last hour, and the debug log says when the answers stop and come back.
+  last hour, with a button to start the figures over, and the debug log
+  says when the answers stop and come back.
 - **A new song is downloaded before it plays.** A song asked to play as
   soon as it is ready is fetched whole onto the device first, while the
   playing song goes on, and then fades in from there rather than streaming

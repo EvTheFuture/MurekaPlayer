@@ -850,6 +850,15 @@ final class PlayerWeb {
             return WireGuard.pingStats();
         }
 
+        // The ping figures started over
+        @JavascriptInterface
+        public void wireGuardPingReset() {
+
+            if (onMureka) {
+                WireGuard.resetPingStats();
+            }
+        }
+
         // WireGuard's own app settings, where its battery use is set.
         // Android asks only for the app itself, never for another one
         @JavascriptInterface

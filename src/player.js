@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.455";
+    const VERSION = "1.9.9.456";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -35998,6 +35998,35 @@
             renderCarStatus();
             settingsRefreshers.push(renderCarStatus);
 
+            // The loss and the answer times of the pings started over, shown
+            // while a host is set
+            const pingResetRow = document.createElement("div");
+            const pingResetBtn = makeButton("Reset the ping figures", "#333", "#fff", function (ev) {
+
+                if (typeof window.MurekaHost.wireGuardPingReset === "function") {
+                    window.MurekaHost.wireGuardPingReset();
+                }
+
+                buttonDone(ev.currentTarget, "Started over", true);
+                renderCarStatus();
+            });
+
+            pingResetRow.style.cssText = "display:flex;gap:8px";
+            pingResetRow.appendChild(pingResetBtn);
+
+            const paintPingReset = function () {
+                pingResetRow.style.display = window.MurekaHost.getPref("wgPingHost", "") ? "flex" : "none";
+            };
+
+            paintPingReset();
+            settingsRefreshers.push(paintPingReset);
+            settingsEvery(function () {
+
+                if (settingsEl && settingsEl.offsetParent !== null) {
+                    paintPingReset();
+                }
+            }, 2000);
+
             // The VPN comes up, or the permission question is answered, a
             // moment after the switch, so the lines follow while shown
             settingsEvery(function () {
@@ -36444,6 +36473,7 @@
             connPage.appendChild(nameRow);
             connPage.appendChild(makeSubLabel("How it stands"));
             connPage.appendChild(carStatusEl);
+            connPage.appendChild(pingResetRow);
             connPage.appendChild(carHint);
 
             devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
