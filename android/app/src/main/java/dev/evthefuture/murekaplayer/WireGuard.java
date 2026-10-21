@@ -151,12 +151,19 @@ final class WireGuard {
     private static final Handler REACH = new Handler(Looper.getMainLooper());
     private static PowerManager.WakeLock reach;
 
-    // Holds or lets go as things stand now. Main thread only
+    // Holds or lets go as things stand now. Main thread only. A host to
+    // ping keeps the phone awake too, a sleeping phone would not ping
     static void keepReachable(Context c) {
 
         final Context app = c.getApplicationContext();
-        boolean want = WebViewSettings.wgKeepAwake(app) && !WebViewSettings.wgTunnel(app).isEmpty()
+        String awakeFor = WebViewSettings.wgPingAwake(app);
+        boolean pinging = !WebViewSettings.wgPingHost(app).isEmpty()
+            && (WebViewSettings.PING_AWAKE_ALWAYS.equals(awakeFor)
+            || WebViewSettings.PING_AWAKE_CHARGER.equals(awakeFor) && onCharger(app));
+        boolean want = (pinging || WebViewSettings.wgKeepAwake(app) && !WebViewSettings.wgTunnel(app).isEmpty())
             && tunnelUp(app);
+
+        pingLoop(app);
         boolean held = reach != null && reach.isHeld();
 
         REACH.removeCallbacksAndMessages(null);
@@ -191,6 +198,249 @@ final class WireGuard {
             }
         } catch (RuntimeException e) {
             Hub.note("WireGuard", "could not keep the phone awake: " + e.getMessage());
+        }
+    }
+
+    // The pings through the tunnel, on a thread of their own since each
+    // one waits for its answer. Started once, it looks again at every
+    // round whether there is a host and the tunnel is WireGuard's, and
+    // says in the debug log when the answers stop or come back
+    private static android.os.HandlerThread pingThread;
+    private static Handler pingHandler;
+    private static volatile boolean pingOk = true;
+    private static volatile int pingMisses = 0;
+    private static volatile boolean pingUp = false;
+    private static volatile boolean pingNone = true;
+    private static volatile boolean pingPlugged = false;
+    private static final int PING_WAIT_S = 3;
+
+    // Whether the phone is on a charger now, from the battery's last word
+    static boolean onCharger(Context c) {
+
+        try {
+
+            android.content.Intent b = c.registerReceiver(null,
+                new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+
+            return b != null && b.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    // Every ping of the last hour: when, answered or not, and how long the
+    // answer took in tenths of a millisecond, for the figures in the settings
+    private static final long PING_KEEP_MS = 60 * 60 * 1000L;
+    private static final java.util.ArrayDeque<long[]> PINGS = new java.util.ArrayDeque<>();
+    private static volatile String pingHost = "";
+    private static volatile boolean pinging = false;
+
+    private static void notePing(boolean ok, long tenthsMs) {
+
+        long now = System.currentTimeMillis();
+
+        synchronized (PINGS) {
+
+            PINGS.addLast(new long[] { now, ok ? 1 : 0, tenthsMs });
+
+            while (!PINGS.isEmpty() && now - PINGS.peekFirst()[0] > PING_KEEP_MS) {
+                PINGS.removeFirst();
+            }
+        }
+    }
+
+    // The pings in figures for the settings: whether they run, the last
+    // answer, and the loss and the time of the answers over the last five
+    // minutes and the last hour
+    static String pingStats() {
+
+        JSONObject o = new JSONObject();
+        long now = System.currentTimeMillis();
+
+        try {
+
+            o.put("host", pingHost);
+            o.put("on", pinging);
+            o.put("misses", pingMisses);
+
+            synchronized (PINGS) {
+
+                long[] last = PINGS.peekLast();
+
+                if (last != null) {
+
+                    o.put("lastAgo", (now - last[0]) / 1000);
+                    o.put("lastOk", last[1] == 1);
+                    o.put("lastMs", last[2] / 10.0);
+                }
+
+                long lastOk = 0;
+
+                for (long[] p : PINGS) {
+
+                    if (p[1] == 1) {
+                        lastOk = p[0];
+                    }
+                }
+
+                o.put("okAgo", lastOk > 0 ? (now - lastOk) / 1000 : -1);
+
+                for (long span : new long[] { 5, 60 }) {
+
+                    int sent = 0;
+                    int got = 0;
+                    long ms = 0;
+
+                    for (long[] p : PINGS) {
+
+                        if (now - p[0] <= span * 60000L) {
+
+                            sent += 1;
+
+                            if (p[1] == 1) {
+
+                                got += 1;
+                                ms += p[2];
+                            }
+                        }
+                    }
+
+                    JSONObject w = new JSONObject();
+
+                    w.put("sent", sent);
+                    w.put("lost", sent - got);
+                    w.put("avgMs", got > 0 ? Math.round(ms / (double) got) / 10.0 : -1);
+                    o.put("m" + span, w);
+                }
+            }
+        } catch (JSONException e) {
+            // Left as far as it got
+        }
+
+        return o.toString();
+    }
+
+    private static synchronized void pingLoop(Context app) {
+
+        if (pingHandler != null) {
+            return;
+        }
+
+        pingThread = new android.os.HandlerThread("wireguard-ping");
+        pingThread.start();
+        pingHandler = new Handler(pingThread.getLooper());
+        pingHandler.post(new Runnable() {
+
+            @Override
+            public void run() {
+
+                String host = WebViewSettings.wgPingHost(app);
+                boolean up = tunnelUp(app);
+
+                // The tunnel came or went by itself, WireGuard switched by
+                // hand say: the phone is kept awake for it, or let sleep
+                boolean plugged = onCharger(app);
+
+                if (up != pingUp || host.isEmpty() != pingNone || plugged != pingPlugged) {
+
+                    pingUp = up;
+                    pingNone = host.isEmpty();
+                    pingPlugged = plugged;
+                    MAIN.post(() -> keepReachable(app));
+                }
+
+                // A new host starts its figures afresh
+                if (!host.equals(pingHost)) {
+
+                    pingHost = host;
+
+                    synchronized (PINGS) {
+                        PINGS.clear();
+                    }
+                }
+
+                pinging = !host.isEmpty() && up;
+
+                if (pinging) {
+                    pingOnce(host);
+                } else {
+
+                    pingOk = true;
+                    pingMisses = 0;
+                }
+
+                pingHandler.postDelayed(this, WebViewSettings.wgPingSeconds(app) * 1000L);
+            }
+        });
+    }
+
+    // One ping with Android's own ping command, which an app may use, and
+    // a small packet to the discard port beside it, so something goes
+    // through the tunnel even where the ping command is missing
+    private static void pingOnce(String host) {
+
+        boolean ok = false;
+        long tenths = 0;
+        Process p = null;
+
+        try {
+
+            p = new ProcessBuilder("/system/bin/ping", "-c", "1", "-W", String.valueOf(PING_WAIT_S), host)
+                .redirectErrorStream(true).start();
+
+            if (p.waitFor(PING_WAIT_S + 2, java.util.concurrent.TimeUnit.SECONDS)) {
+
+                ok = p.exitValue() == 0;
+
+                // How long the answer took, from the "time=12.3 ms" it prints
+                byte[] out = new byte[4096];
+                int n = p.getInputStream().read(out);
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("time=([0-9.]+) ?ms")
+                    .matcher(n > 0 ? new String(out, 0, n, java.nio.charset.StandardCharsets.US_ASCII) : "");
+
+                if (m.find()) {
+                    tenths = Math.round(Double.parseDouble(m.group(1)) * 10);
+                }
+            }
+        } catch (java.io.IOException | NumberFormatException e) {
+            // No ping command, the packet below still goes
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+
+            if (p != null) {
+                p.destroy();
+            }
+        }
+
+        try (java.net.DatagramSocket s = new java.net.DatagramSocket()) {
+
+            byte[] b = new byte[] { 0 };
+
+            s.send(new java.net.DatagramPacket(b, b.length, java.net.InetAddress.getByName(host), 9));
+        } catch (java.io.IOException | RuntimeException e) {
+            // A name that does not resolve, said with the ping's answer
+        }
+
+        notePing(ok, tenths);
+
+        if (ok) {
+
+            if (!pingOk) {
+                Hub.note("WireGuard", "the pinged host " + host + " answers again after " + pingMisses + " missed");
+            }
+
+            pingOk = true;
+            pingMisses = 0;
+        } else {
+
+            pingMisses += 1;
+
+            if (pingOk) {
+                Hub.note("WireGuard", "no answer from the pinged host " + host + " through the tunnel");
+            }
+
+            pingOk = false;
         }
     }
 

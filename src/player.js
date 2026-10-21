@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.452";
+    const VERSION = "1.9.9.455";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24582,7 +24582,7 @@
             coverCacheMB: settings.coverCacheMB || 200,
             caching: cacheRunning === true,
             progress: hostProgress ? Object.assign({ elapsed: Date.now() - progressStarted }, hostProgress) : null,
-            loadFail: loadFail ? { kind: loadFail.kind, why: loadFail.why } : null,
+            loadFail: loadFail ? { kind: loadFail.kind, why: loadFail.why, at: loadFail.at } : null,
             vocals: settings.vocalFilter || "all",
             published: publishFilter,
             browsing: !!creatorSource
@@ -35695,6 +35695,16 @@
 
             const wgRow = makeCarTextRow("WireGuard tunnel to turn on again, blank for none", "wgTunnel", "");
 
+            const wgPingRow = makeCarTextRow("Host to ping while WireGuard is on, blank for none", "wgPingHost", "");
+            const wgPingSecRow = makeCarTextRow("Ping every, seconds", "wgPingSeconds", "20");
+            const wgPingAwakeRow = makeDropRow("Keep the phone awake for the pings", [
+                { label: "On a charger", value: "charger" },
+                { label: "Always", value: "always" },
+                { label: "Never", value: "never" }
+            ], function () { return window.MurekaHost.getPref("wgPingAwake", "charger"); }, function (v) {
+                window.MurekaHost.setPref("wgPingAwake", String(v));
+            });
+
             const wgAwakeRow = makeBoolRow("Keep WireGuard reachable with the screen off",
                 function () { return window.MurekaHost.getPref("wgKeepAwake", "0") === "1"; },
                 function (v) { setPref("wgKeepAwake", v); });
@@ -35910,6 +35920,39 @@
 
                 if (st.wg === "ready" && st.wgLast) {
                     lines.push(["Last", cap(st.wgLast)]);
+                }
+
+                // The pings through the tunnel: the last answer and the loss
+                // over the last five minutes and the last hour
+                let ping = {};
+
+                try {
+                    ping = JSON.parse(typeof window.MurekaHost.wireGuardPing === "function" ? window.MurekaHost.wireGuardPing() || "{}" : "{}");
+                } catch (e) {
+                    ping = {};
+                }
+
+                const lossLine = function (w) {
+
+                    if (!w || !(w.sent > 0)) {
+                        return "No pings yet";
+                    }
+
+                    return Math.round(w.lost / w.sent * 100) + " % lost of " + w.sent
+                        + (w.avgMs >= 0 ? ", " + w.avgMs + " ms on average" : "");
+                };
+
+                if (ping.host && !ping.on) {
+                    lines.push(["Ping", "Waiting, WireGuard does not hold the tunnel"]);
+                } else if (ping.host) {
+
+                    const when = typeof ping.lastAgo === "number" ? ", " + ping.lastAgo + " s ago" : "";
+
+                    lines.push(["Ping", ping.host + (ping.lastOk === true ? ", answered in " + ping.lastMs + " ms"
+                        : (typeof ping.lastOk === "boolean" ? ", no answer" : "")) + when
+                        + (ping.misses > 1 ? ", " + ping.misses + " missed in a row" : "")]);
+                    lines.push(["Last 5 minutes", lossLine(ping.m5)]);
+                    lines.push(["Last hour", lossLine(ping.m60)]);
                 }
 
                 if (st.mdns) {
@@ -36394,6 +36437,10 @@
             connPage.appendChild(withHint(wgTestRow, "Switches the tunnel now, as the hand over does. On takes Android's one VPN from the public address. Browsers that came through the one going off lose the web view."));
             connPage.appendChild(withHint(wgFreeRow, "Android lets WireGuard start its tunnel from the background only when its battery use is Unrestricted. Open settings shows WireGuard's app info, set it under Battery."));
             connPage.appendChild(withHint(wgAwakeRow, "A sleeping phone stops sending WireGuard's keepalives, the mobile network then forgets it after a minute or two, and the web view cannot reach it through the tunnel until it wakes. On, the phone stays awake while WireGuard holds the tunnel. It costs some battery, only while the tunnel is WireGuard's."));
+            connPage.appendChild(wgPingRow);
+            connPage.appendChild(makeHint("A name or an address on the far side of the tunnel, the WireGuard server's own inside address say, pinged again and again while WireGuard holds the tunnel, so traffic goes through it all the time as with a web view open. The debug log says when the answers stop and when they come back."));
+            connPage.appendChild(withHint(wgPingSecRow, "How often, from 5 to 600 seconds."));
+            connPage.appendChild(withHint(wgPingAwakeRow, "A sleeping phone does not ping. On a charger it is kept awake for them, where it costs no battery. Always also on battery, Never lets the pings pause while it sleeps. How the pings go is under How it stands."));
             connPage.appendChild(nameRow);
             connPage.appendChild(makeSubLabel("How it stands"));
             connPage.appendChild(carStatusEl);

@@ -521,6 +521,16 @@
         height: 1.2em;
     }
 
+    .workFailText {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .workFail .chip {
+        flex: 0 0 auto;
+        color: #ff8a8a;
+    }
+
     .chip.ring {
         border-color: var(--accent);
     }
@@ -10902,13 +10912,47 @@
         }
     }
 
+    // A failed Load or Rescan put away in this browser, by when it failed
+    let failAway = "";
+
+    function failKey(f) {
+        return String(f.kind) + "|" + String(f.at || f.why);
+    }
+
+    // The note's buttons, also on the copy the small list shows
+    document.addEventListener("click", function (ev) {
+
+        const b = ev.target.closest ? ev.target.closest("[data-fail-act]") : null;
+
+        if (!b) {
+            return;
+        }
+
+        ev.stopPropagation();
+
+        if (b.dataset.failAct === "again") {
+
+            loadNewSongs(function () {
+                refreshList();
+            });
+        } else {
+
+            failAway = b.dataset.failKey || "";
+            workKey = "";
+            paintWork(state);
+        }
+    }, true);
+
     function paintWorkList(s) {
 
         paintWorkMain(s);
 
         const p = s && s.progress ? s.progress : null;
         const busy = !!(s && (s.loading || s.caching)) || !!p;
-        const fail = !busy && s && s.loadFail ? s.loadFail : null;
+        const failed = !busy && s && s.loadFail ? s.loadFail : null;
+
+        // Put away here, until the next failure
+        const fail = failed && failKey(failed) !== failAway ? failed : null;
         const label = p ? p.label : "Loading songs from Mureka";
         const done = p ? Number(p.done) || 0 : 0;
 
@@ -10939,17 +10983,33 @@
         workKey = key;
         $("libLoad").textContent = "";
 
-        // Nothing running, but the last try did not get through
+        // Nothing running, but the last try did not get through. Try again
+        // asks the phone once more, the cross puts the note away here
         if (fail) {
 
             const row = document.createElement("div");
             const word = document.createElement("span");
+            const again = document.createElement("button");
+            const away = document.createElement("button");
 
             row.className = "workFail";
-            row.appendChild(icon("close"));
-            word.textContent = (fail.kind === "rescan" ? "Rescan" : "Load") + " failed, " + fail.why
-                + ". Update tries again.";
+            word.className = "workFailText";
+            word.textContent = (fail.kind === "rescan" ? "Rescan" : "Load") + " failed, " + fail.why + ".";
+            again.type = "button";
+            again.className = "chip";
+            again.dataset.failAct = "again";
+            again.appendChild(icon("refresh"));
+            again.appendChild(document.createTextNode("Try again"));
+            away.type = "button";
+            away.className = "chip iconOnly";
+            away.dataset.failAct = "away";
+            away.dataset.failKey = failKey(fail);
+            away.setAttribute("aria-label", "Put the note away");
+            away.title = "Put the note away";
+            away.appendChild(icon("close"));
             row.appendChild(word);
+            row.appendChild(again);
+            row.appendChild(away);
             $("libLoad").appendChild(row);
             return;
         }

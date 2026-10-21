@@ -839,6 +839,17 @@ final class PlayerWeb {
             return WireGuard.tunnelUp(appContext) ? "on" : "off";
         }
 
+        // The pings through WireGuard in figures, for the settings
+        @JavascriptInterface
+        public String wireGuardPing() {
+
+            if (!onMureka) {
+                return "";
+            }
+
+            return WireGuard.pingStats();
+        }
+
         // WireGuard's own app settings, where its battery use is set.
         // Android asks only for the app itself, never for another one
         @JavascriptInterface

@@ -392,6 +392,13 @@ the new settings layout and a number of smaller improvements.
   ignores a page's volume, the song goes through a sound engine of its own
   for the fade, which plays on with the screen locked. A song changed or
   paused meanwhile calls the fade off.
+- **A host pinged through WireGuard.** Under Connections, a host on the far
+  side of the tunnel, the WireGuard server's inside address say, is pinged
+  every 20 seconds unless set otherwise while WireGuard holds the tunnel,
+  so traffic goes through it all the time. The phone is kept awake for it
+  on a charger, or always or never as chosen. How it stands shows the last
+  answer and the loss and answer time over the last five minutes and the
+  last hour, and the debug log says when the answers stop and come back.
 - **A new song is downloaded before it plays.** A song asked to play as
   soon as it is ready is fetched whole onto the device first, while the
   playing song goes on, and then fades in from there rather than streaming

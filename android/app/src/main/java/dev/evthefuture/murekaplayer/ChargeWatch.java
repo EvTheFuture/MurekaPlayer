@@ -90,6 +90,10 @@ final class ChargeWatch {
                 } else if (Intent.ACTION_POWER_CONNECTED.equals(action)) {
                     powerChanged(true);
                 }
+
+                // The phone kept awake for WireGuard's pings on a charger
+                // only, looked at again
+                PlayerService.carChanged();
             }
         };
 

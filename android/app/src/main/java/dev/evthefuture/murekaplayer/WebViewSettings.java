@@ -49,6 +49,20 @@ final class WebViewSettings {
     // The phone kept awake while WireGuard holds the tunnel, so its
     // keepalives go out with the screen off too. Off unless switched on
     static final String WG_AWAKE = "wgKeepAwake";
+
+    // A host pinged again and again while WireGuard holds the tunnel, so
+    // traffic goes through it all the time, and how often. Empty for none
+    static final String WG_PING = "wgPingHost";
+    static final String WG_PING_SEC = "wgPingSeconds";
+    static final int WG_PING_DEFAULT = 20;
+
+    // When the phone is kept awake for the pings: only on a charger, where
+    // it costs no battery, always, or never, the pings then pausing while
+    // the phone sleeps
+    static final String WG_PING_AWAKE = "wgPingAwake";
+    static final String PING_AWAKE_CHARGER = "charger";
+    static final String PING_AWAKE_ALWAYS = "always";
+    static final String PING_AWAKE_NEVER = "never";
     static final String VPN = "carVpn";
     static final String VPN_ADDRESS = "vpnAddress";
     static final String MDNS_NAME = "mdnsName";
@@ -142,6 +156,24 @@ final class WebViewSettings {
 
     static boolean wgKeepAwake(Context c) {
         return "1".equals(prefs(c).getString(WG_AWAKE, "0"));
+    }
+
+    static String wgPingHost(Context c) {
+        return prefs(c).getString(WG_PING, "");
+    }
+
+    static String wgPingAwake(Context c) {
+        return prefs(c).getString(WG_PING_AWAKE, PING_AWAKE_CHARGER);
+    }
+
+    // Seconds between the pings, 5 to 600, 20 unless changed
+    static int wgPingSeconds(Context c) {
+
+        try {
+            return Math.max(5, Math.min(600, Integer.parseInt(prefs(c).getString(WG_PING_SEC, String.valueOf(WG_PING_DEFAULT)))));
+        } catch (NumberFormatException e) {
+            return WG_PING_DEFAULT;
+        }
     }
 
     static String vpnAddress(Context c) {
@@ -243,6 +275,19 @@ final class WebViewSettings {
             return true;
         }
 
+        // A host name or an address to ping, or none. Only letters, digits,
+        // dots, dashes and colons, it goes to the ping command as it is
+        if (WG_PING.equals(key)) {
+
+            if (!v.isEmpty() && (!v.matches("[a-zA-Z0-9.:-]{1,253}") || v.startsWith("-"))) {
+                return false;
+            }
+
+            prefs(c).edit().putString(key, v).apply();
+
+            return true;
+        }
+
         // A WireGuard tunnel's name as WireGuard allows it, or none
         if (WG_TUNNEL.equals(key)) {
 
@@ -267,6 +312,9 @@ final class WebViewSettings {
             || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";
+        } else if (WG_PING_AWAKE.equals(key)) {
+
+            v = PING_AWAKE_ALWAYS.equals(v) || PING_AWAKE_NEVER.equals(v) ? v : PING_AWAKE_CHARGER;
         } else if (SAVE_TRIGGER.equals(key)) {
 
             v = TRIGGER_BLUETOOTH.equals(v) ? TRIGGER_BLUETOOTH : TRIGGER_CHARGER;
@@ -276,6 +324,11 @@ final class WebViewSettings {
         } else if (CHARGE_GRACE.equals(key)) {
 
             if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {
+                return false;
+            }
+        } else if (WG_PING_SEC.equals(key)) {
+
+            if (!v.matches("[0-9]{1,3}") || Integer.parseInt(v) < 5 || Integer.parseInt(v) > 600) {
                 return false;
             }
         } else {
