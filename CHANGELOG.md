@@ -431,7 +431,9 @@ the new settings layout and a number of smaller improvements.
   view, as finely as 0.25. A second switch while a fade runs goes at once.
   On an iPhone the sound engine for the fades is woken on every play and
   when the player comes back into view, and a note asks for a tap when
-  Safari keeps it asleep.
+  Safari keeps it asleep. The pause Safari sends from the lock screen
+  controls when another app takes the sound counts as an interruption, so
+  the song plays on when the player is back in view.
 - **No jumping back in a browser playing the music.** When the phone's
   silent copy of the song drifts, the phone is set to the place heard in
   the browser instead of the browser jumping back to it. A jump made on

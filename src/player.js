@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.462";
+    const VERSION = "1.9.9.464";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10297,9 +10297,12 @@
 
             if (userPaused || audio.ended) {
 
+                dbgLog("Audio", audio.ended ? "the song ended" : "paused by a press");
                 setStatus("Paused: " + (currentSong.title || "Untitled"));
                 return;
             }
+
+            dbgLog("Audio", "paused with no press, an interruption" + (iosCtx ? ", sound engine " + iosCtx.state : ""));
 
             // Nobody asked for this pause, so the system interrupted playback.
             // Keep the song, the queue and the position, and re-assert the
@@ -13038,6 +13041,7 @@
                 }
 
                 iosCtx = new Ctx();
+                iosCtx.addEventListener("statechange", iosCtxStateChanged);
             } catch (e) {
                 iosCtx = null;
             }
@@ -13050,6 +13054,39 @@
                 // Asleep until the next tap
             });
         }
+    }
+
+    // Safari on an iPhone sends a pause from the lock screen controls when
+    // another app takes the sound from a song going through the sound
+    // engine, rather than pausing the song itself. The engine is interrupted
+    // then, while a pause pressed leaves it running, so a pause with the
+    // engine interrupted around it is taken as an interruption, and the song
+    // plays on when the player is back in view, as after any interruption
+    let mediaPauseAt = 0;
+    const MEDIA_PAUSE_WINDOW_MS = 2000;
+
+    function interruptedPause(why) {
+
+        if (!iosCtx || !mediaPauseAt || Date.now() - mediaPauseAt > MEDIA_PAUSE_WINDOW_MS) {
+            return;
+        }
+
+        if (iosCtx.state !== "interrupted" || !userPaused || !currentSong || !audio || !audio.paused) {
+            return;
+        }
+
+        mediaPauseAt = 0;
+        userPaused = false;
+        dbgLog("Audio", "the pause from the lock screen controls was an interruption, the sound engine is interrupted (" + why + ")");
+        setStatus("Interrupted: " + (currentSong.title || "Untitled"));
+        setupMediaSession();
+        updateMediaPosition();
+    }
+
+    function iosCtxStateChanged() {
+
+        dbgLog("Audio", "sound engine " + iosCtx.state);
+        interruptedPause("engine " + iosCtx.state);
     }
 
     function wireIosGain() {
@@ -13321,7 +13358,7 @@
             return;
         }
 
-        dbgLog("Audio", "sound engine " + iosCtx.state + ", woken: " + why);
+        dbgLog("Audio", "sound engine " + iosCtx.state + ", woken: " + why + ", song " + (audio && !audio.paused ? "playing" : "paused") + (userPaused ? ", paused by a press" : ""));
 
         try {
 
@@ -13359,11 +13396,20 @@
                 return iosCtx.resume();
             };
 
+            // Stopping the engine may pause the song with it, then the song
+            // is played on, as no one asked for that pause
+            const playOn = function () {
+
+                dbgLog("Audio", "sound engine " + iosCtx.state + " after the restart, song " + (audio.paused ? "paused" : "playing"));
+
+                if (audio.paused && !userPaused && currentSong && audio.src) {
+                    startAudioPlayback();
+                }
+            };
+
             Promise.resolve().then(function () {
                 return iosCtx.suspend();
-            }).then(again, again).catch(function () {
-                // Asleep until the next tap
-            });
+            }).then(again, again).then(playOn, playOn);
 
             setTimeout(function () {
 
@@ -23691,12 +23737,16 @@
 
         setHandler("pause", function () {
 
-            // A pause the user asked for, not an interruption
+            // A pause the user asked for, not an interruption, unless the
+            // sound engine shows otherwise just after
             userPaused = true;
+            mediaPauseAt = Date.now();
 
             if (audio) {
                 audio.pause();
             }
+
+            interruptedPause("media pause");
         });
 
         setHandler("previoustrack", function () {
