@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.481";
+    const VERSION = "1.9.9.482";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25193,6 +25193,11 @@
             hotspotBadge: isApkHost() && typeof window.MurekaHost.hotspotStatus === "function"
                 ? hotspotBadgeState() : null,
             hotspotBadgeOn: settings.webHotspotBadge === true,
+
+            // Whether the hotspot helper runs, for the hotspot's panel:
+            // running, old, stopped or starting, null when not known
+            hotspotHelper: isApkHost() && typeof window.MurekaHost.hotspotStatus === "function"
+                ? hotspotHelperState() : null,
             wgBadge: isApkHost() && typeof window.MurekaHost.wireGuardState === "function"
                 ? wgBadgeState() : null,
             wgBadgeOn: settings.webWgBadge === true,
@@ -25725,6 +25730,26 @@
         hotspotBadgeAt = Date.now();
 
         return hotspotBadgeRead;
+    }
+
+    // The hotspot helper as the web view's panel says it, read at most every
+    // three seconds
+    let helperStateRead = null;
+    let helperStateAt = 0;
+
+    function hotspotHelperState() {
+
+        if (Date.now() - helperStateAt < 3000) {
+            return helperStateRead;
+        }
+
+        const info = hotspotInfoNow();
+        const known = ["running", "old", "stopped"].indexOf(info.helper) !== -1 ? info.helper : null;
+
+        helperStateRead = known !== "running" && (helperTrying || info.starting === true) ? "starting" : known;
+        helperStateAt = Date.now();
+
+        return helperStateRead;
     }
 
     function hotspotInfoNow() {
@@ -37491,6 +37516,16 @@
 
                 if (rows.length === 0) {
                     rows.push(["Not on a hotspot or Wi-Fi right now", ""]);
+                }
+
+                // Where a computer connects to wireless debugging, adb
+                // connect with this address and port. Looked for while
+                // About shows, off while it is switched off
+                const adbWifi = typeof window.MurekaHost.wirelessDebugging === "function"
+                    ? String(window.MurekaHost.wirelessDebugging() || "") : null;
+
+                if (adbWifi !== null) {
+                    rows.push([adbWifi === "off" ? "Off" : (adbWifi || "Looking for it"), "Wireless debugging"]);
                 }
 
                 const key = JSON.stringify(rows);

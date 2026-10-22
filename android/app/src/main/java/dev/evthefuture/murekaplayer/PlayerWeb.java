@@ -1351,6 +1351,18 @@ final class PlayerWeb {
             PlayerService.testArt(which == null ? "" : which);
         }
 
+        // Wireless debugging's address and port for the About page, off or
+        // empty while still looked for
+        @JavascriptInterface
+        public String wirelessDebugging() {
+
+            if (!onMureka || appContext == null) {
+                return "";
+            }
+
+            return HelperStart.wirelessDebugging(appContext);
+        }
+
         @JavascriptInterface
         public String carStatus() {
 

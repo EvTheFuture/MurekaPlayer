@@ -86,6 +86,13 @@ final class HelperStart {
 
     private static AdbMdns pairSearch;
     private static Runnable pairTimeout;
+
+    // Where wireless debugging takes connections, address and port, for the
+    // About page, looked for while it is asked for and a minute after
+    private static AdbMdns debugSearch;
+    private static volatile String debugAt = "";
+    private static volatile long debugAskedAt = 0;
+    private static final long DEBUG_LOOK_MS = 60000L;
     private static volatile int pairPort = -1;
     private static volatile String pairText = "";
     private static volatile String startText = "";
@@ -441,6 +448,76 @@ final class HelperStart {
         }
 
         return buf.toString(StandardCharsets.UTF_8.name()).trim();
+    }
+
+    // Wireless debugging's address and port, as a computer connects to it
+    // with adb connect, off when it is switched off, empty while it is
+    // still looked for. Asking keeps the search going a minute more
+    static String wirelessDebugging(Context context) {
+
+        final Context c = context.getApplicationContext();
+
+        debugAskedAt = System.currentTimeMillis();
+
+        if (!adbWifiOnKnown(c)) {
+
+            MAIN.post(HelperStart::stopDebugSearch);
+            debugAt = "";
+            return "off";
+        }
+
+        MAIN.post(() -> {
+
+            if (debugSearch != null) {
+                return;
+            }
+
+            debugSearch = new AdbMdns(c, AdbMdns.SERVICE_TYPE_TLS_CONNECT, (host, port) -> {
+                debugAt = host != null && port > 0 ? host.getHostAddress() + ":" + port : "";
+            });
+            debugSearch.start();
+            MAIN.postDelayed(HelperStart::debugSearchDone, DEBUG_LOOK_MS);
+        });
+
+        return debugAt;
+    }
+
+    // Stopped once nobody has asked for a minute
+    private static void debugSearchDone() {
+
+        long idle = System.currentTimeMillis() - debugAskedAt;
+
+        if (idle >= DEBUG_LOOK_MS) {
+
+            stopDebugSearch();
+            return;
+        }
+
+        MAIN.postDelayed(HelperStart::debugSearchDone, DEBUG_LOOK_MS - idle);
+    }
+
+    private static void stopDebugSearch() {
+
+        if (debugSearch != null) {
+
+            try {
+                debugSearch.stop();
+            } catch (Throwable t) {
+                // Already stopped
+            }
+        }
+
+        debugSearch = null;
+    }
+
+    // Whether wireless debugging is switched on, off when not known
+    private static boolean adbWifiOnKnown(Context c) {
+
+        try {
+            return Settings.Global.getInt(c.getContentResolver(), ADB_WIFI, 0) == 1;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     // Unknown counts as on, the connection then tells

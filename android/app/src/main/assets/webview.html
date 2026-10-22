@@ -2544,6 +2544,22 @@
         line-height: 1.5;
     }
 
+    /* How something the switch needs stands, green when it is fine */
+    .swNote {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #7fd6a0;
+    }
+
+    .swNote.bad {
+        color: #ff6b5f;
+    }
+
+    .swNote.wait {
+        color: var(--gold);
+    }
+
     /* What switching does to this browser, before it is done */
     .swWarn {
         display: flex;
@@ -8298,7 +8314,12 @@
     }
 
     // The phone's hotspot on or off, while the badge is asked for
+    // The hotspot helper as the phone last said it, for the hotspot's panel
+    let helperShown = null;
+
     function paintHotspotBadge(s) {
+
+        helperShown = s && typeof s.hotspotHelper === "string" ? s.hotspotHelper : null;
 
         const el = $("hotspotBadge");
         const known = s && typeof s.hotspotBadge === "string" ? s.hotspotBadge : null;
@@ -8890,6 +8911,16 @@
         about.textContent = p.about;
         panel.appendChild(about);
 
+        // How something the switch depends on stands, green, red or yellow
+        if (p.note) {
+
+            const note = document.createElement("p");
+
+            note.className = "swNote" + (p.note.kind ? " " + p.note.kind : "");
+            note.textContent = p.note.text;
+            panel.appendChild(note);
+        }
+
         if (p.warn) {
 
             const warn = document.createElement("div");
@@ -8937,11 +8968,31 @@
         const onHere = reachedVia() === "hotspot" || reachedVia() === "public";
         const buttons = [];
 
-        if (st !== "on") {
+        // Without the helper running the phone cannot switch the hotspot,
+        // so starting it is offered instead
+        const helperWords = {
+            running: { text: "The hotspot helper is running.", kind: "" },
+            old: { text: "The hotspot helper runs from an earlier version of the app, start it again.", kind: "wait" },
+            stopped: { text: "The hotspot helper is not running, so the phone cannot switch the hotspot.", kind: "bad" },
+            starting: { text: "The hotspot helper is starting.", kind: "wait" }
+        };
+        const helper = helperShown;
+        const canSwitch = helper !== "stopped" && helper !== "starting";
+
+        if (helper === "stopped" || helper === "old") {
+            buttons.push({ label: "Start the helper", icon: "play", kind: "go", fn: function () {
+
+                send("startHotspotHelper");
+                toast("Starting the hotspot helper", "note");
+                closeSongMenu();
+            } });
+        }
+
+        if (canSwitch && st !== "on") {
             buttons.push({ label: "Switch on", icon: "hotspot", kind: "go", fn: function () { switchHotspot(true); } });
         }
 
-        if (st !== "off") {
+        if (canSwitch && st !== "off") {
             buttons.push({ label: onHere ? "Switch off anyway" : "Switch off", icon: "hotspotOff", kind: "stop",
                 fn: function () { switchHotspot(false); } });
         }
@@ -8953,7 +9004,8 @@
             word: st === "on" ? "On" : (st === "off" ? "Off" : "Not known"),
             about: "Devices join the phone's hotspot to open the web view. It is switched by the hotspot helper on"
                 + " the phone, the way the quick settings tile does it.",
-            warn: st !== "off" && onHere
+            note: helperWords[helper] || null,
+            warn: canSwitch && st !== "off" && onHere
                 ? "Switched off, this browser loses the web view until the hotspot is on again." : "",
             buttons: buttons
         });
@@ -16738,6 +16790,26 @@
         }
     }
 
+    // Where the playing cover is when it stands still in the middle. Read
+    // from the covers' layout, not from the cover itself, which may be in
+    // the middle of sliding or growing to the next song just then
+    function coverAtRest() {
+
+        const g = flowGeo;
+
+        if (g && g.size > 0) {
+
+            const stage = $("artStage").getBoundingClientRect();
+            const left = stage.left + g.off + g.xC;
+
+            return { left: left, right: left + g.size };
+        }
+
+        const cover = $("cover").getBoundingClientRect();
+
+        return { left: cover.left, right: cover.right };
+    }
+
     function setSide(on, relayout) {
 
         const app = $("app");
@@ -16747,14 +16819,14 @@
         if (on && (!was || relayout)) {
 
             const main = $("main").getBoundingClientRect();
-            const cover = $("cover").getBoundingClientRect();
             const seek = $("seek").getBoundingClientRect();
+            const rest = coverAtRest();
 
             // As tall as the list beside it, and a little wider than the
             // cover, so no edge of a bright cover shows round its corners
             sideBox = {
-                left: cover.left - 3,
-                right: cover.right + 3,
+                left: rest.left - 3,
+                right: rest.right + 3,
                 top: main.top,
                 bottom: seek.top - 10
             };
@@ -22737,11 +22809,19 @@
             move(ev.clientX, ev.clientY);
         };
 
+        // Some browsers start dragging the text or picture pressed on, which
+        // ends the pointer's moves on the page and so the swipe, so no drag
+        // starts while the press may still become a swipe
+        const noDrag = function (ev) {
+            ev.preventDefault();
+        };
+
         const mouseUp = function () {
 
             window.removeEventListener("pointermove", mouseMove, true);
             window.removeEventListener("pointerup", mouseUp, true);
             window.removeEventListener("pointercancel", mouseUp, true);
+            window.removeEventListener("dragstart", noDrag, true);
             end();
         };
 
@@ -22758,10 +22838,23 @@
                 return;
             }
 
+            // Pressed on text that is not there to be selected, nothing is
+            // selected or dragged by the browser either, so the press can
+            // become a swipe in every browser. Fields, buttons and text
+            // meant to be copied keep their own behaviour
+            const plain = ev.target.nodeType === 1
+                && !ev.target.closest("input, select, textarea, button, a, label, [contenteditable]")
+                && window.getComputedStyle(ev.target).userSelect === "none";
+
+            if (plain) {
+                ev.preventDefault();
+            }
+
             start(ev.clientX, ev.clientY, true);
             window.addEventListener("pointermove", mouseMove, true);
             window.addEventListener("pointerup", mouseUp, true);
             window.addEventListener("pointercancel", mouseUp, true);
+            window.addEventListener("dragstart", noDrag, true);
         });
 
         // A tap that ends a swipe does not also press what it ended on,

@@ -411,6 +411,12 @@ the new settings layout and a number of smaller improvements.
   phone only. The debug log no longer notes keys typed in fields, and
   blanks more kinds of secrets. A question from the phone that comes over
   another one takes no tap for a moment, and only closes itself.
+- **Wireless debugging's address.** About lists the address and port a
+  computer connects to wireless debugging on, looked for while About
+  shows, or says it is off.
+- **The hotspot helper in the hotspot's panel.** The web view's hotspot
+  panel says in green that the helper is running, or in red that it is
+  not, with a button that starts it in place of the switches.
 - **Badges in any order.** In the web view a badge is held and dragged to
   another place, with a finger or the mouse, as the control buttons, the
   others sliding aside. The order is kept on the phone for every browser,
