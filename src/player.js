@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.467";
+    const VERSION = "1.9.9.473";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2806,6 +2806,15 @@
         return Number.isFinite(n) && n >= 0 ? Math.min(10, Math.round(n * 100) / 100) : fallback;
     }
 
+    // The silence before a paused song fades in as it plays on, 0 to 5 to a
+    // tenth, half a second when not set
+    function hushSeconds(v) {
+
+        const n = Number(v);
+
+        return Number.isFinite(n) && n >= 0 ? Math.min(5, Math.round(n * 10) / 10) : 0.5;
+    }
+
     function readyFadeSeconds(v) {
         return fadeSeconds(v, 1.5);
     }
@@ -2853,6 +2862,7 @@
             fadeKeySec: 0.5,
             fadeOnResume: true,
             fadeResumeSec: 0.5,
+            fadeResumeHushSec: 0.5,
             autoPlay: false,
             playOnSeconds: 30,
             shuffle: false,
@@ -3063,6 +3073,7 @@
                     fadeKeySec: fadeSeconds(parsed.fadeKeySec, 0.5),
                     fadeOnResume: parsed.fadeOnResume !== false,
                     fadeResumeSec: fadeSeconds(parsed.fadeResumeSec, 0.5),
+                    fadeResumeHushSec: hushSeconds(parsed.fadeResumeHushSec),
                     autoPlay: parsed.autoPlay === true,
                     playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
@@ -7673,10 +7684,10 @@
             { label: "Add to the end", ring: true, fn: function () {
                 finishNewAsk(ask.n, "end");
             } },
-            { label: "Replace the queue", fn: function () {
+            { label: "Replace the queue", ring: true, color: "#e5484d", fn: function () {
                 finishNewAsk(ask.n, "replace");
             } },
-            { label: "Leave out for now", fn: function () {
+            { label: "Leave out for now", ring: true, color: "#b8b8c0", fn: function () {
                 finishNewAsk(ask.n, "skip");
             } }
         ], function () {
@@ -7686,7 +7697,7 @@
             if (ask.el) {
                 finishNewAsk(ask.n, "skip");
             }
-        }, true);
+        }, true, true);
         publishHostSoon();
     }
 
@@ -13145,6 +13156,7 @@
     let resumeFadeId = null;
     let resumeFadeTimer = 0;
 
+
     function quietForResume() {
 
         if (!fadeMs("resume") || readyFade || !currentSong) {
@@ -13175,27 +13187,67 @@
             return;
         }
 
-        dbgLog("Audio", "fading in over " + (ms / 1000) + " s as the song plays on");
+        // Silent for the seconds set first, over the stutter Safari may make
+        // as the song comes back, then the ramp
+        const hush = hushSeconds(settings.fadeResumeHushSec);
 
-        // On the gain, a short silence first for the stutter, then the ramp
+        dbgLog("Audio", "fading in over " + (ms / 1000) + " s after " + hush + " s of silence as the song plays on");
+
+        // On the gain, counted from the sound engine running. After an
+        // interruption, an alarm or a call, Safari starts its engine again
+        // only as the song plays, and the stutter comes then
         if (iosGain) {
 
             const g = iosGain.gain;
-            const t = iosCtx.currentTime;
+            let done = false;
 
-            g.cancelScheduledValues(t);
-            g.setValueAtTime(0, t);
-            g.setValueAtTime(0, t + 0.15);
-            g.linearRampToValueAtTime(1, t + 0.15 + ms / 1000);
+            const ramp = function () {
+
+                if (done || !iosGain) {
+                    return;
+                }
+
+                done = true;
+                iosCtx.removeEventListener("statechange", whenRunning);
+
+                const t = iosCtx.currentTime;
+
+                g.cancelScheduledValues(t);
+                g.setValueAtTime(0, t);
+                g.setValueAtTime(0, t + hush);
+                g.linearRampToValueAtTime(1, t + hush + ms / 1000);
+            };
+            const whenRunning = function () {
+
+                if (iosCtx.state === "running") {
+                    ramp();
+                }
+            };
+
+            g.cancelScheduledValues(iosCtx.currentTime);
+            g.value = 0;
+
+            if (iosCtx.state === "running") {
+
+                ramp();
+                return;
+            }
+
+            dbgLog("Audio", "the fade in waits for the sound engine, " + iosCtx.state);
+            iosCtx.addEventListener("statechange", whenRunning);
+
+            // Never left silent, should the engine not say so
+            setTimeout(ramp, 2000);
             return;
         }
 
-        const t0 = Date.now();
+        const t0 = Date.now() + hush * 1000;
 
+        audio.volume = 0;
         clearInterval(resumeFadeTimer);
         resumeFadeTimer = setInterval(function () {
 
-            const k = Math.min(1, (Date.now() - t0) / ms);
+            const k = Math.max(0, Math.min(1, (Date.now() - t0) / ms));
 
             audio.volume = target * k;
 
@@ -16241,8 +16293,8 @@
 
     // The box asking to play on after another app had the sound, with two
     // large buttons, as the tap Safari waits for is easier there than on
-    // the small Play button. Swiped sideways or tapped beside, it goes away.
-    // It goes by itself once the song plays
+    // the small Play button. A tap beside it does nothing, only the buttons
+    // and a swipe sideways answer it. It goes by itself once the song plays
     let heldAskEl = null;
 
     function closeHeldAsk(why) {
@@ -16257,6 +16309,38 @@
 
         heldAskEl.remove();
         heldAskEl = null;
+    }
+
+    // Dismissed or swiped away: not playing on was chosen, so
+    // it counts as a pause pressed. The song is not played on when the
+    // player comes back into view, and the play Safari holds back is called
+    // off, as it would otherwise go through once the other app lets go
+    function declineHeldAsk(why) {
+
+        closeHeldAsk(why);
+
+        if (!audio || !currentSong) {
+            return;
+        }
+
+        // A pause also calls off a play still held back
+        userPaused = true;
+        clearTimeout(heldPlayTimer);
+        heldPlayTimer = 0;
+        audio.pause();
+        updatePlayPause();
+        setStatus("Paused: " + (currentSong.title || "Untitled"));
+
+        if ("mediaSession" in navigator) {
+
+            try {
+                navigator.mediaSession.playbackState = "paused";
+            } catch (e) {
+                // Not supported here
+            }
+        }
+
+        publishHostSoon();
     }
 
     function heldAskButton(label, color, icon) {
@@ -16328,7 +16412,7 @@
         dismiss.addEventListener("click", function () {
 
             if (!dragged) {
-                closeHeldAsk("dismissed");
+                declineHeldAsk("dismissed");
             }
         });
         resume.addEventListener("click", function () {
@@ -16347,13 +16431,6 @@
         card.appendChild(text);
         card.appendChild(row);
         back.appendChild(card);
-
-        back.addEventListener("click", function (ev) {
-
-            if (ev.target === back) {
-                closeHeldAsk("dismissed with a tap beside it");
-            }
-        });
 
         // Swiped sideways: the card follows the finger and fades, and goes
         // past a third of its width or on a quick flick, else it springs back
@@ -16435,7 +16512,7 @@
             setTimeout(function () {
 
                 if (heldAskEl === back) {
-                    closeHeldAsk("swiped away");
+                    declineHeldAsk("swiped away");
                 }
             }, 200);
         };
@@ -35179,6 +35256,11 @@
         const fadeMediaRow = makeFadeRow("Media controls, seconds", "media");
         const fadeKeyRow = makeFadeRow("Keyboard shortcuts, seconds", "key");
         const fadeResumeRow = makeFadeRow("Fade in when playing on, seconds", "resume");
+        const fadeHushRow = makeStepperRow("Silence before fading in, seconds", function () {
+            return hushSeconds(settings.fadeResumeHushSec);
+        }, function (v) {
+            settings.fadeResumeHushSec = hushSeconds(v);
+        }, 0, 5, 0.1);
 
         const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
             function () { return settings.autoInstrumentalChars; },
@@ -35697,6 +35779,7 @@
         playbackPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
         playbackPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
         playbackPage.appendChild(withHint(fadeResumeRow, "A paused song comes back softly when it plays on, after a pause or after another app had the sound. On an iPhone it also hides the short stutter Safari makes then."));
+        playbackPage.appendChild(withHint(fadeHushRow, "How long a song playing on stays silent before it fades in, over the short stutter an iPhone may make as the sound comes back. Steps by a tenth of a second."));
         nowPage.appendChild(makeLabel("Artwork"));
         nowPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
         nowPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
@@ -40103,8 +40186,9 @@
     // Choices in a box over the player, one button each and Cancel. The
     // first line of the title is its heading, the rest the text under it.
     // noCancel: no Cancel button, for when one of the choices already is
-    // the way out. A tap beside the box still calls onCancel
-    function askChoices(title, options, onCancel, noCancel) {
+    // the way out. A tap beside the box still calls onCancel. tall: higher
+    // buttons, easier to hit on a phone
+    function askChoices(title, options, onCancel, noCancel, tall) {
 
         if (!panelEl) {
 
@@ -40160,7 +40244,19 @@
             }
 
             b.style.width = "100%";
+
+            if (tall === true) {
+
+                b.style.minHeight = "56px";
+                b.style.fontSize = "15px";
+                b.style.borderRadius = "8px";
+            }
+
             col.appendChild(b);
+        }
+
+        if (tall === true) {
+            col.style.gap = "8px";
         }
 
         if (noCancel !== true) {

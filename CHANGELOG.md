@@ -433,7 +433,18 @@ the new settings layout and a number of smaller improvements.
   when the player comes back into view, and a note asks for a tap when
   Safari keeps it asleep. The pause Safari sends from the lock screen
   controls when another app takes the sound counts as an interruption, so
-  the song plays on when the player is back in view.
+  the song plays on when the player is back in view. After an
+  interruption such as an alarm, the fade in waits for the sound engine to
+  run again. A setting under Playback, Silence before fading in, keeps a
+  song playing on silent for a while first, half a second unless changed,
+  in steps of a tenth.
+- **Another app keeping the sound.** When Safari holds a play back because
+  another app such as a video app still has the sound, a box asks to play
+  on, as Safari only gives the sound back after a tap: Dismiss and a large
+  Resume playback button. It can be swiped away and goes by itself once
+  the song plays. Dismissed or swiped away, the song stays paused as if
+  paused by hand, also when the player comes back into view. A switch under Playback, on unless changed, shows a short
+  note asking for Play instead.
 - **No jumping back in a browser playing the music.** When the phone's
   silent copy of the song drifts, the phone is set to the place heard in
   the browser instead of the browser jumping back to it. A jump made on
