@@ -396,7 +396,10 @@ the new settings layout and a number of smaller improvements.
   that is on anyway, WireGuard say, with the public address among its own
   addresses: the app then starts no VPN of its own and leaves that one
   alone, and the address works while it is up, also for browsers at the
-  VPN's other end. Off, everything works as before.
+  VPN's other end. Off, everything works as before. Android 14 and later
+  drops connections from the hotspot to an address a VPN lists only once,
+  so the address goes in twice, for WireGuard 3.3.3.3/31, 3.3.3.3/32, and
+  Connections warns when it is there only once.
 - **Security review before 2.0.** Deleting on Mureka from a web view needs
   a web view password. Other websites in a browser can no longer reach the
   web view's addresses, the server closes slow or crowding connections and
@@ -408,6 +411,12 @@ the new settings layout and a number of smaller improvements.
   phone only. The debug log no longer notes keys typed in fields, and
   blanks more kinds of secrets. A question from the phone that comes over
   another one takes no tap for a moment, and only closes itself.
+- **Battery badge.** The web view shows the phone's battery as a badge
+  after the heat badge, filled as far as it is charged, green from half,
+  yellow from a fifth and red below, with a lightning bolt while it
+  charges and a plug while plugged in but not charging. Pointing at it or
+  a tap tells the percent and how it charges, and it can show the percent
+  beside it. Each browser may show it or not.
 - **A host pinged through WireGuard.** Under Connections, a host on the far
   side of the tunnel, the WireGuard server's inside address say, is pinged
   every 20 seconds unless set otherwise while WireGuard holds the tunnel,
@@ -457,7 +466,8 @@ the new settings layout and a number of smaller improvements.
   queue carries its badge whenever it tells something: new while not
   played yet, a draft while the published songs are listed, public while
   the drafts are listed, and every song while all are listed. A song made
-  by trimming without a badge shows only its T.
+  by trimming without a badge carries its T on the heart's corner, so its
+  row keeps the same columns as the rows around it.
 - **New songs outside the filters.** A Library setting offers new songs
   found by a refresh to the play queue even when the filters set leave them
   out, such as a draft while only published songs are listed. Ignored songs

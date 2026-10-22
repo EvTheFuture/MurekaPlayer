@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.473";
+    const VERSION = "1.9.9.477";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2968,6 +2968,8 @@
             webWhoName: true,
             webListSide: "auto",
             webHeatBadge: true,
+            webBatteryBadge: true,
+            batteryText: "icon",
             heatText: "word",
             heatWarm: 40,
             heatHot: 45,
@@ -3212,6 +3214,8 @@
                     webWhoName: parsed.webWhoName !== false,
                     webListSide: parsed.webListSide === "always" || parsed.webListSide === "never" ? parsed.webListSide : "auto",
                     webHeatBadge: parsed.webHeatBadge !== false,
+                    webBatteryBadge: parsed.webBatteryBadge !== false,
+                    batteryText: parsed.batteryText === "percent" ? "percent" : "icon",
                     heatText: parsed.heatText === "both" || parsed.heatText === "temp" ? parsed.heatText : "word",
                     heatWarm: numberIn(parsed.heatWarm, 20, 70, 40),
                     heatHot: numberIn(parsed.heatHot, 20, 70, 45),
@@ -25174,6 +25178,12 @@
             heat: isApkHost() && typeof window.MurekaHost.heatStatus === "function" ? heatNow() : null,
             heatBadgeOn: settings.webHeatBadge !== false,
 
+            // The battery's charge and whether it is plugged in or charging,
+            // for the battery badge, and whether the badge adds the percent
+            battery: isApkHost() && typeof window.MurekaHost.heatStatus === "function" ? heatNow().battery : null,
+            batteryBadgeOn: settings.webBatteryBadge !== false,
+            batteryText: settings.batteryText === "percent" ? "percent" : "icon",
+
             // The battery temperatures where the heat badge turns warm, hot
             // and very hot
             heatLimits: [settings.heatWarm, settings.heatHot, settings.heatVeryHot],
@@ -25615,7 +25625,21 @@
         const level = typeof info.level === "number" && info.level >= 0 ? info.level : null;
         const temp = typeof info.temp === "number" && info.temp > -1000 ? Math.round(info.temp) / 10 : null;
 
-        heatRead = { level: level, temp: temp };
+        // The battery's charge and how it is plugged in, from the same
+        // reading. An app from before these were sent leaves them out
+        const charge = typeof info.charge === "number" && info.charge >= 0 ? Math.min(100, info.charge) : null;
+        const plug = ["ac", "usb", "wireless", "dock", "none"].indexOf(info.plug) !== -1 ? info.plug : null;
+
+        heatRead = {
+            level: level,
+            temp: temp,
+            battery: charge === null ? null : {
+                pct: charge,
+                plug: plug,
+                charging: info.charging === true,
+                full: info.full === true
+            }
+        };
         heatReadAt = Date.now();
 
         if (heatRead.level !== null && heatRead.level >= 3) {
@@ -26733,7 +26757,8 @@
     // are listed. In the queue, which can hold songs of any kind: a new one
     // always, every song while all are listed, and otherwise one the filter
     // would not list, as a draft in the queue while the published songs are
-    // listed. A song made by trimming without its badge still gets its T
+    // listed. A song made by trimming without its badge still gets its T,
+    // on the heart's corner
     function rowBadgeShown(song, inQueue) {
 
         if (song.shared === true) {
@@ -33064,6 +33089,19 @@
         return item;
     }
 
+    // The small yellow T of a song made by trimming, on the corner of the
+    // badge or of the heart
+    function trimRowMark() {
+
+        const mark = document.createElement("span");
+
+        mark.textContent = "T";
+        mark.title = "Trimmed";
+        mark.style.cssText = "position:absolute;top:-4px;right:-3px;width:9px;height:9px;border-radius:50%;background:#c9a83a;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.85;pointer-events:none";
+
+        return mark;
+    }
+
     function buildSongRow(song, number, isPlaying, dimmed, queueIndex) {
 
         if (isPendingSong(song)) {
@@ -33170,7 +33208,7 @@
         // see rowBadgeShown
         const badgeShown = rowBadgeShown(song, listView === "queue");
 
-        if (badgeShown || isTrimmed(song)) {
+        if (badgeShown) {
 
             const published = song.publish_state === 1;
             const isNew = song.is_played === false && song.shared !== true;
@@ -33188,11 +33226,7 @@
                             ? "background:#1f3a2a;color:#7fd6a0"
                             : "background:#3a3a42;color:#bbb")));
 
-            // Only the T of a trimmed song, the place of the badge kept empty
-            if (!badgeShown) {
-
-                badge.textContent = "";
-            } else if (song.shared === true) {
+            if (song.shared === true) {
                 badge.title = "Shared with you from another account, it may not be public";
             } else if (isNew) {
                 badge.title = published ? "Not played yet, public" : "Not played yet, draft";
@@ -33202,13 +33236,8 @@
             // right corner of its badge
             if (isTrimmed(song)) {
 
-                const mark = document.createElement("span");
-
-                mark.textContent = "T";
-                mark.title = "Trimmed";
-                mark.style.cssText = "position:absolute;top:-4px;right:-3px;width:9px;height:9px;border-radius:50%;background:#c9a83a;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.85;pointer-events:none";
                 badge.style.position = "relative";
-                badge.appendChild(mark);
+                badge.appendChild(trimRowMark());
             }
 
             item.appendChild(badge);
@@ -33237,7 +33266,20 @@
             toggleLike(song, heart);
         });
 
-        item.appendChild(heart);
+        // Without a badge, a trimmed song's T sits on the heart's corner
+        // instead, so the row keeps the columns of the rows around it. The
+        // heart is wrapped, as painting it sets its text
+        if (!badgeShown && isTrimmed(song)) {
+
+            const box = document.createElement("span");
+
+            box.style.cssText = "flex:0 0 auto;position:relative;display:flex";
+            box.appendChild(heart);
+            box.appendChild(trimRowMark());
+            item.appendChild(box);
+        } else {
+            item.appendChild(heart);
+        }
 
         // A row of the queue view: its place in the queue, for the menu, and
         // a handle to drag it to another place. Searched, the rows are not
@@ -36554,7 +36596,17 @@
                 }
 
                 if (st.vpnExternal) {
+
                     lines.push(["Public address", st.carUrl ? "On, from another VPN" : "Waiting, no VPN on the phone has the address yet"]);
+
+                    // Android 14 and later drops connections from the
+                    // hotspot to a VPN's address that VPN lists only once
+                    if (st.carUrl && st.vpnOnce === true) {
+
+                        const addr = String(st.carUrl).replace(/^http:\/\//, "").replace(/:\d+$/, "");
+
+                        lines.push(["Warning", "The VPN lists the address once, so Android drops connections to it from the hotspot, while pings still answer. Give it the address twice in the VPN's own addresses, for WireGuard " + addr + "/31, " + addr + "/32 on the Address line"]);
+                    }
                 } else if (st.carUrl) {
                     lines.push(["Public address", "On"]);
                 } else if (st.vpnEnabled) {
@@ -36640,7 +36692,7 @@
                         name.textContent = pair[0];
                         name.style.cssText = "flex:0 0 8.5em;font-size:11px;color:#888";
                         value.textContent = pair[1];
-                        value.style.cssText = "flex:1;min-width:0;font-size:13px;color:#48e1eb;line-height:1.4";
+                        value.style.cssText = "flex:1;min-width:0;font-size:13px;color:" + (pair[0] === "Warning" ? "#f0a94a" : "#48e1eb") + ";line-height:1.4";
                         row.appendChild(name);
                         row.appendChild(value);
                         carStatusEl.appendChild(row);
@@ -36731,6 +36783,11 @@
             const webHeatRow = makeBoolRow("Heat badge",
                 function () { return settings.webHeatBadge !== false; },
                 function (v) { settings.webHeatBadge = v; publishHostSoon(); });
+
+            // The battery's charge, as a badge on the web view
+            const webBatteryRow = makeBoolRow("Battery badge",
+                function () { return settings.webBatteryBadge !== false; },
+                function (v) { settings.webBatteryBadge = v; publishHostSoon(); });
 
             // Whether the phone's hotspot is on, as a badge on the web view
             // The battery temperatures where the heat badge turns warm, hot
@@ -36924,6 +36981,15 @@
                 publishHostSoon();
             });
 
+            const batteryTextRow = makeDropRow("Battery badge shows", [
+                { label: "Icon", value: "icon" },
+                { label: "Icon and percent", value: "percent" }
+            ], function () { return settings.batteryText === "percent" ? "percent" : "icon"; }, function (v) {
+
+                settings.batteryText = v;
+                publishHostSoon();
+            });
+
             webPage.appendChild(makeLabel("Main page"));
             webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
             webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
@@ -36987,6 +37053,8 @@
             webPage.appendChild(heatHotRow);
             webPage.appendChild(heatVeryHotRow);
             webPage.appendChild(makeHint("Below the warm temperature the heat badge says cool. Android's own heat level counts from moderate up and can make the badge say more."));
+            webPage.appendChild(withHint(webBatteryRow, "A battery after the heat badge, filled as far as it is charged: green from half, yellow from a fifth, red below. A lightning bolt while it charges, a plug while plugged in but not charging, such as when full. Pointing at it or a tap tells the percent."));
+            webPage.appendChild(withHint(batteryTextRow, "The icon alone, or the percent beside it."));
 
             // The web view's own screen off, apart from the mobile player's
             webPage.appendChild(makeLabel("Screen off"));
@@ -37123,7 +37191,7 @@
             connPage.appendChild(withHint(vpnInRow, "A device reaching the phone through a VPN the phone is on, WireGuard for one. Only from a private address, so a VPN that carries everything does not open the web view to the internet."));
             connPage.appendChild(withHint(vpnRow, vpnHint.textContent));
             connPage.appendChild(addressRow);
-            connPage.appendChild(withHint(externalRow, "For a VPN that is on anyway, WireGuard say: add the address above to that VPN's own addresses, for WireGuard the tunnel's Address line, such as 10.8.0.2/32, 3.3.3.3/32. On, the app starts no VPN of its own and does not turn WireGuard off or on for the hotspot, the address works while that VPN is up. Browsers at the VPN's other end may use the address too, when that network sends it to the phone."));
+            connPage.appendChild(withHint(externalRow, "For a VPN that is on anyway, WireGuard say: add the address above to that VPN's own addresses, for WireGuard the tunnel's Address line, such as 10.8.0.2/32, 3.3.3.3/31, 3.3.3.3/32. The address twice, with /31 and /32, as Android 14 and later otherwise drops connections to it from the hotspot. On, the app starts no VPN of its own and does not turn WireGuard off or on for the hotspot, the address works while that VPN is up. Browsers at the VPN's other end may use the address too, when that network sends it to the phone."));
             connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the phone's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
             connPage.appendChild(withHint(wgRow, "When the public address goes, this WireGuard tunnel is turned on again, and off before it comes. WireGuard needs Allow remote control apps switched on, in its advanced settings, and Android asks once whether this app may control tunnels."));
             connPage.appendChild(withHint(hotspotNowRow, "Switches the phone's hotspot now, with the helper under Charger and power. Browsers on the hotspot lose the web view when it goes off."));

@@ -995,6 +995,12 @@ final class PlayerWeb {
             int level = -1000;
             int temp = -1000;
 
+            // The battery's charge in percent, how it is plugged in, 0 for
+            // not at all, and whether it is charging or full
+            int charge = -1;
+            int plugged = -1;
+            int state = -1;
+
             try {
 
                 PowerManager pm = (PowerManager) appContext.getSystemService(Context.POWER_SERVICE);
@@ -1011,7 +1017,18 @@ final class PlayerWeb {
                 Intent battery = appContext.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
 
                 if (battery != null) {
+
                     temp = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1000);
+
+                    int now = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                    int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+
+                    if (now >= 0 && scale > 0) {
+                        charge = Math.round(now * 100f / scale);
+                    }
+
+                    plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+                    state = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
                 }
             } catch (RuntimeException e) {
                 temp = -1000;
@@ -1023,6 +1040,15 @@ final class PlayerWeb {
 
                 o.put("level", level);
                 o.put("temp", temp);
+                o.put("charge", charge);
+
+                // ac, usb, wireless, dock, none, or empty when not known
+                o.put("plug", plugged < 0 ? "" : plugged == 0 ? "none"
+                    : (plugged & BatteryManager.BATTERY_PLUGGED_AC) != 0 ? "ac"
+                    : (plugged & BatteryManager.BATTERY_PLUGGED_USB) != 0 ? "usb"
+                    : (plugged & BatteryManager.BATTERY_PLUGGED_WIRELESS) != 0 ? "wireless" : "dock");
+                o.put("charging", state == BatteryManager.BATTERY_STATUS_CHARGING);
+                o.put("full", state == BatteryManager.BATTERY_STATUS_FULL);
             } catch (JSONException e) {
                 return "{}";
             }
@@ -1346,6 +1372,7 @@ final class PlayerWeb {
 
                 o.put("vpnEnabled", WebViewSettings.vpnEnabled(appContext));
                 o.put("vpnExternal", WebViewSettings.vpnExternal(appContext));
+                o.put("vpnOnce", CarVpn.externalListedOnce());
                 o.put("vpn", CarVpn.status());
                 o.put("wg", WireGuard.status(appContext));
                 o.put("wgLast", WireGuard.last());

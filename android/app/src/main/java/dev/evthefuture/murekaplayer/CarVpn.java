@@ -25,7 +25,12 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.ParcelFileDescriptor;
 
 import java.io.IOException;
@@ -64,6 +69,10 @@ public class CarVpn extends VpnService {
     private static volatile Context settingsContext;
     private static volatile String outside = null;
     private static volatile long outsideAt = 0;
+
+    // Whether the other VPN lists the public address only once, which on
+    // Android 14 and later has connections to it from the hotspot dropped
+    private static volatile boolean outsideOnce = false;
 
     static void init(Context c) {
         settingsContext = c.getApplicationContext();
@@ -119,9 +128,60 @@ public class CarVpn extends VpnService {
         }
 
         outside = found;
+        outsideOnce = found != null && listedOnce(c, found);
         outsideAt = now;
 
         return found;
+    }
+
+    // With the address from another VPN: whether Android 14 or later drops
+    // connections to it from the hotspot, as that VPN gives the address
+    // only once. Android makes its rule for an address found once among
+    // all networks, and the same address with a /31 and a /32 counts as
+    // two, which is what this app's own VPN does
+    static boolean externalListedOnce() {
+
+        publicAddress();
+
+        return active == null && outside != null && outsideOnce;
+    }
+
+    private static boolean listedOnce(Context c, String address) {
+
+        if (Build.VERSION.SDK_INT < 34) {
+            return false;
+        }
+
+        ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
+
+        if (cm == null) {
+            return false;
+        }
+
+        int count = 0;
+
+        try {
+
+            for (Network n : cm.getAllNetworks()) {
+
+                LinkProperties lp = cm.getLinkProperties(n);
+
+                if (lp == null) {
+                    continue;
+                }
+
+                for (LinkAddress la : lp.getLinkAddresses()) {
+
+                    if (address.equals(la.getAddress().getHostAddress())) {
+                        count++;
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            return false;
+        }
+
+        return count == 1;
     }
 
     // What it is when down by choice: waiting for the hotspot when it only
