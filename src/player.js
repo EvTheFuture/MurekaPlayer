@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.461";
+    const VERSION = "1.9.9.462";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10053,6 +10053,9 @@
         // not first at a song switch, so the first pause already fades in
         audio.addEventListener("playing", function () {
 
+            // Also when Safari itself plays the song on after an interruption
+            resumeIosCtx("playing");
+
             if (isIosLike() && anyFadeOn()) {
                 wireIosGain();
             }
@@ -13042,6 +13045,7 @@
 
         if (iosCtx && iosCtx.state !== "running") {
 
+            iosCtxTapShown = false;
             iosCtx.resume().catch(function () {
                 // Asleep until the next tap
             });
@@ -13123,14 +13127,6 @@
         const target = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
 
         resumeFadeId = null;
-
-        // The engine woken, Safari leaves it asleep after an interruption
-        if (iosCtx && iosCtx.state !== "running") {
-
-            iosCtx.resume().catch(function () {
-                // Asleep until the next tap
-            });
-        }
 
         if (!same || !ms) {
 
@@ -13312,6 +13308,80 @@
     };
 
     // How long a switch asked for this way fades, in ms, 0 for not at all
+    // Wake the sound engine for the fades without making one. Every play
+    // goes through it, as the song is only heard through a running engine
+    // once the gain is in, and Safari leaves it suspended or interrupted
+    // after another sound took the phone's audio
+    let iosCtxCheckTimer = 0;
+    let iosCtxTapShown = false;
+
+    function resumeIosCtx(why) {
+
+        if (!iosCtx || iosCtx.state === "running" || iosCtx.state === "closed") {
+            return;
+        }
+
+        dbgLog("Audio", "sound engine " + iosCtx.state + ", woken: " + why);
+
+        try {
+
+            const woke = iosCtx.resume();
+
+            if (woke && woke.catch) {
+                woke.catch(function (e) {
+                    dbgLog("Audio", "sound engine stays asleep: " + errText(e));
+                });
+            }
+        } catch (e) {
+            dbgLog("Audio", "sound engine stays asleep: " + errText(e));
+        }
+
+        checkIosCtxSoon();
+    }
+
+    // A song playing through an engine that stays asleep is silent. Tried
+    // once more by stopping and starting the engine, which ends Safari's
+    // interrupted state where a plain resume does not, then a tap is asked for
+    function checkIosCtxSoon() {
+
+        clearTimeout(iosCtxCheckTimer);
+        iosCtxCheckTimer = setTimeout(function () {
+
+            iosCtxCheckTimer = 0;
+
+            if (!iosGain || !audio || audio.paused || iosCtx.state === "running") {
+                return;
+            }
+
+            dbgLog("Audio", "sound engine still " + iosCtx.state + ", stopped and started again");
+
+            const again = function () {
+                return iosCtx.resume();
+            };
+
+            Promise.resolve().then(function () {
+                return iosCtx.suspend();
+            }).then(again, again).catch(function () {
+                // Asleep until the next tap
+            });
+
+            setTimeout(function () {
+
+                if (!iosGain || !audio || audio.paused || iosCtx.state === "running" || document.hidden) {
+                    return;
+                }
+
+                dbgLog("Audio", "sound engine " + iosCtx.state + ", waits for a tap");
+
+                if (!iosCtxTapShown) {
+
+                    iosCtxTapShown = true;
+                    showToast("Tap the player to bring the sound back");
+                }
+            }, 1500);
+        }, 1200);
+    }
+
     // Whether any of the fades is switched on with a length
     function anyFadeOn() {
         return Object.keys(FADE_KINDS).some(function (kind) {
@@ -16038,6 +16108,7 @@
         }
 
         userPaused = false;
+        resumeIosCtx("play");
 
         const started = audio.play();
 
@@ -18227,6 +18298,7 @@
 
         // Always correct the display and the lock screen state, this is free
         updatePlayPause();
+        resumeIosCtx("back in view");
 
         if ("mediaSession" in navigator) {
 
@@ -35072,14 +35144,6 @@
                 publishHostSoon();
             });
 
-        nowPage.appendChild(makeLabel("Fades"));
-        nowPage.appendChild(makeHint("The playing song fades out before another one starts, for each way of switching that is on, over its own seconds. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
-        nowPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready."));
-        nowPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen."));
-        nowPage.appendChild(withHint(fadeSwipeRow, "A swipe on the cover, here or in the web view. The fade starts as the cover glides."));
-        nowPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
-        nowPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
-        nowPage.appendChild(withHint(fadeResumeRow, "A paused song comes back softly when it plays on, after a pause or after another app had the sound. On an iPhone it also hides the short stutter Safari makes then."));
         nowPage.appendChild(makeLabel("Lyrics"));
         nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
@@ -35294,6 +35358,14 @@
 
         // Common: the rest of playback, the artwork and the library counts
         playbackPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
+        playbackPage.appendChild(makeLabel("Fades"));
+        playbackPage.appendChild(makeHint("The playing song fades out before another one starts, for each way of switching that is on, over its own seconds. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
+        playbackPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready."));
+        playbackPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen."));
+        playbackPage.appendChild(withHint(fadeSwipeRow, "A swipe on the cover, here or in the web view. The fade starts as the cover glides."));
+        playbackPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
+        playbackPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
+        playbackPage.appendChild(withHint(fadeResumeRow, "A paused song comes back softly when it plays on, after a pause or after another app had the sound. On an iPhone it also hides the short stutter Safari makes then."));
         nowPage.appendChild(makeLabel("Artwork"));
         nowPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
         nowPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));

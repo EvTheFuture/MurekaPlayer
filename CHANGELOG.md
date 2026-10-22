@@ -420,16 +420,18 @@ the new settings layout and a number of smaller improvements.
   soon as it is ready is fetched whole onto the device first, while the
   playing song goes on, and then fades in from there rather than streaming
   from Mureka. Not fetched within 20 seconds, it streams as before.
-- **Fades for every way of switching songs.** Under Now playing, each way
+- **Fades for every way of switching songs.** Under Playback, each way
   has its own switch and its own seconds: a new song when ready (on, 1.5
   s), a song tapped or Next and Previous on the screen, a swipe on the
   cover, media controls such as the lock screen, Bluetooth or a steering
   wheel, and keyboard shortcuts (each off, 0.5 s), and a fade in when a
   paused song plays on (on, 0.5 s), after a pause or after another app had
   the sound, which on an iPhone also hides the short stutter Safari makes
-  then. The seconds step by half
-  a second or are typed, also in the web view, as finely as 0.25. A second
-  switch while a fade runs goes at once.
+  then. The seconds step by half a second or are typed, also in the web
+  view, as finely as 0.25. A second switch while a fade runs goes at once.
+  On an iPhone the sound engine for the fades is woken on every play and
+  when the player comes back into view, and a note asks for a tap when
+  Safari keeps it asleep.
 - **No jumping back in a browser playing the music.** When the phone's
   silent copy of the song drifts, the phone is set to the place heard in
   the browser instead of the browser jumping back to it. A jump made on
