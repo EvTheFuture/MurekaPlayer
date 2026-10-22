@@ -83,6 +83,10 @@ final class AppScreen {
 
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+
+        // No files or content of the phone for the pages shown
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         s.setSupportMultipleWindows(false);
         s.setUserAgentString(s.getUserAgentString() + " " + WebViewServer.APP_AGENT + "1");
         w.setBackgroundColor(Color.BLACK);

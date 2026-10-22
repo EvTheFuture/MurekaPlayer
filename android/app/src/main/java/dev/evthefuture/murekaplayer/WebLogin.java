@@ -130,9 +130,12 @@ final class WebLogin {
     // Seconds a device waits before its next try, 0 when it may try now
     static synchronized long waitSeconds(String who) {
 
+        // The wait for all devices together holds back only those that sent
+        // a wrong one themselves, so one guessing cannot lock the others out
+        // of signing in. A new address still gets one try at the most
         long now = System.currentTimeMillis();
         long[] t = TRIES.get(who);
-        long left = Math.max(t == null ? 0 : t[1] - now, allUntil - now);
+        long left = t == null ? 0 : Math.max(t[1] - now, allUntil - now);
 
         return left > 0 ? (left + 999) / 1000 : 0;
     }

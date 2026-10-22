@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Mureka Player",
-    "version": "1.9.9.456",
+    "version": "1.9.9.460",
     "description": "Loads all your published Mureka songs into one player with caching, search, shuffle and automatic folder downloads.",
     "author": "EvTheFuture",
     "homepage_url": "https://github.com/EvTheFuture/MurekaPlayer",
@@ -26,9 +26,9 @@
         "downloads"
     ],
     "host_permissions": [
-        "*://www.mureka.ai/*",
-        "*://mureka.ai/*",
-        "*://static-cos.mureka.ai/*"
+        "https://www.mureka.ai/*",
+        "https://mureka.ai/*",
+        "https://static-cos.mureka.ai/*"
     ],
     "background": {
         "scripts": [
@@ -38,8 +38,8 @@
     "content_scripts": [
         {
             "matches": [
-                "*://www.mureka.ai/*",
-                "*://mureka.ai/*"
+                "https://www.mureka.ai/*",
+                "https://mureka.ai/*"
             ],
             "js": [
                 "src/content.js"
@@ -53,7 +53,7 @@
                 "src/player.js"
             ],
             "matches": [
-                "*://*.mureka.ai/*"
+                "https://*.mureka.ai/*"
             ]
         }
     ]

@@ -392,6 +392,22 @@ the new settings layout and a number of smaller improvements.
   ignores a page's volume, the song goes through a sound engine of its own
   for the fade, which plays on with the screen locked. A song changed or
   paused meanwhile calls the fade off.
+- **Public address from another VPN.** A switch under Connections for a VPN
+  that is on anyway, WireGuard say, with the public address among its own
+  addresses: the app then starts no VPN of its own and leaves that one
+  alone, and the address works while it is up, also for browsers at the
+  VPN's other end. Off, everything works as before.
+- **Security review before 2.0.** Deleting on Mureka from a web view needs
+  a web view password. Other websites in a browser can no longer reach the
+  web view's addresses, the server closes slow or crowding connections and
+  takes imports of up to 12 MB and covers of up to 8 MB, one at a time. The
+  app's own commands, browser names with hidden marks and invented browser
+  ids are refused. The app shows Mureka's pages only over https, opens other
+  apps only after a tap, keeps nothing for backups or a new phone, and
+  pairing the hotspot helper and the WireGuard ping settings are on the
+  phone only. The debug log no longer notes keys typed in fields, and
+  blanks more kinds of secrets. A question from the phone that comes over
+  another one takes no tap for a moment, and only closes itself.
 - **A host pinged through WireGuard.** Under Connections, a host on the far
   side of the tunnel, the WireGuard server's inside address say, is pinged
   every 20 seconds unless set otherwise while WireGuard holds the tunnel,
@@ -408,7 +424,10 @@ the new settings layout and a number of smaller improvements.
   has its own switch and its own seconds: a new song when ready (on, 1.5
   s), a song tapped or Next and Previous on the screen, a swipe on the
   cover, media controls such as the lock screen, Bluetooth or a steering
-  wheel, and keyboard shortcuts (each off, 0.5 s). The seconds step by half
+  wheel, and keyboard shortcuts (each off, 0.5 s), and a fade in when a
+  paused song plays on (on, 0.5 s), after a pause or after another app had
+  the sound, which on an iPhone also hides the short stutter Safari makes
+  then. The seconds step by half
   a second or are typed, also in the web view, as finely as 0.25. A second
   switch while a fade runs goes at once.
 - **No jumping back in a browser playing the music.** When the phone's
@@ -422,8 +441,8 @@ the new settings layout and a number of smaller improvements.
 - **Badges in the queue.** On the phone and in the web view, a song in the
   queue carries its badge whenever it tells something: new while not
   played yet, a draft while the published songs are listed, public while
-  the drafts are listed, every song while all are listed, and a song made
-  by trimming with its T.
+  the drafts are listed, and every song while all are listed. A song made
+  by trimming without a badge shows only its T.
 - **Instrumental by short lyrics.** A Library setting counts a song as
   instrumental when its lyrics are shorter than a number of characters, 20
   unless changed, spaces not counted, as with a prompt holding only a note

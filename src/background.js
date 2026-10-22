@@ -80,6 +80,9 @@ function allowedItem(item) {
 // ignores it beyond the harmless call
 let keepAliveTimer = null;
 
+// A batch of downloads under way
+let relayBusy = false;
+
 function startKeepAlive() {
 
     if (keepAliveTimer || !api.runtime.getPlatformInfo) {
@@ -164,13 +167,23 @@ api.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     const items = Array.isArray(msg.items) ? msg.items : [];
     const fromMureka = sender && sender.id === api.runtime.id && sender.tab && murekaHost(sender.url || sender.tab.url);
 
-    if (!fromMureka || items.length === 0 || items.length > MAX_ITEMS) {
+    // One batch at a time, a page asking again and again cannot fill the
+    // disk faster than the downloads finish
+    if (!fromMureka || items.length === 0 || items.length > MAX_ITEMS || relayBusy) {
 
         sendResponse({ ok: 0, fail: items.length });
         return;
     }
 
-    downloadMany(items).then(sendResponse, function () {
+    relayBusy = true;
+
+    downloadMany(items).then(function (result) {
+
+        relayBusy = false;
+        sendResponse(result);
+    }, function () {
+
+        relayBusy = false;
         sendResponse({ ok: 0, fail: items.length });
     });
 

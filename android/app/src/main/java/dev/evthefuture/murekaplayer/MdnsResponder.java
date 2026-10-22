@@ -289,7 +289,10 @@ final class MdnsResponder {
             }
         }
 
-        return fallback;
+        // An asker on none of the phone's networks gets no answer, it has
+        // no business knowing the phone's address. One asking over IPv6
+        // from the same link only, which says nothing of its IPv4 network
+        return asker instanceof java.net.Inet6Address && asker.isLinkLocalAddress() ? fallback : null;
     }
 
     // The interface on the same network as whoever asked

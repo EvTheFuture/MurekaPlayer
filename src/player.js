@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.456";
+    const VERSION = "1.9.9.460";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2850,6 +2850,8 @@
             fadeSwipeSec: 0.5,
             fadeMediaSec: 0.5,
             fadeKeySec: 0.5,
+            fadeOnResume: true,
+            fadeResumeSec: 0.5,
             autoPlay: false,
             playOnSeconds: 30,
             shuffle: false,
@@ -3056,6 +3058,8 @@
                     fadeSwipeSec: fadeSeconds(parsed.fadeSwipeSec, 0.5),
                     fadeMediaSec: fadeSeconds(parsed.fadeMediaSec, 0.5),
                     fadeKeySec: fadeSeconds(parsed.fadeKeySec, 0.5),
+                    fadeOnResume: parsed.fadeOnResume !== false,
+                    fadeResumeSec: fadeSeconds(parsed.fadeResumeSec, 0.5),
                     autoPlay: parsed.autoPlay === true,
                     playOnSeconds: playOnSeconds(parsed.playOnSeconds),
                     shuffle: parsed.shuffle === true,
@@ -8313,7 +8317,9 @@
 
         const path = song.mp3_url || "";
 
-        if (path.indexOf("http") === 0) {
+        // Only a whole address is taken as it is, anything else is a path
+        // on Mureka's file host
+        if (/^https?:\/\//i.test(path)) {
             return path;
         }
 
@@ -8330,7 +8336,7 @@
             return "";
         }
 
-        if (path.indexOf("http") === 0) {
+        if (/^https?:\/\//i.test(path)) {
             return path;
         }
 
@@ -10030,6 +10036,15 @@
 
         audio = new Audio();
 
+        // A paused song playing on fades in, another song loaded instead
+        // plays at the usual level
+        audio.addEventListener("playing", function () {
+            fadeInResume();
+        });
+        audio.addEventListener("loadstart", function () {
+            dropResumeFade();
+        });
+
         // Every jump in the song counted, so a browser playing the music can
         // tell a jump asked for from the phone's place drifting
         audio.addEventListener("seeking", function () {
@@ -10228,6 +10243,11 @@
             // The next song is already starting, so nothing below applies
             if (switchingTrack) {
                 return;
+            }
+
+            // Silent until it plays on, then faded in
+            if (!audio.ended) {
+                quietForResume();
             }
 
             updatePlayPause();
@@ -13046,10 +13066,103 @@
     function setFadeLevel(v) {
 
         if (iosGain) {
+
+            iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
             iosGain.gain.value = v;
         } else {
             audio.volume = v;
         }
+    }
+
+    // The fade in when a paused song plays on, after a pause or after
+    // another app took the sound for a while. Safari's sound engine for the
+    // fades on an iPhone stutters for a moment when the song comes back,
+    // the song is silent then and comes up over the seconds set. The song
+    // paused is noted, a new one loaded instead plays at once as usual
+    let resumeFadeId = null;
+    let resumeFadeTimer = 0;
+
+    function quietForResume() {
+
+        if (!fadeMs("resume") || readyFade || !currentSong) {
+            return;
+        }
+
+        resumeFadeId = currentSong.song_id;
+        clearInterval(resumeFadeTimer);
+        resumeFadeTimer = 0;
+        setFadeLevel(0);
+    }
+
+    function fadeInResume() {
+
+        if (resumeFadeId === null) {
+            return;
+        }
+
+        const same = currentSong && currentSong.song_id === resumeFadeId;
+        const ms = fadeMs("resume");
+        const target = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
+
+        resumeFadeId = null;
+
+        // The engine woken, Safari leaves it asleep after an interruption
+        if (iosCtx && iosCtx.state !== "running") {
+
+            iosCtx.resume().catch(function () {
+                // Asleep until the next tap
+            });
+        }
+
+        if (!same || !ms) {
+
+            applyCarAudioVolume();
+            return;
+        }
+
+        dbgLog("Audio", "fading in over " + (ms / 1000) + " s as the song plays on");
+
+        // On the gain, a short silence first for the stutter, then the ramp
+        if (iosGain) {
+
+            const g = iosGain.gain;
+            const t = iosCtx.currentTime;
+
+            g.cancelScheduledValues(t);
+            g.setValueAtTime(0, t);
+            g.setValueAtTime(0, t + 0.15);
+            g.linearRampToValueAtTime(1, t + 0.15 + ms / 1000);
+            return;
+        }
+
+        const t0 = Date.now();
+
+        clearInterval(resumeFadeTimer);
+        resumeFadeTimer = setInterval(function () {
+
+            const k = Math.min(1, (Date.now() - t0) / ms);
+
+            audio.volume = target * k;
+
+            if (k >= 1) {
+
+                clearInterval(resumeFadeTimer);
+                resumeFadeTimer = 0;
+            }
+        }, 40);
+    }
+
+    // Another song loaded while one was paused for a fade in: the level back
+    function dropResumeFade() {
+
+        if (resumeFadeId === null && !resumeFadeTimer) {
+            return;
+        }
+
+        resumeFadeId = null;
+        clearInterval(resumeFadeTimer);
+        resumeFadeTimer = 0;
+        applyCarAudioVolume();
     }
 
     document.addEventListener("pointerdown", wakeIosCtx, true);
@@ -13176,7 +13289,8 @@
         tap: { on: "fadeOnTap", sec: "fadeTapSec", onFirst: false, secFirst: 0.5 },
         swipe: { on: "fadeOnSwipe", sec: "fadeSwipeSec", onFirst: false, secFirst: 0.5 },
         media: { on: "fadeOnMedia", sec: "fadeMediaSec", onFirst: false, secFirst: 0.5 },
-        key: { on: "fadeOnKey", sec: "fadeKeySec", onFirst: false, secFirst: 0.5 }
+        key: { on: "fadeOnKey", sec: "fadeKeySec", onFirst: false, secFirst: 0.5 },
+        resume: { on: "fadeOnResume", sec: "fadeResumeSec", onFirst: true, secFirst: 0.5 }
     };
 
     // How long a switch asked for this way fades, in ms, 0 for not at all
@@ -14520,9 +14634,11 @@
         // What could let someone act as the user is blanked before it is
         // logged: values of keys that look like tokens, passwords or
         // signatures, in JSON and in queries
-        const SECRET = "(?:token|auth|passw|secret|sign|cred|cookie|session|ticket|key)";
+        const SECRET = "(?:token|auth|passw|pwd|secret|sign|cred|cookie|session|ticket|key|verif|otp|captcha|jwt|email|phone|mobile)";
         const secretJson = new RegExp("(\"[^\"]*" + SECRET + "[^\"]*\"\\s*:\\s*)(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]\\s]+)", "gi");
-        const secretQuery = new RegExp("([?&][^=&]*" + SECRET + "[^=&]*=)[^&#]*", "gi");
+
+        // In a query, or a form's body, which has no ? before its first key
+        const secretQuery = new RegExp("((?:^|[?&])[^=&?]*" + SECRET + "[^=&]*=)[^&#]*", "gi");
 
         const redact = function (text) {
             return String(text || "").replace(secretJson, "$1\"***\"").replace(secretQuery, "$1***");
@@ -24398,6 +24514,8 @@
 
         // The gain of a fade on an iPhone back to whole
         if (iosGain) {
+
+            iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
             iosGain.gain.value = 1;
         }
     }
@@ -26113,9 +26231,9 @@
     // says so wherever it shows, it may not be public. In the list, the
     // account's own songs carry one while both published songs and drafts
     // are listed. In the queue, which can hold songs of any kind: a new one
-    // always, one made by trimming for its T, every song while all are
-    // listed, and otherwise one the filter would not list, as a draft in
-    // the queue while the published songs are listed
+    // always, every song while all are listed, and otherwise one the filter
+    // would not list, as a draft in the queue while the published songs are
+    // listed. A song made by trimming without its badge still gets its T
     function rowBadgeShown(song, inQueue) {
 
         if (song.shared === true) {
@@ -26130,7 +26248,7 @@
             return publishFilter !== "published";
         }
 
-        if (song.is_played === false || isTrimmed(song) || publishFilter === "all") {
+        if (song.is_played === false || publishFilter === "all") {
             return true;
         }
 
@@ -30269,10 +30387,14 @@
 
         const keyText = function (ev) {
 
-            // What is typed into a field stays private, only that it was
-            const key = isField(ev.target) && ev.key && ev.key.length === 1
-                ? "(a typed character)"
-                : JSON.stringify(ev.key);
+            // What is typed into a field stays private, only that something
+            // was: no key, no key code and no modifiers, from which the
+            // typing could be put together again
+            if (isField(ev.target)) {
+                return "(in a field)";
+            }
+
+            const key = JSON.stringify(ev.key);
 
             return key + " code " + (ev.code || "-") + " keyCode " + ev.keyCode
                 + (ev.repeat ? " repeat" : "")
@@ -32546,7 +32668,9 @@
 
         // Mark a song as public, draft or new where that tells something,
         // see rowBadgeShown
-        if (rowBadgeShown(song, listView === "queue")) {
+        const badgeShown = rowBadgeShown(song, listView === "queue");
+
+        if (badgeShown || isTrimmed(song)) {
 
             const published = song.publish_state === 1;
             const isNew = song.is_played === false && song.shared !== true;
@@ -32556,7 +32680,7 @@
             const badge = document.createElement("span");
             badge.textContent = song.shared === true ? "shared" : (isNew ? "new" : (published ? "public" : "draft"));
             badge.style.cssText = "flex:0 0 auto;width:46px;margin-left:6px;padding:0;border-radius:4px;font-size:11px;line-height:16px;text-align:center;"
-                + (song.shared === true
+                + (!badgeShown ? "background:transparent;color:transparent" : song.shared === true
                     ? "background:#2e2640;color:#c9a8ff"
                     : (isNew
                         ? "background:#48e1eb;color:#000;font-weight:600"
@@ -32564,7 +32688,11 @@
                             ? "background:#1f3a2a;color:#7fd6a0"
                             : "background:#3a3a42;color:#bbb")));
 
-            if (song.shared === true) {
+            // Only the T of a trimmed song, the place of the badge kept empty
+            if (!badgeShown) {
+
+                badge.textContent = "";
+            } else if (song.shared === true) {
                 badge.title = "Shared with you from another account, it may not be public";
             } else if (isNew) {
                 badge.title = published ? "Not played yet, public" : "Not played yet, draft";
@@ -33758,6 +33886,10 @@
         pairRow.appendChild(forgetBtn);
         startRow.appendChild(startBtn);
 
+        // Pairing with wireless debugging, or forgetting it, only on the
+        // phone itself, never from a browser
+        pairRow.dataset.hostSkip = "1";
+
         // The command that starts the helper, to copy to a computer with adb
         const commandEl = document.createElement("div");
         const copyRow = document.createElement("div");
@@ -34615,6 +34747,7 @@
         const fadeSwipeRow = makeFadeRow("A swipe on the cover, seconds", "swipe");
         const fadeMediaRow = makeFadeRow("Media controls, seconds", "media");
         const fadeKeyRow = makeFadeRow("Keyboard shortcuts, seconds", "key");
+        const fadeResumeRow = makeFadeRow("Fade in when playing on, seconds", "resume");
 
         const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
             function () { return settings.autoInstrumentalChars; },
@@ -34916,6 +35049,7 @@
         nowPage.appendChild(withHint(fadeSwipeRow, "A swipe on the cover, here or in the web view. The fade starts as the cover glides."));
         nowPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
         nowPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
+        nowPage.appendChild(withHint(fadeResumeRow, "A paused song comes back softly when it plays on, after a pause or after another app had the sound. On an iPhone it also hides the short stutter Safari makes then."));
         nowPage.appendChild(makeLabel("Lyrics"));
         nowPage.appendChild(withHint(semicolonRow, "Mureka's lyrics often use ; as a pause mark. On takes it out on the cover, in the web view and in song information."));
 
@@ -35683,6 +35817,16 @@
 
             const addressRow = makeCarTextRow("Public address, not a private one", "vpnAddress", "3.3.3.3");
 
+            // Or another VPN gives the phone the address, WireGuard with it
+            // among the tunnel's own addresses say. The app then runs no VPN
+            // of its own and leaves that one alone
+            const externalGet = function () {
+                return window.MurekaHost.getPref("vpnExternal", "0") === "1";
+            };
+
+            const externalRow = makeBoolRow("Public address from another VPN", externalGet,
+                function (v) { setPref("vpnExternal", v); });
+
             // Android runs one VPN at a time. Following the hotspot, the
             // public address leaves the phone's VPN to WireGuard, or another
             // VPN app, the rest of the time
@@ -35893,7 +36037,9 @@
                     lines.push(["Hotspot", hsState === "on" ? "On" : "Off"]);
                 }
 
-                if (st.carUrl) {
+                if (st.vpnExternal) {
+                    lines.push(["Public address", st.carUrl ? "On, from another VPN" : "Waiting, no VPN on the phone has the address yet"]);
+                } else if (st.carUrl) {
                     lines.push(["Public address", "On"]);
                 } else if (st.vpnEnabled) {
                     lines.push(["Public address", st.vpn ? cap(st.vpn) : "Starting"]);
@@ -35992,6 +36138,7 @@
                 paintBattery();
                 paintWgFree();
                 updateToggleButton(vpnRow.querySelector("button"), vpnGet());
+                updateToggleButton(externalRow.querySelector("button"), externalGet());
                 updateToggleButton(hotspotOnlyRow.querySelector("button"), hotspotOnlyGet());
             };
 
@@ -36040,7 +36187,7 @@
             // the phone, so a browser cannot lock itself out or let others
             // in. Turning WireGuard on or off now, and how things stand, are
             // in the web view too
-            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, hotspotOnlyRow, wgRow, wgFreeRow, nameRow, carHint, netHint,
+            [hotspotRow, wifiRow, vpnInRow, vpnRow, addressRow, externalRow, hotspotOnlyRow, wgRow, wgFreeRow, nameRow, carHint, netHint,
                 vpnHint, batteryRow].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
@@ -36460,14 +36607,24 @@
             connPage.appendChild(withHint(vpnInRow, "A device reaching the phone through a VPN the phone is on, WireGuard for one. Only from a private address, so a VPN that carries everything does not open the web view to the internet."));
             connPage.appendChild(withHint(vpnRow, vpnHint.textContent));
             connPage.appendChild(addressRow);
+            connPage.appendChild(withHint(externalRow, "For a VPN that is on anyway, WireGuard say: add the address above to that VPN's own addresses, for WireGuard the tunnel's Address line, such as 10.8.0.2/32, 3.3.3.3/32. On, the app starts no VPN of its own and does not turn WireGuard off or on for the hotspot, the address works while that VPN is up. Browsers at the VPN's other end may use the address too, when that network sends it to the phone."));
             connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the phone's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
             connPage.appendChild(withHint(wgRow, "When the public address goes, this WireGuard tunnel is turned on again, and off before it comes. WireGuard needs Allow remote control apps switched on, in its advanced settings, and Android asks once whether this app may control tunnels."));
             connPage.appendChild(withHint(hotspotNowRow, "Switches the phone's hotspot now, with the helper under Charger and power. Browsers on the hotspot lose the web view when it goes off."));
             connPage.appendChild(withHint(wgTestRow, "Switches the tunnel now, as the hand over does. On takes Android's one VPN from the public address. Browsers that came through the one going off lose the web view."));
             connPage.appendChild(withHint(wgFreeRow, "Android lets WireGuard start its tunnel from the background only when its battery use is Unrestricted. Open settings shows WireGuard's app info, set it under Battery."));
             connPage.appendChild(withHint(wgAwakeRow, "A sleeping phone stops sending WireGuard's keepalives, the mobile network then forgets it after a minute or two, and the web view cannot reach it through the tunnel until it wakes. On, the phone stays awake while WireGuard holds the tunnel. It costs some battery, only while the tunnel is WireGuard's."));
+            // What is pinged and how the phone is kept awake for it only on
+            // the phone, a browser could otherwise look for hosts behind the
+            // tunnel or keep the phone from sleeping. How it goes shows in
+            // the web view too
+            const wgPingHint = makeHint("A name or an address on the far side of the tunnel, the WireGuard server's own inside address say, pinged again and again while WireGuard holds the tunnel, so traffic goes through it all the time as with a web view open. The debug log says when the answers stop and when they come back.");
+
+            [wgAwakeRow, wgPingRow, wgPingHint, wgPingSecRow, wgPingAwakeRow].forEach(function (el) {
+                el.dataset.hostSkip = "1";
+            });
             connPage.appendChild(wgPingRow);
-            connPage.appendChild(makeHint("A name or an address on the far side of the tunnel, the WireGuard server's own inside address say, pinged again and again while WireGuard holds the tunnel, so traffic goes through it all the time as with a web view open. The debug log says when the answers stop and when they come back."));
+            connPage.appendChild(wgPingHint);
             connPage.appendChild(withHint(wgPingSecRow, "How often, from 5 to 600 seconds."));
             connPage.appendChild(withHint(wgPingAwakeRow, "A sleeping phone does not ping. On a charger it is kept awake for them, where it costs no battery. Always also on battery, Never lets the pings pause while it sleeps. How the pings go is under How it stands."));
             connPage.appendChild(nameRow);
@@ -37095,17 +37252,18 @@
 
     // The settings the Android app keeps itself, with what they are when
     // never changed, as the app reads them
-    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "allowVpn", "carVpn", "vpnHotspotOnly", "vpnAddress", "mdnsName",
-        "wgTunnel", "appFullscreen", "tabletView"];
+    const APP_PREF_KEYS = ["allowHotspot", "allowWifi", "allowVpn", "carVpn", "vpnExternal", "vpnHotspotOnly", "vpnAddress",
+        "mdnsName", "wgTunnel", "appFullscreen", "tabletView"];
 
     // Those of them that decide who can reach the web view
-    const WEB_VIEW_ACCESS_KEYS = ["allowHotspot", "allowWifi", "allowVpn", "carVpn", "vpnHotspotOnly", "vpnAddress",
-        "mdnsName", "wgTunnel"];
+    const WEB_VIEW_ACCESS_KEYS = ["allowHotspot", "allowWifi", "allowVpn", "carVpn", "vpnExternal", "vpnHotspotOnly",
+        "vpnAddress", "mdnsName", "wgTunnel"];
     const APP_PREF_DEFAULTS = {
         allowHotspot: "1",
         allowWifi: "1",
         allowVpn: "0",
         carVpn: "0",
+        vpnExternal: "0",
         vpnHotspotOnly: "0",
         wgTunnel: "",
         vpnAddress: "3.3.3.3",
@@ -37354,6 +37512,13 @@
 
         if (link === "") {
             return true;
+        }
+
+        // A browser drops tabs and line breaks from an address, and reads a
+        // backslash as a slash, so a link with any of them could turn into
+        // another host than it seems to name
+        if (/[\u0000-\u0020\\]/.test(link)) {
+            return false;
         }
 
         if (!/^[a-z][a-z0-9+.-]*:/i.test(link) && link.indexOf("//") !== 0) {
@@ -39094,6 +39259,7 @@
             allowWifi: "allow from Wi-Fi networks",
             allowVpn: "allow from a VPN",
             carVpn: "public address (VPN)",
+            vpnExternal: "public address from another VPN",
             vpnHotspotOnly: "public address only while the hotspot is on",
             vpnAddress: "public address",
             mdnsName: "local name",

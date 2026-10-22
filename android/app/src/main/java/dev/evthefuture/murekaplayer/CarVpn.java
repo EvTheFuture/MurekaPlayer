@@ -60,6 +60,70 @@ public class CarVpn extends VpnService {
         return active;
     }
 
+    // The app's settings, for the public address another VPN gives
+    private static volatile Context settingsContext;
+    private static volatile String outside = null;
+    private static volatile long outsideAt = 0;
+
+    static void init(Context c) {
+        settingsContext = c.getApplicationContext();
+    }
+
+    // The public address the phone has now: this app's own VPN's, or with
+    // the switch for another VPN on, the address set when any interface of
+    // the phone holds it. Looked for at most every two seconds
+    static String publicAddress() {
+
+        String own = active;
+
+        if (own != null) {
+            return own;
+        }
+
+        Context c = settingsContext;
+
+        if (c == null || !WebViewSettings.vpnExternal(c)) {
+            return null;
+        }
+
+        long now = System.currentTimeMillis();
+
+        if (now - outsideAt < 2000) {
+            return outside;
+        }
+
+        String want = WebViewSettings.vpnAddress(c);
+        String found = null;
+
+        try {
+
+            java.util.Enumeration<java.net.NetworkInterface> all = java.net.NetworkInterface.getNetworkInterfaces();
+
+            while (all != null && all.hasMoreElements() && found == null) {
+
+                java.net.NetworkInterface ni = all.nextElement();
+
+                if (!ni.isUp()) {
+                    continue;
+                }
+
+                for (java.net.InterfaceAddress ia : ni.getInterfaceAddresses()) {
+
+                    if (ia.getAddress() instanceof java.net.Inet4Address && want.equals(ia.getAddress().getHostAddress())) {
+                        found = want;
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            found = null;
+        }
+
+        outside = found;
+        outsideAt = now;
+
+        return found;
+    }
+
     // What it is when down by choice: waiting for the hotspot when it only
     // runs while the hotspot is on, else off
     static String idleStatus(Context c) {

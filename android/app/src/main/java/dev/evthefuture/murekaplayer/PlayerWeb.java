@@ -274,6 +274,10 @@ final class PlayerWeb {
 
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+
+        // No files or content of the phone for the pages shown
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true);
@@ -365,13 +369,16 @@ final class PlayerWeb {
             return false;
         }
 
-        if (appContext != null) {
+        // Another app opened only for a tap, never by a page on its own
+        if (appContext != null && request.hasGesture()) {
 
             try {
                 appContext.startActivity(new Intent(Intent.ACTION_VIEW, uri)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (ActivityNotFoundException e) {
                 // Nothing handles it, the tap simply does nothing
+            } catch (RuntimeException e) {
+                Hub.note("Page", "could not open a link in another app: " + e.getClass().getSimpleName());
             }
         }
 
@@ -527,15 +534,18 @@ final class PlayerWeb {
         }
     }
 
+    // A Mureka page over https only, a plain http one could have been
+    // written by anyone on the network between
     private static boolean isMureka(String url) {
 
         if (url == null) {
             return false;
         }
 
-        String host = Uri.parse(url).getHost();
+        Uri uri = Uri.parse(url);
+        String host = uri.getHost();
 
-        return host != null && (host.equals("mureka.ai") || host.endsWith(".mureka.ai"));
+        return "https".equals(uri.getScheme()) && host != null && (host.equals("mureka.ai") || host.endsWith(".mureka.ai"));
     }
 
     private static String readAsset(Context c, String name) {
@@ -660,6 +670,9 @@ final class PlayerWeb {
     // every page and frame the WebView loads, so it answers nothing on any
     // other page, a site a link led to or a sign in page
     private static volatile boolean onMureka = false;
+
+    // The largest file a page may have saved to Downloads, in characters
+    private static final int SAVE_MAX_CHARS = 32 * 1024 * 1024;
 
     private static final class Bridge {
 
@@ -921,6 +934,14 @@ final class PlayerWeb {
         public void saveFile(String name, String text) {
 
             if (!onMureka) {
+                return;
+            }
+
+            // An export is a few megabytes at the most, a page asking to
+            // save much more is not saving an export
+            if (text != null && text.length() > SAVE_MAX_CHARS) {
+
+                Hub.note("Files", "a file of " + (text.length() / 1048576) + " MB was not saved, too large for an export");
                 return;
             }
 
@@ -1319,11 +1340,12 @@ final class PlayerWeb {
 
             try {
 
-                String publicAddr = CarVpn.activeAddress();
+                String publicAddr = CarVpn.publicAddress();
                 String name = WebViewSettings.mdnsName(appContext);
                 List<String> addresses = WebViewServer.addresses(PlayerService.PORT);
 
                 o.put("vpnEnabled", WebViewSettings.vpnEnabled(appContext));
+                o.put("vpnExternal", WebViewSettings.vpnExternal(appContext));
                 o.put("vpn", CarVpn.status());
                 o.put("wg", WireGuard.status(appContext));
                 o.put("wgLast", WireGuard.last());
@@ -1404,7 +1426,17 @@ final class PlayerWeb {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            return openOutside(request);
+
+            boolean outside = openOutside(request);
+
+            // A page that is not Mureka's about to load in the main view:
+            // the bridge stops answering now, before its first script can
+            // run, not only once the page has started
+            if (!outside && view == web && request.isForMainFrame() && !isMureka(request.getUrl().toString())) {
+                onMureka = false;
+            }
+
+            return outside;
         }
 
         // The offline page, handed out for Mureka's address while it cannot
@@ -1464,7 +1496,7 @@ final class PlayerWeb {
                 + (offlinePage ? "document.documentElement.setAttribute('data-mureka-offline','1');"
                     : "document.documentElement.removeAttribute('data-mureka-offline');");
 
-            view.evaluateJavascript("location.hostname", host -> {
+            view.evaluateJavascript("location.protocol === 'https:' ? location.hostname : ''", host -> {
 
                 String h = host == null ? "" : host.replace("\"", "");
 

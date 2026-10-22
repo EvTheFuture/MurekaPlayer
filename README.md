@@ -99,7 +99,8 @@ javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerTogg
 ### Newest in-development version
 
 Loads the most recent committed code, fetched again on every run so it is
-never stale. Use this only if you want the bleeding edge, as it is a little
+never stale. Nothing checks it against a release, it runs whatever is on the
+main branch at that moment, so use it only for testing. It is also a little
 slower to open.
 
 ```

@@ -3925,6 +3925,11 @@
         color: #f0a94a;
     }
 
+    /* The place of a badge with only a trimmed song's T on it */
+    .rowBadge.plain {
+        background: transparent;
+    }
+
     /* A song picked to share, lit with a bar of the accent colour */
     .row.picked {
         background: rgba(72, 225, 235, 0.16);
@@ -6770,9 +6775,24 @@
         return src ? "/song?u=" + encodeURIComponent(src) : "";
     }
 
+    // An address from the phone used straight, only when it is https on
+    // Mureka's own hosts, so nothing here rests on the phone checking it
+    function safeRemote(u) {
+
+        try {
+
+            const url = new URL(String(u || ""));
+            const host = url.hostname.toLowerCase();
+
+            return url.protocol === "https:" && (host === "mureka.ai" || host.endsWith(".mureka.ai")) ? url.href : "";
+        } catch (e) {
+            return "";
+        }
+    }
+
     audio.addEventListener("error", function () {
 
-        const direct = audio.dataset.src || "";
+        const direct = safeRemote(audio.dataset.src || "");
 
         // A song that would not load may mean this browser lost the internet
         checkBrowserNet("a song would not load", false);
@@ -10671,7 +10691,11 @@
         if (n >= 3) {
 
             coverDone(el);
-            el.style.backgroundImage = "url(\"" + url.replace(/"/g, "%22") + "\")";
+
+            if (safeRemote(url)) {
+                el.style.backgroundImage = "url(\"" + safeRemote(url).replace(/"/g, "%22") + "\")";
+            }
+
             return;
         }
 
@@ -12028,11 +12052,13 @@
 
         // The badge where it tells something, as on the phone. A row of the
         // queue carries its place in it
-        if (badgeShown(song, typeof song.index === "number")) {
+        const shown = badgeShown(song, typeof song.index === "number");
+
+        if (shown || song.trimmed) {
 
             const badge = document.createElement("span");
 
-            paintBadge(badge, song);
+            paintBadge(badge, song, !shown);
             row.appendChild(badge);
         }
     }
@@ -12070,9 +12096,10 @@
 
     // Whether a row carries its badge, by the same rule as the phone: shared
     // always. In the list, while both published songs and drafts are
-    // listed. In the queue, a new one, one made by trimming, every song
-    // when all are listed, and otherwise one the filter would not list, a
-    // draft among the published songs say
+    // listed. In the queue, a new one, every song when all are listed, and
+    // otherwise one the filter would not list, a draft among the published
+    // songs say. A song made by trimming without its badge still gets its
+    // T, on an empty place of the badge's size
     function badgeShown(song, inQueue) {
 
         if (song.shared) {
@@ -12090,7 +12117,7 @@
             return false;
         }
 
-        if (song.isNew || song.trimmed || f === "all") {
+        if (song.isNew || f === "all") {
             return true;
         }
 
@@ -12099,7 +12126,21 @@
 
     // The badge at the end of a line: new for a song not played yet, else
     // public or draft, with a small T for a song made by trimming
-    function paintBadge(badge, song) {
+    function paintBadge(badge, song, plain) {
+
+        // Only the T of a trimmed song, no word
+        if (plain) {
+
+            badge.className = "rowBadge plain";
+            badge.textContent = "";
+            badge.removeAttribute("title");
+
+            if (song.trimmed) {
+                badge.appendChild(trimMark());
+            }
+
+            return;
+        }
 
         if (song.shared) {
 
@@ -13073,9 +13114,11 @@
     // listed them. Two with the same name are numbered
     function otherPlayers() {
 
+        // A handful at most, a page flooding the phone with names cannot
+        // fill the popup
         const list = state && Array.isArray(state.browsers) ? state.browsers.filter(function (b) {
             return b && b.playing && b.id !== clientId;
-        }) : [];
+        }).slice(0, 16) : [];
         const seen = {};
 
         list.sort(function (a, b) {
@@ -13097,13 +13140,9 @@
                 name: base,
                 nth: seen[base]
             };
-        }).map(function (t, i, all) {
+        }).map(function (t) {
 
-            const twins = all.filter(function (x) {
-                return x.name === t.name;
-            }).length;
-
-            if (twins > 1) {
+            if (seen[t.name] > 1) {
                 t.name += " " + t.nth;
             }
 
@@ -15981,7 +16020,7 @@
             const badge = row.querySelector(".rowBadge");
 
             if (badge) {
-                paintBadge(badge, item);
+                paintBadge(badge, item, !badgeShown(item, typeof item.index === "number"));
             }
 
             // A count fetched since the list was drawn
@@ -18740,9 +18779,26 @@
     }
 
     // The song menu's box used for a plain question, with no song behind it
+    // A question that replaces an open menu takes no tap for a moment, so a
+    // tap meant for the menu before does not answer it
+    let menuGuardUntil = 0;
+
+    $("menuItems").addEventListener("click", function (ev) {
+
+        if (Date.now() < menuGuardUntil) {
+
+            ev.stopPropagation();
+            ev.preventDefault();
+        }
+    }, true);
+
     function openChoice(title, items) {
 
         const box = $("menuItems");
+
+        if (isShown("songMenu")) {
+            menuGuardUntil = Date.now() + 700;
+        }
 
         // A question comes first. Playing from would cover it, and the
         // question is often about the filter just picked there
@@ -18973,6 +19029,13 @@
             input.remove();
 
             if (!file) {
+                return;
+            }
+
+            // The phone takes no more than this, said before reading it all
+            if (file.size > 20 * 1024 * 1024) {
+
+                toast("The file is too big to import, " + Math.round(file.size / 1048576) + " MB", "bad");
                 return;
             }
 
@@ -19651,7 +19714,10 @@
         }).catch(function (e) {
 
             dbgLog("Download", "through the phone failed, " + (e && e.message ? e.message : e) + ", opening the link");
-            window.open(m.src, "_blank", "noopener,noreferrer");
+
+            if (safeRemote(m.src)) {
+                window.open(safeRemote(m.src), "_blank", "noopener,noreferrer");
+            }
         });
     }
 
@@ -20847,7 +20913,7 @@
         // From the phone, loaded and counted first with the pie on the
         // tile, then shown and faded in. After three failures straight
         // from Mureka, as before the phone kept covers
-        const direct = tries >= 3;
+        const direct = tries >= 3 && safeRemote(url) !== "";
         const src = direct ? url + (url.indexOf("?") === -1 ? "?" : "&") + "r=" + tries : coverAt(url);
 
         img.onload = function () {
@@ -22587,8 +22653,8 @@
 
             withCurrentMenu(function (m) {
 
-                if (m.src) {
-                    window.open(m.src, "_blank", "noopener,noreferrer");
+                if (safeRemote(m.src)) {
+                    window.open(safeRemote(m.src), "_blank", "noopener,noreferrer");
                 }
             });
         } else if (key === "r") {
@@ -22615,6 +22681,7 @@
     // as well, and either side's answer closes both
     let forceShown = "";
     let forceAsking = false;
+    let forceAskingSeq = 0;
 
     function paintForceAsk() {
 
@@ -22633,13 +22700,17 @@
             if (forceAsking) {
 
                 forceAsking = false;
-                closeConfirm();
+
+                if (confirmSeq === forceAskingSeq) {
+                    closeConfirm();
+                }
             }
 
             return;
         }
 
         forceAsking = true;
+        forceAskingSeq = confirmSeq + 1;
         askConfirm(ask.text, "Do it", false, function () {
 
             forceAsking = false;
@@ -22655,6 +22726,7 @@
     // well, and the first answer anywhere closes the question everywhere
     let goneShown = 0;
     let goneAsking = false;
+    let goneAskingSeq = 0;
 
     function paintGoneAsk() {
 
@@ -22673,13 +22745,17 @@
             if (goneAsking) {
 
                 goneAsking = false;
-                closeConfirm();
+
+                if (confirmSeq === goneAskingSeq) {
+                    closeConfirm();
+                }
             }
 
             return;
         }
 
         goneAsking = true;
+        goneAskingSeq = confirmSeq + 1;
         askConfirm(ask.title + " " + ask.text, "Remove", true, function () {
 
             goneAsking = false;
@@ -22798,6 +22874,7 @@
     // asks too, and the first answer anywhere closes the question everywhere
     let retryShown = 0;
     let retryAsking = false;
+    let retryAskingSeq = 0;
 
     function paintRetryAsk() {
 
@@ -22816,13 +22893,17 @@
             if (retryAsking) {
 
                 retryAsking = false;
-                closeConfirm();
+
+                if (confirmSeq === retryAskingSeq) {
+                    closeConfirm();
+                }
             }
 
             return;
         }
 
         retryAsking = true;
+        retryAskingSeq = confirmSeq + 1;
 
         const field = typeof ask.field === "string" ? ask.field : null;
 
@@ -22850,8 +22931,21 @@
     let confirmAction = null;
     let confirmNoAction = null;
 
+    // Each question shown is numbered, so one the phone takes back closes
+    // only if it is still the one showing. A question that replaces another
+    // on screen takes no answer for a moment, so a tap meant for the one
+    // before does not answer it
+    let confirmSeq = 0;
+    let confirmGuardUntil = 0;
+    const ASK_GUARD_MS = 700;
+
     function askConfirm(text, yesLabel, danger, then, onNo) {
 
+        if (isShown("confirmPop")) {
+            confirmGuardUntil = Date.now() + ASK_GUARD_MS;
+        }
+
+        confirmSeq += 1;
         confirmAction = then;
         confirmNoAction = onNo || null;
         $("confirmField").style.display = "none";
@@ -22901,6 +22995,10 @@
 
     $("confirmNo").addEventListener("click", function () {
 
+        if (Date.now() < confirmGuardUntil) {
+            return;
+        }
+
         const no = confirmNoAction;
 
         closeConfirm();
@@ -22911,6 +23009,10 @@
     });
 
     $("confirmYes").addEventListener("click", function () {
+
+        if (Date.now() < confirmGuardUntil) {
+            return;
+        }
 
         const then = confirmAction;
 

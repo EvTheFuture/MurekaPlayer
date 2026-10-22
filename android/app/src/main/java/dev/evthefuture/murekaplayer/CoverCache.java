@@ -119,6 +119,44 @@ final class CoverCache {
         }
     }
 
+    // A connection to a Mureka address, its redirects followed by hand so
+    // each one must lead to Mureka too, three at the most
+    static HttpURLConnection openMureka(String url, int connectMs, int readMs) throws IOException {
+
+        String at = url;
+
+        for (int hop = 0; hop < 4; hop++) {
+
+            if (!allowed(at)) {
+                throw new IOException("not a Mureka address");
+            }
+
+            HttpURLConnection c = (HttpURLConnection) new URL(at).openConnection();
+
+            c.setConnectTimeout(connectMs);
+            c.setReadTimeout(readMs);
+            c.setInstanceFollowRedirects(false);
+
+            int code = c.getResponseCode();
+
+            if (code != 301 && code != 302 && code != 303 && code != 307 && code != 308) {
+                return c;
+            }
+
+            String next = c.getHeaderField("Location");
+
+            c.disconnect();
+
+            if (next == null) {
+                throw new IOException("a redirect without an address");
+            }
+
+            at = new URL(new URL(at), next).toString();
+        }
+
+        throw new IOException("too many redirects");
+    }
+
     // The stored cover, fetched from Mureka first when it is not here yet.
     // Null when it could not be had
     static File get(String url) {
@@ -158,7 +196,9 @@ final class CoverCache {
 
                 return fromPlayer(url, file) ? file : null;
             } finally {
-                LOCKS.remove(url);
+
+                // Only this lock, a newer one made meanwhile stays
+                LOCKS.remove(url, lock);
             }
         }
     }
@@ -334,7 +374,7 @@ final class CoverCache {
     // so a half written cover is never served
     private static boolean download(String url, File file) {
 
-        File part = new File(dir, file.getName() + ".part");
+        File part = null;
         HttpURLConnection c = null;
         boolean got = false;
 
@@ -355,10 +395,10 @@ final class CoverCache {
 
         try {
 
-            c = (HttpURLConnection) new URL(url).openConnection();
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(20000);
-            c.setInstanceFollowRedirects(true);
+            // A side file of its own, two fetches of one cover never write
+            // into the same one
+            part = File.createTempFile(file.getName(), ".part", dir);
+            c = openMureka(url, 10000, 20000);
 
             if (c.getResponseCode() != 200) {
 
@@ -396,7 +436,7 @@ final class CoverCache {
 
             NET.release();
 
-            if (!got && part.exists() && !part.delete()) {
+            if (!got && part != null && part.exists() && !part.delete()) {
                 Hub.note("Covers", "could not remove a half fetched cover");
             }
         }
@@ -431,8 +471,15 @@ final class CoverCache {
             return false;
         }
 
-        File part = new File(dir, file.getName() + ".part");
+        File part;
         boolean got = false;
+
+        // A side file of its own, as for a download
+        try {
+            part = File.createTempFile(file.getName(), ".part", dir);
+        } catch (IOException e) {
+            return false;
+        }
 
         try (OutputStream out = new FileOutputStream(part)) {
 

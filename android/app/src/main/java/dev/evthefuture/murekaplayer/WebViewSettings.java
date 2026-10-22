@@ -64,6 +64,11 @@ final class WebViewSettings {
     static final String PING_AWAKE_ALWAYS = "always";
     static final String PING_AWAKE_NEVER = "never";
     static final String VPN = "carVpn";
+
+    // The public address given to the phone by another VPN, WireGuard say,
+    // that has it among its own addresses. The app then runs no VPN of its
+    // own and leaves that VPN alone. Off unless switched on
+    static final String VPN_EXTERNAL = "vpnExternal";
     static final String VPN_ADDRESS = "vpnAddress";
     static final String MDNS_NAME = "mdnsName";
     static final String FULLSCREEN = "appFullscreen";
@@ -140,6 +145,10 @@ final class WebViewSettings {
 
     static boolean vpnEnabled(Context c) {
         return "1".equals(prefs(c).getString(VPN, "0"));
+    }
+
+    static boolean vpnExternal(Context c) {
+        return "1".equals(prefs(c).getString(VPN_EXTERNAL, "0"));
     }
 
     static boolean vpnHotspotOnly(Context c) {
@@ -307,7 +316,7 @@ final class WebViewSettings {
 
             v = v.isEmpty() ? DEFAULT_NAME : cleanName(v);
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
-            || ALLOW_VPN.equals(key) || VPN_HOTSPOT_ONLY.equals(key) || WG_AWAKE.equals(key)
+            || ALLOW_VPN.equals(key) || VPN_HOTSPOT_ONLY.equals(key) || WG_AWAKE.equals(key) || VPN_EXTERNAL.equals(key)
             || FULLSCREEN.equals(key) || TABLET_VIEW.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
             || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)) {
 

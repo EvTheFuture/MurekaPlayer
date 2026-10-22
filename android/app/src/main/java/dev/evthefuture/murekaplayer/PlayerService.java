@@ -186,6 +186,7 @@ public class PlayerService extends Service implements Hub.Listener {
     public void onCreate() {
 
         super.onCreate();
+        CarVpn.init(this);
 
         NotificationManager nm = getSystemService(NotificationManager.class);
         NotificationChannel channel = new NotificationChannel(CHANNEL, "Playback", NotificationManager.IMPORTANCE_LOW);
@@ -369,7 +370,7 @@ public class PlayerService extends Service implements Hub.Listener {
                 // Off with the public address down already, it never came
                 // or went some other way, WireGuard still comes back
                 if (st == 11 && !isInitialStickyBroadcast() && WebViewSettings.vpnHotspotOnly(context)
-                    && CarVpn.activeAddress() == null) {
+                    && !WebViewSettings.vpnExternal(context) && CarVpn.activeAddress() == null) {
                     WireGuard.upSoon(context);
                 }
 
@@ -581,6 +582,27 @@ public class PlayerService extends Service implements Hub.Listener {
 
             mdns = new MdnsResponder(name);
             mdns.start();
+        }
+
+        // The public address from another VPN: this app runs none of its
+        // own and leaves that VPN, WireGuard or other, alone
+        if (WebViewSettings.vpnExternal(this)) {
+
+            if (CarVpn.activeAddress() != null) {
+
+                Hub.note("Web view", "the public address now comes from another VPN, the app's own VPN stops");
+                startCarVpn(CarVpn.ACTION_STOP);
+
+                // The WireGuard tunnel named, taken down for the app's own
+                // VPN before, comes back
+                WireGuard.upSoon(this);
+            }
+
+            CarVpn.setStatus(CarVpn.publicAddress() != null ? "from another VPN"
+                : "waiting for another VPN to have the address");
+            WireGuard.keepReachable(this);
+            updateNotification();
+            return;
         }
 
         // The public address, all the time or only while the hotspot is on
@@ -1277,11 +1299,12 @@ public class PlayerService extends Service implements Hub.Listener {
             return "Web view not running: " + server.status();
         }
 
-        if (addresses.isEmpty() && CarVpn.activeAddress() == null) {
+        String publicAddr = CarVpn.publicAddress();
+
+        if (addresses.isEmpty() && publicAddr == null) {
             return "Web view: switch on the hotspot or Wi-Fi";
         }
 
-        String publicAddr = CarVpn.activeAddress();
         String name = "http://" + WebViewSettings.mdnsName(this) + ":" + PORT;
         String local = name + (addresses.isEmpty() ? "" : "  or  " + String.join("  ", addresses));
 

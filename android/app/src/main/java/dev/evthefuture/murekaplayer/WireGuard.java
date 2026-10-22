@@ -160,7 +160,9 @@ final class WireGuard {
         boolean pinging = !WebViewSettings.wgPingHost(app).isEmpty()
             && (WebViewSettings.PING_AWAKE_ALWAYS.equals(awakeFor)
             || WebViewSettings.PING_AWAKE_CHARGER.equals(awakeFor) && onCharger(app));
-        boolean want = (pinging || WebViewSettings.wgKeepAwake(app) && !WebViewSettings.wgTunnel(app).isEmpty())
+        // Only for the tunnel named, another VPN app being up never keeps
+        // the phone awake
+        boolean want = (pinging || WebViewSettings.wgKeepAwake(app)) && !WebViewSettings.wgTunnel(app).isEmpty()
             && tunnelUp(app);
 
         pingLoop(app);

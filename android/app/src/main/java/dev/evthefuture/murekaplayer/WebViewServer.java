@@ -86,9 +86,33 @@ final class WebViewServer {
     // Requests larger than this are refused, the API only needs a few bytes
     private static final int MAX_BODY = 16384;
 
-    // A cover picture from a web view, sent as it is, the largest the
-    // storage can still work on
-    private static final int MAX_COVER = 20 * 1024 * 1024;
+    // A cover picture from a web view, sent as it is, as large as the
+    // covers kept may be, and an import, the largest a library export is
+    // near. Each grows several times over in memory as it is passed on, so
+    // these stay well below what the app can hold
+    private static final int MAX_COVER = 8 * 1024 * 1024;
+    private static final int MAX_IMPORT = 12 * 1024 * 1024;
+
+    // One large upload at a time, the room the others need in memory
+    private static final java.util.concurrent.Semaphore BIG_ONE = new java.util.concurrent.Semaphore(1);
+
+    // Connections one device may hold at once. A browser holds two or
+    // three, and up to six more while it fetches covers, a laptop may have
+    // two of them open. Half of all there are, so one device cannot hold
+    // them all
+    private static final int MAX_PER_DEVICE = 16;
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger> perDevice =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    // Browsers counted at most, a page making up names cannot grow the
+    // lists every browser is sent
+    private static final int MAX_CLIENTS = 32;
+
+    // Commands only the app itself gives the player, never taken from a
+    // browser
+    private static final Set<String> APP_ONLY = new HashSet<>(java.util.Arrays.asList(
+        "appToast", "carGone", "netCheck", "network", "netQuiet", "quiet", "takeSound", "hotspotAuto",
+        "hotspotWaiting", "unplugCountdown", "unplugReason"));
 
     // Requests served at once. A browser holds two or three, the state it
     // waits for and a song or a cover, so this is plenty for several of
@@ -359,10 +383,16 @@ final class WebViewServer {
 
     // A browser asked for the state, so it is here. Its own id keeps two
     // pages on one machine apart
-    private void noteClient(String id, boolean viaHotspot) {
+    private boolean noteClient(String id, boolean viaHotspot) {
 
-        if (id == null || id.isEmpty() || id.length() > 64) {
-            return;
+        // An id as the page makes one, and no more browsers than there can
+        // really be
+        if (id == null || !id.matches("[A-Za-z0-9_-]{8,64}")) {
+            return false;
+        }
+
+        if (!clients.containsKey(id) && clients.size() >= MAX_CLIENTS) {
+            return false;
         }
 
         clients.put(id, System.currentTimeMillis());
@@ -374,6 +404,8 @@ final class WebViewServer {
         }
 
         countClients();
+
+        return true;
     }
 
     // How this browser reaches the phone, so the web view can warn before
@@ -381,7 +413,7 @@ final class WebViewServer {
     // hotspot, hotspot, vpn, or wifi
     private static String reachedVia(InetAddress localAddr, boolean viaHotspot) {
 
-        String publicAddr = CarVpn.activeAddress();
+        String publicAddr = CarVpn.publicAddress();
         InetAddress v4 = plainV4(localAddr);
         InetAddress local = v4 != null ? v4 : localAddr;
 
@@ -433,7 +465,9 @@ final class WebViewServer {
             sounds.put(id, snd);
         }
 
-        String name = param(query, "nm").trim();
+        // Without control or direction marks, which could make one name
+        // look like another
+        String name = param(query, "nm").replaceAll("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]", "").trim();
 
         snd.name = name.length() > 60 ? name.substring(0, 60) : name;
         snd.vol = Math.max(-1, Math.min(100, number(param(query, "vol"), -1)));
@@ -621,11 +655,32 @@ final class WebViewServer {
         // when it is done
         long bigReserved = 0;
 
+        // The device's share of the connections, given back when done
+        final String device = client.getInetAddress() != null ? client.getInetAddress().getHostAddress() : "";
+        final java.util.concurrent.atomic.AtomicInteger held =
+            perDevice.computeIfAbsent(device, k -> new java.util.concurrent.atomic.AtomicInteger());
+
+        // The request line and the headers must all be in within their time,
+        // whatever pace they come at, or the connection is closed
+        java.util.concurrent.ScheduledFuture<?> headWatch = null;
+        boolean big = false;
+        boolean bigTurn = false;
+
         try (Socket c = client) {
+
+            if (held.incrementAndGet() > MAX_PER_DEVICE) {
+                return;
+            }
 
             // Anything that did not come from an allowed local network is
             // closed without a word, the mobile network always among them
             if (!allowed(c.getLocalAddress(), c.getInetAddress())) {
+                return;
+            }
+
+            try {
+                headWatch = watch.schedule(() -> closeQuietly(c), HEAD_MS, TimeUnit.MILLISECONDS);
+            } catch (RejectedExecutionException e) {
                 return;
             }
 
@@ -673,6 +728,8 @@ final class WebViewServer {
             String origin = null;
             String contentType = null;
             String cookie = null;
+            String fetchSite = null;
+            String fetchMode = null;
             String line;
             int headers = 0;
             long headUntil = System.currentTimeMillis() + HEAD_MS;
@@ -714,6 +771,15 @@ final class WebViewServer {
                     cookie = line.substring(colon + 1).trim();
                 }
 
+                // Whether the browser says another site made the request
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("sec-fetch-site")) {
+                    fetchSite = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
+                }
+
+                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("sec-fetch-mode")) {
+                    fetchMode = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
+                }
+
                 if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-type")) {
                     contentType = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
                 }
@@ -728,12 +794,20 @@ final class WebViewServer {
                 }
             }
 
+            // All of the head is in, the rest has its own limits
+            headWatch.cancel(false);
+
             // Another website open in a browser here may not use the web
             // view: not through a name of its own pointing at the phone, not
-            // by sending commands from its page
-            if (!sameSite(method, host, origin, contentType)) {
+            // by sending commands from its page, not by asking for anything
+            // from its page but the page itself, a link to it
+            boolean fromElsewhere = "cross-site".equals(fetchSite) || "same-site".equals(fetchSite);
+            boolean linkToPage = "GET".equals(method) && "navigate".equals(fetchMode)
+                && ("/".equals(path) || "/index.html".equals(path));
 
-                Hub.note("Web view", "turned away a request from another website for " + path);
+            if (!sameSite(method, host, origin, contentType) || fromElsewhere && !linkToPage) {
+
+                noteTurnedAway(path);
                 send(out, 403, "text/plain", bytes("Not from this page"));
                 return;
             }
@@ -745,15 +819,12 @@ final class WebViewServer {
 
             APP_REQUEST.set(appScreen);
 
-            // A request from a web view keeps the phone awake a while
-            if (!appScreen) {
-                PlayerService.webViewActive();
-            }
-
-            boolean big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path)
+            big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path)
                 || "/shareLine".equals(path);
 
-            if (length < 0 || length > (big ? MAX_COVER : MAX_BODY)) {
+            int most = !big ? MAX_BODY : "/setCover".equals(path) ? MAX_COVER : MAX_IMPORT;
+
+            if (length < 0 || length > most) {
 
                 send(out, 413, "text/plain", bytes("Too large"));
                 return;
@@ -773,8 +844,22 @@ final class WebViewServer {
                 return;
             }
 
-            // A large upload only while there is room for it in memory
+            // A request from a web view let in keeps the phone awake a while
+            if (!appScreen) {
+                PlayerService.webViewActive();
+            }
+
+            // A large upload only one at a time, and while there is room for
+            // it in memory
             if (big && length > 0) {
+
+                if (!BIG_ONE.tryAcquire()) {
+
+                    send(out, 503, "text/plain", bytes("Busy, try again"));
+                    return;
+                }
+
+                bigTurn = true;
 
                 if (BIG_READING.addAndGet(length) > MAX_BIG_TOTAL) {
 
@@ -845,8 +930,9 @@ final class WebViewServer {
                 markPoll();
                 if (!appScreen) {
 
-                    noteClient(param(query, "cid"), viaHotspot);
-                    noteSound(param(query, "cid"), query, reachedVia(c.getLocalAddress(), viaHotspot));
+                    if (noteClient(param(query, "cid"), viaHotspot)) {
+                        noteSound(param(query, "cid"), query, reachedVia(c.getLocalAddress(), viaHotspot));
+                    }
                 }
 
                 if (since.isEmpty()) {
@@ -964,8 +1050,41 @@ final class WebViewServer {
                 BIG_READING.addAndGet(-bigReserved);
             }
 
+            if (bigTurn) {
+                BIG_ONE.release();
+            }
+
+            if (headWatch != null) {
+                headWatch.cancel(false);
+            }
+
+            if (held.decrementAndGet() <= 0) {
+                perDevice.remove(device, held);
+            }
+
             APP_REQUEST.remove();
         }
+    }
+
+    // Requests from other websites, said in the debug log at most once a
+    // minute, so a page asking without end does not fill it
+    private volatile long turnedAwayAt = 0;
+    private volatile int turnedAway = 0;
+
+    private void noteTurnedAway(String path) {
+
+        long now = System.currentTimeMillis();
+
+        turnedAway += 1;
+
+        if (now - turnedAwayAt < 60000) {
+            return;
+        }
+
+        Hub.note("Web view", "turned away " + turnedAway + " request" + (turnedAway == 1 ? "" : "s")
+            + " from another website, the last for " + (path.length() > 60 ? path.substring(0, 60) : path));
+        turnedAwayAt = now;
+        turnedAway = 0;
     }
 
     // Whether a body nests brackets deeper than a JSON body ever should.
@@ -1084,10 +1203,7 @@ final class WebViewServer {
 
         try {
 
-            c = (HttpURLConnection) parsed.openConnection();
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(30000);
-            c.setInstanceFollowRedirects(true);
+            c = CoverCache.openMureka(url, 10000, 30000);
 
             int code = c.getResponseCode();
 
@@ -1477,8 +1593,14 @@ final class WebViewServer {
         // allowed, and only from a private address, so a VPN that carries
         // all of the phone's traffic does not open the web view to the
         // internet. The public address is a VPN too, but the car comes to
-        // it over the hotspot, which the checks further down handle
-        String car = CarVpn.activeAddress();
+        // it over the hotspot, which the checks further down handle. Given
+        // by another VPN, it may be asked for through that VPN as well, by
+        // a browser at its other end, let in as any through a VPN
+        String car = CarVpn.publicAddress();
+
+        if (car != null && car.equals(local.getHostAddress()) && interfaceFor(remote) == null) {
+            return WebViewSettings.allowVpn(context) && privateAddress(remote);
+        }
 
         if (car == null || !car.equals(local.getHostAddress())) {
 
@@ -1856,6 +1978,28 @@ final class WebViewServer {
                 return;
             }
 
+            // What only the app itself tells the player
+            if (APP_ONLY.contains(cmd)) {
+
+                send(out, 403, "application/json", bytes("{\"ok\":false}"));
+                return;
+            }
+
+            // Deleting songs on Mureka cannot be undone, so a browser may do
+            // it only once the web view has a password, when only those
+            // signed in can reach it. The app's own screen always may
+            if (!Boolean.TRUE.equals(APP_REQUEST.get()) && !WebLogin.on(context) && deletes(cmd, arg)) {
+
+                Hub.note("Command", "From a web view: deleting on Mureka refused, the web view has no password");
+                JSONObject say = new JSONObject();
+
+                say.put("text", "Deleting on Mureka from a web view needs a web view password, set one on the phone under Web view");
+                say.put("ok", false);
+                Hub.command("appToast", say);
+                send(out, 403, "application/json", bytes("{\"ok\":false,\"needsPassword\":true}"));
+                return;
+            }
+
             // One browser's volume set from another, handed on with the state
             if ("browserVol".equals(cmd)) {
 
@@ -1879,6 +2023,20 @@ final class WebViewServer {
         } catch (JSONException e) {
             send(out, 400, "application/json", bytes("{\"ok\":false}"));
         }
+    }
+
+    // Whether a command deletes a song on Mureka: the song menu's delete,
+    // or a trim that takes the original away
+    private static boolean deletes(String cmd, Object arg) {
+
+        if (!(arg instanceof JSONObject)) {
+            return false;
+        }
+
+        JSONObject a = (JSONObject) arg;
+
+        return "songAction".equals(cmd) && "deleteMureka".equals(a.optString("action", ""))
+            || "trimSong".equals(cmd) && a.optBoolean("deleteOriginal", false);
     }
 
     // An export from a web view, pasted there or read from a file there,
@@ -2328,7 +2486,7 @@ final class WebViewServer {
     // About lists by itself
     private static void addVpnAddresses(JSONArray out, int port, boolean allowVpn) throws IOException, JSONException {
 
-        String publicAddr = CarVpn.activeAddress();
+        String publicAddr = CarVpn.publicAddress();
         java.util.Enumeration<NetworkInterface> all = NetworkInterface.getNetworkInterfaces();
 
         if (all == null) {
