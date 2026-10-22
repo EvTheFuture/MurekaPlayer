@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.460";
+    const VERSION = "1.9.9.461";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2840,6 +2840,7 @@
             refreshOnReturnMin: REFRESH_RETURN_DEFAULT,
             absoluteNumbers: false,
             autoInstrumentalChars: 20,
+            offerAllNew: false,
             readyFadeSeconds: 1.5,
             fadeOnReady: true,
             fadeOnTap: false,
@@ -3048,6 +3049,7 @@
                     refreshOnReturnMin: returnMinutes(parsed.refreshOnReturnMin),
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoInstrumentalChars: lyricLimit(parsed.autoInstrumentalChars),
+                    offerAllNew: parsed.offerAllNew === true,
                     readyFadeSeconds: readyFadeSeconds(parsed.readyFadeSeconds),
                     fadeOnReady: parsed.fadeOnReady !== false,
                     fadeOnTap: parsed.fadeOnTap === true,
@@ -7601,8 +7603,11 @@
             const song = byId.get(key);
 
             // Only songs the list lets through as it is filtered now, a draft
-            // with only the published showing is not asked about
-            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song) || !queueable(song)) {
+            // with only the published showing is not asked about. With the
+            // setting on, every new song is asked about, an ignored one aside
+            const wanted = settings.offerAllNew === true ? !isIgnored(song) : queueable(song);
+
+            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song) || !wanted) {
                 continue;
             }
 
@@ -7636,9 +7641,15 @@
         });
         const more = songs.length - names.length;
         const title = songs.length === 1 ? "A new song" : songs.length + " new songs";
+        // Said when the filters as they are now would leave some out
+        const outside = songs.filter(function (s) {
+            return !passesFilters(s);
+        }).length;
         const text = names.join(", ") + (more > 0 ? " and " + more + " more" : "")
             + ". Where in the play queue do " + (songs.length === 1 ? "it" : "they") + " go? Left out, "
-            + (songs.length === 1 ? "it still shows" : "they still show") + " in the Mureka list.";
+            + (songs.length === 1 ? "it still shows" : "they still show") + " in the Mureka list."
+            + (outside === 0 ? "" : songs.length === 1 ? " The filters set now leave it out of the list."
+                : " The filters set now leave " + (outside === songs.length ? "them" : outside + " of them") + " out of the list.");
 
         // A newer question takes the place of an older one
         if (newAsk) {
@@ -10037,8 +10048,15 @@
         audio = new Audio();
 
         // A paused song playing on fades in, another song loaded instead
-        // plays at the usual level
+        // plays at the usual level. On an iPhone or iPad the gain for the
+        // fades goes in as soon as a song plays with a fade switched on,
+        // not first at a song switch, so the first pause already fades in
         audio.addEventListener("playing", function () {
+
+            if (isIosLike() && anyFadeOn()) {
+                wireIosGain();
+            }
+
             fadeInResume();
         });
         audio.addEventListener("loadstart", function () {
@@ -13294,6 +13312,13 @@
     };
 
     // How long a switch asked for this way fades, in ms, 0 for not at all
+    // Whether any of the fades is switched on with a length
+    function anyFadeOn() {
+        return Object.keys(FADE_KINDS).some(function (kind) {
+            return fadeMs(kind) > 0;
+        });
+    }
+
     function fadeMs(kind) {
 
         const k = FADE_KINDS[kind];
@@ -34725,6 +34750,10 @@
             function () { return settings.refreshOnStart; },
             function (v) { settings.refreshOnStart = v; });
 
+        const offerAllRow = makeBoolRow("Offer new songs the filters leave out",
+            function () { return settings.offerAllNew === true; },
+            function (v) { settings.offerAllNew = v; });
+
         const returnRow = makeBoolRow("Look for new songs while in use",
             function () { return settings.refreshOnReturn; },
             function (v) { settings.refreshOnReturn = v; });
@@ -34868,6 +34897,7 @@
         libraryPage.appendChild(withHint(pubRow, "Looks for new songs on Mureka every time the player opens. Only the newest are fetched, the rest of the library is not loaded again."));
         libraryPage.appendChild(returnRow);
         libraryPage.appendChild(withHint(returnMinRow, "Looks for new songs when the player or a web view opens or comes back into view, and again while it stays in view, each time the last look is older than this. Only the newest are fetched. With the play queue in view, new songs found are offered to it."));
+        libraryPage.appendChild(withHint(offerAllRow, "New songs found are offered to the play queue even when the filters set now would leave them out, such as a draft while only published songs show. Ignored songs are still left out."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         libraryPage.appendChild(withHint(goneRow, "Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
         libraryPage.appendChild(makeLabel("Instrumental songs"));

@@ -443,6 +443,10 @@ the new settings layout and a number of smaller improvements.
   played yet, a draft while the published songs are listed, public while
   the drafts are listed, and every song while all are listed. A song made
   by trimming without a badge shows only its T.
+- **New songs outside the filters.** A Library setting offers new songs
+  found by a refresh to the play queue even when the filters set leave them
+  out, such as a draft while only published songs are listed. Ignored songs
+  are still left out.
 - **Instrumental by short lyrics.** A Library setting counts a song as
   instrumental when its lyrics are shorter than a number of characters, 20
   unless changed, spaces not counted, as with a prompt holding only a note
