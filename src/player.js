@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.464";
+    const VERSION = "1.9.9.467";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2874,6 +2874,7 @@
             directAudio: true,
             remoteArtwork: false,
             artOnResume: false,
+            heldPlayAsk: true,
             trimFade: true,
             trimZoom: 3,
             pauseOnDisconnect: false,
@@ -3087,6 +3088,7 @@
                     directAudio: parsed.directAudio !== false,
                     remoteArtwork: parsed.remoteArtwork === true,
                     artOnResume: parsed.artOnResume === true,
+                    heldPlayAsk: parsed.heldPlayAsk !== false,
                     trimFade: parsed.trimFade !== false,
                     trimZoom: numberIn(parsed.trimZoom, 0, 10, 3),
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
@@ -9197,6 +9199,7 @@
 
         const extra = canShareAudio() ? {
             label: "Share",
+            ring: true,
             onTap: function (typed, close) {
 
                 const name = cleanFileName(typed) || fileName(song);
@@ -10055,6 +10058,7 @@
 
             // Also when Safari itself plays the song on after an interruption
             resumeIosCtx("playing");
+            closeHeldAsk("closed, the song plays");
 
             if (isIosLike() && anyFadeOn()) {
                 wireIosGain();
@@ -16162,6 +16166,8 @@
             return;
         }
 
+        watchHeldPlay(started);
+
         started.catch(function (err) {
 
             switchingTrack = false;
@@ -16176,6 +16182,269 @@
             updatePlayPause();
             setupMediaSession();
         });
+    }
+
+    // Safari holds a play back without a word after another app, such as a
+    // video app, took the sound: the song stays paused and the play neither
+    // goes through nor fails until the next tap. When the player is in view,
+    // a note asks for Play then, once until the song plays again
+    let heldPlayTimer = 0;
+    let heldPlayShown = false;
+    const HELD_PLAY_MS = 1500;
+
+    function watchHeldPlay(started) {
+
+        const asked = Date.now();
+        const id = currentSong ? currentSong.song_id : null;
+        let settled = false;
+
+        started.then(function () {
+
+            settled = true;
+            heldPlayShown = false;
+
+            if (Date.now() - asked > HELD_PLAY_MS) {
+                dbgLog("Audio", "a play held back went through after " + Math.round((Date.now() - asked) / 1000) + " s");
+            }
+        }, function (err) {
+
+            settled = true;
+            dbgLog("Audio", "play refused: " + ((err && err.name) || "error"));
+        });
+
+        clearTimeout(heldPlayTimer);
+        heldPlayTimer = setTimeout(function () {
+
+            heldPlayTimer = 0;
+
+            if (settled || !audio || !audio.paused || userPaused || !currentSong || currentSong.song_id !== id) {
+                return;
+            }
+
+            dbgLog("Audio", "play held back by the browser, the sound is with another app");
+
+            if (heldPlayShown || document.hidden) {
+                return;
+            }
+
+            heldPlayShown = true;
+
+            if (settings.heldPlayAsk !== false && panelEl) {
+
+                askHeldPlay();
+                return;
+            }
+
+            showToast("Another app has the sound. Press Play to play on");
+        }, HELD_PLAY_MS);
+    }
+
+    // The box asking to play on after another app had the sound, with two
+    // large buttons, as the tap Safari waits for is easier there than on
+    // the small Play button. Swiped sideways or tapped beside, it goes away.
+    // It goes by itself once the song plays
+    let heldAskEl = null;
+
+    function closeHeldAsk(why) {
+
+        if (!heldAskEl) {
+            return;
+        }
+
+        if (why) {
+            dbgLog("Audio", "the question to play on " + why);
+        }
+
+        heldAskEl.remove();
+        heldAskEl = null;
+    }
+
+    function heldAskButton(label, color, icon) {
+
+        const b = document.createElement("button");
+        const name = document.createElement("span");
+
+        b.style.cssText = [
+            "flex:1",
+            "min-height:76px",
+            "box-sizing:border-box",
+            "padding:10px 8px",
+            "border:none",
+            "border-radius:10px",
+            "background:#333",
+            "color:" + color,
+            "box-shadow:inset 0 0 0 2px " + color,
+            "font-weight:600",
+            "font-size:15px",
+            "display:flex",
+            "flex-direction:column",
+            "align-items:center",
+            "justify-content:center",
+            "gap:6px",
+            "cursor:pointer"
+        ].join(";");
+
+        if (icon) {
+            b.appendChild(icon);
+        }
+
+        name.textContent = label;
+        b.appendChild(name);
+
+        return b;
+    }
+
+    function askHeldPlay() {
+
+        closeHeldAsk("");
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const text = document.createElement("div");
+        const row = document.createElement("div");
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10;overflow:hidden";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:12px;padding:16px;width:100%;"
+            + "max-width:380px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;touch-action:pan-y;"
+            + "user-select:none;-webkit-user-select:none";
+        head.textContent = "Another app has the sound";
+        head.style.cssText = "font-weight:600;font-size:16px";
+        text.textContent = "The browser only gives the sound back to the player after a tap. "
+            + (currentSong ? "\"" + (currentSong.title || "Untitled") + "\" plays on from where it stopped." : "");
+        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        row.style.cssText = "display:flex;gap:10px";
+
+        const dismiss = heldAskButton("Dismiss", "#9a9aa2", null);
+        const resume = heldAskButton("Resume playback", CTRL_ACCENT, makeFilledIcon([
+            ["path", { d: "M8 5.2v13.6a1 1 0 0 0 1.53.85l10.7-6.8a1 1 0 0 0 0-1.7L9.53 4.35A1 1 0 0 0 8 5.2z" }]
+        ], 30));
+
+        // A swipe that started on a button is not a press on it
+        let dragged = false;
+
+        dismiss.addEventListener("click", function () {
+
+            if (!dragged) {
+                closeHeldAsk("dismissed");
+            }
+        });
+        resume.addEventListener("click", function () {
+
+            if (dragged) {
+                return;
+            }
+
+            closeHeldAsk("answered with Resume playback");
+            startAudioPlayback();
+        });
+
+        row.appendChild(dismiss);
+        row.appendChild(resume);
+        card.appendChild(head);
+        card.appendChild(text);
+        card.appendChild(row);
+        back.appendChild(card);
+
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                closeHeldAsk("dismissed with a tap beside it");
+            }
+        });
+
+        // Swiped sideways: the card follows the finger and fades, and goes
+        // past a third of its width or on a quick flick, else it springs back
+        let sx = null;
+        let sy = 0;
+        let dx = 0;
+        let lastX = 0;
+        let lastT = 0;
+        let speed = 0;
+
+        card.addEventListener("pointerdown", function (ev) {
+
+            sx = ev.clientX;
+            sy = ev.clientY;
+            dx = 0;
+            lastX = ev.clientX;
+            lastT = Date.now();
+            speed = 0;
+            dragged = false;
+            card.style.transition = "none";
+        });
+
+        card.addEventListener("pointermove", function (ev) {
+
+            if (sx === null) {
+                return;
+            }
+
+            dx = ev.clientX - sx;
+
+            if (!dragged && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(ev.clientY - sy)) {
+                dragged = true;
+            }
+
+            if (!dragged) {
+                return;
+            }
+
+            const now = Date.now();
+
+            if (now > lastT) {
+                speed = (ev.clientX - lastX) / (now - lastT);
+            }
+
+            lastX = ev.clientX;
+            lastT = now;
+            card.style.transform = "translateX(" + dx + "px)";
+            card.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / (card.offsetWidth || 300)));
+        });
+
+        const release = function () {
+
+            if (sx === null) {
+                return;
+            }
+
+            sx = null;
+
+            if (!dragged) {
+                return;
+            }
+
+            const width = card.offsetWidth || 300;
+            const away = Math.abs(dx) > width / 3 || (Math.abs(speed) > 0.6 && Math.sign(speed) === Math.sign(dx));
+
+            card.style.transition = "transform 0.2s ease, opacity 0.2s ease";
+
+            if (!away) {
+
+                card.style.transform = "";
+                card.style.opacity = "";
+                return;
+            }
+
+            card.style.transform = "translateX(" + (dx < 0 ? -1 : 1) * (width + 60) + "px)";
+            card.style.opacity = "0";
+            back.style.transition = "opacity 0.2s ease";
+            back.style.opacity = "0";
+            setTimeout(function () {
+
+                if (heldAskEl === back) {
+                    closeHeldAsk("swiped away");
+                }
+            }, 200);
+        };
+
+        card.addEventListener("pointerup", release);
+        card.addEventListener("pointercancel", release);
+
+        heldAskEl = back;
+        panelEl.appendChild(back);
     }
 
     // Point the audio element at a URL, cleaning up the previous blob URL
@@ -16998,6 +17267,13 @@
                 });
             });
             third.style.flex = "1";
+
+            // Ringed in cyan inside, set apart from Cancel and the filled one
+            if (extra.ring) {
+
+                third.style.color = CTRL_ACCENT;
+                third.style.boxShadow = CTRL_RING + CTRL_ACCENT;
+            }
 
             if (extra.setup) {
                 extra.setup(third);
@@ -34893,6 +35169,10 @@
             settings.goneOnMureka = v;
         });
 
+        const heldAskRow = makeBoolRow("Ask to play on after another app",
+            function () { return settings.heldPlayAsk !== false; },
+            function (v) { settings.heldPlayAsk = v; });
+
         const fadeReadyRow = makeFadeRow("A new song when ready, seconds", "ready");
         const fadeTapRow = makeFadeRow("A song tapped, seconds", "tap");
         const fadeSwipeRow = makeFadeRow("A swipe on the cover, seconds", "swipe");
@@ -35408,6 +35688,7 @@
 
         // Common: the rest of playback, the artwork and the library counts
         playbackPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
+        playbackPage.appendChild(withHint(heldAskRow, "When another app such as a video app took the sound, the browser only gives it back after a tap. On, a box with a large Resume playback button asks for that tap when the player is back in view. Off, a short note asks for Play instead."));
         playbackPage.appendChild(makeLabel("Fades"));
         playbackPage.appendChild(makeHint("The playing song fades out before another one starts, for each way of switching that is on, over its own seconds. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
         playbackPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready."));
