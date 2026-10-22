@@ -411,8 +411,12 @@ the new settings layout and a number of smaller improvements.
   phone only. The debug log no longer notes keys typed in fields, and
   blanks more kinds of secrets. A question from the phone that comes over
   another one takes no tap for a moment, and only closes itself.
+- **Badges in any order.** In the web view a badge is held and dragged to
+  another place, with a finger or the mouse, as the control buttons, the
+  others sliding aside. The order is kept on the phone for every browser,
+  or for this browser alone while it has settings of its own.
 - **Battery badge.** The web view shows the phone's battery as a badge
-  after the heat badge, filled as far as it is charged, green from half,
+  without a frame after the heat badge, filled as far as it is charged, green from half,
   yellow from a fifth and red below, with a lightning bolt while it
   charges and a plug while plugged in but not charging. Pointing at it or
   a tap tells the percent and how it charges, and it can show the percent

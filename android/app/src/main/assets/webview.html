@@ -716,6 +716,18 @@
         display: none;
     }
 
+    /* Held to be moved, as the control buttons */
+    #badges > * {
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+    #badges > .holding {
+        transform: scale(0.94);
+        transition: transform 0.2s;
+    }
+
     /* The account signed in on the phone, before the badges */
     #whoName {
         display: none;
@@ -810,7 +822,6 @@
     /* A darker, quieter take on WireGuard's red, and a soft white */
     #wgBadge.on {
         border-color: #642326;
-        box-shadow: inset 0 0 0 1px #642326;
         color: #dcdce0;
     }
 
@@ -880,8 +891,10 @@
         align-items: center;
         gap: 0.3em;
         margin-left: 0.4em;
-        padding: 0.05em 0.45em;
-        border: 1px solid var(--line);
+        box-sizing: border-box;
+        height: calc(1.5em + 2px);
+        padding: 0 0.2em;
+        border: none;
         border-radius: 0.6em;
         background: none;
         color: #7fd6a0;
@@ -898,14 +911,16 @@
     }
 
     #batteryBadge.low {
-        border-color: rgba(255, 90, 79, 0.7);
         color: #ff6b5f;
     }
 
+    /* The battery as tall as the other badges, frame and all, since it
+       has no frame of its own */
     #batteryBadge .batt {
         display: block;
-        width: 1.75em;
-        height: 1.4em;
+        width: calc(3em + 4px);
+        height: calc(1.5em + 2px);
+        overflow: visible;
     }
 
     #batteryBadge .battNum {
@@ -917,14 +932,14 @@
     #batteryBadge .battMark {
         fill: #fff;
         stroke: var(--bg);
-        stroke-width: 1.2;
+        stroke-width: 0.9;
         stroke-linejoin: round;
     }
 
     #batteryBadge .battPlug {
         fill: none;
         stroke: #fff;
-        stroke-width: 1.6;
+        stroke-width: 1.3;
         stroke-linecap: round;
     }
 
@@ -6062,6 +6077,7 @@
             listSide: s.listSide === "always" || s.listSide === "never" ? s.listSide : "auto",
             heatBadge: s.heatBadgeOn !== false,
             batteryBadge: s.batteryBadgeOn !== false,
+            badges: Array.isArray(s.badgeOrder) ? s.badgeOrder.slice() : [],
             batteryText: s.batteryText === "percent" ? "percent" : "icon",
             heatText: s.heatText === "both" || s.heatText === "temp" ? s.heatText : "word",
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
@@ -6145,6 +6161,10 @@
 
         if (s.lyricsWhere === "off") {
             s.lyrics = null;
+        }
+
+        if (Array.isArray(look.badges) && look.badges.length > 0) {
+            s.badgeOrder = look.badges.slice();
         }
 
         if (Array.isArray(look.controls) && look.controls.length > 0) {
@@ -8493,12 +8513,15 @@
             return el;
         };
 
-        svg.setAttribute("viewBox", "0 0 28 24");
+        // Only the body's height in view, so it fills the icon's height
+        svg.setAttribute("viewBox", "0 5.1 28 13.8");
         svg.setAttribute("aria-hidden", "true");
         svg.classList.add("batt");
 
-        add("rect", { x: "1.5", y: "6", width: "21", height: "12", rx: "2.5", fill: "none", stroke: "currentColor", "stroke-width": "1.8" });
-        add("rect", { x: "23.3", y: "9.5", width: "2.2", height: "5", rx: "0.8", fill: "currentColor" });
+        // The outline one pixel wide whatever the size, as the badges' frames
+        add("rect", { x: "1.5", y: "6", width: "21", height: "12", rx: "2.5", fill: "none", stroke: "currentColor",
+            "stroke-width": "1", "vector-effect": "non-scaling-stroke" });
+        add("rect", { x: "22.5", y: "9.5", width: "2.4", height: "5", rx: "0.8", fill: "currentColor" });
 
         // The charge, at least a sliver so an almost empty one still shows
         const width = Math.max(1, 16.8 * Math.min(100, Math.max(0, b.pct)) / 100);
@@ -8506,9 +8529,9 @@
         add("rect", { x: "3.6", y: "8.1", width: width.toFixed(1), height: "7.8", rx: "1", fill: "currentColor" });
 
         if (b.charging) {
-            add("path", { d: "M14.2 1.8 L7.2 13.2 H11.6 L9.8 22.2 L17.2 10.4 H12.7 Z", class: "battMark" });
+            add("path", { d: "M14 5.6 L8.6 12.8 H11.8 L10.6 18.4 L16 11 H12.8 Z", class: "battMark" });
         } else if (b.plug && b.plug !== "none") {
-            add("path", { d: "M10 4.5 V8.5 M14 4.5 V8.5 M8 8.5 H16 V11.5 A4 4 0 0 1 8 11.5 Z M12 15.5 V20", class: "battPlug" });
+            add("path", { d: "M10.4 7 V9.2 M13.6 7 V9.2 M9 9.2 H15 V11.4 A3 3 0 0 1 9 11.4 Z M12 14.4 V17", class: "battPlug" });
         }
 
         return svg;
@@ -8563,6 +8586,221 @@
             el.appendChild(pct);
         }
     }
+
+    // The badges that can be moved, by the names the phone keeps, in the
+    // order they come without one set. The account name stays first
+    const BADGES = { net: "netBadge", heat: "heatBadge", battery: "batteryBadge", wg: "wgBadge", hotspot: "hotspotBadge" };
+    const BADGE_ORDER = ["net", "heat", "battery", "wg", "hotspot"];
+
+    let badgesKey = "";
+    let pendingBadges = null;
+    let badgeHold = null;
+    let badgeDragged = null;
+    let badgeGhost = null;
+    let badgeTimer = 0;
+    let badgeSwallow = false;
+
+    function badgeNameOf(el) {
+
+        for (const name of BADGE_ORDER) {
+
+            if (BADGES[name] === el.id) {
+                return name;
+            }
+        }
+
+        return null;
+    }
+
+    // Every badge in its place, hidden ones too, so a badge that shows
+    // again comes back where it was
+    function badgeNames() {
+
+        return Array.from($("badges").children).map(badgeNameOf).filter(function (name) {
+            return name;
+        });
+    }
+
+    function visibleBadges() {
+
+        return Array.from($("badges").children).filter(function (el) {
+            return badgeNameOf(el) && el.style.display !== "none" && el.style.display !== "";
+        });
+    }
+
+    // The order the phone keeps, or this browser's own, the badges not in
+    // it after the others in their usual order
+    function orderBadges(s) {
+
+        const wanted = s && Array.isArray(s.badgeOrder) ? s.badgeOrder.filter(function (name) {
+            return BADGES[name];
+        }) : [];
+        const names = wanted.concat(BADGE_ORDER.filter(function (name) {
+            return wanted.indexOf(name) === -1;
+        }));
+        const key = names.join(",");
+
+        if (key === badgesKey || badgeDragged || badgeHold) {
+            return;
+        }
+
+        // The phone has not taken the new order yet, keep showing it
+        if (pendingBadges && Date.now() < pendingBadges.until && key !== pendingBadges.key) {
+            return;
+        }
+
+        pendingBadges = null;
+        badgesKey = key;
+
+        for (const name of names) {
+            $("badges").appendChild($(BADGES[name]));
+        }
+    }
+
+    function badgeMove(ev) {
+
+        if (!badgeHold) {
+            return;
+        }
+
+        // Moving before the hold is up is a slip, not a move
+        if (!badgeDragged) {
+
+            if (Math.abs(ev.clientX - badgeHold.x) > 8 || Math.abs(ev.clientY - badgeHold.y) > 8) {
+                endBadgeHold();
+            }
+
+            return;
+        }
+
+        ev.preventDefault();
+        moveGhost(badgeGhost, ev.clientX, ev.clientY);
+
+        // Before the first other badge whose middle is right of the pointer
+        const others = visibleBadges().filter(function (el) {
+            return el !== badgeDragged;
+        });
+        let before = null;
+
+        for (const el of others) {
+
+            const r = el.getBoundingClientRect();
+
+            if (ev.clientX < r.left + r.width / 2) {
+
+                before = el;
+                break;
+            }
+        }
+
+        // Past the last one shown, after it, ahead of any hidden badge
+        if (!before && others.length > 0) {
+            before = others[others.length - 1].nextSibling;
+        }
+
+        if (before !== badgeDragged && badgeDragged.nextSibling !== before) {
+
+            slideAside(visibleBadges(), function () {
+                $("badges").insertBefore(badgeDragged, before);
+            });
+        }
+    }
+
+    function endBadgeHold() {
+
+        clearTimeout(badgeTimer);
+        document.removeEventListener("pointermove", badgeMove, true);
+        document.removeEventListener("pointerup", endBadgeHold, true);
+        document.removeEventListener("pointercancel", endBadgeHold, true);
+
+        if (badgeHold) {
+            badgeHold.el.classList.remove("holding");
+        }
+
+        badgeHold = null;
+
+        if (!badgeDragged) {
+            return;
+        }
+
+        if (badgeGhost) {
+
+            badgeGhost.el.remove();
+            badgeGhost = null;
+        }
+
+        badgeDragged.style.opacity = "";
+        badgeDragged = null;
+        badgeSwallow = true;
+
+        // The click that follows, if any, comes right away
+        setTimeout(function () {
+            badgeSwallow = false;
+        }, 400);
+
+        const names = badgeNames();
+
+        badgesKey = names.join(",");
+
+        // This browser's own order, the phone's stays as it is
+        if (localSettings()) {
+
+            changeLocalLook("badges", names);
+            return;
+        }
+
+        pendingBadges = { key: badgesKey, until: Date.now() + 4000 };
+        send("setBadges", names);
+    }
+
+    // Press and hold a badge to move it, with a finger or the mouse, as the
+    // control buttons: a floating copy follows the pointer and the other
+    // badges slide aside
+    $("badges").addEventListener("pointerdown", function (ev) {
+
+        const el = ev.target.closest("#badges > *");
+
+        if (!el || !badgeNameOf(el) || badgeHold || (ev.button !== undefined && ev.button !== 0)) {
+            return;
+        }
+
+        badgeHold = { x: ev.clientX, y: ev.clientY, el: el };
+        el.classList.add("holding");
+        document.addEventListener("pointermove", badgeMove, true);
+        document.addEventListener("pointerup", endBadgeHold, true);
+        document.addEventListener("pointercancel", endBadgeHold, true);
+
+        badgeTimer = setTimeout(function () {
+
+            if (!badgeHold) {
+                return;
+            }
+
+            el.classList.remove("holding");
+            badgeDragged = el;
+            badgeGhost = makeGhost(el, badgeHold.x, badgeHold.y);
+            el.style.opacity = "0.3";
+        }, 550);
+    });
+
+    $("badges").addEventListener("click", function (ev) {
+
+        if (badgeSwallow) {
+
+            badgeSwallow = false;
+            ev.stopPropagation();
+            ev.preventDefault();
+        }
+    }, true);
+
+    // No context menu or browser drag from a long press
+    $("badges").addEventListener("contextmenu", function (ev) {
+        ev.preventDefault();
+    });
+
+    $("badges").addEventListener("dragstart", function (ev) {
+        ev.preventDefault();
+    });
 
     // A tap tells the percent and how it charges, also where nothing can
     // be pointed at
@@ -8926,6 +9164,7 @@
         paintWgBadge(s);
         paintHeatBadge(s);
         paintBatteryBadge(s);
+        orderBadges(s);
 
         if (!s || !s.id) {
 

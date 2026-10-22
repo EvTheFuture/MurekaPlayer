@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.477";
+    const VERSION = "1.9.9.481";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2815,6 +2815,30 @@
         return Number.isFinite(n) && n >= 0 ? Math.min(5, Math.round(n * 10) / 10) : 0.5;
     }
 
+    // An order of the web view's badges kept or sent, as known badge names,
+    // each once. The names in the order they come without one set: online,
+    // heat, battery, WireGuard and hotspot. Kept in here, as the settings
+    // are read before the constants further down are set
+    function badgeOrderFrom(v) {
+
+        const known = ["net", "heat", "battery", "wg", "hotspot"];
+        const list = Array.isArray(v) ? v : String(v || "").split(",");
+        const seen = {};
+
+        return list.map(function (name) {
+            return String(name).trim().toLowerCase();
+        }).filter(function (name) {
+
+            if (known.indexOf(name) === -1 || seen[name]) {
+                return false;
+            }
+
+            seen[name] = true;
+
+            return true;
+        });
+    }
+
     function readyFadeSeconds(v) {
         return fadeSeconds(v, 1.5);
     }
@@ -2970,6 +2994,7 @@
             webHeatBadge: true,
             webBatteryBadge: true,
             batteryText: "icon",
+            webBadgeOrder: "",
             heatText: "word",
             heatWarm: 40,
             heatHot: 45,
@@ -3216,6 +3241,7 @@
                     webHeatBadge: parsed.webHeatBadge !== false,
                     webBatteryBadge: parsed.webBatteryBadge !== false,
                     batteryText: parsed.batteryText === "percent" ? "percent" : "icon",
+                    webBadgeOrder: badgeOrderFrom(parsed.webBadgeOrder).join(","),
                     heatText: parsed.heatText === "both" || parsed.heatText === "temp" ? parsed.heatText : "word",
                     heatWarm: numberIn(parsed.heatWarm, 20, 70, 40),
                     heatHot: numberIn(parsed.heatHot, 20, 70, 45),
@@ -25184,6 +25210,10 @@
             batteryBadgeOn: settings.webBatteryBadge !== false,
             batteryText: settings.batteryText === "percent" ? "percent" : "icon",
 
+            // The badges in the order dragged to in a web view, empty for
+            // the order they come in
+            badgeOrder: badgeOrderFrom(settings.webBadgeOrder),
+
             // The battery temperatures where the heat badge turns warm, hot
             // and very hot
             heatLimits: [settings.heatWarm, settings.heatHot, settings.heatVeryHot],
@@ -27863,6 +27893,12 @@
             openPlaylists();
         } else if (cmd === "closePlaylists") {
             closePlaylists();
+        } else if (cmd === "setBadges") {
+
+            // The badges dragged to another order in a web view
+            settings.webBadgeOrder = badgeOrderFrom(arg).join(",");
+            saveSettings();
+            publishHostSoon();
         } else if (cmd === "setControls") {
 
             // The transport row rearranged in the web view. The web view's own order
@@ -37043,6 +37079,7 @@
 
             // The badges along the top
             webPage.appendChild(makeLabel("Badges"));
+            webPage.appendChild(makeHint("Hold a badge in the web view and drag it to another place, with a finger or the mouse, as the buttons."));
             webPage.appendChild(withHint(webOnlineBadgeRow, "A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
             webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
             webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
