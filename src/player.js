@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.482";
+    const VERSION = "1.9.9.483";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -7805,12 +7805,19 @@
                 resumeState = null;
             }
 
-            // Copies after the playing song were taken out, so the last
-            // copy of the first new song is the one just put in
-            queuePos = Math.max(0, queue.lastIndexOf(songs[0]));
-            queueMoveDir = 1;
-            playCurrent();
             publishHostSoon();
+
+            // The playing song fades out first, as for a new song played
+            // as soon as it is ready. Copies after the playing song were
+            // taken out, so the last copy of the first new song is the one
+            // just put in
+            switchSong("ready", function () {
+
+                queuePos = Math.max(0, queue.lastIndexOf(songs[0]));
+                queueMoveDir = 1;
+                playCurrent();
+                publishHostSoon();
+            });
         } else if (mode === "replace") {
 
             // Replaced, the playing song plays on, with the new songs after it
@@ -35876,7 +35883,7 @@
         playbackPage.appendChild(withHint(heldAskRow, "When another app such as a video app took the sound, the browser only gives it back after a tap. On, a box with a large Resume playback button asks for that tap when the player is back in view. Off, a short note asks for Play instead."));
         playbackPage.appendChild(makeLabel("Fades"));
         playbackPage.appendChild(makeHint("The playing song fades out before another one starts, for each way of switching that is on, over its own seconds. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
-        playbackPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready."));
+        playbackPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready, and a new song played now from the question that offers new songs."));
         playbackPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen."));
         playbackPage.appendChild(withHint(fadeSwipeRow, "A swipe on the cover, here or in the web view. The fade starts as the cover glides."));
         playbackPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));

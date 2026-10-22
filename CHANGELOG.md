@@ -440,8 +440,8 @@ the new settings layout and a number of smaller improvements.
   playing song goes on, and then fades in from there rather than streaming
   from Mureka. Not fetched within 20 seconds, it streams as before.
 - **Fades for every way of switching songs.** Under Playback, each way
-  has its own switch and its own seconds: a new song when ready (on, 1.5
-  s), a song tapped or Next and Previous on the screen, a swipe on the
+  has its own switch and its own seconds: a new song when ready or played
+  now from the question offering new songs (on, 1.5 s), a song tapped or Next and Previous on the screen, a swipe on the
   cover, media controls such as the lock screen, Bluetooth or a steering
   wheel, and keyboard shortcuts (each off, 0.5 s), and a fade in when a
   paused song plays on (on, 0.5 s), after a pause or after another app had
