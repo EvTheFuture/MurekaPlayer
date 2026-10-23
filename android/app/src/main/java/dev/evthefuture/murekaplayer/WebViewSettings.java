@@ -56,6 +56,10 @@ final class WebViewSettings {
     static final String WG_PING_SEC = "wgPingSeconds";
     static final int WG_PING_DEFAULT = 20;
 
+    // WireGuard turned off and on again after this many seconds without a
+    // single answer to the pings, 0 for never, which it is unless changed
+    static final String WG_RESTART_SEC = "wgRestartSeconds";
+
     // When the phone is kept awake for the pings: only on a charger, where
     // it costs no battery, always, or never, the pings then pausing while
     // the phone sleeps
@@ -182,6 +186,20 @@ final class WebViewSettings {
             return Math.max(5, Math.min(600, Integer.parseInt(prefs(c).getString(WG_PING_SEC, String.valueOf(WG_PING_DEFAULT)))));
         } catch (NumberFormatException e) {
             return WG_PING_DEFAULT;
+        }
+    }
+
+    // Seconds without an answer before WireGuard is restarted, 0 for never,
+    // else 30 to 3600
+    static int wgRestartSeconds(Context c) {
+
+        try {
+
+            int v = Integer.parseInt(prefs(c).getString(WG_RESTART_SEC, "0"));
+
+            return v <= 0 ? 0 : Math.max(30, Math.min(3600, v));
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 
@@ -338,6 +356,11 @@ final class WebViewSettings {
         } else if (WG_PING_SEC.equals(key)) {
 
             if (!v.matches("[0-9]{1,3}") || Integer.parseInt(v) < 5 || Integer.parseInt(v) > 600) {
+                return false;
+            }
+        } else if (WG_RESTART_SEC.equals(key)) {
+
+            if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {
                 return false;
             }
         } else {

@@ -435,6 +435,11 @@ the new settings layout and a number of smaller improvements.
   answer and the loss and answer time over the last five minutes and the
   last hour, with a button to start the figures over, and the debug log
   says when the answers stop and come back.
+- **WireGuard restarted when the pings go unanswered.** A setting under
+  Connections turns WireGuard off and on again once not one ping has
+  been answered for a number of seconds, which sets the tunnel up afresh.
+  Another restart waits at least as long again, and How it stands says
+  how many restarts there were and when the last one was. Off unless set.
 - **A new song is downloaded before it plays.** A song asked to play as
   soon as it is ready is fetched whole onto the device first, while the
   playing song goes on, and then fades in from there rather than streaming

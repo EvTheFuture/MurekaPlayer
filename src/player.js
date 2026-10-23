@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.483";
+    const VERSION = "1.9.9.485";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -36467,6 +36467,7 @@
 
             const wgPingRow = makeCarTextRow("Host to ping while WireGuard is on, blank for none", "wgPingHost", "");
             const wgPingSecRow = makeCarTextRow("Ping every, seconds", "wgPingSeconds", "20");
+            const wgRestartRow = makeCarTextRow("Restart WireGuard after no answer for, seconds", "wgRestartSeconds", "0");
             const wgPingAwakeRow = makeDropRow("Keep the phone awake for the pings", [
                 { label: "On a charger", value: "charger" },
                 { label: "Always", value: "always" },
@@ -36735,6 +36736,15 @@
                         + (ping.misses > 1 ? ", " + ping.misses + " missed in a row" : "")]);
                     lines.push(["Last 5 minutes", lossLine(ping.m5)]);
                     lines.push(["Last hour", lossLine(ping.m60)]);
+
+                    // The restarts made for pings that went unanswered
+                    if (ping.restarts > 0) {
+
+                        const ago = typeof ping.restartAgo === "number" && ping.restartAgo >= 0
+                            ? (ping.restartAgo < 120 ? ping.restartAgo + " s" : Math.round(ping.restartAgo / 60) + " min") + " ago" : "";
+
+                        lines.push(["Restarted", ping.restarts + (ping.restarts === 1 ? " time" : " times") + (ago ? ", the last " + ago : "")]);
+                    }
                 }
 
                 if (st.mdns) {
@@ -37273,13 +37283,14 @@
             // the web view too
             const wgPingHint = makeHint("A name or an address on the far side of the tunnel, the WireGuard server's own inside address say, pinged again and again while WireGuard holds the tunnel, so traffic goes through it all the time as with a web view open. The debug log says when the answers stop and when they come back.");
 
-            [wgAwakeRow, wgPingRow, wgPingHint, wgPingSecRow, wgPingAwakeRow].forEach(function (el) {
+            [wgAwakeRow, wgPingRow, wgPingHint, wgPingSecRow, wgPingAwakeRow, wgRestartRow].forEach(function (el) {
                 el.dataset.hostSkip = "1";
             });
             connPage.appendChild(wgPingRow);
             connPage.appendChild(wgPingHint);
             connPage.appendChild(withHint(wgPingSecRow, "How often, from 5 to 600 seconds."));
             connPage.appendChild(withHint(wgPingAwakeRow, "A sleeping phone does not ping. On a charger it is kept awake for them, where it costs no battery. Always also on battery, Never lets the pings pause while it sleeps. How the pings go is under How it stands."));
+            connPage.appendChild(withHint(wgRestartRow, "When not one ping has been answered for this long, WireGuard is turned off and on again a few seconds later, which sets the tunnel up afresh. The screen comes on for a moment for it, as for the hand over. Another restart waits at least as long again, and a minute or more. 0 never restarts it, otherwise from 30 to 3600 seconds."));
             connPage.appendChild(nameRow);
             connPage.appendChild(makeSubLabel("How it stands"));
             connPage.appendChild(carStatusEl);

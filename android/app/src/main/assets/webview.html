@@ -8926,9 +8926,14 @@
             const warn = document.createElement("div");
             const text = document.createElement("span");
 
+            // Said as a warning, in so many words, before what would happen
+            const word = document.createElement("strong");
+
             warn.className = "swWarn";
             warn.appendChild(icon("alert"));
-            text.textContent = p.warn;
+            word.textContent = "WARNING: ";
+            text.appendChild(word);
+            text.appendChild(document.createTextNode(p.warn));
             warn.appendChild(text);
             panel.appendChild(warn);
         }
@@ -9006,7 +9011,7 @@
                 + " the phone, the way the quick settings tile does it.",
             note: helperWords[helper] || null,
             warn: canSwitch && st !== "off" && onHere
-                ? "Switched off, this browser loses the web view until the hotspot is on again." : "",
+                ? "If switched off, this browser loses the web view until the hotspot is on again." : "",
             buttons: buttons
         });
     }
@@ -9060,7 +9065,7 @@
             warn = "WireGuard takes Android's one VPN from the public address, so this browser loses the web view"
                 + " until the public address is back.";
         } else if (up && via === "vpn") {
-            warn = "Turned off, this browser loses the web view until it can reach the phone another way.";
+            warn = "If turned off, this browser loses the web view until it can reach the phone another way.";
         }
 
         openSwitchPanel({

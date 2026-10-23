@@ -216,6 +216,17 @@ final class WireGuard {
     private static volatile boolean pingPlugged = false;
     private static final int PING_WAIT_S = 3;
 
+    // Since when no ping has been answered, 0 while they are, and the
+    // restarts of WireGuard made for it: how many, and the last one's time.
+    // After a restart another one waits as long again at the least, and a
+    // minute or more, so a host that is gone for good does not keep the
+    // tunnel going up and down
+    private static volatile long pingFailSince = 0;
+    private static volatile int restarts = 0;
+    private static volatile long restartAt = 0;
+    private static final long RESTART_GAP_MS = 4000L;
+    private static final long RESTART_MIN_MS = 60000L;
+
     // Whether the phone is on a charger now, from the battery's last word
     static boolean onCharger(Context c) {
 
@@ -260,6 +271,9 @@ final class WireGuard {
 
         pingMisses = 0;
         pingOk = true;
+        pingFailSince = 0;
+        restarts = 0;
+        restartAt = 0;
         Hub.note("WireGuard", "the ping figures were started over");
     }
 
@@ -276,6 +290,8 @@ final class WireGuard {
             o.put("host", pingHost);
             o.put("on", pinging);
             o.put("misses", pingMisses);
+            o.put("restarts", restarts);
+            o.put("restartAgo", restartAt > 0 ? (now - restartAt) / 1000 : -1);
 
             synchronized (PINGS) {
 
@@ -376,11 +392,14 @@ final class WireGuard {
                 pinging = !host.isEmpty() && up;
 
                 if (pinging) {
+
                     pingOnce(host);
+                    restartIfLost(app);
                 } else {
 
                     pingOk = true;
                     pingMisses = 0;
+                    pingFailSince = 0;
                 }
 
                 pingHandler.postDelayed(this, WebViewSettings.wgPingSeconds(app) * 1000L);
@@ -446,16 +465,63 @@ final class WireGuard {
 
             pingOk = true;
             pingMisses = 0;
+            pingFailSince = 0;
         } else {
 
             pingMisses += 1;
 
             if (pingOk) {
+
                 Hub.note("WireGuard", "no answer from the pinged host " + host + " through the tunnel");
+                pingFailSince = System.currentTimeMillis();
             }
 
             pingOk = false;
         }
+    }
+
+    // No answer at all for as long as set: WireGuard is turned off, and on
+    // again a few seconds later, which makes it set the tunnel up afresh
+    private static void restartIfLost(Context app) {
+
+        int after = WebViewSettings.wgRestartSeconds(app);
+        long now = System.currentTimeMillis();
+        long since = pingFailSince;
+
+        if (after <= 0 || since <= 0 || now - since < after * 1000L) {
+            return;
+        }
+
+        if (restartAt > 0 && now - restartAt < Math.max(after * 1000L, RESTART_MIN_MS)) {
+            return;
+        }
+
+        if (!usable(app) || !tunnelUp(app) || downBusy) {
+            return;
+        }
+
+        restarts += 1;
+        restartAt = now;
+        pingFailSince = 0;
+        Hub.note("WireGuard", "no answer from the pinged host for " + ((now - since) / 1000)
+            + " s, WireGuard is turned off and on again");
+
+        // The screen comes on for each command, as for the hand over, or
+        // Android may hold WireGuard back until something wakes it
+        MAIN.post(() -> {
+
+            stayAwake(app);
+            wakeScreen(app);
+            quiet();
+            say(app, "Restarting WireGuard, the pinged host did not answer", "wait");
+            send(app, false);
+            MAIN.postDelayed(() -> {
+
+                wakeScreen(app);
+                send(app, true, 0);
+                REACH.postDelayed(() -> keepReachable(app), CHECK_MS);
+            }, RESTART_GAP_MS);
+        });
     }
 
     // What was last asked of WireGuard, for the settings
