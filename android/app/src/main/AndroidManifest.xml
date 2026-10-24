@@ -94,6 +94,13 @@
                 android:value="false" />
         </service>
 
+        <!-- Where the running hotspot helper hands over its Binder. Exported
+             for the debugging shell, the only caller it answers -->
+        <provider
+            android:name=".HelperProvider"
+            android:authorities="dev.evthefuture.murekaplayer.helper"
+            android:exported="true" />
+
         <!-- The pairing code typed into the pairing notification -->
         <receiver
             android:name=".PairReply"

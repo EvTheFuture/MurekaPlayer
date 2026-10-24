@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.487";
+    const VERSION = "1.9.9.489";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25592,7 +25592,7 @@
     function hotspotFix(status) {
 
         if (hotspotInfoNow().paired === true) {
-            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. The player starts it through wireless debugging, which needs the phone on Wi-Fi.", paired: true };
+            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off without Wi-Fi. The player starts it through wireless debugging, which needs the phone on Wi-Fi once, and it then keeps running until the phone restarts.", paired: true };
         }
 
         return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. Pair the player with wireless debugging once, further down this page, and it starts the helper by itself.", paired: false };
@@ -34881,11 +34881,11 @@
             "Keep that dialog open.",
             "Pull down the player's notification, type the six digit code there and send it."
         ]));
-        add(makeHint("Afterwards the player turns the hotspot on and off by itself through wireless debugging. Each time it needs the phone on Wi-Fi, and wireless debugging is turned on for it and off again afterwards."));
+        add(makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the phone on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the phone restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
         add(makeSubLabel("From a computer instead"));
         add(commandEl);
         add(copyRow);
-        add(makeHint("For a phone that is not on Wi-Fi: run the command on a computer with adb connected to the phone."));
+        add(makeHint("For a phone that is not on Wi-Fi: run the command on a computer with adb connected to the phone. It starts the helper to keep running."));
 
         paintWords();
         settingsRefreshers.push(paintWords);

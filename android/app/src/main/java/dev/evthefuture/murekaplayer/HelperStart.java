@@ -152,7 +152,7 @@ final class HelperStart {
 
     private static void startOnWifi(Context c) {
 
-        if (!wanted(c) || starting || !"stopped".equals(Hotspot.helper(c))
+        if (!wanted(c) || starting || "running".equals(Hotspot.helper(c))
             || System.currentTimeMillis() - wifiTriedAt < WIFI_TRY_GAP_MS) {
             return;
         }
@@ -347,8 +347,10 @@ final class HelperStart {
 
             String answer = Hotspot.prove(c);
 
-            if (answer.startsWith("ok")) {
-                say("The helper is running");
+            if (answer.startsWith("ok") && Hotspot.helperRunning()) {
+                say("The helper is running and keeps running, switching needs no Wi-Fi");
+            } else if (answer.startsWith("ok")) {
+                say("The helper works but did not keep running, each switch needs Wi-Fi");
             } else {
                 say("The helper did not start" + (answer.isEmpty() ? "" : ": " + answer.replaceAll("\\s+", " ")));
             }

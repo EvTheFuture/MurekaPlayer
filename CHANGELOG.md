@@ -237,15 +237,21 @@ the new settings layout and a number of smaller improvements.
   and power: **Turn off hotspot when on battery** and **Turn on hotspot
   when charging**, or when disconnected and connected with Bluetooth.
   Android lets only the system switch the
-  hotspot, so the player brings a small **hotspot helper** of its own. For
-  each switch it runs once as the phone's debugging shell, gives one
-  command and exits, so nothing is left running. It switches the phone's
+  hotspot, so the player brings a small **hotspot helper** of its own. It
+  runs as the phone's debugging shell and keeps running until the phone
+  restarts, and the app turns the hotspot on and off through it, with no
+  Wi-Fi needed, out in town too. It switches the phone's
   own hotspot, with its own name and password, like the quick settings
   tile, and no other app is involved. The player pairs with **wireless
   debugging** once, the code typed into its notification while the pairing
-  dialog stays open, and from then on runs the helper by itself, switching
-  wireless debugging on for each switch and off again afterwards (the
-  phone has to be on Wi-Fi). It may not work on every device. A command for
+  dialog stays open, and from then on starts the helper by itself, with
+  wireless debugging switched on for it and off again (the phone has to be
+  on Wi-Fi for the start, once after each restart of the phone). Without a
+  running helper, each switch runs the helper once over wireless debugging
+  instead and needs Wi-Fi. A switch that cannot reach it is tried again as
+  soon as the phone joins a Wi-Fi, else every 20 seconds, for five
+  minutes, and left alone when the hotspot is already that way. It
+  may not work on every device. A command for
   a computer with adb is there for a phone that is not on Wi-Fi. The page
   shows the pairing, the hotspot's last known state and what the last
   command did, and **Turn on hotspot** and **Turn off hotspot** try it,
