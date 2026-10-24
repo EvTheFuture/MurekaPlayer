@@ -72,6 +72,16 @@ final class HelperStart {
     // Android's setting for wireless debugging, on or off
     private static final String ADB_WIFI = "adb_wifi_enabled";
 
+    // USB debugging. With it off, switching wireless debugging off stops
+    // Android's adb service, and Android then ends every process started
+    // through it, the helper left running too, so it is switched on for a
+    // helper that is to keep running
+    private static final String ADB_USB = "adb_enabled";
+
+    // Wireless debugging switched on for a helper started to keep running,
+    // switched off again once it has handed over its Binder or given up
+    private static volatile boolean serveSwitchedWifi = false;
+
     // Whether this app is paired, kept with the other settings
     private static final String PAIRED = "adbPaired";
 
@@ -368,9 +378,14 @@ final class HelperStart {
         }
 
         boolean switchedOn = false;
+        boolean serve = "serve".equals(what);
         AdbLink link = null;
 
         try {
+
+            if (serve) {
+                keepAdbService(c);
+            }
 
             if (!adbWifiOn(c)) {
 
@@ -412,14 +427,63 @@ final class HelperStart {
                 }
             }
 
-            if (switchedOn) {
-
-                try {
-                    Settings.Global.putInt(c.getContentResolver(), ADB_WIFI, 0);
-                } catch (Throwable t) {
-                    Hub.note("Helper", "could not switch wireless debugging off again, " + why(t));
-                }
+            // Left on for a helper started to keep running until it has
+            // handed over its Binder, see serveDone
+            if (switchedOn && serve) {
+                serveSwitchedWifi = true;
+            } else if (switchedOn) {
+                wifiDebuggingOff(c);
             }
+        }
+    }
+
+    // A helper started to keep running has handed over its Binder, or did
+    // not: wireless debugging off again, when it was switched on for it
+    static void serveDone(Context c) {
+
+        if (serveSwitchedWifi) {
+
+            serveSwitchedWifi = false;
+            wifiDebuggingOff(c);
+        }
+    }
+
+    private static void wifiDebuggingOff(Context c) {
+
+        try {
+            Settings.Global.putInt(c.getContentResolver(), ADB_WIFI, 0);
+        } catch (Throwable t) {
+            Hub.note("Helper", "could not switch wireless debugging off again, " + why(t));
+        }
+    }
+
+    // USB debugging on, so Android's adb service keeps running when
+    // wireless debugging goes off, and the helper with it. Said in the log,
+    // with how both stood
+    private static void keepAdbService(Context c) {
+
+        ContentResolver cr = c.getContentResolver();
+        int usb = Settings.Global.getInt(cr, ADB_USB, -1);
+        int wifi = Settings.Global.getInt(cr, ADB_WIFI, -1);
+
+        if (usb == 1) {
+
+            Hub.note("Helper", "USB debugging is on, wireless debugging " + (wifi == 1 ? "on" : "off"));
+            return;
+        }
+
+        if (!canSwitchAdb(c)) {
+
+            Hub.note("Helper", "USB debugging is off and the app may not switch it, the helper may end with wireless debugging");
+            return;
+        }
+
+        try {
+
+            Settings.Global.putInt(cr, ADB_USB, 1);
+            Hub.note("Helper", "USB debugging switched on, so the helper keeps running when wireless debugging goes off");
+        } catch (Throwable t) {
+            Hub.note("Helper", "could not switch USB debugging on, " + why(t));
         }
     }
 

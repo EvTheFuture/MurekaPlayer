@@ -14269,7 +14269,13 @@
             // than the one it was read for
             const typing = document.activeElement && document.activeElement.classList.contains("pField");
 
-            if (data && data.items && panelOpen() && !typing && !editorBusy && acts === panelActs && name === panelName) {
+            // A reading the same as what is drawn leaves the page as it is,
+            // so text being selected or looked at in the browser's tools
+            // is not drawn over every two seconds
+            const same = data && data.items && JSON.stringify(data.items) === panelDrawn
+                && $("panelBody").childElementCount > 0;
+
+            if (data && data.items && panelOpen() && !typing && !editorBusy && acts === panelActs && name === panelName && !same) {
                 renderPanel(data.items);
             }
 
@@ -14473,6 +14479,9 @@
     // once it closes. Drawn under it, the browser closed the open list
     let selectHeldItems = null;
 
+    // The reading the settings were last drawn from, as text
+    let panelDrawn = "";
+
     function renderPanel(items) {
 
         const active = document.activeElement;
@@ -14491,6 +14500,7 @@
         }
 
         lastPanelItems = items;
+        panelDrawn = JSON.stringify(items);
 
         if (panelShowTimer) {
 

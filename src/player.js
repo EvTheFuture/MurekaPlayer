@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.489";
+    const VERSION = "1.9.9.493";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34521,6 +34521,12 @@
             });
         });
 
+        // A web view copies the command into its own browser, as with the
+        // debug log, not onto the phone
+        copyBtn.__copyText = function () {
+            return command;
+        };
+
         copyRow.appendChild(copyBtn);
 
         const helperWords = {
@@ -34881,7 +34887,7 @@
             "Keep that dialog open.",
             "Pull down the player's notification, type the six digit code there and send it."
         ]));
-        add(makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the phone on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the phone restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
+        add(makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the phone on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the phone restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. USB debugging is switched on for that, since with it off Android ends the helper as soon as wireless debugging goes off. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
         add(makeSubLabel("From a computer instead"));
         add(commandEl);
         add(copyRow);

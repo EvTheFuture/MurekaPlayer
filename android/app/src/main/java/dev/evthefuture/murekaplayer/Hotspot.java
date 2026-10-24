@@ -487,11 +487,36 @@ final class Hotspot {
             }
 
             if ("running".equals(helper(c))) {
-                return "ok " + helperVersion + ", keeps running";
+
+                // Wireless debugging off again, the helper should outlive it,
+                // which a moment later shows
+                HelperStart.serveDone(c);
+
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+                if ("running".equals(helper(c))) {
+                    return "ok " + helperVersion + ", keeps running";
+                }
+
+                Hub.note("Helper", "the helper ended when wireless debugging went off");
             }
 
-            Hub.note("Helper", "the helper started but did not reach the app, see " + HELPER_LOG);
+            // What the helper said, from its log on the phone, into the
+            // debug log, so why it did not reach the app can be seen
+            if (!helperRunning()) {
+
+                String said = HelperStart.once(c, "log");
+
+                Hub.note("Helper", "the helper did not reach the app or did not keep running, its log: "
+                    + (said.isEmpty() ? "empty" : said));
+            }
         }
+
+        HelperStart.serveDone(c);
 
         answer = HelperStart.once(c, "ping");
         proved = answer.startsWith("ok");
@@ -509,13 +534,24 @@ final class Hotspot {
     // the log file
     static String shellCommand(Context c, String what) {
 
-        String run = "CLASSPATH=" + c.getApplicationInfo().sourceDir
-            + " app_process /system/bin " + HotspotHelper.class.getName() + " "
+        String args = " /system/bin " + HotspotHelper.class.getName() + " "
             + c.getApplicationInfo().uid + " " + versionCode(c) + " " + what;
+        String run = "CLASSPATH=" + c.getApplicationInfo().sourceDir + " app_process" + args;
         String grant = "pm grant " + c.getPackageName() + " android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1; ";
 
+        // In a session of its own, deaf to the hang up that comes when the
+        // adb session ends, and the adb session held a moment longer while
+        // it starts. The log says when the shell part ran
         if ("serve".equals(what)) {
-            return grant + "(setsid sh -c '" + run + "' </dev/null >" + HELPER_LOG + " 2>&1 &); echo started";
+            return grant + "(setsid sh -c 'echo launched; CLASSPATH=" + c.getApplicationInfo().sourceDir
+                + " exec nohup app_process" + args + "' </dev/null >" + HELPER_LOG + " 2>&1 &); sleep 1; echo started";
+        }
+
+        // The end of what a helper started to serve has said, and whether
+        // one is still running
+        if ("log".equals(what)) {
+            return "tail -c 1500 " + HELPER_LOG + " 2>&1; echo; echo running: "
+                + "$(ps -A -o PID,ARGS 2>/dev/null | grep -c '[H]otspotHelper.* serve')";
         }
 
         return grant + run;

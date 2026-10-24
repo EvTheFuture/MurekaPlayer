@@ -297,9 +297,12 @@ public final class HotspotHelper {
 
             if (app == null) {
 
+                say("the app did not take the Binder");
                 sleepQuietly(HANDOVER_GAP_MS);
                 continue;
             }
+
+            say("handed over to the app");
 
             // Waits until the app's process ends, then hands over again
             final IBinder watched = app;

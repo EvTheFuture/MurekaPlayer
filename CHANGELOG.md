@@ -246,7 +246,9 @@ the new settings layout and a number of smaller improvements.
   debugging** once, the code typed into its notification while the pairing
   dialog stays open, and from then on starts the helper by itself, with
   wireless debugging switched on for it and off again (the phone has to be
-  on Wi-Fi for the start, once after each restart of the phone). Without a
+  on Wi-Fi for the start, once after each restart of the phone). USB
+  debugging is switched on for it, since with it off Android ends every
+  process started over adb when wireless debugging goes off. Without a
   running helper, each switch runs the helper once over wireless debugging
   instead and needs Wi-Fi. A switch that cannot reach it is tried again as
   soon as the phone joins a Wi-Fi, else every 20 seconds, for five
