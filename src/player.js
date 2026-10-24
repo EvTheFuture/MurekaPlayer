@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.485";
+    const VERSION = "1.9.9.487";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25438,8 +25438,9 @@
             src: songUrl(song) || "",
 
             // The cover at its full size, without Mureka's resizing, for the
-            // web view to show it to copy or save
-            cover: song.cover ? String(song.cover).split("?")[0] : "",
+            // web view to show it to copy or save. The whole address, the
+            // phone fetches only from Mureka's own hosts, never a bare path
+            cover: song.cover ? coverUrl(song).split("?")[0] : "",
 
             // What the web view's trimmer needs: the account's own song with a file
             canTrim: !creatorSource && !!songUrl(song),
@@ -36340,52 +36341,17 @@
         dataChoiceEl = document.createElement("div");
         dataChoiceEl.style.cssText = "display:none;flex-direction:column;gap:6px;padding:8px;border-radius:8px;background:#222";
 
-        const driveInfoRow = document.createElement("div");
-        driveInfoRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:#888";
-
-        // Drive sign in only exists when the player has a Google client id
-        if (!GOOGLE_CLIENT_ID) {
-            driveInfoRow.style.display = "none";
-        }
-
-        driveStatusEl = document.createElement("span");
-
-        // Connect when signed out, Disconnect when signed in
-        driveLinkEl = document.createElement("span");
-        driveLinkEl.style.cssText = "color:#48e1eb;cursor:pointer;text-decoration:underline;flex:0 0 auto";
-        driveLinkEl.addEventListener("click", function () {
-
-            if (storedDriveToken()) {
-                disconnectDrive();
-            } else {
-                connectDrive();
-            }
-        });
-
-        driveInfoRow.appendChild(driveStatusEl);
-        driveInfoRow.appendChild(driveLinkEl);
-
-        // What the last export, import or Drive action did. The status line
-        // on the cover sits behind the settings, so it is shown here as well
+        // What the last export or import did. The status line on the cover
+        // sits behind the settings, so it is shown here as well
         dataMsgEl = document.createElement("div");
         dataMsgEl.style.cssText = "font-size:12px;color:#48e1eb;line-height:1.4";
 
-        // The status is redrawn each time the settings open, and the sign in
-        // library is fetched then, so a Drive tap can open its popup at once
+        // Cleared each time the settings open
         settingsRefreshers.push(function () {
 
             dataMsgEl.textContent = "";
             hideDataChoice();
-            updateDriveStatus();
-
-            if (GOOGLE_CLIENT_ID) {
-
-                loadGis().catch(function () {
-                });
-            }
         });
-
-        updateDriveStatus();
 
         // Mureka's own tempo for songs without one set by hand goes along
         const murekaBpmRow = makeBoolRow("Include Mureka's BPM in song tweaks",
@@ -36400,7 +36366,6 @@
         backupPage.appendChild(libraryRow);
         backupPage.appendChild(importRow);
         backupPage.appendChild(dataChoiceEl);
-        backupPage.appendChild(driveInfoRow);
         backupPage.appendChild(dataMsgEl);
 
         // Which networks may open the web view, only in the Android app. Kept
@@ -37759,38 +37724,10 @@
         updateStartButtons();
     }
 
-    // Google OAuth client id for Drive, from a Google Cloud project with the
-    // Drive API enabled and https://www.mureka.ai listed as an authorized
-    // JavaScript origin. It is public by design, a client id is no secret.
-    // Empty leaves the Drive buttons explaining that Drive is not set up
-    const GOOGLE_CLIENT_ID = "";
-
-    // Only files this player created itself can be seen, nothing else in the
-    // Drive, and the file is an ordinary visible one that can be downloaded
-    const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-    const DRIVE_FILE_NAMES = {
-        songs: "mureka-player-songs.json",
-        settings: "mureka-player-settings.json"
-    };
-
-    // localStorage key for the Drive access token and when it runs out. A
-    // browser only ever gets a short lived token, about an hour
-    const DRIVE_TOKEN_KEY = "mureka_gdrive_token";
-
     // The hidden file picker used for importing, built the first time
     let importInputEl = null;
 
-    // Google's sign in library, loaded once, and the token client built on it
-    let gisLoading = null;
-    let gisTokenClient = null;
-
-    // The promise waiting for the sign in popup to answer
-    let driveTokenWaiter = null;
-
-    // The Drive status line in the settings panel, its Connect or
-    // Disconnect link and the line reporting the last data action
-    let driveStatusEl = null;
-    let driveLinkEl = null;
+    // The line reporting the last data action
     let dataMsgEl = null;
 
     // The in place choice of where data goes or comes from
@@ -40507,13 +40444,6 @@
             copyUserData(kind);
         } });
 
-        // The library is a file of its own, Drive keeps only the other two
-        if (GOOGLE_CLIENT_ID && kind !== "library" && kind !== "queue") {
-            options.push({ label: "Google Drive", fn: function () {
-                saveToDrive(kind);
-            } });
-        }
-
         if (options.length === 1) {
 
             options[0].fn();
@@ -40523,8 +40453,8 @@
         showDataChoice("Export " + dataKindName(kind) + " to", options);
     }
 
-    // Ask where an import comes from. A file can be picked from the Google
-    // Drive and Files apps too, so without Drive sign in it opens at once
+    // Ask where an import comes from: a file, which can be picked from the
+    // Google Drive and Files apps too, or text pasted
     function chooseImport() {
 
         const options = [
@@ -40532,25 +40462,7 @@
             { label: "Paste", fn: pasteImport }
         ];
 
-        if (!GOOGLE_CLIENT_ID) {
-
-            showDataChoice("Import from", options);
-            return;
-        }
-
-        showDataChoice("Import from", options.concat([
-            { label: "Google Drive", fn: function () {
-
-                showDataChoice("Load from Google Drive", [
-                    { label: "Song tweaks", fn: function () {
-                        loadFromDrive("songs");
-                    } },
-                    { label: "Settings", fn: function () {
-                        loadFromDrive("settings");
-                    } }
-                ]);
-            } }
-        ]));
+        showDataChoice("Import from", options);
     }
 
     // An export pasted as text, for when the file only got as far as the
@@ -41971,506 +41883,6 @@
         }
 
         importParsed(p, "file", "Imported");
-    }
-
-    // Load Google's sign in library into the page, once. It is fetched when
-    // the settings open, so it is ready by the time a Drive button is tapped
-    function loadGis() {
-
-        if (window.google && window.google.accounts && window.google.accounts.oauth2) {
-            return Promise.resolve();
-        }
-
-        if (!gisLoading) {
-
-            gisLoading = new Promise(function (resolve, reject) {
-
-                const s = document.createElement("script");
-
-                s.src = "https://accounts.google.com/gsi/client";
-                s.async = true;
-                s.onload = function () {
-                    resolve();
-                };
-                s.onerror = function () {
-
-                    gisLoading = null;
-                    reject(new Error("gis"));
-                };
-
-                document.head.appendChild(s);
-            });
-        }
-
-        return gisLoading;
-    }
-
-    // The stored token, when it still has a minute left
-    function storedDriveToken() {
-
-        try {
-
-            const raw = JSON.parse(localStorage.getItem(DRIVE_TOKEN_KEY));
-
-            if (raw && raw.token && raw.expiresAt - 60000 > Date.now()) {
-                return raw;
-            }
-        } catch (e) {
-        }
-
-        return null;
-    }
-
-    function forgetDriveToken() {
-
-        try {
-            localStorage.removeItem(DRIVE_TOKEN_KEY);
-        } catch (e) {
-        }
-
-        updateDriveStatus();
-    }
-
-    // Get a Drive token. Has to be called straight from a tap, with nothing
-    // awaited first, or Safari blocks the sign in popup
-    function requestDriveToken() {
-
-        const stored = storedDriveToken();
-
-        if (stored) {
-            return Promise.resolve(stored.token);
-        }
-
-        if (!GOOGLE_CLIENT_ID) {
-            return Promise.reject(new Error("noclient"));
-        }
-
-        const oauth = window.google && window.google.accounts && window.google.accounts.oauth2;
-
-        if (!oauth) {
-
-            // Not loaded yet, start it so the next tap works
-            loadGis().catch(function () {
-            });
-
-            return Promise.reject(new Error("notready"));
-        }
-
-        if (!gisTokenClient) {
-
-            gisTokenClient = oauth.initTokenClient({
-                client_id: GOOGLE_CLIENT_ID,
-                scope: DRIVE_SCOPE,
-                callback: function (resp) {
-
-                    const waiter = driveTokenWaiter;
-
-                    driveTokenWaiter = null;
-
-                    if (!waiter) {
-                        return;
-                    }
-
-                    if (!resp || resp.error || !resp.access_token) {
-
-                        waiter.reject(new Error((resp && resp.error) || "denied"));
-                        return;
-                    }
-
-                    const expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
-
-                    try {
-                        localStorage.setItem(DRIVE_TOKEN_KEY, JSON.stringify({
-                            token: resp.access_token,
-                            expiresAt: expiresAt
-                        }));
-                    } catch (e) {
-                    }
-
-                    updateDriveStatus();
-                    waiter.resolve(resp.access_token);
-                },
-                error_callback: function (err) {
-
-                    const waiter = driveTokenWaiter;
-
-                    driveTokenWaiter = null;
-
-                    if (waiter) {
-                        waiter.reject(new Error((err && err.type) || "popup"));
-                    }
-                }
-            });
-        }
-
-        return new Promise(function (resolve, reject) {
-
-            driveTokenWaiter = { resolve: resolve, reject: reject };
-            gisTokenClient.requestAccessToken({ prompt: "" });
-        });
-    }
-
-    // Explain why a Drive token could not be had
-    function driveTokenProblem(err) {
-
-        const code = err && err.message;
-
-        if (code === "noclient") {
-            return "Google Drive is not available in this version of the player,"
-                + " it needs a Google client id built in";
-        }
-
-        if (code === "notready") {
-            return "Connecting to Google, tap again in a moment";
-        }
-
-        if (code === "popup_failed_to_open") {
-            return "The Google sign in window was blocked, allow popups and tap again";
-        }
-
-        if (code === "popup_closed" || code === "access_denied") {
-            return "Google sign in was cancelled";
-        }
-
-        return "Could not sign in to Google (" + (code || "unknown") + ")";
-    }
-
-    // One Drive request with the token. A 401 means the token ran out early,
-    // so it is dropped and the next tap signs in again
-    async function driveFetch(token, url, options) {
-
-        const opts = Object.assign({}, options || {});
-
-        opts.headers = Object.assign({}, opts.headers || {}, {
-            Authorization: "Bearer " + token
-        });
-
-        const res = await timedFetch(url, opts, 30000);
-
-        if (res.status === 401) {
-
-            forgetDriveToken();
-            throw new Error("expired");
-        }
-
-        if (!res.ok) {
-            throw new Error("HTTP " + res.status);
-        }
-
-        return res;
-    }
-
-    // The id of a data file in Drive, the newest when there are several
-    async function driveFindFile(token, name) {
-
-        const q = "name = '" + name + "' and trashed = false";
-        const url = "https://www.googleapis.com/drive/v3/files?spaces=drive"
-            + "&orderBy=modifiedTime%20desc&pageSize=1&fields=files(id,modifiedTime)"
-            + "&q=" + encodeURIComponent(q);
-
-        const res = await driveFetch(token, url);
-        const json = await res.json();
-
-        return (json.files && json.files[0]) ? json.files[0].id : null;
-    }
-
-    async function driveDownload(token, id) {
-
-        const res = await driveFetch(token, "https://www.googleapis.com/drive/v3/files/"
-            + encodeURIComponent(id) + "?alt=media");
-
-        return res.json();
-    }
-
-    // Write the data file, replacing its contents, or create it the first time
-    async function driveUpload(token, id, name, data) {
-
-        const body = JSON.stringify(data, null, 2);
-
-        if (id) {
-
-            await driveFetch(token, "https://www.googleapis.com/upload/drive/v3/files/"
-                + encodeURIComponent(id) + "?uploadType=media", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: body
-            });
-
-            return;
-        }
-
-        const boundary = "mureka" + Date.now();
-        const meta = JSON.stringify({ name: name, mimeType: "application/json" });
-        const multipart = "--" + boundary + "\r\n"
-            + "Content-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n"
-            + "--" + boundary + "\r\n"
-            + "Content-Type: application/json\r\n\r\n" + body + "\r\n"
-            + "--" + boundary + "--";
-
-        await driveFetch(token, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-            method: "POST",
-            headers: { "Content-Type": "multipart/related; boundary=" + boundary },
-            body: multipart
-        });
-    }
-
-    // What goes up to Drive. Whatever another device saved there is kept,
-    // and this device's values win for the songs both hold, so saving from
-    // one phone does not wipe what the other one added
-    function mergeForUpload(remote) {
-
-        const local = collectUserData("songs");
-        const p = parseUserData(remote);
-
-        if (!p || p.kind === "settings") {
-            return local;
-        }
-
-        const ratingsOut = {};
-        const bpmOut = {};
-
-        for (const entry of p.ratings) {
-            ratingsOut[entry[0]] = entry[1];
-        }
-
-        for (const entry of p.bpm) {
-            bpmOut[entry[0]] = entry[1];
-        }
-
-        local.ratings = Object.assign(ratingsOut, local.ratings);
-        local.manualBpm = Object.assign(bpmOut, local.manualBpm);
-        local.manualInstrumental = Array.from(new Set(p.instr.concat(local.manualInstrumental)));
-        local.ignored = Array.from(new Set(p.ignore.concat(local.ignored)));
-
-        if (local.murekaBpm || p.murekaBpm.length > 0) {
-
-            const murekaOut = {};
-
-            for (const entry of p.murekaBpm) {
-                murekaOut[entry[0]] = entry[1];
-            }
-
-            local.murekaBpm = Object.assign(murekaOut, local.murekaBpm || {});
-        }
-        local.trimmed = Array.from(new Set(p.trimmed.concat(local.trimmed || [])));
-
-        // Removals follow the same rule, this device wins. Removed here takes
-        // the value out of the upload, held here drops the other removal
-        const kept = {
-            rating: function (id) {
-                return ratings.has(id);
-            },
-            bpm: function (id) {
-                return manualBpm.has(id);
-            },
-            instr: function (id) {
-                return manualInstrumental.has(id);
-            },
-            ignore: function (id) {
-                return ignoredIds.has(id);
-            }
-        };
-
-        for (const kind of Object.keys(kept)) {
-
-            const removed = new Set(local.cleared[kind]);
-
-            for (const id of p.cleared[kind]) {
-
-                if (!kept[kind](id)) {
-                    removed.add(id);
-                }
-            }
-
-            local.cleared[kind] = Array.from(removed);
-        }
-
-        for (const id of local.cleared.rating) {
-            delete local.ratings[id];
-        }
-
-        for (const id of local.cleared.bpm) {
-            delete local.manualBpm[id];
-        }
-
-        // A tempo set by hand goes in its own list, not as Mureka's
-        if (local.murekaBpm) {
-
-            for (const id of Object.keys(local.manualBpm)) {
-                delete local.murekaBpm[id];
-            }
-        }
-
-        local.manualInstrumental = local.manualInstrumental.filter(function (id) {
-            return local.cleared.instr.indexOf(id) < 0;
-        });
-
-        local.ignored = local.ignored.filter(function (id) {
-            return local.cleared.ignore.indexOf(id) < 0;
-        });
-
-        const seen = new Set(local.creators.map(function (c) {
-            return String(c.user_id);
-        }));
-
-        for (const c of p.creators) {
-
-            if (!seen.has(c.user_id)) {
-
-                seen.add(c.user_id);
-                local.creators.push(c);
-            }
-        }
-
-        return local;
-    }
-
-    // Save one kind of data to Drive. The token is asked for first,
-    // straight from the tap. Song tweaks merge with what is there already,
-    // settings replace it
-    async function saveToDrive(kind) {
-
-        const name = DRIVE_FILE_NAMES[kind === "settings" ? "settings" : "songs"];
-        let token = null;
-
-        try {
-            token = await requestDriveToken();
-        } catch (e) {
-
-            dataStatus(driveTokenProblem(e));
-            return;
-        }
-
-        dataStatus("Saving " + dataKindName(kind) + " to Google Drive...");
-
-        try {
-
-            const id = await driveFindFile(token, name);
-            let data = null;
-
-            if (kind === "settings") {
-                data = collectUserData("settings");
-            } else {
-                data = mergeForUpload(id ? await driveDownload(token, id) : null);
-            }
-
-            await driveUpload(token, id, name, data);
-
-            dataStatus("Saved to Google Drive, " + exportedText(data));
-        } catch (e) {
-
-            dataStatus(e && e.message === "expired"
-                ? "The Google sign in ran out, tap Export again"
-                : "Could not save to Google Drive (" + ((e && e.message) || "error") + ")");
-        }
-    }
-
-    // Load one kind of data from Drive and merge it in, the same way as a
-    // file import
-    async function loadFromDrive(kind) {
-
-        const name = DRIVE_FILE_NAMES[kind === "settings" ? "settings" : "songs"];
-        let token = null;
-
-        try {
-            token = await requestDriveToken();
-        } catch (e) {
-
-            dataStatus(driveTokenProblem(e));
-            return;
-        }
-
-        dataStatus("Reading " + dataKindName(kind) + " from Google Drive...");
-
-        try {
-
-            const id = await driveFindFile(token, name);
-
-            if (!id) {
-
-                dataStatus("No " + dataKindName(kind) + " in your Google Drive yet, export first");
-                return;
-            }
-
-            const p = parseUserData(await driveDownload(token, id));
-
-            if (!p) {
-
-                dataStatus("The Drive file is not a Mureka Player export");
-                return;
-            }
-
-            importParsed(p, "Google Drive data", "Loaded from Google Drive:");
-        } catch (e) {
-
-            dataStatus(e && e.message === "expired"
-                ? "The Google sign in ran out, tap Import again"
-                : "Could not read from Google Drive (" + ((e && e.message) || "error") + ")");
-        }
-    }
-
-    // Sign in to Drive without saving or loading anything. The token is
-    // asked for straight from the tap, Google opens its own sign in window
-    async function connectDrive() {
-
-        try {
-
-            await requestDriveToken();
-            dataStatus("Google Drive connected");
-        } catch (e) {
-            dataStatus(driveTokenProblem(e));
-        }
-    }
-
-    // Sign out of Drive on this device, and tell Google to drop the grant
-    function disconnectDrive() {
-
-        const stored = storedDriveToken();
-        const oauth = window.google && window.google.accounts && window.google.accounts.oauth2;
-
-        if (stored && oauth && oauth.revoke) {
-
-            try {
-                oauth.revoke(stored.token, function () {
-                });
-            } catch (e) {
-            }
-        }
-
-        forgetDriveToken();
-        dataStatus("Google Drive disconnected on this device");
-    }
-
-    // Keep the Drive line in the settings panel honest
-    function updateDriveStatus() {
-
-        if (!driveStatusEl) {
-            return;
-        }
-
-        if (!GOOGLE_CLIENT_ID) {
-
-            driveStatusEl.textContent = "Google Drive: not available in this version of the player";
-            driveLinkEl.style.display = "none";
-            return;
-        }
-
-        const stored = storedDriveToken();
-
-        driveLinkEl.style.display = "";
-        driveLinkEl.textContent = stored ? "Disconnect" : "Connect";
-
-        if (!stored) {
-
-            driveStatusEl.textContent = "Google Drive: not connected";
-            return;
-        }
-
-        const until = new Date(stored.expiresAt);
-        const hh = String(until.getHours()).padStart(2, "0");
-        const mm = String(until.getMinutes()).padStart(2, "0");
-
-        driveStatusEl.textContent = "Google Drive: connected until " + hh + ":" + mm;
     }
 
     // Show the settings overlay, expanding the panel first if it is minimized

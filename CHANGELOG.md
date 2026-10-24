@@ -411,6 +411,9 @@ the new settings layout and a number of smaller improvements.
   phone only. The debug log no longer notes keys typed in fields, and
   blanks more kinds of secrets. A question from the phone that comes over
   another one takes no tap for a moment, and only closes itself.
+- **No code from elsewhere.** The Google Drive sign in, never switched on,
+  is gone with the script it would have loaded from Google, so the add-on
+  runs only its own files, as Mozilla's add-on rules ask.
 - **Wireless debugging's address.** About lists the address and port a
   computer connects to wireless debugging on, looked for while About
   shows, or says it is off.
