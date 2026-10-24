@@ -431,7 +431,8 @@ the new settings layout and a number of smaller improvements.
 - **Badges in any order.** In the web view a badge is held and dragged to
   another place, with a finger or the mouse, as the control buttons, the
   others sliding aside. The order is kept on the phone for every browser,
-  or for this browser alone while it has settings of its own.
+  or for this browser alone while it has settings of its own. When a
+  badge comes, goes or changes width, the others glide to their new places.
 - **Battery badge.** The web view shows the phone's battery as a badge
   without a frame after the heat badge, filled as far as it is charged, green from half,
   yellow from a fifth and red below, with a lightning bolt while it

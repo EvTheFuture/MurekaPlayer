@@ -8294,6 +8294,70 @@
         subtree: true
     });
 
+    // A badge coming, going or changing width: the others glide to their
+    // new places instead of jumping there. Where each one was is noted
+    // after every change, measured from the start of the group, so the
+    // group moving as a whole does not count, and from the layout, so a
+    // glide still under way does not count either. Not while one is
+    // dragged, the drag slides them itself
+    const badgePlaces = new Map();
+
+    function badgePlace(el) {
+        return el.offsetLeft - $("badges").offsetLeft;
+    }
+
+    function noteBadgePlaces() {
+
+        badgePlaces.clear();
+
+        for (const el of $("badges").children) {
+
+            if (el.offsetParent) {
+                badgePlaces.set(el, badgePlace(el));
+            }
+        }
+    }
+
+    function glideBadges() {
+
+        if (badgeDragged || badgeHold) {
+
+            noteBadgePlaces();
+            return;
+        }
+
+        for (const el of $("badges").children) {
+
+            if (!el.offsetParent || !el.animate || !badgePlaces.has(el)) {
+                continue;
+            }
+
+            const dx = badgePlaces.get(el) - badgePlace(el);
+
+            if (Math.abs(dx) < 0.5) {
+                continue;
+            }
+
+            el.animate([
+                { transform: "translateX(" + dx + "px)" },
+                { transform: "translateX(0)" }
+            ], { duration: 260, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+        }
+
+        noteBadgePlaces();
+    }
+
+    new MutationObserver(glideBadges).observe($("badges"), {
+        attributes: true,
+        attributeFilter: ["style", "class"],
+        childList: true,
+        characterData: true,
+        subtree: true
+    });
+
+    window.addEventListener("resize", noteBadgePlaces);
+    noteBadgePlaces();
+
     // The phone's hotspot as the badge last said it, and a switch asked
     // for here that is waited for: which way, and the timer giving up on it
     let hotspotShown = null;
@@ -21980,7 +22044,15 @@
     function replaceFlow() {
 
         if (!flowDrag && !flowAuto) {
+
             placeFlow(flowOffset);
+
+            // The text over the cover follows the cover's new size. The
+            // page's resize can come before the covers have their new
+            // size, which left it as small as it was in between
+            if (miniOpen && $("app").classList.contains("miniSide")) {
+                placeMini(true);
+            }
         }
     }
 
