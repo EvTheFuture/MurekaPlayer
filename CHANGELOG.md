@@ -489,6 +489,12 @@ the new settings layout and a number of smaller improvements.
   browser chosen, or the music on the phone, the web view drops the song
   and its media controls, so a call, a notification or another app taking
   the sound no longer pauses the music on the phone or in another browser.
+- **The queue goes on the way the list reads.** Without shuffle, the
+  songs after the playing one are those after it in the list as it is
+  ordered now, also songs played earlier in the queue, instead of every
+  song not played yet, which after many songs left whole stretches of the
+  list out. A refresh that adds, removes, publishes or unpublishes songs
+  makes a queue built from the list follow it, as a filter does.
 - **Badges in the queue.** On the phone and in the web view, a song in the
   queue carries its badge whenever it tells something: new while not
   played yet, a draft while the published songs are listed, public while

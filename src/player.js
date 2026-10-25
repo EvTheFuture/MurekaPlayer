@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.495";
+    const VERSION = "1.9.9.496";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8192,6 +8192,12 @@
         setStatus((deep
             ? (pruneSkipped ? "Rescanned, " : "Rescan complete, ")
             : "Up to date, ") + parts.join(", "));
+
+        // Songs come, gone or moved between published and drafts change
+        // the list, and a queue made from it follows, as for a filter
+        if (newCount > 0 || nowPublished > 0 || nowDraft > 0 || removed > 0) {
+            queueFollowFilter();
+        }
     }
 
     // Every stored song removed, one after the other, the settings counting.
@@ -11609,10 +11615,14 @@
     }
 
     // A queue's played part and song at pos as they are, and after them the
-    // songs of the list not yet reached, kept in the Mureka sorted order then
-    // optionally shuffled. orderedSongs is the displayed order, so with
-    // shuffle off the queue matches the list. The vocals and playlist
-    // filters still apply. Songs put in with Play next stay right after the
+    // songs of the list still to come. With shuffle off those are the songs
+    // after the playing one in the list as it is ordered now, so the queue
+    // goes on the way the list reads, also when the list's order changed
+    // since the queue was made and songs already played turn up again
+    // further down. With shuffle on, or when the playing song is not in
+    // the list, every song of the list not played yet, shuffled.
+    // orderedSongs is the displayed order. The vocals and playlist filters
+    // still apply. Songs put in with Play next stay right after the
     // song at pos, and songs put in with Play last stay at the end, in the
     // order they were put in, also when the list leaves them out: they were
     // asked for
@@ -11632,13 +11642,25 @@
         const picked = new Set(next.concat(last).map(function (s) {
             return s.song_id;
         }));
-        let upcoming = orderedSongs().filter(function (s) {
-            return !playedIds.has(s.song_id) && !picked.has(s.song_id) && queueable(s)
-                && !queueSkipIds.has(String(s.song_id));
+        const list = orderedSongs().filter(function (s) {
+            return !picked.has(s.song_id) && queueable(s) && !queueSkipIds.has(String(s.song_id));
         });
+        const here = q[pos] ? list.findIndex(function (s) {
+            return s.song_id === q[pos].song_id;
+        }) : -1;
+        let upcoming;
 
-        if (shuffleMode) {
-            upcoming = shuffleCopy(upcoming);
+        if (!shuffleMode && here >= 0) {
+            upcoming = list.slice(here + 1);
+        } else {
+
+            upcoming = list.filter(function (s) {
+                return !playedIds.has(s.song_id);
+            });
+
+            if (shuffleMode) {
+                upcoming = shuffleCopy(upcoming);
+            }
         }
 
         return played.concat(next, upcoming, last);
