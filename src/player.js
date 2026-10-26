@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.496";
+    const VERSION = "1.9.9.497";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25648,17 +25648,27 @@
         }, 40000);
     }
 
-    // What a hotspot command said, as the app tells it with each result
+    // What a hotspot command said, as the app tells it with each result.
+    // Android's own word on the hotspot changing, and a try that is to be
+    // made again, come the same way but are not the result, which follows.
+    // Android's word can come first now the running helper switches at once
     function hotspotResult(text) {
 
         if (!hotspotAutoFollowing) {
             return;
         }
 
+        const said = String(text);
+
+        if (/^Android says/.test(said) || /is tried again/.test(said) || /^the running helper did not answer/.test(said)
+            || /^starting the hotspot helper/.test(said) || /^The helper /.test(said)) {
+            return;
+        }
+
         hotspotAutoFollowing = false;
         clearTimeout(hotspotAutoTimer);
 
-        if (String(text).indexOf("Switched") === 0) {
+        if (said.indexOf("Switched") === 0 || /^the hotspot is (on|off) already$/.test(said)) {
             showToast(hotspotAutoWant === "on" ? "Hotspot turned on" : "Hotspot turned off", true);
         } else {
             showToast(String(text), false);
