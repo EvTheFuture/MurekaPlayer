@@ -576,6 +576,60 @@
         text-align: right;
     }
 
+    /* The badges and the status between the buttons, side by side, or the
+       status under the badges when there is too little room beside them to
+       read it. The marquee sets its alignment inline, so this one has to
+       win over it */
+    #midBar {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+    }
+
+    #midBar.statusBelow {
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 4px;
+    }
+
+    #midBar.statusBelow #status {
+        flex: 0 0 auto;
+        width: 100%;
+        text-align: left !important;
+        font-size: 0.85em;
+    }
+
+    #midBar.statusBelow #status.blank {
+        display: none;
+    }
+
+    /* Too narrow for the badges between the buttons, the buttons take less
+       room on each side of their icons */
+    #bottom.compact {
+        gap: 1vw;
+    }
+
+    #bottom.compact #midBar {
+        gap: 1vw;
+    }
+
+    #bottom.compact #sound button {
+        padding: 12px 12px;
+    }
+
+    #bottom.compact .chip {
+        padding: 14px 12px;
+    }
+
+    /* On a phone held upright the box steps aside, the badges go under the
+       title and the status over the cover as before */
+    html.phone #midBar {
+        display: contents;
+    }
+
     /* Whether the phone is online: red while it is not, green for a few
        seconds once it is back, or for as long as it is online */
     /* Signing in to the web view, when the phone has a password for it */
@@ -680,7 +734,7 @@
         cursor: pointer;
     }
 
-    /* In the accent colour, so the tick shows dark on cyan */
+    /* In the accent color, so the tick shows dark on cyan */
     .pwCheck input {
         width: 20px;
         height: 20px;
@@ -3028,7 +3082,7 @@
     }
 
     /* Every control of the settings as tall as the others: switches,
-       buttons, drop-downs and colour swatches */
+       buttons, drop-downs and color swatches */
     #panelBody {
         --pctl-h: var(--ctl-h);
     }
@@ -3178,7 +3232,7 @@
         flex: 1 1 12em;
     }
 
-    /* A colour from the phone's settings, a swatch over a chequer that
+    /* A color from the phone's settings, a swatch over a chequer that
        opens the picker, and its share beside it */
     .pColorWrap {
         display: inline-flex;
@@ -3209,7 +3263,7 @@
     }
 
     /* The share always as wide as 100 %, right aligned, and kept empty for
-       a solid colour, so every swatch in the settings lines up */
+       a solid color, so every swatch in the settings lines up */
     .pColorPct {
         flex: 0 0 auto;
         width: 4.2em;
@@ -3218,7 +3272,7 @@
         white-space: nowrap;
     }
 
-    /* The colour picker's sliders, the same in every browser */
+    /* The color picker's sliders, the same in every browser */
     input.mureka-range {
         -webkit-appearance: none;
         appearance: none;
@@ -4024,7 +4078,7 @@
         background: transparent;
     }
 
-    /* A song picked to share, lit with a bar of the accent colour */
+    /* A song picked to share, lit with a bar of the accent color */
     .row.picked {
         background: rgba(72, 225, 235, 0.16);
         box-shadow: inset 3px 0 0 var(--accent);
@@ -5030,7 +5084,7 @@
         cursor: pointer;
     }
 
-    /* In the accent colour when ticked, plain grey is hard to read */
+    /* In the accent color when ticked, plain grey is hard to read */
     .trimCheck input {
         width: 22px;
         height: 22px;
@@ -5148,15 +5202,17 @@
             <button id="soundCar" type="button" data-icon="browser" data-name="This browser" aria-label="Music in this browser" title="Music in this browser"></button>
             <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
         </div>
-        <span id="badges">
-            <span id="whoName"></span>
-            <span id="netBadge"></span>
-            <button id="heatBadge" type="button"></button>
-            <button id="batteryBadge" type="button"></button>
-            <button id="wgBadge" type="button"></button>
-            <button id="hotspotBadge" type="button"></button>
-        </span>
-        <div id="status" class="marquee"></div>
+        <div id="midBar">
+            <span id="badges">
+                <span id="whoName"></span>
+                <span id="netBadge"></span>
+                <button id="heatBadge" type="button"></button>
+                <button id="batteryBadge" type="button"></button>
+                <button id="wgBadge" type="button"></button>
+                <button id="hotspotBadge" type="button"></button>
+            </span>
+            <div id="status" class="marquee"></div>
+        </div>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
         <button class="chip iconOnly" id="actionsBtn" type="button" data-icon="menu" aria-label="Actions" title="Actions"></button>
         <button class="chip iconOnly" id="settingsBtn" type="button" data-icon="settings" aria-label="Settings" title="Settings"></button>
@@ -5568,7 +5624,7 @@
     window.addEventListener("orientationchange", applyPhoneLayout);
 
     // The icons, drawn like the phone player's, 24 units square with round
-    // strokes in the button's own colour. Each is a list of shapes
+    // strokes in the button's own color. Each is a list of shapes
     const ICONS = {
         settings: [
             ["circle", { cx: "12", cy: "12", r: "3" }],
@@ -6060,7 +6116,7 @@
     }
 
     // How the song's progress shows on the waveform: a bar over it, a bar
-    // behind it, the waveform itself coloured, or not at all
+    // behind it, the waveform itself colored, or not at all
     const PROGRESS_LOOKS = ["over", "under", "wave", "off"];
 
     function progressLook(v) {
@@ -6135,7 +6191,7 @@
         s.listSide = ["auto", "always", "never"].indexOf(look.listSide) !== -1 ? look.listSide
             : (raw.listSide === "always" || raw.listSide === "never" ? raw.listSide : "auto");
 
-        // The waveform's colours. A look kept before they could be set
+        // The waveform's colors. A look kept before they could be set
         // follows the phone
         for (const w of WAVE_SWATCHES) {
 
@@ -6299,18 +6355,18 @@
         relook();
     }
 
-    // The waveform's colours a browser can have of its own: the key in its
-    // look, the field in the phone's state, and the colour and share they
+    // The waveform's colors a browser can have of its own: the key in its
+    // look, the field in the phone's state, and the color and share they
     // come with, the same as the phone's
     const WAVE_SWATCHES = [
-        { label: "Colour when played", key: "wavePlayed", field: "wavePlayedFill", c: "#c8c8d0", a: 100 },
-        { label: "Colour still to play", key: "waveRest", field: "waveRestFill", c: "#666666", a: 100 },
-        { label: "Play head colour", key: "playHead", field: "playHeadFill", c: "#ffffff", a: 60 },
-        { label: "Progress colour up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
-        { label: "Progress colour past the play head", key: "progressAhead", field: "waveZoomProgressAhead", c: "#a8a8a8", a: 100 }
+        { label: "Color when played", key: "wavePlayed", field: "wavePlayedFill", c: "#c8c8d0", a: 100 },
+        { label: "Color still to play", key: "waveRest", field: "waveRestFill", c: "#666666", a: 100 },
+        { label: "Play head color", key: "playHead", field: "playHeadFill", c: "#ffffff", a: 60 },
+        { label: "Progress color up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
+        { label: "Progress color past the play head", key: "progressAhead", field: "waveZoomProgressAhead", c: "#c8c8d0", a: 100 }
     ];
 
-    // A colour and its share from the phone's rgba text, or the default
+    // A color and its share from the phone's rgba text, or the default
     function swatchFrom(text, def) {
 
         const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(String(text || "").trim());
@@ -6361,11 +6417,11 @@
         { label: "Heat badge shows", page: "Web view", key: "heatText", kind: "select", values: ["word", "both", "temp"] },
         { label: "Battery badge", page: "Web view", key: "batteryBadge", kind: "bool" },
         { label: "Battery badge shows", page: "Web view", key: "batteryText", kind: "select", values: ["icon", "percent"] },
-        { label: "Colour when played", page: "Web view", key: "wavePlayed", kind: "swatch" },
-        { label: "Colour still to play", page: "Web view", key: "waveRest", kind: "swatch" },
-        { label: "Play head colour", page: "Web view", key: "playHead", kind: "swatch" },
-        { label: "Progress colour up to the play head", page: "Web view", key: "progressFill", kind: "swatch" },
-        { label: "Progress colour past the play head", page: "Web view", key: "progressAhead", kind: "swatch" },
+        { label: "Color when played", page: "Web view", key: "wavePlayed", kind: "swatch" },
+        { label: "Color still to play", page: "Web view", key: "waveRest", kind: "swatch" },
+        { label: "Play head color", page: "Web view", key: "playHead", kind: "swatch" },
+        { label: "Progress color up to the play head", page: "Web view", key: "progressFill", kind: "swatch" },
+        { label: "Progress color past the play head", page: "Web view", key: "progressAhead", kind: "swatch" },
         { label: "Lyric size", page: "Web view", key: "size", kind: "step", step: 1, min: 10, max: 60 },
         { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
         { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
@@ -6629,13 +6685,13 @@
             localRow(row || below, def);
         }
 
-        // The waveform's colours put back as they came, here alone while
+        // The waveform's colors put back as they came, here alone while
         // this browser keeps its own
         if (local && page === "Web view") {
 
             for (const b of box.querySelectorAll("button")) {
 
-                if (b.textContent.trim() !== "Reset the waveform colours") {
+                if (b.textContent.trim() !== "Reset the waveform colors") {
                     continue;
                 }
 
@@ -6793,7 +6849,7 @@
             }, true);
         } else if (def.kind === "swatch") {
 
-            // This browser's colour on the swatch, the picker changing it
+            // This browser's color on the swatch, the picker changing it
             // here alone
             const sw = row.querySelector(".pColor");
             const w = WAVE_SWATCHES.find(function (x) {
@@ -7873,7 +7929,7 @@
 
             half.setAttribute("d", STAR_D);
 
-            // Colours go through style, attributes do not understand var()
+            // Colors go through style, attributes do not understand var()
             half.style.fill = "var(--gold)";
             half.style.stroke = "var(--gold)";
             half.setAttribute("stroke-width", "1.6");
@@ -8133,10 +8189,80 @@
 
     window.addEventListener("resize", function () {
 
+        placeStatus();
+
         for (const m of marquees) {
             m.check();
         }
     });
+
+    // Narrower than this beside the badges, the status line is too short to
+    // read and goes under the bar instead
+    const STATUS_MIN_PX = 240;
+
+    // The status beside the badges when there is room for it, else under
+    // them. The box's width does not depend on which, so the answer stays
+    function placeStatus() {
+
+        const box = $("midBar");
+        const badges = $("badges");
+
+        if (!box) {
+            return;
+        }
+
+        const bar = $("bottom");
+
+        if (isPhone()) {
+
+            box.classList.remove("statusBelow");
+            bar.classList.remove("compact");
+            return;
+        }
+
+        const shown = badges.parentNode === box && getComputedStyle(badges).display !== "none";
+        const badgesWide = shown ? badges.getBoundingClientRect().width : 0;
+
+        // The buttons narrower only when the badges would not fit between
+        // them otherwise. Measured at full size each time, so it does not
+        // flip back and forth
+        const wasCompact = bar.classList.contains("compact");
+
+        bar.classList.remove("compact");
+
+        const compact = box.clientWidth < badgesWide;
+
+        bar.classList.toggle("compact", compact);
+
+        if (compact !== wasCompact) {
+            box.classList.remove("statusBelow");
+        }
+
+        let used = 0;
+
+        if (shown) {
+            used = badgesWide + (parseFloat(getComputedStyle(box).columnGap) || 0);
+        }
+
+        const below = box.clientWidth - used < STATUS_MIN_PX;
+
+        if (box.classList.contains("statusBelow") !== below) {
+
+            box.classList.toggle("statusBelow", below);
+            statusLine.check();
+        }
+    }
+
+    // Badges coming and going change the room, as does the bar's width
+    if (typeof ResizeObserver === "function") {
+
+        const statusRoom = new ResizeObserver(function () {
+            placeStatus();
+        });
+
+        statusRoom.observe($("midBar"));
+        statusRoom.observe($("badges"));
+    }
 
     setInterval(function () {
 
@@ -9194,7 +9320,7 @@
 
             // The hotspot and heat badges go along, they share one group
             if (home === $("bottom")) {
-                home.insertBefore($("badges"), $("status"));
+                $("midBar").insertBefore($("badges"), $("status"));
             } else {
                 home.appendChild($("badges"));
             }
@@ -9517,7 +9643,7 @@
         syncSession();
     }
 
-    // The waveform bars, played part in the accent colour, redrawn only
+    // The waveform bars, played part in the accent color, redrawn only
     // when the played part, the view or the size moved on
     let waveShown = "";
 
@@ -9560,7 +9686,7 @@
     // in front of them how loud the song sounds, bright, a column per
     // screen pixel. start and span the part of the song in view, each
     // column keeping its place in the song as the view moves
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, colour) {
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, color) {
 
         const room = h - 1;
         const from0 = start || 0;
@@ -9582,9 +9708,9 @@
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
-            ctx.fillStyle = colour(played, x, "dim");
+            ctx.fillStyle = color(played, x, "dim");
             ctx.fillRect(x, (h - ph) / 2, 1, ph);
-            ctx.fillStyle = colour(played, x, "loud");
+            ctx.fillStyle = color(played, x, "loud");
             ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
     }
@@ -10105,7 +10231,7 @@
 
     // Zoomed in, the whole song as a thin progress line along the foot of
     // the waveform, the part played in played, a little lighter than the
-    // played waveform or as the waveform coloured by the progress is, and
+    // played waveform or as the waveform colored by the progress is, and
     // the rest dim. How far it is zoomed shows in the waveform
     function drawWaveOverview(ctx, w, h, frac, dpr, played) {
 
@@ -10123,7 +10249,7 @@
         return Math.max(1, Math.round(2 * dpr));
     }
 
-    // A thin play head across the waveform at x in its colour, down to the
+    // A thin play head across the waveform at x in its color, down to the
     // thin progress line when zoomed in and the full height when not
     function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
 
@@ -10135,12 +10261,12 @@
     }
 
     // How much darker the dim layer of our own waveform is than its bright
-    // layer, and Mureka's bars still to play than the colour set for them,
-    // so the waveform looks as it always did with the colours as they came
+    // layer, and Mureka's bars still to play than the color set for them,
+    // so the waveform looks as it always did with the colors as they came
     const WAVE_DIM_SHADE = 0.57;
     const WAVE_BAR_REST_SHADE = 0.83;
 
-    // The colour and share of an rgba() fill, to darken by hand
+    // The color and share of an rgba() fill, to darken by hand
     function rgbaParts(text) {
 
         const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(text || "");
@@ -10160,11 +10286,11 @@
         return "rgba(" + t.c.join(", ") + ", " + Math.round(t.a * k * 1000) / 1000 + ")";
     }
 
-    // The colours of the waveform for one drawing: played and still to play
-    // as set, and, coloured by the song's progress, up to the play head in
+    // The colors of the waveform for one drawing: played and still to play
+    // as set, and, colored by the song's progress, up to the play head in
     // fill and on to where the progress reaches in ahead, as the bar would
     // lie, each with its share. The painter takes whether a column is
-    // played, where it is and which layer: loud, dim or bar. Each colour is
+    // played, where it is and which layer: loud, dim or bar. Each color is
     // worked out once a drawing
     function wavePainter(w, frac, headX, played, rest, fill, ahead) {
 
@@ -10211,7 +10337,7 @@
 
     // Zoomed in, how far into the whole song it is, from the left edge and
     // the full height, as if the waveform were the song's progress bar. One
-    // colour over the played part, left of the play head at headX, and
+    // color over the played part, left of the play head at headX, and
     // another where it reaches past the play head
     function drawWaveProgress(ctx, w, h, frac, fill, ahead, headX) {
 
@@ -10231,7 +10357,7 @@
     // Mureka's waveform as bars, each the highest point of its slice. Each
     // bar keeps its place in the song, so zoomed in they slide along rather
     // than change height as the view moves
-    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, colour) {
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, color) {
 
         const pitch = barW + gap;
         const count = Math.max(1, Math.floor(w / pitch));
@@ -10249,7 +10375,7 @@
             const peak = waveSlice(data, from, Math.min(1, from + step));
             const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
 
-            ctx.fillStyle = colour(from + step / 2 <= frac, x, "bar");
+            ctx.fillStyle = color(from + step / 2 <= frac, x, "bar");
             ctx.fillRect(x, (h - bh) / 2, barW, bh);
         }
     }
@@ -10284,7 +10410,7 @@
         // on by a column or more
         const played = Math.round(frac / span * count);
         // The song's progress across the whole waveform, under it, over it or
-        // as the waveform's own colour, in the colours the phone has. Zoomed
+        // as the waveform's own color, in the colors the phone has. Zoomed
         // out it lies on the played part
         const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
@@ -10318,7 +10444,7 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        // The waveform in the colours set, and coloured by the progress when
+        // The waveform in the colors set, and colored by the progress when
         // that is the look, each layer keeping its shade
         const wave = look === "wave";
         const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
@@ -10341,12 +10467,12 @@
     }
 
     // The synced lyrics, rolling exactly like the phone's. Five rows, each
-    // with its own place, size, colour and opacity: half a line above that
+    // with its own place, size, color and opacity: half a line above that
     // has faded out, the line before, the line being sung, the line after,
     // and half a line below faded out. All rows share one line height, so
     // the gaps stay even whatever the sizes. When the song moves on a line,
     // every row takes the text of the row below and animates from that
-    // row's place, size, colour and opacity into its own, so a line grows
+    // row's place, size, color and opacity into its own, so a line grows
     // and brightens as it reaches the middle and shrinks and fades as it
     // leaves over the top, like text on a turning cylinder. A jump, a seek
     // or a new song just puts the rows in place. The sizes come from the
@@ -15431,10 +15557,10 @@
         return wrap;
     }
 
-    // A colour and how much of it shows, picked over the page: hue,
-    // saturation, lightness and opacity sliders, a few ready colours and a
+    // A color and how much of it shows, picked over the page: hue,
+    // saturation, lightness and opacity sliders, a few ready colors and a
     // swatch of the result over a chequer. Each change is handed to change
-    // at once, Cancel or a tap beside it hands back the colour it opened with
+    // at once, Cancel or a tap beside it hands back the color it opened with
     const PICK_SWATCHES = ["#ffffff", "#c8c8d0", "#48e1eb", "#7ee787", "#ffd166", "#ff9f43", "#ff6b9a", "#a78bfa"];
 
     function hexToHsl(hex) {
@@ -15493,8 +15619,8 @@
         const hsl = hexToHsl(color);
         let nowAlpha = alpha;
 
-        // A colour given as it is, the one opened with or a ready one, kept
-        // exactly until a colour slider moves
+        // A color given as it is, the one opened with or a ready one, kept
+        // exactly until a color slider moves
         let exact = color;
 
         const back = document.createElement("div");
@@ -15579,7 +15705,7 @@
             change(nowColor(), nowAlpha);
         };
 
-        // A ready colour sets the three colour sliders, the opacity stays
+        // A ready color sets the three color sliders, the opacity stays
         const setColor = function (hex) {
 
             const v = hexToHsl(hex);
@@ -15639,13 +15765,13 @@
         box.appendChild(swatches);
         box.appendChild(slider("h", "Hue", 359, "", hsl.h));
 
-        // The hue slider shows the colours it goes through
+        // The hue slider shows the colors it goes through
         sliders.h.input.style.setProperty("--mureka-track",
             "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)");
         box.appendChild(slider("s", "Saturation", 100, " %", hsl.s));
         box.appendChild(slider("l", "Lightness", 100, " %", hsl.l));
 
-        // A solid colour has no opacity to pick, it is always fully shown
+        // A solid color has no opacity to pick, it is always fully shown
         if (maxAlpha > 0) {
             box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
         } else {
@@ -15677,7 +15803,7 @@
         (document.fullscreenElement || document.body).appendChild(back);
     }
 
-    // A colour from the phone's settings: a swatch over a chequer and its
+    // A color from the phone's settings: a swatch over a chequer and its
     // share, a tap opens the picker here. Each change goes to the phone
     function panelColor(node) {
 
@@ -15688,13 +15814,13 @@
         let color = /^#[0-9a-f]{6}$/i.test(node.color || "") ? node.color : "#ffffff";
         let alpha = Number(node.alpha) || 0;
 
-        // A solid colour has no share to pick or show
+        // A solid color has no share to pick or show
         const max = node.max === 0 ? 0 : Number(node.max) || 100;
 
         wrap.className = "pColorWrap";
         swatch.type = "button";
         swatch.className = "pColor";
-        swatch.setAttribute("aria-label", "Pick the colour");
+        swatch.setAttribute("aria-label", "Pick the color");
         fillEl.className = "pColorFill";
         swatch.appendChild(fillEl);
         pct.className = "pText pColorPct";
@@ -15720,7 +15846,7 @@
 
         swatch.addEventListener("click", function () {
 
-            openColorPicker("Colour", color, alpha, max, function (c, a) {
+            openColorPicker("Color", color, alpha, max, function (c, a) {
 
                 color = c;
                 alpha = a;
@@ -15819,7 +15945,7 @@
             field.inputMode = node.inputMode;
         }
 
-        // A date or a colour is picked, not typed, and sent once it is
+        // A date or a color is picked, not typed, and sent once it is
         // picked. Sent while typing, a half written date would be taken as
         // none and clear the filter it belongs to
         if (node.type === "date" || node.type === "color") {
@@ -19236,7 +19362,7 @@
     }
 
     // The phone's note on something asked of Mureka, renaming, publishing,
-    // remixing, liking and the like, shown here once, in its colour. A note
+    // remixing, liking and the like, shown here once, in its color. A note
     // already there when the page opens is not shown again
     let toastSeen = null;
 
@@ -20692,7 +20818,7 @@
 
         // What changes the song on Mureka itself is in cyan, what takes it
         // away there, Unpublish and Delete on Mureka, in red. Remixing is a
-        // setting of the song, in the plain colour
+        // setting of the song, in the plain color
         if (m.mine) {
 
             box.appendChild(menuItem("pencil", "Rename", function () {
@@ -24550,6 +24676,11 @@
     // one step
     const TRIM_PINCH_STEP = 1.35;
 
+    // How far the close up's height can be magnified, so quiet clicks and
+    // crackles show, and how many pixels of an up or down drag double it
+    const TRIM_GAIN_MAX = 256;
+    const TRIM_GAIN_PX = 40;
+
     let trimCtx = null;
 
     // Set when the sound engine stopped moving, so the next play makes a
@@ -24895,6 +25026,34 @@
         zoomRow.appendChild(ui.zoomLabel);
         zoomRow.appendChild(ui.zoomInBtn);
 
+        // Gain, the close up's height magnified in doublings
+        const gainRow = document.createElement("div");
+
+        gainRow.className = "trimRow";
+        ui.gainLabel = document.createElement("div");
+        ui.gainLabel.className = "trimGrow trimZoomLabel";
+
+        const gainBy = function (step) {
+
+            if (!tr) {
+                return;
+            }
+
+            const at = Math.round(Math.log2(tr.waveGain));
+
+            trimSetGain(Math.pow(2, at + step));
+        };
+
+        ui.gainDownBtn = trimButton("Less gain", function () {
+            gainBy(-1);
+        });
+        ui.gainUpBtn = trimButton("More gain", function () {
+            gainBy(1);
+        });
+        gainRow.appendChild(ui.gainDownBtn);
+        gainRow.appendChild(ui.gainLabel);
+        gainRow.appendChild(ui.gainUpBtn);
+
         // Fine steps for the chosen end
         const nudgeRow = document.createElement("div");
 
@@ -24994,7 +25153,7 @@
         const hint = document.createElement("div");
 
         hint.className = "pText small";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. Dragging up or down in the close up, Shift with the wheel, or More gain and Less gain magnify its height, so quiet clicks show. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         box.appendChild(head);
         box.appendChild(ui.info);
@@ -25006,6 +25165,7 @@
         box.appendChild(ui.edgeRow);
         box.appendChild(ui.detail);
         box.appendChild(zoomRow);
+        box.appendChild(gainRow);
         box.appendChild(nudgeRow);
         box.appendChild(playRow);
         box.appendChild(ui.fadeRow);
@@ -25138,6 +25298,9 @@
             paused: null,
             busy: false,
             job: "",
+
+            // The close up's height magnified, the song itself is not changed
+            waveGain: 1,
             overviewPeaks: null,
             drag: null
         };
@@ -25735,7 +25898,7 @@
         return { lo: lo, hi: hi };
     }
 
-    // The colour of the wave at a time: lit inside the kept part, darker in
+    // The color of the wave at a time: lit inside the kept part, darker in
     // the second that fades out, grey outside
     function trimWaveColor(t) {
 
@@ -25752,10 +25915,16 @@
 
     // Draw columns of peaks, or a line through the samples once they are
     // further apart than a column
-    function trimDrawWave(g, w, h, from, to, peaks) {
+    function trimDrawWave(g, w, h, from, to, peaks, gain) {
 
         const mid = h / 2;
         const spanPerCol = (to - from) / w;
+        const k = mid * 0.95 * (gain || 1);
+
+        // A sample magnified past the edge is drawn at the edge
+        const y = function (v) {
+            return Math.max(0, Math.min(h, mid - v * k));
+        };
 
         if (spanPerCol * tr.rate < 1) {
 
@@ -25771,8 +25940,8 @@
 
                 g.strokeStyle = trimWaveColor(t0);
                 g.beginPath();
-                g.moveTo((t0 - from) / (to - from) * w, mid - tr.mono[i] * mid * 0.95);
-                g.lineTo((t1 - from) / (to - from) * w, mid - tr.mono[i + 1] * mid * 0.95);
+                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
+                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
                 g.stroke();
             }
 
@@ -25782,8 +25951,8 @@
         for (let c = 0; c < w; c++) {
 
             const t = from + (c + 0.5) * spanPerCol;
-            const top = mid - peaks.hi[c] * mid * 0.95;
-            const bottom = mid - peaks.lo[c] * mid * 0.95;
+            const top = y(peaks.hi[c]);
+            const bottom = y(peaks.lo[c]);
 
             g.fillStyle = trimWaveColor(t);
             g.fillRect(c, top, 1, Math.max(1, bottom - top));
@@ -25818,6 +25987,9 @@
         trimUi.pauseBtn.classList.toggle("playing", playing === "kept");
         trimUi.zoomOutBtn.disabled = tr.zoom <= 0;
         trimUi.zoomInBtn.disabled = tr.zoom >= TRIM_ZOOMS.length - 1;
+        trimUi.gainDownBtn.disabled = tr.waveGain <= 1;
+        trimUi.gainUpBtn.disabled = tr.waveGain >= TRIM_GAIN_MAX;
+        trimUi.gainLabel.textContent = trimGainText();
         trimUi.zoomLabel.textContent = TRIM_ZOOMS[tr.zoom] >= 1
             ? TRIM_ZOOMS[tr.zoom] + " s wide"
             : Math.round(TRIM_ZOOMS[tr.zoom] * 1000) + " ms wide";
@@ -25882,7 +26054,7 @@
         const cols = de.w;
         const peaks = (span / cols) * tr.rate >= 1 ? trimPeaks(from, to, cols) : null;
 
-        trimDrawWave(de.g, de.w, de.h, from, to, peaks);
+        trimDrawWave(de.g, de.w, de.h, from, to, peaks, tr.waveGain);
 
         trimLine(de.g, dx(tr.start), de.h, tr.edge === "start" ? "#fff" : "#ffd479", 2 * de.dpr);
         trimLine(de.g, dx(tr.end), de.h, tr.edge === "end" ? "#fff" : "#ffd479", 2 * de.dpr);
@@ -25899,6 +26071,32 @@
         de.g.fillText(trimTimeText(Math.max(0, from)), 4 * de.dpr, de.h - 3 * de.dpr);
         de.g.textAlign = "right";
         de.g.fillText(trimTimeText(Math.min(tr.duration, to)), de.w - 4 * de.dpr, de.h - 3 * de.dpr);
+
+        // The height magnified, shown while it is
+        if (tr.waveGain > 1.01) {
+
+            de.g.fillStyle = "#ffd479";
+            de.g.textBaseline = "top";
+            de.g.fillText(trimGainText(), de.w - 4 * de.dpr, 3 * de.dpr);
+        }
+    }
+
+    function trimGainText() {
+
+        const g = tr ? tr.waveGain : 1;
+
+        return "Gain " + (g < 10 ? g.toFixed(1) : String(Math.round(g))) + "\u00d7";
+    }
+
+    // Magnify the close up's height, kept between none and the most
+    function trimSetGain(g) {
+
+        if (!tr) {
+            return;
+        }
+
+        tr.waveGain = Math.max(1, Math.min(TRIM_GAIN_MAX, g));
+        trimPaint();
     }
 
     // Dragging and tapping on the two waveforms
@@ -25995,7 +26193,7 @@
                 return;
             }
 
-            tr.drag = { where: "detail", x: ev.clientX, from: tr[tr.edge], moved: false };
+            tr.drag = { where: "detail", x: ev.clientX, y: ev.clientY, from: tr[tr.edge], gain: tr.waveGain, moved: false, mode: "" };
             detail.setPointerCapture(ev.pointerId);
             ev.preventDefault();
         });
@@ -26008,14 +26206,22 @@
 
             const r = detail.getBoundingClientRect();
             const perPx = TRIM_ZOOMS[tr.zoom] / r.width;
+            const moveX = ev.clientX - tr.drag.x;
+            const moveY = ev.clientY - tr.drag.y;
 
-            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
+            // The first clear move decides: sideways moves the end, up or
+            // down magnifies the height
+            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > 4) {
+
                 tr.drag.moved = true;
+                tr.drag.mode = Math.abs(moveY) > Math.abs(moveX) ? "gain" : "edge";
             }
 
-            if (tr.drag.moved) {
+            if (tr.drag.mode === "gain") {
+                trimSetGain(tr.drag.gain * Math.pow(2, -moveY / TRIM_GAIN_PX));
+            } else if (tr.drag.mode === "edge") {
 
-                trimSetEdge(tr.edge, tr.drag.from + (ev.clientX - tr.drag.x) * perPx);
+                trimSetEdge(tr.edge, tr.drag.from + moveX * perPx);
                 trimPaint();
             }
         });
@@ -26032,8 +26238,12 @@
 
             if (drag.moved) {
 
-                tr.viewC = tr[tr.edge];
-                trimPaint();
+                if (drag.mode === "edge") {
+
+                    tr.viewC = tr[tr.edge];
+                    trimPaint();
+                }
+
                 return;
             }
 
@@ -26061,6 +26271,20 @@
             }
 
             ev.preventDefault();
+
+            // With Shift held the wheel magnifies the height, some browsers
+            // then turn the wheel sideways
+            if (ev.shiftKey) {
+
+                const d = ev.deltaY || ev.deltaX;
+
+                if (d) {
+                    trimSetGain(tr.waveGain * (d < 0 ? 2 : 0.5));
+                }
+
+                return;
+            }
+
             trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
         }, { passive: false });
 
@@ -26092,8 +26316,13 @@
 
             if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
 
-                trimSetEdge(tr.edge, tr.drag.from);
-                trimPaint();
+                if (tr.drag.mode === "gain") {
+                    trimSetGain(tr.drag.gain);
+                } else {
+
+                    trimSetEdge(tr.edge, tr.drag.from);
+                    trimPaint();
+                }
             }
 
             tr.drag = null;

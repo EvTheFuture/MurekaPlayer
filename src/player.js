@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.498";
+    const VERSION = "1.9.9.502";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -199,7 +199,7 @@
     // from it has never been rated, which is kept apart from zero stars
     const RATING_KEY = "mureka_rating_v1";
 
-    // Star colours, lit and unlit. An unrated song shows grey outlines, a
+    // Star colors, lit and unlit. An unrated song shows grey outlines, a
     // rated one gold outlines, so zero stars and not rated look different
     const STAR_GOLD = "#f5c518";
     const STAR_EMPTY = "#6a6a74";
@@ -334,15 +334,19 @@
     let settingsKeptAside = false;
     let settingsSaveFailed = false;
 
-    // The song's progress on the waveform: a colour as #rrggbb and how much
+    // The song's progress on the waveform: a color as #rrggbb and how much
     // it shows, in percent. One up to the play head, and one past it
     const PROGRESS_COLOR = "#47e0eb";
     const PROGRESS_ALPHA_DEFAULT = 100;
-    const PROGRESS_AHEAD_COLOR = "#a8a8a8";
+
+    // The progress past the play head once had a grey of its own. Now it
+    // comes with the played part's color, and the old grey kept as a value
+    // counts as never changed
+    const PROGRESS_AHEAD_OLD = "#a8a8a8";
     const PROGRESS_AHEAD_ALPHA = 100;
     const PROGRESS_ALPHA_MAX = 100;
 
-    // The waveform's own colours, played and still to play. The web view's
+    // The waveform's own colors, played and still to play. The web view's
     // played part is a light grey unless changed
     const WAVE_PLAYED_COLOR = "#488084";
     const WEB_WAVE_PLAYED_COLOR = "#c8c8d0";
@@ -352,11 +356,11 @@
     const WEB_LYRIC_SHIFT = 60;
     const WAVE_REST_COLOR = "#666666";
 
-    // The play head's colour and share as they came
+    // The play head's color and share as they came
     const PLAY_HEAD_COLOR = "#ffffff";
     const PLAY_HEAD_ALPHA = 60;
 
-    // The waveform's colours as they came, by their settings: the colour,
+    // The waveform's colors as they came, by their settings: the color,
     // its share and their values, for the mobile player. The web view's
     // have web before them
     const WAVE_COLOR_DEFAULTS = [
@@ -364,11 +368,19 @@
         ["waveRestColor", "waveRestAlpha", WAVE_REST_COLOR, 100],
         ["playHeadColor", "playHeadAlpha", PLAY_HEAD_COLOR, PLAY_HEAD_ALPHA],
         ["waveZoomProgressColor", "waveZoomProgressAlpha", PROGRESS_COLOR, PROGRESS_ALPHA_DEFAULT],
-        ["waveZoomProgressAheadColor", "waveZoomProgressAheadAlpha", PROGRESS_AHEAD_COLOR, PROGRESS_AHEAD_ALPHA]
+        ["waveZoomProgressAheadColor", "waveZoomProgressAheadAlpha", WAVE_PLAYED_COLOR, PROGRESS_AHEAD_ALPHA]
     ];
 
     function progressColor(v, fallback) {
         return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : (fallback || "#ffffff");
+    }
+
+    // The progress past the play head, the old grey taken as unchanged
+    function aheadColor(v, fallback) {
+
+        const c = progressColor(v, fallback);
+
+        return c === PROGRESS_AHEAD_OLD ? fallback : c;
     }
 
     function progressAlpha(v, fallback) {
@@ -387,36 +399,36 @@
     const PROGRESS_LOOK_CHOICES = [
         { value: "over", label: "Bar over the waveform" },
         { value: "under", label: "Bar behind the waveform" },
-        { value: "wave", label: "Colour the waveform" },
+        { value: "wave", label: "Color the waveform" },
         { value: "off", label: "Off" }
     ];
     const PROGRESS_LOOK_HINT = "How far into the whole song it is, from the waveform's left edge: a bar over the "
-        + "waveform across its full height, the same bar behind it so the waveform's colours stay as they are, or the "
-        + "waveform itself coloured instead. Zoomed out it lies on the played part. Zoomed in it still shows the whole "
+        + "waveform across its full height, the same bar behind it so the waveform's colors stay as they are, or the "
+        + "waveform itself colored instead. Zoomed out it lies on the played part. Zoomed in it still shows the whole "
         + "song, and its edge can be dragged at any height to move through it, the waveform following, as on the thin "
         + "line at its foot.";
-    const PROGRESS_COLOR_HINT = "The colour of the progress on the played part, left of the play head, and how much "
-        + "of it shows. Colouring the waveform, the waveform takes it there instead of its own colours, and the thin "
+    const PROGRESS_COLOR_HINT = "The color of the progress on the played part, left of the play head, and how much "
+        + "of it shows. Coloring the waveform, the waveform takes it there instead of its own colors, and the thin "
         + "line at its foot takes it too.";
-    const WAVE_COLOR_HINT = "The waveform's colour left of the play head, and how much of it shows. The quieter "
+    const WAVE_COLOR_HINT = "The waveform's color left of the play head, and how much of it shows. The quieter "
         + "outer part of the waveform from the song takes it darker, and the thin line at its foot zoomed in takes it "
         + "too.";
-    const WAVE_REST_HINT = "The waveform's colour right of the play head, still to play, and how much of it shows.";
+    const WAVE_REST_HINT = "The waveform's color right of the play head, still to play, and how much of it shows.";
     const PLAY_HEAD_HINT = "The thin line across the waveform where the song is, and how much of it shows.";
-    const PROGRESS_AHEAD_HINT = "The colour of the progress where it reaches past the play head, on the part still "
+    const PROGRESS_AHEAD_HINT = "The color of the progress where it reaches past the play head, on the part still "
         + "to come in view.";
 
     // How the song's progress shows on the waveform: a bar over it, a bar
-    // behind it, the waveform itself coloured, or not at all. Kept under a
+    // behind it, the waveform itself colored, or not at all. Kept under a
     // name of its own since 1.9.9.343, so a look saved while a bar was what
-    // came is not kept, and the waveform coloured is what comes
+    // came is not kept, and the waveform colored is what comes
     const PROGRESS_LOOKS = ["over", "under", "wave", "off"];
 
     function progressLook(v) {
         return PROGRESS_LOOKS.indexOf(v) !== -1 ? v : "wave";
     }
 
-    // The colour and its share as one fill for the canvas
+    // The color and its share as one fill for the canvas
     function progressFill(color, alpha) {
 
         const c = progressColor(color);
@@ -994,11 +1006,11 @@
     // How many rows go in at a time
     const RENDER_CHUNK = 120;
 
-    // The panel colour, used by the panel, the backdrop behind it and the page
+    // The panel color, used by the panel, the backdrop behind it and the page
     // backgrounds it takes over, so the three can never drift apart
     const PANEL_BACKGROUND = "#1d1d22";
 
-    // Thin strips in the panel colour pinned to the bottom and top edges
+    // Thin strips in the panel color pinned to the bottom and top edges
     // while the panel is open on a phone, see updateEdgeStrip
     let edgeStripEl = null;
     let topStripEl = null;
@@ -1009,15 +1021,15 @@
     const TOP_STRIP_ROOM = "13px";
     const TOP_STRIP_GAP = "2px";
 
-    // Safari 26 on iOS ignores theme-color. It takes the colour of its bottom
+    // Safari 26 on iOS ignores theme-color. It takes the color of its bottom
     // toolbar from the first fixed or sticky element it finds 8 pixels inside
-    // the bottom edge, and uses that element's plain background colour. It
+    // the bottom edge, and uses that element's plain background color. It
     // skips elements 10 pixels tall or less, nearly transparent ones and
     // hidden ones, and without a match it falls back to the page background,
     // which mureka.ai sets to black. The panel alone did not qualify, so this
-    // strip gives Safari a fixed element with a plain colour at the edge.
+    // strip gives Safari a fixed element with a plain color at the edge.
     // It sits above the panel so it is the one found, is 11 pixels tall so
-    // it is not skipped, and never takes a tap. The top bar is coloured the
+    // it is not skipped, and never takes a tap. The top bar is colored the
     // same way from the top edge, which shows once a banner of Safari's own
     // above the page has gone, so a strip goes there too. Folded, the site
     // shows its own bars, so they go
@@ -1088,7 +1100,7 @@
     // The padding the phone layout gives the panel
     const PANEL_PAD_MOBILE = "8px";
 
-    // What the page looked like before the panel took its colours over, so it
+    // What the page looked like before the panel took its colors over, so it
     // can be handed back untouched the moment the panel folds away
     let savedRootBackground = null;
     let savedThemeColors = null;
@@ -1097,7 +1109,7 @@
     // Safari paints the strip around the page, and tints its own toolbars,
     // from the page rather than from anything drawn on top of it. No element
     // can reach those areas, which is why a sheet behind the panel leaves them
-    // black. The page itself is asked for the panel colour instead, through
+    // black. The page itself is asked for the panel color instead, through
     // the root background for the strip and through theme-color for the bars,
     // and both are put back exactly as they were when the panel folds away
     function paintPageBehind(active) {
@@ -1116,7 +1128,7 @@
             savedRootBackground = null;
         }
 
-        // A site may ship several of these, one per colour scheme, and the one
+        // A site may ship several of these, one per color scheme, and the one
         // that applies is whichever matches, so they all have to be handled
         let metas = Array.prototype.slice.call(
             document.querySelectorAll('meta[name="theme-color"]'));
@@ -2987,8 +2999,8 @@
             webWaveZoomProgressColor: PROGRESS_COLOR,
             waveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
             webWaveZoomProgressAlpha: PROGRESS_ALPHA_DEFAULT,
-            waveZoomProgressAheadColor: PROGRESS_AHEAD_COLOR,
-            webWaveZoomProgressAheadColor: PROGRESS_AHEAD_COLOR,
+            waveZoomProgressAheadColor: WAVE_PLAYED_COLOR,
+            webWaveZoomProgressAheadColor: WEB_WAVE_PLAYED_COLOR,
             waveZoomProgressAheadAlpha: PROGRESS_AHEAD_ALPHA,
             webWaveZoomProgressAheadAlpha: PROGRESS_AHEAD_ALPHA,
             webOnlineBadge: "fade",
@@ -3234,8 +3246,8 @@
                     webWaveZoomProgressColor: progressColor(parsed.webWaveZoomProgressColor, PROGRESS_COLOR),
                     waveZoomProgressAlpha: progressAlpha(parsed.waveZoomProgressAlpha),
                     webWaveZoomProgressAlpha: progressAlpha(parsed.webWaveZoomProgressAlpha),
-                    waveZoomProgressAheadColor: progressColor(parsed.waveZoomProgressAheadColor, PROGRESS_AHEAD_COLOR),
-                    webWaveZoomProgressAheadColor: progressColor(parsed.webWaveZoomProgressAheadColor, PROGRESS_AHEAD_COLOR),
+                    waveZoomProgressAheadColor: aheadColor(parsed.waveZoomProgressAheadColor, WAVE_PLAYED_COLOR),
+                    webWaveZoomProgressAheadColor: aheadColor(parsed.webWaveZoomProgressAheadColor, WEB_WAVE_PLAYED_COLOR),
                     waveZoomProgressAheadAlpha: progressAlpha(parsed.waveZoomProgressAheadAlpha, PROGRESS_AHEAD_ALPHA),
                     webWaveZoomProgressAheadAlpha: progressAlpha(parsed.webWaveZoomProgressAheadAlpha, PROGRESS_AHEAD_ALPHA),
                     webOnlineBadge: parsed.webOnlineBadge === "always" ? "always" : "fade",
@@ -4720,7 +4732,7 @@
         const r = currentSong ? getRating(currentSong) : null;
 
         // Filled once the song is rated, plain before. On the filled button
-        // the star takes the button's own dark colour, gold would not show
+        // the star takes the button's own dark color, gold would not show
         // on the accent
         paintCtrl(rateCtrlBtn, r === null ? "plain" : "fill");
 
@@ -23687,7 +23699,7 @@
 
     // Zoomed in, the whole song as a thin progress line along the foot of
     // the waveform, the part played in played, a little lighter than the
-    // played waveform or as the waveform coloured by the progress is, and
+    // played waveform or as the waveform colored by the progress is, and
     // the rest dim. How far it is zoomed shows in the waveform
     function drawWaveOverview(ctx, w, h, frac, dpr, played) {
 
@@ -23705,7 +23717,7 @@
         return Math.max(1, Math.round(2 * dpr));
     }
 
-    // A thin play head across the waveform at x in its colour, down to the
+    // A thin play head across the waveform at x in its color, down to the
     // thin progress line when zoomed in and the full height when not
     function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
 
@@ -23717,12 +23729,12 @@
     }
 
     // How much darker the dim layer of our own waveform is than its bright
-    // layer, and Mureka's bars still to play than the colour set for them,
-    // so the waveform looks as it always did with the colours as they came
+    // layer, and Mureka's bars still to play than the color set for them,
+    // so the waveform looks as it always did with the colors as they came
     const WAVE_DIM_SHADE = 0.57;
     const WAVE_BAR_REST_SHADE = 0.83;
 
-    // The colour and share of an rgba() fill, to darken by hand
+    // The color and share of an rgba() fill, to darken by hand
     function rgbaParts(text) {
 
         const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(text || "");
@@ -23742,11 +23754,11 @@
         return "rgba(" + t.c.join(", ") + ", " + Math.round(t.a * k * 1000) / 1000 + ")";
     }
 
-    // The colours of the waveform for one drawing: played and still to play
-    // as set, and, coloured by the song's progress, up to the play head in
+    // The colors of the waveform for one drawing: played and still to play
+    // as set, and, colored by the song's progress, up to the play head in
     // fill and on to where the progress reaches in ahead, as the bar would
     // lie, each with its share. The painter takes whether a column is
-    // played, where it is and which layer: loud, dim or bar. Each colour is
+    // played, where it is and which layer: loud, dim or bar. Each color is
     // worked out once a drawing
     function wavePainter(w, frac, headX, played, rest, fill, ahead) {
 
@@ -23793,7 +23805,7 @@
 
     // Zoomed in, how far into the whole song it is, from the left edge and
     // the full height, as if the waveform were the song's progress bar. One
-    // colour over the played part, left of the play head at headX, and
+    // color over the played part, left of the play head at headX, and
     // another where it reaches past the play head
     function drawWaveProgress(ctx, w, h, frac, fill, ahead, headX) {
 
@@ -23813,7 +23825,7 @@
     // Mureka's waveform as bars, each the highest point of its slice. Each
     // bar keeps its place in the song, so zoomed in they slide along rather
     // than change height as the view moves
-    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, colour) {
+    function drawWaveBars(ctx, w, h, data, frac, start, span, barW, gap, dpr, color) {
 
         const pitch = barW + gap;
         const count = Math.max(1, Math.floor(w / pitch));
@@ -23831,7 +23843,7 @@
             const peak = waveSlice(data, from, Math.min(1, from + step));
             const bh = Math.max(2 * dpr, peak * (h - 2 * dpr));
 
-            ctx.fillStyle = colour(from + step / 2 <= frac, x, "bar");
+            ctx.fillStyle = color(from + step / 2 <= frac, x, "bar");
             ctx.fillRect(x, (h - bh) / 2, barW, bh);
         }
     }
@@ -23882,7 +23894,7 @@
         const start = waveZoomer ? waveZoomer.start(frac) : 0;
 
         // The song's progress across the whole waveform, under it, over it or
-        // as the waveform's own colour. Zoomed out it lies on the played part
+        // as the waveform's own color. Zoomed out it lies on the played part
         const look = progressLook(settings.waveProgressLook);
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
@@ -23895,7 +23907,7 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        // The waveform in the colours set, and coloured by the progress when
+        // The waveform in the colors set, and colored by the progress when
         // that is the look, each layer keeping its shade
         const wave = look === "wave";
         const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
@@ -23952,9 +23964,9 @@
 
     // Our own waveform: the peaks dim, and in front of them how loud the
     // song sounds, bright, a column per screen pixel. Played in the accent
-    // colour, the rest grey. start and span the part of the song in view,
+    // color, the rest grey. start and span the part of the song in view,
     // each column keeping its place in the song as the view moves
-    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, colour) {
+    function drawLayeredWave(ctx, w, h, peaks, loud, frac, start, span, color) {
 
         const room = h - 1;
         const from0 = start || 0;
@@ -23976,9 +23988,9 @@
             const ph = Math.max(1, p * room);
             const lh = Math.max(1, l * room);
 
-            ctx.fillStyle = colour(played, x, "dim");
+            ctx.fillStyle = color(played, x, "dim");
             ctx.fillRect(x, (h - ph) / 2, 1, ph);
-            ctx.fillStyle = colour(played, x, "loud");
+            ctx.fillStyle = color(played, x, "loud");
             ctx.fillRect(x, (h - lh) / 2, 1, lh);
         }
     }
@@ -28115,7 +28127,7 @@
             }
         } else if (cmd === "hcolor") {
 
-            // A colour picked in the web view, for a swatch in the settings
+            // A color picked in the web view, for a swatch in the settings
             const el = arg ? hostElement(arg.id) : null;
 
             if (el && typeof el.__setColor === "function") {
@@ -29330,7 +29342,7 @@
             // with the backdrop pseudo element, which defaults to black. That
             // is the bar above and below in fullscreen, and styling it is the
             // only thing that reaches it. The fullscreen element itself gets
-            // the same colour, for the same reason
+            // the same color, for the same reason
             "::backdrop{background:" + PANEL_BACKGROUND + "}"
             + ":fullscreen{background:" + PANEL_BACKGROUND + "}"
             + ":-webkit-full-screen{background:" + PANEL_BACKGROUND + "}"
@@ -29351,7 +29363,7 @@
             + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
             + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
             + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:#48e1eb}"
-            // The colour picker's sliders, drawn by the player, so the page's
+            // The color picker's sliders, drawn by the player, so the page's
             // own look for fields and Safari's plain one do not show
             + "input.mureka-range{-webkit-appearance:none !important;appearance:none !important;background:transparent !important;"
             + "border:none !important;box-shadow:none !important;padding:0 !important;margin:0 !important;height:32px !important}"
@@ -29722,7 +29734,7 @@
         toTopBtn.addEventListener("click", scrollListEdge);
 
         // Above it, the way back to the playing song, a target in the
-        // accent colour on the panel's dark
+        // accent color on the panel's dark
         locateBtn = document.createElement("button");
         locateBtn.type = "button";
         locateBtn.setAttribute("aria-label", "Show the playing song");
@@ -29818,7 +29830,7 @@
         panel.appendChild(bodyEl);
         buildResizeHandles(panel);
 
-        // A sheet in the panel colour directly behind the panel, for phones
+        // A sheet in the panel color directly behind the panel, for phones
         // On iOS the whole page rubber bands when a drag runs past its end,
         // and fixed elements travel with it, so for a moment the panel slides
         // and whatever the site paints shows through at the edge it leaves.
@@ -31345,7 +31357,7 @@
         // asked for
         paintPageBehind(!minimized);
 
-        // Safari's bottom toolbar follows the panel colour while it is open
+        // Safari's bottom toolbar follows the panel color while it is open
         updateEdgeStrip(!minimized);
 
         // The art height may have changed, re-seat the coverflow strip
@@ -31982,7 +31994,7 @@
 
     // Transport icons, drawn as solid shapes rather than taken from the font.
     // The Unicode media characters are emoji on most phones, so they arrive in
-    // the vendor colours and at the vendor weight, which is why the row looked
+    // the vendor colors and at the vendor weight, which is why the row looked
     // different on every device. These are filled with currentColor instead, so
     // they follow the button like every other icon here
     function makeFilledIcon(shapes, size) {
@@ -32487,7 +32499,7 @@
         paintSelBar();
     }
 
-    // A picked row is lit, with a bar of the accent colour at its start
+    // A picked row is lit, with a bar of the accent color at its start
     function paintRowSelected(row, on) {
 
         if (!row) {
@@ -33874,10 +33886,10 @@
         return row;
     }
 
-    // A colour and how much of it shows, picked over the page: hue,
-    // saturation, lightness and opacity sliders, a few ready colours and a
+    // A color and how much of it shows, picked over the page: hue,
+    // saturation, lightness and opacity sliders, a few ready colors and a
     // swatch of the result over a chequer. Each change is handed to change
-    // at once, Cancel or a tap beside it hands back the colour it opened with
+    // at once, Cancel or a tap beside it hands back the color it opened with
     const PICK_SWATCHES = ["#ffffff", "#c8c8d0", "#48e1eb", "#7ee787", "#ffd166", "#ff9f43", "#ff6b9a", "#a78bfa"];
 
     function hexToHsl(hex) {
@@ -33936,8 +33948,8 @@
         const hsl = hexToHsl(color);
         let nowAlpha = alpha;
 
-        // A colour given as it is, the one opened with or a ready one, kept
-        // exactly until a colour slider moves
+        // A color given as it is, the one opened with or a ready one, kept
+        // exactly until a color slider moves
         let exact = color;
 
         const back = document.createElement("div");
@@ -34022,7 +34034,7 @@
             change(nowColor(), nowAlpha);
         };
 
-        // A ready colour sets the three colour sliders, the opacity stays
+        // A ready color sets the three color sliders, the opacity stays
         const setColor = function (hex) {
 
             const v = hexToHsl(hex);
@@ -34082,13 +34094,13 @@
         box.appendChild(swatches);
         box.appendChild(slider("h", "Hue", 359, "", hsl.h));
 
-        // The hue slider shows the colours it goes through
+        // The hue slider shows the colors it goes through
         sliders.h.input.style.setProperty("--mureka-track",
             "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)");
         box.appendChild(slider("s", "Saturation", 100, " %", hsl.s));
         box.appendChild(slider("l", "Lightness", 100, " %", hsl.l));
 
-        // A solid colour has no opacity to pick, it is always fully shown
+        // A solid color has no opacity to pick, it is always fully shown
         if (maxAlpha > 0) {
             box.appendChild(slider("a", "Opacity", maxAlpha, " %", alpha));
         } else {
@@ -34120,10 +34132,10 @@
         (document.fullscreenElement || document.body).appendChild(back);
     }
 
-    // A colour with how much of it shows: a swatch of the two together, a
+    // A color with how much of it shows: a swatch of the two together, a
     // tap on it opens the picker, and the share beside it. The web view
-    // reads the colour from the swatch and opens a picker of its own.
-    // Without getAlpha it is a solid colour, set gets the colour alone
+    // reads the color from the swatch and opens a picker of its own.
+    // Without getAlpha it is a solid color, set gets the color alone
     function makeColorRow(label, getColor, getAlpha, set) {
 
         const solid = typeof getAlpha !== "function";
@@ -34138,7 +34150,7 @@
         name.textContent = label;
         name.style.cssText = "flex:1;min-width:0";
         swatch.type = "button";
-        swatch.setAttribute("aria-label", "Pick the colour");
+        swatch.setAttribute("aria-label", "Pick the color");
         swatch.style.cssText = "flex:0 0 auto;width:64px;height:30px;box-sizing:border-box;border-radius:6px;border:1px solid #555;padding:0;"
             + "cursor:pointer;position:relative;overflow:hidden;background-color:#1d1d22;"
             + "background-image:linear-gradient(45deg,#444 25%,transparent 25%,transparent 75%,#444 75%),"
@@ -34214,8 +34226,8 @@
         el.style.display = show ? el.__shownAs : "none";
     }
 
-    // A button that puts the waveform's colours back as they came, and the
-    // waveform coloured as the way the song's progress shows. prefix is ""
+    // A button that puts the waveform's colors back as they came, and the
+    // waveform colored as the way the song's progress shows. prefix is ""
     // for the mobile player's and "web" for the web view's, rows the rows
     // to show again and changed what runs after
     function makeWaveColorReset(prefix, rows, changed) {
@@ -34226,14 +34238,17 @@
         };
 
         row.style.cssText = "display:flex";
-        row.appendChild(makeButton("Reset the waveform colours", "#444", "#fff", function (ev) {
+        row.appendChild(makeButton("Reset the waveform colors", "#444", "#fff", function (ev) {
 
             buttonDone(ev.currentTarget, "Reset", true);
 
             for (const d of WAVE_COLOR_DEFAULTS) {
 
-                // The web view's played part has a colour of its own
-                settings[key(d[0])] = prefix === "web" && d[0] === "waveColor" ? WEB_WAVE_PLAYED_COLOR : d[2];
+                // The web view's played part, and the progress past the
+                // play head that matches it, have a color of their own
+                const webPlayed = d[0] === "waveColor" || d[0] === "waveZoomProgressAheadColor";
+
+                settings[key(d[0])] = prefix === "web" && webPlayed ? WEB_WAVE_PLAYED_COLOR : d[2];
                 settings[key(d[1])] = d[3];
             }
 
@@ -35769,7 +35784,7 @@
                 function () { return settings[keys.text]; },
                 function (v) { settings[keys.text] = v; changed(); });
 
-            const colorRow = makeColorRow("Screen off mark colour",
+            const colorRow = makeColorRow("Screen off mark color",
                 function () { return settings[keys.color]; },
                 null,
                 function (v) { settings[keys.color] = v; changed(); });
@@ -36130,7 +36145,7 @@
         }
 
 
-        const waveColorRow = makeColorRow("Colour when played",
+        const waveColorRow = makeColorRow("Color when played",
             function () { return settings.waveColor; },
             function () { return settings.waveAlpha; },
             function (color, alpha) {
@@ -36140,7 +36155,7 @@
                 drawWave();
             });
 
-        const waveRestColorRow = makeColorRow("Colour still to play",
+        const waveRestColorRow = makeColorRow("Color still to play",
             function () { return settings.waveRestColor; },
             function () { return settings.waveRestAlpha; },
             function (color, alpha) {
@@ -36150,7 +36165,7 @@
                 drawWave();
             });
 
-        const playHeadColorRow = makeColorRow("Play head colour",
+        const playHeadColorRow = makeColorRow("Play head color",
             function () { return settings.playHeadColor; },
             function () { return settings.playHeadAlpha; },
             function (color, alpha) {
@@ -36189,7 +36204,7 @@
                 paintMobileWave();
             });
 
-        const waveProgressColorRow = makeColorRow("Progress colour up to the play head",
+        const waveProgressColorRow = makeColorRow("Progress color up to the play head",
             function () { return settings.waveZoomProgressColor; },
             function () { return settings.waveZoomProgressAlpha; },
             function (color, alpha) {
@@ -36199,7 +36214,7 @@
                 drawWave();
             });
 
-        const waveProgressAheadRow = makeColorRow("Progress colour past the play head",
+        const waveProgressAheadRow = makeColorRow("Progress color past the play head",
             function () { return settings.waveZoomProgressAheadColor; },
             function () { return settings.waveZoomProgressAheadAlpha; },
             function (color, alpha) {
@@ -36211,11 +36226,11 @@
 
 
         // The waveform: whether it shows and where it comes from, how it
-        // zooms, its colours, then how the song's progress shows on it and
-        // in which colours. Without the waveform the rest is hidden, and
-        // without the progress on it so are its colours
+        // zooms, its colors, then how the song's progress shows on it and
+        // in which colors. Without the waveform the rest is hidden, and
+        // without the progress on it so are its colors
         const mobileWave = [
-            withHint(waveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colours. Until a song is cached it shows Mureka's. The web view has its own choice."),
+            withHint(waveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colors. Until a song is cached it shows Mureka's. The web view has its own choice."),
             withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."),
             withHint(waveColorRow, WAVE_COLOR_HINT),
             withHint(waveRestColorRow, WAVE_REST_HINT),
@@ -36981,7 +36996,7 @@
             });
 
 
-            const webWaveColorRow = makeColorRow("Colour when played",
+            const webWaveColorRow = makeColorRow("Color when played",
                 function () { return settings.webWaveColor; },
                 function () { return settings.webWaveAlpha; },
                 function (color, alpha) {
@@ -36991,7 +37006,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveRestColorRow = makeColorRow("Colour still to play",
+            const webWaveRestColorRow = makeColorRow("Color still to play",
                 function () { return settings.webWaveRestColor; },
                 function () { return settings.webWaveRestAlpha; },
                 function (color, alpha) {
@@ -37001,7 +37016,7 @@
                     publishHostSoon();
                 });
 
-            const webPlayHeadColorRow = makeColorRow("Play head colour",
+            const webPlayHeadColorRow = makeColorRow("Play head color",
                 function () { return settings.webPlayHeadColor; },
                 function () { return settings.webPlayHeadAlpha; },
                 function (color, alpha) {
@@ -37029,7 +37044,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveProgressColorRow = makeColorRow("Progress colour up to the play head",
+            const webWaveProgressColorRow = makeColorRow("Progress color up to the play head",
                 function () { return settings.webWaveZoomProgressColor; },
                 function () { return settings.webWaveZoomProgressAlpha; },
                 function (color, alpha) {
@@ -37039,7 +37054,7 @@
                     publishHostSoon();
                 });
 
-            const webWaveProgressAheadRow = makeColorRow("Progress colour past the play head",
+            const webWaveProgressAheadRow = makeColorRow("Progress color past the play head",
                 function () { return settings.webWaveZoomProgressAheadColor; },
                 function () { return settings.webWaveZoomProgressAheadAlpha; },
                 function (color, alpha) {
@@ -37083,8 +37098,8 @@
             webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
 
             // The waveform: whether it shows and where it comes from, how it
-            // zooms, its colours, then how the song's progress shows on it and
-            // in which colours
+            // zooms, its colors, then how the song's progress shows on it and
+            // in which colors
             const webWaveReset = makeWaveColorReset("web", [webWaveColorRow, webWaveRestColorRow, webPlayHeadColorRow,
                 webWaveProgressRow, webWaveProgressColorRow, webWaveProgressAheadRow], publishHostSoon);
 
@@ -37137,7 +37152,7 @@
             webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
             webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
             webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
-            webPage.appendChild(withHint(heatTextRow, "The word, the word and the battery's temperature, or the temperature alone. The colour follows the limits below either way."));
+            webPage.appendChild(withHint(heatTextRow, "The word, the word and the battery's temperature, or the temperature alone. The color follows the limits below either way."));
             webPage.appendChild(heatWarmRow);
             webPage.appendChild(heatHotRow);
             webPage.appendChild(heatVeryHotRow);
@@ -40237,7 +40252,7 @@
             });
 
             // Ringed rather than filled, so it stands apart from the others,
-            // in a colour of its own when given one
+            // in a color of its own when given one
             if (opt.ring) {
 
                 const ring = opt.color || "#48e1eb";
@@ -40373,7 +40388,7 @@
             });
 
             // Ringed rather than filled, so it stands apart from the others,
-            // in a colour of its own when given one
+            // in a color of its own when given one
             if (opt.ring) {
 
                 const ring = opt.color || "#48e1eb";
@@ -42480,6 +42495,11 @@
     // one step
     const TRIM_PINCH_STEP = 1.35;
 
+    // How far the close up's height can be magnified, so quiet clicks and
+    // crackles show, and how many pixels of an up or down drag double it
+    const TRIM_GAIN_MAX = 256;
+    const TRIM_GAIN_PX = 40;
+
     let trimEl = null;
     let trimToken = 0;
     let trimCtx = null;
@@ -42903,6 +42923,34 @@
         ui.zoomOutBtn = zoomOut;
         ui.zoomInBtn = zoomIn;
 
+        // Gain, the close up's height magnified in doublings
+        const gainRow = document.createElement("div");
+
+        gainRow.style.cssText = "display:flex;gap:6px;align-items:center";
+        ui.gainLabel = document.createElement("span");
+        ui.gainLabel.style.cssText = "flex:1;text-align:center;font-size:13px;font-variant-numeric:tabular-nums";
+
+        const gainBy = function (step) {
+
+            if (!tr) {
+                return;
+            }
+
+            const at = Math.round(Math.log2(tr.waveGain));
+
+            trimSetGain(Math.pow(2, at + step));
+        };
+
+        ui.gainDownBtn = makeButton("Less gain", "#333", "#fff", function () {
+            gainBy(-1);
+        });
+        ui.gainUpBtn = makeButton("More gain", "#333", "#fff", function () {
+            gainBy(1);
+        });
+        gainRow.appendChild(ui.gainDownBtn);
+        gainRow.appendChild(ui.gainLabel);
+        gainRow.appendChild(ui.gainUpBtn);
+
         // Fine steps for the chosen end
         const nudgeRow = document.createElement("div");
 
@@ -43043,7 +43091,7 @@
         const hint = document.createElement("div");
 
         hint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
-        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
+        hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. Dragging up or down in the close up, Shift with the wheel, or More gain and Less gain magnify its height, so quiet clicks show. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         trimEl.appendChild(head);
         trimEl.appendChild(ui.info);
@@ -43054,6 +43102,7 @@
         trimEl.appendChild(ui.edgeRow);
         trimEl.appendChild(ui.detail);
         trimEl.appendChild(zoomRow);
+        trimEl.appendChild(gainRow);
         trimEl.appendChild(nudgeRow);
         trimEl.appendChild(playRow);
         trimEl.appendChild(ui.fadeRow);
@@ -43250,6 +43299,9 @@
             paused: null,
             busy: false,
             gain: null,
+
+            // The close up's height magnified, the song itself is not changed
+            waveGain: 1,
             overviewPeaks: null,
             drag: null
         };
@@ -43856,7 +43908,7 @@
         return { lo: lo, hi: hi };
     }
 
-    // The colour of the wave at a time: lit inside the kept part, darker in
+    // The color of the wave at a time: lit inside the kept part, darker in
     // the second that fades out, grey outside
     function trimWaveColor(t) {
 
@@ -43873,10 +43925,16 @@
 
     // Draw columns of peaks, or a line through the samples once they are
     // further apart than a column
-    function trimDrawWave(g, w, h, from, to, peaks) {
+    function trimDrawWave(g, w, h, from, to, peaks, gain) {
 
         const mid = h / 2;
         const spanPerCol = (to - from) / w;
+        const k = mid * 0.95 * (gain || 1);
+
+        // A sample magnified past the edge is drawn at the edge
+        const y = function (v) {
+            return Math.max(0, Math.min(h, mid - v * k));
+        };
 
         if (spanPerCol * tr.rate < 1) {
 
@@ -43893,8 +43951,8 @@
 
                 g.strokeStyle = trimWaveColor(t0);
                 g.beginPath();
-                g.moveTo((t0 - from) / (to - from) * w, mid - tr.mono[i] * mid * 0.95);
-                g.lineTo((t1 - from) / (to - from) * w, mid - tr.mono[i + 1] * mid * 0.95);
+                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
+                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
                 g.stroke();
             }
 
@@ -43904,8 +43962,8 @@
         for (let c = 0; c < w; c++) {
 
             const t = from + (c + 0.5) * spanPerCol;
-            const top = mid - peaks.hi[c] * mid * 0.95;
-            const bottom = mid - peaks.lo[c] * mid * 0.95;
+            const top = y(peaks.hi[c]);
+            const bottom = y(peaks.lo[c]);
 
             g.fillStyle = trimWaveColor(t);
             g.fillRect(c, top, 1, Math.max(1, bottom - top));
@@ -43942,6 +44000,11 @@
         trimUi.zoomOutBtn.style.opacity = tr.zoom <= 0 ? "0.5" : "1";
         trimUi.zoomInBtn.disabled = tr.zoom >= TRIM_ZOOMS.length - 1;
         trimUi.zoomInBtn.style.opacity = tr.zoom >= TRIM_ZOOMS.length - 1 ? "0.5" : "1";
+        trimUi.gainDownBtn.disabled = tr.waveGain <= 1;
+        trimUi.gainDownBtn.style.opacity = tr.waveGain <= 1 ? "0.5" : "1";
+        trimUi.gainUpBtn.disabled = tr.waveGain >= TRIM_GAIN_MAX;
+        trimUi.gainUpBtn.style.opacity = tr.waveGain >= TRIM_GAIN_MAX ? "0.5" : "1";
+        trimUi.gainLabel.textContent = trimGainText();
         trimUi.zoomLabel.textContent = TRIM_ZOOMS[tr.zoom] >= 1
             ? TRIM_ZOOMS[tr.zoom] + " s wide"
             : Math.round(TRIM_ZOOMS[tr.zoom] * 1000) + " ms wide";
@@ -44006,7 +44069,7 @@
         const cols = de.w;
         const peaks = (span / cols) * tr.rate >= 1 ? trimPeaks(from, to, cols) : null;
 
-        trimDrawWave(de.g, de.w, de.h, from, to, peaks);
+        trimDrawWave(de.g, de.w, de.h, from, to, peaks, tr.waveGain);
 
         trimLine(de.g, dx(tr.start), de.h, tr.edge === "start" ? "#fff" : "#ffd479", 2 * de.dpr);
         trimLine(de.g, dx(tr.end), de.h, tr.edge === "end" ? "#fff" : "#ffd479", 2 * de.dpr);
@@ -44023,6 +44086,32 @@
         de.g.fillText(trimTimeText(Math.max(0, from)), 4 * de.dpr, de.h - 3 * de.dpr);
         de.g.textAlign = "right";
         de.g.fillText(trimTimeText(Math.min(tr.duration, to)), de.w - 4 * de.dpr, de.h - 3 * de.dpr);
+
+        // The height magnified, shown while it is
+        if (tr.waveGain > 1.01) {
+
+            de.g.fillStyle = "#ffd479";
+            de.g.textBaseline = "top";
+            de.g.fillText(trimGainText(), de.w - 4 * de.dpr, 3 * de.dpr);
+        }
+    }
+
+    function trimGainText() {
+
+        const g = tr ? tr.waveGain : 1;
+
+        return "Gain " + (g < 10 ? g.toFixed(1) : String(Math.round(g))) + "\u00d7";
+    }
+
+    // Magnify the close up's height, kept between none and the most
+    function trimSetGain(g) {
+
+        if (!tr) {
+            return;
+        }
+
+        tr.waveGain = Math.max(1, Math.min(TRIM_GAIN_MAX, g));
+        trimPaint();
     }
 
     // Dragging and tapping on the two waveforms
@@ -44120,7 +44209,7 @@
                 return;
             }
 
-            tr.drag = { where: "detail", x: ev.clientX, from: tr[tr.edge], moved: false };
+            tr.drag = { where: "detail", x: ev.clientX, y: ev.clientY, from: tr[tr.edge], gain: tr.waveGain, moved: false, mode: "" };
             detail.setPointerCapture(ev.pointerId);
             ev.preventDefault();
         });
@@ -44133,14 +44222,22 @@
 
             const r = detail.getBoundingClientRect();
             const perPx = TRIM_ZOOMS[tr.zoom] / r.width;
+            const moveX = ev.clientX - tr.drag.x;
+            const moveY = ev.clientY - tr.drag.y;
 
-            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
+            // The first clear move decides: sideways moves the end, up or
+            // down magnifies the height
+            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > 4) {
+
                 tr.drag.moved = true;
+                tr.drag.mode = Math.abs(moveY) > Math.abs(moveX) ? "gain" : "edge";
             }
 
-            if (tr.drag.moved) {
+            if (tr.drag.mode === "gain") {
+                trimSetGain(tr.drag.gain * Math.pow(2, -moveY / TRIM_GAIN_PX));
+            } else if (tr.drag.mode === "edge") {
 
-                trimSetEdge(tr.edge, tr.drag.from + (ev.clientX - tr.drag.x) * perPx);
+                trimSetEdge(tr.edge, tr.drag.from + moveX * perPx);
                 trimPaint();
             }
         });
@@ -44157,8 +44254,12 @@
 
             if (drag.moved) {
 
-                tr.viewC = tr[tr.edge];
-                trimPaint();
+                if (drag.mode === "edge") {
+
+                    tr.viewC = tr[tr.edge];
+                    trimPaint();
+                }
+
                 return;
             }
 
@@ -44186,6 +44287,20 @@
             }
 
             ev.preventDefault();
+
+            // With Shift held the wheel magnifies the height, some browsers
+            // then turn the wheel sideways
+            if (ev.shiftKey) {
+
+                const d = ev.deltaY || ev.deltaX;
+
+                if (d) {
+                    trimSetGain(tr.waveGain * (d < 0 ? 2 : 0.5));
+                }
+
+                return;
+            }
+
             trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
         }, { passive: false });
 
@@ -44217,8 +44332,13 @@
 
             if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
 
-                trimSetEdge(tr.edge, tr.drag.from);
-                trimPaint();
+                if (tr.drag.mode === "gain") {
+                    trimSetGain(tr.drag.gain);
+                } else {
+
+                    trimSetEdge(tr.edge, tr.drag.from);
+                    trimPaint();
+                }
             }
 
             tr.drag = null;
@@ -47200,7 +47320,7 @@
         // library is theirs. What changes the song on Mureka itself is in
         // cyan, as in the web view, what takes it away there, Unpublish and
         // Delete on Mureka, in red. Remixing is a setting of the song, in the
-        // plain colour
+        // plain color
         if (mine) {
 
             menuGroup();

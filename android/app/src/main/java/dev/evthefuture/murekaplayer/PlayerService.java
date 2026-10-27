@@ -1029,7 +1029,7 @@ public class PlayerService extends Service implements Hub.Listener {
         return "";
     }
 
-    // A dark square with a loading ring, the player's colours. Plainly not
+    // A dark square with a loading ring, the player's colors. Plainly not
     // a song's cover, and a picture of its own for the head unit
     private Bitmap loadingArt() {
 

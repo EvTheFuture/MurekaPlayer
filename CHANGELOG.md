@@ -340,12 +340,12 @@ the new settings layout and a number of smaller improvements.
   in a dropdown. Songs is left out, the list is always there.
 - The screen goes off by itself after a while untouched while music
   plays. It has its own screen off settings under Web view, apart from the
-  mobile player's: on or off, after how long, and the mark with its colour,
+  mobile player's: on or off, after how long, and the mark with its color,
   size and how often it moves.
 - **Settings for this browser**, at the top of the settings, lets one
   browser keep its own look. The settings it covers are marked with a dot
   where they always are, all under Web view, the order of the buttons
-  and the waveform's colours included. While it is on, a change
+  and the waveform's colors included. While it is on, a change
   made in that browser applies there only, and the phone and other
   browsers keep theirs. Off by default: switched on, the settings are kept
   in that browser only, never sent anywhere, and switching it off deletes
@@ -374,7 +374,7 @@ the new settings layout and a number of smaller improvements.
 - **Drop-downs for every choice.** A setting with more than on and off is
   a drop-down beside its name, in place of a row of buttons or a button
   that changed its word on each tap, in the web view's copy of the settings
-  too. Every switch, button, drop-down and colour swatch in the settings has
+  too. Every switch, button, drop-down and color swatch in the settings has
   the same height. A setting's control sits at the right of its name, and
   the explanation runs on under the control once past it. A choice too long
   for a narrow screen fades out at its end in the web view.
@@ -439,6 +439,11 @@ the new settings layout and a number of smaller improvements.
   charges and a plug while plugged in but not charging. Pointing at it or
   a tap tells the percent and how it charges, and it can show the percent
   beside it. Each browser may show it or not.
+- **Status under the badges when it is narrow.** With too little room
+  beside the badges to read the status, on a phone held sideways for one,
+  the status moves under the badges, two rows between the buttons. When
+  the badges would not fit between the buttons, the buttons take less room
+  on each side of their icons.
 - **A host pinged through WireGuard.** Under Connections, a host on the far
   side of the tunnel, the WireGuard server's inside address say, is pinged
   every 20 seconds unless set otherwise while WireGuard holds the tunnel,
@@ -750,6 +755,11 @@ the new settings layout and a number of smaller improvements.
   instead.
 - **Trimmer keeps its zoom**: the close up opens as wide as it was left
   last time, on the phone and in each browser with the web view.
+- **Trimmer gain**: the close up's height can be magnified up to 256 times,
+  so quiet clicks and crackles near the end show. Drag up or down in the
+  close up, use Shift with the wheel, or press More gain and Less gain.
+  The gain shows in the close up's corner. Only the drawing changes, not
+  the song or what is heard.
 - **Download** in the song menu asks for the file name first, filled in
   with the song's title followed by its id in brackets, ready to change.
   Where the browser can hand files to other apps, on a phone for one,
@@ -826,16 +836,16 @@ the new settings layout and a number of smaller improvements.
   in the background and puts the dots right when it is done.
 - **Waveform from**, under Mobile player: Mureka's, as before, or **From
   the song**, worked out from the song itself once it is cached, far more
-  detailed and in the same colours: the peaks dim, and in front of them
+  detailed and in the same colors: the peaks dim, and in front of them
   how loud the song sounds, bright. It is worked out once and kept, and
   Mureka's shows until the song is cached. The web view has the same
   choice of its own, under Web view.
-- **Colour when played**, **Colour still to play** and **Play head colour**
+- **Color when played**, **Color still to play** and **Play head color**
   for the waveform, under Mobile player and Web view, Waveform, each with
   how much of it shows, picked over the settings. The quieter outer part of
   the waveform from the song takes them darker. The play head shows on the
-  waveform zoomed out too. **Reset the waveform colours** puts all of the
-  waveform's colours back as they came, and the waveform coloured as the way
+  waveform zoomed out too. **Reset the waveform colors** puts all of the
+  waveform's colors back as they came, and the waveform colored as the way
   the song's progress shows.
 - **Zoom into the waveform**, in the player and the web views: pinch, the
   mouse wheel over it, or a press held still a moment and then slid up zooms
@@ -847,15 +857,16 @@ the new settings layout and a number of smaller improvements.
   zoomed out. From the waveform's left edge it also shows how far into the
   whole song it is, and that edge can be dragged at any height to move
   through the whole song, the waveform following, the play head coming first
-  when the two are close. It has one colour on the played part, left of the
+  when the two are close. It has one color on the played part, left of the
   play head, and another where it reaches past it. **Song's progress on the
   waveform** picks how: a bar over the waveform, a bar behind it, the
-  waveform itself coloured, the thin line at its foot then in the same
-  colour, or off, the waveform coloured as it comes. Zoomed out it lies on
-  the played part, in the same colour. **Progress colour up to the play
-  head** and **Progress colour past the play head**, each with how much of
-  it shows, are picked over the settings. All under Mobile player and Web
-  view, Waveform, the look also for each browser on its own.
+  waveform itself colored, the thin line at its foot then in the same
+  color, or off, the waveform colored as it comes. Zoomed out it lies on
+  the played part, in the same color. **Progress color up to the play
+  head** and **Progress color past the play head**, each with how much of
+  it shows, are picked over the settings. The progress past the play head
+  comes in the same color as Color when played. All under Mobile player and
+  Web view, Waveform, the look also for each browser on its own.
   Dragging past two thirds of the way to an edge scrolls the waveform that
   way, faster the nearer the edge. **Remember the waveform zoom level**, under
   Mobile player and Web view, keeps the zoom for the next time the player
