@@ -6099,9 +6099,9 @@
             controls: Array.isArray(s.controls) ? s.controls.slice() : null,
             size: s.lyricLayout && typeof s.lyricLayout.size === "number" ? s.lyricLayout.size : 26,
             sidePct: s.lyricLayout && typeof s.lyricLayout.side === "number" ? Math.round(s.lyricLayout.side * 100) : 80,
-            linePct: s.lyricLayout && typeof s.lyricLayout.line === "number" ? Math.round(s.lyricLayout.line * 100) : 150,
+            linePct: s.lyricLayout && typeof s.lyricLayout.line === "number" ? Math.round(s.lyricLayout.line * 100) : 160,
             sideShift: s.lyricLayout && typeof s.lyricLayout.sideShift === "number" ? s.lyricLayout.sideShift : 0,
-            shift: s.lyricLayout && typeof s.lyricLayout.shift === "number" ? s.lyricLayout.shift : 0
+            shift: s.lyricLayout && typeof s.lyricLayout.shift === "number" ? s.lyricLayout.shift : 60
         });
     }
 
@@ -6303,7 +6303,7 @@
     // look, the field in the phone's state, and the colour and share they
     // come with, the same as the phone's
     const WAVE_SWATCHES = [
-        { label: "Colour when played", key: "wavePlayed", field: "wavePlayedFill", c: "#488084", a: 100 },
+        { label: "Colour when played", key: "wavePlayed", field: "wavePlayedFill", c: "#c8c8d0", a: 100 },
         { label: "Colour still to play", key: "waveRest", field: "waveRestFill", c: "#666666", a: 100 },
         { label: "Play head colour", key: "playHead", field: "playHeadFill", c: "#ffffff", a: 60 },
         { label: "Progress colour up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
@@ -10514,9 +10514,9 @@
         return {
             size: Math.round((typeof l.size === "number" ? l.size : 26) * scale),
             side: typeof l.side === "number" ? l.side : 0.8,
-            line: typeof l.line === "number" ? l.line : 1.5,
+            line: typeof l.line === "number" ? l.line : 1.6,
             sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale),
-            shift: Math.round((typeof l.shift === "number" ? l.shift : 0) * scale)
+            shift: Math.round((typeof l.shift === "number" ? l.shift : 60) * scale)
         };
     }
 

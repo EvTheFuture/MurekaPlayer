@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.497";
+    const VERSION = "1.9.9.498";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -342,8 +342,14 @@
     const PROGRESS_AHEAD_ALPHA = 100;
     const PROGRESS_ALPHA_MAX = 100;
 
-    // The waveform's own colours, played and still to play
+    // The waveform's own colours, played and still to play. The web view's
+    // played part is a light grey unless changed
     const WAVE_PLAYED_COLOR = "#488084";
+    const WEB_WAVE_PLAYED_COLOR = "#c8c8d0";
+
+    // The web view's lyric line spacing and position unless changed
+    const WEB_LYRIC_LINE = 1.6;
+    const WEB_LYRIC_SHIFT = 60;
     const WAVE_REST_COLOR = "#666666";
 
     // The play head's colour and share as they came
@@ -2966,7 +2972,7 @@
             waveProgressLook: "wave",
             webWaveProgressLook: "wave",
             waveColor: WAVE_PLAYED_COLOR,
-            webWaveColor: WAVE_PLAYED_COLOR,
+            webWaveColor: WEB_WAVE_PLAYED_COLOR,
             waveAlpha: 100,
             webWaveAlpha: 100,
             waveRestColor: WAVE_REST_COLOR,
@@ -3011,9 +3017,9 @@
             webVolumeUnit: "percent",
             webLyricSize: 26,
             webLyricSideMul: 0,
-            webLyricLineMul: 0,
+            webLyricLineMul: WEB_LYRIC_LINE,
             webLyricSideShift: null,
-            webLyricShift: 0,
+            webLyricShift: WEB_LYRIC_SHIFT,
             metaTitle: "${title}",
             metaSubtitle: "${genre}",
             debugOverlay: false,
@@ -3213,7 +3219,7 @@
                     waveProgressLook: progressLook(parsed.waveProgressLook),
                     webWaveProgressLook: progressLook(parsed.webWaveProgressLook),
                     waveColor: progressColor(parsed.waveColor, WAVE_PLAYED_COLOR),
-                    webWaveColor: progressColor(parsed.webWaveColor, WAVE_PLAYED_COLOR),
+                    webWaveColor: progressColor(parsed.webWaveColor, WEB_WAVE_PLAYED_COLOR),
                     waveAlpha: progressAlpha(parsed.waveAlpha, 100),
                     webWaveAlpha: progressAlpha(parsed.webWaveAlpha, 100),
                     waveRestColor: progressColor(parsed.waveRestColor, WAVE_REST_COLOR),
@@ -3269,11 +3275,11 @@
                     webLyricSideMul: (typeof parsed.webLyricSideMul === "number" && parsed.webLyricSideMul >= 0.5 && parsed.webLyricSideMul <= 1)
                         ? parsed.webLyricSideMul : 0,
                     webLyricLineMul: (typeof parsed.webLyricLineMul === "number" && parsed.webLyricLineMul >= 1 && parsed.webLyricLineMul <= 2)
-                        ? parsed.webLyricLineMul : 0,
+                        ? parsed.webLyricLineMul : WEB_LYRIC_LINE,
                     webLyricSideShift: (typeof parsed.webLyricSideShift === "number" && parsed.webLyricSideShift >= -40 && parsed.webLyricSideShift <= 40)
                         ? parsed.webLyricSideShift : null,
                     webLyricShift: (typeof parsed.webLyricShift === "number" && parsed.webLyricShift >= -80 && parsed.webLyricShift <= 80)
-                        ? parsed.webLyricShift : 0,
+                        ? parsed.webLyricShift : WEB_LYRIC_SHIFT,
                     metaTitle: typeof parsed.metaTitle === "string"
                         ? parsed.metaTitle
                         : "${title}",
@@ -34226,7 +34232,8 @@
 
             for (const d of WAVE_COLOR_DEFAULTS) {
 
-                settings[key(d[0])] = d[2];
+                // The web view's played part has a colour of its own
+                settings[key(d[0])] = prefix === "web" && d[0] === "waveColor" ? WEB_WAVE_PLAYED_COLOR : d[2];
                 settings[key(d[1])] = d[3];
             }
 
