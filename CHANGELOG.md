@@ -24,6 +24,10 @@ In development.
   above as well, the custom color and the similar songs too. A trimmed
   song goes into its original's set. Sets travel with song tweaks, in a
   file and in a copied line, where Song sets is a choice of its own.
+  A Sets button for the button row, on the phone and in the web view,
+  switches the sets off and on again: off, every song stands on its own
+  in the list and the queue, and the sets are kept as they are. A pressed
+  song keeps its set's color.
 - **Notes.** A song's menu has Note, a few words kept with the song, shown
   in Information and in the menu, on the phone and in the web view. A trimmed song takes its original's
   note. Notes travel with song tweaks.

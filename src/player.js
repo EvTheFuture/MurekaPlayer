@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.10";
+    const VERSION = "2.0.0.11";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1277,6 +1277,7 @@
 
     // The vocals, instrumental or all cycle when placed in the transport row
     let vocalsCtrlBtn = null;
+    let setsCtrlBtn = null;
 
     // Long press state for rearranging the transport row in the player itself.
     // A short press must still work the button, so nothing moves until the
@@ -2937,6 +2938,7 @@
             repeat: "all",
             prefetchCount: PREFETCH_DEFAULT,
             vocalFilter: "all",
+            setsOn: true,
             view: "mureka",
             reportPlays: true,
             artOverlayMode: "all",
@@ -3152,6 +3154,7 @@
                     repeat: repeat,
                     prefetchCount: prefetchCount,
                     vocalFilter: vocalFilter,
+                    setsOn: parsed.setsOn !== false,
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
                     copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
@@ -5537,7 +5540,7 @@
     // version was made. A set with one song in the list stays as it is
     function groupSets(list) {
 
-        if (songSetOf.size === 0) {
+        if (songSetOf.size === 0 || !setsShown()) {
             return list;
         }
 
@@ -5616,6 +5619,43 @@
 
     // How many sets the menu offers to add to at once, the latest used
     const SET_PICK_MAX = 6;
+
+    // Sets kept together in the list and the queue, or the songs as if
+    // there were none. Switched by the Sets button, the sets stay as they are
+    function setsShown() {
+        return settings.setsOn !== false;
+    }
+
+    function toggleSetsShown(on) {
+
+        settings.setsOn = typeof on === "boolean" ? on : !setsShown();
+        saveSettings();
+        songDataStamp++;
+        updateSetsCtrlButton();
+        setsChanged();
+        showToast(setsShown() ? "Song sets on" : "Song sets off", true);
+    }
+
+    // On is filled, off is plain
+    function updateSetsCtrlButton() {
+
+        if (!setsCtrlBtn) {
+            return;
+        }
+
+        setsCtrlBtn.title = setsShown() ? "Song sets on, tap to show the songs one by one" : "Song sets off, tap to keep them together";
+        paintCtrl(setsCtrlBtn, setsShown() ? "fill" : "plain");
+        updateControlLabels();
+    }
+
+    function iconSets() {
+
+        return makeSvgIcon([
+            ["polygon", { points: "12 2 2 7 12 12 22 7 12 2" }],
+            ["polyline", { points: "2 17 12 22 22 17" }],
+            ["polyline", { points: "2 12 12 17 22 12" }]
+        ]);
+    }
 
     // What can be done with a song's set, or which set to put it in
     function askSetFor(song) {
@@ -7243,7 +7283,7 @@
     // folded set, under the first
     function foldSets(entries, opened, playingId) {
 
-        if (songSetOf.size === 0) {
+        if (songSetOf.size === 0 || !setsShown()) {
             return entries;
         }
 
@@ -20522,7 +20562,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets"];
 
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
@@ -20553,6 +20593,10 @@
 
         if (name === "rate") {
             return makeStarSvg(20);
+        }
+
+        if (name === "sets") {
+            return iconSets();
         }
 
         // The web view's two list buttons, drawn as they are there
@@ -26796,6 +26840,7 @@
             } : null,
             version: VERSION,
             shuffle: shuffleMode,
+            setsOn: setsShown(),
             repeat: repeatMode,
             carAudio: hostCarAudio,
             fade: hostFade,
@@ -28451,7 +28496,7 @@
 
         return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
             creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
-            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : ""].join("|");
+            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : "", setsShown() ? "sets" : ""].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -30008,6 +30053,8 @@
             const value = arg === "vocal" || arg === "instrumental" ? arg : "all";
 
             setVocalFilter(value);
+        } else if (cmd === "sets") {
+            toggleSetsShown(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "feed") {
 
             // A way of showing asked for by name, or the next one in turn
@@ -31114,6 +31161,11 @@
             showRatingPopup(rateCtrlBtn, currentSong);
         });
 
+        // Song sets kept together, or every song on its own
+        setsCtrlBtn = makeIconButton(iconSets(), "Song sets on / off", function () {
+            toggleSetsShown();
+        });
+
         controlButtons = {
             prev: makeIconButton(iconPrev(), "Previous", function () {
                 switchSong("tap", playPrev);
@@ -31127,7 +31179,8 @@
             repeat: repeatBtn,
             published: publishedCtrlBtn,
             vocals: vocalsCtrlBtn,
-            rate: rateCtrlBtn
+            rate: rateCtrlBtn,
+            sets: setsCtrlBtn
         };
 
         updateFeedButton();
@@ -31135,6 +31188,7 @@
         applyControlOrder();
         enableControlRowDragging();
         updateVocalsCtrlButton();
+        updateSetsCtrlButton();
         updateRateButton();
 
         playerEl.appendChild(artBox);
@@ -34913,7 +34967,7 @@
         const mark = function (row, below) {
 
             if (marked) {
-                marked.style.boxShadow = "";
+                marked.style.boxShadow = marked.dataset.setBar || "";
             }
 
             marked = row;
@@ -35003,7 +35057,7 @@
             item.style.transform = "";
             item.style.zIndex = "";
             item.style.background = "";
-            item.style.boxShadow = "";
+            item.style.boxShadow = item.dataset.setBar || "";
             grip.style.cursor = "grab";
 
             if (to !== from) {
@@ -49284,7 +49338,7 @@
     function markPressedRow(el) {
 
         if (pressedRowEl && pressedRowEl !== el) {
-            pressedRowEl.style.boxShadow = "";
+            pressedRowEl.style.boxShadow = pressedRowEl.dataset.setBar || "";
         }
 
         pressedRowEl = el;
@@ -49292,7 +49346,7 @@
         if (el) {
 
             el.style.borderRadius = "6px";
-            el.style.boxShadow = "inset 0 0 0 999px rgba(72, 225, 235, 0.16)";
+            el.style.boxShadow = (el.dataset.setBar ? el.dataset.setBar + ", " : "") + "inset 0 0 0 999px rgba(72, 225, 235, 0.16)";
         }
     }
 
