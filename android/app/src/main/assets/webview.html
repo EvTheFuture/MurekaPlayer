@@ -1989,22 +1989,28 @@
 
     /* A song the filters leave out, greyed, its fold's count and arrow
        kept plain to read and to tap */
-    .row.greyed:not(.playing) > :not(.foldChip) {
+    .row.greyed:not(.playing) > :not(.hasFold) {
         opacity: 0.45;
     }
 
+    /* In the number column of a fold's first song, so the title keeps its
+       room, the same width whatever the count */
     .foldChip {
-        flex: 0 0 auto;
+        display: inline-block;
+        box-sizing: border-box;
+        width: 3em;
+        padding: 0.5em 0;
         border: 1px solid var(--line);
         border-radius: 999px;
         background: var(--card);
         color: var(--text);
         font: inherit;
-        font-size: 0.7em;
+        font-size: 0.8em;
         line-height: 1;
-        padding: 0.45em 0.8em;
+        text-align: center;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+        overflow: hidden;
         cursor: pointer;
     }
 
@@ -13271,7 +13277,7 @@
 
         const n = chip.dataset.count;
 
-        chip.textContent = (open ? "\u25BE " : "\u25B8 ") + n;
+        chip.textContent = (open ? "\u25BE" : "\u25B8") + n;
         chip.title = open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them";
         chip.setAttribute("aria-label", chip.title);
         chip.dataset.open = open ? "1" : "";
@@ -13361,8 +13367,14 @@
             row.classList.add("playing");
         };
 
-        openChoice("\"" + song.title + "\" is left out by the filters", [
+        const choices = [
             { icon: "play", label: "Play now", fn: function () {
+
+                closeSongMenu();
+                send("playNow", song.id);
+                mark();
+            } },
+            { icon: "queue", label: "Play from here now", fn: function () {
 
                 closeSongMenu();
                 send("playId", song.id);
@@ -13372,19 +13384,33 @@
 
                 closeSongMenu();
                 send("playNext", song.id);
-            } },
-            { icon: "queue", label: "Play all up to the next match", fn: function () {
-
-                closeSongMenu();
-                send("playRun", song.id);
-                mark();
-            } },
-            { icon: "listPlusTop", label: "Play all after this song", fn: function () {
-
-                closeSongMenu();
-                send("playNextRun", song.id);
             } }
-        ]);
+        ];
+
+        // The ones taking all only when more left out songs follow it
+        if (song.more > 0) {
+            choices.push.apply(choices, [
+                { icon: "play", label: "Play all now", fn: function () {
+
+                    closeSongMenu();
+                    send("playRunNow", song.id);
+                    mark();
+                } },
+                { icon: "queue", label: "Play all from here now", fn: function () {
+
+                    closeSongMenu();
+                    send("playRun", song.id);
+                    mark();
+                } },
+                { icon: "listPlusTop", label: "Play all after this song", fn: function () {
+
+                    closeSongMenu();
+                    send("playNextRun", song.id);
+                } }
+            ]);
+        }
+
+        openChoice("\"" + song.title + "\" is left out by the filters", choices);
     }
 
     function makeRow(song, place) {
@@ -13414,9 +13440,15 @@
         songLine(song, row);
 
         // The first of several songs in a row the filters leave out: how
-        // many, this one counted, and an arrow to open or fold them
+        // many, this one counted, and an arrow to open or fold them, in
+        // place of its number
         if (song.run > 1) {
-            row.insertBefore(foldChip(song, row), row.querySelector(".rowTitle").nextSibling);
+
+            const num = row.querySelector(".rowNum");
+
+            num.textContent = "";
+            num.classList.add("hasFold");
+            num.appendChild(foldChip(song, row));
         }
 
         // Its place in the list as shown, sorted and searched, counting only

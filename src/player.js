@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.5";
+    const VERSION = "2.0.0.6";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6437,6 +6437,8 @@
         const title = (song.title || "").trim() || "Untitled";
         const more = run.length - 1;
         const options = [{ label: "Play now", fn: function () {
+            playLeftOutNow(song, false);
+        } }, { label: "Play from here now", fn: function () {
             playFromTapped(song.song_id);
         } }, { label: "Play after this song", fn: function () {
 
@@ -6446,19 +6448,57 @@
 
         if (more > 0) {
 
-            options.push({ label: "Play all up to the next match", ring: true, fn: function () {
+            options.push({ label: "Play all now", ring: true, fn: function () {
+                playLeftOutNow(song, true);
+            } }, { label: "Play all from here now", ring: true, fn: function () {
                 playLeftOutRun(song.song_id);
             } }, { label: "Play all after this song", ring: true, fn: function () {
                 addLeftOutRunNext(song);
             } });
         }
 
-        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it,"
-            + " then the queue goes on with the songs they let through. Play after this song puts it right after the"
-            + " song playing."
-            + (more > 0 ? " The two with all take the " + (more === 1 ? "song" : more + " songs")
-                + " after it the filters leave out as well, up to the next one they let through, then the queue follows the filters again." : ""),
+        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it at once,"
+            + " then the queue goes on as it was. Play from here now makes the queue anew from this song, going on with the"
+            + " songs the filters let through. Play after this song puts it right after the song playing."
+            + (more > 0 ? " The ones with all take the " + (more === 1 ? "song" : more + " songs")
+                + " after it the filters leave out as well, up to the next one they let through." : ""),
             options, null, false, true);
+    }
+
+    // A left out song, or it and those after it the filters leave out up to
+    // the next song they let through, played at once. The queue is kept:
+    // they go in right after the song playing, and after them the queue goes
+    // on as it was. With nothing playing there is no queue to keep, the queue
+    // is made from the list as with a tap
+    function playLeftOutNow(song, all) {
+
+        if (queueIdle() || (offlineMode() && !cachedIds.has(song.song_id))) {
+
+            if (all) {
+                playLeftOutRun(song.song_id);
+            } else {
+                playFromTapped(song.song_id);
+            }
+
+            return;
+        }
+
+        const run = all ? leftOutRunFrom(song) : [song];
+
+        switchSong("tap", function () {
+
+            for (let i = run.length - 1; i >= 0; i -= 1) {
+                addNext(run[i]);
+            }
+
+            resumeState = null;
+            queueMoveDir = 1;
+            queuePos += 1;
+            dbgLog("Song", "played now with the queue kept, " + run.length + (run.length === 1 ? " song" : " songs") + " put in");
+            playCurrent();
+            saveQueue();
+            publishHostSoon();
+        });
     }
 
     // A left out song and those after it the filters leave out, up to the
@@ -11893,8 +11933,9 @@
     // after the playing one in the list as it is ordered now, so the queue
     // goes on the way the list reads, also when the list's order changed
     // since the queue was made and songs already played turn up again
-    // further down. A playing song the list leaves out goes on with the
-    // list's songs after its place in the library. With shuffle on, or when
+    // further down. A playing song the list leaves out goes on after the
+    // last song of the list played before it, or else after its own place
+    // in the library. With shuffle on, or when
     // the playing song has no place there, every song of the list not
     // played yet, shuffled with shuffle on.
     // orderedSongs is the displayed order. The vocals and playlist filters
@@ -11934,9 +11975,21 @@
             return s.song_id === q[pos].song_id;
         }) : -1;
 
-        // A playing song the filters leave out still has its place in the
-        // library, the queue goes on with the songs the list lets through
-        // after that place
+        // A playing song the filters leave out goes on after the last song
+        // the list lets through played before it, so songs played now with
+        // the queue kept leave the rest of the queue as it was. Without one,
+        // after the playing song's own place in the library
+        let before = -1;
+
+        for (let k = pos - 1; k >= 0 && here < 0 && before < 0; k -= 1) {
+
+            const id = q[k].song_id;
+
+            before = list.findIndex(function (s) {
+                return s.song_id === id;
+            });
+        }
+
         const placeOf = new Map();
 
         ordered.forEach(function (s, i) {
@@ -11948,6 +12001,8 @@
 
         if (!shuffleMode && here >= 0) {
             upcoming = list.slice(here + 1);
+        } else if (!shuffleMode && before >= 0) {
+            upcoming = list.slice(before + 1);
         } else if (!shuffleMode && at >= 0) {
 
             upcoming = list.filter(function (s) {
@@ -27781,6 +27836,10 @@
                 plays: songPlays(song),
                 greyed: e.greyed === true,
                 place: e.greyed ? 0 : place,
+
+                // How many left out songs follow it up to the next match,
+                // for the choices that take all of them
+                more: e.greyed ? leftOutRunFrom(song).length - 1 : 0,
                 runHead: e.runHead || "",
                 run: e.runCount || 0,
                 runOpen: e.runOpen === true
@@ -28669,6 +28728,18 @@
 
             if (song) {
                 playLeftOutRun(song.song_id);
+            }
+        } else if (cmd === "playNow" || cmd === "playRunNow") {
+
+            // Played at once with the queue kept, the one song or all of
+            // them up to the next match
+            const wanted = String(arg);
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === wanted;
+            });
+
+            if (song) {
+                playLeftOutNow(song, cmd === "playRunNow");
             }
         } else if (cmd === "playNextRun") {
 
@@ -33863,12 +33934,13 @@
         const chip = document.createElement("span");
         const n = fold.runCount;
 
-        chip.textContent = (fold.runOpen ? "\u25BE " : "\u25B8 ") + n;
+        chip.textContent = (fold.runOpen ? "\u25BE" : "\u25B8") + n;
         chip.title = fold.runOpen ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them";
         chip.setAttribute("role", "button");
         chip.dataset.foldChip = "1";
-        chip.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 6px;border-radius:9px;border:1px solid #6a6a74;color:#ddd;"
-            + "font-size:11px;line-height:16px;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer";
+        chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1px solid #6a6a74;"
+            + "color:#ddd;font-size:11px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;"
+            + "overflow:hidden;cursor:pointer";
 
         chip.addEventListener("click", function (ev) {
 
@@ -33969,9 +34041,13 @@
         item.appendChild(titleEl);
 
         // The first of several songs in a row the filters leave out: how
-        // many, this one counted, and an arrow to open or fold them
+        // many, this one counted, and an arrow to open or fold them, in
+        // place of its number, so the title keeps its room
         if (fold && fold.runCount > 1) {
-            item.appendChild(buildFoldChip(fold));
+
+            numEl.textContent = "";
+            numEl.dataset.foldChip = "1";
+            numEl.appendChild(buildFoldChip(fold));
         }
 
         // Sorted by plays, each song's plays take the place of the rating,

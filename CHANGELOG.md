@@ -7,23 +7,27 @@ In development.
 - **Songs the filters leave out stay in the list.** The song list shows
   every song, those the filters leave out greyed between the others, in
   every list view on the phone and in both lists of the web view. Several
-  in a row fold under the first, which shows how many there are with an
-  arrow that opens and folds them. A tap on one asks whether to play it
-  now, the queue then going on with the songs the filters let through, or
-  to play all of them up to the next song the filters let through, after
-  which the queue follows the filters again. Play after this song and Play
-  all after this song put the one song, or all of them up to the next
-  match, right after the song playing instead. They can be put in the
-  queue as usual. The count line says how many songs the filters let through
-  and how many they leave out. In the web view only the songs the filters
-  let through are numbered, a greyed one has no number and the song after
-  it takes the next one. A playlist still shows only its own songs.
-  With the published songs listed, newest published first, a draft goes
-  where it was made among them. A Library setting, on unless changed,
-  shows only the songs the filters let through instead.
+  in a row fold under the first, whose number gives way to a button of
+  one width with how many there are and an arrow that opens and folds
+  them. A tap on one asks how to play it: Play now plays it at once and
+  the queue goes on as it was after it, Play from here now makes the queue
+  anew from it, going on with the songs the filters let through, and Play
+  after this song puts it right after the song playing. Play all now,
+  Play all from here now and Play all after this song do the same with it
+  and the songs after it the filters leave out, up to the next one they
+  let through, and show only when there are such songs. They can be put in
+  the queue as usual. The count line says how many songs the filters let
+  through and how many they leave out. In the web view only the songs the
+  filters let through are numbered, a greyed one has no number and the
+  song after it takes the next one. A playlist still shows only its own
+  songs. With the published songs listed, newest published first, a draft
+  goes where it was made among them. A Library setting, on unless
+  changed, shows only the songs the filters let through instead.
 - **The queue goes on from a song outside the filters.** With shuffle off,
-  a queue playing a song the filters leave out goes on with the songs they
-  let through after its place in the list, rather than from the top.
+  a queue playing a song the filters leave out, made again from the list,
+  goes on after the last song played that the filters let through, rather
+  than from the top, so songs played now with the queue kept leave the
+  rest of it as it was.
 
 ### Build
 
