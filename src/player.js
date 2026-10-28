@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "1.9.9.502";
+    const VERSION = "1.9.9.504";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -866,6 +866,21 @@
     // for a fade, see wireIosGain
     let iosCtx = null;
     let iosGain = null;
+
+    // What reaches the speaker, read to tell a silent engine from a quiet
+    // song, and the check of it while a song plays
+    let iosMeter = null;
+    let iosMeterBuf = null;
+    let iosWatchTimer = 0;
+    let iosWatchLast = null;
+    let iosStillTicks = 0;
+    let iosSilentTicks = 0;
+    let iosGoodTicks = 0;
+    let iosRestartTried = false;
+
+    // Set when the engine passes no sound on even after a restart. The next
+    // tap then makes a new engine and a new element
+    let iosEngineDead = false;
 
     // How many jumps the song made, see ensureAudio
     let hostSeeks = 0;
@@ -10122,29 +10137,51 @@
 
         audio = new Audio();
 
+        // The element can be replaced after Safari's sound engine stopped
+        // passing its sound on, the one replaced then has no say any more
+        const el = audio;
+        const audioOn = function (name, fn) {
+
+            el.addEventListener(name, function (ev) {
+
+                if (el !== audio) {
+                    return;
+                }
+
+                return fn.call(this, ev);
+            });
+        };
+
         // A paused song playing on fades in, another song loaded instead
         // plays at the usual level. On an iPhone or iPad the gain for the
         // fades goes in as soon as a song plays with a fade switched on,
         // not first at a song switch, so the first pause already fades in
-        audio.addEventListener("playing", function () {
+        audioOn("playing", function () {
 
             // Also when Safari itself plays the song on after an interruption
             resumeIosCtx("playing");
             closeHeldAsk("closed, the song plays");
 
             if (isIosLike() && anyFadeOn()) {
+
+                // A song a tap started a moment ago, fetched first say,
+                // wakes the engine now, the gain goes in once it runs
+                if ((!iosCtx || iosCtx.state !== "running") && navigator.userActivation && navigator.userActivation.isActive) {
+                    wakeIosCtx();
+                }
+
                 wireIosGain();
             }
 
             fadeInResume();
         });
-        audio.addEventListener("loadstart", function () {
+        audioOn("loadstart", function () {
             dropResumeFade();
         });
 
         // Every jump in the song counted, so a browser playing the music can
         // tell a jump asked for from the phone's place drifting
-        audio.addEventListener("seeking", function () {
+        audioOn("seeking", function () {
             hostSeeks += 1;
         });
 
@@ -10159,12 +10196,12 @@
         ["loadstart", "canplay", "play", "playing", "pause", "waiting", "stalled",
             "seeked", "ended", "emptied", "error"].forEach(function (name) {
 
-            audio.addEventListener(name, function () {
+            audioOn(name, function () {
                 dbgLog("Audio", name + " at " + dbgNum(audio.currentTime));
             });
         });
 
-        audio.addEventListener("ended", function () {
+        audioOn("ended", function () {
 
             // The silent unlock sound is not a song
             if (isPriming()) {
@@ -10174,7 +10211,7 @@
         });
 
         // A song that starts playing proves the audio base URL is correct
-        audio.addEventListener("playing", function () {
+        audioOn("playing", function () {
 
             audioUnlocked = true;
 
@@ -10231,7 +10268,7 @@
             updateMediaPosition();
         });
 
-        audio.addEventListener("error", function () {
+        audioOn("error", function () {
 
             // The silent unlock sound is not a song
             if (isPriming()) {
@@ -10245,7 +10282,7 @@
         });
 
         // Set the seek bar range once the duration is known
-        audio.addEventListener("loadedmetadata", function () {
+        audioOn("loadedmetadata", function () {
 
             // The silent unlock sound is not a song
             if (isPriming()) {
@@ -10269,7 +10306,7 @@
         startWatchdog();
 
         // Move the seek bar and time labels as the song plays
-        audio.addEventListener("timeupdate", function () {
+        audioOn("timeupdate", function () {
 
             // The silent unlock sound is not a song
             if (isPriming()) {
@@ -10297,7 +10334,7 @@
             }
         });
 
-        audio.addEventListener("play", function () {
+        audioOn("play", function () {
 
             // The silent unlock sound is not a song
             if (isPriming()) {
@@ -10329,7 +10366,7 @@
             updateMediaPosition();
         });
 
-        audio.addEventListener("pause", function () {
+        audioOn("pause", function () {
 
             // The silent unlock sound is not a song
             if (isPriming()) {
@@ -10370,6 +10407,12 @@
             syncWakeLock();
 
             resetIdleTimer();
+
+            if (iosEngineDead && !userPaused) {
+
+                setStatus("No sound, tap Play: " + (currentSong.title || "Untitled"));
+                return;
+            }
 
             if (userPaused || audio.ended) {
 
@@ -13179,6 +13222,11 @@
 
         dbgLog("Audio", "sound engine " + iosCtx.state);
         interruptedPause("engine " + iosCtx.state);
+
+        // Woken while a song plays, the gain for the fades goes in now
+        if (iosCtx.state === "running" && audio && !audio.paused && isIosLike() && anyFadeOn()) {
+            wireIosGain();
+        }
     }
 
     function wireIosGain() {
@@ -13197,9 +13245,27 @@
 
             iosGain = iosCtx.createGain();
             source.connect(iosGain);
-            iosGain.connect(iosCtx.destination);
+
+            // The meter passes the sound on unchanged
+            try {
+
+                iosMeter = iosCtx.createAnalyser();
+                iosMeter.fftSize = 2048;
+                iosMeterBuf = new Float32Array(iosMeter.fftSize);
+                iosGain.connect(iosMeter);
+                iosMeter.connect(iosCtx.destination);
+            } catch (e) {
+
+                iosMeter = null;
+                iosGain.connect(iosCtx.destination);
+            }
+
             audio.crossOrigin = "anonymous";
             dbgLog("Audio", "the song goes through a gain for fades, Safari ignores a page's own volume");
+
+            if (!iosWatchTimer) {
+                iosWatchTimer = setInterval(watchIosEngine, IOS_WATCH_MS);
+            }
         } catch (e) {
 
             dbgLog("Audio", "no gain for fades: " + errText(e));
@@ -13349,8 +13415,30 @@
         applyCarAudioVolume();
     }
 
-    document.addEventListener("pointerdown", wakeIosCtx, true);
-    document.addEventListener("keydown", wakeIosCtx, true);
+    // A tap or a key wakes the engine only while a song plays, or once the
+    // tap has started one. Woken with the song paused, the engine takes the
+    // phone's sound from another app playing, a video say, which then goes
+    // quiet as well, as on Dismiss in the box asking to play on. Checked
+    // again once the tap's own handlers have run, still within the tap
+    function wakeIosCtxOnTap() {
+
+        if (audio && !audio.paused) {
+
+            wakeIosCtx();
+            return;
+        }
+
+        setTimeout(function () {
+
+            if (audio && !audio.paused) {
+                wakeIosCtx();
+            }
+        }, 0);
+    }
+
+    document.addEventListener("pointerdown", wakeIosCtxOnTap, true);
+    document.addEventListener("keydown", wakeIosCtxOnTap, true);
+    document.addEventListener("click", wakeIosCtxOnTap, true);
 
     // The fade before a newly made song asked to play at once: the playing
     // song goes quiet over the seconds set, then the new one starts at the
@@ -13559,6 +13647,196 @@
                 }
             }, 1500);
         }, 1200);
+    }
+
+    // Safari can stop passing a song's sound on while the engine still says
+    // it runs, after another sound engine on the page played or after a long
+    // time in the background: the song moves on in silence until Safari is
+    // restarted. Each second the engine's clock and the sound reaching the
+    // speaker are compared with the song moving on. The clock standing
+    // still, or no sound at all for several seconds in the middle of a song,
+    // first restarts the engine, then pauses the song for a tap that makes
+    // a new engine
+    const IOS_WATCH_MS = 1000;
+    const IOS_STILL_TICKS = 2;
+    const IOS_SILENT_TICKS = 5;
+    const IOS_GOOD_TICKS = 10;
+
+    // Away from a song's first and last seconds, which may be silent
+    const IOS_EDGE_SEC = 3;
+    const IOS_TAIL_SEC = 8;
+
+    function iosMeterSilent() {
+
+        if (!iosMeter || !iosMeterBuf) {
+            return false;
+        }
+
+        iosMeter.getFloatTimeDomainData(iosMeterBuf);
+
+        for (let i = 0; i < iosMeterBuf.length; i++) {
+
+            if (Math.abs(iosMeterBuf[i]) > 1e-6) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    function iosWatchReset() {
+
+        iosWatchLast = null;
+        iosStillTicks = 0;
+        iosSilentTicks = 0;
+    }
+
+    function watchIosEngine() {
+
+        if (!iosGain || !iosCtx || !audio || audio.paused || audio.seeking || audio.readyState < 3 || isPriming()) {
+
+            iosWatchReset();
+            return;
+        }
+
+        const now = { ctx: iosCtx.currentTime, el: audio.currentTime };
+        const last = iosWatchLast;
+
+        iosWatchLast = now;
+
+        if (!last) {
+            return;
+        }
+
+        // A jump or a song stalling says nothing about the engine
+        const moved = now.el - last.el;
+
+        if (moved < 0.5 || moved > 3) {
+            return;
+        }
+
+        const ticked = now.ctx - last.ctx >= 0.1;
+        const length = isFinite(audio.duration) ? audio.duration : 0;
+        const middle = now.el > IOS_EDGE_SEC && (!length || length - now.el > IOS_TAIL_SEC);
+        const silent = ticked && middle && iosGain.gain.value > 0.05 && iosMeterSilent();
+
+        iosStillTicks = ticked ? 0 : iosStillTicks + 1;
+        iosSilentTicks = silent ? iosSilentTicks + 1 : 0;
+
+        if (ticked && !silent) {
+
+            iosGoodTicks += 1;
+
+            // Sound for a while, a later loss gets its restart again
+            if (iosGoodTicks >= IOS_GOOD_TICKS) {
+                iosRestartTried = false;
+            }
+
+            return;
+        }
+
+        iosGoodTicks = 0;
+
+        if (iosStillTicks >= IOS_STILL_TICKS) {
+            iosEngineLost("the sound engine's clock stands still while the song moves on, engine " + iosCtx.state);
+        } else if (iosSilentTicks >= IOS_SILENT_TICKS) {
+            iosEngineLost("no sound reaches the speaker while the song moves on, engine " + iosCtx.state);
+        }
+    }
+
+    function iosEngineLost(why) {
+
+        iosWatchReset();
+
+        // First the engine stopped and started again, which needs no tap
+        if (!iosRestartTried) {
+
+            iosRestartTried = true;
+            dbgLog("Audio", why + ", stopped and started again");
+
+            const again = function () {
+                return iosCtx.resume();
+            };
+            const told = function () {
+                dbgLog("Audio", "sound engine " + iosCtx.state + " after the restart, song " + (audio.paused ? "paused" : "playing"));
+            };
+
+            Promise.resolve().then(function () {
+                return iosCtx.suspend();
+            }).then(again, again).then(told, told);
+            return;
+        }
+
+        // Still silent: paused where it is, for a tap that makes a new engine
+        iosEngineDead = true;
+        dbgLog("Audio", why + " after a restart too, the song pauses for a tap that makes a new sound engine");
+        audio.pause();
+        iosAskTap();
+    }
+
+    function iosAskTap() {
+
+        if (document.hidden || !panelEl || !currentSong) {
+            return;
+        }
+
+        askHeldPlay("dead");
+    }
+
+    // Whether this moment comes from a tap, when a new engine may start
+    function inTap() {
+        return !navigator.userActivation || navigator.userActivation.isActive;
+    }
+
+    // A new engine and a new element in place of the silent ones, during a
+    // tap, the song loaded again at the place it was. An element passed to
+    // an engine once stays with it, so the element is new as well
+    function rebuildIosAudio() {
+
+        const old = audio;
+        const src = old ? old.src : "";
+        const at = old ? old.currentTime || 0 : 0;
+
+        iosEngineDead = false;
+        iosRestartTried = false;
+        iosWatchReset();
+        dbgLog("Audio", "a new sound engine and audio element, the song goes on at " + dbgNum(at));
+
+        if (iosCtx) {
+
+            try {
+                iosCtx.removeEventListener("statechange", iosCtxStateChanged);
+                iosCtx.close();
+            } catch (e) {
+                // Gone already
+            }
+        }
+
+        iosCtx = null;
+        iosGain = null;
+        iosMeter = null;
+        audio = null;
+
+        if (old) {
+
+            try {
+                old.pause();
+                old.removeAttribute("src");
+                old.load();
+                old.remove();
+            } catch (e) {
+                // Gone already
+            }
+        }
+
+        ensureAudio();
+        wakeIosCtx();
+
+        if (src) {
+
+            pendingSeek = at;
+            audio.src = src;
+        }
     }
 
     // Whether any of the fades is switched on with a length
@@ -16286,6 +16564,21 @@
             return;
         }
 
+        // The engine passes no sound on: a new one, which Safari starts only
+        // during a tap, without one the box asks for it. Out of view, as
+        // from the lock screen, it is tried anyway, a refused play then
+        // waits for the next press of Play
+        if (iosEngineDead) {
+
+            if (!inTap() && !document.hidden) {
+
+                iosAskTap();
+                return;
+            }
+
+            rebuildIosAudio();
+        }
+
         userPaused = false;
         resumeIosCtx("play");
 
@@ -16455,7 +16748,8 @@
         return b;
     }
 
-    function askHeldPlay() {
+    // Dead is the engine passing no sound on, the same box with its own words
+    function askHeldPlay(kind) {
 
         closeHeldAsk("");
 
@@ -16471,9 +16765,11 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:12px;padding:16px;width:100%;"
             + "max-width:380px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;touch-action:pan-y;"
             + "user-select:none;-webkit-user-select:none";
-        head.textContent = "Another app has the sound";
+        head.textContent = kind === "dead" ? "No sound comes through" : "Another app has the sound";
         head.style.cssText = "font-weight:600;font-size:16px";
-        text.textContent = "The browser only gives the sound back to the player after a tap. "
+        text.textContent = (kind === "dead"
+            ? "The browser stopped passing the player's sound on. A tap starts it anew. "
+            : "The browser only gives the sound back to the player after a tap. ")
             + (currentSong ? "\"" + (currentSong.title || "Untitled") + "\" plays on from where it stopped." : "");
         text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
         row.style.cssText = "display:flex;gap:10px";
@@ -18774,7 +19070,11 @@
 
         // Always correct the display and the lock screen state, this is free
         updatePlayPause();
-        resumeIosCtx("back in view");
+
+        // Only for a song playing, a paused one wakes it when it plays
+        if (!audio.paused) {
+            resumeIosCtx("back in view");
+        }
 
         if ("mediaSession" in navigator) {
 
@@ -43405,6 +43705,22 @@
         trimToken += 1;
         trimStop();
         tr = null;
+
+        // Its sound engine closed with it, two engines on a page can leave
+        // Safari passing only one of them on
+        if (trimCtx) {
+
+            try {
+                trimCtx.close();
+            } catch (e) {
+                // Gone already
+            }
+
+            trimCtx = null;
+        }
+
+        // The player's engine gets its restart again should it stay silent
+        iosRestartTried = false;
 
         if (trimEl) {
             trimEl.style.display = "none";

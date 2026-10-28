@@ -484,8 +484,23 @@ the new settings layout and a number of smaller improvements.
   on, as Safari only gives the sound back after a tap: Dismiss and a large
   Resume playback button. It can be swiped away and goes by itself once
   the song plays. Dismissed or swiped away, the song stays paused as if
-  paused by hand, also when the player comes back into view. A switch under Playback, on unless changed, shows a short
-  note asking for Play instead.
+  paused by hand, also when the player comes back into view. A switch
+  under Playback, on unless changed, shows a short note asking for Play
+  instead.
+- **Another app keeps its sound.** A tap or a key on the page with the
+  song paused, Dismiss in the box among them, no longer wakes the
+  player's sound engine on an iPhone or iPad, which took the sound from
+  another app playing and left both quiet. The engine wakes when a song
+  plays.
+- **Sound that stops coming through.** Safari on an iPhone or iPad can
+  stop passing the player's sound on while it says all is well, after a
+  long time in the background or after another sound on the page, and
+  until now only restarting Safari helped. While a song plays the player
+  checks that its sound engine moves on and that sound reaches the
+  speaker. When it does not, the engine is restarted, and should that not
+  help, the song pauses where it is and the box asks for a tap: Resume
+  playback makes a new sound engine and plays on from the same place. The
+  trimmer's own sound engine now closes with the trimmer.
 - **No jumping back in a browser playing the music.** When the phone's
   silent copy of the song drifts, the phone is set to the place heard in
   the browser instead of the browser jumping back to it. A jump made on
