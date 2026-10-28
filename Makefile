@@ -58,7 +58,7 @@ KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all addons android apk debug release install install-debug signing check version bookmarklet clean distclean
+.PHONY: help all addons android apk debug release install install-debug signing check version bookmarklet fdroid clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
@@ -73,6 +73,7 @@ help:
 	@echo "  make check          syntax check the player and compare versions"
 	@echo "  make version        bump manifest.json to the player version"
 	@echo "  make bookmarklet    pin the release bookmarklet to a tag, TAG=v$(VERSION) unless given"
+	@echo "  make fdroid         the F-Droid recipe for a tag in fdroid/, TAG=v$(VERSION) unless given"
 	@echo "  make clean          remove build output, keep the caches"
 	@echo "  make distclean      also remove the Gradle and SDK caches in the tree"
 	@echo
@@ -112,6 +113,12 @@ TAG ?= v$(VERSION)
 
 bookmarklet:
 	./release-bookmarklet.sh $(TAG)
+
+# The F-Droid build recipe for a tagged release, written to fdroid/ as
+# fdroiddata keeps it, ready to copy to metadata/ in the fork. The release
+# APK, when it is here, is checked for the release key. Tag the release first
+fdroid:
+	APKSIGNER="$(APKSIGNER)" JAVA_HOME="$(JAVA_HOME)" sh ./fdroid-metadata.sh $(patsubst v%,%,$(TAG))
 
 # The player has to parse, and the manifest has to agree with it. Both are
 # cheap, so they run before anything is packaged
