@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0";
+    const VERSION = "2.0.0.5";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2907,6 +2907,7 @@
             absoluteNumbers: false,
             autoInstrumentalChars: 20,
             offerAllNew: false,
+            listShowAll: true,
             readyFadeSeconds: 1.5,
             fadeOnReady: true,
             fadeOnTap: false,
@@ -3121,6 +3122,7 @@
                     absoluteNumbers: parsed.absoluteNumbers === true,
                     autoInstrumentalChars: lyricLimit(parsed.autoInstrumentalChars),
                     offerAllNew: parsed.offerAllNew === true,
+                    listShowAll: parsed.listShowAll !== false,
                     readyFadeSeconds: readyFadeSeconds(parsed.readyFadeSeconds),
                     fadeOnReady: parsed.fadeOnReady !== false,
                     fadeOnTap: parsed.fadeOnTap === true,
@@ -6313,11 +6315,219 @@
     }
 
     function passesFilters(song) {
+        return passesPlaylist(song) && passesSongFilters(song);
+    }
 
-        return passesVocalFilter(song) && passesPlaylist(song) && passesPublishFilter(song)
+    // The filters other than the playlist. With the songs they leave out
+    // shown, the list holds every song of the playlist or library, the ones
+    // these leave out greyed among the others
+    function passesSongFilters(song) {
+
+        return passesVocalFilter(song) && passesPublishFilter(song)
             && passesTagFilter(song) && passesBpmFilter(song)
             && passesModelFilter(song) && passesDateFilter(song)
             && passesRatingFilter(song);
+    }
+
+    function showLeftOut() {
+        return settings.listShowAll !== false;
+    }
+
+    // Songs the filters leave out that follow each other are folded under
+    // the first, which carries how many there are, unless that one is
+    // opened. Entries are { song, greyed }, the list as shown. The playing
+    // song is never folded away, it ends a fold and the next one starts
+    // after it. Each entry of a fold carries runHead, the first one's id,
+    // and the first one runCount and runOpen
+    function foldLeftOut(entries, opened, playingId) {
+
+        const out = [];
+        let i = 0;
+
+        while (i < entries.length) {
+
+            const e = entries[i];
+            const free = function (x) {
+                return x.greyed && !isPendingSong(x.song) && String(x.song.song_id) !== playingId;
+            };
+
+            if (!free(e)) {
+
+                out.push(e);
+                i += 1;
+                continue;
+            }
+
+            let j = i;
+
+            while (j < entries.length && free(entries[j])) {
+                j += 1;
+            }
+
+            if (j - i === 1) {
+
+                out.push(e);
+                i = j;
+                continue;
+            }
+
+            const head = String(e.song.song_id);
+            const open = opened.has(head);
+
+            e.runCount = j - i;
+            e.runOpen = open;
+
+            for (let k = i; k < j; k += 1) {
+
+                entries[k].runHead = head;
+
+                if (k === i || open) {
+                    out.push(entries[k]);
+                }
+            }
+
+            i = j;
+        }
+
+        return out;
+    }
+
+    // The folds opened in the player's own list, by their first song
+    const openedRuns = new Set();
+
+    // A left out song and those after it the filters leave out too, up to
+    // the next song they let through, in the order the queue plays them.
+    // Songs not in the playlist, still being made or ignored are passed over
+    function leftOutRunFrom(song) {
+
+        const list = orderedSongs();
+        const at = list.findIndex(function (x) {
+            return x.song_id === song.song_id;
+        });
+        const run = [song];
+
+        if (at < 0) {
+            return run;
+        }
+
+        for (let k = at + 1; k < list.length; k += 1) {
+
+            const x = list[k];
+
+            if (queueable(x)) {
+                break;
+            }
+
+            if (!passesPlaylist(x) || isIgnored(x) || isPendingSong(x)) {
+                continue;
+            }
+
+            run.push(x);
+        }
+
+        return run;
+    }
+
+    // A tap on a song the filters leave out asks how far to play: the song
+    // now, the queue going on with what the filters let through, or all of
+    // them up to the next song they let through
+    function askLeftOut(song) {
+
+        const run = leftOutRunFrom(song);
+        const title = (song.title || "").trim() || "Untitled";
+        const more = run.length - 1;
+        const options = [{ label: "Play now", fn: function () {
+            playFromTapped(song.song_id);
+        } }, { label: "Play after this song", fn: function () {
+
+            addNext(song);
+            showToast("Playing next", true);
+        } }];
+
+        if (more > 0) {
+
+            options.push({ label: "Play all up to the next match", ring: true, fn: function () {
+                playLeftOutRun(song.song_id);
+            } }, { label: "Play all after this song", ring: true, fn: function () {
+                addLeftOutRunNext(song);
+            } });
+        }
+
+        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it,"
+            + " then the queue goes on with the songs they let through. Play after this song puts it right after the"
+            + " song playing."
+            + (more > 0 ? " The two with all take the " + (more === 1 ? "song" : more + " songs")
+                + " after it the filters leave out as well, up to the next one they let through, then the queue follows the filters again." : ""),
+            options, null, false, true);
+    }
+
+    // A left out song and those after it the filters leave out, up to the
+    // next song they let through, put right after the song playing, in the
+    // list's order, the way Play next puts one
+    function addLeftOutRunNext(song) {
+
+        const run = leftOutRunFrom(song);
+
+        for (let i = run.length - 1; i >= 0; i -= 1) {
+            addNext(run[i]);
+        }
+
+        saveQueue();
+        publishHostSoon();
+        setStatus("Playing next: " + run.length + (run.length === 1 ? " song" : " songs") + " from " + (song.title || "Untitled"));
+        showToast(run.length === 1 ? "Playing next" : "Playing next, " + run.length + " songs", true);
+    }
+
+    // Songs of a run played up to the next match, kept in the queue right
+    // after the playing song when the queue is made again from the list
+    const runMarks = new Set();
+
+    function playLeftOutRun(songId) {
+
+        const song = cache.songs.find(function (x) {
+            return x.song_id === songId;
+        });
+
+        if (!song) {
+            return;
+        }
+
+        // Offline and not stored, Play now says so the usual way
+        if (offlineMode() && !cachedIds.has(songId)) {
+
+            playFromTapped(songId);
+            return;
+        }
+
+        const run = leftOutRunFrom(song);
+
+        switchSong("tap", function () {
+
+            buildQueue(songId);
+
+            if (!queue[queuePos] || queue[queuePos].song_id !== songId) {
+
+                playCurrent();
+                return;
+            }
+
+            const rest = run.slice(1);
+            const restIds = new Set(rest.map(function (x) {
+                return x.song_id;
+            }));
+
+            queue = queue.slice(0, queuePos + 1).concat(rest, queue.slice(queuePos + 1).filter(function (x) {
+                return !restIds.has(x.song_id);
+            }));
+
+            for (const x of rest) {
+                runMarks.add(String(x.song_id));
+            }
+
+            resumeState = null;
+            dbgLog("Song", "played with the " + rest.length + " songs after it the filters leave out, up to the next match");
+            playCurrent();
+        });
     }
 
     // How many songs the list is currently showing, filters applied
@@ -10690,6 +10900,7 @@
         // A new queue has no songs put in to play next
         playNextMarks.clear();
         playLastMarks.clear();
+        runMarks.clear();
 
         // Made from the list, so no longer a queue put together by hand
         queueOwn = false;
@@ -10914,7 +11125,7 @@
 
         queue.forEach(function (x) {
 
-            if (!isPlayNext(x.song_id)) {
+            if (!isPlayNext(x.song_id) && !runMarks.has(String(x.song_id))) {
                 queued.add(x.song_id);
             }
         });
@@ -10980,6 +11191,7 @@
             dropNextReady();
             playNextMarks.clear();
             playLastMarks.clear();
+            runMarks.clear();
             queue = [];
             queueOwn = true;
         }
@@ -11053,6 +11265,7 @@
                 queueOwn = false;
                 playNextMarks.clear();
                 playLastMarks.clear();
+                runMarks.clear();
             }
 
             previewFromIdle = true;
@@ -11680,8 +11893,10 @@
     // after the playing one in the list as it is ordered now, so the queue
     // goes on the way the list reads, also when the list's order changed
     // since the queue was made and songs already played turn up again
-    // further down. With shuffle on, or when the playing song is not in
-    // the list, every song of the list not played yet, shuffled.
+    // further down. A playing song the list leaves out goes on with the
+    // list's songs after its place in the library. With shuffle on, or when
+    // the playing song has no place there, every song of the list not
+    // played yet, shuffled with shuffle on.
     // orderedSongs is the displayed order. The vocals and playlist filters
     // still apply. Songs put in with Play next stay right after the
     // song at pos, and songs put in with Play last stay at the end, in the
@@ -11700,19 +11915,44 @@
         const last = rest.filter(function (s) {
             return playLastMarks.has(String(s.song_id)) && !playNextMarks.has(String(s.song_id));
         });
-        const picked = new Set(next.concat(last).map(function (s) {
+
+        // Songs the filters leave out, played up to the next match, stay
+        // right after the ones put in with Play next
+        const run = rest.filter(function (s) {
+            const id = String(s.song_id);
+
+            return runMarks.has(id) && !playNextMarks.has(id) && !playLastMarks.has(id);
+        });
+        const picked = new Set(next.concat(last, run).map(function (s) {
             return s.song_id;
         }));
-        const list = orderedSongs().filter(function (s) {
+        const ordered = orderedSongs();
+        const list = ordered.filter(function (s) {
             return !picked.has(s.song_id) && queueable(s) && !queueSkipIds.has(String(s.song_id));
         });
         const here = q[pos] ? list.findIndex(function (s) {
             return s.song_id === q[pos].song_id;
         }) : -1;
+
+        // A playing song the filters leave out still has its place in the
+        // library, the queue goes on with the songs the list lets through
+        // after that place
+        const placeOf = new Map();
+
+        ordered.forEach(function (s, i) {
+            placeOf.set(s.song_id, i);
+        });
+
+        const at = q[pos] && placeOf.has(q[pos].song_id) ? placeOf.get(q[pos].song_id) : -1;
         let upcoming;
 
         if (!shuffleMode && here >= 0) {
             upcoming = list.slice(here + 1);
+        } else if (!shuffleMode && at >= 0) {
+
+            upcoming = list.filter(function (s) {
+                return placeOf.get(s.song_id) > at;
+            });
         } else {
 
             upcoming = list.filter(function (s) {
@@ -11724,7 +11964,7 @@
             }
         }
 
-        return played.concat(next, upcoming, last);
+        return played.concat(next, run, upcoming, last);
     }
 
     // How many of the songs still to come in the queue the list, as it is
@@ -13007,8 +13247,20 @@
 
         if (!creatorSource && publishFilter === "published" && cache.complete) {
 
+            // A draft has no publish date. Shown greyed, it goes where it
+            // was made among the published songs, rather than all of them
+            // after the last published song. The published songs keep
+            // their order among themselves
+            const showAll = showLeftOut();
+            const when = function (song) {
+
+                const at = publishedAt(song);
+
+                return at > 0 || !showAll ? at : (song.generate_at > 0 ? song.generate_at : 0);
+            };
+
             return cache.songs.slice().sort(function (a, b) {
-                return publishedAt(b) - publishedAt(a);
+                return when(b) - when(a);
             });
         }
 
@@ -27047,7 +27299,7 @@
 
         return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
             creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
-            cache.songs.length, songDataStamp, pendingStamp].join("|");
+            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : ""].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -27355,7 +27607,8 @@
     // changed or another sorting is asked for
     function hostPrepared(view) {
 
-        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size;
+        const showAll = showLeftOut();
+        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size + "|" + showAll;
 
         if (hostListMemo && hostListMemo.key === key) {
             return hostListMemo;
@@ -27380,9 +27633,26 @@
             source = sortByPlays(cache.songs, false);
         }
 
+        // Each song with whether the filters leave it out, those only while
+        // they are shown greyed
+        const entries = [];
+
+        for (const song of source) {
+
+            if (!passesPlaylist(song)) {
+                continue;
+            }
+
+            const greyed = !passesSongFilters(song);
+
+            if (!greyed || showAll) {
+                entries.push({ song: song, greyed: greyed });
+            }
+        }
+
         hostListMemo = {
             key: key,
-            songs: source.filter(passesFilters),
+            entries: entries,
             numbers: hostNumbers()
         };
 
@@ -27429,22 +27699,51 @@
 
         // Songs still being generated first, in the list's own order only
         const pending = view === "mureka" ? shownPending() : [];
+        const searched = pending.map(function (song) {
+            return { song: song, greyed: false };
+        }).concat(prepared.entries).filter(function (e) {
+            return searchMatches(e.song, q);
+        });
 
-        for (const song of pending.concat(prepared.songs)) {
+        // The folds this browser opened, by their first song, and a fold
+        // asked for alone: only the songs under its first, all of them
+        const opened = new Set(String(req && req.open ? req.open : "").split(",").filter(Boolean));
+        const runOf = String(req && req.run ? req.run : "");
+        let rows = showLeftOut() ? foldLeftOut(searched.map(function (e) {
+            return { song: e.song, greyed: e.greyed };
+        }), runOf ? new Set([runOf]) : opened, playingId) : searched;
 
+        if (runOf) {
+
+            rows = rows.filter(function (e) {
+                return e.runHead === runOf && String(e.song.song_id) !== runOf;
+            });
+        }
+
+        const pageEnd = runOf ? rows.length : offset + limit;
+
+        // Each row's place among the songs the filters let through, the
+        // number the web view shows. A greyed row has none and does not
+        // count, so the song after it takes the next number
+        let place = 0;
+
+        for (const e of rows) {
+
+            const song = e.song;
             const title = (song.title || "").trim() || "Untitled";
 
-            if (!searchMatches(song, q)) {
-                continue;
+            total += 1;
+
+            if (!e.greyed) {
+                place += 1;
             }
 
-            total += 1;
 
             if (playingId && String(song.song_id) === playingId) {
                 playingAt = total - 1;
             }
 
-            if (total - 1 < offset || songs.length >= limit) {
+            if ((!runOf && total - 1 < offset) || total > pageEnd) {
                 continue;
             }
 
@@ -27479,13 +27778,26 @@
                 duration: (song.duration_milliseconds || 0) / 1000,
                 playing: String(song.song_id) === playingId,
                 playNext: isPlayNext(song.song_id),
-                plays: songPlays(song)
+                plays: songPlays(song),
+                greyed: e.greyed === true,
+                place: e.greyed ? 0 : place,
+                runHead: e.runHead || "",
+                run: e.runCount || 0,
+                runOpen: e.runOpen === true
             });
         }
+
+        // The songs the filters let through and those shown greyed, apart
+        // from the rows, which count a fold once
+        const leftOut = searched.filter(function (e) {
+            return e.greyed;
+        }).length;
 
         return {
             token: req && req.token ? String(req.token) : "",
             total: total,
+            matched: searched.length - leftOut,
+            leftOut: leftOut,
             offset: offset,
             playingAt: playingAt,
             songs: songs,
@@ -28345,6 +28657,29 @@
 
             if (song) {
                 playFromTapped(song.song_id);
+            }
+        } else if (cmd === "playRun") {
+
+            // A song the filters leave out, with those after it they leave
+            // out too, up to the next one they let through
+            const wanted = String(arg);
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === wanted;
+            });
+
+            if (song) {
+                playLeftOutRun(song.song_id);
+            }
+        } else if (cmd === "playNextRun") {
+
+            // The same songs, put right after the song playing
+            const wanted = String(arg);
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === wanted;
+            });
+
+            if (song) {
+                addLeftOutRunNext(song);
             }
         } else if (cmd === "playWhenReady") {
 
@@ -33521,7 +33856,46 @@
         return mark;
     }
 
-    function buildSongRow(song, number, isPlaying, dimmed, queueIndex) {
+    // The count of a fold and its arrow, opening or folding it. The list
+    // stays where it was, the rows under it move
+    function buildFoldChip(fold) {
+
+        const chip = document.createElement("span");
+        const n = fold.runCount;
+
+        chip.textContent = (fold.runOpen ? "\u25BE " : "\u25B8 ") + n;
+        chip.title = fold.runOpen ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them";
+        chip.setAttribute("role", "button");
+        chip.dataset.foldChip = "1";
+        chip.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 6px;border-radius:9px;border:1px solid #6a6a74;color:#ddd;"
+            + "font-size:11px;line-height:16px;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer";
+
+        chip.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+
+            if (openedRuns.has(fold.runHead)) {
+                openedRuns.delete(fold.runHead);
+            } else {
+                openedRuns.add(fold.runHead);
+            }
+
+            const top = listEl ? listEl.scrollTop : 0;
+
+            renderList();
+
+            if (listEl) {
+                listEl.scrollTop = top;
+            }
+        });
+
+        return chip;
+    }
+
+    // fold, for a row of the list: whether the filters leave it out, and
+    // for the first of several in a row how many there are and whether
+    // they are opened
+    function buildSongRow(song, number, isPlaying, dimmed, queueIndex, fold) {
 
         if (isPendingSong(song)) {
             return buildPendingRow(song);
@@ -33540,8 +33914,16 @@
             item.style.fontStyle = "italic";
         }
 
-        if (dimmed || (offlineMode() && !cachedIds.has(song.song_id))) {
+        const greyed = !!(fold && fold.greyed);
+
+        const faded = dimmed || (offlineMode() && !cachedIds.has(song.song_id));
+
+        if (faded) {
             item.style.opacity = "0.45";
+        }
+
+        if (greyed) {
+            item.title = "Left out by the filters. Tap to play; long press or right-click for options";
         }
 
         // The dot marks whether the song is stored
@@ -33585,6 +33967,12 @@
         }
 
         item.appendChild(titleEl);
+
+        // The first of several songs in a row the filters leave out: how
+        // many, this one counted, and an arrow to open or fold them
+        if (fold && fold.runCount > 1) {
+            item.appendChild(buildFoldChip(fold));
+        }
 
         // Sorted by plays, each song's plays take the place of the rating,
         // filled in as counts come in
@@ -33787,6 +34175,14 @@
                 return;
             }
 
+            // Left out by the filters, a question first, unless it is the
+            // song playing
+            if (greyed && !(currentSong && currentSong.song_id === song.song_id)) {
+
+                askLeftOut(song);
+                return;
+            }
+
             playFromTapped(song.song_id);
         });
 
@@ -33861,6 +34257,17 @@
             unlight(false);
         });
 
+
+        // Greyed, everything but the fold's chip, which stays plain to read
+        if (greyed && !isPlaying && !faded) {
+
+            for (const part of item.children) {
+
+                if (!part.dataset || part.dataset.foldChip !== "1") {
+                    part.style.opacity = "0.45";
+                }
+            }
+        }
         return item;
     }
 
@@ -33904,7 +34311,7 @@
             }
 
             const item = buildSongRow(song, lazyState.numberById.get(song.song_id), isPlaying, dimmed,
-                lazyState.byQueueIndex ? entry.index : -1);
+                lazyState.byQueueIndex ? entry.index : -1, lazyState.byQueueIndex ? null : entry);
 
             if (isPlaying) {
                 playingItemEl = item;
@@ -33958,14 +34365,28 @@
 
         // Decide what the list shows without touching the DOM. Rows are built
         // afterwards, only as far down as is needed
-        const visible = [];
+        let visible = [];
+
+        const showAll = listView !== "queue" && showLeftOut();
 
         songs.forEach(function (song, i) {
 
-            // Skip rows hidden by the vocals or playlist filter
-            // The queue view always shows the real queue, so it is never filtered
-            if (listView !== "queue" && !isPendingSong(song) && !passesFilters(song)) {
-                return;
+            // The queue view always shows the real queue, so it is never
+            // filtered. The playlist makes the list. Songs the other filters
+            // leave out are left out too, or shown greyed
+            let greyed = false;
+
+            if (listView !== "queue" && !isPendingSong(song)) {
+
+                if (!passesPlaylist(song)) {
+                    return;
+                }
+
+                greyed = !passesSongFilters(song);
+
+                if (greyed && !showAll) {
+                    return;
+                }
             }
 
             // Skip rows that do not match the current search text
@@ -33973,15 +34394,22 @@
                 return;
             }
 
-            visible.push({ song: song, index: i });
+            visible.push({ song: song, index: i, greyed: greyed });
         });
 
-        const shown = visible.length;
+        // Shown counts the songs the filters let through
+        const shown = visible.filter(function (e) {
+            return !e.greyed;
+        }).length;
+
+        if (showAll) {
+            visible = foldLeftOut(visible, openedRuns, playingId === null ? "" : String(playingId));
+        }
 
         // A different view, filter or search starts from the top again. The
         // same one keeps as many rows as had been built, so a redraw does not
         // pull the list up from under someone who had scrolled down
-        const key = [listView, query, publishFilter, settings.vocalFilter,
+        const key = [listView, query, publishFilter, settings.vocalFilter, showAll ? "all" : "",
             activePlaylist ? activePlaylist.name : "", creatorSource ? creatorSource.user_id : ""].join("|");
 
         if (key !== lazyKey) {
@@ -34074,7 +34502,7 @@
         const filtering = listView !== "queue"
             && (settings.vocalFilter !== "all" || activePlaylist);
 
-        if ((query || filtering) && shown === 0 && !playingItemEl) {
+        if ((query || filtering) && visible.length === 0 && !playingItemEl) {
 
             const empty = document.createElement("div");
             empty.textContent = "No matches";
@@ -34084,7 +34512,7 @@
         }
 
         // Tell the user the queue view is empty until playback starts
-        if (!query && shown === 0 && !playingItemEl && listView === "queue") {
+        if (!query && visible.length === 0 && !playingItemEl && listView === "queue") {
 
             const empty = document.createElement("div");
             empty.textContent = "Queue is empty, press play";
@@ -35696,6 +36124,15 @@
             function () { return settings.refreshOnStart; },
             function (v) { settings.refreshOnStart = v; });
 
+        const showAllRow = makeBoolRow("Show the songs the filters leave out",
+            function () { return settings.listShowAll !== false; },
+            function (v) {
+
+                settings.listShowAll = v;
+                renderList();
+                publishHostSoon();
+            });
+
         const offerAllRow = makeBoolRow("Offer new songs the filters leave out",
             function () { return settings.offerAllNew === true; },
             function (v) { settings.offerAllNew = v; });
@@ -35855,6 +36292,8 @@
         libraryPage.appendChild(withHint(offerAllRow, "New songs found are offered to the play queue even when the filters set now would leave them out, such as a draft while only published songs show. Ignored songs are still left out."));
         libraryPage.appendChild(withHint(allRow, "Numbers each song by its place in the whole library, so it keeps its number when filters hide other songs."));
         libraryPage.appendChild(withHint(goneRow, "Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
+        libraryPage.appendChild(makeLabel("Song list"));
+        libraryPage.appendChild(withHint(showAllRow, "The song list shows every song, those the filters leave out greyed between the others, in every list view and in the web view. Several in a row fold under the first, with how many there are and an arrow that opens them. A tap on one asks whether to play it now, the queue then going on with the songs the filters let through, or to play all of them up to the next song the filters let through. They can be put in the queue as usual. Off, the list shows only the songs the filters let through. A playlist still shows only its own songs."));
         libraryPage.appendChild(makeLabel("Instrumental songs"));
         libraryPage.appendChild(withHint(lyricLimitRow, "A song whose lyrics have fewer characters than this, spaces not counted, counts as instrumental, for the vocals filter and everywhere else. Mureka's prompt often holds only a short note such as [Instrumental] for one. The lyrics are known for songs played, coming up next, opened in Information or read for the play counts. 0 switches it off."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
@@ -40050,6 +40489,7 @@
 
                 playNextMarks.clear();
                 playLastMarks.clear();
+                runMarks.clear();
                 queue = [];
                 queueOwn = true;
             }
@@ -40120,6 +40560,7 @@
         dropNextReady();
         playNextMarks.clear();
         playLastMarks.clear();
+        runMarks.clear();
         resumeState = null;
 
         if (keepIt) {

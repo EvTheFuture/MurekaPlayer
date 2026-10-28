@@ -58,7 +58,7 @@ KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all addons android apk debug release install install-debug signing check version bookmarklet fdroid clean distclean
+.PHONY: help all addons android apk debug release install install-debug signing check version bookmarklet fdroid prune clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
@@ -74,6 +74,7 @@ help:
 	@echo "  make version        bump manifest.json to the player version"
 	@echo "  make bookmarklet    pin the release bookmarklet to a tag, TAG=v$(VERSION) unless given"
 	@echo "  make fdroid         the F-Droid recipe for a tag in fdroid/, TAG=v$(VERSION) unless given"
+	@echo "  make prune          remove release APKs older than $(VERSION), make all does it last"
 	@echo "  make clean          remove build output, keep the caches"
 	@echo "  make distclean      also remove the Gradle and SDK caches in the tree"
 	@echo
@@ -84,7 +85,7 @@ help:
 
 # The manifest is brought to the player's version first, so a build never
 # stops on a version mismatch it could have fixed itself
-all: version check addons release
+all: version check addons release prune
 	@echo "Built everything at version $(VERSION)"
 
 # The browser add-on packages, including the version check build.sh does
@@ -96,7 +97,8 @@ addons:
 # file F-Droid reads to notice a new release. The code is the one the app
 # gets, two digits for each of the first three parts and four for the
 # build, 2.0.0 is 200000000. Empty when a part is too large for its digits
-VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '{ c = 0; for (i = 1; i <= 4; i++) { w = (i == 4) ? 10000 : 100; p = $$i + 0; if (p >= w) { c = ""; break } c = c * w + p } print c }')
+VERSION_AWK = { c = 0; for (i = 1; i <= 4; i++) { w = (i == 4) ? 10000 : 100; p = $$i + 0; if (p >= w) { c = ""; break } c = c * w + p } print c }
+VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '$(VERSION_AWK)')
 
 version:
 	@if [ -z "$(VERSION_CODE)" ]; then \
@@ -106,6 +108,21 @@ version:
 	./update-manifest-version.sh
 	@printf 'versionName=%s\nversionCode=%s\n' "$(VERSION)" "$(VERSION_CODE)" > android/version.properties
 	@echo "android/version.properties at $(VERSION), code $(VERSION_CODE)"
+
+# Release APKs of older versions are removed, each with its checksum, the
+# current one and any newer one are kept. Versions are compared by their
+# version code, so no sort -V is needed
+prune:
+	@for f in mureka-player-*.apk; do \
+	    [ -e "$$f" ] || continue; \
+	    v=$${f#mureka-player-}; \
+	    v=$${v%.apk}; \
+	    code=$$(echo "$$v" | awk -F. '$(VERSION_AWK)'); \
+	    if [ -n "$$code" ] && [ "$$code" -lt "$(VERSION_CODE)" ]; then \
+	        rm -f "$$f" "$$f.sha256"; \
+	        echo "Removed $$f"; \
+	    fi; \
+	done
 
 # The release bookmarklet, pinned to a tag with the player's hash. Tag the
 # release first

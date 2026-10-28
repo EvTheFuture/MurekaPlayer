@@ -1154,6 +1154,11 @@ final class WebViewServer {
             req.put("view", listView(param(query, "view")));
             req.put("offset", number(param(query, "offset"), 0));
             req.put("limit", number(param(query, "limit"), 60));
+
+            // The folds of left out songs this browser opened, and one fold
+            // asked for alone, song ids the player only compares
+            req.put("open", param(query, "open"));
+            req.put("run", param(query, "run"));
         } catch (JSONException e) {
             // A default request then
         }

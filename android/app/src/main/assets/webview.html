@@ -1987,6 +1987,27 @@
         opacity: 0.45;
     }
 
+    /* A song the filters leave out, greyed, its fold's count and arrow
+       kept plain to read and to tap */
+    .row.greyed:not(.playing) > :not(.foldChip) {
+        opacity: 0.45;
+    }
+
+    .foldChip {
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--card);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.7em;
+        line-height: 1;
+        padding: 0.45em 0.8em;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
     .rowNum {
         flex: 0 0 auto;
         min-width: 2.4em;
@@ -11818,7 +11839,7 @@
         listBusy = true;
         showListLoading(true);
 
-        fetchJson("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=" + listLoaded
+        fetchJson("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=" + listLoaded
             + "&limit=" + (done ? 200 : PAGE)).then(function (data) {
 
             if (token !== listToken) {
@@ -11850,9 +11871,7 @@
             });
 
             noteFilters(data.filters);
-            $("counts").textContent = listTotal + " song" + (listTotal === 1 ? "" : "s")
-                + (listQuery ? " matching " + listQuery : "")
-                + (listLoaded < listTotal ? ", showing " + listLoaded : "");
+            paintListCount(data);
             sizeCountRoom();
 
             if (done) {
@@ -11884,6 +11903,33 @@
 
     // Where the playing song is in the whole list, as the phone last said
     let listPlayingAt = -1;
+
+    // The songs the filters let through, and those shown greyed, as the
+    // phone counted them, apart from the rows, where a fold counts once
+    let listCount = null;
+    let miniCount = null;
+
+    function songsWord(n) {
+        return n + " song" + (n === 1 ? "" : "s");
+    }
+
+    function countText(c, total, query) {
+
+        const n = c && typeof c.matched === "number" ? c.matched : total;
+        const out = c && c.leftOut > 0 ? ", " + c.leftOut + " left out" : "";
+
+        return songsWord(n) + (query ? " matching " + query : "") + out;
+    }
+
+    function paintListCount(data) {
+
+        if (data) {
+            listCount = { matched: data.matched, leftOut: data.leftOut };
+        }
+
+        $("counts").textContent = countText(listCount, listTotal, listQuery)
+            + (listLoaded < listTotal ? ", showing " + listLoaded : "");
+    }
 
     // A list read again because songs may have come in stays at its top
     // when it was there, where the new songs are. Opened, searched, sorted
@@ -13184,6 +13230,163 @@
         })
         : null;
 
+    // The folds of songs the filters leave out opened in this browser, by
+    // their first song. The phone folds the list, every request says which
+    // are opened, so the pages it sends follow on from the rows here
+    const openRuns = new Set();
+
+    function foldParam() {
+        return openRuns.size > 0 ? "&open=" + esc(Array.from(openRuns).join(",")) : "";
+    }
+
+    // The two song lists and how far each has loaded
+    function foldBoxes() {
+
+        return [
+            { box: $("rows"), q: function () { return listQuery; }, add: function (n) { listLoaded += n; listTotal += n; paintListCount(null); } },
+            { box: $("miniRows"), q: function () { return miniQuery; }, add: function (n) { miniLoaded += n; miniTotal += n; paintMiniCount(); } }
+        ];
+    }
+
+    function foldChip(song, row) {
+
+        const chip = document.createElement("button");
+
+        chip.type = "button";
+        chip.className = "foldChip";
+        chip.dataset.head = song.id;
+        chip.dataset.count = String(song.run);
+        paintFoldChip(chip, song.runOpen === true);
+
+        chip.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            toggleFold(song.id);
+        });
+
+        return chip;
+    }
+
+    function paintFoldChip(chip, open) {
+
+        const n = chip.dataset.count;
+
+        chip.textContent = (open ? "\u25BE " : "\u25B8 ") + n;
+        chip.title = open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them";
+        chip.setAttribute("aria-label", chip.title);
+        chip.dataset.open = open ? "1" : "";
+    }
+
+    // Opened, the fold's songs are read from the phone and put in under its
+    // first, folded they are taken out again, in both lists where it shows,
+    // each list's count moving with them so its next page follows on
+    function toggleFold(head) {
+
+        const open = !openRuns.has(head);
+
+        if (open) {
+            openRuns.add(head);
+        } else {
+            openRuns.delete(head);
+        }
+
+        for (const f of foldBoxes()) {
+
+            const chip = Array.from(f.box.querySelectorAll(".foldChip")).find(function (c) {
+                return c.dataset.head === head;
+            });
+
+            if (!chip) {
+                continue;
+            }
+
+            const headRow = chip.closest(".row");
+
+            paintFoldChip(chip, open);
+
+            if (!open) {
+
+                const gone = Array.from(f.box.querySelectorAll(".row")).filter(function (r) {
+                    return r.dataset.runHead === head && r !== headRow;
+                });
+
+                for (const r of gone) {
+                    r.remove();
+                }
+
+                f.add(-gone.length);
+                continue;
+            }
+
+            fetchJson("/list?q=" + esc(f.q()) + "&view=" + (listSort || "mureka") + "&run=" + esc(head)).then(function (data) {
+
+                if (!data || !Array.isArray(data.songs) || !openRuns.has(head) || !headRow.isConnected) {
+                    return;
+                }
+
+                // Put in already by a tap before this one
+                if (headRow.nextElementSibling && headRow.nextElementSibling.dataset.runHead === head) {
+                    return;
+                }
+
+                let after = headRow;
+
+                for (const song of data.songs) {
+
+                    const row = makeRow(song, 0);
+
+                    after.after(row);
+                    after = row;
+                }
+
+                f.add(data.songs.length);
+            }).catch(function () {
+            });
+        }
+    }
+
+    // A tap on a song the filters leave out asks how far to play: the song
+    // now, the queue going on with what the filters let through, or all of
+    // them up to the next song they let through. The phone counts those
+    function askLeftOut(song, row) {
+
+        const mark = function () {
+
+            const before = document.querySelector(".row.playing");
+
+            if (before) {
+                before.classList.remove("playing");
+            }
+
+            row.classList.add("playing");
+        };
+
+        openChoice("\"" + song.title + "\" is left out by the filters", [
+            { icon: "play", label: "Play now", fn: function () {
+
+                closeSongMenu();
+                send("playId", song.id);
+                mark();
+            } },
+            { icon: "listPlusTop", label: "Play after this song", fn: function () {
+
+                closeSongMenu();
+                send("playNext", song.id);
+            } },
+            { icon: "queue", label: "Play all up to the next match", fn: function () {
+
+                closeSongMenu();
+                send("playRun", song.id);
+                mark();
+            } },
+            { icon: "listPlusTop", label: "Play all after this song", fn: function () {
+
+                closeSongMenu();
+                send("playNextRun", song.id);
+            } }
+        ]);
+    }
+
     function makeRow(song, place) {
 
         if (song.pending) {
@@ -13200,18 +13403,33 @@
         }
 
         row.setAttribute("role", "button");
-        row.className = "row" + (song.playing ? " playing" : "");
+        row.className = "row" + (song.playing ? " playing" : "") + (song.greyed ? " greyed" : "");
         row.dataset.id = song.id;
+
+        if (song.runHead) {
+            row.dataset.runHead = song.runHead;
+        }
+
         attachLongPress(row, song.id);
         songLine(song, row);
 
-        // Its place in the list as shown, sorted and searched
-        if (place > 0) {
+        // The first of several songs in a row the filters leave out: how
+        // many, this one counted, and an arrow to open or fold them
+        if (song.run > 1) {
+            row.insertBefore(foldChip(song, row), row.querySelector(".rowTitle").nextSibling);
+        }
+
+        // Its place in the list as shown, sorted and searched, counting only
+        // the songs the filters let through, as the phone numbered them. A
+        // greyed song has no place
+        const at = typeof song.place === "number" ? song.place : place;
+
+        if (at > 0 && !song.greyed) {
 
             const mark = document.createElement("span");
 
             mark.className = "rowPlace";
-            mark.textContent = "#" + place;
+            mark.textContent = "#" + at;
             row.appendChild(mark);
         }
 
@@ -13229,6 +13447,13 @@
         row.appendChild(nextBtn);
 
         row.addEventListener("click", function () {
+
+            // Left out by the filters, a question first, unless it plays
+            if (song.greyed && !row.classList.contains("playing")) {
+
+                askLeftOut(song, row);
+                return;
+            }
 
             send("playId", song.id);
 
@@ -16489,7 +16714,7 @@
         const queueView = listView === "queue";
         const url = queueView
             ? "/queue?q=" + esc(listQuery)
-            : "/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=0&limit="
+            : "/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
                 + Math.min(200, Math.max(PAGE, listLoaded));
 
         fetch(url, { cache: "no-store" }).then(function (res) {
@@ -16521,7 +16746,7 @@
             return;
         }
 
-        fetchJson("/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + "&offset=0&limit="
+        fetchJson("/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
             + Math.min(200, Math.max(PAGE, miniLoaded))).then(function (data) {
 
             const found = new Map();
@@ -17631,7 +17856,7 @@
 
         miniBusy = true;
 
-        const miniUrl = "/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + "&offset=" + miniLoaded
+        const miniUrl = "/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=" + miniLoaded
             + "&limit=" + (limit || PAGE);
 
         fetchJson(miniUrl).then(function (data) {
@@ -17656,6 +17881,7 @@
 
             miniTotal = data.total;
             miniLoaded += data.songs.length;
+            miniCount = { matched: data.matched, leftOut: data.leftOut };
             rowMeta = data.meta || rowMeta;
 
             for (const song of data.songs) {
@@ -17952,7 +18178,9 @@
             return;
         }
 
-        $("miniCount").textContent = miniTotal + " song" + (miniTotal === 1 ? "" : "s") + (miniQuery ? " matching" : "");
+        const c = countText(miniCount, miniTotal, "");
+
+        $("miniCount").textContent = miniQuery ? c.replace(/^(\d+ songs?)/, "$1 matching") : c;
     }
 
     // Each state: the playing row lit, and the count or the work shown. A
@@ -18135,7 +18363,7 @@
             return;
         }
 
-        fetchJson("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + "&offset=0&limit=1").then(function (data) {
+        fetchJson("/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit=1").then(function (data) {
 
             if (!followPlaying || !data || typeof data.playingAt !== "number") {
                 return;

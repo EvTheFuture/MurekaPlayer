@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.1.0
+
+In development.
+
+- **Songs the filters leave out stay in the list.** The song list shows
+  every song, those the filters leave out greyed between the others, in
+  every list view on the phone and in both lists of the web view. Several
+  in a row fold under the first, which shows how many there are with an
+  arrow that opens and folds them. A tap on one asks whether to play it
+  now, the queue then going on with the songs the filters let through, or
+  to play all of them up to the next song the filters let through, after
+  which the queue follows the filters again. Play after this song and Play
+  all after this song put the one song, or all of them up to the next
+  match, right after the song playing instead. They can be put in the
+  queue as usual. The count line says how many songs the filters let through
+  and how many they leave out. In the web view only the songs the filters
+  let through are numbered, a greyed one has no number and the song after
+  it takes the next one. A playlist still shows only its own songs.
+  With the published songs listed, newest published first, a draft goes
+  where it was made among them. A Library setting, on unless changed,
+  shows only the songs the filters let through instead.
+- **The queue goes on from a song outside the filters.** With shuffle off,
+  a queue playing a song the filters leave out goes on with the songs they
+  let through after its place in the list, rather than from the top.
+
+### Build
+
+- **make fdroid** writes the F-Droid build recipe for a tagged release to
+  fdroid/, in the form F-Droid keeps it, ready to copy to fdroiddata. It
+  checks that the tag carries the version and the store changelog, and,
+  when the release APK is there, that it is signed with the release key.
+- The app no longer lists the phone state and storage permissions. The
+  build added them for a library that names no target Android version,
+  the app never used them.
+- **make all** removes the release APKs of older versions, each with its
+  checksum, once the current one is built, and keeps any newer one.
+  **make prune** does it on its own.
+
 ## 2.0.0
 
 The big news is a new Android app. It runs the same player as the add-on and
@@ -1003,6 +1041,10 @@ the new settings layout and a number of smaller improvements.
   of the version and four for the build, so 2.0.0 is 200000000 and a
   build number up to 9999 never sorts past the next version. A version
   too large for that stops the build.
+- The APK carries no Google dependency metadata in its signing block,
+  which F-Droid does not accept. F-Droid builds the app from the release
+  tag, finds it the same as the APK on GitHub and ships that APK, signed
+  with the release key, so either can update the other.
 
 ### Known limits
 
