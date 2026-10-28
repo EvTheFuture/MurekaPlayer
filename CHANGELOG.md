@@ -4,6 +4,29 @@
 
 In development.
 
+- **Song sets.** The versions of a song, made again and again on Mureka,
+  can be kept together in a set, to compare them and listen them through.
+  A song's menu has Add to a set: a new set with the song, or one of the
+  sets used last. In a set, the menu takes it out, moves it to another
+  set, renames the set or changes its color, one of the ready ones or any
+  color from the color picker. Suggest similar songs lists the songs in no
+  set that look like more versions of the set's songs, with why: the same
+  or similar lyrics, the same or a similar title, made in the same
+  generation. The most alike are ticked, Add puts the ticked ones in the
+  set. Lyrics count for songs played or opened in the player before, and
+  only when they have more than a few words. In the list a set sits where
+  its newest song was made, folded under its best rated song, the newest
+  of those, with a chip in the set's color showing how many songs it
+  holds. Opened, the set's other songs follow, newest first, each with a
+  bar of the set's color. A queue made from the list plays a set's songs
+  one after another. The playing song shows also in a folded set. The web
+  view shows the sets the same way, and its song menu does all of the
+  above as well, the custom color and the similar songs too. A trimmed
+  song goes into its original's set. Sets travel with song tweaks, in a
+  file and in a copied line, where Song sets is a choice of its own.
+- **Notes.** A song's menu has Note, a few words kept with the song, shown
+  in Information and in the menu, on the phone and in the web view. A trimmed song takes its original's
+  note. Notes travel with song tweaks.
 - **Songs the filters leave out stay in the list.** The song list shows
   every song, those the filters leave out greyed between the others, in
   every list view on the phone and in both lists of the web view. Several
@@ -28,6 +51,14 @@ In development.
   goes on after the last song played that the filters let through, rather
   than from the top, so songs played now with the queue kept leave the
   rest of it as it was.
+- **Dismiss leaves the other app playing.** On an iPhone or iPad, a play
+  Safari held back while another app, a video say, had the sound went
+  through on the next tap, Dismiss in the box asking to play on among
+  them, and took the sound from that app, which went quiet. The play and
+  the sound engine's wake are now called off as soon as the hold is seen,
+  the song staying where it was, so only Resume playback starts it. Coming
+  back into view plays on once, not once for each of the events that come
+  with it.
 
 ### Build
 

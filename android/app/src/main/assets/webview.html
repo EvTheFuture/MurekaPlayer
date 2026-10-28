@@ -1993,6 +1993,11 @@
         opacity: 0.45;
     }
 
+    /* A song of a set, a bar of the set's color at its start */
+    .row.inSet {
+        box-shadow: inset 4px 0 0 var(--setColor, transparent);
+    }
+
     /* In the number column of a fold's first song, so the title keeps its
        room, the same width whatever the count */
     .foldChip {
@@ -2526,6 +2531,16 @@
     .menuItem.inset {
         color: var(--accent);
         box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
+    /* In a set's own color, and ringed in it */
+    .menuItem.setText {
+        color: var(--setColor);
+    }
+
+    .menuItem.setRing {
+        color: var(--setColor);
+        box-shadow: inset 0 0 0 2px var(--setColor);
     }
 
     /* Ringed in grey, apart from a ringed choice beside it */
@@ -5949,6 +5964,15 @@
             ["path", { d: "M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" }],
             ["line", { x1: "12", y1: "9", x2: "12", y2: "13" }],
             ["line", { x1: "12", y1: "17", x2: "12.01", y2: "17" }]
+        ],
+        note: [
+            ["path", { d: "M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z" }],
+            ["polyline", { points: "15 3 15 9 21 9" }]
+        ],
+        sets: [
+            ["polygon", { points: "12 2 2 7 12 12 22 7 12 2" }],
+            ["polyline", { points: "2 17 12 22 22 17" }],
+            ["polyline", { points: "2 12 12 17 22 12" }]
         ],
         info: [
             ["circle", { cx: "12", cy: "12", r: "10" }],
@@ -13241,8 +13265,13 @@
     // are opened, so the pages it sends follow on from the rows here
     const openRuns = new Set();
 
+    // The song sets opened in this browser, by set id, sent the same way
+    const openSets = new Set();
+
     function foldParam() {
-        return openRuns.size > 0 ? "&open=" + esc(Array.from(openRuns).join(",")) : "";
+
+        return (openRuns.size > 0 ? "&open=" + esc(Array.from(openRuns).join(",")) : "")
+            + (openSets.size > 0 ? "&sets=" + esc(Array.from(openSets).join(",")) : "");
     }
 
     // The two song lists and how far each has loaded
@@ -13254,20 +13283,31 @@
         ];
     }
 
+    // The chip of a fold of songs the filters leave out, or of a set, in the
+    // set's color
     function foldChip(song, row) {
 
         const chip = document.createElement("button");
+        const isSet = song.setCount > 1;
 
         chip.type = "button";
         chip.className = "foldChip";
-        chip.dataset.head = song.id;
-        chip.dataset.count = String(song.run);
-        paintFoldChip(chip, song.runOpen === true);
+        chip.dataset.kind = isSet ? "set" : "run";
+        chip.dataset.head = isSet ? song.setId : song.id;
+        chip.dataset.count = String(isSet ? song.setCount : song.run);
+
+        if (isSet) {
+
+            chip.style.borderColor = song.setColor;
+            chip.style.color = song.setColor;
+        }
+
+        paintFoldChip(chip, isSet ? song.setOpen === true : song.runOpen === true);
 
         chip.addEventListener("click", function (ev) {
 
             ev.stopPropagation();
-            toggleFold(song.id);
+            toggleFold(chip.dataset.head, chip.dataset.kind);
         });
 
         return chip;
@@ -13278,7 +13318,9 @@
         const n = chip.dataset.count;
 
         chip.textContent = (open ? "\u25BE" : "\u25B8") + n;
-        chip.title = open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them";
+        chip.title = chip.dataset.kind === "set"
+            ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
+            : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
         chip.setAttribute("aria-label", chip.title);
         chip.dataset.open = open ? "1" : "";
     }
@@ -13286,20 +13328,27 @@
     // Opened, the fold's songs are read from the phone and put in under its
     // first, folded they are taken out again, in both lists where it shows,
     // each list's count moving with them so its next page follows on
-    function toggleFold(head) {
+    function toggleFold(head, kind) {
 
-        const open = !openRuns.has(head);
+        const isSet = kind === "set";
+        const opened = isSet ? openSets : openRuns;
+        const open = !opened.has(head);
+
+        // The rows under a fold's first: songs of the run, or of the set
+        const under = function (r) {
+            return isSet ? r.dataset.setOf === head : r.dataset.runHead === head;
+        };
 
         if (open) {
-            openRuns.add(head);
+            opened.add(head);
         } else {
-            openRuns.delete(head);
+            opened.delete(head);
         }
 
         for (const f of foldBoxes()) {
 
             const chip = Array.from(f.box.querySelectorAll(".foldChip")).find(function (c) {
-                return c.dataset.head === head;
+                return c.dataset.head === head && c.dataset.kind === (isSet ? "set" : "run");
             });
 
             if (!chip) {
@@ -13313,7 +13362,7 @@
             if (!open) {
 
                 const gone = Array.from(f.box.querySelectorAll(".row")).filter(function (r) {
-                    return r.dataset.runHead === head && r !== headRow;
+                    return under(r) && r !== headRow;
                 });
 
                 for (const r of gone) {
@@ -13324,16 +13373,23 @@
                 continue;
             }
 
-            fetchJson("/list?q=" + esc(f.q()) + "&view=" + (listSort || "mureka") + "&run=" + esc(head)).then(function (data) {
+            fetchJson("/list?q=" + esc(f.q()) + "&view=" + (listSort || "mureka") + (isSet ? "&set=" : "&run=") + esc(head)).then(function (data) {
 
-                if (!data || !Array.isArray(data.songs) || !openRuns.has(head) || !headRow.isConnected) {
+                if (!data || !Array.isArray(data.songs) || !opened.has(head) || !headRow.isConnected) {
                     return;
                 }
 
-                // Put in already by a tap before this one
-                if (headRow.nextElementSibling && headRow.nextElementSibling.dataset.runHead === head) {
-                    return;
+                // A song of the set shown while folded, the playing one, is
+                // taken out first, it comes again in its place
+                const shown = Array.from(f.box.querySelectorAll(".row")).filter(function (r) {
+                    return under(r) && r !== headRow;
+                });
+
+                for (const r of shown) {
+                    r.remove();
                 }
+
+                f.add(-shown.length);
 
                 let after = headRow;
 
@@ -13436,13 +13492,24 @@
             row.dataset.runHead = song.runHead;
         }
 
+        // A song of a set, the set's color at its start
+        if (song.setColor) {
+
+            row.classList.add("inSet");
+            row.style.setProperty("--setColor", song.setColor);
+        }
+
+        if (song.setMember) {
+            row.dataset.setOf = song.setId;
+        }
+
         attachLongPress(row, song.id);
         songLine(song, row);
 
         // The first of several songs in a row the filters leave out: how
         // many, this one counted, and an arrow to open or fold them, in
         // place of its number
-        if (song.run > 1) {
+        if (song.run > 1 || song.setCount > 1) {
 
             const num = row.querySelector(".rowNum");
 
@@ -19818,7 +19885,14 @@
                 return c && c !== "tall";
             }).concat(["tall"]).join(" ");
 
-            box.appendChild(menuItem(item.icon, item.label, item.fn, cls));
+            const el = menuItem(item.icon, item.label, item.fn, cls);
+
+            // A set's choices in the set's own color
+            if (item.color) {
+                el.style.setProperty("--setColor", item.color);
+            }
+
+            box.appendChild(el);
         }
 
         $("songMenu").style.display = "flex";
@@ -20788,18 +20862,19 @@
 
     // The values a copy can carry, and what each kind of copy carries until
     // chosen otherwise in this browser. Songs for someone else leave the
-    // ratings and ignored songs out
+    // ratings and ignored songs out. Song sets only go with song tweaks
     const COPY_TYPES = [
         { key: "bpm", label: "Tempos (BPM)" },
         { key: "instr", label: "Instrumental marks" },
         { key: "rating", label: "Ratings" },
-        { key: "ignore", label: "Ignored songs" }
+        { key: "ignore", label: "Ignored songs" },
+        { key: "sets", label: "Song sets", only: "tweaks" }
     ];
 
     const COPY_DEFAULTS = {
-        songs: { bpm: true, instr: true, rating: false, ignore: false },
-        queue: { bpm: true, instr: true, rating: false, ignore: false },
-        tweaks: { bpm: true, instr: true, rating: true, ignore: true }
+        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true }
     };
 
     function copyTypesHere(kind) {
@@ -20845,6 +20920,11 @@
     function askCopy(kind, ids, action) {
 
         const on = copyTypesHere(kind);
+
+        // Only what this kind of copy can carry is offered
+        const types = COPY_TYPES.filter(function (t) {
+            return !t.only || t.only === kind;
+        });
         const titles = {
             songs: action === "share" ? "Share the picked songs" : "Copy the picked songs",
             queue: "Copy the play queue",
@@ -20935,11 +21015,11 @@
 
         const draw = function () {
 
-            const any = COPY_TYPES.some(function (t) {
+            const any = types.some(function (t) {
                 return on[t.key];
             });
             const ready = kind !== "tweaks" || any;
-            const items = COPY_TYPES.map(function (t) {
+            const items = types.map(function (t) {
 
                 return {
                     icon: on[t.key] ? "check" : "circle",
@@ -20958,7 +21038,7 @@
 
             items.push({ icon: "check", label: "All", fn: function () {
 
-                for (const t of COPY_TYPES) {
+                for (const t of types) {
                     on[t.key] = true;
                 }
 
@@ -20970,7 +21050,7 @@
 
             items.push({ icon: "circle", label: "None", fn: function () {
 
-                for (const t of COPY_TYPES) {
+                for (const t of types) {
                     on[t.key] = false;
                 }
 
@@ -21039,6 +21119,176 @@
     // The choices for one song that do not start it playing, shared by the
     // long press menu and the actions menu, where they are for the playing
     // song. Close is how the menu they sit in closes
+    // A set or a note changed on the phone, for the song the menu was for.
+    // The list is read again once the phone has it
+    function setAction(m, action, value) {
+        return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
+    }
+
+    // What can be done with the song's set, or which set to put it in
+    function askSetHere(m) {
+
+        if (!m.set) {
+
+            askSetPickHere(m, "Add \"" + m.title + "\" to a set");
+            return;
+        }
+
+        const set = m.set;
+
+        openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs"), [
+            { icon: "target", label: "Suggest similar songs", fn: function () {
+                askSimilarHere(m);
+            } },
+            { icon: "close", label: "Take out of the set", fn: function () {
+
+                closeSongMenu();
+                setAction(m, "outOfSet");
+                toast("Taken out of the set", "ok");
+            } },
+            { icon: "sets", label: "Move to another set", fn: function () {
+                askSetPickHere(m, "Move \"" + m.title + "\" to another set");
+            } },
+            { icon: "pencil", label: "Rename the set", fn: function () {
+
+                closeSongMenu();
+                askText("Name of the set", set.name, "Rename", function (typed) {
+
+                    if (typed.trim()) {
+                        setAction(m, "renameSet", typed.trim());
+                    }
+                });
+            } },
+            { icon: "image", label: "Color of the set", cls: "setRing", color: set.color, fn: function () {
+                askSetColorHere(m);
+            } }
+        ]);
+    }
+
+    // A new set, or one of the latest used ones
+    function askSetPickHere(m, title) {
+
+        const items = [{ icon: "listPlus", label: "New set with this song", fn: function () {
+
+            closeSongMenu();
+            setAction(m, "newSet");
+            toast("New set", "ok");
+        } }];
+
+        for (const set of m.sets || []) {
+
+            items.push({ icon: "sets", label: set.name + " (" + set.count + ")", cls: "setRing", color: set.color, fn: function () {
+
+                closeSongMenu();
+                setAction(m, "toSet", set.id);
+                toast("In the set " + set.name, "ok");
+            } });
+        }
+
+        openChoice(title, items);
+    }
+
+    // One of the ready colors, or any from the color picker
+    function askSetColorHere(m) {
+
+        const set = m.set;
+        const colors = (m.setColors || []).slice();
+
+        // A custom color in use is shown as well
+        if (colors.indexOf(set.color) < 0) {
+            colors.unshift(set.color);
+        }
+
+        const items = colors.map(function (c) {
+
+            return { icon: c === set.color ? "check" : "circle", label: c === set.color ? "In use" : "\u25CF",
+                cls: "setRing", color: c, fn: function () {
+
+                    closeSongMenu();
+                    setAction(m, "setColor", c);
+                } };
+        });
+
+        items.push({ icon: "image", label: "Custom color", fn: function () {
+
+            let timer = 0;
+
+            closeSongMenu();
+            openColorPicker("Color of \"" + set.name + "\"", set.color, 100, 0, function (c) {
+
+                // The list follows the picker, a moment after it stops
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    setAction(m, "setColor", c);
+                }, 250);
+            });
+        } });
+
+        openChoice("Color of \"" + set.name + "\"", items);
+    }
+
+    // The songs that look like more versions of the set's songs, to tick,
+    // the most alike already ticked
+    function askSimilarHere(m) {
+
+        const found = m.similar || [];
+
+        if (found.length === 0) {
+
+            closeSongMenu();
+            toast("No similar songs found. Lyrics only count for songs played or opened on the phone before.", "bad");
+            return;
+        }
+
+        const on = {};
+
+        for (const f of found) {
+            on[f.id] = f.ticked === true;
+        }
+
+        const draw = function () {
+
+            const picked = found.filter(function (f) {
+                return on[f.id];
+            });
+            const items = found.map(function (f) {
+
+                return {
+                    icon: on[f.id] ? "check" : "circle",
+                    label: f.title + " (" + f.why + ", " + f.date + ")",
+                    cls: on[f.id] ? "inset" : "",
+                    fn: function () {
+
+                        on[f.id] = !on[f.id];
+                        draw();
+                    }
+                };
+            });
+
+            items.push({
+                icon: "listPlus",
+                label: picked.length === 0 ? "Tick the songs to add" : "Add " + picked.length + (picked.length === 1 ? " song" : " songs"),
+                cls: picked.length > 0 ? "accent" : "",
+                fn: function () {
+
+                    if (picked.length === 0) {
+                        return;
+                    }
+
+                    closeSongMenu();
+                    setAction(m, "addToSet", picked.map(function (f) {
+                        return f.id;
+                    }));
+                    toast(picked.length === 1 ? "1 song added to the set" : picked.length + " songs added to the set", "ok");
+                }
+            });
+
+            openChoice("Similar songs, tap to tick", items);
+        };
+
+        draw();
+    }
+
     function songMenuItems(m, box, close, fromActions) {
 
         const act = function (action, value) {
@@ -21190,6 +21440,26 @@
                 showBpmField(m);
             }));
         }
+
+        // Kept together with its other versions, and a few words of its own
+        const setItem = menuItem("sets", m.set ? "Set: " + m.set.name : "Add to a set", function () {
+
+            close();
+            askSetHere(m);
+        }, m.set ? "setText" : "");
+
+        if (m.set) {
+            setItem.style.setProperty("--setColor", m.set.color);
+        }
+
+        box.appendChild(setItem);
+        box.appendChild(menuItem("note", m.note ? "Note: " + m.note : "Note", function () {
+
+            close();
+            askText("Note on \"" + m.title + "\"", m.note || "", "Save", function (typed) {
+                setAction(m, "note", typed);
+            });
+        }));
 
         if (fromActions) {
 

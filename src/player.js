@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.6";
+    const VERSION = "2.0.0.10";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -150,7 +150,7 @@
 
     // The kinds of song tweaks an import can leave out, read with the
     // settings, which remember what was left out last time
-    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "ignore", "creators"];
+    const IMPORT_TYPE_KEYS = ["rating", "bpm", "instr", "ignore", "creators", "sets", "notes"];
 
     // Left out of an import until chosen otherwise: ratings, ignored songs
     // and saved creators are a matter of taste, tempos and instrumental
@@ -240,16 +240,26 @@
         { key: "bpm", label: "Tempos (BPM)" },
         { key: "instr", label: "Instrumental marks" },
         { key: "rating", label: "Ratings" },
-        { key: "ignore", label: "Ignored songs" }
+        { key: "ignore", label: "Ignored songs" },
+        { key: "sets", label: "Song sets", only: "tweaks" }
     ];
 
     // What each kind of copy carries until chosen otherwise. Songs for
-    // someone else leave the ratings and ignored songs out
+    // someone else leave the ratings and ignored songs out. Song sets only
+    // go with song tweaks
     const COPY_DEFAULTS = {
-        songs: { bpm: true, instr: true, rating: false, ignore: false },
-        queue: { bpm: true, instr: true, rating: false, ignore: false },
-        tweaks: { bpm: true, instr: true, rating: true, ignore: true }
+        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true }
     };
+
+    // The values a kind of copy can carry
+    function copyTypesOf(kind) {
+
+        return COPY_TYPES.filter(function (t) {
+            return !t.only || t.only === kind;
+        });
+    }
 
     // Album art coverflow, the center cover takes this fraction of the width and
     // the previous and next covers peek in on the sides. Lower shows more of the
@@ -4916,6 +4926,96 @@
         return n;
     }
 
+    // The word triples of each song's lyrics, hashed, to tell the versions
+    // of a song from other songs. Kept for this visit only, filled as
+    // details come in from Mureka or are read from the store
+    const lyricPrints = new Map();
+
+    // Lyrics with fewer words than this say nothing about which song it is
+    const LYRIC_PRINT_MIN_WORDS = 30;
+
+    // The text of lyrics in any of their shapes, tags like [Verse] left out
+    function lyricText(lyrics, out) {
+
+        if (typeof lyrics === "string") {
+
+            out.push(lyrics.replace(/\[[^\]]*\]/g, " "));
+            return out;
+        }
+
+        if (!Array.isArray(lyrics)) {
+            return out;
+        }
+
+        for (const part of lyrics) {
+
+            if (typeof part === "string") {
+                lyricText(part, out);
+            } else if (part && Array.isArray(part.rows)) {
+                lyricText(part.rows, out);
+            } else if (part && typeof part.text === "string") {
+                lyricText(part.text, out);
+            }
+        }
+
+        return out;
+    }
+
+    // Lower case words of letters and digits, marks kept for scripts like Thai
+    function textWords(text) {
+        return String(text || "").toLowerCase().match(/[\p{L}\p{M}\p{N}']+/gu) || [];
+    }
+
+    function hashText(text) {
+
+        let h = 0x811c9dc5;
+
+        for (let i = 0; i < text.length; i++) {
+
+            h ^= text.charCodeAt(i);
+            h = Math.imul(h, 0x01000193);
+        }
+
+        return h >>> 0;
+    }
+
+    function noteLyricPrint(id, lyrics) {
+
+        const words = textWords(lyricText(lyrics, []).join(" "));
+        const key = String(id);
+
+        if (words.length < LYRIC_PRINT_MIN_WORDS) {
+
+            lyricPrints.delete(key);
+            return;
+        }
+
+        const print = new Set();
+
+        for (let i = 0; i + 2 < words.length; i++) {
+            print.add(hashText(words[i] + " " + words[i + 1] + " " + words[i + 2]));
+        }
+
+        lyricPrints.set(key, print);
+    }
+
+    // How much two lyric prints share, 0 to 1
+    function printLikeness(a, b) {
+
+        const small = a.size <= b.size ? a : b;
+        const big = small === a ? b : a;
+        let both = 0;
+
+        for (const h of small) {
+
+            if (big.has(h)) {
+                both++;
+            }
+        }
+
+        return both / (a.size + b.size - both);
+    }
+
     // A song's details came in, from Mureka or the store: its lyrics'
     // length is noted, and the list drawn again when that makes it an
     // instrumental or no longer one
@@ -4934,6 +5034,8 @@
         if (lyrics === undefined || lyrics === null) {
             return;
         }
+
+        noteLyricPrint(id, lyrics);
 
         const key = String(id);
         const n = lyricChars(lyrics);
@@ -5134,6 +5236,748 @@
     function queueable(song) {
         return passesFilters(song) && !isIgnored(song);
     }
+
+    // Song sets: the versions of one song, made again and again on Mureka,
+    // kept together so they can be compared and listened through. A set has
+    // a name and a color. A song is in one set at most, put there by hand or
+    // by the player. A song taken out of a set by hand is never put in one
+    // by the player again. Kept on this device, carried by song tweaks
+    const SETS_KEY = "mureka_sets_v1";
+    const NOTES_KEY = "mureka_notes_v1";
+    const SET_COLORS = ["#ff9f43", "#a78bfa", "#7ee787", "#ff6b9a", "#ffd166", "#48b0eb", "#f87171", "#e0a8ff"];
+
+    // Set id to { id, name, color, used }, song id to { set, how }, and the
+    // songs never to be put in a set by the player
+    const songSets = new Map();
+    const songSetOf = new Map();
+    const setNotAuto = new Set();
+
+    // A note on a song, by song id
+    const songNotes = new Map();
+
+    // The folds of sets opened in the player's own list, by set id
+    const openedSets = new Set();
+
+    function loadSetsData() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(SETS_KEY) || "null");
+
+            if (raw && Array.isArray(raw.sets)) {
+
+                for (const x of raw.sets) {
+
+                    if (x && typeof x.id === "string" && x.id) {
+                        songSets.set(x.id, { id: x.id, name: String(x.name || "Set"), color: setColor(x.color), used: Number(x.used) || 0 });
+                    }
+                }
+
+                const members = raw.members && typeof raw.members === "object" ? raw.members : {};
+
+                for (const id of Object.keys(members)) {
+
+                    const m = members[id];
+
+                    if (Array.isArray(m) && songSets.has(m[0])) {
+                        songSetOf.set(String(id), { set: m[0], how: m[1] === "auto" ? "auto" : "hand" });
+                    }
+                }
+
+                for (const id of Array.isArray(raw.notAuto) ? raw.notAuto : []) {
+                    setNotAuto.add(String(id));
+                }
+            }
+        } catch (e) {
+            // A broken entry starts without sets
+        }
+
+        try {
+
+            const notes = JSON.parse(localStorage.getItem(NOTES_KEY) || "null");
+
+            if (notes && typeof notes === "object") {
+
+                for (const id of Object.keys(notes)) {
+
+                    if (typeof notes[id] === "string" && notes[id].trim()) {
+                        songNotes.set(String(id), notes[id]);
+                    }
+                }
+            }
+        } catch (e) {
+            // A broken entry starts without notes
+        }
+    }
+
+    function setColor(v) {
+        return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : SET_COLORS[0];
+    }
+
+    function setsData() {
+
+        const members = {};
+
+        songSetOf.forEach(function (m, id) {
+            members[id] = [m.set, m.how];
+        });
+
+        return {
+            sets: Array.from(songSets.values()),
+            members: members,
+            notAuto: Array.from(setNotAuto)
+        };
+    }
+
+    // Saved, and everything showing sets drawn again
+    function saveSets() {
+
+        exportsVersion += 1;
+        songDataStamp += 1;
+
+        try {
+            localStorage.setItem(SETS_KEY, JSON.stringify(setsData()));
+        } catch (e) {
+            // Full, kept for this visit only
+        }
+    }
+
+    function saveNotes() {
+
+        exportsVersion += 1;
+
+        const out = {};
+
+        songNotes.forEach(function (v, id) {
+            out[id] = v;
+        });
+
+        try {
+            localStorage.setItem(NOTES_KEY, JSON.stringify(out));
+        } catch (e) {
+            // Full, kept for this visit only
+        }
+    }
+
+    function songNote(song) {
+        return song ? songNotes.get(String(song.song_id)) || "" : "";
+    }
+
+    function setSongNote(song, text) {
+
+        const id = String(song.song_id);
+        const clean = String(text || "").trim();
+
+        if (clean) {
+            songNotes.set(id, clean);
+        } else {
+            songNotes.delete(id);
+        }
+
+        saveNotes();
+    }
+
+    // The set a song is in, or null
+    function setOfSong(song) {
+
+        const m = song ? songSetOf.get(String(song.song_id)) : null;
+
+        return m && songSets.has(m.set) ? songSets.get(m.set) : null;
+    }
+
+    // A set's songs in the library, newest first
+    function setSongs(setId) {
+
+        const out = cache.songs.filter(function (x) {
+            const m = songSetOf.get(String(x.song_id));
+
+            return m && m.set === setId;
+        });
+
+        return out.sort(byNewest);
+    }
+
+    function byNewest(a, b) {
+        return (b.generate_at || 0) - (a.generate_at || 0) || String(b.song_id).localeCompare(String(a.song_id));
+    }
+
+    // The song a set is folded under: the best rated, the newest of those
+    function setHeadOf(songs) {
+
+        let best = null;
+        let bestRating = -1;
+
+        for (const x of songs.slice().sort(byNewest)) {
+
+            const r = getRating(x);
+            const v = r === null ? -1 : r;
+
+            if (best === null || v > bestRating) {
+
+                best = x;
+                bestRating = v;
+            }
+        }
+
+        return best;
+    }
+
+    // A color no set has yet, the least used one once all are taken
+    function freeSetColor() {
+
+        const used = new Map(SET_COLORS.map(function (c) {
+            return [c, 0];
+        }));
+
+        songSets.forEach(function (x) {
+
+            if (used.has(x.color)) {
+                used.set(x.color, used.get(x.color) + 1);
+            }
+        });
+
+        let pick = SET_COLORS[0];
+
+        for (const c of SET_COLORS) {
+
+            if (used.get(c) < used.get(pick)) {
+                pick = c;
+            }
+        }
+
+        return pick;
+    }
+
+    function newSetId() {
+        return "s" + Date.now().toString(36) + Math.floor(Math.random() * 1679616).toString(36);
+    }
+
+    // A new set holding the song, named after it
+    function newSetWith(song, how) {
+
+        const id = newSetId();
+
+        songSets.set(id, { id: id, name: (song.title || "").trim() || "Set", color: freeSetColor(), used: Date.now() });
+        putInSet(song, id, how || "hand");
+
+        return songSets.get(id);
+    }
+
+    // The song into a set, out of the one it was in. By hand it may be put
+    // in a set by the player again later
+    function putInSet(song, setId, how) {
+
+        const id = String(song.song_id);
+        const before = songSetOf.get(id);
+
+        songSetOf.set(id, { set: setId, how: how === "auto" ? "auto" : "hand" });
+
+        if (how !== "auto") {
+            setNotAuto.delete(id);
+        }
+
+        songSets.get(setId).used = Date.now();
+
+        if (before && before.set !== setId) {
+            dropEmptySet(before.set);
+        }
+
+        saveSets();
+    }
+
+    // Out of its set by hand, and never put in one by the player again
+    function takeOutOfSet(song) {
+
+        const id = String(song.song_id);
+        const before = songSetOf.get(id);
+
+        if (!before) {
+            return;
+        }
+
+        songSetOf.delete(id);
+        setNotAuto.add(id);
+        dropEmptySet(before.set);
+        saveSets();
+    }
+
+    // A set with no song left goes
+    function dropEmptySet(setId) {
+
+        for (const m of songSetOf.values()) {
+
+            if (m.set === setId) {
+                return;
+            }
+        }
+
+        songSets.delete(setId);
+        openedSets.delete(setId);
+    }
+
+    // The sets, the latest used first, with how many songs each holds
+    function setsByUse() {
+
+        const counts = new Map();
+
+        songSetOf.forEach(function (m) {
+            counts.set(m.set, (counts.get(m.set) || 0) + 1);
+        });
+
+        return Array.from(songSets.values()).sort(function (a, b) {
+            return (b.used || 0) - (a.used || 0);
+        }).map(function (x) {
+            return { set: x, count: counts.get(x.id) || 0 };
+        });
+    }
+
+    // A list with the songs of each set brought together where its first
+    // song is, the best rated first, then the rest newest first. In the
+    // Mureka order the first is the newest, so a set sits where its latest
+    // version was made. A set with one song in the list stays as it is
+    function groupSets(list) {
+
+        if (songSetOf.size === 0) {
+            return list;
+        }
+
+        const bySet = new Map();
+
+        for (const x of list) {
+
+            const m = songSetOf.get(String(x.song_id));
+
+            if (m && songSets.has(m.set)) {
+
+                if (!bySet.has(m.set)) {
+                    bySet.set(m.set, []);
+                }
+
+                bySet.get(m.set).push(x);
+            }
+        }
+
+        if (bySet.size === 0) {
+            return list;
+        }
+
+        const out = [];
+        const done = new Set();
+
+        for (const x of list) {
+
+            const m = songSetOf.get(String(x.song_id));
+            const members = m ? bySet.get(m.set) : null;
+
+            if (!members || members.length < 2) {
+
+                out.push(x);
+                continue;
+            }
+
+            if (done.has(m.set)) {
+                continue;
+            }
+
+            done.add(m.set);
+
+            const head = setHeadOf(members);
+
+            out.push(head);
+
+            for (const y of members.slice().sort(byNewest)) {
+
+                if (y !== head) {
+                    out.push(y);
+                }
+            }
+        }
+
+        return out;
+    }
+
+    // The order a queue made from the list follows, sets together
+    function queueOrder() {
+        return groupSets(orderedSongs());
+    }
+
+    // After a set changed: the lists drawn again, here and in the web view,
+    // and a queue made from the list following the new order
+    function setsChanged() {
+
+        renderList();
+        publishHostSoon();
+        queueFollowFilter();
+
+        if (currentSong) {
+            updatePlayerInfo(currentSong);
+        }
+    }
+
+    // How many sets the menu offers to add to at once, the latest used
+    const SET_PICK_MAX = 6;
+
+    // What can be done with a song's set, or which set to put it in
+    function askSetFor(song) {
+
+        const title = (song.title || "").trim() || "Untitled";
+        const inSet = setOfSong(song);
+
+        if (!inSet) {
+
+            askSetPick(song, "Add \"" + title + "\" to a set\nSongs in a set are kept together in the list, under the best rated one, so the versions of a song can be compared and listened through.");
+            return;
+        }
+
+        const count = setSongs(inSet.id).length;
+
+        askChoices("Set \"" + inSet.name + "\"\n" + count + (count === 1 ? " song" : " songs") + ". \"" + title + "\" is one of them.", [
+            { label: "Suggest similar songs", fn: function () {
+                askSimilar(inSet);
+            } },
+            { label: "Take out of the set", fn: function () {
+
+                takeOutOfSet(song);
+                setsChanged();
+                showToast("Taken out of the set", true);
+            } },
+            { label: "Move to another set", fn: function () {
+                askSetPick(song, "Move \"" + title + "\" to another set");
+            } },
+            { label: "Rename the set", fn: function () {
+
+                askText("Name of the set", inSet.name, "Rename", function (name) {
+
+                    const clean = String(name || "").trim();
+
+                    if (clean) {
+
+                        inSet.name = clean;
+                        saveSets();
+                        setsChanged();
+                    }
+                });
+            } },
+            { label: "Color of the set", ring: true, color: inSet.color, fn: function () {
+                askSetColor(inSet);
+            } }
+        ], null, false, true);
+    }
+
+    // A new set, or one of the latest used ones
+    function askSetPick(song, title) {
+
+        const current = setOfSong(song);
+        const options = [{ label: "New set with this song", fn: function () {
+
+            newSetWith(song, "hand");
+            setsChanged();
+            showToast("New set", true);
+        } }];
+
+        for (const entry of setsByUse()) {
+
+            if (options.length > SET_PICK_MAX || (current && entry.set.id === current.id)) {
+                continue;
+            }
+
+            options.push({ label: entry.set.name + " (" + entry.count + ")", ring: true, color: entry.set.color, fn: function () {
+
+                putInSet(song, entry.set.id, "hand");
+                setsChanged();
+                showToast("In the set " + entry.set.name, true);
+            } });
+        }
+
+        askChoices(title, options, null, false, true);
+    }
+
+    function askSetColor(set) {
+
+        const options = SET_COLORS.map(function (c) {
+
+            return { label: c === set.color ? "\u25CF  in use" : "\u25CF", ring: true, color: c, fn: function () {
+
+                set.color = c;
+                saveSets();
+                setsChanged();
+            } };
+        });
+
+        // A custom color in use is shown as well
+        if (SET_COLORS.indexOf(set.color) < 0) {
+            options.unshift({ label: "\u25CF  in use", ring: true, color: set.color, fn: null });
+        }
+
+        options.push({ label: "Custom color", fn: function () {
+            pickSetColor(set);
+        } });
+
+        askChoices("Color of \"" + set.name + "\"", options, null, false, false);
+    }
+
+    // Any color for a set, the list following the picker as it moves
+    function pickSetColor(set) {
+
+        let timer = 0;
+
+        openColorPicker("Color of \"" + set.name + "\"", set.color, 100, 0, function (c) {
+
+            set.color = setColor(c);
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+
+                saveSets();
+                setsChanged();
+            }, 150);
+        });
+    }
+
+    // How many similar songs are suggested at once, and how alike a song
+    // has to be. Songs made within SAME_RUN_SECONDS of each other came
+    // from the same generation
+    const SIMILAR_MAX = 12;
+    const SIMILAR_MIN = 0.35;
+    const SIMILAR_TICKED = 0.6;
+    const SAME_RUN_SECONDS = 10;
+
+    // Words at the end of a title that only tell versions apart: numbers,
+    // v2, take and the like. Inside a title a number is part of its name
+    const TITLE_VERSION_WORD = /^(v?\d+|version|ver|take|alt|alternative|copy|draft|untitled)$/;
+
+    function titleWords(title) {
+
+        const words = textWords(String(title || "").replace(/[(\[{][^)\]}]*[)\]}]/g, " "));
+
+        while (words.length > 0 && TITLE_VERSION_WORD.test(words[words.length - 1])) {
+            words.pop();
+        }
+
+        return Array.from(new Set(words));
+    }
+
+    // How alike two titles are, 0 to 1, 1 for the same words
+    function titleLikeness(a, b) {
+
+        const wa = titleWords(a);
+        const wb = titleWords(b);
+
+        if (wa.length === 0 || wb.length === 0) {
+            return 0;
+        }
+
+        const both = wa.filter(function (w) {
+            return wb.indexOf(w) >= 0;
+        }).length;
+
+        return both / (wa.length + wb.length - both);
+    }
+
+    // How much song b looks like another version of song a, and why
+    function songLikeness(a, b) {
+
+        const why = [];
+        let score = 0;
+        const pa = lyricPrints.get(String(a.song_id));
+        const pb = lyricPrints.get(String(b.song_id));
+
+        if (pa && pb) {
+
+            const l = printLikeness(pa, pb);
+
+            if (l >= 0.8) {
+
+                score += l;
+                why.push("same lyrics");
+            } else if (l >= 0.3) {
+
+                score += l;
+                why.push("similar lyrics");
+            }
+        }
+
+        const t = titleLikeness(a.title, b.title);
+
+        if (t >= 1) {
+
+            score += 0.6;
+            why.push("same title");
+        } else if (t >= 0.5) {
+
+            score += 0.4 * t;
+            why.push("similar title");
+        }
+
+        const ga = a.generate_at || 0;
+        const gb = b.generate_at || 0;
+
+        if (ga > 0 && gb > 0 && Math.abs(ga - gb) <= SAME_RUN_SECONDS) {
+
+            score += 0.5;
+            why.push("made together");
+        }
+
+        return { score: score, why: why };
+    }
+
+    // Songs in no set that look like more versions of a set's songs, the
+    // most alike first
+    function similarToSet(set) {
+
+        const members = setSongs(set.id);
+        const out = [];
+
+        for (const x of cache.songs) {
+
+            if (songSetOf.has(String(x.song_id))) {
+                continue;
+            }
+
+            let best = { score: 0, why: [] };
+
+            for (const m of members) {
+
+                const r = songLikeness(m, x);
+
+                if (r.score > best.score) {
+                    best = r;
+                }
+            }
+
+            if (best.score >= SIMILAR_MIN) {
+                out.push({ song: x, score: best.score, why: best.why });
+            }
+        }
+
+        out.sort(function (a, b) {
+            return b.score - a.score || byNewest(a.song, b.song);
+        });
+
+        return out.slice(0, SIMILAR_MAX);
+    }
+
+    // The similar songs to tick, the most alike already ticked
+    function askSimilar(set) {
+
+        const found = similarToSet(set);
+        const hint = "Lyrics only count for songs played or opened in the player before.";
+
+        if (found.length === 0 || !panelEl) {
+
+            askChoices("No similar songs\nNo song outside a set looks like the songs in \"" + set.name + "\". " + hint, [
+                { label: "OK", fn: null }
+            ], null, true, false);
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const body = document.createElement("div");
+        const list = document.createElement("div");
+        const row = document.createElement("div");
+        const ticks = [];
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = "Similar songs";
+        head.style.cssText = "font-weight:600";
+        body.textContent = "Songs that look like more versions of the songs in \"" + set.name + "\". Tick the ones to add. " + hint;
+        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const close = function () {
+            back.remove();
+        };
+
+        const addBtn = makeButton("Add", "#48e1eb", "#000", function () {
+
+            const picked = ticks.filter(function (t) {
+                return t.box.get();
+            });
+
+            close();
+
+            for (const t of picked) {
+                putInSet(t.song, set.id, "hand");
+            }
+
+            setsChanged();
+            showToast(picked.length === 1 ? "1 song added to the set" : picked.length + " songs added to the set", true);
+        });
+
+        const paint = function () {
+
+            const any = ticks.some(function (t) {
+                return t.box.get();
+            });
+
+            addBtn.disabled = !any;
+            addBtn.style.opacity = any ? "1" : "0.4";
+        };
+
+        for (const f of found) {
+
+            const box = makeTickBox("", f.score >= SIMILAR_TICKED, paint);
+            const name = box.el.children[1];
+            const line = document.createElement("div");
+            const sub = document.createElement("div");
+            const why = f.why.join(", ");
+
+            line.textContent = (f.song.title || "").trim() || "Untitled";
+            line.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+            sub.textContent = why.charAt(0).toUpperCase() + why.slice(1) + " \u00B7 " + fmtDate(f.song.generate_at);
+            sub.style.cssText = "color:#999;font-size:12px";
+            name.textContent = "";
+            name.appendChild(line);
+            name.appendChild(sub);
+            list.appendChild(box.el);
+            ticks.push({ song: f.song, box: box });
+        }
+
+        const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
+
+        cancelBtn.style.flex = "1";
+        addBtn.style.flex = "1";
+        row.appendChild(cancelBtn);
+        row.appendChild(addBtn);
+        card.appendChild(head);
+        card.appendChild(body);
+        card.appendChild(list);
+        card.appendChild(row);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        paint();
+        panelEl.appendChild(back);
+    }
+
+    function askNoteFor(song) {
+
+        const title = (song.title || "").trim() || "Untitled";
+
+        askText("Note on \"" + title + "\"", songNote(song), "Save", function (text) {
+
+            setSongNote(song, text);
+
+            if (currentSong) {
+                updatePlayerInfo(currentSong);
+            }
+
+            publishHostSoon();
+        });
+    }
+
+    loadSetsData();
 
     // Mark a song ignored or take the mark away. Marked while it is still to
     // come in the queue, the question is whether it leaves the queue too.
@@ -6348,7 +7192,7 @@
 
             const e = entries[i];
             const free = function (x) {
-                return x.greyed && !isPendingSong(x.song) && String(x.song.song_id) !== playingId;
+                return x.greyed && !x.setId && !isPendingSong(x.song) && String(x.song.song_id) !== playingId;
             };
 
             if (!free(e)) {
@@ -6392,6 +7236,83 @@
         return out;
     }
 
+    // The songs of a set, together in the list, folded under the first of
+    // them unless the set is opened. Each entry of a set carries setId and
+    // setColor, and in a set of several in the list the first also setCount
+    // and setOpen, the others setMember. The playing song shows also in a
+    // folded set, under the first
+    function foldSets(entries, opened, playingId) {
+
+        if (songSetOf.size === 0) {
+            return entries;
+        }
+
+        const out = [];
+        let i = 0;
+
+        const setIdOf = function (e) {
+
+            if (isPendingSong(e.song)) {
+                return "";
+            }
+
+            const m = songSetOf.get(String(e.song.song_id));
+
+            return m && songSets.has(m.set) ? m.set : "";
+        };
+
+        while (i < entries.length) {
+
+            const e = entries[i];
+            const id = setIdOf(e);
+
+            if (!id) {
+
+                out.push(e);
+                i += 1;
+                continue;
+            }
+
+            let j = i;
+
+            while (j < entries.length && setIdOf(entries[j]) === id) {
+                j += 1;
+            }
+
+            const color = songSets.get(id).color;
+            const open = opened.has(id);
+
+            for (let k = i; k < j; k += 1) {
+
+                entries[k].setId = id;
+                entries[k].setColor = color;
+
+                if (j - i > 1 && k > i) {
+                    entries[k].setMember = true;
+                }
+            }
+
+            if (j - i > 1) {
+
+                e.setCount = j - i;
+                e.setOpen = open;
+            }
+
+            out.push(e);
+
+            for (let k = i + 1; k < j; k += 1) {
+
+                if (open || String(entries[k].song.song_id) === playingId) {
+                    out.push(entries[k]);
+                }
+            }
+
+            i = j;
+        }
+
+        return out;
+    }
+
     // The folds opened in the player's own list, by their first song
     const openedRuns = new Set();
 
@@ -6400,7 +7321,7 @@
     // Songs not in the playlist, still being made or ignored are passed over
     function leftOutRunFrom(song) {
 
-        const list = orderedSongs();
+        const list = queueOrder();
         const at = list.findIndex(function (x) {
             return x.song_id === song.song_id;
         });
@@ -10528,6 +11449,12 @@
             // The source swap ended in an error rather than playing, so clear
             // the flag or the next real interruption pause would be ignored
             switchingTrack = false;
+
+            // The empty moment of a held play called off is no failure
+            if (heldReleasing && !audio.getAttribute("src")) {
+                return;
+            }
+
             handlePlayError();
         });
 
@@ -10626,6 +11553,13 @@
             // A source swap flips paused and may fire this on some engines.
             // The next song is already starting, so nothing below applies
             if (switchingTrack) {
+                return;
+            }
+
+            // A held play called off, the song stays where it was
+            if (heldReleasing) {
+
+                updatePlayPause();
                 return;
             }
 
@@ -10952,7 +11886,7 @@
 
         // The song asked for plays even when ignored, the songs after it
         // leave the ignored ones out
-        let songs = orderedSongs().filter(function (s) {
+        let songs = queueOrder().filter(function (s) {
             return queueable(s) || s.song_id === startId;
         });
 
@@ -10965,7 +11899,7 @@
             });
 
             if (!inPool) {
-                songs = orderedSongs().filter(function (s) {
+                songs = queueOrder().filter(function (s) {
                     return !isIgnored(s) || s.song_id === startId;
                 });
             }
@@ -11824,7 +12758,7 @@
                 return s.song_id;
             }));
 
-            const added = orderedSongs().filter(function (s) {
+            const added = queueOrder().filter(function (s) {
 
                 return queueable(s) && !inQueue.has(s.song_id) && !queueSkipIds.has(String(s.song_id));
             });
@@ -11967,7 +12901,7 @@
         const picked = new Set(next.concat(last, run).map(function (s) {
             return s.song_id;
         }));
-        const ordered = orderedSongs();
+        const ordered = queueOrder();
         const list = ordered.filter(function (s) {
             return !picked.has(s.song_id) && queueable(s) && !queueSkipIds.has(String(s.song_id));
         });
@@ -12049,7 +12983,7 @@
         let h = 0;
         let n = 0;
 
-        for (const song of orderedSongs()) {
+        for (const song of queueOrder()) {
 
             if (!queueable(song)) {
                 continue;
@@ -13367,18 +14301,18 @@
     function displaySongs() {
 
         if (listView === "stars") {
-            return sortByStars(cache.songs);
+            return groupSets(sortByStars(cache.songs));
         }
 
         if (listView === "plays" && settings.playsOn === true) {
-            return sortByPlays(cache.songs, false);
+            return groupSets(sortByPlays(cache.songs, false));
         }
 
         if (listView === "alpha") {
 
-            return cache.songs.slice().sort(function (a, b) {
+            return groupSets(cache.songs.slice().sort(function (a, b) {
                 return (a.title || "").trim().localeCompare((b.title || "").trim());
-            });
+            }));
         }
 
         if (listView === "queue") {
@@ -13389,8 +14323,9 @@
         }
 
         // Default Mureka view, the canonical order for the current source,
-        // with the songs still being generated first, being the newest
-        const ordered = orderedSongs();
+        // with the songs still being generated first, being the newest, and
+        // the songs of a set together
+        const ordered = queueOrder();
 
         return pendingSongs.size > 0 ? shownPending().concat(ordered) : ordered;
     }
@@ -16951,6 +17886,7 @@
             }
 
             dbgLog("Audio", "play held back by the browser, the sound is with another app");
+            releaseHeldPlay();
 
             if (heldPlayShown || document.hidden) {
                 return;
@@ -16966,6 +17902,53 @@
 
             showToast("Another app has the sound. Press Play to play on");
         }, HELD_PLAY_MS);
+    }
+
+    // A play Safari holds back goes through on the next tap anywhere on the
+    // page, and so does the sound engine's wake, and either takes the sound
+    // from the other app, which then goes quiet even when that tap was
+    // Dismiss. Both are called off once the hold is seen: the song is loaded
+    // again where it was, with no play waiting, and the engine is put to
+    // sleep. Resume playback starts both again during its own tap
+    let heldReleasing = false;
+    let heldReleaseTimer = 0;
+
+    function releaseHeldPlay() {
+
+        if (!audio || !audio.src) {
+            return;
+        }
+
+        const src = audio.src;
+        const at = audio.currentTime || 0;
+
+        heldReleasing = true;
+        clearTimeout(heldReleaseTimer);
+
+        // The reload's own events are no interruption and no new song
+        heldReleaseTimer = setTimeout(function () {
+            heldReleasing = false;
+        }, 1500);
+
+        try {
+
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+            pendingSeek = at > 0.5 ? at : 0;
+            audio.src = src;
+        } catch (e) {
+            dbgLog("Audio", "the held play could not be called off: " + errText(e));
+        }
+
+        if (iosCtx && iosCtx.state !== "closed" && iosCtx.state !== "suspended") {
+
+            iosCtx.suspend().catch(function () {
+                // Asleep already
+            });
+        }
+
+        dbgLog("Audio", "the held play and the sound engine's wake called off at " + dbgNum(at) + ", no tap hands the sound over");
     }
 
     // The box asking to play on after another app had the sound, with two
@@ -19356,6 +20339,11 @@
     // sometimes pageshow together, and they must share a single check
     let resyncTimer = null;
 
+    // When the last return to view played on, so the events that come with
+    // it do not each play on again
+    let resyncPlayAt = 0;
+    const RESYNC_PLAY_GAP_MS = 1500;
+
     // The watchdog interval and the position it last sampled
     let watchdogTimer = null;
     let watchdogLast = -1;
@@ -19398,6 +20386,13 @@
 
         if (audio.paused) {
 
+            // Focus, visible and page shown come together, one play on for
+            // all of them. Each would be one more play Safari may hold back
+            if (Date.now() - resyncPlayAt < RESYNC_PLAY_GAP_MS) {
+                return;
+            }
+
+            resyncPlayAt = Date.now();
             setupMediaSession();
             resendArtOnResume();
             startAudioPlayback();
@@ -26097,8 +27092,110 @@
             // where the queue is, for taking a part of it out
             queueAt: upcomingIndex(song),
             queuePos: queuePos,
-            queueLength: queue.length
+            queueLength: queue.length,
+
+            // The song's set and the sets to put it in, the latest used,
+            // the ready colors and, in a set, the songs that look like more
+            // versions of its songs. And the song's note
+            set: hostSetOf(song),
+            sets: hostSetsToPick(song),
+            setColors: SET_COLORS,
+            similar: hostSimilar(song),
+            note: songNote(song)
         };
+    }
+
+    function hostSetOf(song) {
+
+        const set = setOfSong(song);
+
+        return set ? { id: set.id, name: set.name, color: set.color, count: setSongs(set.id).length } : null;
+    }
+
+    function hostSetsToPick(song) {
+
+        const current = setOfSong(song);
+
+        return setsByUse().filter(function (entry) {
+            return !current || entry.set.id !== current.id;
+        }).slice(0, SET_PICK_MAX).map(function (entry) {
+            return { id: entry.set.id, name: entry.set.name, color: entry.set.color, count: entry.count };
+        });
+    }
+
+    function hostSimilar(song) {
+
+        const set = setOfSong(song);
+
+        if (!set) {
+            return [];
+        }
+
+        return similarToSet(set).map(function (f) {
+
+            const why = f.why.join(", ");
+
+            return {
+                id: String(f.song.song_id),
+                title: (f.song.title || "").trim() || "Untitled",
+                why: why.charAt(0).toUpperCase() + why.slice(1),
+                date: fmtDate(f.song.generate_at),
+                ticked: f.score >= SIMILAR_TICKED
+            };
+        });
+    }
+
+    // A set changed from a web view's song menu
+    function hostSetAction(song, act, value) {
+
+        const set = setOfSong(song);
+
+        if (act === "newSet") {
+            newSetWith(song, "hand");
+        } else if (act === "toSet") {
+
+            if (!songSets.has(String(value))) {
+                return;
+            }
+
+            putInSet(song, String(value), "hand");
+        } else if (act === "outOfSet") {
+            takeOutOfSet(song);
+        } else if (act === "renameSet") {
+
+            const clean = String(value || "").trim().slice(0, 200);
+
+            if (!set || !clean) {
+                return;
+            }
+
+            set.name = clean;
+            saveSets();
+        } else if (act === "setColor") {
+
+            if (!set || !/^#[0-9a-f]{6}$/i.test(String(value))) {
+                return;
+            }
+
+            set.color = setColor(value);
+            saveSets();
+        } else if (act === "addToSet") {
+
+            if (!set || !Array.isArray(value)) {
+                return;
+            }
+
+            for (const id of value) {
+
+                const other = hostFindSong(String(id));
+
+                if (other && !songSetOf.has(String(other.song_id))) {
+                    putInSet(other, set.id, "hand");
+                }
+            }
+        }
+
+        setsChanged();
     }
 
     // The cache dot the phone shows in front of a song
@@ -27663,7 +28760,7 @@
     function hostPrepared(view) {
 
         const showAll = showLeftOut();
-        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size + "|" + showAll;
+        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size + "|" + showAll + "|" + songDataStamp;
 
         if (hostListMemo && hostListMemo.key === key) {
             return hostListMemo;
@@ -27707,11 +28804,29 @@
 
         hostListMemo = {
             key: key,
-            entries: entries,
+            entries: groupedEntries(entries),
             numbers: hostNumbers()
         };
 
         return hostListMemo;
+    }
+
+    // Entries in the order of their songs with the songs of each set together
+    function groupedEntries(entries) {
+
+        if (songSetOf.size === 0) {
+            return entries;
+        }
+
+        const byId = new Map(entries.map(function (e) {
+            return [e.song, e];
+        }));
+
+        return groupSets(entries.map(function (e) {
+            return e.song;
+        })).map(function (x) {
+            return byId.get(x);
+        });
     }
 
     // Whether a song matches search text, already lowercase: by its title,
@@ -27764,18 +28879,34 @@
         // asked for alone: only the songs under its first, all of them
         const opened = new Set(String(req && req.open ? req.open : "").split(",").filter(Boolean));
         const runOf = String(req && req.run ? req.run : "");
-        let rows = showLeftOut() ? foldLeftOut(searched.map(function (e) {
-            return { song: e.song, greyed: e.greyed };
-        }), runOf ? new Set([runOf]) : opened, playingId) : searched;
 
-        if (runOf) {
+        // The sets this browser opened, and a set asked for alone: its songs
+        // under the first, all of them
+        const openSets = new Set(String(req && req.sets ? req.sets : "").split(",").filter(Boolean));
+        const setOf = String(req && req.set ? req.set : "");
+
+        let rows = foldSets(searched.map(function (e) {
+            return { song: e.song, greyed: e.greyed };
+        }), setOf ? new Set([setOf]) : openSets, playingId);
+
+        if (setOf) {
 
             rows = rows.filter(function (e) {
-                return e.runHead === runOf && String(e.song.song_id) !== runOf;
+                return e.setId === setOf && e.setMember;
             });
+        } else {
+
+            rows = showLeftOut() ? foldLeftOut(rows, runOf ? new Set([runOf]) : opened, playingId) : rows;
+
+            if (runOf) {
+
+                rows = rows.filter(function (e) {
+                    return e.runHead === runOf && String(e.song.song_id) !== runOf;
+                });
+            }
         }
 
-        const pageEnd = runOf ? rows.length : offset + limit;
+        const pageEnd = runOf || setOf ? rows.length : offset + limit;
 
         // Each row's place among the songs the filters let through, the
         // number the web view shows. A greyed row has none and does not
@@ -27789,7 +28920,8 @@
 
             total += 1;
 
-            if (!e.greyed) {
+            // A song of a set under its first has no number of its own
+            if (!e.greyed && !e.setMember) {
                 place += 1;
             }
 
@@ -27798,7 +28930,7 @@
                 playingAt = total - 1;
             }
 
-            if ((!runOf && total - 1 < offset) || total > pageEnd) {
+            if ((!runOf && !setOf && total - 1 < offset) || total > pageEnd) {
                 continue;
             }
 
@@ -27835,7 +28967,15 @@
                 playNext: isPlayNext(song.song_id),
                 plays: songPlays(song),
                 greyed: e.greyed === true,
-                place: e.greyed ? 0 : place,
+                place: e.greyed || e.setMember ? 0 : place,
+
+                // Its set: the color, and on the first of several how many
+                // and whether opened, the others marked as under it
+                setId: e.setId || "",
+                setColor: e.setColor || "",
+                setCount: e.setCount || 0,
+                setOpen: e.setOpen === true,
+                setMember: e.setMember === true,
 
                 // How many left out songs follow it up to the next match,
                 // for the choices that take all of them
@@ -28418,6 +29558,15 @@
             const n = Math.max(1, Math.min(5, Math.round(Number(a.value) || 0)));
 
             setRating(song, nextRating(getRating(song), n));
+        } else if (["newSet", "toSet", "outOfSet", "renameSet", "setColor", "addToSet"].indexOf(act) >= 0) {
+            hostSetAction(song, act, a.value);
+        } else if (act === "note") {
+
+            setSongNote(song, a.value === null || a.value === undefined ? "" : String(a.value).slice(0, 2000));
+
+            if (currentSong) {
+                updatePlayerInfo(currentSong);
+            }
         }
 
         publishHostSoon();
@@ -33213,7 +34362,7 @@
         }
 
         row.style.background = on ? "rgba(72,225,235,0.16)" : "";
-        row.style.boxShadow = on ? "inset 3px 0 0 #48e1eb" : "";
+        row.style.boxShadow = on ? "inset 3px 0 0 #48e1eb" : (row.dataset.setBar || "");
     }
 
     function paintSelBar() {
@@ -33293,6 +34442,7 @@
         }
 
         const on = copyTypesFor(kind);
+        const kindTypes = copyTypesOf(kind);
         const titles = { songs: "Copy the picked songs", queue: "Copy the play queue", tweaks: "Copy song tweaks" };
         const texts = {
             songs: "What goes along with the songs:",
@@ -33329,7 +34479,7 @@
 
             const chosen = {};
 
-            for (const t of COPY_TYPES) {
+            for (const t of kindTypes) {
                 chosen[t.key] = on[t.key] === true;
             }
 
@@ -33340,12 +34490,12 @@
 
         const paint = function () {
 
-            for (const t of COPY_TYPES) {
+            for (const t of kindTypes) {
                 boxes[t.key].set(on[t.key] === true);
             }
 
             // Songs go without any values, tweaks need at least one kind
-            const any = COPY_TYPES.some(function (t) {
+            const any = kindTypes.some(function (t) {
                 return on[t.key];
             });
             const ready = kind !== "tweaks" || any;
@@ -33356,7 +34506,7 @@
 
         const setAll = function (value) {
 
-            for (const t of COPY_TYPES) {
+            for (const t of kindTypes) {
                 on[t.key] = value;
             }
 
@@ -33375,7 +34525,7 @@
         quick.appendChild(allBtn);
         quick.appendChild(noneBtn);
 
-        for (const type of COPY_TYPES) {
+        for (const type of kindTypes) {
 
             boxes[type.key] = makeTickBox(type.label, on[type.key], function (value) {
 
@@ -33929,27 +35079,39 @@
 
     // The count of a fold and its arrow, opening or folding it. The list
     // stays where it was, the rows under it move
-    function buildFoldChip(fold) {
+    function buildFoldChip(fold, kind) {
 
         const chip = document.createElement("span");
-        const n = fold.runCount;
+        const isSet = kind === "set";
+        const n = isSet ? fold.setCount : fold.runCount;
+        const open = isSet ? fold.setOpen : fold.runOpen;
+        const opened = isSet ? openedSets : openedRuns;
+        const key = isSet ? fold.setId : fold.runHead;
 
-        chip.textContent = (fold.runOpen ? "\u25BE" : "\u25B8") + n;
-        chip.title = fold.runOpen ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them";
+        chip.textContent = (open ? "\u25BE" : "\u25B8") + n;
+        chip.title = isSet
+            ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
+            : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
         chip.setAttribute("role", "button");
         chip.dataset.foldChip = "1";
         chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1px solid #6a6a74;"
             + "color:#ddd;font-size:11px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;"
             + "overflow:hidden;cursor:pointer";
 
+        if (isSet) {
+
+            chip.style.borderColor = fold.setColor;
+            chip.style.color = fold.setColor;
+        }
+
         chip.addEventListener("click", function (ev) {
 
             ev.stopPropagation();
 
-            if (openedRuns.has(fold.runHead)) {
-                openedRuns.delete(fold.runHead);
+            if (opened.has(key)) {
+                opened.delete(key);
             } else {
-                openedRuns.add(fold.runHead);
+                opened.add(key);
             }
 
             const top = listEl ? listEl.scrollTop : 0;
@@ -34042,12 +35204,20 @@
 
         // The first of several songs in a row the filters leave out: how
         // many, this one counted, and an arrow to open or fold them, in
-        // place of its number, so the title keeps its room
-        if (fold && fold.runCount > 1) {
+        // place of its number, so the title keeps its room. The first of a
+        // set the same, in the set's color
+        if (fold && (fold.runCount > 1 || fold.setCount > 1)) {
 
             numEl.textContent = "";
             numEl.dataset.foldChip = "1";
-            numEl.appendChild(buildFoldChip(fold));
+            numEl.appendChild(buildFoldChip(fold, fold.setCount > 1 ? "set" : "run"));
+        }
+
+        // A song of a set has a bar of the set's color at its start
+        if (fold && fold.setColor) {
+
+            item.dataset.setBar = "inset 3px 0 0 " + fold.setColor;
+            item.style.boxShadow = item.dataset.setBar;
         }
 
         // Sorted by plays, each song's plays take the place of the rating,
@@ -34477,6 +35647,10 @@
         const shown = visible.filter(function (e) {
             return !e.greyed;
         }).length;
+
+        if (listView !== "queue") {
+            visible = foldSets(visible, openedSets, playingId === null ? "" : String(playingId));
+        }
 
         if (showAll) {
             visible = foldLeftOut(visible, openedRuns, playingId === null ? "" : String(playingId));
@@ -38965,6 +40139,14 @@
             data.manualBpm[key] = value;
         });
 
+        // Song sets and notes, from 2.1 on
+        data.sets = setsData();
+        data.notes = {};
+
+        songNotes.forEach(function (value, key) {
+            data.notes[key] = value;
+        });
+
         // Mureka's own tempo for songs without one set by hand, when asked
         // for. Kept apart, an import takes it only where the song has no
         // tempo at all, as for another account that Mureka gives none
@@ -39052,6 +40234,8 @@
             ignore: [],
             trimmed: [],
             creators: [],
+            sets: { sets: [], members: [], notAuto: [] },
+            notes: [],
             cleared: { rating: [], bpm: [], instr: [], ignore: [] },
             settings: (data.settings && typeof data.settings === "object") ? data.settings : null,
             appSettings: (data.appSettings && typeof data.appSettings === "object") ? data.appSettings : null,
@@ -39202,6 +40386,49 @@
             }
         }
 
+        // Song sets and notes, from 2.1 on
+        if (data.sets && typeof data.sets === "object" && Array.isArray(data.sets.sets)) {
+
+            const known = new Set();
+
+            for (const x of data.sets.sets) {
+
+                if (x && typeof x.id === "string" && /^[a-z0-9]{1,40}$/i.test(x.id)) {
+
+                    known.add(x.id);
+                    out.sets.sets.push({ id: x.id, name: String(x.name || "Set").slice(0, 200), color: setColor(x.color), used: Number(x.used) || 0 });
+                }
+            }
+
+            const members = data.sets.members && typeof data.sets.members === "object" ? data.sets.members : {};
+
+            for (const id of Object.keys(members)) {
+
+                const m = members[id];
+
+                if (Array.isArray(m) && known.has(m[0])) {
+                    out.sets.members.push([String(id), m[0], m[1] === "auto" ? "auto" : "hand"]);
+                }
+            }
+
+            if (Array.isArray(data.sets.notAuto)) {
+
+                out.sets.notAuto = data.sets.notAuto.filter(function (id) {
+                    return id !== null && id !== undefined && id !== "";
+                }).map(String);
+            }
+        }
+
+        if (data.notes && typeof data.notes === "object") {
+
+            for (const id of Object.keys(data.notes)) {
+
+                if (typeof data.notes[id] === "string" && data.notes[id].trim()) {
+                    out.notes.push([String(id), data.notes[id].trim().slice(0, 4000)]);
+                }
+            }
+        }
+
         // Trim marks in files from 1.9.9.55 to 1.9.9.148 are left out, Mureka
         // marks trimmed songs itself
         return out;
@@ -39269,8 +40496,57 @@
     function planSongMerge(p) {
 
         const plan = {
-            ratings: [], bpm: [], instr: [], ignore: [], trimmed: [], creators: [], clears: [], same: 0, conflicts: []
+            ratings: [], bpm: [], instr: [], ignore: [], trimmed: [], creators: [], clears: [], same: 0, conflicts: [],
+            sets: [], setDefs: [], notAuto: [], notes: []
         };
+
+        // A song in no set here goes into the file's set, the set made here
+        // as it was there. A song in a set here stays where it is, and one
+        // taken out of a set here on purpose stays out
+        const fileSets = new Map(p.sets.sets.map(function (x) {
+            return [x.id, x];
+        }));
+        const wanted = new Set();
+
+        for (const m of p.sets.members) {
+
+            if (songSetOf.has(m[0]) || setNotAuto.has(m[0])) {
+
+                plan.same++;
+                continue;
+            }
+
+            plan.sets.push(m);
+            wanted.add(m[1]);
+        }
+
+        wanted.forEach(function (id) {
+
+            if (!songSets.has(id) && fileSets.has(id)) {
+                plan.setDefs.push(fileSets.get(id));
+            }
+        });
+
+        for (const id of p.sets.notAuto) {
+
+            if (!songSetOf.has(id) && !setNotAuto.has(id)) {
+                plan.notAuto.push(id);
+            }
+        }
+
+        // A note where there is none here is taken, one that differs asked
+        for (const entry of p.notes) {
+
+            const mine = songNotes.get(entry[0]);
+
+            if (mine === undefined) {
+                plan.notes.push(entry);
+            } else if (mine === entry[1]) {
+                plan.same++;
+            } else {
+                plan.conflicts.push({ type: "notes", id: entry[0], mine: mine, theirs: entry[1] });
+            }
+        }
 
         // A trimmed song stays trimmed, so these are only ever added
         for (const id of p.trimmed) {
@@ -39416,6 +40692,13 @@
 
         if (c.type === "ignore") {
             return v ? "ignored" : "not ignored";
+        }
+
+        if (c.type === "notes") {
+
+            const text = String(v || "");
+
+            return "the note \u201C" + (text.length > 60 ? text.slice(0, 59) + "\u2026" : text) + "\u201D";
         }
 
         if (v === null) {
@@ -39732,6 +41015,32 @@
             addSavedCreator(c.user_id, c.stage_name);
         }
 
+        for (const x of plan.setDefs) {
+
+            if (!songSets.has(x.id)) {
+                songSets.set(x.id, { id: x.id, name: x.name, color: x.color, used: x.used || Date.now() });
+            }
+        }
+
+        for (const m of plan.sets) {
+
+            if (songSets.has(m[1]) && !songSetOf.has(m[0])) {
+                songSetOf.set(m[0], { set: m[1], how: m[2] });
+            }
+        }
+
+        for (const id of plan.notAuto) {
+            setNotAuto.add(id);
+        }
+
+        for (const entry of plan.notes) {
+            songNotes.set(entry[0], entry[1]);
+        }
+
+        if (plan.sets.length > 0 || plan.notAuto.length > 0) {
+            saveSets();
+        }
+
         for (const entry of plan.clears) {
             clearedMarks[entry[0]][entry[1]] = Date.now();
         }
@@ -39744,6 +41053,12 @@
 
             // The file's side wins, a value or its removal
             const store = { rating: ratings, bpm: manualBpm }[c.type];
+
+            if (c.type === "notes") {
+
+                songNotes.set(c.id, c.theirs);
+                return;
+            }
 
             if (c.type === "instr" && c.theirs) {
 
@@ -39773,6 +41088,7 @@
         });
 
         saveClearedMarks();
+        saveNotes();
         saveRatings();
         saveManualBpm();
         saveManualInstrumental();
@@ -39812,7 +41128,9 @@
         { key: "bpm", label: "Tempos (BPM)" },
         { key: "instr", label: "Instrumental marks" },
         { key: "ignore", label: "Ignored songs" },
-        { key: "creators", label: "Saved creators" }
+        { key: "creators", label: "Saved creators" },
+        { key: "sets", label: "Song sets" },
+        { key: "notes", label: "Notes" }
     ];
 
     // Every kind, with how much the file brings of it: new values, values
@@ -39831,7 +41149,9 @@
                 instr: plan.instr.length,
                 ignore: plan.ignore.length,
                 trimmed: plan.trimmed.length,
-                creators: plan.creators.length
+                creators: plan.creators.length,
+                sets: plan.sets.length,
+                notes: plan.notes.length
             }[type.key];
             const removed = plan.clears.filter(function (c) {
                 return c[0] === type.key;
@@ -39879,6 +41199,10 @@
             ignore: keep("ignore") ? plan.ignore : [],
             trimmed: keep("trimmed") ? plan.trimmed : [],
             creators: keep("creators") ? plan.creators : [],
+            sets: keep("sets") ? plan.sets : [],
+            setDefs: keep("sets") ? plan.setDefs : [],
+            notAuto: keep("sets") ? plan.notAuto : [],
+            notes: keep("notes") ? plan.notes : [],
             clears: plan.clears.filter(function (c) {
                 return keep(c[0]);
             }),
@@ -40010,7 +41334,7 @@
     function mergeSummary(plan, answers) {
 
         const added = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.ignore.length
-            + plan.trimmed.length;
+            + plan.trimmed.length + plan.sets.length + plan.notes.length;
         const taken = answers.filter(Boolean).length;
         const parts = [];
 
@@ -40228,7 +41552,7 @@
         if (!asked) {
 
             const fresh = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.ignore.length
-                + plan.trimmed.length + plan.creators.length + plan.clears.length;
+                + plan.trimmed.length + plan.creators.length + plan.clears.length + plan.sets.length + plan.notes.length;
             const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
             const types = planTypes(plan);
 
@@ -41182,7 +42506,7 @@
             + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
         back.setAttribute("data-mureka-notice", "1");
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
-            + "max-width:360px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+            + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = lines[0];
         head.style.cssText = "font-weight:600";
         text.textContent = lines.slice(1).join("\n").trim();
@@ -41452,7 +42776,7 @@
 
             if (line && line.kind === "tweaks") {
 
-                importParsed(parseUserData(songDataFromEntries(line.entries)), sourceName, "Imported", asked);
+                importParsed(parseUserData(songDataFromEntries(line.entries, line.sets)), sourceName, "Imported", asked);
                 return "";
             }
 
@@ -41603,11 +42927,55 @@
             }
         }
 
+        if (types.sets && tweaks) {
+
+            const m = songSetOf.get(id);
+
+            if (m && songSets.has(m.set)) {
+                f += (m.how === "auto" ? "A" : "S") + m.set;
+            } else if (setNotAuto.has(id)) {
+                f += "S0";
+            }
+        }
+
         if (playingId && playingId === id) {
             f += "P";
         }
 
         return f;
+    }
+
+    // A set as a token of its own on a tweaks line: 0 and the set's id, no
+    // song code starts with 0, then its color and its name as UTF-8 in hex
+    function setToken(set) {
+
+        const name = Array.from(new TextEncoder().encode(set.name || "")).map(function (b) {
+            return b.toString(16).padStart(2, "0");
+        }).join("");
+
+        return "0" + set.id + "_" + setColor(set.color).slice(1) + name;
+    }
+
+    function readSetToken(token) {
+
+        const m = /^0([a-z0-9]{1,40})_([0-9a-f]{6})((?:[0-9a-f]{2})*)$/.exec(token);
+
+        if (!m) {
+            return null;
+        }
+
+        const bytes = new Uint8Array((m[3].match(/../g) || []).map(function (h) {
+            return parseInt(h, 16);
+        }));
+        let name = "";
+
+        try {
+            name = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch (e) {
+            name = "";
+        }
+
+        return { id: m[1], name: name.trim() || "Set", color: "#" + m[2] };
     }
 
     // The line for songs to play, in their order, or for the song tweaks
@@ -41645,11 +43013,35 @@
             tokens.push(f ? code + "_" + f : code);
         }
 
+        let count = tokens.length;
+
+        // The sets the songs are in, named once ahead of the songs
+        if (tweaks && types.sets && tokens.length > 0) {
+
+            const used = [];
+
+            for (const token of tokens) {
+
+                const m = /_(?:.*?)[SA]([a-z0-9]+)/.exec(token);
+                const id = m && m[1] !== "0" ? m[1] : "";
+
+                if (id && used.indexOf(id) < 0 && songSets.has(id)) {
+                    used.push(id);
+                }
+            }
+
+            for (let i = used.length - 1; i >= 0; i--) {
+                tokens.unshift(setToken(songSets.get(used[i])));
+            }
+
+            count = tokens.length - used.length;
+        }
+
         const head = tweaks ? "Mureka Player song tweaks: " : "Mureka Player songs: ";
 
         return {
             text: tokens.length > 0 ? head + SHARE_MARK + "." + (tweaks ? "t" : "s") + "." + tokens.join(".") : "",
-            count: tokens.length
+            count: count
         };
     }
 
@@ -41720,6 +43112,12 @@
             add(Object.keys(clearedMarks.ignore));
         }
 
+        if (types.sets) {
+
+            add(songSetOf.keys());
+            add(setNotAuto);
+        }
+
         return Array.from(ids);
     }
 
@@ -41754,8 +43152,20 @@
         if (m) {
 
             const entries = [];
+            const sets = [];
 
             for (const token of m[2].split(".")) {
+
+                if (token.charAt(0) === "0") {
+
+                    const set = readSetToken(token);
+
+                    if (set) {
+                        sets.push(set);
+                    }
+
+                    continue;
+                }
 
                 const parts = token.split("_");
                 const id = parts[0] ? codeToId(parts[0]) : "";
@@ -41803,6 +43213,13 @@
                         } else {
                             e.ignore = true;
                         }
+                    } else if ((f[1] === "S" || f[1] === "A") && has) {
+
+                        if (f[2] === "0") {
+                            e.setOut = true;
+                        } else {
+                            e.set = [f[2], f[1] === "A" ? "auto" : "hand"];
+                        }
                     } else if (f[1] === "P") {
                         e.playing = true;
                     }
@@ -41813,7 +43230,7 @@
                 entries.push(e);
             }
 
-            return entries.length > 0 ? { kind: m[1] === "t" ? "tweaks" : "songs", entries: entries } : null;
+            return entries.length > 0 ? { kind: m[1] === "t" ? "tweaks" : "songs", entries: entries, sets: sets } : null;
         }
 
         // The older lines of shared songs, with a tempo after _ and ! for
@@ -41929,7 +43346,7 @@
 
     // A tweaks line, or the values of a songs line, as a song tweaks file
     // would hold them, for the same import with its switches and questions
-    function songDataFromEntries(entries) {
+    function songDataFromEntries(entries, sets) {
 
         const data = {
             app: "mureka-player",
@@ -41975,6 +43392,24 @@
             } else if (e.ignoreGone) {
                 data.cleared.ignore.push(e.id);
             }
+        }
+
+        // Song sets, as a file holds them, the sets named on the line
+        const defs = Array.isArray(sets) ? sets : [];
+        const members = {};
+        const notAuto = [];
+
+        for (const e of entries) {
+
+            if (e.set) {
+                members[e.id] = e.set;
+            } else if (e.setOut) {
+                notAuto.push(e.id);
+            }
+        }
+
+        if (defs.length > 0 || notAuto.length > 0) {
+            data.sets = { sets: defs, members: members, notAuto: notAuto };
         }
 
         return data;
@@ -42504,7 +43939,7 @@
 
             // A line of song tweaks, asked about as a file of them is
             if (line && line.kind === "tweaks") {
-                p = parseUserData(songDataFromEntries(line.entries));
+                p = parseUserData(songDataFromEntries(line.entries, line.sets));
             } else if (line || songLinkKeys(text).length > 0) {
 
                 // Songs, the ones not held here read from Mureka, then
@@ -43172,6 +44607,16 @@
             : "-");
         addInfoRow("Model", song.model || "-");
         addInfoRow("Rating", ratingText(getRating(song)));
+
+        const infoSet = setOfSong(song);
+
+        if (infoSet) {
+            addInfoRow("Set", infoSet.name + " (" + setSongs(infoSet.id).length + ")");
+        }
+
+        if (songNote(song)) {
+            addInfoRow("Note", songNote(song));
+        }
         addInfoRow("Duration", formatTime((song.duration_milliseconds || 0) / 1000));
 
         // Counts arrive with the detail fetch, start as a placeholder
@@ -46069,6 +47514,24 @@
             any = true;
         }
 
+        // The set of the original, a trim is a version of the same song,
+        // and its note
+        const inSet = songSetOf.get(a);
+
+        if (inSet && songSets.has(inSet.set) && !songSetOf.has(b)) {
+
+            songSetOf.set(b, { set: inSet.set, how: inSet.how });
+            saveSets();
+            any = true;
+        }
+
+        if (songNotes.has(a) && !songNotes.has(b)) {
+
+            songNotes.set(b, songNotes.get(a));
+            saveNotes();
+            any = true;
+        }
+
         if (any) {
 
             noteChangedHere(to);
@@ -46269,7 +47732,7 @@
         }
 
         // The new song keeps what was set on the original here: its rating,
-        // tempo, instrumental mark and ignored
+        // tempo, instrumental mark, ignored, its set and its note
         let carried = false;
 
         for (const s of extractSongs(json.data || json)) {
@@ -47909,6 +49372,15 @@
         pencil: [
             ["path", { d: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" }]
         ],
+        note: [
+            ["path", { d: "M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z" }],
+            ["polyline", { points: "15 3 15 9 21 9" }]
+        ],
+        sets: [
+            ["polygon", { points: "12 2 2 7 12 12 22 7 12 2" }],
+            ["polyline", { points: "2 17 12 22 22 17" }],
+            ["polyline", { points: "2 12 12 17 22 12" }]
+        ],
         play: [
             ["path", { d: "M8 5.2v13.6a1 1 0 0 0 1.53.85l10.7-6.8a1 1 0 0 0 0-1.7L9.53 4.35A1 1 0 0 0 8 5.2z", fill: "currentColor", stroke: "none" }]
         ],
@@ -48219,6 +49691,20 @@
         addMenuRow("Set BPM", "#fff", function () {
             promptManualBpm(song);
         }, "tempo");
+
+        // The song's set and note, for comparing its versions
+        menuGroup();
+
+        const inSet = setOfSong(song);
+        const note = songNote(song);
+
+        addMenuRow(inSet ? "Set: " + inSet.name : "Add to a set", inSet ? inSet.color : "#fff", function () {
+            askSetFor(song);
+        }, "sets");
+
+        addMenuRow(note ? "Note: " + (note.length > 28 ? note.slice(0, 27) + "\u2026" : note) : "Note", "#fff", function () {
+            askNoteFor(song);
+        }, "note");
 
         // About the song and passing it on
         menuGroup();

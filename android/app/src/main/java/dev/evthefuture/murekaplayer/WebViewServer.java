@@ -1159,6 +1159,11 @@ final class WebViewServer {
             // asked for alone, song ids the player only compares
             req.put("open", param(query, "open"));
             req.put("run", param(query, "run"));
+
+            // The song sets opened, and one set asked for alone, set ids the
+            // player only compares
+            req.put("sets", param(query, "sets"));
+            req.put("set", param(query, "set"));
         } catch (JSONException e) {
             // A default request then
         }
