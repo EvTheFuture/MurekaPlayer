@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.20";
+    const VERSION = "2.0.0.21";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();

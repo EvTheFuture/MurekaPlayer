@@ -13744,6 +13744,18 @@
         openChoice("\"" + song.title + "\" is left out by the filters", choices);
     }
 
+    // The tick before a kept song's title, in its set's color
+    function keptMark() {
+
+        const tick = document.createElement("span");
+
+        tick.className = "keptMark";
+        tick.appendChild(icon("check"));
+        tick.title = "Kept";
+
+        return tick;
+    }
+
     function makeRow(song, place) {
 
         if (song.pending) {
@@ -13781,18 +13793,8 @@
         attachLongPress(row, song.id);
         songLine(song, row);
 
-        if (song.setKept) {
-
-            const tick = document.createElement("span");
-            const title = row.querySelector(".rowTitle");
-
-            tick.className = "keptMark";
-            tick.appendChild(icon("check"));
-            tick.title = "Kept";
-
-            if (title) {
-                title.prepend(tick);
-            }
+        if (song.setKept && row.querySelector(".rowTitle")) {
+            row.querySelector(".rowTitle").prepend(keptMark());
         }
 
         // The first of several songs in a row the filters leave out: how
@@ -17426,20 +17428,33 @@
             return;
         }
 
-        fetchJson("/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
-            + Math.min(200, Math.max(PAGE, miniLoaded))).then(function (data) {
+        // Read the way the list shown was read, so its rows keep their
+        // badges: the queue by place, the sets as the Sets view has them
+        const queueView = miniView === "queue";
+        const url = queueView
+            ? "/queue?q=" + esc(miniQuery)
+            : (miniView === "sets" ? setsListUrl(miniQuery) : "/list?q=" + esc(miniQuery) + "&view=" + (listSort || "mureka")
+                + foldParam() + "&offset=0&limit=" + Math.min(200, Math.max(PAGE, miniLoaded)));
+
+        fetchJson(url).then(function (data) {
 
             const found = new Map();
+            const list = data ? (queueView ? data.items : data.songs) : null;
 
-            if (!data || !Array.isArray(data.songs)) {
+            if (!Array.isArray(list)) {
                 return;
             }
 
-            for (const item of data.songs) {
-                found.set(String(item.id), item);
+            for (const item of list) {
+
+                if (item.kind === "set" || item.kind === "sorts" || item.kind === "doneHead") {
+                    continue;
+                }
+
+                found.set(queueView ? String(item.index) : String(item.id), item);
             }
 
-            refreshRows($("miniRows"), found, false);
+            refreshRows($("miniRows"), found, queueView);
         }).catch(function () {
         });
     }
@@ -17622,9 +17637,14 @@
 
                 title.textContent = item.title;
 
-                // The mark of an ignored song goes with the old text
+                // The mark of an ignored song goes with the old text, and
+                // a kept song's tick
                 if (item.ignored) {
                     title.prepend(ignoredMark());
+                }
+
+                if (item.setKept) {
+                    title.prepend(keptMark());
                 }
             }
 
