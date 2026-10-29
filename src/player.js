@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.17";
+    const VERSION = "2.0.0.20";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2940,6 +2940,7 @@
             vocalFilter: "all",
             setsOn: true,
             setSort: "added",
+            setSuggest: true,
             view: "mureka",
             libView: "mureka",
             reportPlays: true,
@@ -3158,6 +3159,7 @@
                     vocalFilter: vocalFilter,
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
+                    setSuggest: parsed.setSuggest !== false,
                     view: view,
                     libView: ["mureka", "alpha", "stars", "plays"].indexOf(parsed.libView) >= 0
                         ? parsed.libView : (["alpha", "stars", "plays"].indexOf(view) >= 0 ? view : "mureka"),
@@ -4111,6 +4113,9 @@
             cover: s.cover,
             share_key: s.share_key,
             generate_at: s.generate_at,
+
+            // The generation it came from, Mureka makes two songs at a time
+            feed_id: s.feed_id || undefined,
             publish_state: s.publish_state,
             publish_at: s.publish_at,
             is_liked: s.is_liked === true,
@@ -5468,8 +5473,27 @@
         return out.sort(byNewest);
     }
 
+    // Newest first, generation by generation. The songs of one generation,
+    // made at the same moment, in the order Mureka made them, first first
     function byNewest(a, b) {
-        return (b.generate_at || 0) - (a.generate_at || 0) || String(b.song_id).localeCompare(String(a.song_id));
+
+        const ga = a.generate_at || 0;
+        const gb = b.generate_at || 0;
+
+        if (a.feed_id && b.feed_id && String(a.feed_id) !== String(b.feed_id) && ga === gb) {
+            return compareIds(b.feed_id, a.feed_id);
+        }
+
+        return gb - ga || compareIds(a.song_id, b.song_id);
+    }
+
+    // Two ids of digits as numbers, without losing any digit
+    function compareIds(a, b) {
+
+        const x = String(a);
+        const y = String(b);
+
+        return x.length - y.length || (x < y ? -1 : (x > y ? 1 : 0));
     }
 
     // The song a set is folded under: the best rated, the newest of those,
@@ -6150,16 +6174,275 @@
             why.push("similar title");
         }
 
-        const ga = a.generate_at || 0;
-        const gb = b.generate_at || 0;
-
-        if (ga > 0 && gb > 0 && Math.abs(ga - gb) <= SAME_RUN_SECONDS) {
+        if (madeTogether(a, b)) {
 
             score += 0.5;
             why.push("made together");
         }
 
         return { score: score, why: why };
+    }
+
+    // Two songs of the same generation, by Mureka's feed when both carry
+    // it, else made within a few seconds of each other
+    function madeTogether(a, b) {
+
+        if (a.feed_id && b.feed_id) {
+            return String(a.feed_id) === String(b.feed_id);
+        }
+
+        const ga = a.generate_at || 0;
+        const gb = b.generate_at || 0;
+
+        return ga > 0 && gb > 0 && Math.abs(ga - gb) <= SAME_RUN_SECONDS;
+    }
+
+    // New songs from a load, offered for a set, one group made together at
+    // a time, the set they most likely belong to first. Asked here and in
+    // the web views, the first answer anywhere counts
+    let setAsk = null;
+    let setAskSeq = 0;
+    const setAskQueue = [];
+
+    // Only songs made lately are asked about, and only so many at a time,
+    // a first load of the whole library asks about none
+    const SET_SUGGEST_AGE_MS = 2 * 86400000;
+    const SET_SUGGEST_MAX = 12;
+
+    // How much a song gone into a set lately counts for it
+    function setRecency(set) {
+
+        const age = Date.now() - (set.added || 0);
+
+        return age < 3600000 ? 0.4 : (age < 6 * 3600000 ? 0.25 : (age < 86400000 ? 0.1 : 0));
+    }
+
+    // The new songs in groups made together, each with its likeliest set,
+    // or none. The set a song last went into, a short while ago, is guessed
+    // even without anything else alike, a new version often follows
+    function guessSetsFor(songs) {
+
+        const groups = [];
+
+        for (const x of songs) {
+
+            const g = groups.find(function (gr) {
+                return gr.songs.some(function (y) {
+                    return madeTogether(x, y);
+                });
+            });
+
+            if (g) {
+                g.songs.push(x);
+            } else {
+                groups.push({ songs: [x], set: null, why: [] });
+            }
+        }
+
+        let latest = null;
+
+        songSets.forEach(function (set) {
+
+            if (!latest || (set.added || 0) > (latest.added || 0)) {
+                latest = set;
+            }
+        });
+
+        for (const g of groups) {
+
+            let bestTotal = 0;
+
+            songSets.forEach(function (set) {
+
+                let like = { score: 0, why: [] };
+
+                for (const m of setSongs(set.id)) {
+
+                    for (const x of g.songs) {
+
+                        const r = songLikeness(m, x);
+
+                        if (r.score > like.score) {
+                            like = r;
+                        }
+                    }
+                }
+
+                const recent = setRecency(set);
+                const fits = like.score >= SIMILAR_MIN || (set === latest && recent >= 0.4);
+                const total = like.score + (like.score > 0 || set === latest ? recent : 0);
+
+                if (fits && total > bestTotal) {
+
+                    bestTotal = total;
+                    g.set = set;
+                    g.why = like.why.concat(recent > 0 && (like.score > 0 || set === latest) ? ["a song went into it lately"] : []);
+                }
+            });
+        }
+
+        return groups;
+    }
+
+    // New songs found by a load: their lyrics read first, for comparing,
+    // then offered for a set
+    async function suggestSetsForNew(ids, firstLoad) {
+
+        if (creatorSource || firstLoad || settings.setSuggest === false || !Array.isArray(ids) || ids.length === 0) {
+            return;
+        }
+
+        const wanted = new Set(ids.map(String));
+        const songs = cache.songs.filter(function (x) {
+
+            const id = String(x.song_id);
+
+            return wanted.has(id) && !songSetOf.has(id) && !setNotAuto.has(id) && !isPendingSong(x)
+                && (x.generate_at || 0) * 1000 > Date.now() - SET_SUGGEST_AGE_MS;
+        }).slice(0, SET_SUGGEST_MAX);
+
+        if (songs.length === 0) {
+            return;
+        }
+
+        for (const x of songs) {
+
+            const entry = await loadDetailFromStore(x.song_id) || await fetchDetail(x);
+
+            if (entry && entry.lyrics) {
+                noteLyricPrint(x.song_id, entry.lyrics);
+            }
+        }
+
+        for (const g of guessSetsFor(songs)) {
+            setAskQueue.push(g);
+        }
+
+        nextSetAsk();
+    }
+
+    // The next group's question, once no other question about new songs
+    // is open
+    function nextSetAsk() {
+
+        if (setAsk || setAskQueue.length === 0) {
+            return;
+        }
+
+        if (newAsk) {
+
+            setTimeout(nextSetAsk, 1500);
+            return;
+        }
+
+        const g = setAskQueue.shift();
+        const songs = g.songs.filter(function (x) {
+            return cache.songs.indexOf(x) !== -1 && !songSetOf.has(String(x.song_id));
+        });
+
+        if (songs.length === 0) {
+
+            nextSetAsk();
+            return;
+        }
+
+        const one = songs.length === 1;
+        const names = songs.slice(0, 4).map(function (x) {
+            return "\"" + ((x.title || "").trim() || "Untitled") + "\"";
+        });
+        const why = g.why.join(", ");
+        const title = one ? "Put the new song in a set?" : "Put the " + songs.length + " new songs in a set?";
+        const text = names.join(", ") + (songs.length > names.length ? " and " + (songs.length - names.length) + " more" : "")
+            + (g.set ? (one ? " looks" : " look") + " like more versions of \"" + g.set.name + "\"" + (why ? ": " + why : "") + "."
+                : ". No set looks like " + (one ? "it" : "them") + ", one of the latest used or a new one can take " + (one ? "it." : "them."));
+        const options = [];
+
+        if (g.set) {
+            options.push({ key: "set:" + g.set.id, label: "Add to " + g.set.name, color: g.set.color });
+        }
+
+        for (const entry of setsByUse()) {
+
+            if (options.length >= 4) {
+                break;
+            }
+
+            if (!g.set || entry.set.id !== g.set.id) {
+                options.push({ key: "set:" + entry.set.id, label: entry.set.name + " (" + entry.count + ")", color: entry.set.color });
+            }
+        }
+
+        options.push({ key: "new", label: one ? "New set with it" : "New set with them", color: "" });
+        options.push({ key: "no", label: "Not now", color: "" });
+
+        setAskSeq += 1;
+
+        const ask = { n: setAskSeq, title: title, text: text, options: options, songs: songs, el: null };
+
+        setAsk = ask;
+        ask.el = askChoices(title + "\n" + text, options.map(function (o, i) {
+
+            return {
+                label: o.label,
+                ring: i > 0 && o.key !== "new",
+                color: o.key === "no" ? "#b8b8c0" : (o.color || undefined),
+                fn: function () {
+                    finishSetAsk(ask.n, o.key);
+                }
+            };
+        }), function () {
+
+            if (ask.el) {
+                finishSetAsk(ask.n, "no");
+            }
+        }, true, true);
+        publishHostSoon();
+    }
+
+    // key: set: and its id, new, or no for not now
+    function finishSetAsk(n, key) {
+
+        const ask = setAsk;
+
+        if (!ask || ask.n !== n) {
+            return;
+        }
+
+        setAsk = null;
+
+        if (ask.el && ask.el.parentNode) {
+            ask.el.remove();
+        }
+
+        const songs = ask.songs.filter(function (x) {
+            return cache.songs.indexOf(x) !== -1 && !songSetOf.has(String(x.song_id));
+        });
+        const k = String(key || "");
+
+        if (songs.length > 0 && k.indexOf("set:") === 0 && songSets.has(k.slice(4))) {
+
+            const set = songSets.get(k.slice(4));
+
+            for (const x of songs) {
+                putInSet(x, set.id, "hand");
+            }
+
+            setsChanged();
+            showToast("In the set " + set.name, true);
+        } else if (songs.length > 0 && k === "new") {
+
+            const set = newSetWith(songs[0], "hand");
+
+            for (const x of songs.slice(1)) {
+                putInSet(x, set.id, "hand");
+            }
+
+            setsChanged();
+            showToast("New set " + set.name, true);
+        }
+
+        publishHostSoon();
+        setTimeout(nextSetAsk, 400);
     }
 
     // Songs in no set that look like more versions of a set's songs, the
@@ -9715,6 +9998,9 @@
         // then and are not
         noteUnoffered(newIds);
         settlePending();
+
+        // Offered for a set, not on a first load of the whole library
+        suggestSetsForNew(newIds, known.size === 0);
 
         const held = heldQueue();
         const offered = !deep && held.pos >= 0 && held.pos < held.q.length ? newQueueSongs(Array.from(unofferedNew)) : [];
@@ -27199,6 +27485,7 @@
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
             newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text } : null,
+            setAsk: setAsk ? { n: setAsk.n, title: setAsk.title, text: setAsk.text, options: setAsk.options } : null,
             followAsk: followAsk ? { n: followAsk.n, title: followAsk.title, text: followAsk.text } : null,
             pendingCount: pendingCount(),
             retryAsk: retryAsk ? {
@@ -30378,6 +30665,10 @@
 
             // Whether the queue follows the list, from a web view
             finishFollowAsk(Number(arg && arg.n), arg && typeof arg.mode === "string" ? arg.mode : "");
+        } else if (cmd === "setAskAnswer") {
+
+            // Which set the new songs go in, from a web view
+            finishSetAsk(Number(arg && arg.n), arg && typeof arg.key === "string" ? arg.key : "");
         } else if (cmd === "newAnswer") {
 
             // Where the new songs go, from a web view, for the question it
@@ -40750,6 +41041,11 @@
         setsPage.appendChild(makeLabel("In the list"));
         setsPage.appendChild(setsCountEl);
         setsPage.appendChild(withHint(setsOnRow, "Off, every song stands on its own in the list and the queue. The sets stay as they are. The Sets button for the button row does the same."));
+        const setSuggestRow = makeBoolRow("Suggest a set for new songs",
+            function () { return settings.setSuggest !== false; },
+            function (v) { settings.setSuggest = v; });
+
+        setsPage.appendChild(withHint(setSuggestRow, "New songs a load finds are offered for a set, the one they most likely belong to first: by title, lyrics, songs made together and the set a song last went into a short while ago."));
         setsPage.appendChild(withHint(setSortRow, "Last added puts the set a song last went into first. Done sets come after the others, folded together."));
         setsPage.appendChild(makeLabel("Tidy up"));
         setsPage.appendChild(openSetsBtn);

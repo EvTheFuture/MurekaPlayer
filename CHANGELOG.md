@@ -17,7 +17,8 @@ In development.
   only when they have more than a few words. In the list a set sits where
   its newest song was made, folded under its best rated song, the newest
   of those, with a chip in the set's color showing how many songs it
-  holds. Opened, the set's other songs follow, newest first, each with a
+  holds. Opened, the set's other songs follow, newest first, the two of
+  one generation in the order Mureka made them, each with a
   bar of the set's color. A queue made from the list plays a set's songs
   one after another. The playing song shows also in a folded set. The web
   view shows the sets the same way, and its song menu does all of the
@@ -47,8 +48,15 @@ In development.
   the set, suggest similar songs, rename it, color it, mark it done, merge
   it into another set or dissolve it. Any number of a set's songs can be
   marked kept, the versions chosen, ticked in the set's color and first
-  in the set. A done set stays folded in the list with its color faded.
-  Songs picked with Select go into a set together. The settings have a
+  in the set. The web view draws the fold arrows and the tick itself, so
+  they show in browsers whose fonts lack them. A done set stays folded in the list with its color faded.
+  Songs picked with Select go into a set together. New songs a load
+  finds, made in the last two days and in no set, are offered for a set,
+  the songs of one generation together: the set they most likely belong
+  to first, by title, lyrics and the set a song went into a short while
+  ago, then the latest used sets, a new set, or not now. Asked on the phone
+  and in the web views, after the question about the play queue, and
+  switched off on the Song sets page. The settings have a
   Song sets page, with the Sets view's sort and a way to dissolve the
   sets left with one song. Its Open the Sets view opens it where the page
   is shown, in the web view the web view's own.

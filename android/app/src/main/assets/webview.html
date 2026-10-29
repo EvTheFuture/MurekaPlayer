@@ -2042,6 +2042,12 @@
         color: var(--setColor);
     }
 
+    .setArrow .ico {
+        width: 1em;
+        height: 1em;
+        stroke-width: 3;
+    }
+
     .setText {
         flex: 1;
         min-width: 0;
@@ -2074,7 +2080,15 @@
         flex-wrap: wrap;
     }
 
+    .setsDone .ico {
+        width: 1em;
+        height: 1em;
+    }
+
     .setsDone {
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
         padding: 16px 6px 8px;
         color: var(--muted);
         font-weight: 600;
@@ -2089,6 +2103,14 @@
     }
 
     /* A kept song of a set, a tick in the set's color before its title */
+    .keptMark .ico {
+        display: inline-block;
+        width: 0.9em;
+        height: 0.9em;
+        vertical-align: -0.1em;
+        stroke-width: 3;
+    }
+
     .keptMark {
         margin-right: 0.35em;
         font-weight: 700;
@@ -2102,6 +2124,16 @@
 
     /* In the number column of a fold's first song, so the title keeps its
        room, the same width whatever the count */
+    /* The arrow drawn, before the count */
+    .foldChip .ico {
+        display: inline-block;
+        width: 1.05em;
+        height: 1.05em;
+        margin-right: 0.05em;
+        vertical-align: -0.18em;
+        stroke-width: 3;
+    }
+
     .foldChip {
         display: inline-block;
         box-sizing: border-box;
@@ -5867,6 +5899,9 @@
         ],
         circle: [
             ["circle", { cx: "12", cy: "12", r: "8" }]
+        ],
+        dot: [
+            ["circle", { cx: "12", cy: "12", r: "7", fill: "currentColor" }]
         ],
         grip: [
             ["circle", { cx: "9", cy: "6", r: "1.4", fill: "currentColor", stroke: "none" }],
@@ -13520,7 +13555,13 @@
 
         const n = chip.dataset.count;
 
-        chip.textContent = (open ? "\u25BE" : "\u25B8") + n;
+        const count = document.createElement("span");
+
+        // Drawn, not a character, some browsers' fonts have no such arrows
+        count.textContent = n;
+        chip.textContent = "";
+        chip.appendChild(icon(open ? "chevronDown" : "chevronRight"));
+        chip.appendChild(count);
         chip.title = chip.dataset.kind === "set"
             ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
             : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
@@ -13746,7 +13787,7 @@
             const title = row.querySelector(".rowTitle");
 
             tick.className = "keptMark";
-            tick.textContent = "\u2713";
+            tick.appendChild(icon("check"));
             tick.title = "Kept";
 
             if (title) {
@@ -13974,7 +14015,7 @@
         row.dataset.set = item.setId;
         row.style.setProperty("--setColor", item.setColor);
         arrow.className = "setArrow";
-        arrow.textContent = item.open ? "\u25BE" : "\u25B8";
+        arrow.appendChild(icon(item.open ? "chevronDown" : "chevronRight"));
         text.className = "setText";
         name.className = "setName";
         name.textContent = item.name;
@@ -14044,7 +14085,11 @@
 
         head.className = "setsDone";
         head.setAttribute("role", "button");
-        head.textContent = (item.open ? "\u25BE  " : "\u25B8  ") + "Done (" + item.count + ")";
+        const label = document.createElement("span");
+
+        label.textContent = "Done (" + item.count + ")";
+        head.appendChild(icon(item.open ? "chevronDown" : "chevronRight"));
+        head.appendChild(label);
         head.addEventListener("click", function () {
 
             setsViewDone = !setsViewDone;
@@ -19307,6 +19352,7 @@
         paintRetryAsk();
         paintGoneAsk();
         paintNewAsk();
+        paintSetAsk();
         paintFollowAsk();
         followWaveZoomKeep(state);
         theaterSound();
@@ -21827,7 +21873,7 @@
 
         const items = colors.map(function (c) {
 
-            return { icon: c === set.color ? "check" : "circle", label: c === set.color ? "In use" : "\u25CF",
+            return { icon: c === set.color ? "check" : "dot", label: c === set.color ? "In use" : "",
                 cls: "setRing", color: c, fn: function () {
 
                     closeSongMenu();
@@ -24741,6 +24787,51 @@
                 answer("skip");
             } }
         ]);
+    }
+
+    // New songs a load found offered for a set, the likeliest set first. The
+    // phone asks as well, and the first answer anywhere closes the question
+    // everywhere
+    let setAskShown = 0;
+    let setAsking = "";
+
+    function paintSetAsk() {
+
+        const ask = state && state.setAsk ? state.setAsk : null;
+        const n = ask ? Number(ask.n) : 0;
+
+        if (n === setAskShown) {
+            return;
+        }
+
+        setAskShown = n;
+
+        if (setAsking && $("songMenu").style.display === "flex" && $("menuTitle").textContent === setAsking) {
+            closeSongMenu();
+        }
+
+        setAsking = "";
+
+        if (!ask) {
+            return;
+        }
+
+        setAsking = ask.title + " " + ask.text;
+        openChoice(setAsking, (ask.options || []).map(function (o) {
+
+            return {
+                icon: o.key === "new" ? "listPlus" : (o.key === "no" ? "close" : "sets"),
+                label: o.label,
+                cls: o.color ? "setRing" : "",
+                color: o.color || "",
+                fn: function () {
+
+                    setAsking = "";
+                    closeSongMenu();
+                    send("setAskAnswer", { n: n, key: o.key });
+                }
+            };
+        }));
     }
 
     // Whether a queue put together by hand follows the list after its filter
