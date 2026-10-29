@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.23";
+    const VERSION = "2.0.0.24";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -7983,10 +7983,19 @@
         const run = leftOutRunFrom(song);
         const title = (song.title || "").trim() || "Untitled";
         const more = run.length - 1;
+        const after = more === 1 ? "the song after it" : "the " + more + " songs after it";
+
+        // Play from here plays down the list from the song, the songs after
+        // it the filters leave out included, as they are shown
         const options = [{ label: "Play now", fn: function () {
             playLeftOutNow(song, false);
-        } }, { label: "Play from here now", fn: function () {
-            playFromTapped(song.song_id);
+        } }, { label: "Play from here", fn: function () {
+
+            if (more > 0) {
+                playLeftOutRun(song.song_id);
+            } else {
+                playFromTapped(song.song_id);
+            }
         } }, { label: "Play after this song", fn: function () {
 
             addNext(song);
@@ -7995,20 +8004,16 @@
 
         if (more > 0) {
 
-            options.push({ label: "Play all now", ring: true, fn: function () {
-                playLeftOutNow(song, true);
-            } }, { label: "Play all from here now", ring: true, fn: function () {
-                playLeftOutRun(song.song_id);
-            } }, { label: "Play all after this song", ring: true, fn: function () {
+            options.push({ label: "Play all after this song", ring: true, fn: function () {
                 addLeftOutRunNext(song);
             } });
         }
 
-        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it at once,"
-            + " then the queue goes on as it was. Play from here now makes the queue anew from this song, going on with the"
-            + " songs the filters let through. Play after this song puts it right after the song playing."
-            + (more > 0 ? " The ones with all take the " + (more === 1 ? "song" : more + " songs")
-                + " after it the filters leave out as well, up to the next one they let through." : ""),
+        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays only it,"
+            + " then the queue goes on as it was. Play from here plays on down the list from it"
+            + (more > 0 ? ", " + after + " the filters leave out too." : ".")
+            + " Play after this song puts it right after the song playing"
+            + (more > 0 ? ", Play all after this song it and " + after + "." : "."),
             options, null, false, true);
     }
 

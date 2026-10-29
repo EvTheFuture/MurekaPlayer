@@ -74,15 +74,13 @@ In development.
   them, in the accent color, a set's in its own color. A fold opens also
   when its first song started playing since the list was drawn, and in
   the web view one the phone could not send right away is asked for again
-  or closes with a note. A tap on one asks how to play it: Play now plays it at once and
-  the queue goes on as it was after it, Play from here now makes the queue
-  anew from it, going on with the songs the filters let through, and Play
-  after this song puts it right after the song playing. Play all now,
-  Play all from here now and Play all after this song do the same with it
-  and the songs after it the filters leave out, up to the next one they
-  let through, and show only when there are such songs. They can be put in
-  the queue as usual. The count line says how many songs the filters let
-  through and how many they leave out. In the web view only the songs the
+  or closes with a note. A tap on one asks how to play it: Play now plays
+  only it, then the queue goes on as it was. Play from here plays on down
+  the list from it, the songs after it the filters leave out included, as
+  shown. Play after this song puts it right after the song playing, and
+  Play all after this song, there when more such songs follow, puts them
+  all there. They can be put in the queue as usual. The count line says
+  how many songs the filters let through and how many they leave out. In the web view only the songs the
   filters let through are numbered, a greyed one has no number and the
   song after it takes the next one. A playlist still shows only its own
   songs. With the published songs listed, newest published first, a draft

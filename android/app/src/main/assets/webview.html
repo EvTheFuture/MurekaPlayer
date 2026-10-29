@@ -13765,6 +13765,8 @@
             return;
         }
 
+        // Play from here plays down the list from the song, the songs after
+        // it the filters leave out included, as they are shown
         const choices = [
             { icon: "play", label: "Play now", fn: function () {
 
@@ -13772,10 +13774,10 @@
                 send("playNow", song.id);
                 mark();
             } },
-            { icon: "queue", label: "Play from here now", fn: function () {
+            { icon: "queue", label: "Play from here", fn: function () {
 
                 closeSongMenu();
-                send("playId", song.id);
+                send(song.more > 0 ? "playRun" : "playId", song.id);
                 mark();
             } },
             { icon: "listPlusTop", label: "Play after this song", fn: function () {
@@ -13785,27 +13787,13 @@
             } }
         ];
 
-        // The ones taking all only when more left out songs follow it
+        // Only when more left out songs follow it
         if (song.more > 0) {
-            choices.push.apply(choices, [
-                { icon: "play", label: "Play all now", fn: function () {
+            choices.push({ icon: "listPlusTop", label: "Play all after this song", cls: "inset", fn: function () {
 
-                    closeSongMenu();
-                    send("playRunNow", song.id);
-                    mark();
-                } },
-                { icon: "queue", label: "Play all from here now", fn: function () {
-
-                    closeSongMenu();
-                    send("playRun", song.id);
-                    mark();
-                } },
-                { icon: "listPlusTop", label: "Play all after this song", fn: function () {
-
-                    closeSongMenu();
-                    send("playNextRun", song.id);
-                } }
-            ]);
+                closeSongMenu();
+                send("playNextRun", song.id);
+            } });
         }
 
         openChoice("\"" + song.title + "\" is left out by the filters", choices);
