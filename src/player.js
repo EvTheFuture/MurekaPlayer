@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.14";
+    const VERSION = "2.0.0.16";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5824,13 +5824,23 @@
         ], null, false, true);
     }
 
-    // The set's songs from the first, the queue going on after them
-    function playSet(set) {
+    // The set's songs from the first, or from the song given and round to
+    // the ones before it, the queue going on after them. The filters do not
+    // leave any of the set's songs out
+    function playSet(set, from) {
 
-        const songs = setOrder(setSongs(set.id));
+        let songs = setOrder(setSongs(set.id));
 
         if (songs.length === 0) {
             return;
+        }
+
+        const at = from ? songs.findIndex(function (x) {
+            return x.song_id === from.song_id;
+        }) : -1;
+
+        if (at > 0) {
+            songs = songs.slice(at).concat(songs.slice(0, at));
         }
 
         const first = songs[0];
@@ -14258,6 +14268,19 @@
     // Highlight the active view button
     function updateViewButtons() {
 
+        // The sets' sort in place of the songs' while the sets show
+        const onSets = listView === "sets";
+
+        Object.keys(setSortButtons).forEach(function (value) {
+
+            const b = setSortButtons[value];
+            const on = setSortOf() === value;
+
+            b.style.display = onSets ? "" : "none";
+            b.style.background = on ? "#48e1eb" : "#333";
+            b.style.color = on ? "#000" : "#fff";
+        });
+
         Object.keys(viewButtons).forEach(function (name) {
 
             const btn = viewButtons[name];
@@ -14272,13 +14295,16 @@
             btn.style.background = active ? "#48e1eb" : "#333";
             btn.style.color = active ? "#000" : "#fff";
 
-            // The sorts are about Mureka's songs, faint over the others
+            // The sorts are about Mureka's songs, faint over the queue and
+            // gone while the sets show, which have their own
             if (name === "alpha" || name === "stars" || name === "plays") {
+
                 btn.style.opacity = LIB_VIEWS.indexOf(listView) >= 0 ? "1" : "0.55";
+                btn.style.display = onSets ? "none" : "";
             }
 
             // Plays only with play counts on
-            if (name === "plays") {
+            if (name === "plays" && !onSets) {
                 btn.style.display = settings.playsOn === true ? "" : "none";
             }
         });
@@ -27130,6 +27156,7 @@
             version: VERSION,
             shuffle: shuffleMode,
             setsOn: setsShown(),
+            setSort: setSortOf(),
             repeat: repeatMode,
             carAudio: hostCarAudio,
             fade: hostFade,
@@ -29487,7 +29514,8 @@
                     setId: e.set.id,
                     setColor: setMarkColor(e.set),
                     setMember: true,
-                    setKept: isKept(x)
+                    setKept: isKept(x),
+                    inSets: true
                 });
             }
         };
@@ -30382,14 +30410,19 @@
             toggleShuffle();
         } else if (cmd === "repeat") {
             cycleRepeat();
-        } else if (cmd === "playId") {
+        } else if (cmd === "playId" || cmd === "playSetFrom") {
 
             const wanted = String(arg);
             const song = cache.songs.find(function (s) {
                 return String(s.song_id) === wanted;
             });
+            const set = cmd === "playSetFrom" ? setOfSong(song) : null;
 
-            if (song) {
+            // A song tapped in the web view's Sets view plays its set on
+            // from there
+            if (song && set) {
+                playSet(set, song);
+            } else if (song) {
                 playFromTapped(song.song_id);
             }
         } else if (cmd === "playRun") {
@@ -30541,12 +30574,7 @@
             if (SET_SORTS.some(function (x) {
                 return x.value === arg;
             })) {
-
-                settings.setSort = arg;
-                saveSettings();
-                songDataStamp++;
-                renderList();
-                publishHostSoon();
+                sortSetsBy(arg);
             }
         } else if (cmd === "feed") {
 
@@ -32033,6 +32061,18 @@
         sortRow.appendChild(viewButtons.alpha);
         sortRow.appendChild(viewButtons.stars);
         sortRow.appendChild(viewButtons.plays);
+
+        // In the Sets view the same row sorts the sets
+        for (const choice of SET_SORTS) {
+
+            const b = makeActionButton(choice.value === "name" ? iconAlpha() : iconSets(), choice.label, "#333", "#fff", function () {
+                sortSetsBy(choice.value);
+            });
+
+            b.title = "Sets by " + choice.label.toLowerCase();
+            setSortButtons[choice.value] = b;
+            sortRow.appendChild(b);
+        }
 
         // Vocals filter row
         const filterRow = document.createElement("div");
@@ -35708,6 +35748,19 @@
         return chip;
     }
 
+    // The buttons sorting the sets in the view menu, by sort
+    const setSortButtons = {};
+
+    function sortSetsBy(value) {
+
+        settings.setSort = value;
+        saveSettings();
+        songDataStamp++;
+        updateViewButtons();
+        renderList();
+        publishHostSoon();
+    }
+
     // How the Sets view is sorted: by the last time a song went into a set,
     // by when the set was made, or by name
     const SET_SORTS = [
@@ -35945,10 +35998,7 @@
 
             const on = setSortOf() === choice.value;
             const b = makeButton(choice.label, on ? "#48e1eb" : "#333", on ? "#000" : "#fff", function () {
-
-                settings.setSort = choice.value;
-                saveSettings();
-                renderList();
+                sortSetsBy(choice.value);
             });
 
             b.style.padding = "4px 10px";
@@ -35978,7 +36028,8 @@
                     setId: entry.set.id,
                     setColor: setMarkColor(entry.set),
                     setMember: true,
-                    setKept: isKept(x)
+                    setKept: isKept(x),
+                    inSets: true
                 });
 
                 item.style.marginLeft = "10px";
@@ -36348,6 +36399,13 @@
                     queuePos = inQueue;
                     playCurrent();
                 });
+                return;
+            }
+
+            // A song tapped in the Sets view plays its set on from there
+            if (fold && fold.inSets && setOfSong(song)) {
+
+                playSet(setOfSong(song), song);
                 return;
             }
 
@@ -40561,12 +40619,7 @@
             function (v) { toggleSetsShown(v); });
 
         const setSortRow = makeDropRow("Sort the Sets view by", SET_SORTS, setSortOf, function (v) {
-
-            settings.setSort = v;
-
-            if (listView === "sets") {
-                renderList();
-            }
+            sortSetsBy(v);
         });
 
         const openSetsBtn = makeButton("Open the Sets view", "#333", "#fff", function () {

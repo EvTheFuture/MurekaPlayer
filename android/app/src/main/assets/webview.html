@@ -5361,6 +5361,9 @@
         <button class="chip" id="viewAlpha" type="button" data-icon="alpha"><span class="lbl">A-Z</span></button>
         <button class="chip" id="viewStars" type="button" data-icon="star"><span class="lbl">Stars</span></button>
         <button class="chip" id="viewPlays" type="button" data-icon="play"><span class="lbl">Plays</span></button>
+        <button class="chip" id="setSortAdded" type="button" data-icon="listPlus"><span class="lbl">Last added</span></button>
+        <button class="chip" id="setSortCreated" type="button" data-icon="sets"><span class="lbl">Created</span></button>
+        <button class="chip" id="setSortName" type="button" data-icon="alpha"><span class="lbl">Name</span></button>
         <span class="chipSep"></span>
         <button class="chip" id="toCurrent" type="button" data-icon="target"><span class="lbl">Now playing</span></button>
         <span class="chipSep" id="libSep"></span>
@@ -12718,9 +12721,15 @@
         $("viewQueue").classList.toggle("on", listView === "queue");
         $("viewSets").classList.toggle("on", listView === "sets");
 
-        // The Sets view has a sort of its own, at the top of the list
-        for (const id of ["sortSep", "sortGroup", "viewAlpha", "viewStars"]) {
+        // The sets are sorted their own way, in the same place
+        for (const id of ["viewAlpha", "viewStars"]) {
             $(id).style.display = listView === "sets" ? "none" : "";
+        }
+
+        for (const item of SET_SORTS) {
+
+            $(item.el).style.display = listView === "sets" ? "" : "none";
+            $(item.el).classList.toggle("on", setSortNow() === item.value);
         }
 
         $("viewAlpha").classList.toggle("on", listSort === "alpha" || listSort === "alphaDesc");
@@ -12733,6 +12742,44 @@
         setLabel($("viewPlays"), "Plays" + (listSort === "playsUp" ? " \u2191" : (listSort === "playsDown" ? " \u2193" : "")));
         $("viewPlays").style.display = playsOn() && listView !== "sets" ? "" : "none";
         paintMiniSort();
+    }
+
+    // How the sets are sorted, kept on the phone, the same everywhere
+    const SET_SORTS = [
+        { value: "added", label: "Last added", icon: "listPlus", el: "setSortAdded" },
+        { value: "created", label: "Created", icon: "sets", el: "setSortCreated" },
+        { value: "name", label: "Name", icon: "alpha", el: "setSortName" }
+    ];
+
+    function setSortNow() {
+        return state && typeof state.setSort === "string" ? state.setSort : "added";
+    }
+
+    function setSortInfo() {
+
+        return SET_SORTS.find(function (x) {
+            return x.value === setSortNow();
+        }) || SET_SORTS[0];
+    }
+
+    // Sorted on the phone, both lists showing sets read again
+    function sortSets(value) {
+
+        if (state) {
+            state.setSort = value;
+        }
+
+        paintViews();
+        send("setSort", value).then(function () {
+
+            if ($("browse").style.display === "flex" && listView === "sets") {
+                loadSets(false);
+            }
+
+            if (miniOpen && miniView === "sets") {
+                loadMiniSets(false);
+            }
+        });
     }
 
     // Whether the phone has play counts on, sorting by plays is offered then
@@ -12764,8 +12811,37 @@
         return SORTS[0];
     }
 
+    // The small list shows Mureka's songs, the queue or the song sets,
+    // switched in turn with its button and kept for the next visit
+    const MINI_VIEWS = [
+        { view: "mureka", icon: "mureka", label: "Mureka" },
+        { view: "queue", icon: "queue", label: "Queue" },
+        { view: "sets", icon: "sets", label: "Sets" }
+    ];
+    let miniView = "mureka";
+
+    try {
+
+        const kept = localStorage.getItem("murekaMiniView");
+
+        miniView = kept === "queue" || kept === "sets" ? kept : "mureka";
+    } catch (e) {
+        // Mureka's songs then
+    }
+
     // The small list's sort button names the sorting in use
     function paintMiniSort() {
+
+        // The sets' own sort while they show, always set to one of them
+        if (miniView === "sets") {
+
+            const set = setSortInfo();
+
+            setIcon($("miniSort"), set.icon);
+            setLabel($("miniSort"), set.label);
+            $("miniSort").classList.remove("on");
+            return;
+        }
 
         const info = sortInfo(listSort);
 
@@ -13668,7 +13744,8 @@
                 return;
             }
 
-            send("playId", song.id);
+            // In the Sets view the set plays on from the song
+            send(song.inSets ? "playSetFrom" : "playId", song.id);
 
             // Mark it at once, the next list refresh confirms it
             const before = document.querySelector(".row.playing");
@@ -13700,7 +13777,7 @@
         for (const item of data.songs) {
 
             if (item.kind === "sorts") {
-                box.appendChild(makeSetSorts(item, reload));
+                continue;
             } else if (item.kind === "set") {
                 box.appendChild(makeSetRow(item, reload));
             } else if (item.kind === "doneHead") {
@@ -13820,36 +13897,6 @@
         }).catch(function () {
             miniBusy = false;
         });
-    }
-
-    // The sort of the Sets view, chips across its top
-    function makeSetSorts(item, reload) {
-
-        const head = document.createElement("div");
-        const name = document.createElement("span");
-
-        head.className = "setsHead";
-        name.className = "chipGroup";
-        name.textContent = "Sort";
-        head.appendChild(name);
-
-        for (const choice of item.sorts || []) {
-
-            const b = document.createElement("button");
-
-            b.type = "button";
-            b.className = "chip" + (choice.value === item.sort ? " on" : "");
-            b.textContent = choice.label;
-            b.addEventListener("click", function () {
-
-                send("setSort", choice.value).then(function () {
-                    reload();
-                });
-            });
-            head.appendChild(b);
-        }
-
-        return head;
     }
 
     // One set: a tap opens or folds it, a hold or the button at its end
@@ -16925,6 +16972,22 @@
     // in use lit
     $("miniSort").addEventListener("click", function () {
 
+        if (miniView === "sets") {
+
+            const now = setSortNow();
+            const choices = SET_SORTS.map(function (item) {
+
+                return { icon: item.icon, label: item.label, cls: item.value === now ? "accent" : "", fn: function () {
+
+                    closeSongMenu();
+                    sortSets(item.value);
+                } };
+            });
+
+            openChoice("Sort the sets", choices);
+            return;
+        }
+
         const items = SORTS.filter(function (item) {
             return playsOn() || item.sort.indexOf("plays") !== 0;
         }).map(function (item) {
@@ -16969,6 +17032,13 @@
     $("viewPlays").addEventListener("click", function () {
         setSort("plays");
     });
+
+    for (const item of SET_SORTS) {
+
+        $(item.el).addEventListener("click", function () {
+            sortSets(item.value);
+        });
+    }
 
     // The playing song may be further down than what is loaded so far
     // Ask the phone for whatever is new on Mureka, from the Update chip or
@@ -18131,24 +18201,6 @@
     let miniFollow = false;
     let miniHandAt = 0;
 
-    // The small list shows Mureka's songs, the queue or the song sets,
-    // switched in turn with its button and kept for the next visit
-    const MINI_VIEWS = [
-        { view: "mureka", icon: "mureka", label: "Mureka" },
-        { view: "queue", icon: "queue", label: "Queue" },
-        { view: "sets", icon: "sets", label: "Sets" }
-    ];
-    let miniView = "mureka";
-
-    try {
-
-        const kept = localStorage.getItem("murekaMiniView");
-
-        miniView = kept === "queue" || kept === "sets" ? kept : "mureka";
-    } catch (e) {
-        // Mureka's songs then
-    }
-
     function paintMiniView() {
 
         const info = MINI_VIEWS.find(function (x) {
@@ -18161,8 +18213,7 @@
         $("miniView").classList.toggle("on", miniView === "queue");
         $("miniView").classList.toggle("ring", miniView === "sets");
 
-        // The sets have a sort of their own, at the top of the list
-        $("miniSort").style.display = miniView === "sets" ? "none" : "";
+        paintMiniSort();
     }
 
     paintMiniView();

@@ -28,10 +28,14 @@ In development.
   player's view menu, with A-Z, Stars and Plays as the sorts of Mureka's
   songs on a row of their own, in the web view's song list and in its
   small list over the main page, whose button goes through the three in
-  turn: plain for Mureka, filled for the queue, ringed for the sets. The Sets view has a row for each set: its name and color, how many
+  turn: plain for Mureka, filled for the queue, ringed for the sets.
+  While the sets show, the sort buttons in the same places sort the sets,
+  by Last added, Created or Name. The Sets view has a row for each set: its name and color, how many
   songs, how many kept, the best rating and a date. Sorted by the last
   time a song went in, by when it was made or by name, the done sets
-  folded together after the others. A tap opens a set in place, a long
+  folded together after the others. A song tapped in the Sets view plays
+  its set on from there, round to the songs before it, whatever the
+  filters say, then the queue goes on. A tap opens a set in place, a long
   press or the button at its end shows what can be done with it: play
   the set, suggest similar songs, rename it, color it, mark it done, merge
   it into another set or dissolve it. Any number of a set's songs can be
