@@ -18155,9 +18155,11 @@
             return x.view === miniView;
         }) || MINI_VIEWS[0];
 
+        // Mureka plain, the queue filled, the sets ringed
         setIcon($("miniView"), info.icon);
         setLabel($("miniView"), info.label);
-        $("miniView").classList.toggle("on", miniView !== "mureka");
+        $("miniView").classList.toggle("on", miniView === "queue");
+        $("miniView").classList.toggle("ring", miniView === "sets");
 
         // The sets have a sort of their own, at the top of the list
         $("miniSort").style.display = miniView === "sets" ? "none" : "";
