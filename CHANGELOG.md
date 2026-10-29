@@ -24,6 +24,19 @@ In development.
   above as well, the custom color and the similar songs too. A trimmed
   song goes into its original's set. Sets travel with song tweaks, in a
   file and in a copied line, where Song sets is a choice of its own.
+  The Sets view, beside Mureka, Queue and the others, on the phone and in
+  the web view, has a row for each set: its name and color, how many
+  songs, how many kept, the best rating and a date. Sorted by the last
+  time a song went in, by when it was made or by name, the done sets
+  folded together after the others. A tap opens a set in place, a long
+  press or the button at its end shows what can be done with it: play
+  the set, suggest similar songs, rename it, color it, mark it done, merge
+  it into another set or dissolve it. Any number of a set's songs can be
+  marked kept, the versions chosen, ticked in the set's color and first
+  in the set. A done set stays folded in the list with its color faded.
+  Songs picked with Select go into a set together. The settings have a
+  Song sets page, with the Sets view's sort and a way to dissolve the
+  sets left with one song.
   A Sets button for the button row, on the phone and in the web view,
   switches the sets off and on again: off, every song stands on its own
   in the list and the queue, and the sets are kept as they are. A pressed

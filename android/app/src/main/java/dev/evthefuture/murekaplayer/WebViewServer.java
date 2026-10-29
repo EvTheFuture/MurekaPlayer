@@ -141,7 +141,7 @@ final class WebViewServer {
     // The sortings of the song list the player knows, anything else is
     // Mureka's own order
     private static final String[] LIST_VIEWS = {
-        "alpha", "alphaDesc", "playsDown", "playsUp", "stars", "starsDown", "starsUp"
+        "alpha", "alphaDesc", "playsDown", "playsUp", "sets", "stars", "starsDown", "starsUp"
     };
 
     private final Context context;
@@ -1164,6 +1164,9 @@ final class WebViewServer {
             // player only compares
             req.put("sets", param(query, "sets"));
             req.put("set", param(query, "set"));
+
+            // Whether the done sets show in the Sets view
+            req.put("done", param(query, "done"));
         } catch (JSONException e) {
             // A default request then
         }

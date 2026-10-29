@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.11";
+    const VERSION = "2.0.0.12";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2939,6 +2939,7 @@
             prefetchCount: PREFETCH_DEFAULT,
             vocalFilter: "all",
             setsOn: true,
+            setSort: "added",
             view: "mureka",
             reportPlays: true,
             artOverlayMode: "all",
@@ -3113,7 +3114,7 @@
                 // Remembered list view, one of mureka, queue, alpha, stars or
                 // plays, the last only while play counts are on
                 const view = (parsed.view === "queue" || parsed.view === "alpha" || parsed.view === "stars"
-                    || parsed.view === "plays")
+                    || parsed.view === "plays" || parsed.view === "sets")
                     ? parsed.view
                     : "mureka";
 
@@ -3155,6 +3156,7 @@
                     prefetchCount: prefetchCount,
                     vocalFilter: vocalFilter,
                     setsOn: parsed.setsOn !== false,
+                    setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
                     view: view,
                     reportPlays: parsed.reportPlays !== false,
                     copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
@@ -5249,8 +5251,11 @@
     const NOTES_KEY = "mureka_notes_v1";
     const SET_COLORS = ["#ff9f43", "#a78bfa", "#7ee787", "#ff6b9a", "#ffd166", "#48b0eb", "#f87171", "#e0a8ff"];
 
-    // Set id to { id, name, color, used }, song id to { set, how }, and the
-    // songs never to be put in a set by the player
+    // Set id to { id, name, color, used, created, added, done }, song id to
+    // { set, how, kept }, and the songs never to be put in a set by the
+    // player. Created and added, the last time a song went into it, are in
+    // milliseconds. A done set has been listened through. Kept songs are
+    // the versions chosen, any number of them, the first of the set
     const songSets = new Map();
     const songSetOf = new Map();
     const setNotAuto = new Set();
@@ -5260,6 +5265,10 @@
 
     // The folds of sets opened in the player's own list, by set id
     const openedSets = new Set();
+
+    // The sets opened in the Sets view, and whether its done sets show
+    const setsViewOpen = new Set();
+    let setsViewDoneOpen = false;
 
     function loadSetsData() {
 
@@ -5272,7 +5281,7 @@
                 for (const x of raw.sets) {
 
                     if (x && typeof x.id === "string" && x.id) {
-                        songSets.set(x.id, { id: x.id, name: String(x.name || "Set"), color: setColor(x.color), used: Number(x.used) || 0 });
+                        songSets.set(x.id, cleanSet(x));
                     }
                 }
 
@@ -5283,7 +5292,7 @@
                     const m = members[id];
 
                     if (Array.isArray(m) && songSets.has(m[0])) {
-                        songSetOf.set(String(id), { set: m[0], how: m[1] === "auto" ? "auto" : "hand" });
+                        songSetOf.set(String(id), { set: m[0], how: m[1] === "auto" ? "auto" : "hand", kept: m[2] === 1 || m[2] === true });
                     }
                 }
 
@@ -5317,12 +5326,68 @@
         return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : SET_COLORS[0];
     }
 
+    // A set as stored, from what was kept or read. Sets from before the
+    // dates were kept take the last time one was used for both
+    function cleanSet(x) {
+
+        const used = Number(x.used) || 0;
+        const created = Number(x.created) || used;
+
+        return {
+            id: String(x.id),
+            name: String(x.name || "Set").slice(0, 200),
+            color: setColor(x.color),
+            used: used,
+            created: created,
+            added: Number(x.added) || used || created,
+            done: x.done === true
+        };
+    }
+
+    // The color a set's songs are marked with, faded for a done set
+    function setMarkColor(set) {
+        return set.done ? set.color + "80" : set.color;
+    }
+
+    function isKept(song) {
+
+        const m = song ? songSetOf.get(String(song.song_id)) : null;
+
+        return !!(m && m.kept);
+    }
+
+    function setKept(song, on) {
+
+        const m = songSetOf.get(String(song.song_id));
+
+        if (!m) {
+            return;
+        }
+
+        m.kept = on === true;
+        saveSets();
+    }
+
+    // A set's songs in the order the list shows them: the first, then the
+    // other kept ones and then the rest, newest first
+    function setOrder(members) {
+
+        const head = setHeadOf(members);
+        const rest = members.filter(function (x) {
+            return x !== head;
+        }).sort(byNewest);
+
+        return [head].concat(rest.filter(isKept), rest.filter(function (x) {
+            return !isKept(x);
+        }));
+    }
+
     function setsData() {
 
         const members = {};
 
         songSetOf.forEach(function (m, id) {
-            members[id] = [m.set, m.how];
+            members[id] = m.kept ? [m.set, m.how, 1] : [m.set, m.how];
         });
 
         return {
@@ -5404,13 +5469,15 @@
         return (b.generate_at || 0) - (a.generate_at || 0) || String(b.song_id).localeCompare(String(a.song_id));
     }
 
-    // The song a set is folded under: the best rated, the newest of those
+    // The song a set is folded under: the best rated, the newest of those,
+    // of the kept songs when there are any
     function setHeadOf(songs) {
 
         let best = null;
         let bestRating = -1;
+        const kept = songs.filter(isKept);
 
-        for (const x of songs.slice().sort(byNewest)) {
+        for (const x of (kept.length > 0 ? kept : songs).slice().sort(byNewest)) {
 
             const r = getRating(x);
             const v = r === null ? -1 : r;
@@ -5460,7 +5527,9 @@
 
         const id = newSetId();
 
-        songSets.set(id, { id: id, name: (song.title || "").trim() || "Set", color: freeSetColor(), used: Date.now() });
+        const now = Date.now();
+
+        songSets.set(id, cleanSet({ id: id, name: (song.title || "").trim() || "Set", color: freeSetColor(), used: now, created: now }));
         putInSet(song, id, how || "hand");
 
         return songSets.get(id);
@@ -5472,14 +5541,20 @@
 
         const id = String(song.song_id);
         const before = songSetOf.get(id);
+        const set = songSets.get(setId);
 
-        songSetOf.set(id, { set: setId, how: how === "auto" ? "auto" : "hand" });
+        // Kept stays kept while it stays in the same set
+        songSetOf.set(id, { set: setId, how: how === "auto" ? "auto" : "hand", kept: !!(before && before.set === setId && before.kept) });
 
         if (how !== "auto") {
             setNotAuto.delete(id);
         }
 
-        songSets.get(setId).used = Date.now();
+        set.used = Date.now();
+
+        if (!before || before.set !== setId) {
+            set.added = set.used;
+        }
 
         if (before && before.set !== setId) {
             dropEmptySet(before.set);
@@ -5584,15 +5659,8 @@
 
             done.add(m.set);
 
-            const head = setHeadOf(members);
-
-            out.push(head);
-
-            for (const y of members.slice().sort(byNewest)) {
-
-                if (y !== head) {
-                    out.push(y);
-                }
+            for (const y of setOrder(members)) {
+                out.push(y);
             }
         }
 
@@ -5671,7 +5739,16 @@
 
         const count = setSongs(inSet.id).length;
 
-        askChoices("Set \"" + inSet.name + "\"\n" + count + (count === 1 ? " song" : " songs") + ". \"" + title + "\" is one of them.", [
+        const kept = isKept(song);
+
+        askChoices("Set \"" + inSet.name + "\"\n" + count + (count === 1 ? " song" : " songs") + ". \"" + title + "\" is one of them"
+            + (kept ? ", kept." : "."), [
+            { label: kept ? "Not kept" : "Mark as kept", fn: function () {
+
+                setKept(song, !kept);
+                setsChanged();
+                showToast(kept ? "No longer kept" : "Kept", true);
+            } },
             { label: "Suggest similar songs", fn: function () {
                 askSimilar(inSet);
             } },
@@ -5684,24 +5761,210 @@
             { label: "Move to another set", fn: function () {
                 askSetPick(song, "Move \"" + title + "\" to another set");
             } },
+            { label: "The whole set", ring: true, color: inSet.color, fn: function () {
+                askSetMenu(inSet);
+            } }
+        ], null, false, true);
+    }
+
+    // What can be done with a set as a whole
+    function askSetMenu(set) {
+
+        const songs = setSongs(set.id);
+        const kept = songs.filter(isKept).length;
+
+        askChoices("Set \"" + set.name + "\"\n" + songs.length + (songs.length === 1 ? " song" : " songs")
+            + (kept > 0 ? ", " + kept + " kept" : "") + (set.done ? ". Done." : "."), [
+            { label: "Play the set", fn: function () {
+                playSet(set);
+            } },
+            { label: "Suggest similar songs", fn: function () {
+                askSimilar(set);
+            } },
             { label: "Rename the set", fn: function () {
 
-                askText("Name of the set", inSet.name, "Rename", function (name) {
+                askText("Name of the set", set.name, "Rename", function (name) {
 
                     const clean = String(name || "").trim();
 
                     if (clean) {
 
-                        inSet.name = clean;
+                        set.name = clean.slice(0, 200);
                         saveSets();
                         setsChanged();
                     }
                 });
             } },
-            { label: "Color of the set", ring: true, color: inSet.color, fn: function () {
-                askSetColor(inSet);
+            { label: "Color of the set", ring: true, color: set.color, fn: function () {
+                askSetColor(set);
+            } },
+            { label: set.done ? "Not done, open again" : "Mark as done", fn: function () {
+
+                set.done = !set.done;
+                saveSets();
+                setsChanged();
+                showToast(set.done ? "Set done" : "Set open again", true);
+            } },
+            { label: "Merge into another set", fn: function () {
+                askMergeSet(set);
+            } },
+            { label: "Dissolve the set", ring: true, color: "#f87171", fn: function () {
+
+                askYesNo("Dissolve \"" + set.name + "\"?", "The set is gone, its songs stay in the library, each on its own. They are not put in a set by the player again.",
+                    "Dissolve", function () {
+
+                        dissolveSet(set);
+                        setsChanged();
+                        showToast("Set dissolved", true);
+                    }, null, true);
             } }
         ], null, false, true);
+    }
+
+    // The set's songs from the first, the queue going on after them
+    function playSet(set) {
+
+        const songs = setOrder(setSongs(set.id));
+
+        if (songs.length === 0) {
+            return;
+        }
+
+        const first = songs[0];
+
+        switchSong("tap", function () {
+
+            buildQueue(first.song_id);
+
+            if (!queue[queuePos] || queue[queuePos].song_id !== first.song_id) {
+
+                playCurrent();
+                return;
+            }
+
+            const rest = songs.slice(1);
+            const ids = new Set(rest.map(function (x) {
+                return x.song_id;
+            }));
+
+            queue = queue.slice(0, queuePos + 1).concat(rest, queue.slice(queuePos + 1).filter(function (x) {
+                return !ids.has(x.song_id);
+            }));
+
+            for (const x of rest) {
+                runMarks.add(String(x.song_id));
+            }
+
+            resumeState = null;
+            dbgLog("Song", "played the set " + set.name + ", " + songs.length + " songs");
+            playCurrent();
+        });
+    }
+
+    // Every song of the set into another one, the set gone after
+    function askMergeSet(set) {
+
+        const options = [];
+
+        for (const entry of setsByUse()) {
+
+            if (entry.set.id === set.id) {
+                continue;
+            }
+
+            options.push({ label: entry.set.name + " (" + entry.count + ")", ring: true, color: entry.set.color, fn: function () {
+
+                for (const x of setSongs(set.id)) {
+
+                    const kept = isKept(x);
+
+                    putInSet(x, entry.set.id, "hand");
+
+                    if (kept) {
+                        songSetOf.get(String(x.song_id)).kept = true;
+                    }
+                }
+
+                dropEmptySet(set.id);
+                saveSets();
+                setsChanged();
+                showToast("Merged into " + entry.set.name, true);
+            } });
+        }
+
+        if (options.length === 0) {
+
+            showToast("There is no other set", false);
+            return;
+        }
+
+        askChoices("Merge \"" + set.name + "\" into", options, null, false, true);
+    }
+
+    // The set gone, its songs on their own, never put in a set by the
+    // player again
+    function dissolveSet(set) {
+
+        songSetOf.forEach(function (m, id) {
+
+            if (m.set === set.id) {
+
+                songSetOf.delete(id);
+                setNotAuto.add(id);
+            }
+        });
+
+        songSets.delete(set.id);
+        openedSets.delete(set.id);
+        saveSets();
+    }
+
+    // Songs picked in the list into a new set, or one of the latest used
+    function askSetPickMany(songs, done) {
+
+        const real = songs.filter(function (x) {
+            return x && !isPendingSong(x);
+        });
+
+        if (real.length === 0) {
+            return;
+        }
+
+        const put = function (setId) {
+
+            for (const x of real) {
+                putInSet(x, setId, "hand");
+            }
+
+            setsChanged();
+
+            if (done) {
+                done();
+            }
+        };
+
+        const options = [{ label: "New set with these songs", fn: function () {
+
+            const set = newSetWith(real[0], "hand");
+
+            put(set.id);
+            showToast("New set of " + real.length + (real.length === 1 ? " song" : " songs"), true);
+        } }];
+
+        for (const entry of setsByUse()) {
+
+            if (options.length > SET_PICK_MAX) {
+                break;
+            }
+
+            options.push({ label: entry.set.name + " (" + entry.count + ")", ring: true, color: entry.set.color, fn: function () {
+
+                put(entry.set.id);
+                showToast("In the set " + entry.set.name, true);
+            } });
+        }
+
+        askChoices("Put " + real.length + (real.length === 1 ? " song" : " songs") + " in a set", options, null, false, true);
     }
 
     // A new set, or one of the latest used ones
@@ -7319,13 +7582,14 @@
                 j += 1;
             }
 
-            const color = songSets.get(id).color;
+            const color = setMarkColor(songSets.get(id));
             const open = opened.has(id);
 
             for (let k = i; k < j; k += 1) {
 
                 entries[k].setId = id;
                 entries[k].setColor = color;
+                entries[k].setKept = isKept(entries[k].song);
 
                 if (j - i > 1 && k > i) {
                     entries[k].setMember = true;
@@ -14129,7 +14393,7 @@
         const v = listView === "queue"
             ? "Queue"
             : (listView === "alpha" ? "A-Z" : (listView === "stars" ? "Stars"
-                : (listView === "plays" && settings.playsOn === true ? "Plays" : "Mureka")));
+                : (listView === "plays" && settings.playsOn === true ? "Plays" : (listView === "sets" ? "Sets" : "Mureka"))));
 
         const f = settings.vocalFilter === "vocal"
             ? "Vocals"
@@ -27144,6 +27408,7 @@
             // versions of its songs. And the song's note
             set: hostSetOf(song),
             sets: hostSetsToPick(song),
+            mergeTo: hostSetsToPick(song, true),
             setColors: SET_COLORS,
             similar: hostSimilar(song),
             note: songNote(song)
@@ -27154,16 +27419,36 @@
 
         const set = setOfSong(song);
 
-        return set ? { id: set.id, name: set.name, color: set.color, count: setSongs(set.id).length } : null;
+        if (!set) {
+            return null;
+        }
+
+        const songs = setSongs(set.id);
+
+        return {
+            id: set.id,
+            name: set.name,
+            color: set.color,
+            count: songs.length,
+            kept: songs.filter(isKept).length,
+            done: set.done === true,
+            songKept: isKept(song)
+        };
     }
 
-    function hostSetsToPick(song) {
+    // The latest used sets to put the song in, or every other set to merge
+    // its set into
+    function hostSetsToPick(song, all) {
 
         const current = setOfSong(song);
 
+        if (all && !current) {
+            return [];
+        }
+
         return setsByUse().filter(function (entry) {
             return !current || entry.set.id !== current.id;
-        }).slice(0, SET_PICK_MAX).map(function (entry) {
+        }).slice(0, all ? undefined : SET_PICK_MAX).map(function (entry) {
             return { id: entry.set.id, name: entry.set.name, color: entry.set.color, count: entry.count };
         });
     }
@@ -27224,6 +27509,56 @@
 
             set.color = setColor(value);
             saveSets();
+        } else if (act === "keep") {
+
+            if (!set) {
+                return;
+            }
+
+            setKept(song, value === true);
+        } else if (act === "playSet") {
+
+            if (set) {
+                playSet(set);
+            }
+
+            return;
+        } else if (act === "doneSet") {
+
+            if (!set) {
+                return;
+            }
+
+            set.done = value === true;
+            saveSets();
+        } else if (act === "mergeSet") {
+
+            const into = songSets.get(String(value));
+
+            if (!set || !into || into.id === set.id) {
+                return;
+            }
+
+            for (const x of setSongs(set.id)) {
+
+                const kept = isKept(x);
+
+                putInSet(x, into.id, "hand");
+
+                if (kept) {
+                    songSetOf.get(String(x.song_id)).kept = true;
+                }
+            }
+
+            dropEmptySet(set.id);
+            saveSets();
+        } else if (act === "dissolveSet") {
+
+            if (!set) {
+                return;
+            }
+
+            dissolveSet(set);
         } else if (act === "addToSet") {
 
             if (!set || !Array.isArray(value)) {
@@ -28891,6 +29226,11 @@
     // applied, then the web view's search text on top
     function hostList(req) {
 
+        // The Sets view, a row for each set
+        if (req && req.view === "sets") {
+            return hostSetsList(req);
+        }
+
         const q = String(req && req.q ? req.q : "").trim().toLowerCase();
         const offset = Math.max(0, Number(req && req.offset) || 0);
         const limit = Math.max(1, Math.min(200, Number(req && req.limit) || 60));
@@ -29045,6 +29385,121 @@
             offset: offset,
             playingAt: playingAt,
             songs: songs,
+            meta: hostRowMeta(),
+            filters: hostFilters()
+        };
+    }
+
+    // The web view's Sets view: the sort, a row for each set with what its
+    // row says, and the songs of the sets this browser opened under them.
+    // The done sets after the others, under a row of their own, when that
+    // is opened or searched. All of it at once, there are never many
+    function hostSetsList(req) {
+
+        const q = String(req && req.q ? req.q : "").trim().toLowerCase();
+        const opened = new Set(String(req && req.sets ? req.sets : "").split(",").filter(Boolean));
+        const doneOpen = String(req && req.done ? req.done : "") === "1";
+        const playingId = currentSong ? String(currentSong.song_id) : "";
+        const numbers = hostNumbers();
+        const rows = [{ kind: "sorts", sort: setSortOf(), sorts: SET_SORTS }];
+        let playingAt = -1;
+
+        const entries = setsSorted().filter(function (e) {
+
+            return !q || e.set.name.toLowerCase().indexOf(q) !== -1 || e.songs.some(function (x) {
+                return searchMatches(x, q);
+            });
+        });
+
+        const add = function (e) {
+
+            const open = opened.has(e.set.id);
+
+            rows.push({
+                kind: "set",
+                setId: e.set.id,
+                name: e.set.name,
+                setColor: setMarkColor(e.set),
+                done: e.set.done === true,
+                meta: setRowMeta(e),
+                count: e.songs.length,
+                open: open,
+                firstId: e.songs.length > 0 ? String(e.songs[0].song_id) : ""
+            });
+
+            for (const x of e.songs) {
+
+                const id = String(x.song_id);
+
+                // Folded, the playing song still shows under it
+                if (!open && id !== playingId) {
+                    continue;
+                }
+
+                if (id === playingId) {
+                    playingAt = rows.length;
+                }
+
+                rows.push({
+                    id: id,
+                    title: (x.title || "").trim() || "Untitled",
+                    number: numbers.get(x.song_id) || null,
+                    published: x.publish_state === 1,
+                    cached: hostCacheState(x),
+                    isNew: x.is_played === false,
+                    trimmed: isTrimmed(x),
+                    ignored: isIgnored(x),
+                    shared: x.shared === true,
+                    cover: coverUrl(x),
+                    rating: getRating(x),
+                    liked: x.is_liked === true,
+                    duration: (x.duration_milliseconds || 0) / 1000,
+                    playing: id === playingId,
+                    playNext: isPlayNext(x.song_id),
+                    plays: songPlays(x),
+                    greyed: false,
+                    place: 0,
+                    setId: e.set.id,
+                    setColor: setMarkColor(e.set),
+                    setMember: true,
+                    setKept: isKept(x)
+                });
+            }
+        };
+
+        const working = entries.filter(function (e) {
+            return !e.set.done;
+        });
+        const done = entries.filter(function (e) {
+            return e.set.done;
+        });
+
+        working.forEach(add);
+
+        if (done.length > 0) {
+
+            const open = doneOpen || !!q;
+
+            rows.push({ kind: "doneHead", count: done.length, open: open });
+
+            if (open) {
+                done.forEach(add);
+            }
+        }
+
+        const doneAll = Array.from(songSets.values()).filter(function (x) {
+            return x.done;
+        }).length;
+        const offset = Math.max(0, Number(req && req.offset) || 0);
+
+        return {
+            token: req && req.token ? String(req.token) : "",
+            total: rows.length,
+            offset: 0,
+            playingAt: playingAt,
+            songs: offset > 0 ? [] : rows,
+            setsCount: songSets.size + (songSets.size === 1 ? " set, " : " sets, ") + doneAll + " done, "
+                + songSetOf.size + (songSetOf.size === 1 ? " song" : " songs") + " in them",
             meta: hostRowMeta(),
             filters: hostFilters()
         };
@@ -29603,7 +30058,7 @@
             const n = Math.max(1, Math.min(5, Math.round(Number(a.value) || 0)));
 
             setRating(song, nextRating(getRating(song), n));
-        } else if (["newSet", "toSet", "outOfSet", "renameSet", "setColor", "addToSet"].indexOf(act) >= 0) {
+        } else if (["newSet", "toSet", "outOfSet", "renameSet", "setColor", "addToSet", "keep", "playSet", "doneSet", "mergeSet", "dissolveSet"].indexOf(act) >= 0) {
             hostSetAction(song, act, a.value);
         } else if (act === "note") {
 
@@ -30055,6 +30510,18 @@
             setVocalFilter(value);
         } else if (cmd === "sets") {
             toggleSetsShown(typeof arg === "boolean" ? arg : undefined);
+        } else if (cmd === "setSort") {
+
+            if (SET_SORTS.some(function (x) {
+                return x.value === arg;
+            })) {
+
+                settings.setSort = arg;
+                saveSettings();
+                songDataStamp++;
+                renderList();
+                publishHostSoon();
+            }
         } else if (cmd === "feed") {
 
             // A way of showing asked for by name, or the next one in turn
@@ -31512,6 +31979,11 @@
         viewButtons.stars.title = "Most stars first";
 
         // Most plays first, offered with play counts on
+        viewButtons.sets = makeActionButton(iconSets(), "Sets", "#333", "#fff", function () {
+            setView("sets");
+        });
+        viewButtons.sets.title = "One row for each song set";
+
         viewButtons.plays = makeActionButton(iconPlay(), "Plays", "#333", "#fff", function () {
             setView("plays");
         });
@@ -31522,6 +31994,7 @@
         viewRow.appendChild(viewButtons.alpha);
         viewRow.appendChild(viewButtons.stars);
         viewRow.appendChild(viewButtons.plays);
+        viewRow.appendChild(viewButtons.sets);
 
         // Vocals filter row
         const filterRow = document.createElement("div");
@@ -34360,6 +34833,14 @@
         // Anything that changes what the list holds comes through here, so
         // the web view's sorted copy is made again on its next request
         hostListStamp += 1;
+
+        if (listView === "sets") {
+
+            renderSetsView();
+            saveCacheMarksSoon();
+            return;
+        }
+
         renderSongs(displaySongs(), listView === "queue");
 
         if (cache.songs.length > 0) {
@@ -34634,6 +35115,14 @@
             shareBtn.style.flex = "0 0 auto";
             selBarEl.appendChild(shareBtn);
         }
+
+        const setBtn = makeButton("Set", "#333", "#fff", function () {
+            askSetPickMany(Array.from(selectedSongs.values()), endSelect);
+        });
+
+        setBtn.title = "Put the picked songs in a set";
+        setBtn.style.flex = "0 0 auto";
+        selBarEl.appendChild(setBtn);
 
         const doneBtn = makeButton("Done", "#333", "#fff", endSelect);
 
@@ -35180,6 +35669,343 @@
         return chip;
     }
 
+    // How the Sets view is sorted: by the last time a song went into a set,
+    // by when the set was made, or by name
+    const SET_SORTS = [
+        { value: "added", label: "Last added" },
+        { value: "created", label: "Created" },
+        { value: "name", label: "Name" }
+    ];
+
+    function setSortOf() {
+
+        return SET_SORTS.some(function (x) {
+            return x.value === settings.setSort;
+        }) ? settings.setSort : "added";
+    }
+
+    // Every set with its songs in list order, sorted as chosen
+    function setsSorted() {
+
+        const bySet = new Map();
+
+        for (const x of cache.songs) {
+
+            const m = songSetOf.get(String(x.song_id));
+
+            if (m && songSets.has(m.set)) {
+
+                if (!bySet.has(m.set)) {
+                    bySet.set(m.set, []);
+                }
+
+                bySet.get(m.set).push(x);
+            }
+        }
+
+        const sort = setSortOf();
+        const out = [];
+
+        songSets.forEach(function (set) {
+
+            const songs = bySet.get(set.id) || [];
+
+            out.push({ set: set, songs: songs.length > 0 ? setOrder(songs) : [] });
+        });
+
+        out.sort(function (a, b) {
+
+            if (sort === "name") {
+                return a.set.name.localeCompare(b.set.name);
+            }
+
+            const k = sort === "created" ? "created" : "added";
+
+            return (b.set[k] || 0) - (a.set[k] || 0) || a.set.name.localeCompare(b.set.name);
+        });
+
+        return out;
+    }
+
+    // A date in milliseconds as the day only
+    function setDay(ms) {
+        return ms > 0 ? fmtDate(ms / 1000).slice(0, 10) : "";
+    }
+
+    // What a set's row says under its name
+    function setRowMeta(entry) {
+
+        const n = entry.songs.length;
+        const parts = [n + (n === 1 ? " song" : " songs")];
+        const kept = entry.songs.filter(isKept).length;
+        let best = null;
+
+        for (const x of entry.songs) {
+
+            const r = getRating(x);
+
+            if (r !== null && (best === null || r > best)) {
+                best = r;
+            }
+        }
+
+        if (kept > 0) {
+            parts.push(kept + " kept");
+        }
+
+        if (best !== null) {
+            parts.push(ratingNumber(best) + "\u2605");
+        }
+
+        const day = setDay(setSortOf() === "created" ? entry.set.created : entry.set.added);
+
+        if (day) {
+            parts.push(day);
+        }
+
+        return parts.join("  \u00B7  ");
+    }
+
+    // A long press, or a right click, on a row of the Sets view
+    function onLongPress(el, fn) {
+
+        let timer = null;
+        let fired = false;
+
+        el.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+            fn();
+        });
+        el.addEventListener("touchstart", function () {
+
+            fired = false;
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+
+                fired = true;
+                fn();
+            }, 550);
+        }, { passive: true });
+
+        for (const name of ["touchend", "touchmove", "touchcancel"]) {
+
+            el.addEventListener(name, function () {
+                clearTimeout(timer);
+            }, { passive: true });
+        }
+
+        // A tap that became a long press does not also open the set
+        el.addEventListener("click", function (ev) {
+
+            if (fired) {
+
+                fired = false;
+                ev.stopImmediatePropagation();
+                ev.preventDefault();
+            }
+        }, true);
+    }
+
+    function buildSetRow(entry, open) {
+
+        const set = entry.set;
+        const row = document.createElement("div");
+        const arrow = document.createElement("span");
+        const text = document.createElement("div");
+        const name = document.createElement("div");
+        const meta = document.createElement("div");
+        const more = document.createElement("span");
+
+        row.style.cssText = "display:flex;align-items:center;gap:8px;padding:7px 4px 7px 16px;margin-top:2px;cursor:pointer;"
+            + "user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;border-radius:6px;background:#26262c;"
+            + "box-shadow:inset 4px 0 0 " + setMarkColor(set);
+        row.dataset.setRow = set.id;
+        row.title = "Tap to open or fold; long press or right-click for the set";
+        arrow.textContent = open ? "\u25BE" : "\u25B8";
+        arrow.style.cssText = "flex:0 0 auto;width:1em;margin-left:10px;color:" + setMarkColor(set);
+        text.style.cssText = "flex:1;min-width:0";
+        name.textContent = set.name;
+        name.style.cssText = "font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (set.done ? "#aaa" : "#fff");
+        meta.textContent = setRowMeta(entry);
+        meta.style.cssText = "font-size:11px;color:#999;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        more.textContent = "\u22EF";
+        more.setAttribute("role", "button");
+        more.title = "The set";
+        more.style.cssText = "flex:0 0 auto;padding:4px 10px;font-size:18px;color:#ccc;cursor:pointer";
+        more.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            askSetMenu(set);
+        });
+        text.appendChild(name);
+        text.appendChild(meta);
+        row.appendChild(arrow);
+        row.appendChild(text);
+        row.appendChild(more);
+        row.addEventListener("click", function () {
+
+            const top = listEl ? listEl.scrollTop : 0;
+
+            if (setsViewOpen.has(set.id)) {
+                setsViewOpen.delete(set.id);
+            } else {
+                setsViewOpen.add(set.id);
+            }
+
+            renderList();
+
+            if (listEl) {
+                listEl.scrollTop = top;
+            }
+        });
+        onLongPress(row, function () {
+            askSetMenu(set);
+        });
+
+        return row;
+    }
+
+    // The Sets view: a row for each set, sorted as chosen, its songs under
+    // it once opened. The done sets after the others, folded together. The
+    // search box finds sets by their name and by their songs' titles
+    function renderSetsView() {
+
+        if (!listEl) {
+            return;
+        }
+
+        listEl.textContent = "";
+        playingItemEl = null;
+        lazyRows = [];
+        lazyRendered = 0;
+        lazyState = null;
+
+        const query = String(searchQuery || "").toLowerCase();
+        const numberById = hostNumbers();
+        const playingId = currentSong ? currentSong.song_id : null;
+        const entries = setsSorted().filter(function (e) {
+
+            return !query || e.set.name.toLowerCase().indexOf(query) !== -1 || e.songs.some(function (x) {
+                return searchMatches(x, query);
+            });
+        });
+
+        // The sort, chips across the top
+        const sorts = document.createElement("div");
+
+        sorts.style.cssText = "display:flex;align-items:center;gap:6px;padding:2px 2px 6px";
+
+        const sortName = document.createElement("span");
+
+        sortName.textContent = "Sort";
+        sortName.style.cssText = "font-size:12px;color:#999";
+        sorts.appendChild(sortName);
+
+        for (const choice of SET_SORTS) {
+
+            const on = setSortOf() === choice.value;
+            const b = makeButton(choice.label, on ? "#48e1eb" : "#333", on ? "#000" : "#fff", function () {
+
+                settings.setSort = choice.value;
+                saveSettings();
+                renderList();
+            });
+
+            b.style.padding = "4px 10px";
+            b.style.fontSize = "12px";
+            b.style.flex = "0 0 auto";
+            sorts.appendChild(b);
+        }
+
+        listEl.appendChild(sorts);
+
+        const addSet = function (entry) {
+
+            const open = setsViewOpen.has(entry.set.id);
+
+            listEl.appendChild(buildSetRow(entry, open));
+
+            for (const x of entry.songs) {
+
+                const isPlaying = x.song_id === playingId;
+
+                // Folded, the playing song still shows under it
+                if (!open && !isPlaying) {
+                    continue;
+                }
+
+                const item = buildSongRow(x, numberById.get(x.song_id), isPlaying, false, -1, {
+                    setId: entry.set.id,
+                    setColor: setMarkColor(entry.set),
+                    setMember: true,
+                    setKept: isKept(x)
+                });
+
+                item.style.marginLeft = "10px";
+
+                if (isPlaying) {
+                    playingItemEl = item;
+                }
+
+                listEl.appendChild(item);
+            }
+        };
+
+        const working = entries.filter(function (e) {
+            return !e.set.done;
+        });
+        const done = entries.filter(function (e) {
+            return e.set.done;
+        });
+
+        working.forEach(addSet);
+
+        if (done.length > 0) {
+
+            const open = setsViewDoneOpen || !!query;
+            const head = document.createElement("div");
+
+            head.textContent = (open ? "\u25BE  " : "\u25B8  ") + "Done (" + done.length + ")";
+            head.setAttribute("role", "button");
+            head.style.cssText = "padding:10px 4px 6px;color:#aaa;font-weight:600;cursor:pointer;user-select:none;-webkit-user-select:none";
+            head.addEventListener("click", function () {
+
+                setsViewDoneOpen = !setsViewDoneOpen;
+                renderList();
+            });
+            listEl.appendChild(head);
+
+            if (open) {
+                done.forEach(addSet);
+            }
+        }
+
+        if (entries.length === 0) {
+
+            const empty = document.createElement("div");
+
+            empty.textContent = query ? "No matches" : "No sets yet. A song's menu has Add to a set, and songs picked with Select can be put in a set together.";
+            empty.style.cssText = "padding:6px 2px;color:#888";
+            listEl.appendChild(empty);
+        }
+
+        if (countsEl) {
+
+            const all = songSets.size;
+            const doneAll = Array.from(songSets.values()).filter(function (x) {
+                return x.done;
+            }).length;
+            const text = "Sets " + all + "  \u00B7  Done " + doneAll + "  \u00B7  Songs in sets " + songSetOf.size;
+
+            countsEl.__ways = [text, all + " sets \u00B7 " + doneAll + " done", all + " sets", String(all)];
+            countsEl.textContent = text;
+            placeCounts();
+        }
+
+        updateLocateBtn();
+    }
+
     // fold, for a row of the list: whether the filters leave it out, and
     // for the first of several in a row how many there are and whether
     // they are opened
@@ -35267,11 +36093,22 @@
             numEl.appendChild(buildFoldChip(fold, fold.setCount > 1 ? "set" : "run"));
         }
 
-        // A song of a set has a bar of the set's color at its start
+        // A song of a set has a bar of the set's color at its start, and a
+        // kept one a tick before its title
         if (fold && fold.setColor) {
 
             item.dataset.setBar = "inset 3px 0 0 " + fold.setColor;
             item.style.boxShadow = item.dataset.setBar;
+
+            if (fold.setKept) {
+
+                const tick = document.createElement("span");
+
+                tick.textContent = "\u2713";
+                tick.title = "Kept";
+                tick.style.cssText = "flex:0 0 auto;margin-right:5px;font-size:12px;font-weight:700;color:" + fold.setColor;
+                item.insertBefore(tick, titleEl);
+            }
         }
 
         // Sorted by plays, each song's plays take the place of the rating,
@@ -37269,6 +38106,7 @@
         const playbackPage = makePage();
         const nowPage = makePage();
         const publishPage = makePage();
+        const setsPage = makePage();
         const cachePage = makePage();
         const chargerPage = makePage();
         const backupPage = makePage();
@@ -37286,6 +38124,7 @@
             playback: playbackPage,
             nowplaying: nowPage,
             publishing: publishPage,
+            sets: setsPage,
             cache: cachePage,
             charger: chargerPage,
             backup: backupPage,
@@ -39655,6 +40494,84 @@
         publishPage.appendChild(withHint(copyOnPublishRow, "The song's link goes to the clipboard as it is published, in the web view to that browser's, with a note saying so."));
         publishPage.appendChild(withHint(noRemixRow, "Before a song is published, Mureka is told to disallow remixing it, then it is published. If Mureka does not take that, the song is not published. Remixing can still be allowed afterwards in the song menu."));
 
+        // Song sets: kept together or not, how the Sets view is sorted, and
+        // tidying up
+        const setsCountEl = makeHint("");
+        const singleSets = function () {
+
+            return setsSorted().filter(function (e) {
+                return e.songs.length <= 1;
+            });
+        };
+        const paintSetsCount = function () {
+
+            const done = Array.from(songSets.values()).filter(function (x) {
+                return x.done;
+            }).length;
+
+            setsCountEl.textContent = songSets.size + (songSets.size === 1 ? " set, " : " sets, ") + done + " done, "
+                + songSetOf.size + (songSetOf.size === 1 ? " song" : " songs") + " in them. "
+                + singleSets().length + " with only one song.";
+        };
+
+        paintSetsCount();
+        settingsRefreshers.push(paintSetsCount);
+
+        const setsOnRow = makeBoolRow("Keep sets together",
+            function () { return setsShown(); },
+            function (v) { toggleSetsShown(v); });
+
+        const setSortRow = makeDropRow("Sort the Sets view by", SET_SORTS, setSortOf, function (v) {
+
+            settings.setSort = v;
+
+            if (listView === "sets") {
+                renderList();
+            }
+        });
+
+        const openSetsBtn = makeButton("Open the Sets view", "#333", "#fff", function () {
+
+            closeSettings();
+            setView("sets");
+        });
+
+        const singleSetsBtn = makeButton("Dissolve sets with only one song", "#333", "#fff", function () {
+
+            const found = singleSets();
+
+            if (found.length === 0) {
+
+                showToast("No set with only one song", true);
+                return;
+            }
+
+            askYesNo("Dissolve " + found.length + (found.length === 1 ? " set?" : " sets?"),
+                "The sets with only one song in the library are gone, their songs stay. Those songs are not put in a set by the player again.",
+                "Dissolve", function () {
+
+                    for (const e of found) {
+                        dissolveSet(e.set);
+                    }
+
+                    setsChanged();
+                    paintSetsCount();
+                    showToast(found.length + (found.length === 1 ? " set dissolved" : " sets dissolved"), true);
+                }, null, true);
+        });
+
+        openSetsBtn.style.textAlign = "left";
+        singleSetsBtn.style.textAlign = "left";
+        setsPage.appendChild(makeLabel("In the list"));
+        setsPage.appendChild(setsCountEl);
+        setsPage.appendChild(withHint(setsOnRow, "Off, every song stands on its own in the list and the queue. The sets stay as they are. The Sets button for the button row does the same."));
+        setsPage.appendChild(withHint(setSortRow, "Last added puts the set a song last went into first. Done sets come after the others, folded together."));
+        setsPage.appendChild(makeLabel("Tidy up"));
+        setsPage.appendChild(openSetsBtn);
+        setsPage.appendChild(makeHint("The Sets view lists the sets, one row each. A tap opens a set, a long press shows what can be done with it: play it, rename it, color it, mark it done, merge it into another set or dissolve it."));
+        setsPage.appendChild(singleSetsBtn);
+        setsPage.appendChild(makeHint("A set left with one song after the others were taken out or deleted on Mureka."));
+
         // Each page opens with the way back and a word on what it holds
         const heads = [
             [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
@@ -39663,6 +40580,7 @@
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
+            [setsPage, "Song sets", "The versions of a song kept together, to compare them and listen them through. Kept on this device and carried by song tweaks."],
             [chargerPage, "Charger and power", "What happens when the phone goes on battery, or chosen Bluetooth devices disconnect, and when that changes back. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
             [cachePage, "Cache control", "What the player keeps on this device so songs and covers are there without waiting for Mureka, and how much room it takes."],
             [backupPage, "Backup and restore", null],
@@ -39717,8 +40635,9 @@
         mainPage.appendChild(makePageButton("Playback", "playback"));
         mainPage.appendChild(makePageButton("Now playing", "nowplaying"));
         mainPage.appendChild(makeLabel("Your songs"));
-        mainPage.appendChild(makeHint("What happens when you publish or change songs of your own."));
+        mainPage.appendChild(makeHint("What happens when you publish or change songs of your own, and how their versions are kept together."));
         mainPage.appendChild(makePageButton("Publishing", "publishing"));
+        mainPage.appendChild(makePageButton("Song sets", "sets"));
         mainPage.appendChild(makeLabel("Data"));
         mainPage.appendChild(makeHint("What is stored on this device, and saving your ratings, song tweaks and settings to bring them back."));
         mainPage.appendChild(makePageButton("Cache control", "cache"));
@@ -40450,7 +41369,7 @@
                 if (x && typeof x.id === "string" && /^[a-z0-9]{1,40}$/i.test(x.id)) {
 
                     known.add(x.id);
-                    out.sets.sets.push({ id: x.id, name: String(x.name || "Set").slice(0, 200), color: setColor(x.color), used: Number(x.used) || 0 });
+                    out.sets.sets.push(cleanSet(x));
                 }
             }
 
@@ -40461,7 +41380,7 @@
                 const m = members[id];
 
                 if (Array.isArray(m) && known.has(m[0])) {
-                    out.sets.members.push([String(id), m[0], m[1] === "auto" ? "auto" : "hand"]);
+                    out.sets.members.push([String(id), m[0], m[1] === "auto" ? "auto" : "hand", m[2] === 1 || m[2] === true]);
                 }
             }
 
@@ -41072,14 +41991,14 @@
         for (const x of plan.setDefs) {
 
             if (!songSets.has(x.id)) {
-                songSets.set(x.id, { id: x.id, name: x.name, color: x.color, used: x.used || Date.now() });
+                songSets.set(x.id, cleanSet(Object.assign({}, x, { used: x.used || Date.now() })));
             }
         }
 
         for (const m of plan.sets) {
 
             if (songSets.has(m[1]) && !songSetOf.has(m[0])) {
-                songSetOf.set(m[0], { set: m[1], how: m[2] });
+                songSetOf.set(m[0], { set: m[1], how: m[2], kept: m[3] === true });
             }
         }
 
@@ -42986,7 +43905,7 @@
             const m = songSetOf.get(id);
 
             if (m && songSets.has(m.set)) {
-                f += (m.how === "auto" ? "A" : "S") + m.set;
+                f += (m.how === "auto" ? "A" : "S") + m.set + (m.kept ? "K" : "");
             } else if (setNotAuto.has(id)) {
                 f += "S0";
             }
@@ -43274,6 +44193,8 @@
                         } else {
                             e.set = [f[2], f[1] === "A" ? "auto" : "hand"];
                         }
+                    } else if (f[1] === "K") {
+                        e.kept = true;
                     } else if (f[1] === "P") {
                         e.playing = true;
                     }
@@ -43456,7 +44377,7 @@
         for (const e of entries) {
 
             if (e.set) {
-                members[e.id] = e.set;
+                members[e.id] = [e.set[0], e.set[1], e.kept === true ? 1 : 0];
             } else if (e.setOut) {
                 notAuto.push(e.id);
             }

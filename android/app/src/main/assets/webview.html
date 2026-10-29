@@ -1993,6 +1993,82 @@
         opacity: 0.45;
     }
 
+    /* The Sets view: a row for each set, its color at its start, its
+       songs under it once opened */
+    .setRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 6px;
+        padding: 12px 8px 12px 18px;
+        border-radius: 10px;
+        background: #26262c;
+        box-shadow: inset 6px 0 0 var(--setColor, transparent);
+        cursor: pointer;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+
+    .setArrow {
+        flex: 0 0 auto;
+        width: 1em;
+        color: var(--setColor);
+    }
+
+    .setText {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .setName {
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .setRow.done .setName {
+        color: var(--muted);
+    }
+
+    .setMeta {
+        color: var(--muted);
+        font-size: 0.7em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .setsHead {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 4px;
+        flex-wrap: wrap;
+    }
+
+    .setsDone {
+        padding: 16px 6px 8px;
+        color: var(--muted);
+        font-weight: 600;
+        cursor: pointer;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+    #rows .row.inSet.setSong {
+        margin-left: 12px;
+        width: calc(100% - 12px);
+    }
+
+    /* A kept song of a set, a tick in the set's color before its title */
+    .keptMark {
+        margin-right: 0.35em;
+        font-weight: 700;
+        color: var(--setColor);
+    }
+
     /* A song of a set, a bar of the set's color at its start */
     .row.inSet {
         box-shadow: inset 4px 0 0 var(--setColor, transparent);
@@ -5279,8 +5355,9 @@
         <span class="chipGroup">List</span>
         <button class="chip" id="viewMureka" type="button" data-icon="mureka"><span class="lbl">Mureka</span></button>
         <button class="chip" id="viewQueue" type="button" data-icon="queue"><span class="lbl">Queue</span></button>
-        <span class="chipSep"></span>
-        <span class="chipGroup">Sort</span>
+        <button class="chip" id="viewSets" type="button" data-icon="sets"><span class="lbl">Sets</span></button>
+        <span class="chipSep" id="sortSep"></span>
+        <span class="chipGroup" id="sortGroup">Sort</span>
         <button class="chip" id="viewAlpha" type="button" data-icon="alpha"><span class="lbl">A-Z</span></button>
         <button class="chip" id="viewStars" type="button" data-icon="star"><span class="lbl">Stars</span></button>
         <button class="chip" id="viewPlays" type="button" data-icon="play"><span class="lbl">Plays</span></button>
@@ -11174,8 +11251,8 @@
         const saved = localStorage.getItem("murekaCarView");
 
         // A to Z used to be a view of its own, it is Mureka sorted now
-        if (saved === "queue") {
-            listView = "queue";
+        if (saved === "queue" || saved === "sets") {
+            listView = saved;
         } else if (saved === "alpha") {
             listSort = "alpha";
         }
@@ -11857,6 +11934,12 @@
         if (listView === "queue") {
 
             loadQueue(reset, stayTop);
+            return;
+        }
+
+        if (listView === "sets") {
+
+            loadSets(reset);
             return;
         }
 
@@ -12633,6 +12716,13 @@
 
         $("viewMureka").classList.toggle("on", listView === "mureka");
         $("viewQueue").classList.toggle("on", listView === "queue");
+        $("viewSets").classList.toggle("on", listView === "sets");
+
+        // The Sets view has a sort of its own, at the top of the list
+        for (const id of ["sortSep", "sortGroup", "viewAlpha", "viewStars"]) {
+            $(id).style.display = listView === "sets" ? "none" : "";
+        }
+
         $("viewAlpha").classList.toggle("on", listSort === "alpha" || listSort === "alphaDesc");
         $("viewStars").classList.toggle("on", listSort === "starsUp" || listSort === "starsDown");
         setLabel($("viewAlpha"), listSort === "alphaDesc" ? "Z-A" : "A-Z");
@@ -12641,7 +12731,7 @@
         // An arrow shows the direction, up for fewest first, down for most
         setLabel($("viewStars"), "Stars" + (listSort === "starsUp" ? " \u2191" : (listSort === "starsDown" ? " \u2193" : "")));
         setLabel($("viewPlays"), "Plays" + (listSort === "playsUp" ? " \u2191" : (listSort === "playsDown" ? " \u2193" : "")));
-        $("viewPlays").style.display = playsOn() ? "" : "none";
+        $("viewPlays").style.display = playsOn() && listView !== "sets" ? "" : "none";
         paintMiniSort();
     }
 
@@ -13516,6 +13606,20 @@
         attachLongPress(row, song.id);
         songLine(song, row);
 
+        if (song.setKept) {
+
+            const tick = document.createElement("span");
+            const title = row.querySelector(".rowTitle");
+
+            tick.className = "keptMark";
+            tick.textContent = "\u2713";
+            tick.title = "Kept";
+
+            if (title) {
+                title.prepend(tick);
+            }
+        }
+
         // The first of several songs in a row the filters leave out: how
         // many, this one counted, and an arrow to open or fold them, in
         // place of its number
@@ -13577,6 +13681,222 @@
         });
 
         return row;
+    }
+
+    // The Sets view: the sets opened here and whether the done ones show
+    const setsViewOpen = new Set();
+    let setsViewDone = false;
+
+    function setsListUrl() {
+
+        return "/list?q=" + esc(listQuery) + "&view=sets&sets=" + esc(Array.from(setsViewOpen).join(","))
+            + "&done=" + (setsViewDone ? "1" : "0") + "&offset=0&limit=200";
+    }
+
+    // Read whole each time, there are never many sets. Opened or folded,
+    // the list keeps its place
+    function loadSets(reset) {
+
+        const keep = $("rows").scrollTop;
+
+        listToken += 1;
+
+        const token = listToken;
+
+        listBusy = true;
+        showListLoading(true);
+
+        fetchJson(setsListUrl()).then(function (data) {
+
+            if (token !== listToken) {
+                return;
+            }
+
+            listBusy = false;
+            showListLoading(false);
+
+            if (!data || !Array.isArray(data.songs)) {
+                return;
+            }
+
+            clearRows();
+            listTotal = data.songs.length;
+            listLoaded = data.songs.length;
+            listPlayingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
+            rowMeta = data.meta || rowMeta;
+
+            for (const item of data.songs) {
+
+                if (item.kind === "sorts") {
+                    $("rows").appendChild(makeSetSorts(item));
+                } else if (item.kind === "set") {
+                    $("rows").appendChild(makeSetRow(item));
+                } else if (item.kind === "doneHead") {
+                    $("rows").appendChild(makeDoneHead(item));
+                } else {
+
+                    const row = makeRow(item, 0);
+
+                    row.classList.add("setSong");
+                    $("rows").appendChild(row);
+                }
+            }
+
+            if (data.songs.length <= 1) {
+
+                const empty = document.createElement("div");
+
+                empty.className = "setsDone";
+                empty.textContent = listQuery ? "No matches" : "No sets yet. A song's menu has Add to a set.";
+                $("rows").appendChild(empty);
+            }
+
+            noteFilters(data.filters);
+            $("counts").textContent = data.setsCount || "";
+            sizeCountRoom();
+            quietScroll();
+            $("rows").scrollTop = reset ? 0 : keep;
+        }).catch(function () {
+
+            listBusy = false;
+            showListLoading(false);
+        });
+    }
+
+    // The sort of the Sets view, chips across its top
+    function makeSetSorts(item) {
+
+        const head = document.createElement("div");
+        const name = document.createElement("span");
+
+        head.className = "setsHead";
+        name.className = "chipGroup";
+        name.textContent = "Sort";
+        head.appendChild(name);
+
+        for (const choice of item.sorts || []) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip" + (choice.value === item.sort ? " on" : "");
+            b.textContent = choice.label;
+            b.addEventListener("click", function () {
+
+                send("setSort", choice.value).then(function () {
+                    loadSets(false);
+                });
+            });
+            head.appendChild(b);
+        }
+
+        return head;
+    }
+
+    // One set: a tap opens or folds it, a hold or the button at its end
+    // shows what can be done with it
+    function makeSetRow(item) {
+
+        const row = document.createElement("div");
+        const arrow = document.createElement("span");
+        const text = document.createElement("div");
+        const name = document.createElement("div");
+        const meta = document.createElement("div");
+        const more = lineButton("The set", "menu", function () {
+            openSetMenu(item);
+        });
+
+        row.className = "setRow" + (item.done ? " done" : "");
+        row.dataset.set = item.setId;
+        row.style.setProperty("--setColor", item.setColor);
+        arrow.className = "setArrow";
+        arrow.textContent = item.open ? "\u25BE" : "\u25B8";
+        text.className = "setText";
+        name.className = "setName";
+        name.textContent = item.name;
+        meta.className = "setMeta";
+        meta.textContent = item.meta;
+        text.appendChild(name);
+        text.appendChild(meta);
+        row.appendChild(arrow);
+        row.appendChild(text);
+        row.appendChild(more);
+
+        let timer = 0;
+        let held = false;
+
+        row.addEventListener("click", function () {
+
+            if (held) {
+
+                held = false;
+                return;
+            }
+
+            if (setsViewOpen.has(item.setId)) {
+                setsViewOpen.delete(item.setId);
+            } else {
+                setsViewOpen.add(item.setId);
+            }
+
+            loadSets(false);
+        });
+        row.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+            openSetMenu(item);
+        });
+        row.addEventListener("touchstart", function () {
+
+            held = false;
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+
+                held = true;
+                openSetMenu(item);
+            }, 550);
+        }, { passive: true });
+
+        for (const name2 of ["touchend", "touchmove", "touchcancel"]) {
+
+            row.addEventListener(name2, function () {
+                clearTimeout(timer);
+            }, { passive: true });
+        }
+
+        return row;
+    }
+
+    function makeDoneHead(item) {
+
+        const head = document.createElement("div");
+
+        head.className = "setsDone";
+        head.setAttribute("role", "button");
+        head.textContent = (item.open ? "\u25BE  " : "\u25B8  ") + "Done (" + item.count + ")";
+        head.addEventListener("click", function () {
+
+            setsViewDone = !setsViewDone;
+            loadSets(false);
+        });
+
+        return head;
+    }
+
+    // What the set's menu needs comes with the menu of its first song
+    function openSetMenu(item) {
+
+        if (!item.firstId) {
+            return;
+        }
+
+        fetchJson("/menu?id=" + esc(item.firstId)).then(function (m) {
+
+            if (m && m.set) {
+                askSetMenuHere(m);
+            }
+        }).catch(function () {
+        });
     }
 
     // The filter row follows whatever the player has set, wherever it was set
@@ -16492,6 +16812,10 @@
         setView("queue");
     });
 
+    $("viewSets").addEventListener("click", function () {
+        setView("sets");
+    });
+
     // A to Z or Stars sorts the view shown, Mureka's songs or the queue.
     // Each press goes one step on: A to Z, Z to A, back to the list's own
     // order, and for stars fewest first, most first, own order. The view
@@ -16823,8 +17147,8 @@
         const queueView = listView === "queue";
         const url = queueView
             ? "/queue?q=" + esc(listQuery)
-            : "/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
-                + Math.min(200, Math.max(PAGE, listLoaded));
+            : (listView === "sets" ? setsListUrl() : "/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
+                + Math.min(200, Math.max(PAGE, listLoaded)));
 
         fetch(url, { cache: "no-store" }).then(function (res) {
             return res.json();
@@ -21151,7 +21475,13 @@
 
         const set = m.set;
 
-        openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs"), [
+        openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs") + (set.songKept ? ", this one kept" : ""), [
+            { icon: "check", label: set.songKept ? "Not kept" : "Mark as kept", fn: function () {
+
+                closeSongMenu();
+                setAction(m, "keep", !set.songKept);
+                toast(set.songKept ? "No longer kept" : "Kept", "ok");
+            } },
             { icon: "target", label: "Suggest similar songs", fn: function () {
                 askSimilarHere(m);
             } },
@@ -21163,6 +21493,27 @@
             } },
             { icon: "sets", label: "Move to another set", fn: function () {
                 askSetPickHere(m, "Move \"" + m.title + "\" to another set");
+            } },
+            { icon: "sets", label: "The whole set", cls: "setRing", color: set.color, fn: function () {
+                askSetMenuHere(m);
+            } }
+        ]);
+    }
+
+    // What can be done with a set as a whole, sent for one of its songs
+    function askSetMenuHere(m) {
+
+        const set = m.set;
+
+        openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs")
+            + (set.kept > 0 ? ", " + set.kept + " kept" : "") + (set.done ? ", done" : ""), [
+            { icon: "play", label: "Play the set", fn: function () {
+
+                closeSongMenu();
+                setAction(m, "playSet");
+            } },
+            { icon: "target", label: "Suggest similar songs", fn: function () {
+                askSimilarHere(m);
             } },
             { icon: "pencil", label: "Rename the set", fn: function () {
 
@@ -21176,6 +21527,43 @@
             } },
             { icon: "image", label: "Color of the set", cls: "setRing", color: set.color, fn: function () {
                 askSetColorHere(m);
+            } },
+            { icon: "check", label: set.done ? "Not done, open again" : "Mark as done", fn: function () {
+
+                closeSongMenu();
+                setAction(m, "doneSet", !set.done);
+                toast(set.done ? "Set open again" : "Set done", "ok");
+            } },
+            { icon: "listPlus", label: "Merge into another set", fn: function () {
+
+                const items = (m.mergeTo || []).map(function (to) {
+
+                    return { icon: "sets", label: to.name + " (" + to.count + ")", cls: "setRing", color: to.color, fn: function () {
+
+                        closeSongMenu();
+                        setAction(m, "mergeSet", to.id);
+                        toast("Merged into " + to.name, "ok");
+                    } };
+                });
+
+                if (items.length === 0) {
+
+                    closeSongMenu();
+                    toast("There is no other set", "bad");
+                    return;
+                }
+
+                openChoice("Merge \"" + set.name + "\" into", items);
+            } },
+            { icon: "trash", label: "Dissolve the set", cls: "danger", fn: function () {
+
+                closeSongMenu();
+                askConfirm("Dissolve \"" + set.name + "\"? Its songs stay in the library, each on its own, and are not put in a set by the player again.",
+                    "Dissolve", true, function () {
+
+                        setAction(m, "dissolveSet");
+                        toast("Set dissolved", "ok");
+                    });
             } }
         ]);
     }
