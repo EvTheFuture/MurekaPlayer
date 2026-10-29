@@ -71,7 +71,10 @@ In development.
   every list view on the phone and in both lists of the web view. Several
   in a row fold under the first, whose number gives way to a button of
   one width with how many there are and an arrow that opens and folds
-  them. A tap on one asks how to play it: Play now plays it at once and
+  them, in the accent color, a set's in its own color. A fold opens also
+  when its first song started playing since the list was drawn, and in
+  the web view one the phone could not send right away is asked for again
+  or closes with a note. A tap on one asks how to play it: Play now plays it at once and
   the queue goes on as it was after it, Play from here now makes the queue
   anew from it, going on with the songs the filters let through, and Play
   after this song puts it right after the song playing. Play all now,

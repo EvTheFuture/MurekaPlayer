@@ -2139,10 +2139,11 @@
         box-sizing: border-box;
         width: 3em;
         padding: 0.5em 0;
-        border: 1px solid var(--line);
+        border: 2px solid var(--accent);
         border-radius: 999px;
-        background: var(--card);
-        color: var(--text);
+        background: rgba(72, 225, 235, 0.1);
+        color: var(--accent);
+        font-weight: 600;
         font: inherit;
         font-size: 0.8em;
         line-height: 1;
@@ -11676,6 +11677,22 @@
         return el;
     }
 
+    // A row's covers watched by the list it went into. Made for the song
+    // list, a row put in the small list has its covers watched there, or
+    // they never come
+    function thumbsFor(box, row) {
+
+        if (box !== $("miniRows") || !thumbObserver || !miniThumbs) {
+            return;
+        }
+
+        for (const thumb of row.querySelectorAll(".thumb")) {
+
+            thumbObserver.unobserve(thumb);
+            miniThumbs.observe(thumb);
+        }
+    }
+
     function clearRows() {
 
         if (thumbObserver) {
@@ -13538,6 +13555,7 @@
 
             chip.style.borderColor = song.setColor;
             chip.style.color = song.setColor;
+            chip.style.background = "rgba(255, 255, 255, 0.06)";
         }
 
         paintFoldChip(chip, isSet ? song.setOpen === true : song.runOpen === true);
@@ -13617,38 +13635,93 @@
                 continue;
             }
 
-            fetchJson("/list?q=" + esc(f.q()) + "&view=" + (listSort || "mureka") + (isSet ? "&set=" : "&run=") + esc(head)).then(function (data) {
-
-                if (!data || !Array.isArray(data.songs) || !opened.has(head) || !headRow.isConnected) {
-                    return;
-                }
-
-                // A song of the set shown while folded, the playing one, is
-                // taken out first, it comes again in its place
-                const shown = Array.from(f.box.querySelectorAll(".row")).filter(function (r) {
-                    return under(r) && r !== headRow;
-                });
-
-                for (const r of shown) {
-                    r.remove();
-                }
-
-                f.add(-shown.length);
-
-                let after = headRow;
-
-                for (const song of data.songs) {
-
-                    const row = makeRow(song, 0);
-
-                    after.after(row);
-                    after = row;
-                }
-
-                f.add(data.songs.length);
-            }).catch(function () {
-            });
+            readFold(f, head, isSet, opened, chip, headRow, under, 0);
         }
+    }
+
+    // A fold's songs read from the phone and put in under its first. The
+    // phone busy or the answer lost, it is asked once more, then the fold
+    // closes again and says so, rather than staying open with nothing under
+    // it. Read again meanwhile, the list brings the fold opened itself
+    function readFold(f, head, isSet, opened, chip, headRow, under, tries) {
+
+        const failed = function (why) {
+
+            if (!opened.has(head) || !headRow.isConnected) {
+                return;
+            }
+
+            dbgLog("Fold", (isSet ? "set " : "run ") + head + " not read, " + why + (tries === 0 ? ", asking again" : ""));
+
+            if (tries === 0) {
+
+                setTimeout(function () {
+                    readFold(f, head, isSet, opened, chip, headRow, under, 1);
+                }, 700);
+                return;
+            }
+
+            opened.delete(head);
+            paintFoldChip(chip, false);
+            toast("The phone did not send the songs, tap again", "bad");
+        };
+
+        fetchJson("/list?q=" + esc(f.q()) + "&view=" + (listSort || "mureka") + (isSet ? "&set=" : "&run=") + esc(head)).then(function (data) {
+
+            if (!opened.has(head) || !headRow.isConnected) {
+                return;
+            }
+
+            if (!data || !Array.isArray(data.songs)) {
+
+                failed(data && data.error ? data.error : "no answer");
+                return;
+            }
+
+            // Nothing under it any more, the list changed on the phone, so
+            // it is read again as it is now
+            if (data.songs.length === 0) {
+
+                dbgLog("Fold", (isSet ? "set " : "run ") + head + " has no songs under it now, the list is read again");
+                opened.delete(head);
+                paintFoldChip(chip, false);
+
+                if (f.box === $("miniRows")) {
+                    refreshMini();
+                } else {
+                    refreshList();
+                }
+
+                return;
+            }
+
+            // A song of the set shown while folded, the playing one, is
+            // taken out first, it comes again in its place
+            const shown = Array.from(f.box.querySelectorAll(".row")).filter(function (r) {
+                return under(r) && r !== headRow;
+            });
+
+            for (const r of shown) {
+                r.remove();
+            }
+
+            f.add(-shown.length);
+
+            let after = headRow;
+
+            for (const song of data.songs) {
+
+                const row = makeRow(song, 0);
+
+                after.after(row);
+                after = row;
+                thumbsFor(f.box, row);
+            }
+
+            f.add(data.songs.length);
+        }).catch(function () {
+            failed("the phone did not answer");
+        });
     }
 
     // A tap on a song the filters leave out asks how far to play: the song

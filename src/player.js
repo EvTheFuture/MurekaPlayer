@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.22";
+    const VERSION = "2.0.0.23";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -29674,13 +29674,33 @@
             });
         } else {
 
-            rows = showLeftOut() ? foldLeftOut(rows, runOf ? new Set([runOf]) : opened, playingId) : rows;
-
             if (runOf) {
 
-                rows = rows.filter(function (e) {
-                    return e.runHead === runOf && String(e.song.song_id) !== runOf;
+                // The songs after the fold's first that the filters leave
+                // out too, as the browser drew the fold. The playing song
+                // starts or ends a fold, so a song that began or stopped
+                // playing since then would leave a fold worked out anew
+                // with another first, and nothing under the one asked for
+                const at = rows.findIndex(function (e) {
+                    return String(e.song.song_id) === runOf;
                 });
+                const run = [];
+
+                for (let k = at + 1; at >= 0 && k < rows.length; k += 1) {
+
+                    const e = rows[k];
+
+                    if (!e.greyed || e.setId || isPendingSong(e.song)) {
+                        break;
+                    }
+
+                    e.runHead = runOf;
+                    run.push(e);
+                }
+
+                rows = run;
+            } else {
+                rows = showLeftOut() ? foldLeftOut(rows, opened, playingId) : rows;
             }
         }
 
@@ -36062,14 +36082,17 @@
             : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
         chip.setAttribute("role", "button");
         chip.dataset.foldChip = "1";
-        chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1px solid #6a6a74;"
-            + "color:#ddd;font-size:11px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;"
-            + "overflow:hidden;cursor:pointer";
+        // In color so it is easy to notice, the accent for songs the
+        // filters leave out, a set's own color for a set
+        chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1.5px solid #48e1eb;"
+            + "background:rgba(72,225,235,0.1);color:#48e1eb;font-weight:600;font-size:11px;line-height:16px;text-align:center;"
+            + "font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;cursor:pointer";
 
         if (isSet) {
 
             chip.style.borderColor = fold.setColor;
             chip.style.color = fold.setColor;
+            chip.style.background = "rgba(255,255,255,0.06)";
         }
 
         chip.addEventListener("click", function (ev) {
