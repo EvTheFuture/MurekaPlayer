@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.12";
+    const VERSION = "2.0.0.13";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2941,6 +2941,7 @@
             setsOn: true,
             setSort: "added",
             view: "mureka",
+            libView: "mureka",
             reportPlays: true,
             artOverlayMode: "all",
             copyLinkOnPublish: true,
@@ -3158,6 +3159,8 @@
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
                     view: view,
+                    libView: ["mureka", "alpha", "stars", "plays"].indexOf(parsed.libView) >= 0
+                        ? parsed.libView : (["alpha", "stars", "plays"].indexOf(view) >= 0 ? view : "mureka"),
                     reportPlays: parsed.reportPlays !== false,
                     copyLinkOnPublish: parsed.copyLinkOnPublish !== false,
                     noRemixOnPublish: parsed.noRemixOnPublish === true,
@@ -13534,10 +13537,26 @@
         repeatBtn.title = "Repeat: " + repeatLabel();
     }
 
+    // Mureka's songs in their own order or sorted, the other two views
+    // being the queue and the sets
+    const LIB_VIEWS = ["mureka", "alpha", "stars", "plays"];
+
+    // How Mureka's songs were last shown, for their button
+    function libView() {
+
+        const v = settings.libView;
+
+        return LIB_VIEWS.indexOf(v) >= 0 && (v !== "plays" || settings.playsOn === true) ? v : "mureka";
+    }
+
     // Switch the list view and refresh
     function setView(view) {
 
         listView = view;
+
+        if (LIB_VIEWS.indexOf(view) >= 0) {
+            settings.libView = view;
+        }
 
         // Remember the view so the next startup opens on it
         settings.view = view;
@@ -14247,10 +14266,16 @@
                 return;
             }
 
-            const active = name === listView;
+            // Mureka's songs whichever way they are sorted
+            const active = name === "mureka" ? LIB_VIEWS.indexOf(listView) >= 0 : name === listView;
 
             btn.style.background = active ? "#48e1eb" : "#333";
             btn.style.color = active ? "#000" : "#fff";
+
+            // The sorts are about Mureka's songs, faint over the others
+            if (name === "alpha" || name === "stars" || name === "plays") {
+                btn.style.opacity = LIB_VIEWS.indexOf(listView) >= 0 ? "1" : "0.55";
+            }
 
             // Plays only with play counts on
             if (name === "plays") {
@@ -29619,6 +29644,7 @@
                 off: el.disabled === true,
                 now: el.dataset.hostNow === "1",
                 exp: el.dataset.hostExport || "",
+                web: el.dataset.hostWeb || "",
                 imp: el.dataset.hostImport === "1",
                 wide: el.style.textAlign === "left",
                 copy: typeof el.__copyText === "function" ? String(el.__copyText() || "") : undefined
@@ -31954,47 +31980,59 @@
         searchRow.appendChild(searchInput);
         searchRow.appendChild(searchClear);
 
-        // View selector, three segments sharing one row
+        // The list shown, one of three: Mureka's songs, sorted as last
+        // chosen, the queue or the song sets
         const viewRow = document.createElement("div");
         viewRow.style.cssText = "display:flex;gap:6px";
 
         viewButtons.mureka = makeActionButton(iconMureka(), "Mureka", "#333", "#fff", function () {
-            setView("mureka");
+            setView(libView());
         });
-        viewButtons.mureka.title = "Published order";
+        viewButtons.mureka.title = "Mureka's songs";
 
         viewButtons.queue = makeActionButton(iconQueue(), "Queue", "#333", "#fff", function () {
             setView("queue");
         });
         viewButtons.queue.title = "Current song and what plays next";
 
-        viewButtons.alpha = makeActionButton(iconAlpha(), "A-Z", "#333", "#fff", function () {
-            setView("alpha");
-        });
-        viewButtons.alpha.title = "Alphabetical by title";
-
-        viewButtons.stars = makeActionButton(makeStarSvg(16), "Stars", "#333", "#fff", function () {
-            setView("stars");
-        });
-        viewButtons.stars.title = "Most stars first";
-
-        // Most plays first, offered with play counts on
         viewButtons.sets = makeActionButton(iconSets(), "Sets", "#333", "#fff", function () {
             setView("sets");
         });
         viewButtons.sets.title = "One row for each song set";
 
-        viewButtons.plays = makeActionButton(iconPlay(), "Plays", "#333", "#fff", function () {
-            setView("plays");
-        });
-        viewButtons.plays.title = "Most plays first";
-
         viewRow.appendChild(viewButtons.mureka);
         viewRow.appendChild(viewButtons.queue);
-        viewRow.appendChild(viewButtons.alpha);
-        viewRow.appendChild(viewButtons.stars);
-        viewRow.appendChild(viewButtons.plays);
         viewRow.appendChild(viewButtons.sets);
+
+        // How Mureka's songs are sorted. A tap on the sort in use goes back
+        // to Mureka's own order, and from the queue or the sets a sort opens
+        // Mureka's songs sorted that way
+        const sortRow = document.createElement("div");
+        sortRow.style.cssText = "display:flex;gap:6px";
+
+        const sortBy = function (view) {
+            setView(listView === view ? "mureka" : view);
+        };
+
+        viewButtons.alpha = makeActionButton(iconAlpha(), "A-Z", "#333", "#fff", function () {
+            sortBy("alpha");
+        });
+        viewButtons.alpha.title = "Mureka's songs alphabetical by title";
+
+        viewButtons.stars = makeActionButton(makeStarSvg(16), "Stars", "#333", "#fff", function () {
+            sortBy("stars");
+        });
+        viewButtons.stars.title = "Mureka's songs, most stars first";
+
+        // Most plays first, offered with play counts on
+        viewButtons.plays = makeActionButton(iconPlay(), "Plays", "#333", "#fff", function () {
+            sortBy("plays");
+        });
+        viewButtons.plays.title = "Mureka's songs, most plays first";
+
+        sortRow.appendChild(viewButtons.alpha);
+        sortRow.appendChild(viewButtons.stars);
+        sortRow.appendChild(viewButtons.plays);
 
         // Vocals filter row
         const filterRow = document.createElement("div");
@@ -32042,6 +32080,7 @@
         viewMenuEl = document.createElement("div");
         viewMenuEl.style.cssText = POPUP_CSS;
         viewMenuEl.appendChild(viewRow);
+        viewMenuEl.appendChild(sortRow);
         viewMenuEl.appendChild(filterRow);
         viewMenuEl.appendChild(smartRow);
 
@@ -40560,6 +40599,8 @@
                 }, null, true);
         });
 
+        // In the web view it opens the web view's own Sets view
+        openSetsBtn.dataset.hostWeb = "setsView";
         openSetsBtn.style.textAlign = "left";
         singleSetsBtn.style.textAlign = "left";
         setsPage.appendChild(makeLabel("In the list"));

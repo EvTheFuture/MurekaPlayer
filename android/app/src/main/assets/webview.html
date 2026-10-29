@@ -5268,7 +5268,7 @@
         <div id="mini">
             <div id="miniTop">
                 <span id="miniCount"></span>
-                <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs or the queue" title="Songs or the queue"><span class="lbl">Mureka</span></button>
+                <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs, the queue or the sets" title="Songs, the queue or the sets"><span class="lbl">Mureka</span></button>
                 <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
                 <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
@@ -13687,10 +13687,41 @@
     const setsViewOpen = new Set();
     let setsViewDone = false;
 
-    function setsListUrl() {
+    function setsListUrl(q) {
 
-        return "/list?q=" + esc(listQuery) + "&view=sets&sets=" + esc(Array.from(setsViewOpen).join(","))
+        return "/list?q=" + esc(q === undefined ? listQuery : q) + "&view=sets&sets=" + esc(Array.from(setsViewOpen).join(","))
             + "&done=" + (setsViewDone ? "1" : "0") + "&offset=0&limit=200";
+    }
+
+    // The sets as read, put into a list box. reload reads them again for
+    // that box, after a set was opened, folded or sorted
+    function drawSets(box, data, q, reload) {
+
+        for (const item of data.songs) {
+
+            if (item.kind === "sorts") {
+                box.appendChild(makeSetSorts(item, reload));
+            } else if (item.kind === "set") {
+                box.appendChild(makeSetRow(item, reload));
+            } else if (item.kind === "doneHead") {
+                box.appendChild(makeDoneHead(item, reload));
+            } else {
+
+                const row = makeRow(item, 0);
+
+                row.classList.add("setSong");
+                box.appendChild(row);
+            }
+        }
+
+        if (data.songs.length <= 1) {
+
+            const empty = document.createElement("div");
+
+            empty.className = "setsDone";
+            empty.textContent = q ? "No matches" : "No sets yet. A song's menu has Add to a set.";
+            box.appendChild(empty);
+        }
     }
 
     // Read whole each time, there are never many sets. Opened or folded,
@@ -13706,7 +13737,7 @@
         listBusy = true;
         showListLoading(true);
 
-        fetchJson(setsListUrl()).then(function (data) {
+        fetchJson(setsListUrl(listQuery)).then(function (data) {
 
             if (token !== listToken) {
                 return;
@@ -13724,33 +13755,9 @@
             listLoaded = data.songs.length;
             listPlayingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
             rowMeta = data.meta || rowMeta;
-
-            for (const item of data.songs) {
-
-                if (item.kind === "sorts") {
-                    $("rows").appendChild(makeSetSorts(item));
-                } else if (item.kind === "set") {
-                    $("rows").appendChild(makeSetRow(item));
-                } else if (item.kind === "doneHead") {
-                    $("rows").appendChild(makeDoneHead(item));
-                } else {
-
-                    const row = makeRow(item, 0);
-
-                    row.classList.add("setSong");
-                    $("rows").appendChild(row);
-                }
-            }
-
-            if (data.songs.length <= 1) {
-
-                const empty = document.createElement("div");
-
-                empty.className = "setsDone";
-                empty.textContent = listQuery ? "No matches" : "No sets yet. A song's menu has Add to a set.";
-                $("rows").appendChild(empty);
-            }
-
+            drawSets($("rows"), data, listQuery, function () {
+                loadSets(false);
+            });
             noteFilters(data.filters);
             $("counts").textContent = data.setsCount || "";
             sizeCountRoom();
@@ -13763,8 +13770,60 @@
         });
     }
 
+    // The same in the small list over the main page
+    function loadMiniSets(reset) {
+
+        const box = $("miniRows");
+        const keep = box.scrollTop;
+
+        miniToken += 1;
+
+        const token = miniToken;
+
+        miniBusy = true;
+
+        fetchJson(setsListUrl(miniQuery)).then(function (data) {
+
+            if (token !== miniToken) {
+                return;
+            }
+
+            miniBusy = false;
+
+            if (!data || !Array.isArray(data.songs)) {
+                return;
+            }
+
+            clearMiniRows();
+            miniTotal = data.songs.length;
+            miniLoaded = data.songs.length;
+            miniPlayingAt = typeof data.playingAt === "number" ? data.playingAt : -1;
+            rowMeta = data.meta || rowMeta;
+            drawSets(box, data, miniQuery, function () {
+                loadMiniSets(false);
+            });
+
+            // Its covers come as this list scrolls, not the big one
+            for (const thumb of box.querySelectorAll(".thumb")) {
+
+                if (thumbObserver && miniThumbs) {
+
+                    thumbObserver.unobserve(thumb);
+                    miniThumbs.observe(thumb);
+                }
+            }
+
+            $("miniCount").textContent = data.setsCount || "";
+            miniQuietUntil = Date.now() + 400;
+            box.scrollTop = reset ? 0 : keep;
+            updateMiniLocate();
+        }).catch(function () {
+            miniBusy = false;
+        });
+    }
+
     // The sort of the Sets view, chips across its top
-    function makeSetSorts(item) {
+    function makeSetSorts(item, reload) {
 
         const head = document.createElement("div");
         const name = document.createElement("span");
@@ -13784,7 +13843,7 @@
             b.addEventListener("click", function () {
 
                 send("setSort", choice.value).then(function () {
-                    loadSets(false);
+                    reload();
                 });
             });
             head.appendChild(b);
@@ -13795,7 +13854,7 @@
 
     // One set: a tap opens or folds it, a hold or the button at its end
     // shows what can be done with it
-    function makeSetRow(item) {
+    function makeSetRow(item, reload) {
 
         const row = document.createElement("div");
         const arrow = document.createElement("span");
@@ -13839,7 +13898,7 @@
                 setsViewOpen.add(item.setId);
             }
 
-            loadSets(false);
+            reload();
         });
         row.addEventListener("contextmenu", function (ev) {
 
@@ -13867,7 +13926,7 @@
         return row;
     }
 
-    function makeDoneHead(item) {
+    function makeDoneHead(item, reload) {
 
         const head = document.createElement("div");
 
@@ -13877,7 +13936,7 @@
         head.addEventListener("click", function () {
 
             setsViewDone = !setsViewDone;
-            loadSets(false);
+            reload();
         });
 
         return head;
@@ -15720,6 +15779,14 @@
                     return;
                 }
 
+                // Opens the Sets view here, in this browser
+                if (node.web === "setsView") {
+
+                    closePanel();
+                    openBrowse("sets");
+                    return;
+                }
+
                 // An export can land here, in the browser showing this page,
                 // or on the phone. Only this page knows which one is wanted
                 if (node.exp) {
@@ -17147,7 +17214,7 @@
         const queueView = listView === "queue";
         const url = queueView
             ? "/queue?q=" + esc(listQuery)
-            : (listView === "sets" ? setsListUrl() : "/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
+            : (listView === "sets" ? setsListUrl(listQuery) : "/list?q=" + esc(listQuery) + "&view=" + (listSort || "mureka") + foldParam() + "&offset=0&limit="
                 + Math.min(200, Math.max(PAGE, listLoaded)));
 
         fetch(url, { cache: "no-store" }).then(function (res) {
@@ -18064,30 +18131,47 @@
     let miniFollow = false;
     let miniHandAt = 0;
 
-    // The small list shows Mureka's songs or the queue, switched with its
-    // button and kept for the next visit
+    // The small list shows Mureka's songs, the queue or the song sets,
+    // switched in turn with its button and kept for the next visit
+    const MINI_VIEWS = [
+        { view: "mureka", icon: "mureka", label: "Mureka" },
+        { view: "queue", icon: "queue", label: "Queue" },
+        { view: "sets", icon: "sets", label: "Sets" }
+    ];
     let miniView = "mureka";
 
     try {
-        miniView = localStorage.getItem("murekaMiniView") === "queue" ? "queue" : "mureka";
+
+        const kept = localStorage.getItem("murekaMiniView");
+
+        miniView = kept === "queue" || kept === "sets" ? kept : "mureka";
     } catch (e) {
         // Mureka's songs then
     }
 
     function paintMiniView() {
 
-        const queueShown = miniView === "queue";
+        const info = MINI_VIEWS.find(function (x) {
+            return x.view === miniView;
+        }) || MINI_VIEWS[0];
 
-        setIcon($("miniView"), queueShown ? "queue" : "mureka");
-        setLabel($("miniView"), queueShown ? "Queue" : "Mureka");
-        $("miniView").classList.toggle("on", queueShown);
+        setIcon($("miniView"), info.icon);
+        setLabel($("miniView"), info.label);
+        $("miniView").classList.toggle("on", miniView !== "mureka");
+
+        // The sets have a sort of their own, at the top of the list
+        $("miniSort").style.display = miniView === "sets" ? "none" : "";
     }
 
     paintMiniView();
 
     $("miniView").addEventListener("click", function () {
 
-        miniView = miniView === "queue" ? "mureka" : "queue";
+        const at = MINI_VIEWS.findIndex(function (x) {
+            return x.view === miniView;
+        });
+
+        miniView = MINI_VIEWS[(at + 1) % MINI_VIEWS.length].view;
 
         try {
             localStorage.setItem("murekaMiniView", miniView);
@@ -18251,6 +18335,19 @@
 
         if (reset) {
             miniStayTop = false;
+        }
+
+        if (miniView === "sets") {
+
+            if (reset) {
+                hideMiniEdge();
+            }
+
+            if (miniOpen) {
+                loadMiniSets(reset);
+            }
+
+            return;
         }
 
         if (miniView === "queue") {
@@ -18606,8 +18703,8 @@
     // under it
     function paintMiniCount() {
 
-        // The queue's line is written as it is read
-        if (miniView === "queue") {
+        // The queue's and the sets' lines are written as they are read
+        if (miniView === "queue" || miniView === "sets") {
             return;
         }
 
