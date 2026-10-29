@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.21";
+    const VERSION = "2.0.0.22";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8013,30 +8013,26 @@
     }
 
     // A tap on a song of the Sets view the filters leave out asks, as in the
-    // list: the song now, the set on from it with the songs the filters let
-    // through, after the song playing, or the set on from it with all its
-    // songs
+    // list: the song now, the whole set on from it, or after the song
+    // playing. Asked for, the set plays all of its songs, the ones the
+    // filters leave out too
     function askSetLeftOut(song, set) {
 
         const title = (song.title || "").trim() || "Untitled";
 
         askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it at once,"
-            + " then the queue goes on as it was. Play the set from here plays it and then the set's songs the filters let"
-            + " through. Play after this song puts it right after the song playing. Play all of the set from here takes"
-            + " every song of the set.", [
+            + " then the queue goes on as it was. Play the set from here plays it and every other song of the set, then the"
+            + " queue goes on. Play after this song puts it right after the song playing.", [
             { label: "Play now", fn: function () {
                 playLeftOutNow(song, false);
             } },
             { label: "Play the set from here", fn: function () {
-                playSet(set, song);
+                playSet(set, song, true);
             } },
             { label: "Play after this song", fn: function () {
 
                 addNext(song);
                 showToast("Playing next", true);
-            } },
-            { label: "Play all of the set from here", ring: true, fn: function () {
-                playSet(set, song, true);
             } }
         ], null, false, true);
     }

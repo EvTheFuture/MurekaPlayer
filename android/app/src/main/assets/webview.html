@@ -13680,19 +13680,13 @@
                 { icon: "sets", label: "Play the set from here", fn: function () {
 
                     closeSongMenu();
-                    send("playSetFrom", song.id);
+                    send("playSetAllFrom", song.id);
                     mark();
                 } },
                 { icon: "listPlusTop", label: "Play after this song", fn: function () {
 
                     closeSongMenu();
                     send("playNext", song.id);
-                } },
-                { icon: "sets", label: "Play all of the set from here", cls: "inset", fn: function () {
-
-                    closeSongMenu();
-                    send("playSetAllFrom", song.id);
-                    mark();
                 } }
             ]);
             return;

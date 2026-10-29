@@ -41,8 +41,7 @@ In development.
   song tapped in the Sets view plays its set on from there, round to the
   songs before it, then the queue goes on. The songs the filters leave out
   are greyed and passed over, as in the list; a tap on one asks: play it
-  now, the set from there, after the song playing, or all of the set from
-  there. Play the set in the set's menu is the same, with Play all of the
+  now, the whole set from there, or after the song playing. Play the set in the set's menu is the same, with Play all of the
   set beside it when the filters leave some out. A tap opens a set in place, a long
   press or the button at its end shows what can be done with it: play
   the set, suggest similar songs, rename it, color it, mark it done, merge
