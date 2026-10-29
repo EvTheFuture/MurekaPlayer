@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.16";
+    const VERSION = "2.0.0.17";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5776,11 +5776,19 @@
         const songs = setSongs(set.id);
         const kept = songs.filter(isKept).length;
 
+        const leftOut = songs.filter(function (x) {
+            return !setSongMatches(x);
+        }).length;
+        const playAll = leftOut > 0 && leftOut < songs.length ? [{ label: "Play all of the set", ring: true, fn: function () {
+            playSet(set, null, true);
+        } }] : [];
+
         askChoices("Set \"" + set.name + "\"\n" + songs.length + (songs.length === 1 ? " song" : " songs")
-            + (kept > 0 ? ", " + kept + " kept" : "") + (set.done ? ". Done." : "."), [
+            + (kept > 0 ? ", " + kept + " kept" : "") + (leftOut > 0 ? ", " + leftOut + " left out by the filters" : "")
+            + (set.done ? ". Done." : "."), [
             { label: "Play the set", fn: function () {
                 playSet(set);
-            } },
+            } }].concat(playAll, [
             { label: "Suggest similar songs", fn: function () {
                 askSimilar(set);
             } },
@@ -5821,13 +5829,20 @@
                         showToast("Set dissolved", true);
                     }, null, true);
             } }
-        ], null, false, true);
+        ]), null, false, true);
+    }
+
+    // Whether a song of a set is one the filters let through, as the list
+    // has it. The others show greyed in the Sets view
+    function setSongMatches(song) {
+        return passesPlaylist(song) && passesSongFilters(song);
     }
 
     // The set's songs from the first, or from the song given and round to
-    // the ones before it, the queue going on after them. The filters do not
-    // leave any of the set's songs out
-    function playSet(set, from) {
+    // the ones before it, the queue going on after them. Only the songs the
+    // filters let through, besides the one given, unless all is asked for.
+    // When the filters let none through, all of them
+    function playSet(set, from, all) {
 
         let songs = setOrder(setSongs(set.id));
 
@@ -5841,6 +5856,17 @@
 
         if (at > 0) {
             songs = songs.slice(at).concat(songs.slice(0, at));
+        }
+
+        if (all !== true) {
+
+            const through = songs.filter(function (x) {
+                return (from && x.song_id === from.song_id) || (setSongMatches(x) && !isIgnored(x));
+            });
+
+            if (through.length > 0) {
+                songs = through;
+            }
         }
 
         const first = songs[0];
@@ -7701,6 +7727,35 @@
             + (more > 0 ? " The ones with all take the " + (more === 1 ? "song" : more + " songs")
                 + " after it the filters leave out as well, up to the next one they let through." : ""),
             options, null, false, true);
+    }
+
+    // A tap on a song of the Sets view the filters leave out asks, as in the
+    // list: the song now, the set on from it with the songs the filters let
+    // through, after the song playing, or the set on from it with all its
+    // songs
+    function askSetLeftOut(song, set) {
+
+        const title = (song.title || "").trim() || "Untitled";
+
+        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it at once,"
+            + " then the queue goes on as it was. Play the set from here plays it and then the set's songs the filters let"
+            + " through. Play after this song puts it right after the song playing. Play all of the set from here takes"
+            + " every song of the set.", [
+            { label: "Play now", fn: function () {
+                playLeftOutNow(song, false);
+            } },
+            { label: "Play the set from here", fn: function () {
+                playSet(set, song);
+            } },
+            { label: "Play after this song", fn: function () {
+
+                addNext(song);
+                showToast("Playing next", true);
+            } },
+            { label: "Play all of the set from here", ring: true, fn: function () {
+                playSet(set, song, true);
+            } }
+        ], null, false, true);
     }
 
     // A left out song, or it and those after it the filters leave out up to
@@ -27483,6 +27538,9 @@
             color: set.color,
             count: songs.length,
             kept: songs.filter(isKept).length,
+            leftOut: songs.filter(function (x) {
+                return !setSongMatches(x);
+            }).length,
             done: set.done === true,
             songKept: isKept(song)
         };
@@ -27568,10 +27626,10 @@
             }
 
             setKept(song, value === true);
-        } else if (act === "playSet") {
+        } else if (act === "playSet" || act === "playSetAll") {
 
             if (set) {
-                playSet(set);
+                playSet(set, null, act === "playSetAll");
             }
 
             return;
@@ -29475,6 +29533,7 @@
                 done: e.set.done === true,
                 meta: setRowMeta(e),
                 count: e.songs.length,
+                published: setPublicCount(e) > 0,
                 open: open,
                 firstId: e.songs.length > 0 ? String(e.songs[0].song_id) : ""
             });
@@ -29509,7 +29568,7 @@
                     playing: id === playingId,
                     playNext: isPlayNext(x.song_id),
                     plays: songPlays(x),
-                    greyed: false,
+                    greyed: !setSongMatches(x),
                     place: 0,
                     setId: e.set.id,
                     setColor: setMarkColor(e.set),
@@ -30112,7 +30171,7 @@
             const n = Math.max(1, Math.min(5, Math.round(Number(a.value) || 0)));
 
             setRating(song, nextRating(getRating(song), n));
-        } else if (["newSet", "toSet", "outOfSet", "renameSet", "setColor", "addToSet", "keep", "playSet", "doneSet", "mergeSet", "dissolveSet"].indexOf(act) >= 0) {
+        } else if (["newSet", "toSet", "outOfSet", "renameSet", "setColor", "addToSet", "keep", "playSet", "playSetAll", "doneSet", "mergeSet", "dissolveSet"].indexOf(act) >= 0) {
             hostSetAction(song, act, a.value);
         } else if (act === "note") {
 
@@ -30410,18 +30469,18 @@
             toggleShuffle();
         } else if (cmd === "repeat") {
             cycleRepeat();
-        } else if (cmd === "playId" || cmd === "playSetFrom") {
+        } else if (cmd === "playId" || cmd === "playSetFrom" || cmd === "playSetAllFrom") {
 
             const wanted = String(arg);
             const song = cache.songs.find(function (s) {
                 return String(s.song_id) === wanted;
             });
-            const set = cmd === "playSetFrom" ? setOfSong(song) : null;
+            const set = cmd !== "playId" ? setOfSong(song) : null;
 
             // A song tapped in the web view's Sets view plays its set on
-            // from there
+            // from there, the songs the filters let through or all of them
             if (song && set) {
-                playSet(set, song);
+                playSet(set, song, cmd === "playSetAllFrom");
             } else if (song) {
                 playFromTapped(song.song_id);
             }
@@ -35824,12 +35883,26 @@
         return ms > 0 ? fmtDate(ms / 1000).slice(0, 10) : "";
     }
 
+    // How many of a set's songs are public on Mureka
+    function setPublicCount(entry) {
+
+        return entry.songs.filter(function (x) {
+            return x.publish_state === 1;
+        }).length;
+    }
+
     // What a set's row says under its name
     function setRowMeta(entry) {
 
         const n = entry.songs.length;
         const parts = [n + (n === 1 ? " song" : " songs")];
         const kept = entry.songs.filter(isKept).length;
+        const pub = setPublicCount(entry);
+
+        if (pub > 0) {
+            parts.push(pub + " public");
+        }
+
         let best = null;
 
         for (const x of entry.songs) {
@@ -35934,6 +36007,15 @@
         text.appendChild(meta);
         row.appendChild(arrow);
         row.appendChild(text);
+
+        const pub = setPublicCount(entry) > 0;
+        const badge = document.createElement("span");
+
+        badge.textContent = pub ? "public" : "draft";
+        badge.title = pub ? "At least one of its songs is public" : "None of its songs is public";
+        badge.style.cssText = "flex:0 0 auto;width:46px;border-radius:4px;font-size:11px;line-height:16px;text-align:center;"
+            + (pub ? "background:#1f3a2a;color:#7fd6a0" : "background:#3a3a42;color:#bbb");
+        row.appendChild(badge);
         row.appendChild(more);
         row.addEventListener("click", function () {
 
@@ -36029,7 +36111,8 @@
                     setColor: setMarkColor(entry.set),
                     setMember: true,
                     setKept: isKept(x),
-                    inSets: true
+                    inSets: true,
+                    greyed: !setSongMatches(x)
                 });
 
                 item.style.marginLeft = "10px";
@@ -36240,7 +36323,9 @@
 
         // Mark a song as public, draft or new where that tells something,
         // see rowBadgeShown
-        const badgeShown = rowBadgeShown(song, listView === "queue");
+        // In the Sets view the filters do not choose the songs, so each
+        // says whether it is public
+        const badgeShown = rowBadgeShown(song, listView === "queue") || !!(fold && fold.inSets && !creatorSource);
 
         if (badgeShown) {
 
@@ -36402,10 +36487,16 @@
                 return;
             }
 
-            // A song tapped in the Sets view plays its set on from there
+            // A song tapped in the Sets view plays its set on from there,
+            // one the filters leave out asks first unless it is playing
             if (fold && fold.inSets && setOfSong(song)) {
 
-                playSet(setOfSong(song), song);
+                if (greyed && !(currentSong && currentSong.song_id === song.song_id)) {
+                    askSetLeftOut(song, setOfSong(song));
+                } else {
+                    playSet(setOfSong(song), song);
+                }
+
                 return;
             }
 

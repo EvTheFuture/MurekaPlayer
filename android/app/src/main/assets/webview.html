@@ -1651,6 +1651,32 @@
         font-size: 1em;
     }
 
+    /* The list and sort buttons keep one width whatever they say, so the
+       buttons beside them stay in place while switching */
+    #miniTop #miniView,
+    #miniTop #miniSort {
+        flex: 0 0 auto;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 0 10px;
+        overflow: hidden;
+    }
+
+    #miniTop #miniView {
+        width: 7.6em;
+    }
+
+    #miniTop #miniSort {
+        width: 9.4em;
+    }
+
+    #miniTop #miniView .lbl,
+    #miniTop #miniSort .lbl {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
     /* Search in the small list, its own apart from the big list's */
     #miniSearchRow {
         flex: 0 0 auto;
@@ -13059,7 +13085,8 @@
     // T, on the heart's corner
     function badgeShown(song, inQueue) {
 
-        if (song.shared) {
+        // The filters do not choose the songs of the Sets view
+        if (song.shared || song.inSets) {
             return true;
         }
 
@@ -13599,6 +13626,37 @@
             row.classList.add("playing");
         };
 
+        // A song of the Sets view: the set goes on from it
+        if (song.inSets) {
+
+            openChoice("\"" + song.title + "\" is left out by the filters", [
+                { icon: "play", label: "Play now", fn: function () {
+
+                    closeSongMenu();
+                    send("playNow", song.id);
+                    mark();
+                } },
+                { icon: "sets", label: "Play the set from here", fn: function () {
+
+                    closeSongMenu();
+                    send("playSetFrom", song.id);
+                    mark();
+                } },
+                { icon: "listPlusTop", label: "Play after this song", fn: function () {
+
+                    closeSongMenu();
+                    send("playNext", song.id);
+                } },
+                { icon: "sets", label: "Play all of the set from here", cls: "inset", fn: function () {
+
+                    closeSongMenu();
+                    send("playSetAllFrom", song.id);
+                    mark();
+                } }
+            ]);
+            return;
+        }
+
         const choices = [
             { icon: "play", label: "Play now", fn: function () {
 
@@ -13926,6 +13984,13 @@
         text.appendChild(meta);
         row.appendChild(arrow);
         row.appendChild(text);
+
+        // Public when any of its songs is, draft otherwise
+        const badge = document.createElement("span");
+
+        badge.className = "rowBadge" + (item.published ? "" : " draft");
+        badge.textContent = item.published ? "public" : "draft";
+        row.appendChild(badge);
         row.appendChild(more);
 
         let timer = 0;
@@ -21656,12 +21721,20 @@
         const set = m.set;
 
         openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs")
-            + (set.kept > 0 ? ", " + set.kept + " kept" : "") + (set.done ? ", done" : ""), [
+            + (set.kept > 0 ? ", " + set.kept + " kept" : "") + (set.leftOut > 0 ? ", " + set.leftOut + " left out by the filters" : "")
+            + (set.done ? ", done" : ""), [
             { icon: "play", label: "Play the set", fn: function () {
 
                 closeSongMenu();
                 setAction(m, "playSet");
-            } },
+            } }
+        ].concat(set.leftOut > 0 && set.leftOut < set.count ? [
+            { icon: "play", label: "Play all of the set", cls: "inset", fn: function () {
+
+                closeSongMenu();
+                setAction(m, "playSetAll");
+            } }
+        ] : [], [
             { icon: "target", label: "Suggest similar songs", fn: function () {
                 askSimilarHere(m);
             } },
@@ -21715,7 +21788,7 @@
                         toast("Set dissolved", "ok");
                     });
             } }
-        ]);
+        ]));
     }
 
     // A new set, or one of the latest used ones
