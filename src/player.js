@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.31";
+    const VERSION = "2.0.0.33";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1278,6 +1278,8 @@
     // The vocals, instrumental or all cycle when placed in the transport row
     let vocalsCtrlBtn = null;
     let setsCtrlBtn = null;
+    let nightCtrlBtn = null;
+    let nightActionBtn = null;
 
     // Long press state for rearranging the transport row in the player itself.
     // A short press must still work the button, so nothing moves until the
@@ -3161,6 +3163,9 @@
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
                     setSuggest: parsed.setSuggest !== false,
+
+                    // Sound profiles, made whole when first used
+                    sound: parsed.sound && typeof parsed.sound === "object" ? parsed.sound : null,
                     setOldMonths: typeof parsed.setOldMonths === "number" ? parsed.setOldMonths : 1,
                     view: view,
                     libView: ["mureka", "alpha", "stars", "plays"].indexOf(parsed.libView) >= 0
@@ -12089,6 +12094,392 @@
         return mins + ":" + (secs < 10 ? "0" : "") + secs;
     }
 
+    // Sound profiles: five bands of EQ, a volume beyond the device's own
+    // steps and a compressor if wanted, the song going through them on its
+    // way out. A Bluetooth speaker has a profile of its own and a night
+    // profile for night mode, the device's own speaker and devices not set up
+    // share one of each. Off unless switched on. Not on an iPhone or iPad,
+    // whose player has the song go through the sound engine for its fades
+    const SOUND_BANDS = [
+        { type: "lowshelf", f: 100, label: "Bass" },
+        { type: "peaking", f: 300, label: "Low mids" },
+        { type: "peaking", f: 1000, label: "Mids" },
+        { type: "peaking", f: 3000, label: "High mids" },
+        { type: "highshelf", f: 8000, label: "Treble" }
+    ];
+
+    // How hard the compressor holds the loud parts down, the quiet ones
+    // staying as they are
+    const SOUND_COMP = [
+        { value: "light", label: "Light", threshold: -24, ratio: 2, knee: 12 },
+        { value: "medium", label: "Medium", threshold: -32, ratio: 4, knee: 10 },
+        { value: "strong", label: "Strong", threshold: -42, ratio: 8, knee: 6 }
+    ];
+
+    // The sound engine and the chain the song goes through: the bands, the
+    // compressor and the volume. Made once, the song wired in when it may be
+    let fxCtx = null;
+    let fxEl = null;
+    let fxBands = [];
+    let fxComp = null;
+    let fxOut = null;
+
+    // The Bluetooth device connected now that the profiles go by, read from
+    // the app every few seconds while sound profiles are on
+    let btNow = null;
+    let btPollTimer = 0;
+    const BT_POLL_MS = 4000;
+
+    function soundOffered() {
+        return !isIosLike() && !!(window.AudioContext || window.webkitAudioContext);
+    }
+
+    function cleanProfile(x, i) {
+
+        const o = x && typeof x === "object" ? x : {};
+        const bands = Array.isArray(o.bands) ? o.bands : [];
+        const num = function (v, min, max) {
+
+            const n = Number(v);
+
+            return isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : 0;
+        };
+
+        return {
+            id: typeof o.id === "string" && o.id ? o.id : "p" + Date.now().toString(36) + i,
+            name: String(o.name || "Profile").slice(0, 60),
+            night: o.night === true,
+            gain: num(o.gain, -40, 12),
+            bands: SOUND_BANDS.map(function (b, k) {
+                return num(bands[k], -12, 12);
+            }),
+            comp: o.comp === true,
+            compLevel: SOUND_COMP.some(function (c) {
+                return c.value === o.compLevel;
+            }) ? o.compLevel : "medium"
+        };
+    }
+
+    // The settings of sound profiles, made whole the first time they are
+    // read. A plain profile and a night one to start from
+    function sound() {
+
+        const raw = settings.sound && typeof settings.sound === "object" ? settings.sound : {};
+
+        if (raw.clean === true) {
+            return raw;
+        }
+
+        let profiles = Array.isArray(raw.profiles) ? raw.profiles.map(cleanProfile) : [];
+
+        if (profiles.length === 0) {
+
+            profiles = [
+                cleanProfile({ id: "plain", name: "Plain" }, 0),
+                cleanProfile({ id: "night", name: "Night", night: true, gain: -15, bands: [0, 0, 0, -2, -5], comp: true, compLevel: "medium" }, 1)
+            ];
+        }
+
+        const has = function (id) {
+
+            return profiles.some(function (x) {
+                return x.id === id;
+            });
+        };
+        const firstOf = function (night) {
+
+            const f = profiles.find(function (x) {
+                return x.night === night;
+            });
+
+            return f ? f.id : "";
+        };
+        const fb = raw.fallback && typeof raw.fallback === "object" ? raw.fallback : {};
+        const devices = {};
+
+        if (raw.devices && typeof raw.devices === "object") {
+
+            for (const a of Object.keys(raw.devices)) {
+
+                const d = raw.devices[a] || {};
+
+                devices[a] = {
+                    name: String(d.name || a).slice(0, 80),
+                    day: has(d.day) ? d.day : "",
+                    night: has(d.night) ? d.night : ""
+                };
+            }
+        }
+
+        settings.sound = {
+            clean: true,
+            on: raw.on === true,
+            night: raw.night === true,
+            profiles: profiles,
+            fallback: {
+                day: has(fb.day) ? fb.day : firstOf(false),
+                night: has(fb.night) ? fb.night : firstOf(true)
+            },
+            devices: devices
+        };
+
+        return settings.sound;
+    }
+
+    function soundProfile(id) {
+
+        return sound().profiles.find(function (x) {
+            return x.id === id;
+        }) || null;
+    }
+
+    // The profile in use now, and for which device and mode. In night mode
+    // the night profile, the speaker's own or else the device's, the plain
+    // one when there is no night profile
+    function activeSound() {
+
+        const s = sound();
+        const dev = btNow && s.devices[btNow.address] ? s.devices[btNow.address] : null;
+        const where = btNow ? btNow.name : "this device";
+        let p = null;
+
+        if (s.night) {
+            p = soundProfile(dev && dev.night ? dev.night : s.fallback.night);
+        }
+
+        if (!p) {
+            p = soundProfile(dev && dev.day ? dev.day : s.fallback.day);
+        }
+
+        return { profile: p, where: where, night: s.night };
+    }
+
+    function soundWords() {
+
+        const s = sound();
+        const a = activeSound();
+
+        if (!s.on) {
+            return "Sound profiles are off.";
+        }
+
+        if (!a.profile) {
+            return "No profile for " + a.where + ".";
+        }
+
+        return (s.night ? "Night mode, " : "") + "\"" + a.profile.name + "\" for " + a.where + ".";
+    }
+
+    function dbToGain(db) {
+        return Math.pow(10, db / 20);
+    }
+
+    // The song into the chain. A song from another address loaded before
+    // the element asked for it with CORS would come out silent, so the
+    // element asks from now on, and such a song is wired with the next one
+    function wireSound() {
+
+        if (!sound().on || !soundOffered() || !audio) {
+            return false;
+        }
+
+        if (fxEl === audio) {
+            return true;
+        }
+
+        const src = String(audio.currentSrc || audio.src || "");
+        const asked = audio.crossOrigin === "anonymous";
+
+        if (!asked) {
+            audio.crossOrigin = "anonymous";
+        }
+
+        if (!asked && src && src.indexOf("blob:") !== 0 && src.indexOf(location.origin) !== 0) {
+
+            dbgLog("Sound", "the song playing came without CORS, the profile takes the next song");
+            return false;
+        }
+
+        try {
+
+            if (!fxCtx) {
+
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+
+                fxCtx = new Ctx();
+                fxBands = SOUND_BANDS.map(function (b) {
+
+                    const f = fxCtx.createBiquadFilter();
+
+                    f.type = b.type;
+                    f.frequency.value = b.f;
+                    f.Q.value = 0.9;
+                    f.gain.value = 0;
+
+                    return f;
+                });
+                fxComp = fxCtx.createDynamicsCompressor();
+                fxComp.threshold.value = 0;
+                fxComp.ratio.value = 1;
+                fxOut = fxCtx.createGain();
+
+                for (let i = 0; i + 1 < fxBands.length; i++) {
+                    fxBands[i].connect(fxBands[i + 1]);
+                }
+
+                fxBands[fxBands.length - 1].connect(fxComp);
+                fxComp.connect(fxOut);
+                fxOut.connect(fxCtx.destination);
+            }
+
+            fxCtx.createMediaElementSource(audio).connect(fxBands[0]);
+            fxEl = audio;
+            dbgLog("Sound", "the song goes through the sound profile");
+            applySound();
+
+            return true;
+        } catch (e) {
+
+            dbgLog("Sound", "no sound profile: " + errText(e));
+            return false;
+        }
+    }
+
+    // The profile in use set on the chain, smoothly. Off, or with nothing
+    // to do, the chain passes the song on as it is
+    function applySound() {
+
+        if (fxCtx && fxCtx.state !== "running" && audio && !audio.paused) {
+
+            fxCtx.resume().catch(function () {
+                // Again with the next song
+            });
+        }
+
+        if (!fxCtx) {
+            return;
+        }
+
+        const a = activeSound();
+        const p = sound().on && a.profile ? a.profile : cleanProfile({}, 0);
+        const c = p.comp ? SOUND_COMP.find(function (x) {
+            return x.value === p.compLevel;
+        }) : null;
+        const t = fxCtx.currentTime;
+
+        fxBands.forEach(function (b, i) {
+            b.gain.setTargetAtTime(p.bands[i], t, 0.05);
+        });
+
+        fxComp.threshold.setTargetAtTime(c ? c.threshold : 0, t, 0.05);
+        fxComp.ratio.setTargetAtTime(c ? c.ratio : 1, t, 0.05);
+        fxComp.knee.setTargetAtTime(c ? c.knee : 0, t, 0.05);
+        fxOut.gain.setTargetAtTime(dbToGain(p.gain), t, 0.05);
+    }
+
+    // Something about the profiles changed: kept, put to work, and shown
+    function soundChanged() {
+
+        saveSettings();
+        wireSound();
+        applySound();
+        watchBluetoothSound();
+        updateNightCtrlButton();
+        publishHostSoon();
+    }
+
+    function setSoundOn(on) {
+
+        sound().on = on === true;
+        soundChanged();
+        showToast(on ? "Sound profiles on, " + soundWords().replace(/\.$/, "") : "Sound profiles off", true);
+    }
+
+    // Night mode on or off, sound profiles switched on with it
+    function setNight(on) {
+
+        const s = sound();
+
+        s.night = typeof on === "boolean" ? on : !s.night;
+
+        if (s.night && !s.on) {
+            s.on = true;
+        }
+
+        soundChanged();
+        showToast(s.night ? "Night mode on, " + soundWords().replace(/^Night mode, /, "").replace(/\.$/, "") : "Night mode off", true);
+    }
+
+    // The connected Bluetooth device the profiles go by: the first with a
+    // profile of its own, else the first connected. Read from the app
+    function readBluetoothSound() {
+
+        let info = {};
+
+        try {
+            info = JSON.parse(window.MurekaHost && window.MurekaHost.btDevices ? window.MurekaHost.btDevices() || "{}" : "{}");
+        } catch (e) {
+            info = {};
+        }
+
+        const s = sound();
+        const on = (Array.isArray(info.devices) ? info.devices : []).filter(function (d) {
+            return d && d.connected && typeof d.address === "string";
+        });
+        const pick = on.find(function (d) {
+            return !!s.devices[d.address];
+        }) || on[0] || null;
+        const was = btNow ? btNow.address : "";
+
+        btNow = pick ? { address: pick.address, name: String(pick.name || pick.address) } : null;
+
+        if ((btNow ? btNow.address : "") !== was) {
+
+            dbgLog("Sound", btNow ? btNow.name + " connected, " + soundWords() : "no Bluetooth device, " + soundWords());
+            applySound();
+            publishHostSoon();
+        }
+    }
+
+    function watchBluetoothSound() {
+
+        const want = sound().on && isApkHost();
+
+        if (want && !btPollTimer) {
+
+            readBluetoothSound();
+            btPollTimer = setInterval(readBluetoothSound, BT_POLL_MS);
+        } else if (!want && btPollTimer) {
+
+            clearInterval(btPollTimer);
+            btPollTimer = 0;
+        }
+    }
+
+    function iconMoon() {
+        return makeSvgIcon([["path", { d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" }]]);
+    }
+
+    // Night mode on is filled, off plain
+    function updateNightCtrlButton() {
+
+        const on = sound().on && sound().night;
+
+        if (nightCtrlBtn) {
+
+            nightCtrlBtn.title = on ? soundWords() : "Night mode off";
+            paintCtrl(nightCtrlBtn, on ? "fill" : "plain");
+        }
+
+        if (nightActionBtn) {
+
+            nightActionBtn.style.background = on ? "#48e1eb" : "#444";
+            nightActionBtn.style.color = on ? "#000" : "#fff";
+        }
+
+        updateControlLabels();
+    }
+
     // Create the shared audio element on first use
     function ensureAudio() {
 
@@ -12118,6 +12509,13 @@
         // fades goes in as soon as a song plays with a fade switched on,
         // not first at a song switch, so the first pause already fades in
         audioOn("playing", function () {
+
+            // Through the sound profile, the engine running with the song
+            if (sound().on) {
+
+                wireSound();
+                applySound();
+            }
 
             // Also when Safari itself plays the song on after an interruption
             resumeIosCtx("playing");
@@ -21350,7 +21748,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night"];
 
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
@@ -21385,6 +21783,10 @@
 
         if (name === "sets") {
             return iconSets();
+        }
+
+        if (name === "night") {
+            return iconMoon();
         }
 
         // The web view's two list buttons, drawn as they are there
@@ -27631,6 +28033,8 @@
             shuffle: shuffleMode,
             setsOn: setsShown(),
             setSort: setSortOf(),
+            nightOn: sound().on && sound().night,
+            soundText: soundWords(),
             repeat: repeatMode,
             carAudio: hostCarAudio,
             fade: hostFade,
@@ -30125,7 +30529,8 @@
 
     function hostWalk(el, out, path) {
 
-        if (!el || el.nodeType !== 1 || el.style.display === "none" || el.dataset.hostSkip) {
+        // Skipped when hidden, unless only meant to show in the web view
+        if (!el || el.nodeType !== 1 || (el.style.display === "none" && !el.dataset.webOnly) || el.dataset.hostSkip) {
             return;
         }
 
@@ -30217,7 +30622,7 @@
 
         Array.from(el.children).forEach(function (c, i) {
 
-            if (c.style.display !== "none") {
+            if (c.style.display !== "none" || c.dataset.webOnly) {
                 kids.push({ el: c, path: path + "." + i });
             }
         });
@@ -31071,6 +31476,8 @@
             setVocalFilter(value);
         } else if (cmd === "sets") {
             toggleSetsShown(typeof arg === "boolean" ? arg : undefined);
+        } else if (cmd === "night") {
+            setNight(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "setSort") {
 
             if (SET_SORTS.some(function (x) {
@@ -31612,6 +32019,18 @@
             rowDisplay.appendChild(fullscreenButton);
         }
         rowDisplay.appendChild(blackoutButton);
+
+        // Night mode, the night profile of the speaker in use
+        if (soundOffered()) {
+
+            nightActionBtn = makeActionButton(iconMoon(), "Night mode", "#444", "#fff", function () {
+
+                closeActions();
+                setNight();
+            });
+            rowDisplay.appendChild(nightActionBtn);
+        }
+
         rowDisplay.appendChild(foldButton);
         rowDisplay.appendChild(webViewButton);
 
@@ -32189,6 +32608,11 @@
             toggleSetsShown();
         });
 
+        // Night mode, the night profile of the speaker in use
+        nightCtrlBtn = makeIconButton(iconMoon(), "Night mode on / off", function () {
+            setNight();
+        });
+
         controlButtons = {
             prev: makeIconButton(iconPrev(), "Previous", function () {
                 switchSong("tap", playPrev);
@@ -32203,7 +32627,8 @@
             published: publishedCtrlBtn,
             vocals: vocalsCtrlBtn,
             rate: rateCtrlBtn,
-            sets: setsCtrlBtn
+            sets: setsCtrlBtn,
+            night: nightCtrlBtn
         };
 
         updateFeedButton();
@@ -32212,7 +32637,9 @@
         enableControlRowDragging();
         updateVocalsCtrlButton();
         updateSetsCtrlButton();
+        updateNightCtrlButton();
         updateRateButton();
+        watchBluetoothSound();
 
         playerEl.appendChild(artBox);
         playerEl.appendChild(seekRow);
@@ -38770,6 +39197,7 @@
         const libraryPage = makePage();
         const playbackPage = makePage();
         const nowPage = makePage();
+        const soundPage = makePage();
         const publishPage = makePage();
         const setsPage = makePage();
         const cachePage = makePage();
@@ -38788,6 +39216,7 @@
             library: libraryPage,
             playback: playbackPage,
             nowplaying: nowPage,
+            sound: soundPage,
             publishing: publishPage,
             sets: setsPage,
             cache: cachePage,
@@ -41244,6 +41673,290 @@
         setsPage.appendChild(singleSetsBtn);
         setsPage.appendChild(makeHint("A set left with one song after the others were taken out or deleted on Mureka."));
 
+        // Sound profiles: switched on, night mode, the profiles to edit and
+        // the profiles of each speaker. Drawn again whole when profiles or
+        // speakers come and go, the drop-downs list them
+        const soundBox = document.createElement("div");
+        let soundEditId = "";
+        let soundKey = "";
+
+        soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
+
+        const soundDevices = function () {
+
+            try {
+
+                const info = JSON.parse(window.MurekaHost && window.MurekaHost.btDevices ? window.MurekaHost.btDevices() || "{}" : "{}");
+
+                return Array.isArray(info.devices) ? info.devices.filter(function (d) {
+                    return d && typeof d.address === "string";
+                }) : [];
+            } catch (e) {
+                return [];
+            }
+        };
+
+        const drawSound = function () {
+
+            const sd = sound();
+            const devs = isApkHost() ? soundDevices() : [];
+            const key = JSON.stringify([soundEditId, sd.profiles.map(function (x) {
+                return [x.id, x.name, x.night];
+            }), devs.map(function (d) {
+                return d.address + d.name;
+            })]);
+
+            if (key === soundKey) {
+                return;
+            }
+
+            soundKey = key;
+            soundBox.textContent = "";
+
+            if (!soundOffered()) {
+
+                soundBox.appendChild(makeHint("Sound profiles are not offered on an iPhone or iPad, the sound there goes its own way for the fades."));
+                return;
+            }
+
+            if (!soundProfile(soundEditId)) {
+                soundEditId = sd.profiles[0].id;
+            }
+
+            const edit = soundProfile(soundEditId);
+            const now = makeHint(soundWords());
+
+            settingsRefreshers.push(function () {
+                now.textContent = soundWords();
+            });
+
+            // Said in the web view only, where the music may play in the
+            // browser itself
+            const webNote = makeHint("Sound profiles only change the sound played by the device running the app, not music playing in this browser.");
+
+            webNote.dataset.webOnly = "1";
+            webNote.style.display = "none";
+            soundBox.appendChild(webNote);
+            soundBox.appendChild(makeLabel("In use"));
+            soundBox.appendChild(withHint(makeBoolRow("Sound profiles",
+                function () { return sound().on; },
+                function (v) { setSoundOn(v); }),
+                "The song goes through the profile of the speaker in use. Switched on during a song streamed from Mureka, the profile takes the next song."));
+            soundBox.appendChild(withHint(makeBoolRow("Night mode",
+                function () { return sound().night; },
+                function (v) { setNight(v); }),
+                "Each speaker's night profile instead, quieter for sleeping. The Night button for the button row and the menu switch it too."));
+            soundBox.appendChild(now);
+
+            // The profile to edit, and making or removing one
+            soundBox.appendChild(makeLabel("Profiles"));
+
+            const pick = makeDropRow("Profile to edit", sd.profiles.map(function (x) {
+                return { value: x.id, label: x.name + (x.night ? " (night)" : "") };
+            }), function () { return soundEditId; }, function (v) {
+
+                soundEditId = v;
+                drawSound();
+            });
+
+            soundBox.appendChild(pick);
+
+            const buttons = document.createElement("div");
+
+            buttons.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+            buttons.appendChild(makeButton("New profile", "#333", "#fff", function () {
+
+                const fresh = cleanProfile({ name: "Profile " + (sound().profiles.length + 1) }, sound().profiles.length);
+
+                sound().profiles.push(fresh);
+                soundEditId = fresh.id;
+                soundChanged();
+                drawSound();
+            }));
+            buttons.appendChild(makeButton("Copy profile", "#333", "#fff", function () {
+
+                const copy = cleanProfile(Object.assign({}, edit, { id: "", name: edit.name + " copy" }), sound().profiles.length);
+
+                sound().profiles.push(copy);
+                soundEditId = copy.id;
+                soundChanged();
+                drawSound();
+            }));
+            buttons.appendChild(makeButton("Delete profile", "#333", "#fff", function () {
+
+                const all = sound().profiles;
+
+                if (all.length <= 1) {
+
+                    showToast("The last profile stays", false);
+                    return;
+                }
+
+                sound().profiles = all.filter(function (x) {
+                    return x.id !== edit.id;
+                });
+
+                // Speakers using it take the device's profile instead
+                const sd2 = sound();
+
+                for (const a of Object.keys(sd2.devices)) {
+
+                    if (sd2.devices[a].day === edit.id) {
+                        sd2.devices[a].day = "";
+                    }
+
+                    if (sd2.devices[a].night === edit.id) {
+                        sd2.devices[a].night = "";
+                    }
+                }
+
+                sd2.clean = false;
+                sound();
+                soundEditId = "";
+                soundChanged();
+                drawSound();
+            }));
+            soundBox.appendChild(buttons);
+
+            // The profile itself
+            const nameRow = makeTextRow("Name", function () { return edit.name; }, function (v) {
+
+                edit.name = String(v || "").slice(0, 60) || "Profile";
+
+                // The drop-down follows the name as it is typed
+                const opt = Array.from(pick.__select.options).find(function (o) {
+                    return o.value === edit.id;
+                });
+
+                if (opt) {
+                    opt.textContent = edit.name + (edit.night ? " (night)" : "");
+                }
+
+                soundKey = "";
+                publishHostSoon();
+            });
+
+            soundBox.appendChild(nameRow);
+            soundBox.appendChild(withHint(makeBoolRow("Night profile",
+                function () { return edit.night; },
+                function (v) {
+
+                    edit.night = v;
+                    soundChanged();
+                    drawSound();
+                }), "Offered as a speaker's night profile, for night mode."));
+            soundBox.appendChild(withHint(makeStepperRow("Volume, dB",
+                function () { return edit.gain; },
+                function (v) {
+
+                    edit.gain = Math.max(-40, Math.min(12, Math.round(v)));
+                    soundChanged();
+                }, -40, 12, 1), "Below 0 turns the song down further than the device's lowest step, for sleeping. Above 0 can clip on loud songs."));
+
+            SOUND_BANDS.forEach(function (b, i) {
+
+                soundBox.appendChild(makeStepperRow(b.label + " (" + (b.f >= 1000 ? (b.f / 1000) + " kHz" : b.f + " Hz") + "), dB",
+                    function () { return edit.bands[i]; },
+                    function (v) {
+
+                        edit.bands[i] = Math.max(-12, Math.min(12, Math.round(v)));
+                        soundChanged();
+                    }, -12, 12, 1));
+            });
+
+            soundBox.appendChild(withHint(makeBoolRow("Compressor",
+                function () { return edit.comp; },
+                function (v) {
+
+                    edit.comp = v;
+                    soundChanged();
+                }), "Holds the loud parts down so the quiet ones can be heard at a lower volume."));
+            soundBox.appendChild(makeDropRow("Compressor strength", SOUND_COMP.map(function (c) {
+                return { value: c.value, label: c.label };
+            }), function () { return edit.compLevel; }, function (v) {
+
+                edit.compLevel = v;
+                soundChanged();
+            }));
+
+            // Which profiles each speaker takes
+            soundBox.appendChild(makeLabel("Speakers"));
+            soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Set to the device's, it takes those of This device."));
+
+            const dayChoices = function (phone) {
+
+                const out = phone ? [] : [{ value: "", label: "The device's" }];
+
+                return out.concat(sound().profiles.filter(function (x) {
+                    return !x.night;
+                }).map(function (x) {
+                    return { value: x.id, label: x.name };
+                }));
+            };
+            const nightChoices = function (phone) {
+
+                const out = [{ value: "", label: phone ? "None, the profile" : "The device's" }];
+
+                return out.concat(sound().profiles.filter(function (x) {
+                    return x.night;
+                }).map(function (x) {
+                    return { value: x.id, label: x.name };
+                }));
+            };
+            const speaker = function (title, get, set, phone) {
+
+                soundBox.appendChild(makeSubLabel(title));
+                soundBox.appendChild(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
+
+                    set("day", v);
+                    soundChanged();
+                }));
+                soundBox.appendChild(makeDropRow("Night profile", nightChoices(phone), function () { return get("night"); }, function (v) {
+
+                    set("night", v);
+                    soundChanged();
+                }));
+            };
+
+            speaker("This device and others not set up", function (k) {
+                return sound().fallback[k] || "";
+            }, function (k, v) {
+                sound().fallback[k] = v;
+            }, true);
+
+            for (const d of devs) {
+
+                speaker(String(d.name || d.address) + (d.connected ? ", connected" : ""), function (k) {
+
+                    const dev = sound().devices[d.address];
+
+                    return dev ? dev[k] : "";
+                }, function (k, v) {
+
+                    const all = sound().devices;
+
+                    if (!all[d.address]) {
+                        all[d.address] = { name: String(d.name || d.address), day: "", night: "" };
+                    }
+
+                    all[d.address][k] = v;
+                    all[d.address].name = String(d.name || d.address);
+                }, false);
+            }
+
+            if (isApkHost() && devs.length === 0) {
+                soundBox.appendChild(makeHint("No paired Bluetooth devices seen. Bluetooth access is allowed under Charger and power."));
+            }
+
+            if (!isApkHost()) {
+                soundBox.appendChild(makeHint("Bluetooth speakers are set up in the app."));
+            }
+        };
+
+        drawSound();
+        settingsRefreshers.push(drawSound);
+        soundPage.appendChild(soundBox);
+
         // Each page opens with the way back and a word on what it holds
         const heads = [
             [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
@@ -41251,6 +41964,7 @@
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
+            [soundPage, "Sound", "Sound profiles: the bass, mids and treble, a volume below the device's lowest step and a compressor, a profile of its own and a night profile for each Bluetooth speaker."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
             [setsPage, "Song sets", "The versions of a song kept together, to compare them and listen them through. Kept on this device and carried by song tweaks."],
             [chargerPage, "Charger and power", "What happens when the phone goes on battery, or chosen Bluetooth devices disconnect, and when that changes back. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
@@ -41306,6 +42020,7 @@
         mainPage.appendChild(makePageButton("Library", "library"));
         mainPage.appendChild(makePageButton("Playback", "playback"));
         mainPage.appendChild(makePageButton("Now playing", "nowplaying"));
+        mainPage.appendChild(makePageButton("Sound", "sound"));
         mainPage.appendChild(makeLabel("Your songs"));
         mainPage.appendChild(makeHint("What happens when you publish or change songs of your own, and how their versions are kept together."));
         mainPage.appendChild(makePageButton("Publishing", "publishing"));

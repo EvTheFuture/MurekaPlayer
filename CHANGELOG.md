@@ -70,6 +70,20 @@ In development.
   switches the sets off and on again: off, every song stands on its own
   in the list and the queue, and the sets are kept as they are. A pressed
   song keeps its set's color.
+- **Sound profiles and night mode.** A Sound page in the settings, on
+  the phone and in the web view, holds profiles of five bands, bass, low
+  mids, mids, high mids and treble, a volume that can go below the
+  device's lowest step, and a compressor at three strengths that holds the
+  loud parts down. A profile can be marked a night profile. Each
+  Bluetooth speaker gets a profile and a night profile, the device's own
+  speaker and devices not set up one of each, and the profile follows the
+  speaker connected. Night mode switches to the night profiles, from a
+  Night button for the button row, the menu or the Sound page, on the
+  phone and in the web view. Off unless switched on, and not on an iPhone
+  or iPad. Switched on during a song streamed from Mureka, the profile
+  takes the next song. Only the sound played by the device running the
+  app goes through it, which the web view's Sound page says, not music
+  playing in a web view's browser.
 - **Notes.** A song's menu has Note, a few words kept with the song, shown
   in Information and in the menu, on the phone and in the web view. A trimmed song takes its original's
   note. Notes travel with song tweaks.

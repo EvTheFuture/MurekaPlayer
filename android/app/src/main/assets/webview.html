@@ -5383,6 +5383,7 @@
         <button class="ctl" id="vocBtn" type="button" data-label="Vocals" aria-label="Vocals, instrumental or all" data-icon="all"></button>
         <button class="ctl" id="rateBtn" type="button" data-label="Rate" aria-label="Rate the playing song" data-icon="star"></button>
         <button class="ctl" id="setsBtn" type="button" data-label="Sets" aria-label="Song sets on or off" data-icon="sets"></button>
+        <button class="ctl" id="nightBtn" type="button" data-label="Night" aria-label="Night mode on or off" data-icon="moon"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -6192,10 +6193,11 @@
         vocals: { label: "Vocals", icon: "all", el: "vocBtn" },
         rate: { label: "Rate", icon: "star", el: "rateBtn" },
         sets: { label: "Sets", icon: "sets", el: "setsBtn" },
+        night: { label: "Night", icon: "moon", el: "nightBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "songs", "minilist"];
 
     function icon(name) {
 
@@ -9730,6 +9732,8 @@
         $("play").classList.toggle("flat", stopped);
         $("shuffle").classList.toggle("on", !!(s && s.shuffle));
         $("setsBtn").classList.toggle("on", !!(s && s.setsOn === true));
+        $("nightBtn").classList.toggle("on", !!(s && s.nightOn === true));
+        $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
         $("repeat").classList.toggle("on", !!(s && s.repeat === "all"));
         $("repeat").classList.toggle("ring", !!(s && s.repeat === "one"));
@@ -19960,6 +19964,13 @@
         send("sets");
     });
 
+    // Night mode on the phone, each speaker's night profile
+    $("nightBtn").addEventListener("click", function () {
+
+        $("nightBtn").classList.toggle("on");
+        send("night");
+    });
+
     $("repeat").addEventListener("click", function () {
         send("repeat");
     });
@@ -25196,6 +25207,12 @@
             $("actionsPop").style.display = "none";
             showPanel("creators");
         }));
+
+        box.appendChild(menuItem("moon", s.nightOn ? "Night mode off" : "Night mode", function () {
+
+            $("actionsPop").style.display = "none";
+            send("night");
+        }, s.nightOn ? "accent" : ""));
 
         box.appendChild(menuItem("moon", "Screen off", function () {
 
