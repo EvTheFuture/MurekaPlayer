@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.28";
+    const VERSION = "2.0.0.30";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6111,8 +6111,12 @@
     // How many similar songs are suggested at once, and how alike a song
     // has to be. Songs made within SAME_RUN_SECONDS of each other came
     // from the same generation
-    const SIMILAR_MAX = 12;
+    const SIMILAR_MAX = 20;
     const SIMILAR_MIN = 0.35;
+
+    // Suggest similar songs also lists songs only a little alike, not
+    // ticked, the guess for new songs only takes those SIMILAR_MIN alike
+    const SIMILAR_SHOW = 0.2;
     const SIMILAR_TICKED = 0.45;
     const SAME_RUN_SECONDS = 10;
 
@@ -6161,7 +6165,42 @@
         const shorter = Math.min(wa.length, wb.length);
         const within = shorter >= 2 ? 0.85 * both / shorter : 0;
 
-        return Math.max(jaccard, within);
+        return Math.max(jaccard, within, letterLikeness(titleWords(a).join(""), titleWords(b).join("")));
+    }
+
+    // How alike two texts are letter by letter: the pairs of letters next
+    // to each other they share, 0 to 1. "No5 Travels the World" and "No5
+    // Travels the Big World" share most of theirs
+    function letterLikeness(a, b) {
+
+        if (a.length < 4 || b.length < 4) {
+            return a === b && a.length > 0 ? 1 : 0;
+        }
+
+        const pairs = new Map();
+
+        for (let i = 0; i + 1 < a.length; i++) {
+
+            const k = a.slice(i, i + 2);
+
+            pairs.set(k, (pairs.get(k) || 0) + 1);
+        }
+
+        let both = 0;
+
+        for (let i = 0; i + 1 < b.length; i++) {
+
+            const k = b.slice(i, i + 2);
+            const n = pairs.get(k) || 0;
+
+            if (n > 0) {
+
+                both += 1;
+                pairs.set(k, n - 1);
+            }
+        }
+
+        return 2 * both / (a.length - 1 + b.length - 1);
     }
 
     // How much song b looks like another version of song a, and why
@@ -6189,14 +6228,20 @@
 
         const t = titleLikeness(a.title, b.title);
 
+        // A title much alike counts on its own, one a little alike with
+        // something else
         if (t >= 1) {
 
             score += 0.6;
             why.push("same title");
         } else if (t >= 0.5) {
 
-            score += 0.4 * t;
+            score += 0.6 * t;
             why.push("similar title");
+        } else if (t >= 0.35) {
+
+            score += 0.4 * t;
+            why.push("title a little alike");
         }
 
         if (madeTogether(a, b)) {
@@ -6213,7 +6258,9 @@
                 score += 0.25;
                 why.push("made shortly after");
             } else if (a.generate_at > 0 && b.generate_at > 0 && apart <= 3 * 3600) {
+
                 score += 0.1;
+                why.push("made within a few hours");
             }
         }
 
@@ -6506,7 +6553,7 @@
                 }
             }
 
-            if (best.score >= SIMILAR_MIN) {
+            if (best.score >= SIMILAR_SHOW) {
                 out.push({ song: x, score: best.score, why: best.why });
             }
         }
@@ -6547,7 +6594,8 @@
             + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = "Similar songs";
         head.style.cssText = "font-weight:600";
-        body.textContent = "Songs that look like more versions of the songs in \"" + set.name + "\". Tick the ones to add. " + hint;
+        body.textContent = "Songs that look like more versions of the songs in \"" + set.name + "\", the most alike first and ticked,"
+            + " the ones less alike after them. Tick the ones to add. " + hint;
         body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
         list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
         row.style.cssText = "display:flex;gap:8px";
