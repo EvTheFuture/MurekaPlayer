@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.30";
+    const VERSION = "2.0.0.31";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2941,6 +2941,7 @@
             setsOn: true,
             setSort: "added",
             setSuggest: true,
+            setOldMonths: 1,
             view: "mureka",
             libView: "mureka",
             reportPlays: true,
@@ -3160,6 +3161,7 @@
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
                     setSuggest: parsed.setSuggest !== false,
+                    setOldMonths: typeof parsed.setOldMonths === "number" ? parsed.setOldMonths : 1,
                     view: view,
                     libView: ["mureka", "alpha", "stars", "plays"].indexOf(parsed.libView) >= 0
                         ? parsed.libView : (["alpha", "stars", "plays"].indexOf(view) >= 0 ? view : "mureka"),
@@ -6114,6 +6116,15 @@
     const SIMILAR_MAX = 20;
     const SIMILAR_MIN = 0.35;
 
+    // How many months before a set's oldest song a song may be made and
+    // still be ticked as one of its versions
+    function setOldMonths() {
+
+        const n = Number(settings.setOldMonths);
+
+        return isFinite(n) && n >= 0 ? Math.min(60, Math.round(n)) : 1;
+    }
+
     // Suggest similar songs also lists songs only a little alike, not
     // ticked, the guess for new songs only takes those SIMILAR_MIN alike
     const SIMILAR_SHOW = 0.2;
@@ -6536,6 +6547,14 @@
         const members = setSongs(set.id);
         const out = [];
 
+        // A song made long before the set's oldest song is offered, never
+        // ticked. The months come from the Song sets settings, 0 for never
+        const months = setOldMonths();
+        const oldest = members.reduce(function (min, x) {
+            return x.generate_at > 0 && (min === 0 || x.generate_at < min) ? x.generate_at : min;
+        }, 0);
+        const before = months > 0 && oldest > 0 ? oldest - months * 30 * 86400 : 0;
+
         for (const x of cache.songs) {
 
             if (songSetOf.has(String(x.song_id))) {
@@ -6554,7 +6573,15 @@
             }
 
             if (best.score >= SIMILAR_SHOW) {
-                out.push({ song: x, score: best.score, why: best.why });
+
+                const old = before > 0 && x.generate_at > 0 && x.generate_at < before;
+
+                out.push({
+                    song: x,
+                    score: best.score,
+                    why: old ? best.why.concat(["much older than the set"]) : best.why,
+                    ticked: best.score >= SIMILAR_TICKED && !old
+                });
             }
         }
 
@@ -6632,7 +6659,7 @@
 
         for (const f of found) {
 
-            const box = makeTickBox("", f.score >= SIMILAR_TICKED, paint);
+            const box = makeTickBox("", f.ticked, paint);
             const name = box.el.children[1];
             const line = document.createElement("div");
             const sub = document.createElement("div");
@@ -27972,7 +27999,7 @@
                 title: (f.song.title || "").trim() || "Untitled",
                 why: why.charAt(0).toUpperCase() + why.slice(1),
                 date: fmtDate(f.song.generate_at),
-                ticked: f.score >= SIMILAR_TICKED
+                ticked: f.ticked
             };
         });
     }
@@ -41204,6 +41231,11 @@
             function () { return settings.setSuggest !== false; },
             function (v) { settings.setSuggest = v; });
 
+        const setOldRow = makeStepperRow("Older songs not ticked, months",
+            function () { return setOldMonths(); },
+            function (v) { settings.setOldMonths = v; }, 0, 60, 1);
+
+        setsPage.appendChild(withHint(setOldRow, "Suggest similar songs offers a song made this many months or more before the oldest song in the set, but does not tick it. 0 ticks them as any other."));
         setsPage.appendChild(withHint(setSuggestRow, "New songs a load finds are offered for a set, the one they most likely belong to first: by title, lyrics, songs made together and the set a song last went into a short while ago."));
         setsPage.appendChild(withHint(setSortRow, "Last added puts the set a song last went into first. Done sets come after the others, folded together."));
         setsPage.appendChild(makeLabel("Tidy up"));

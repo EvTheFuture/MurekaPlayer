@@ -16,7 +16,9 @@ In development.
   their letters alike counting, made in the same generation or shortly
   after one of the
   set's songs. The most alike come first and are ticked, the ones only a
-  little alike follow unticked, up to twenty. Add puts the ticked ones in the
+  little alike follow unticked, up to twenty. A song made long before the
+  set's oldest song, a month unless set otherwise on the Song sets page,
+  is offered but not ticked. Add puts the ticked ones in the
   set. Lyrics count for songs played or opened in the player before, and
   only when they have more than a few words. In the list a set sits where
   its newest song was made, with a chip in the set's color showing how
