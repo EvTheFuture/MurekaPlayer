@@ -91,6 +91,13 @@ In development.
   goes on after the last song played that the filters let through, rather
   than from the top, so songs played now with the queue kept leave the
   rest of it as it was.
+- **New songs played now while nothing plays come first.** Stopped or
+  paused, Play now in the question about new songs puts them in the place
+  of the song that would have played, which follows after them, rather
+  than after it.
+- **Hearts follow a like everywhere.** A song liked or unliked, on the
+  phone or in a web view, shows its heart as it is in every list at once,
+  the small list over the web view's main page too.
 - **Dismiss leaves the other app playing.** On an iPhone or iPad, a play
   Safari held back while another app, a video say, had the sound went
   through on the next tap, Dismiss in the box asking to play on among

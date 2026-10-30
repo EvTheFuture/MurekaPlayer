@@ -9627,6 +9627,16 @@
             subtitleLine.setText(s.subtitle || "");
             paintStars(heldRating(s.id, s.rating));
             $("like").classList.toggle("liked", !!s.liked);
+
+            // The playing song's heart in both lists follows its like
+            for (const row of document.querySelectorAll("#rows .row, #miniRows .row")) {
+
+                const heart = row.dataset.id === String(s.id) ? row.querySelector(".rowHeart") : null;
+
+                if (heart) {
+                    heart.classList.toggle("liked", !!s.liked);
+                }
+            }
         }
 
         setFlowSongs(s);

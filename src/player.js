@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.24";
+    const VERSION = "2.0.0.26";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -9653,6 +9653,11 @@
 
             const held = heldQueue().resumed;
 
+            // Nothing playing, stopped or paused, the new songs take the
+            // place of the song that would have played, which follows them
+            const idleNow = !(audio && !audio.paused && audio.src);
+            const heldSong = held ? resumeState.queue[resumeState.queuePos] : queue[queuePos];
+
             applySharedSongs(songs, "next", true);
             playNextMarks.delete(String(songs[0].song_id));
 
@@ -9673,7 +9678,21 @@
             // just put in
             switchSong("ready", function () {
 
-                queuePos = Math.max(0, queue.lastIndexOf(songs[0]));
+                const at = idleNow && heldSong ? queue.indexOf(heldSong) : -1;
+
+                if (at >= 0) {
+
+                    const fresh = new Set(songs);
+                    const rest = queue.slice(at).filter(function (x) {
+                        return !fresh.has(x);
+                    });
+
+                    queue = queue.slice(0, at).concat(songs, rest);
+                    queuePos = at;
+                } else {
+                    queuePos = Math.max(0, queue.lastIndexOf(songs[0]));
+                }
+
                 queueMoveDir = 1;
                 playCurrent();
                 publishHostSoon();
@@ -35693,6 +35712,24 @@
     }
 
     // Like or unlike a song through the Mureka favorite endpoint
+    // A like changed: the hearts of the list here drawn again, where it
+    // stays, and the web views told to paint theirs, through the count of
+    // song changes they watch
+    function likeShown() {
+
+        songEdits += 1;
+
+        const top = listEl ? listEl.scrollTop : 0;
+
+        renderList();
+
+        if (listEl) {
+            listEl.scrollTop = top;
+        }
+
+        publishHostSoon();
+    }
+
     // The heart flips immediately. When the request fails, the question
     // whether to try again comes first, only Cancel puts it back
     // state 1 likes the song, state 2 removes the like
@@ -35718,6 +35755,7 @@
         noteChangedHere(song);
         paintHeart(heartEl, makeLiked);
         shiftLikes(song, makeLiked ? 1 : -1);
+        likeShown();
 
         let busyTries = 0;
 
@@ -35786,6 +35824,10 @@
                 paintHeart(heartEl, liked);
                 saveCache();
 
+                if (liked !== makeLiked) {
+                    likeShown();
+                }
+
                 // The viewer's own likes, for a creator's list read later
                 if (viewerLiked) {
 
@@ -35836,6 +35878,7 @@
 
                 paintHeart(heartEl, song.is_liked);
                 shiftLikes(song, makeLiked ? -1 : 1);
+                likeShown();
                 setStatus("Like left as it was");
                 showToast(makeLiked ? "Not liked" : "Like not removed", false);
 
