@@ -11,15 +11,17 @@ In development.
   set, renames the set or changes its color, one of the ready ones or any
   color from the color picker. Suggest similar songs lists the songs in no
   set that look like more versions of the set's songs, with why: the same
-  or similar lyrics, the same or a similar title, made in the same
-  generation. The most alike are ticked, Add puts the ticked ones in the
+  or similar lyrics, the same or a similar title, small words like the or
+  och left aside and most of the shorter title in the longer one
+  counting, made in the same generation or shortly after one of the
+  set's songs. The most alike are ticked, Add puts the ticked ones in the
   set. Lyrics count for songs played or opened in the player before, and
   only when they have more than a few words. In the list a set sits where
-  its newest song was made, folded under its best rated song, the newest
-  of those, with a chip in the set's color showing how many songs it
-  holds. Opened, the set's other songs follow, newest first, the two of
-  one generation in the order Mureka made them, each with a
-  bar of the set's color. A queue made from the list plays a set's songs
+  its newest song was made, with a chip in the set's color showing how
+  many songs it holds. Its songs go newest first, so new versions come on
+  top and a folded set shows the latest, the two of one generation in the
+  order Mureka made them, each with a bar of the set's color. A done set
+  shows its kept and best rated song first instead. A queue made from the list plays a set's songs
   one after another. The playing song shows also in a folded set. The web
   view shows the sets the same way, and its song menu does all of the
   above as well, the custom color and the similar songs too. A trimmed
@@ -46,9 +48,10 @@ In development.
   press or the button at its end shows what can be done with it: play
   the set, suggest similar songs, rename it, color it, mark it done, merge
   it into another set or dissolve it. Any number of a set's songs can be
-  marked kept, the versions chosen, ticked in the set's color and first
-  in the set. The web view draws the fold arrows and the tick itself, so
-  they show in browsers whose fonts lack them. A done set stays folded in the list with its color faded.
+  marked kept, the versions chosen, ticked in the set's color, first in a
+  done set. The web view draws the fold arrows and the tick itself, so
+  they show in browsers whose fonts lack them. A done set stays folded in
+  the list with its color faded.
   Songs picked with Select go into a set together. New songs a load
   finds, made in the last two days and in no set, are offered for a set,
   the songs of one generation together: the set they most likely belong
@@ -71,7 +74,7 @@ In development.
   every list view on the phone and in both lists of the web view. Several
   in a row fold under the first, whose number gives way to a button of
   one width with how many there are and an arrow that opens and folds
-  them, in the accent color, a set's in its own color. A fold opens also
+  them, in the accent color, a set's in its own color, filled while open. A fold opens also
   when its first song started playing since the list was drawn, and in
   the web view one the phone could not send right away is asked for again
   or closes with a note. A tap on one asks how to play it: Play now plays

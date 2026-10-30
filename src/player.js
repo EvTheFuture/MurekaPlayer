@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.26";
+    const VERSION = "2.0.0.28";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -5376,9 +5376,18 @@
         saveSets();
     }
 
-    // A set's songs in the order the list shows them: the first, then the
-    // other kept ones and then the rest, newest first
+    // A set's songs in the order the list shows them. A set still worked
+    // on, newest first, so new versions come on top and a folded set shows
+    // the latest. A done set, the kept and best rated first, then the other
+    // kept ones and then the rest, newest first
     function setOrder(members) {
+
+        const m = members.length > 0 ? songSetOf.get(String(members[0].song_id)) : null;
+        const set = m ? songSets.get(m.set) : null;
+
+        if (!set || !set.done) {
+            return members.slice().sort(byNewest);
+        }
 
         const head = setHeadOf(members);
         const rest = members.filter(function (x) {
@@ -6104,8 +6113,11 @@
     // from the same generation
     const SIMILAR_MAX = 12;
     const SIMILAR_MIN = 0.35;
-    const SIMILAR_TICKED = 0.6;
+    const SIMILAR_TICKED = 0.45;
     const SAME_RUN_SECONDS = 10;
+
+    // Made within this many seconds of a set's song counts toward the set
+    const SHORTLY_AFTER_SECONDS = 30 * 60;
 
     // Words at the end of a title that only tell versions apart: numbers,
     // v2, take and the like. Inside a title a number is part of its name
@@ -6123,10 +6135,17 @@
     }
 
     // How alike two titles are, 0 to 1, 1 for the same words
+    // Small words that say nothing about which song it is
+    const TITLE_SMALL_WORDS = ["the", "a", "an", "of", "in", "on", "at", "and", "to", "my", "your", "i", "you",
+        "feat", "ft", "och", "en", "ett", "pa", "av", "till", "min", "din", "det", "den"];
+
     function titleLikeness(a, b) {
 
-        const wa = titleWords(a);
-        const wb = titleWords(b);
+        const keep = function (w) {
+            return TITLE_SMALL_WORDS.indexOf(w.normalize("NFD").replace(/[\u0300-\u036f]/g, "")) < 0;
+        };
+        const wa = titleWords(a).filter(keep);
+        const wb = titleWords(b).filter(keep);
 
         if (wa.length === 0 || wb.length === 0) {
             return 0;
@@ -6135,8 +6154,14 @@
         const both = wa.filter(function (w) {
             return wb.indexOf(w) >= 0;
         }).length;
+        const jaccard = both / (wa.length + wb.length - both);
 
-        return both / (wa.length + wb.length - both);
+        // Most of the shorter title in the longer one counts too, a title
+        // made again with a word or two changed
+        const shorter = Math.min(wa.length, wb.length);
+        const within = shorter >= 2 ? 0.85 * both / shorter : 0;
+
+        return Math.max(jaccard, within);
     }
 
     // How much song b looks like another version of song a, and why
@@ -6178,6 +6203,18 @@
 
             score += 0.5;
             why.push("made together");
+        } else {
+
+            // Made a little after one another, likely made again from it
+            const apart = Math.abs((a.generate_at || 0) - (b.generate_at || 0));
+
+            if (a.generate_at > 0 && b.generate_at > 0 && apart <= SHORTLY_AFTER_SECONDS) {
+
+                score += 0.25;
+                why.push("made shortly after");
+            } else if (a.generate_at > 0 && b.generate_at > 0 && apart <= 3 * 3600) {
+                score += 0.1;
+            }
         }
 
         return { score: score, why: why };
@@ -36141,6 +36178,13 @@
             chip.style.borderColor = fold.setColor;
             chip.style.color = fold.setColor;
             chip.style.background = "rgba(255,255,255,0.06)";
+        }
+
+        // Opened, the chip is filled
+        if (open) {
+
+            chip.style.background = isSet ? fold.setColor : "#48e1eb";
+            chip.style.color = "#000";
         }
 
         chip.addEventListener("click", function (ev) {

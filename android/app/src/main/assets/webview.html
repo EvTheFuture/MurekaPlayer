@@ -2124,6 +2124,17 @@
 
     /* In the number column of a fold's first song, so the title keeps its
        room, the same width whatever the count */
+    /* A set's chip in the set's color */
+    .foldChip[data-kind="set"] {
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    /* Opened, the chip is filled */
+    .foldChip[data-open="1"] {
+        background: var(--chipColor);
+        color: #000;
+    }
+
     /* The arrow drawn, before the count */
     .foldChip .ico {
         display: inline-block;
@@ -2135,16 +2146,17 @@
     }
 
     .foldChip {
+        --chipColor: var(--accent);
         display: inline-block;
         box-sizing: border-box;
         width: 3em;
         padding: 0.5em 0;
-        border: 2px solid var(--accent);
+        border: 2px solid var(--chipColor);
         border-radius: 999px;
         background: rgba(72, 225, 235, 0.1);
-        color: var(--accent);
-        font-weight: 600;
+        color: var(--chipColor);
         font: inherit;
+        font-weight: 600;
         font-size: 0.8em;
         line-height: 1;
         text-align: center;
@@ -13562,10 +13574,7 @@
         chip.dataset.count = String(isSet ? song.setCount : song.run);
 
         if (isSet) {
-
-            chip.style.borderColor = song.setColor;
-            chip.style.color = song.setColor;
-            chip.style.background = "rgba(255, 255, 255, 0.06)";
+            chip.style.setProperty("--chipColor", song.setColor);
         }
 
         paintFoldChip(chip, isSet ? song.setOpen === true : song.runOpen === true);
