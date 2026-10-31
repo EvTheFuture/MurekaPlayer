@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.42";
+    const VERSION = "2.0.0.43";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12788,6 +12788,9 @@
             resumeIosCtx("playing");
             closeHeldAsk("closed, the song plays");
 
+            // Told once the engine has settled
+            setTimeout(noteHeardLag, 1500);
+
             if (isIosLike() && anyFadeOn()) {
 
                 // A song a tap started a moment ago, fetched first say,
@@ -25448,7 +25451,8 @@
 
         lyricBox.style.display = "block";
 
-        const ms = isFinite(audio.currentTime) ? audio.currentTime * 1000 : 0;
+        // The line heard, not the one the song's clock has reached
+        const ms = isFinite(audio.currentTime) ? songTimes().at * 1000 : 0;
 
         // The rows are sorted, take the last one that has started
         let idx = -1;
@@ -27170,10 +27174,59 @@
     // Where the song is and how long it is: from the audio while it is
     // loaded, else for a restored song where it was left and the length
     // Mureka gives, so the times and the waveform show before Play
+    // How far behind the song's own clock the sound is heard, in seconds.
+    // A song going through a sound engine, for the fades on an iPhone or a
+    // sound profile, reaches the speaker that much later, Bluetooth more so,
+    // as far as the engine tells. 0 when it plays on its own
+    function heardLag() {
+
+        let ctx = null;
+
+        if (iosGain && iosCtx) {
+            ctx = iosCtx;
+        } else if (fxCtx && fxEl === audio) {
+            ctx = fxCtx;
+        }
+
+        if (!ctx || ctx.state !== "running") {
+            return 0;
+        }
+
+        const base = Number(ctx.baseLatency) || 0;
+        const out = Number(ctx.outputLatency) || 0;
+
+        return Math.max(0, Math.min(3, base + out));
+    }
+
+    // The engine's lag in the log whenever it changes by more than a bit
+    let lagLogged = -1;
+
+    function noteHeardLag() {
+
+        const lag = heardLag();
+
+        if (Math.abs(lag - lagLogged) < 0.05) {
+            return;
+        }
+
+        lagLogged = lag;
+
+        const ctx = iosGain && iosCtx ? iosCtx : fxCtx;
+
+        dbgLog("Audio", "heard " + Math.round(lag * 1000) + " ms after the song's own clock"
+            + (ctx ? ", engine base " + Math.round((Number(ctx.baseLatency) || 0) * 1000) + " ms, output "
+                + (ctx.outputLatency === undefined ? "not told" : Math.round((Number(ctx.outputLatency) || 0) * 1000) + " ms") : ""));
+    }
+
+    // Where the song is and how long it is. While it plays, the place heard,
+    // so the waveform and the time go with the sound
     function songTimes() {
 
         if (audio && audio.src && isFinite(audio.duration) && audio.duration > 0) {
-            return { at: isFinite(audio.currentTime) ? audio.currentTime : 0, length: audio.duration };
+
+            const at = isFinite(audio.currentTime) ? audio.currentTime : 0;
+
+            return { at: audio.paused ? at : Math.max(0, at - heardLag()), length: audio.duration };
         }
 
         const song = restoredSong();
@@ -34412,6 +34465,7 @@
             + " | ready " + audio.readyState + " net " + audio.networkState
             + " | src " + src
             + " | vol " + dbgNum(audio.volume) + (audio.muted ? " muted" : "")
+            + " | heard after " + Math.round(heardLag() * 1000) + " ms"
             + (audio.error ? " | error " + audio.error.code : "");
     }
 
