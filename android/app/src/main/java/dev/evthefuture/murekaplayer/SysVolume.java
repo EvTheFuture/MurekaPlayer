@@ -25,6 +25,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
@@ -40,6 +41,14 @@ final class SysVolume {
     private static final long CHECK_MS = 3000;
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    // Android's own media volume curve, the step in percent of the highest
+    // and its level in dB, for an output that gives no curve of its own
+    private static final float[][] MEDIA_CURVE = { { 1, -58 }, { 20, -40 }, { 60, -17 }, { 100, 0 } };
+
+    // A curve spanning less than this is taken as none, as over Bluetooth
+    // with absolute volume, where the speaker turns the sound down itself
+    private static final float CURVE_MIN_SPAN_DB = 10;
 
     private static Context appContext;
     private static AudioManager audio;
@@ -138,5 +147,133 @@ final class SysVolume {
         } catch (RuntimeException e) {
             // Do not disturb can refuse the change, so leave it as it was
         }
+    }
+
+    // Lower the volume by about the dB given, by the levels Android gives
+    // the steps of the output in use, never below the lowest step above
+    // silent. The answer as JSON: the step before, the step after and the
+    // highest step, or empty when nothing could be done
+    static String lowerBy(float db) {
+
+        if (audio == null || !(db > 0)) {
+            return "{}";
+        }
+
+        try {
+
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            int cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            int want = cur;
+
+            if (max > 0 && cur > 1) {
+
+                int type = outputType();
+                boolean own = hasCurve(type, max);
+                float goal = stepDb(cur, max, type, own) - db;
+                float best = Float.MAX_VALUE;
+
+                // The step closest to the level wanted
+                for (int i = 1; i <= cur; i++) {
+
+                    float off = Math.abs(stepDb(i, max, type, own) - goal);
+
+                    if (off < best) {
+
+                        best = off;
+                        want = i;
+                    }
+                }
+
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, want, 0);
+            }
+
+            int now = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+
+            Hub.setVolume(now, max);
+
+            return "{\"from\":" + cur + ",\"to\":" + now + ",\"max\":" + max + "}";
+        } catch (RuntimeException e) {
+
+            // Do not disturb can refuse the change
+            return "{}";
+        }
+    }
+
+    // The kind of output the music most likely plays on: Bluetooth, then
+    // headphones, else the speaker
+    private static int outputType() {
+
+        int found = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+        int rank = 0;
+
+        for (AudioDeviceInfo d : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+
+            int t = d.getType();
+            int r = 0;
+
+            if (t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLE_HEADSET
+                || t == AudioDeviceInfo.TYPE_BLE_SPEAKER) {
+                r = 3;
+            } else if (t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == AudioDeviceInfo.TYPE_WIRED_HEADSET
+                || t == AudioDeviceInfo.TYPE_USB_HEADSET) {
+                r = 2;
+            }
+
+            if (r > rank) {
+
+                rank = r;
+                found = t;
+            }
+        }
+
+        return found;
+    }
+
+    // Whether the output has a volume curve of its own worth going by
+    private static boolean hasCurve(int type, int max) {
+
+        try {
+
+            float low = audio.getStreamVolumeDb(AudioManager.STREAM_MUSIC, 1, type);
+            float high = audio.getStreamVolumeDb(AudioManager.STREAM_MUSIC, max, type);
+
+            return !Float.isNaN(low) && !Float.isInfinite(low) && !Float.isNaN(high)
+                && !Float.isInfinite(high) && high - low >= CURVE_MIN_SPAN_DB;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    // The level of a step in dB, from the output's own curve or Android's
+    // usual media curve
+    private static float stepDb(int index, int max, int type, boolean own) {
+
+        if (own) {
+
+            try {
+                return audio.getStreamVolumeDb(AudioManager.STREAM_MUSIC, index, type);
+            } catch (RuntimeException e) {
+                // Falls back to the usual curve below
+            }
+        }
+
+        float pct = index * 100f / max;
+
+        if (pct <= MEDIA_CURVE[0][0]) {
+            return MEDIA_CURVE[0][1];
+        }
+
+        for (int i = 1; i < MEDIA_CURVE.length; i++) {
+
+            if (pct <= MEDIA_CURVE[i][0]) {
+
+                float[] a = MEDIA_CURVE[i - 1];
+                float[] b = MEDIA_CURVE[i];
+
+                return a[1] + (b[1] - a[1]) * (pct - a[0]) / (b[0] - a[0]);
+            }
+        }
+
+        return 0;
     }
 }

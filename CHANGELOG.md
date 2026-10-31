@@ -20,11 +20,13 @@ In development.
   set's oldest song, a month unless set otherwise on the Song sets page,
   is offered but not ticked. Add puts the ticked ones in the
   set. Lyrics count for songs played or opened in the player before, and
-  only when they have more than a few words. In the list a set sits where
-  its newest song was made, with a chip in the set's color showing how
-  many songs it holds. Its songs go newest first, so new versions come on
-  top and a folded set shows the latest, the two of one generation in the
-  order Mureka made them, each with a bar of the set's color. A done set
+  only when they have more than a few words. In the list a set of
+  several songs sits where its newest song was made, under a head row
+  like the Sets view's, with its name, how many songs, how many public,
+  the best rating and the day, and its menu. A tap on the head opens or
+  folds it. Its songs go newest first, so new versions come on top, the
+  two of one generation in the order Mureka made them, each with a bar
+  of the set's color. A done set
   shows its kept and best rated song first instead. A queue made from the list plays a set's songs
   one after another. The playing song shows also in a folded set. The web
   view shows the sets the same way, and its song menu does all of the
@@ -70,20 +72,30 @@ In development.
   switches the sets off and on again: off, every song stands on its own
   in the list and the queue, and the sets are kept as they are. A pressed
   song keeps its set's color.
-- **Sound profiles and night mode.** A Sound page in the settings, on
+- **Sound profiles and night mode.** A Sound profiles page in the settings, on
   the phone and in the web view, holds profiles of five bands, bass, low
   mids, mids, high mids and treble, a volume that can go below the
   device's lowest step, and a compressor at three strengths that holds the
-  loud parts down. A profile can be marked a night profile. Each
+  loud parts down. The page lists the profiles, each with a line on what
+  it does and an Edit button that opens its editor, where the bands are
+  upright sliders side by side, heard at once while moved, also in the
+  web view. A profile can be marked a night profile. Each
   Bluetooth speaker gets a profile and a night profile, the device's own
   speaker and devices not set up one of each, and the profile follows the
   speaker connected. Night mode switches to the night profiles, from a
-  Night button for the button row, the menu or the Sound page, on the
+  Night button for the button row, the menu or the Sound profiles page, on the
   phone and in the web view. Off unless switched on, and not on an iPhone
   or iPad. Switched on during a song streamed from Mureka, the profile
   takes the next song. Only the sound played by the device running the
-  app goes through it, which the web view's Sound page says, not music
-  playing in a web view's browser.
+  app goes through it, which the web view's Sound profiles page says, not music
+  playing in a web view's browser. In the app, a night profile can ask,
+  as night mode goes off, whether to lower the device's volume as much as
+  the profile turned the song down, never below the lowest step, so the
+  song does not suddenly get loud. Night mode stays on until it is
+  answered.
+- **Settings in the web view answer at once.** A stepper's number moves
+  as soon as its minus or plus is pressed, as a switch already did, and
+  the device's reading follows.
 - **Notes.** A song's menu has Note, a few words kept with the song, shown
   in Information and in the menu, on the phone and in the web view. A trimmed song takes its original's
   note. Notes travel with song tweaks.
@@ -92,7 +104,7 @@ In development.
   every list view on the phone and in both lists of the web view. Several
   in a row fold under the first, whose number gives way to a button of
   one width with how many there are and an arrow that opens and folds
-  them, in the accent color, a set's in its own color, filled while open. A fold opens also
+  them, in the accent color, filled while open. A fold opens also
   when its first song started playing since the list was drawn, and in
   the web view one the phone could not send right away is asked for again
   or closes with a note. A tap on one asks how to play it: Play now plays

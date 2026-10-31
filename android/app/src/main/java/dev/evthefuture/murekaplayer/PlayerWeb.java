@@ -1109,6 +1109,22 @@ final class PlayerWeb {
             return BtWatch.devices(appContext);
         }
 
+        // The media volume lowered by about the dB given, as night mode goes
+        // off. JSON with the step before, the step after and the highest
+        @JavascriptInterface
+        public String lowerVolume(String db) {
+
+            if (!onMureka) {
+                return "";
+            }
+
+            try {
+                return SysVolume.lowerBy(Float.parseFloat(db));
+            } catch (NumberFormatException | NullPointerException e) {
+                return "{}";
+            }
+        }
+
         // The WireGuard tunnel named in the settings on or off by hand, to
         // try the hand over. "1" for on
         @JavascriptInterface

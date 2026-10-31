@@ -2097,7 +2097,8 @@
         user-select: none;
     }
 
-    #rows .row.inSet.setSong {
+    #rows .row.inSet.setSong,
+    #miniRows .row.inSet.setSong {
         margin-left: 12px;
         width: calc(100% - 12px);
     }
@@ -2250,6 +2251,21 @@
     .row.inSet.menuFor {
         box-shadow: inset 4px 0 0 var(--setColor, transparent), inset 0 0 0 999px rgba(72, 225, 235, 0.16);
         box-shadow: inset 4px 0 0 var(--setColor, transparent), inset 0 0 0 999px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+    /* Under a set's head the bar sits just outside the row, in the room the
+       row is set in by, clear of the dot at its start */
+    #rows .row.inSet.setSong,
+    #miniRows .row.inSet.setSong {
+        box-shadow: -4px 0 0 var(--setColor, transparent);
+    }
+
+    #rows .row.inSet.setSong.pressing,
+    #rows .row.inSet.setSong.menuFor,
+    #miniRows .row.inSet.setSong.pressing,
+    #miniRows .row.inSet.setSong.menuFor {
+        box-shadow: -4px 0 0 var(--setColor, transparent), inset 0 0 0 999px rgba(72, 225, 235, 0.16);
+        box-shadow: -4px 0 0 var(--setColor, transparent), inset 0 0 0 999px color-mix(in srgb, var(--accent) 16%, transparent);
     }
 
     /* Where a song is in the list shown, #1 at the top, small and faint in
@@ -3402,6 +3418,7 @@
 
     .pSelArrow {
         flex: 0 0 auto;
+        margin-left: auto;
         display: flex;
         color: var(--muted);
     }
@@ -3523,6 +3540,55 @@
         display: block;
         width: 100%;
         box-sizing: border-box;
+    }
+
+    /* The bands of a sound profile, upright sliders side by side, the level
+       above each and its name under it */
+    .pEq {
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        width: 100%;
+        max-width: 520px;
+        padding: 6px 0;
+    }
+
+    .pEqBand {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .pEqLevel {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+    }
+
+    .pEqWrap {
+        position: relative;
+        width: 44px;
+        height: 180px;
+    }
+
+    /* Turned on its side, top up, so it works the same in every browser */
+    .pEqSlider {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 180px;
+        margin: 0;
+        transform: translate(-50%, -50%) rotate(-90deg);
+        accent-color: var(--accent);
+    }
+
+    .pEqName {
+        font-size: 0.75em;
+        color: var(--muted);
+        text-align: center;
+        line-height: 1.25;
     }
 
     .pStep {
@@ -12097,6 +12163,14 @@
             rowMeta = data.meta || rowMeta;
 
             data.songs.forEach(function (song, i) {
+
+                // A set's head, as in the Sets view
+                if (song.kind === "set") {
+
+                    $("rows").appendChild(makeSetRow(song, keepListPlace, openSets));
+                    return;
+                }
+
                 $("rows").appendChild(makeRow(song, first + i + 1));
             });
 
@@ -12169,6 +12243,47 @@
 
     function atListTop(box) {
         return box.scrollTop <= 4;
+    }
+
+    // A set opened or folded in a list: read again as far as it was, and
+    // left where it was
+    function keepListPlace() {
+
+        const box = $("rows");
+        const keep = box.scrollTop;
+        const want = Math.max(listLoaded, PAGE);
+        const more = function () {
+
+            if (listLoaded < want && listLoaded < listTotal) {
+
+                loadList(false, more);
+                return;
+            }
+
+            quietScroll();
+            box.scrollTop = keep;
+        };
+
+        loadList(true, more);
+    }
+
+    function keepMiniPlace() {
+
+        const box = $("miniRows");
+        const keep = box.scrollTop;
+        const want = Math.max(miniLoaded, PAGE);
+        const more = function () {
+
+            if (miniLoaded < want && miniLoaded < miniTotal) {
+
+                loadMini(false, more);
+                return;
+            }
+
+            box.scrollTop = keep;
+        };
+
+        loadMini(true, more, Math.min(200, want));
     }
 
     function refreshList() {
@@ -13864,6 +13979,11 @@
             row.style.setProperty("--setColor", song.setColor);
         }
 
+        // Under its set's head in a list, set in as in the Sets view
+        if (song.setSong) {
+            row.classList.add("setSong");
+        }
+
         if (song.setMember) {
             row.dataset.setOf = song.setId;
         }
@@ -14080,7 +14200,11 @@
 
     // One set: a tap opens or folds it, a hold or the button at its end
     // shows what can be done with it
-    function makeSetRow(item, reload) {
+    // opened: the sets opened where the row is, the Sets view's own or the
+    // song lists'
+    function makeSetRow(item, reload, opened) {
+
+        const openHere = opened || setsViewOpen;
 
         const row = document.createElement("div");
         const arrow = document.createElement("span");
@@ -14125,10 +14249,10 @@
                 return;
             }
 
-            if (setsViewOpen.has(item.setId)) {
-                setsViewOpen.delete(item.setId);
+            if (openHere.has(item.setId)) {
+                openHere.delete(item.setId);
             } else {
-                setsViewOpen.add(item.setId);
+                openHere.add(item.setId);
             }
 
             reload();
@@ -15415,7 +15539,7 @@
             const same = data && data.items && JSON.stringify(data.items) === panelDrawn
                 && $("panelBody").childElementCount > 0;
 
-            if (data && data.items && panelOpen() && !typing && !editorBusy && acts === panelActs && name === panelName && !same) {
+            if (data && data.items && panelOpen() && !typing && !editorBusy && !eqMoving && acts === panelActs && name === panelName && !same) {
                 renderPanel(data.items);
             }
 
@@ -15436,6 +15560,55 @@
         });
     }
 
+    // The range and step of a stepper's number, kept with it
+    function stepperLimits(el, node) {
+
+        el.dataset.min = String(node.min || "");
+        el.dataset.max = String(node.max || "");
+        el.dataset.step = String(node.step || "");
+    }
+
+    // The number between a stepper's minus and plus moved one step at once,
+    // the reading from the phone follows and puts it right
+    function nudgeStepper(btn, dir) {
+
+        const num = btn.parentElement ? btn.parentElement.querySelector(".pNum") : null;
+
+        if (!num || num.dataset.step === undefined) {
+            return;
+        }
+
+        const field = num.tagName === "INPUT";
+        const now = Number(field ? num.value : num.textContent);
+        const step = Number(num.dataset.step) || 1;
+        const min = num.dataset.min === "" ? NaN : Number(num.dataset.min);
+        const max = num.dataset.max === "" ? NaN : Number(num.dataset.max);
+
+        if (!isFinite(now) || (field ? num.value : num.textContent).trim() === "") {
+            return;
+        }
+
+        let v = now + dir * step;
+
+        if (isFinite(min)) {
+            v = Math.max(min, v);
+        }
+
+        if (isFinite(max)) {
+            v = Math.min(max, v);
+        }
+
+        // Rounded to the step, so a step of 0.1 never shows a long tail
+        const places = (String(step).split(".")[1] || "").length;
+        const text = String(Number(v.toFixed(places)));
+
+        if (field) {
+            num.value = text;
+        } else {
+            num.textContent = text;
+        }
+    }
+
     // Each page of a panel as last read, drawn at once when it is opened
     // again or gone back to, and then brought up to date from the phone
     const panelPages = {};
@@ -15451,8 +15624,10 @@
         const text = String(label || "").replace(/\s+/g, " ").trim();
         let target = null;
 
-        if (text.indexOf("\u2039") === 0) {
+        if (text === "\u2039 Back") {
             target = "main";
+        } else if (text.indexOf("\u2039") === 0) {
+            target = text.replace(/^\u2039\s*/, "").trim();
         } else if (/\u203A$/.test(text)) {
             target = text.replace(/\s*\u203A$/, "").trim();
         }
@@ -15604,6 +15779,8 @@
             for (const sb of $("panelBody").querySelectorAll(".pSelBox")) {
                 paintSelectBox(sb);
             }
+
+            evenSelectBoxes($("panelBody"));
         }
     });
 
@@ -15855,6 +16032,28 @@
         for (const sb of box.querySelectorAll(".pSelBox")) {
             paintSelectBox(sb);
         }
+
+        evenSelectBoxes(box);
+    }
+
+    // Every drop-down beside a name as wide as the widest on the page, so
+    // they line up, never wider than a drop-down may be
+    function evenSelectBoxes(box) {
+
+        const boxes = Array.from(box.querySelectorAll(".pRow > .pSelBox"));
+        let widest = 0;
+
+        for (const sb of boxes) {
+            sb.style.minWidth = "";
+        }
+
+        for (const sb of boxes) {
+            widest = Math.max(widest, sb.getBoundingClientRect().width);
+        }
+
+        for (const sb of boxes) {
+            sb.style.minWidth = "min(" + Math.ceil(widest) + "px, 62%)";
+        }
     }
 
     function panelNode(node, hasButtons, top) {
@@ -15925,6 +16124,7 @@
             field.style.flex = "0 0 auto";
             field.value = was;
             field.setAttribute("aria-label", "Value");
+            stepperLimits(field, node);
 
             field.addEventListener("change", function () {
 
@@ -15962,6 +16162,7 @@
             shown.className = "pText pNum";
             shown.style.flex = "0 0 auto";
             shown.textContent = node.value === "" ? "-" : String(node.value);
+            stepperLimits(shown, node);
 
             return shown;
         }
@@ -16065,6 +16266,11 @@
                     btn.classList.toggle("on", on);
                 }
 
+                // So does a stepper's number
+                if (node.s === "+" || node.s === "-") {
+                    nudgeStepper(btn, node.s === "+" ? 1 : -1);
+                }
+
                 panelJump(node.s);
                 panelAction("hclick", node.id);
             });
@@ -16106,6 +16312,10 @@
 
         if (node.t === "controls") {
             return controlEditor(node);
+        }
+
+        if (node.t === "eq") {
+            return panelEq(node);
         }
 
         const text = document.createElement("div");
@@ -16215,6 +16425,97 @@
     // the lower one what is not shown. Drag a button to move it, or tap it
     // to move it to the other row. Every change is saved on the phone
     let editorBusy = false;
+
+    // A band of a sound profile being moved: the page is not drawn again
+    // under the finger, and the phone hears the level while it moves, a
+    // few times a second
+    let eqMoving = false;
+    const EQ_SEND_MS = 150;
+
+    window.addEventListener("pointerup", function () {
+        eqMoving = false;
+    });
+    window.addEventListener("pointercancel", function () {
+        eqMoving = false;
+    });
+
+    function panelEq(node) {
+
+        const box = document.createElement("div");
+
+        box.className = "pEq";
+
+        for (const b of node.bands || []) {
+
+            const col = document.createElement("div");
+            const level = document.createElement("div");
+            const wrap = document.createElement("div");
+            const slider = document.createElement("input");
+            const name = document.createElement("div");
+            const freq = document.createElement("div");
+            let sentAt = 0;
+            let later = 0;
+
+            const show = function () {
+
+                const v = Number(slider.value) || 0;
+
+                level.textContent = (v > 0 ? "+" : "") + v;
+            };
+            const tell = function () {
+
+                sentAt = Date.now();
+                send("hset", { id: b.id, value: slider.value });
+            };
+
+            col.className = "pEqBand";
+            level.className = "pEqLevel";
+            wrap.className = "pEqWrap";
+            slider.className = "pEqSlider";
+            name.className = "pEqName";
+            freq.className = "pEqName";
+            slider.type = "range";
+            slider.min = String(b.min);
+            slider.max = String(b.max);
+            slider.step = String(b.step || 1);
+            slider.value = String(b.value);
+            slider.setAttribute("aria-label", b.label + " " + b.freq + ", dB");
+            name.textContent = b.label;
+            freq.textContent = b.freq;
+            show();
+
+            slider.addEventListener("pointerdown", function () {
+                eqMoving = true;
+            });
+            slider.addEventListener("input", function () {
+
+                show();
+                clearTimeout(later);
+
+                if (Date.now() - sentAt >= EQ_SEND_MS) {
+                    tell();
+                } else {
+                    later = setTimeout(tell, EQ_SEND_MS);
+                }
+            });
+            slider.addEventListener("change", function () {
+
+                clearTimeout(later);
+                eqMoving = false;
+                show();
+                panelAction("hset", { id: b.id, value: slider.value });
+            });
+
+            wrap.appendChild(slider);
+            col.appendChild(level);
+            col.appendChild(wrap);
+            col.appendChild(name);
+            col.appendChild(freq);
+            box.appendChild(col);
+        }
+
+        return box;
+    }
 
     function controlEditor(node) {
 
@@ -18678,6 +18979,12 @@
             for (const song of data.songs) {
 
                 place += 1;
+
+                if (song.kind === "set") {
+
+                    $("miniRows").appendChild(makeSetRow(song, keepMiniPlace, openSets));
+                    continue;
+                }
 
                 const row = makeRow(song, place);
 
@@ -24925,7 +25232,7 @@
         openChoice(setAsking, (ask.options || []).map(function (o) {
 
             return {
-                icon: o.key === "new" ? "listPlus" : (o.key === "no" ? "close" : "sets"),
+                icon: o.icon || (o.key === "new" ? "listPlus" : (o.key === "no" ? "close" : "sets")),
                 label: o.label,
                 cls: o.color ? "setRing" : "",
                 color: o.color || "",

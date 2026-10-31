@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.33";
+    const VERSION = "2.0.0.42";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1869,6 +1869,12 @@
 
     // The settings page shown, main or one of the pages it opens
     let settingsPageNow = "main";
+
+    // The page one level up: a profile's editor goes back to Sound, the
+    // other pages to the main one
+    function settingsParent(name) {
+        return name === "soundedit" ? "sound" : "main";
+    }
 
     function showSettingsPage(name) {
 
@@ -6477,7 +6483,7 @@
 
         setAskSeq += 1;
 
-        const ask = { n: setAskSeq, title: title, text: text, options: options, songs: songs, el: null };
+        const ask = { n: setAskSeq, title: title, text: text, options: options, songs: songs, group: g, el: null };
 
         setAsk = ask;
         ask.el = askChoices(title + "\n" + text, options.map(function (o, i) {
@@ -6499,6 +6505,53 @@
         publishHostSoon();
     }
 
+    // Another question asked the way a set question is, here and in the
+    // web views, the first answer anywhere counts. A set question open
+    // meanwhile goes back in line. done gets the key of the answer, "" when
+    // the question is closed without one
+    function askLikeSets(title, text, options, done) {
+
+        const open = setAsk;
+
+        if (open) {
+
+            setAsk = null;
+
+            if (open.el && open.el.parentNode) {
+                open.el.remove();
+            }
+
+            if (open.group) {
+                setAskQueue.unshift(open.group);
+            } else if (open.done) {
+                open.done("");
+            }
+        }
+
+        setAskSeq += 1;
+
+        const ask = { n: setAskSeq, title: title, text: text, options: options, done: done, el: null };
+
+        setAsk = ask;
+        ask.el = askChoices(title + "\n" + text, options.map(function (o, i) {
+
+            return {
+                label: o.label,
+                ring: i > 0,
+                color: o.plain ? "#b8b8c0" : undefined,
+                fn: function () {
+                    finishSetAsk(ask.n, o.key);
+                }
+            };
+        }), function () {
+
+            if (ask.el) {
+                finishSetAsk(ask.n, "");
+            }
+        }, true, true);
+        publishHostSoon();
+    }
+
     // key: set: and its id, new, or no for not now
     function finishSetAsk(n, key) {
 
@@ -6512,6 +6565,15 @@
 
         if (ask.el && ask.el.parentNode) {
             ask.el.remove();
+        }
+
+        // Not about sets
+        if (ask.done) {
+
+            ask.done(String(key || ""));
+            publishHostSoon();
+            setTimeout(nextSetAsk, 400);
+            return;
         }
 
         const songs = ask.songs.filter(function (x) {
@@ -8054,6 +8116,67 @@
         }
 
         return out;
+    }
+
+    // A set of several songs in a song list gets a head row like the Sets
+    // view's, its name, how many songs and the rest, and its songs under it
+    // once opened. Folded, only the head shows, and the playing song under
+    // it. The songs under a head have no fold chip of their own
+    function withSetHeads(entries, playingId) {
+
+        if (!entries.some(function (e) {
+            return e.setCount > 1;
+        })) {
+            return entries;
+        }
+
+        const bySet = new Map(setsSorted().map(function (x) {
+            return [x.set.id, x];
+        }));
+        const out = [];
+
+        for (const e of entries) {
+
+            if (e.setCount > 1 && songSets.has(e.setId)) {
+
+                const open = e.setOpen === true;
+
+                out.push({
+                    setHead: true,
+                    open: open,
+                    entry: bySet.get(e.setId) || { set: songSets.get(e.setId), songs: [] }
+                });
+                e.setCount = 0;
+                e.setUnder = true;
+
+                if (!open && String(e.song.song_id) !== String(playingId)) {
+                    continue;
+                }
+            } else if (e.setMember) {
+                e.setUnder = true;
+            }
+
+            out.push(e);
+        }
+
+        return out;
+    }
+
+    // A set's head row for the web view, in the Sets view and the lists
+    function setHeadItem(e, open) {
+
+        return {
+            kind: "set",
+            setId: e.set.id,
+            name: e.set.name,
+            setColor: setMarkColor(e.set),
+            done: e.set.done === true,
+            meta: setRowMeta(e),
+            count: e.songs.length,
+            published: setPublicCount(e) > 0,
+            open: open,
+            firstId: e.songs.length > 0 ? String(e.songs[0].song_id) : ""
+        };
     }
 
     // The folds opened in the player's own list, by their first song
@@ -12154,6 +12277,7 @@
                 return num(bands[k], -12, 12);
             }),
             comp: o.comp === true,
+            askLower: o.askLower === true,
             compLevel: SOUND_COMP.some(function (c) {
                 return c.value === o.compLevel;
             }) ? o.compLevel : "medium"
@@ -12203,10 +12327,11 @@
 
                 const d = raw.devices[a] || {};
 
+                // "none" for no profile at all, "" for the same as this device
                 devices[a] = {
                     name: String(d.name || a).slice(0, 80),
-                    day: has(d.day) ? d.day : "",
-                    night: has(d.night) ? d.night : ""
+                    day: has(d.day) || d.day === "none" ? d.day : "",
+                    night: has(d.night) || d.night === "none" ? d.night : ""
                 };
             }
         }
@@ -12252,6 +12377,34 @@
         }
 
         return { profile: p, where: where, night: s.night };
+    }
+
+    // What a profile does, in a line under its name in the list
+    function soundProfileWords(p) {
+
+        const parts = [];
+        const comp = SOUND_COMP.find(function (c) {
+            return c.value === p.compLevel;
+        });
+
+        if (p.night) {
+            parts.push("night profile");
+        }
+
+        parts.push(p.gain === 0 ? "volume as it is" : "volume " + (p.gain > 0 ? "+" : "") + p.gain + " dB");
+        parts.push(p.bands.some(function (v) {
+            return v !== 0;
+        }) ? "EQ " + p.bands.map(function (v) {
+            return (v > 0 ? "+" : "") + v;
+        }).join(" ") : "EQ flat");
+
+        if (p.comp) {
+            parts.push((comp ? comp.label : "Medium").toLowerCase() + " compressor");
+        }
+
+        const line = parts.join(", ") + ".";
+
+        return line.charAt(0).toUpperCase() + line.slice(1);
     }
 
     function soundWords() {
@@ -12345,9 +12498,10 @@
         }
     }
 
-    // The profile in use set on the chain, smoothly. Off, or with nothing
-    // to do, the chain passes the song on as it is
-    function applySound() {
+    // The profile in use set on the chain, smoothly while a song plays and
+    // at once before one starts, so it is never heard on its way there.
+    // Off, or with nothing to do, the chain passes the song on as it is
+    function applySound(now) {
 
         if (fxCtx && fxCtx.state !== "running" && audio && !audio.paused) {
 
@@ -12366,15 +12520,47 @@
             return x.value === p.compLevel;
         }) : null;
         const t = fxCtx.currentTime;
+        const atOnce = now === true || !audio || audio.paused || fxCtx.state !== "running";
+        const put = function (param, v) {
+
+            if (atOnce) {
+
+                param.cancelScheduledValues(t);
+                param.value = v;
+            } else {
+                param.setTargetAtTime(v, t, 0.05);
+            }
+        };
 
         fxBands.forEach(function (b, i) {
-            b.gain.setTargetAtTime(p.bands[i], t, 0.05);
+            put(b.gain, p.bands[i]);
         });
 
-        fxComp.threshold.setTargetAtTime(c ? c.threshold : 0, t, 0.05);
-        fxComp.ratio.setTargetAtTime(c ? c.ratio : 1, t, 0.05);
-        fxComp.knee.setTargetAtTime(c ? c.knee : 0, t, 0.05);
-        fxOut.gain.setTargetAtTime(dbToGain(p.gain), t, 0.05);
+        put(fxComp.threshold, c ? c.threshold : 0);
+        put(fxComp.ratio, c ? c.ratio : 1);
+        put(fxComp.knee, c ? c.knee : 0);
+        put(fxOut.gain, dbToGain(p.gain));
+    }
+
+    // The sound profile in place before a song starts or plays on, so not a
+    // moment of the song is heard without it: the chain in, the profile's
+    // values set at once and the sound engine woken
+    function prepareSound() {
+
+        if (!sound().on || !soundOffered() || !audio) {
+            return;
+        }
+
+        if (wireSound()) {
+            applySound(true);
+        }
+
+        if (fxCtx && fxCtx.state !== "running") {
+
+            fxCtx.resume().catch(function () {
+                // Woken again once the song plays
+            });
+        }
     }
 
     // Something about the profiles changed: kept, put to work, and shown
@@ -12395,12 +12581,39 @@
         showToast(on ? "Sound profiles on, " + soundWords().replace(/\.$/, "") : "Sound profiles off", true);
     }
 
-    // Night mode on or off, sound profiles switched on with it
+    // The device's media volume can be lowered by the app
+    function lowerVolumeOffered() {
+        return isApkHost() && !!(window.MurekaHost && window.MurekaHost.lowerVolume);
+    }
+
+    // Night mode on or off, sound profiles switched on with it. Going off
+    // with a night profile that asks for it, the question comes first and
+    // night mode stays until it is answered, so the song does not get loud
+    // while waiting
     function setNight(on) {
 
         const s = sound();
+        const want = typeof on === "boolean" ? on : !s.night;
+        const was = activeSound();
 
-        s.night = typeof on === "boolean" ? on : !s.night;
+        if (s.night && !want && s.on && was.night && was.profile && was.profile.night
+            && was.profile.askLower && was.profile.gain < 0 && lowerVolumeOffered()) {
+
+            askNightOff(was.profile);
+            updateNightCtrlButton();
+
+            // A switch in the settings pressed shows night mode still on
+            setTimeout(function () {
+
+                settingsRefreshers.forEach(function (fn) {
+                    fn();
+                });
+                publishHostSoon();
+            }, 0);
+            return;
+        }
+
+        s.night = want;
 
         if (s.night && !s.on) {
             s.on = true;
@@ -12408,6 +12621,54 @@
 
         soundChanged();
         showToast(s.night ? "Night mode on, " + soundWords().replace(/^Night mode, /, "").replace(/\.$/, "") : "Night mode off", true);
+    }
+
+    // Night mode off, and the device's volume lowered by the night
+    // profile's volume first when the answer says so
+    function askNightOff(profile) {
+
+        const db = -profile.gain;
+
+        askLikeSets("Lower the volume?", "Night mode goes off and \"" + profile.name + "\" turned the song down " + db + " dB. The device's volume can go down as much, to its lowest step at most.", [
+            { key: "lower", label: "Lower the volume", icon: "speakerLow" },
+            { key: "keep", label: "Keep the volume", icon: "speaker" },
+            { key: "cancel", label: "Cancel", icon: "close", plain: true }
+        ], function (key) {
+
+            // Cancelled, night mode stays on
+            if (key !== "lower" && key !== "keep") {
+
+                updateNightCtrlButton();
+                publishHostSoon();
+                return;
+            }
+
+            let r = {};
+
+            // Lowered first, so the song is not louder for a moment
+            if (key === "lower") {
+
+                try {
+                    r = JSON.parse(window.MurekaHost.lowerVolume(String(db)) || "{}");
+                } catch (e) {
+
+                    dbgLog("Sound", "volume not lowered: " + errText(e));
+                    r = {};
+                }
+            }
+
+            sound().night = false;
+            soundChanged();
+
+            if (key === "lower" && r && r.max > 0) {
+
+                dbgLog("Sound", "night mode off, volume " + r.from + " to " + r.to + " of " + r.max);
+                showToast(r.to < r.from ? "Night mode off, volume " + r.to + " of " + r.max : "Night mode off, the volume was at its lowest step", true);
+                return;
+            }
+
+            showToast("Night mode off", true);
+        });
     }
 
     // The connected Bluetooth device the profiles go by: the first with a
@@ -12488,6 +12749,12 @@
         }
 
         audio = new Audio();
+
+        // Asked for with CORS from the start while sound profiles are on, so
+        // the first song streamed can go through the profile as well
+        if (sound().on && soundOffered()) {
+            audio.crossOrigin = "anonymous";
+        }
 
         // The element can be replaced after Safari's sound engine stopped
         // passing its sound on, the one replaced then has no say any more
@@ -15968,6 +16235,19 @@
         publishHostSoon();
         dbgLog("Song", "fading out over " + (ms / 1000) + " s for the new song");
 
+        // On the gain the ramp is left to the sound engine, so it stays
+        // smooth however busy the page is meanwhile. The timer then only
+        // watches for a change and for the end
+        if (iosGain) {
+
+            const g = iosGain.gain;
+            const t = iosCtx.currentTime;
+
+            g.cancelScheduledValues(t);
+            g.setValueAtTime(start, t);
+            g.linearRampToValueAtTime(0, t + ms / 1000);
+        }
+
         fade.timer = setInterval(function () {
 
             // Another song or a pause meanwhile: the fade is called off and
@@ -15982,12 +16262,16 @@
 
             const k = Math.min(1, (Date.now() - t0) / ms);
 
-            setFadeLevel(Math.max(0, start * (1 - k)));
-
             if (k < 1) {
+
+                if (!iosGain) {
+                    setFadeLevel(Math.max(0, start * (1 - k)));
+                }
+
                 return;
             }
 
+            setFadeLevel(0);
             clearInterval(fade.timer);
             readyFade = null;
             hostFade = null;
@@ -19049,6 +19333,7 @@
 
         userPaused = false;
         resumeIosCtx("play");
+        prepareSound();
 
         const started = audio.play();
 
@@ -30244,6 +30529,10 @@
             }
         }
 
+        if (!runOf && !setOf) {
+            rows = withSetHeads(rows, playingId);
+        }
+
         const pageEnd = runOf || setOf ? rows.length : offset + limit;
 
         // Each row's place among the songs the filters let through, the
@@ -30252,6 +30541,18 @@
         let place = 0;
 
         for (const e of rows) {
+
+            // A set's head, as in the Sets view
+            if (e.setHead) {
+
+                total += 1;
+
+                if (total - 1 >= offset && total <= pageEnd) {
+                    songs.push(setHeadItem(e.entry, e.open));
+                }
+
+                continue;
+            }
 
             const song = e.song;
             const title = (song.title || "").trim() || "Untitled";
@@ -30314,6 +30615,7 @@
                 setCount: e.setCount || 0,
                 setOpen: e.setOpen === true,
                 setMember: e.setMember === true,
+                setSong: e.setUnder === true,
 
                 // How many left out songs follow it up to the next match,
                 // for the choices that take all of them
@@ -30368,18 +30670,7 @@
 
             const open = opened.has(e.set.id);
 
-            rows.push({
-                kind: "set",
-                setId: e.set.id,
-                name: e.set.name,
-                setColor: setMarkColor(e.set),
-                done: e.set.done === true,
-                meta: setRowMeta(e),
-                count: e.songs.length,
-                published: setPublicCount(e) > 0,
-                open: open,
-                firstId: e.songs.length > 0 ? String(e.songs[0].song_id) : ""
-            });
+            rows.push(setHeadItem(e, open));
 
             for (const x of e.songs) {
 
@@ -30549,6 +30840,30 @@
                 which: el.dataset.hostControls,
                 active: hostControls(el.dataset.hostControls),
                 all: controlNamesFor(el.dataset.hostControls).slice()
+            });
+            return;
+        }
+
+        // The bands of a sound profile, drawn by the web view as sliders of
+        // its own, each set through the phone's slider by its place
+        if (el.dataset.hostEq) {
+
+            out.push({
+                t: "eq",
+                bands: Array.from(el.children).map(function (col, i) {
+
+                    const slider = col.querySelector("input");
+
+                    return {
+                        id: path + "." + i + ".1.0",
+                        label: col.dataset.eqLabel || "",
+                        freq: col.dataset.eqFreq || "",
+                        value: slider ? slider.value : "0",
+                        min: slider ? slider.min : "-12",
+                        max: slider ? slider.max : "12",
+                        step: slider ? slider.step : "1"
+                    };
+                })
             });
             return;
         }
@@ -36876,7 +37191,11 @@
         }, true);
     }
 
-    function buildSetRow(entry, open) {
+    // opened: the sets opened where the row is, the Sets view's own or
+    // the song list's
+    function buildSetRow(entry, open, opened) {
+
+        const openSets = opened || setsViewOpen;
 
         const set = entry.set;
         const row = document.createElement("div");
@@ -36925,10 +37244,10 @@
 
             const top = listEl ? listEl.scrollTop : 0;
 
-            if (setsViewOpen.has(set.id)) {
-                setsViewOpen.delete(set.id);
+            if (openSets.has(set.id)) {
+                openSets.delete(set.id);
             } else {
-                setsViewOpen.add(set.id);
+                openSets.add(set.id);
             }
 
             renderList();
@@ -37520,6 +37839,14 @@
         for (let k = lazyRendered; k < end; k += 1) {
 
             const entry = lazyRows[k];
+
+            // The head of a set, opened and folded in place
+            if (entry.setHead) {
+
+                frag.appendChild(buildSetRow(entry.entry, entry.open, openedSets));
+                continue;
+            }
+
             const song = entry.song;
 
             let isPlaying;
@@ -37541,6 +37868,11 @@
 
             const item = buildSongRow(song, lazyState.numberById.get(song.song_id), isPlaying, dimmed,
                 lazyState.byQueueIndex ? entry.index : -1, lazyState.byQueueIndex ? null : entry);
+
+            // Under its set's head, set in like the Sets view
+            if (entry.setUnder) {
+                item.style.marginLeft = "10px";
+            }
 
             if (isPlaying) {
                 playingItemEl = item;
@@ -37639,6 +37971,10 @@
             visible = foldLeftOut(visible, openedRuns, playingId === null ? "" : String(playingId));
         }
 
+        if (listView !== "queue") {
+            visible = withSetHeads(visible, playingId === null ? "" : String(playingId));
+        }
+
         // A different view, filter or search starts from the top again. The
         // same one keeps as many rows as had been built, so a redraw does not
         // pull the list up from under someone who had scrolled down
@@ -37662,6 +37998,10 @@
         let target = Math.max(RENDER_CHUNK, lazyKeep);
 
         const playingAt = visible.findIndex(function (entry) {
+
+            if (entry.setHead) {
+                return false;
+            }
 
             return byQueueIndex
                 ? entry.index === queuePos
@@ -39198,6 +39538,7 @@
         const playbackPage = makePage();
         const nowPage = makePage();
         const soundPage = makePage();
+        const soundEditPage = makePage();
         const publishPage = makePage();
         const setsPage = makePage();
         const cachePage = makePage();
@@ -39217,6 +39558,7 @@
             playback: playbackPage,
             nowplaying: nowPage,
             sound: soundPage,
+            soundedit: soundEditPage,
             publishing: publishPage,
             sets: setsPage,
             cache: cachePage,
@@ -41700,8 +42042,8 @@
 
             const sd = sound();
             const devs = isApkHost() ? soundDevices() : [];
-            const key = JSON.stringify([soundEditId, sd.profiles.map(function (x) {
-                return [x.id, x.name, x.night];
+            const key = JSON.stringify([sd.profiles.map(function (x) {
+                return [x.id, x.name, soundProfileWords(x)];
             }), devs.map(function (d) {
                 return d.address + d.name;
             })]);
@@ -41719,11 +42061,6 @@
                 return;
             }
 
-            if (!soundProfile(soundEditId)) {
-                soundEditId = sd.profiles[0].id;
-            }
-
-            const edit = soundProfile(soundEditId);
             const now = makeHint(soundWords());
 
             settingsRefreshers.push(function () {
@@ -41738,7 +42075,7 @@
             webNote.style.display = "none";
             soundBox.appendChild(webNote);
             soundBox.appendChild(makeLabel("In use"));
-            soundBox.appendChild(withHint(makeBoolRow("Sound profiles",
+            soundBox.appendChild(withHint(makeBoolRow("Use sound profiles",
                 function () { return sound().on; },
                 function (v) { setSoundOn(v); }),
                 "The song goes through the profile of the speaker in use. Switched on during a song streamed from Mureka, the profile takes the next song."));
@@ -41748,144 +42085,52 @@
                 "Each speaker's night profile instead, quieter for sleeping. The Night button for the button row and the menu switch it too."));
             soundBox.appendChild(now);
 
-            // The profile to edit, and making or removing one
+            // The profiles, each with what it does and a way to its editor
             soundBox.appendChild(makeLabel("Profiles"));
 
-            const pick = makeDropRow("Profile to edit", sd.profiles.map(function (x) {
-                return { value: x.id, label: x.name + (x.night ? " (night)" : "") };
-            }), function () { return soundEditId; }, function (v) {
+            for (const prof of sd.profiles) {
 
-                soundEditId = v;
-                drawSound();
-            });
+                const row = document.createElement("div");
+                const col = document.createElement("div");
+                const name = document.createElement("div");
+                const words = makeHint(soundProfileWords(prof));
+                const editBtn = makeButton("Edit", "#333", "#fff", function () {
+                    openSoundEdit(prof.id);
+                });
 
-            soundBox.appendChild(pick);
+                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px";
+                col.dataset.hostCol = "1";
+                name.textContent = prof.name;
+                name.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+                editBtn.style.flex = "0 0 auto";
+                editBtn.style.padding = "6px 14px";
+                col.appendChild(name);
+                col.appendChild(words);
+                row.appendChild(col);
+                row.appendChild(editBtn);
+                soundBox.appendChild(row);
+            }
 
-            const buttons = document.createElement("div");
-
-            buttons.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-            buttons.appendChild(makeButton("New profile", "#333", "#fff", function () {
+            const newBtn = makeButton("New profile", "#333", "#fff", function () {
 
                 const fresh = cleanProfile({ name: "Profile " + (sound().profiles.length + 1) }, sound().profiles.length);
 
                 sound().profiles.push(fresh);
-                soundEditId = fresh.id;
                 soundChanged();
-                drawSound();
-            }));
-            buttons.appendChild(makeButton("Copy profile", "#333", "#fff", function () {
-
-                const copy = cleanProfile(Object.assign({}, edit, { id: "", name: edit.name + " copy" }), sound().profiles.length);
-
-                sound().profiles.push(copy);
-                soundEditId = copy.id;
-                soundChanged();
-                drawSound();
-            }));
-            buttons.appendChild(makeButton("Delete profile", "#333", "#fff", function () {
-
-                const all = sound().profiles;
-
-                if (all.length <= 1) {
-
-                    showToast("The last profile stays", false);
-                    return;
-                }
-
-                sound().profiles = all.filter(function (x) {
-                    return x.id !== edit.id;
-                });
-
-                // Speakers using it take the device's profile instead
-                const sd2 = sound();
-
-                for (const a of Object.keys(sd2.devices)) {
-
-                    if (sd2.devices[a].day === edit.id) {
-                        sd2.devices[a].day = "";
-                    }
-
-                    if (sd2.devices[a].night === edit.id) {
-                        sd2.devices[a].night = "";
-                    }
-                }
-
-                sd2.clean = false;
-                sound();
-                soundEditId = "";
-                soundChanged();
-                drawSound();
-            }));
-            soundBox.appendChild(buttons);
-
-            // The profile itself
-            const nameRow = makeTextRow("Name", function () { return edit.name; }, function (v) {
-
-                edit.name = String(v || "").slice(0, 60) || "Profile";
-
-                // The drop-down follows the name as it is typed
-                const opt = Array.from(pick.__select.options).find(function (o) {
-                    return o.value === edit.id;
-                });
-
-                if (opt) {
-                    opt.textContent = edit.name + (edit.night ? " (night)" : "");
-                }
-
-                soundKey = "";
-                publishHostSoon();
+                openSoundEdit(fresh.id);
             });
 
-            soundBox.appendChild(nameRow);
-            soundBox.appendChild(withHint(makeBoolRow("Night profile",
-                function () { return edit.night; },
-                function (v) {
-
-                    edit.night = v;
-                    soundChanged();
-                    drawSound();
-                }), "Offered as a speaker's night profile, for night mode."));
-            soundBox.appendChild(withHint(makeStepperRow("Volume, dB",
-                function () { return edit.gain; },
-                function (v) {
-
-                    edit.gain = Math.max(-40, Math.min(12, Math.round(v)));
-                    soundChanged();
-                }, -40, 12, 1), "Below 0 turns the song down further than the device's lowest step, for sleeping. Above 0 can clip on loud songs."));
-
-            SOUND_BANDS.forEach(function (b, i) {
-
-                soundBox.appendChild(makeStepperRow(b.label + " (" + (b.f >= 1000 ? (b.f / 1000) + " kHz" : b.f + " Hz") + "), dB",
-                    function () { return edit.bands[i]; },
-                    function (v) {
-
-                        edit.bands[i] = Math.max(-12, Math.min(12, Math.round(v)));
-                        soundChanged();
-                    }, -12, 12, 1));
-            });
-
-            soundBox.appendChild(withHint(makeBoolRow("Compressor",
-                function () { return edit.comp; },
-                function (v) {
-
-                    edit.comp = v;
-                    soundChanged();
-                }), "Holds the loud parts down so the quiet ones can be heard at a lower volume."));
-            soundBox.appendChild(makeDropRow("Compressor strength", SOUND_COMP.map(function (c) {
-                return { value: c.value, label: c.label };
-            }), function () { return edit.compLevel; }, function (v) {
-
-                edit.compLevel = v;
-                soundChanged();
-            }));
+            newBtn.style.alignSelf = "flex-start";
+            soundBox.appendChild(newBtn);
 
             // Which profiles each speaker takes
             soundBox.appendChild(makeLabel("Speakers"));
-            soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Set to the device's, it takes those of This device."));
+            soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode."));
 
             const dayChoices = function (phone) {
 
-                const out = phone ? [] : [{ value: "", label: "The device's" }];
+                const out = phone ? [] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
 
                 return out.concat(sound().profiles.filter(function (x) {
                     return !x.night;
@@ -41895,7 +42140,7 @@
             };
             const nightChoices = function (phone) {
 
-                const out = [{ value: "", label: phone ? "None, the profile" : "The device's" }];
+                const out = phone ? [{ value: "", label: "None" }] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
 
                 return out.concat(sound().profiles.filter(function (x) {
                     return x.night;
@@ -41903,19 +42148,28 @@
                     return { value: x.id, label: x.name };
                 }));
             };
+            // The drop-downs all as wide, so they line up down the page
+            const even = function (row) {
+
+                if (row.__select) {
+                    row.__select.style.minWidth = "11em";
+                }
+
+                return row;
+            };
             const speaker = function (title, get, set, phone) {
 
                 soundBox.appendChild(makeSubLabel(title));
-                soundBox.appendChild(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
+                soundBox.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
 
                     set("day", v);
                     soundChanged();
-                }));
-                soundBox.appendChild(makeDropRow("Night profile", nightChoices(phone), function () { return get("night"); }, function (v) {
+                })));
+                soundBox.appendChild(even(makeDropRow("Night profile", nightChoices(phone), function () { return get("night"); }, function (v) {
 
                     set("night", v);
                     soundChanged();
-                }));
+                })));
             };
 
             speaker("This device and others not set up", function (k) {
@@ -41953,9 +42207,275 @@
             }
         };
 
+        // The editor of one profile, a page of its own under Sound. Drawn
+        // again whole only when the profile or what it offers changes, so a
+        // slider being moved stays under the finger
+        const soundEditBox = document.createElement("div");
+        let soundEditKey = "";
+
+        soundEditBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
+
+        const drawSoundEdit = function () {
+
+            const edit = soundProfile(soundEditId);
+
+            if (!edit) {
+
+                soundEditKey = "";
+                soundEditBox.textContent = "";
+
+                if (settingsPageNow === "soundedit") {
+                    showSettingsPage("sound");
+                }
+
+                return;
+            }
+
+            const key = JSON.stringify([edit.id, edit.night, lowerVolumeOffered(), sound().profiles.length]);
+
+            if (key === soundEditKey) {
+                return;
+            }
+
+            soundEditKey = key;
+            soundEditBox.textContent = "";
+
+            // The way back to Sound, and the profile's name beside it
+            const head = document.createElement("div");
+            const back = makeButton("\u2039  Sound profiles", "#333", "#fff", function () {
+                showSettingsPage("sound");
+            });
+            const title = document.createElement("span");
+
+            head.style.cssText = "display:flex;align-items:center;gap:10px";
+            back.style.flex = "0 0 auto";
+            back.style.padding = "6px 12px";
+            title.textContent = edit.name;
+            title.style.cssText = "font-weight:600";
+            head.appendChild(back);
+            head.appendChild(title);
+            soundEditBox.appendChild(head);
+
+            soundEditBox.appendChild(makeTextRow("Name", function () { return edit.name; }, function (v) {
+
+                edit.name = String(v || "").slice(0, 60) || "Profile";
+                title.textContent = edit.name;
+                saveSettings();
+                soundKey = "";
+                drawSound();
+                publishHostSoon();
+            }));
+            soundEditBox.appendChild(withHint(makeBoolRow("Night profile",
+                function () { return edit.night; },
+                function (v) {
+
+                    edit.night = v;
+                    soundChanged();
+                    drawSoundEdit();
+                }), "Offered as a speaker's night profile, for night mode."));
+            soundEditBox.appendChild(withHint(makeStepperRow("Volume, dB",
+                function () { return edit.gain; },
+                function (v) {
+
+                    edit.gain = Math.max(-40, Math.min(12, Math.round(v)));
+                    soundChanged();
+                }, -40, 12, 1), "Below 0 turns the song down further than the device's lowest step, for sleeping. Above 0 can clip on loud songs."));
+
+            // Only a night profile turned down is left by a jump up
+            if (edit.night && lowerVolumeOffered()) {
+
+                soundEditBox.appendChild(withHint(makeBoolRow("Ask to lower the volume",
+                    function () { return edit.askLower === true; },
+                    function (v) {
+
+                        edit.askLower = v;
+                        soundChanged();
+                    }), "When night mode goes off, asks whether to lower the device's volume as much as the volume above turns the song down, never below the lowest step. Only with the volume below 0."));
+            }
+
+            // The bands as upright sliders side by side, each with its level
+            // above and its name under it. Heard at once while moved, kept
+            // once let go. The web view draws its own from the same values
+            soundEditBox.appendChild(makeLabel("Equalizer"));
+
+            const eq = document.createElement("div");
+            const shown = [];
+
+            eq.dataset.hostEq = "1";
+            eq.style.cssText = "display:flex;justify-content:space-between;gap:4px;padding:4px 0";
+
+            SOUND_BANDS.forEach(function (b, i) {
+
+                const col = document.createElement("div");
+                const level = document.createElement("span");
+                const wrap = document.createElement("div");
+                const slider = document.createElement("input");
+                const name = document.createElement("span");
+                const freq = b.f >= 1000 ? (b.f / 1000) + " kHz" : b.f + " Hz";
+                const show = function () {
+
+                    const v = edit.bands[i];
+
+                    level.textContent = (v > 0 ? "+" : "") + v;
+                };
+
+                col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px";
+                col.dataset.eqLabel = b.label;
+                col.dataset.eqFreq = freq;
+                level.style.cssText = "font-size:13px;font-variant-numeric:tabular-nums;color:#fff";
+                wrap.style.cssText = "position:relative;width:36px;height:150px";
+                slider.type = "range";
+                slider.min = "-12";
+                slider.max = "12";
+                slider.step = "1";
+                slider.value = String(edit.bands[i]);
+                slider.setAttribute("aria-label", b.label + " " + freq + ", dB");
+
+                // Turned on its side, top up, so it works the same in every
+                // browser the player runs in
+                slider.style.cssText = "position:absolute;left:50%;top:50%;width:150px;margin:0;"
+                    + "transform:translate(-50%,-50%) rotate(-90deg);accent-color:#48e1eb";
+                name.textContent = b.label + "\n" + freq;
+                name.style.cssText = "font-size:11px;color:#999;text-align:center;line-height:1.3;white-space:pre-line";
+
+                slider.addEventListener("input", function () {
+
+                    edit.bands[i] = Math.max(-12, Math.min(12, Math.round(Number(slider.value) || 0)));
+                    show();
+                    applySound();
+                });
+                slider.addEventListener("change", function () {
+
+                    edit.bands[i] = Math.max(-12, Math.min(12, Math.round(Number(slider.value) || 0)));
+                    show();
+                    soundChanged();
+                });
+
+                show();
+                shown.push(function () {
+
+                    if (document.activeElement !== slider) {
+                        slider.value = String(edit.bands[i]);
+                    }
+
+                    show();
+                });
+
+                wrap.appendChild(slider);
+                col.appendChild(level);
+                col.appendChild(wrap);
+                col.appendChild(name);
+                eq.appendChild(col);
+            });
+
+            settingsRefreshers.push(function () {
+
+                for (const fn of shown) {
+                    fn();
+                }
+            });
+            soundEditBox.appendChild(eq);
+
+            const flat = makeButton("Flat", "#333", "#fff", function () {
+
+                edit.bands = SOUND_BANDS.map(function () {
+                    return 0;
+                });
+                soundChanged();
+
+                for (const fn of shown) {
+                    fn();
+                }
+            });
+
+            flat.style.alignSelf = "flex-start";
+            soundEditBox.appendChild(flat);
+
+            soundEditBox.appendChild(makeLabel("Compressor"));
+            soundEditBox.appendChild(withHint(makeBoolRow("Compressor",
+                function () { return edit.comp; },
+                function (v) {
+
+                    edit.comp = v;
+                    soundChanged();
+                }), "Holds the loud parts down so the quiet ones can be heard at a lower volume."));
+            soundEditBox.appendChild(makeDropRow("Compressor strength", SOUND_COMP.map(function (c) {
+                return { value: c.value, label: c.label };
+            }), function () { return edit.compLevel; }, function (v) {
+
+                edit.compLevel = v;
+                soundChanged();
+            }));
+
+            // Another like it, or this one gone
+            soundEditBox.appendChild(makeLabel("Profile"));
+
+            const buttons = document.createElement("div");
+
+            buttons.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+            buttons.appendChild(makeButton("Duplicate profile", "#333", "#fff", function () {
+
+                const copy = cleanProfile(Object.assign({}, edit, { id: "", bands: edit.bands.slice(), name: edit.name + " copy" }), sound().profiles.length);
+
+                sound().profiles.push(copy);
+                soundChanged();
+                openSoundEdit(copy.id);
+            }));
+            buttons.appendChild(makeButton("Delete profile", "#333", "#fff", function () {
+
+                const all = sound().profiles;
+
+                if (all.length <= 1) {
+
+                    showToast("The last profile stays", false);
+                    return;
+                }
+
+                sound().profiles = all.filter(function (x) {
+                    return x.id !== edit.id;
+                });
+
+                // Speakers using it take the device's profile instead
+                const sd2 = sound();
+
+                for (const a of Object.keys(sd2.devices)) {
+
+                    if (sd2.devices[a].day === edit.id) {
+                        sd2.devices[a].day = "";
+                    }
+
+                    if (sd2.devices[a].night === edit.id) {
+                        sd2.devices[a].night = "";
+                    }
+                }
+
+                sd2.clean = false;
+                sound();
+                soundEditId = "";
+                soundChanged();
+                showToast("Profile " + edit.name + " deleted", true);
+                showSettingsPage("sound");
+                drawSoundEdit();
+            }));
+            soundEditBox.appendChild(buttons);
+        };
+
+        // A profile's editor opened, drawn for it
+        const openSoundEdit = function (id) {
+
+            soundEditId = id;
+            soundEditKey = "";
+            soundKey = "";
+            drawSound();
+            drawSoundEdit();
+            showSettingsPage("soundedit");
+        };
+
         drawSound();
         settingsRefreshers.push(drawSound);
+        settingsRefreshers.push(drawSoundEdit);
         soundPage.appendChild(soundBox);
+        soundEditPage.appendChild(soundEditBox);
 
         // Each page opens with the way back and a word on what it holds
         const heads = [
@@ -41964,7 +42484,7 @@
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
-            [soundPage, "Sound", "Sound profiles: the bass, mids and treble, a volume below the device's lowest step and a compressor, a profile of its own and a night profile for each Bluetooth speaker."],
+            [soundPage, "Sound profiles", "The bass, mids and treble, a volume below the device's lowest step and a compressor, a profile of its own and a night profile for each Bluetooth speaker."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
             [setsPage, "Song sets", "The versions of a song kept together, to compare them and listen them through. Kept on this device and carried by song tweaks."],
             [chargerPage, "Charger and power", "What happens when the phone goes on battery, or chosen Bluetooth devices disconnect, and when that changes back. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
@@ -42020,7 +42540,7 @@
         mainPage.appendChild(makePageButton("Library", "library"));
         mainPage.appendChild(makePageButton("Playback", "playback"));
         mainPage.appendChild(makePageButton("Now playing", "nowplaying"));
-        mainPage.appendChild(makePageButton("Sound", "sound"));
+        mainPage.appendChild(makePageButton("Sound profiles", "sound"));
         mainPage.appendChild(makeLabel("Your songs"));
         mainPage.appendChild(makeHint("What happens when you publish or change songs of your own, and how their versions are kept together."));
         mainPage.appendChild(makePageButton("Publishing", "publishing"));
@@ -42075,7 +42595,7 @@
         swipeDownCloses(settingsEl, settingsEl, function () {
 
             if (settingsPageNow !== "main") {
-                showSettingsPage("main");
+                showSettingsPage(settingsParent(settingsPageNow));
             } else {
                 closeSettings();
             }
@@ -42106,7 +42626,7 @@
                 page.style.boxSizing = "border-box";
                 page.style.background = "#1d1d22";
                 page.style.zIndex = "2";
-                settingsPages.main.style.display = "flex";
+                settingsPages[settingsParent(settingsPageNow)].style.display = "flex";
             },
             drop: function (closed) {
 
@@ -42122,9 +42642,9 @@
                     page.style[p] = "";
                 }
 
-                // Snapped back, the main page goes out of sight again
+                // Snapped back, the page under it goes out of sight again
                 if (!closed && settingsPageNow !== "main") {
-                    settingsPages.main.style.display = "none";
+                    settingsPages[settingsParent(settingsPageNow)].style.display = "none";
                 }
             }
         });
@@ -47823,7 +48343,7 @@
                 return;
             }
 
-            showSettingsPage("main");
+            showSettingsPage(settingsParent(settingsPageNow));
             ev.preventDefault();
             ev.stopImmediatePropagation();
         }, true);
