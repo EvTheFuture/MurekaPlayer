@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.55";
+    const VERSION = "2.0.0.56";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1283,6 +1283,7 @@
     let vocalsCtrlBtn = null;
     let setsCtrlBtn = null;
     let nightCtrlBtn = null;
+    let eqCtrlBtn = null;
     let nightActionBtn = null;
 
     // Long press state for rearranging the transport row in the player itself.
@@ -12401,6 +12402,9 @@
     // profile for night mode, the device's own speaker and devices not set up
     // share one of each. Off unless switched on. Not on an iPhone or iPad,
     // whose player has the song go through the sound engine for its fades
+    // Where the bass cut, a high-pass filter, starts, in Hz, 0 for none
+    const SOUND_CUTS = [0, 40, 60, 80, 100, 120, 150, 200];
+
     const SOUND_BANDS = [
         { type: "lowshelf", f: 100, label: "Bass" },
         { type: "peaking", f: 300, label: "Low mids" },
@@ -12421,6 +12425,7 @@
     // compressor and the volume. Made once, the song wired in when it may be
     let fxCtx = null;
     let fxEl = null;
+    let fxCut = null;
     let fxBands = [];
     let fxComp = null;
     let fxOut = null;
@@ -12456,6 +12461,7 @@
             }),
             comp: o.comp === true,
             askLower: o.askLower === true,
+            bassCut: SOUND_CUTS.indexOf(Number(o.bassCut)) >= 0 ? Number(o.bassCut) : 0,
             compLevel: SOUND_COMP.some(function (c) {
                 return c.value === o.compLevel;
             }) ? o.compLevel : "medium"
@@ -12539,12 +12545,28 @@
     // The profile in use now, and for which device and mode. In night mode
     // the night profile, the speaker's own or else the device's, the plain
     // one when there is no night profile
+    // A profile picked by hand for the way out in use, until another takes
+    // over or it is set back. Not kept, a start goes by the settings again
+    let soundPick = null;
+
+    function soundOutKey() {
+        return btNow ? btNow.address : "device";
+    }
+
+    function soundPicked() {
+        return soundPick && soundPick.key === soundOutKey() && soundProfile(soundPick.id) ? soundPick.id : "";
+    }
+
     function activeSound() {
 
         const s = sound();
         const dev = btNow && s.devices[btNow.address] ? s.devices[btNow.address] : null;
         const where = btNow ? btNow.name : "this device";
         let p = null;
+
+        if (soundPicked()) {
+            return { profile: soundProfile(soundPick.id), where: where, night: s.night, picked: true };
+        }
 
         if (s.night) {
             p = soundProfile(dev && dev.night ? dev.night : s.fallback.night);
@@ -12576,6 +12598,10 @@
             return (v > 0 ? "+" : "") + v;
         }).join(" ") : "EQ flat");
 
+        if (p.bassCut > 0) {
+            parts.push("bass cut below " + p.bassCut + " Hz");
+        }
+
         if (p.comp) {
             parts.push((comp ? comp.label : "Medium").toLowerCase() + " compressor");
         }
@@ -12598,7 +12624,65 @@
             return "No profile for " + a.where + ".";
         }
 
-        return (s.night ? "Night mode, " : "") + "\"" + a.profile.name + "\" for " + a.where + ".";
+        return (s.night && !a.picked ? "Night mode, " : "") + "\"" + a.profile.name + "\" for " + a.where + (a.picked ? ", picked by hand" : "") + ".";
+    }
+
+    // A profile picked for the way out in use, or "" to go by the settings
+    // again. Sound profiles are switched on with a pick
+    function setSoundPick(id) {
+
+        soundPick = id && soundProfile(id) ? { key: soundOutKey(), id: id } : null;
+
+        if (soundPick && !sound().on) {
+            sound().on = true;
+        }
+
+        soundChanged();
+        showToast(soundWords().replace(/\.$/, ""), true);
+    }
+
+    // The profiles to pick from, the one in use ticked
+    function askSoundPick() {
+
+        if (!soundOffered()) {
+
+            showToast("Sound profiles are not offered on an iPhone or iPad", false);
+            return;
+        }
+
+        const a = activeSound();
+        const now = sound().on && a.profile ? a.profile.id : "";
+        const picked = soundPicked();
+        const options = [{
+            label: (picked ? "" : "\u2713 ") + "As set for " + a.where,
+            ring: true,
+            fn: function () {
+                setSoundPick("");
+            }
+        }];
+
+        for (const p of sound().profiles) {
+
+            options.push({
+                label: (picked && p.id === now ? "\u2713 " : "") + p.name + (p.night ? " (night)" : ""),
+                fn: function () {
+                    setSoundPick(p.id);
+                }
+            });
+        }
+
+        askChoices("Sound profile for " + a.where + "\nUsed until another speaker or headphones take over, or it is set back.", options);
+    }
+
+    // The profile button lit while a profile is picked by hand
+    function updateEqCtrlButton() {
+
+        if (!eqCtrlBtn) {
+            return;
+        }
+
+        eqCtrlBtn.title = soundWords();
+        paintCtrl(eqCtrlBtn, soundPicked() ? "fill" : "plain");
     }
 
     function dbToGain(db) {
@@ -12659,11 +12743,18 @@
                 }
 
                 fxBands[fxBands.length - 1].connect(fxComp);
+
+                // The bass cut first, open all the way down while off
+                fxCut = fxCtx.createBiquadFilter();
+                fxCut.type = "highpass";
+                fxCut.frequency.value = 10;
+                fxCut.Q.value = 0.7;
+                fxCut.connect(fxBands[0]);
                 fxComp.connect(fxOut);
                 fxOut.connect(fxCtx.destination);
             }
 
-            fxCtx.createMediaElementSource(audio).connect(fxBands[0]);
+            fxCtx.createMediaElementSource(audio).connect(fxCut);
             fxEl = audio;
             dbgLog("Sound", "the song goes through the sound profile");
             applySound();
@@ -12718,6 +12809,10 @@
         put(fxComp.ratio, c ? c.ratio : 1);
         put(fxComp.knee, c ? c.knee : 0);
         put(fxOut.gain, dbToGain(p.gain));
+
+        if (fxCut) {
+            put(fxCut.frequency, p.bassCut > 0 ? p.bassCut : 10);
+        }
     }
 
     // The sound profile in place before a song starts or plays on, so not a
@@ -12874,8 +12969,16 @@
 
         if ((btNow ? btNow.address : "") !== was) {
 
+            // A profile picked by hand was for the way out before
+            if (soundPick && soundPick.key !== soundOutKey()) {
+
+                dbgLog("Sound", "the profile picked by hand was for the speaker before, the settings again");
+                soundPick = null;
+            }
+
             dbgLog("Sound", btNow ? btNow.name + " connected, " + soundWords() : "no Bluetooth device, " + soundWords());
             applySound();
+            updateNightCtrlButton();
             publishHostSoon();
         }
     }
@@ -12893,6 +12996,19 @@
             clearInterval(btPollTimer);
             btPollTimer = 0;
         }
+    }
+
+    // Three sliders, the sound profile button
+    function iconEq() {
+
+        return makeSvgIcon([
+            ["line", { x1: "6", y1: "4", x2: "6", y2: "20" }],
+            ["line", { x1: "12", y1: "4", x2: "12", y2: "20" }],
+            ["line", { x1: "18", y1: "4", x2: "18", y2: "20" }],
+            ["circle", { cx: "6", cy: "14", r: "2.2" }],
+            ["circle", { cx: "12", cy: "8", r: "2.2" }],
+            ["circle", { cx: "18", cy: "16", r: "2.2" }]
+        ]);
     }
 
     function iconMoon() {
@@ -12916,6 +13032,7 @@
             nightActionBtn.style.color = on ? "#000" : "#fff";
         }
 
+        updateEqCtrlButton();
         updateControlLabels();
     }
 
@@ -22227,7 +22344,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq"];
 
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
@@ -22405,6 +22522,10 @@
 
         if (name === "night") {
             return iconMoon();
+        }
+
+        if (name === "eq") {
+            return iconEq();
         }
 
         // The web view's two list buttons, drawn as they are there
@@ -29456,6 +29577,14 @@
             setSort: setSortOf(),
             nightOn: sound().on && sound().night,
             soundText: soundWords(),
+
+            // The profiles to pick from by the profile button, and the one
+            // picked by hand for the way out in use
+            soundPicks: soundOffered() ? sound().profiles.map(function (p) {
+                return { id: p.id, name: p.name, night: p.night };
+            }) : [],
+            soundPicked: soundPicked(),
+            soundWhere: activeSound().where,
             repeat: repeatMode,
             carAudio: hostCarAudio,
             fade: hostFade,
@@ -32973,6 +33102,8 @@
             setVocalFilter(value);
         } else if (cmd === "sets") {
             toggleSetsShown(typeof arg === "boolean" ? arg : undefined);
+        } else if (cmd === "soundPick") {
+            setSoundPick(typeof arg === "string" ? arg : "");
         } else if (cmd === "night") {
             setNight(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "setSort") {
@@ -34129,6 +34260,11 @@
             setNight();
         });
 
+        // A sound profile picked by hand for the way out in use
+        eqCtrlBtn = makeIconButton(iconEq(), "Sound profile", function () {
+            askSoundPick();
+        });
+
         controlButtons = {
             prev: makeIconButton(iconPrev(), "Previous", function () {
                 switchSong("tap", playPrev);
@@ -34144,7 +34280,8 @@
             vocals: vocalsCtrlBtn,
             rate: rateCtrlBtn,
             sets: setsCtrlBtn,
-            night: nightCtrlBtn
+            night: nightCtrlBtn,
+            eq: eqCtrlBtn
         };
 
         updateFeedButton();
@@ -36734,6 +36871,10 @@
 
         if (isGroupName(name)) {
             return groupLabel(name);
+        }
+
+        if (name === "eq") {
+            return "EQ";
         }
 
         return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
@@ -43424,6 +43565,39 @@
             }
         };
 
+        // A heading with the thin line under it, as the pages' own
+        // headings get, here where the page is drawn again whole
+        const soundHeading = function (text, first, strong) {
+
+            const el = makeLabel(text);
+
+            el.dataset.sectionLine = "1";
+            el.style.borderBottom = "1px solid #3a3a42";
+            el.style.paddingBottom = "4px";
+            el.style.marginTop = first ? "0" : "22px";
+
+            if (strong) {
+
+                el.style.color = "#fff";
+                el.style.fontWeight = "600";
+                delete el.dataset.section;
+            }
+
+            return el;
+        };
+
+        // Drop-downs all one width, so they line up down the page
+        const evenDrop = function (row) {
+
+            if (row.__select) {
+
+                row.__select.style.width = "min(14em, 62%)";
+                row.__select.style.textOverflow = "ellipsis";
+            }
+
+            return row;
+        };
+
         const drawSound = function () {
 
             const sd = sound();
@@ -43460,7 +43634,7 @@
             webNote.dataset.webOnly = "1";
             webNote.style.display = "none";
             soundBox.appendChild(webNote);
-            soundBox.appendChild(makeLabel("In use"));
+            soundBox.appendChild(soundHeading("In use", true));
             soundBox.appendChild(withHint(makeBoolRow("Use sound profiles",
                 function () { return sound().on; },
                 function (v) { setSoundOn(v); }),
@@ -43472,7 +43646,7 @@
             soundBox.appendChild(now);
 
             // The profiles, each with what it does and a way to its editor
-            soundBox.appendChild(makeLabel("Profiles"));
+            soundBox.appendChild(soundHeading("Profiles"));
 
             for (const prof of sd.profiles) {
 
@@ -43511,7 +43685,7 @@
             soundBox.appendChild(newBtn);
 
             // Which profiles each speaker takes
-            soundBox.appendChild(makeLabel("Speakers"));
+            soundBox.appendChild(soundHeading("Speakers"));
             soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode."));
 
             const dayChoices = function (phone) {
@@ -43534,18 +43708,10 @@
                     return { value: x.id, label: x.name };
                 }));
             };
-            // The drop-downs all as wide, so they line up down the page
-            const even = function (row) {
-
-                if (row.__select) {
-                    row.__select.style.minWidth = "11em";
-                }
-
-                return row;
-            };
+            const even = evenDrop;
             const speaker = function (title, get, set, phone) {
 
-                soundBox.appendChild(makeSubLabel(title));
+                soundBox.appendChild(soundHeading(title, false, true));
                 soundBox.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
 
                     set("day", v);
@@ -43682,7 +43848,7 @@
             // The bands as upright sliders side by side, each with its level
             // above and its name under it. Heard at once while moved, kept
             // once let go. The web view draws its own from the same values
-            soundEditBox.appendChild(makeLabel("Equalizer"));
+            soundEditBox.appendChild(soundHeading("Equalizer"));
 
             const eq = document.createElement("div");
             const shown = [];
@@ -43777,7 +43943,15 @@
             flat.style.alignSelf = "flex-start";
             soundEditBox.appendChild(flat);
 
-            soundEditBox.appendChild(makeLabel("Compressor"));
+            soundEditBox.appendChild(withHint(evenDrop(makeDropRow("Bass cut", SOUND_CUTS.map(function (f) {
+                return { value: String(f), label: f === 0 ? "Off" : "Below " + f + " Hz" };
+            }), function () { return String(edit.bassCut || 0); }, function (v) {
+
+                edit.bassCut = Number(v) || 0;
+                soundChanged();
+            })), "A high-pass filter: everything below this is cut away, steeply, for a small speaker that rattles on deep bass or to keep it quiet at night."));
+
+            soundEditBox.appendChild(soundHeading("Compressor"));
             soundEditBox.appendChild(withHint(makeBoolRow("Compressor",
                 function () { return edit.comp; },
                 function (v) {
@@ -43785,16 +43959,16 @@
                     edit.comp = v;
                     soundChanged();
                 }), "Holds the loud parts down so the quiet ones can be heard at a lower volume."));
-            soundEditBox.appendChild(makeDropRow("Compressor strength", SOUND_COMP.map(function (c) {
+            soundEditBox.appendChild(evenDrop(makeDropRow("Compressor strength", SOUND_COMP.map(function (c) {
                 return { value: c.value, label: c.label };
             }), function () { return edit.compLevel; }, function (v) {
 
                 edit.compLevel = v;
                 soundChanged();
-            }));
+            })));
 
             // Another like it, or this one gone
-            soundEditBox.appendChild(makeLabel("Profile"));
+            soundEditBox.appendChild(soundHeading("Profile"));
 
             const buttons = document.createElement("div");
 

@@ -92,7 +92,10 @@ In development.
   as night mode goes off, whether to lower the device's volume as much as
   the profile turned the song down, never below the lowest step, so the
   song does not suddenly get loud. Night mode stays on until it is
-  answered.
+  answered. A profile can also cut the bass away below a frequency, a
+  high-pass filter, from 40 to 200 Hz. The EQ button for the button row
+  picks any profile by hand for the speaker or headphones in use, until
+  another takes over or it is set back, on the phone and in the web view.
 - **Settings in the web view answer at once.** A stepper's number moves
   as soon as its minus or plus is pressed, as a switch already did, and
   the device's reading follows.

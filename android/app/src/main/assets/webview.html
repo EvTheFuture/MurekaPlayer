@@ -5495,6 +5495,7 @@
         <button class="ctl" id="rateBtn" type="button" data-label="Rate" aria-label="Rate the playing song" data-icon="star"></button>
         <button class="ctl" id="setsBtn" type="button" data-label="Sets" aria-label="Song sets on or off" data-icon="sets"></button>
         <button class="ctl" id="nightBtn" type="button" data-label="Night" aria-label="Night mode on or off" data-icon="moon"></button>
+        <button class="ctl" id="eqBtn" type="button" data-label="EQ" aria-label="Sound profile" data-icon="eq"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -6161,6 +6162,14 @@
             ["rect", { x: "4", y: "11", width: "16", height: "10", rx: "2" }],
             ["path", { d: "M8 11V7a4 4 0 0 1 8 0v4" }]
         ],
+        eq: [
+            ["line", { x1: "6", y1: "4", x2: "6", y2: "20" }],
+            ["line", { x1: "12", y1: "4", x2: "12", y2: "20" }],
+            ["line", { x1: "18", y1: "4", x2: "18", y2: "20" }],
+            ["circle", { cx: "6", cy: "14", r: "2.2" }],
+            ["circle", { cx: "12", cy: "8", r: "2.2" }],
+            ["circle", { cx: "18", cy: "16", r: "2.2" }]
+        ],
         moon: [
             ["path", { d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" }]
         ],
@@ -6305,10 +6314,11 @@
         rate: { label: "Rate", icon: "star", el: "rateBtn" },
         sets: { label: "Sets", icon: "sets", el: "setsBtn" },
         night: { label: "Night", icon: "moon", el: "nightBtn" },
+        eq: { label: "EQ", icon: "eq", el: "eqBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "songs", "minilist"];
 
     function icon(name) {
 
@@ -9844,6 +9854,8 @@
         $("shuffle").classList.toggle("on", !!(s && s.shuffle));
         $("setsBtn").classList.toggle("on", !!(s && s.setsOn === true));
         $("nightBtn").classList.toggle("on", !!(s && s.nightOn === true));
+        $("eqBtn").classList.toggle("on", !!(s && s.soundPicked));
+        $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
         $("repeat").classList.toggle("on", !!(s && s.repeat === "all"));
@@ -20635,6 +20647,42 @@
     });
 
     // Night mode on the phone, each speaker's night profile
+    // A sound profile picked by hand for the phone's way out in use
+    $("eqBtn").addEventListener("click", function () {
+
+        const list = state && Array.isArray(state.soundPicks) ? state.soundPicks : [];
+
+        if (list.length === 0) {
+
+            toast("Sound profiles are not offered on this phone", "bad");
+            return;
+        }
+
+        const picked = state.soundPicked || "";
+
+        openChoice("Sound profile for " + (state.soundWhere || "the phone") + ". Used until another speaker or headphones take over, or it is set back.", [{
+            icon: picked ? "close" : "check",
+            label: "As set for " + (state.soundWhere || "the phone"),
+            fn: function () {
+
+                closeSongMenu();
+                send("soundPick", "");
+            }
+        }].concat(list.map(function (p) {
+
+            return {
+                icon: p.id === picked ? "check" : "eq",
+                label: p.name + (p.night ? " (night)" : ""),
+                cls: p.id === picked ? "accent" : "",
+                fn: function () {
+
+                    closeSongMenu();
+                    send("soundPick", p.id);
+                }
+            };
+        })));
+    });
+
     $("nightBtn").addEventListener("click", function () {
 
         $("nightBtn").classList.toggle("on");
