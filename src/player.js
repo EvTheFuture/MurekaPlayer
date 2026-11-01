@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.56";
+    const VERSION = "2.0.0.57";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23261,11 +23261,10 @@
         const width = Math.max(at.width, 44);
 
         drop.dataset.group = id;
-        drop.style.cssText = "position:absolute;z-index:9;display:flex;flex-wrap:wrap;gap:6px;padding:8px;box-sizing:border-box;"
+        drop.style.cssText = "position:absolute;z-index:9;display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:8px;box-sizing:border-box;width:max-content;"
             + "background:#1d1d22;border:1px solid #3a3a42;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6);touch-action:none;"
             + "transition:opacity 0.6s ease";
-        drop.style.left = (row.left - box.left) + "px";
-        drop.style.width = row.width + "px";
+        drop.style.maxWidth = row.width + "px";
 
         // Closes by itself a while after the last press, fading a little
         // first, the last part of the wait or a second and a half, so there
@@ -23273,18 +23272,25 @@
         const restart = function () {
 
             clearTimeout(groupDropTimer);
+            drop.style.transition = "opacity 0.6s ease";
             drop.style.opacity = "1";
 
             const sec = Number(settings.ctlGroupClose) || 0;
 
-            if (sec > 0) {
+            if (sec > 0 && !drop.dataset.hover) {
 
                 const warn = Math.min(1.5, sec / 2);
 
                 groupDropTimer = setTimeout(function () {
 
                     drop.style.opacity = "0.45";
-                    groupDropTimer = setTimeout(closeCtlGroup, warn * 1000);
+                    groupDropTimer = setTimeout(function () {
+
+                        // Faded out all the way, then gone
+                        drop.style.transition = "opacity 0.35s ease";
+                        drop.style.opacity = "0";
+                        groupDropTimer = setTimeout(closeCtlGroup, 350);
+                    }, warn * 1000);
                 }, (sec - warn) * 1000);
             }
         };
@@ -23303,18 +23309,42 @@
                 restart();
             });
 
+            // The size the buttons have in the row
             m.style.flex = "0 0 " + width + "px";
+            m.style.width = width + "px";
             m.style.height = at.height + "px";
             drop.appendChild(m);
         }
 
         panelEl.appendChild(drop);
 
-        // Above the row when there is room, else under it
-        const h = drop.getBoundingClientRect().height;
+        // As wide as its buttons need, centered on the row, above it when
+        // there is room, else under it
+        const size = drop.getBoundingClientRect();
+        const h = size.height;
         const above = row.top - box.top - h - 6;
+        const left = row.left - box.left + (row.width - size.width) / 2;
 
+        drop.style.left = Math.max(0, left) + "px";
         drop.style.top = (above >= 0 ? above : row.bottom - box.top + 6) + "px";
+
+        // Never closing by itself under the mouse
+        drop.addEventListener("pointerenter", function (ev) {
+
+            if (ev.pointerType === "mouse") {
+
+                drop.dataset.hover = "1";
+                restart();
+            }
+        });
+        drop.addEventListener("pointerleave", function (ev) {
+
+            if (ev.pointerType === "mouse") {
+
+                delete drop.dataset.hover;
+                restart();
+            }
+        });
 
         // A tap anywhere else, or a swipe on it, closes it
         const outside = function (ev) {

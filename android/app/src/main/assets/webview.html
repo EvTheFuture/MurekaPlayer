@@ -1142,7 +1142,8 @@
         text-overflow: ellipsis;
     }
 
-    #controls .ctl {
+    #controls .ctl,
+    .groupDrop .ctl {
         flex-direction: column;
         gap: 4px;
     }
@@ -3611,13 +3612,20 @@
     }
 
     /* Fading a little before it closes by itself, so there is time to
-       press again */
+       press again, then out */
     .groupDrop.closing {
         opacity: 0.45;
     }
 
+    .groupDrop.gone {
+        opacity: 0;
+        transition-duration: 0.35s;
+    }
+
+    /* As wide as its buttons need, no wider than the bar */
     .groupDrop {
         transition: opacity 0.6s ease;
+        width: max-content;
         position: fixed;
         z-index: 60;
         display: flex;
@@ -4971,7 +4979,8 @@
         height: 56px;
     }
 
-    html.phone #controls.names .ctl svg {
+    html.phone #controls.names .ctl svg,
+    html.phone .groupDrop.names .ctl svg {
         height: 20px;
     }
 
@@ -20206,22 +20215,26 @@
 
             const sec = state && Number(state.ctlGroupClose) || 0;
 
-            if (sec > 0) {
+            if (sec > 0 && !drop.dataset.hover) {
 
                 const warn = Math.min(1.5, sec / 2);
 
                 webGroupTimer = setTimeout(function () {
 
                     drop.classList.add("closing");
-                    webGroupTimer = setTimeout(closeWebGroup, warn * 1000);
+                    webGroupTimer = setTimeout(function () {
+
+                        // Faded out all the way, then gone
+                        drop.classList.add("gone");
+                        webGroupTimer = setTimeout(closeWebGroup, 350);
+                    }, warn * 1000);
                 }, (sec - warn) * 1000);
             }
         };
 
         drop.className = "groupDrop" + ($("controls").classList.contains("names") ? " names" : "");
         drop.dataset.group = id;
-        drop.style.left = bar.left + "px";
-        drop.style.width = bar.width + "px";
+        drop.style.maxWidth = bar.width + "px";
 
         for (const name of members) {
 
@@ -20239,10 +20252,31 @@
 
         document.body.appendChild(drop);
 
-        // Above the bar when there is room, else under it
-        const h = drop.getBoundingClientRect().height;
+        // Centered on the bar, above it when there is room, else under it
+        const size = drop.getBoundingClientRect();
+        const h = size.height;
+        const left = bar.left + (bar.width - size.width) / 2;
 
+        drop.style.left = Math.max(4, Math.min(window.innerWidth - size.width - 4, left)) + "px";
         drop.style.top = (bar.top - h - 8 >= 0 ? bar.top - h - 8 : bar.bottom + 8) + "px";
+
+        // Never closing by itself under the mouse
+        drop.addEventListener("pointerenter", function (ev) {
+
+            if (ev.pointerType === "mouse") {
+
+                drop.dataset.hover = "1";
+                restart();
+            }
+        });
+        drop.addEventListener("pointerleave", function (ev) {
+
+            if (ev.pointerType === "mouse") {
+
+                delete drop.dataset.hover;
+                restart();
+            }
+        });
 
         const outside = function (ev) {
 
