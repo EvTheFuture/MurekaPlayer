@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.45";
+    const VERSION = "2.0.0.48";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2952,6 +2952,7 @@
             vocalFilter: "all",
             setsOn: true,
             setSort: "added",
+            seekLag: {},
             setSuggest: true,
             setOldMonths: 1,
             view: "mureka",
@@ -3172,6 +3173,7 @@
                     vocalFilter: vocalFilter,
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
+                    seekLag: parsed.seekLag && typeof parsed.seekLag === "object" ? parsed.seekLag : {},
                     setSuggest: parsed.setSuggest !== false,
 
                     // Sound profiles, made whole when first used
@@ -21083,7 +21085,8 @@
     // Close the top most thing over the player. True when something closed
     function closeTopDialog() {
 
-        const notices = panelEl ? panelEl.querySelectorAll("[data-mureka-notice]") : [];
+        // Folded, the questions are out of sight and left as they are
+        const notices = panelEl && !minimized ? panelEl.querySelectorAll("[data-mureka-notice]") : [];
 
         if (notices.length > 0) {
 
@@ -27264,12 +27267,12 @@
     // two are in step
     const SYNC_STEP_MS = 40;
     const SYNC_FRAME_SEC = 0.01;
-    const SYNC_MAX_SEC = 2.5;
-    const SYNC_KEEP = 125;
+    const SYNC_MAX_SEC = 4;
+    const SYNC_KEEP = 375;
     const SYNC_MIN = 75;
-    const SYNC_GOOD = 0.75;
+    const SYNC_GOOD = 0.6;
     const SYNC_APART_SEC = 0.08;
-    const SYNC_MARGIN = 0.05;
+    const SYNC_MARGIN = 0.04;
 
     // The lag measured, in seconds, on top of what the engine tells
     let syncLag = 0;
@@ -27287,7 +27290,7 @@
 
     // Guesses tried since the last move, given up after a while
     let syncTries = 0;
-    const SYNC_TRIES = 25;
+    const SYNC_TRIES = 40;
 
     // A new song from its start: in step
     function syncFresh() {
@@ -27299,8 +27302,45 @@
         stopSyncTimer();
     }
 
-    // Moved: measured again
+    // The lag last measured after a move, for each way out the engine tells
+    // of, Bluetooth with its own delay apart from the speaker. Used at once
+    // after the next move, until it is measured again
+    function seekLagKey() {
+
+        const ctx = iosCtx;
+        const told = ctx ? (Number(ctx.baseLatency) || 0) + (Number(ctx.outputLatency) || 0) : 0;
+
+        return String(Math.round(told * 20) * 50);
+    }
+
+    function knownSeekLag() {
+
+        const all = settings.seekLag && typeof settings.seekLag === "object" ? settings.seekLag : {};
+        const v = Number(all[seekLagKey()]);
+
+        return isFinite(v) && v >= 0 && v <= SYNC_MAX_SEC * 1000 ? v / 1000 : null;
+    }
+
+    function rememberSeekLag(lag) {
+
+        if (!settings.seekLag || typeof settings.seekLag !== "object") {
+            settings.seekLag = {};
+        }
+
+        settings.seekLag[seekLagKey()] = Math.round(lag * 1000);
+        saveSettings();
+    }
+
+    // Moved: the lag last measured after a move until measured again
     function syncMoved() {
+
+        const known = knownSeekLag();
+
+        if (known !== null && iosGain) {
+
+            syncLag = known;
+            dbgLog("Audio", "moved, " + Math.round(known * 1000) + " ms taken from the last measure until measured again");
+        }
 
         syncWanted = true;
         syncSamples = [];
@@ -27400,6 +27440,24 @@
         return b > syncEnv.n ? 0 : (syncEnv.sum[b] - syncEnv.sum[a]) / (b - a);
     }
 
+    // The song's clock between its own updates, which some browsers make
+    // only a few times a second, worked out from the time since
+    let syncClock = { el: -1, at: 0 };
+
+    function syncSongTime() {
+
+        const el = audio.currentTime;
+        const now = performance.now();
+
+        if (el !== syncClock.el) {
+
+            syncClock = { el: el, at: now };
+            return el;
+        }
+
+        return el + Math.min(0.5, (now - syncClock.at) / 1000) * (audio.playbackRate || 1);
+    }
+
     function syncTick() {
 
         if (!syncWanted || !iosGain || !iosMeter || !iosCtx || iosCtx.state !== "running" || !audio || audio.paused) {
@@ -27424,7 +27482,7 @@
             sq += syncBuf[i] * syncBuf[i];
         }
 
-        syncSamples.push({ el: audio.currentTime, level: Math.sqrt(sq / syncBuf.length) });
+        syncSamples.push({ el: syncSongTime(), level: Math.sqrt(sq / syncBuf.length) });
 
         if (syncSamples.length > SYNC_KEEP) {
             syncSamples.shift();
@@ -27435,18 +27493,15 @@
         }
     }
 
-    // The lag that lines the two up best, taken when they line up well
+    // The lag that lines the two up best. Taken when they line up well and
+    // the best stands out from lags further off, music with a steady beat
+    // lining up nearly as well a beat away. The longer it listens the more
+    // of the song's changes it has to go by. The first guesses go to the
+    // log, so a lag never found can be told
+
     function syncGuess() {
 
         syncTries += 1;
-
-        if (syncTries > SYNC_TRIES) {
-
-            dbgLog("Audio", "the lag heard could not be measured here, the song's levels too even or too regular");
-            syncWanted = false;
-            stopSyncTimer();
-            return;
-        }
 
         const n = syncSamples.length;
         const win = iosMeter.fftSize / iosCtx.sampleRate;
@@ -27464,54 +27519,52 @@
             varR += (x.level - meanR) * (x.level - meanR);
         }
 
-        // Too even to tell anything by, a long note or quiet
-        if (varR / n < 1e-6) {
-            return;
-        }
-
+        const tried = [];
         let best = -2;
         let bestLag = 0;
-        const e = new Float64Array(n);
-        const tried = [];
 
-        for (let lag = 0; lag <= SYNC_MAX_SEC + 1e-9; lag += SYNC_FRAME_SEC) {
+        // Too even to tell anything by, a long note, quiet or no sound read
+        if (varR / n >= 1e-7) {
 
-            let meanE = 0;
+            const e = new Float64Array(n);
 
-            for (let i = 0; i < n; i++) {
+            for (let lag = 0; lag <= SYNC_MAX_SEC + 1e-9; lag += SYNC_FRAME_SEC) {
 
-                const at = syncSamples[i].el - lag;
+                let meanE = 0;
 
-                e[i] = syncLevel(at - win, at);
-                meanE += e[i];
-            }
+                for (let i = 0; i < n; i++) {
 
-            meanE /= n;
+                    const at = syncSamples[i].el - lag;
 
-            let cov = 0;
-            let varE = 0;
+                    e[i] = syncLevel(at - win, at);
+                    meanE += e[i];
+                }
 
-            for (let i = 0; i < n; i++) {
+                meanE /= n;
 
-                const de = e[i] - meanE;
+                let cov = 0;
+                let varE = 0;
 
-                cov += de * (syncSamples[i].level - meanR);
-                varE += de * de;
-            }
+                for (let i = 0; i < n; i++) {
 
-            const r = varE > 0 ? cov / Math.sqrt(varE * varR) : -1;
+                    const de = e[i] - meanE;
 
-            tried.push({ lag: lag, r: r });
+                    cov += de * (syncSamples[i].level - meanR);
+                    varE += de * de;
+                }
 
-            if (r > best) {
+                const r = varE > 0 ? cov / Math.sqrt(varE * varR) : -1;
 
-                best = r;
-                bestLag = lag;
+                tried.push({ lag: lag, r: r });
+
+                if (r > best) {
+
+                    best = r;
+                    bestLag = lag;
+                }
             }
         }
 
-        // Music with a steady beat lines up nearly as well a beat away, so
-        // the best has to stand out from any lag further off
         let other = -2;
 
         for (const x of tried) {
@@ -27521,28 +27574,34 @@
             }
         }
 
-        if (best < SYNC_GOOD || best - other < SYNC_MARGIN) {
+        const good = best >= SYNC_GOOD && best - other >= SYNC_MARGIN;
+
+        if (syncTries <= 8 || good) {
+
+            dbgLog("Audio", "lag check " + syncTries + ": best " + Math.round(bestLag * 1000) + " ms, match " + Math.round(best * 100)
+                + " %, next best " + Math.round(other * 100) + " %, level " + meanR.toFixed(4) + (good ? ", taken" : ""));
+        }
+
+        if (!good) {
+
+            if (syncTries >= SYNC_TRIES) {
+
+                dbgLog("Audio", "the lag heard could not be measured here");
+                syncWanted = false;
+                stopSyncTimer();
+            }
+
             return;
         }
 
-        // Two guesses agreeing are enough, the lag stays until the next move
-        if (Math.abs(bestLag - syncLag) <= 0.03) {
-
-            syncAgreed += 1;
-        } else {
-
-            syncAgreed = 0;
-            dbgLog("Audio", "heard " + Math.round(bestLag * 1000) + " ms later than the song's clock and the engine say, measured (match "
-                + Math.round(best * 100) + " %)");
+        if (Math.abs(bestLag - syncLag) > 0.03) {
+            dbgLog("Audio", "heard " + Math.round(bestLag * 1000) + " ms later than the song's clock and the engine say, measured");
         }
 
         syncLag = bestLag;
-
-        if (syncAgreed >= 1) {
-
-            syncWanted = false;
-            stopSyncTimer();
-        }
+        rememberSeekLag(bestLag);
+        syncWanted = false;
+        stopSyncTimer();
     }
 
     // The engine's lag in the log whenever it changes by more than a bit
@@ -30251,6 +30310,22 @@
     let playerQuiet = false;
     let quietBadgeEl = null;
 
+    // A mark on the folded player while a question waits in it, a tap on it
+    // opens the player to show the question
+    let askWaitEl = null;
+
+    function paintAskWait() {
+
+        if (!askWaitEl || !panelEl) {
+            return;
+        }
+
+        const n = minimized ? panelEl.querySelectorAll(":scope > [data-mureka-notice]").length : 0;
+
+        askWaitEl.textContent = n === 1 ? "A question waits" : n + " questions wait";
+        askWaitEl.style.display = n > 0 ? "inline-block" : "none";
+    }
+
     function setQuiet(on) {
 
         playerQuiet = on;
@@ -32440,6 +32515,25 @@
 
         headerTitle.appendChild(quietBadgeEl);
 
+        askWaitEl = document.createElement("span");
+        askWaitEl.title = "Open the player to answer";
+        askWaitEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(72,225,235,0.6);border-radius:8px;color:#48e1eb;font-weight:600;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+
+        // Not a drag of the folded player, a way into it
+        for (const name of ["mousedown", "pointerdown", "touchstart"]) {
+
+            askWaitEl.addEventListener(name, function (ev) {
+                ev.stopPropagation();
+            }, { passive: true });
+        }
+
+        askWaitEl.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            setMinimized(false);
+        });
+        headerTitle.appendChild(askWaitEl);
+
         // A small mark while offline. With the internet back on the offline
         // page, a tap loads the real page at once
         offlineBadgeEl = document.createElement("span");
@@ -33427,6 +33521,9 @@
             // The hint in an empty field is grey in all of them, also where
             // the page styles its own fields' hints
             + "#mureka-player-panel,[data-mureka-notice],[data-mureka-press],.mureka-ask{color-scheme:dark}"
+
+            // A question waits out of sight while the player is folded
+            + "#mureka-player-panel.mureka-folded>[data-mureka-notice]{display:none !important}"
             + "#mureka-player-panel ::placeholder,[data-mureka-notice] ::placeholder,[data-mureka-press] ::placeholder,"
             + ".mureka-ask ::placeholder{color:#8a8a94 !important;opacity:1 !important}"
             + "#mureka-search-input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}"
@@ -35737,6 +35834,20 @@
     function setMinimized(value) {
 
         minimized = value;
+
+        // Questions wait out of sight while folded, the mark says so
+        if (panelEl) {
+
+            panelEl.classList.toggle("mureka-folded", minimized);
+
+            if (!panelEl.__askWatch && window.MutationObserver) {
+
+                panelEl.__askWatch = new MutationObserver(paintAskWait);
+                panelEl.__askWatch.observe(panelEl, { childList: true });
+            }
+        }
+
+        paintAskWait();
 
         // Every fold starts at the top again, dragged away from there after
         miniPos = null;
