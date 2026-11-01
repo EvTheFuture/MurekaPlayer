@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.59";
+    const VERSION = "2.0.0.61";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -976,10 +976,108 @@
     // Only kept while the player runs. They show greyed at the top of the
     // list, and the first list page is read every few seconds until they
     // are ready. Those asked to play when ready are in pendingPlay, as
-    // "now" to play at once or "after" to play once the playing song ends
+    // "now" to play at once or "after" to play once the playing song ends.
+    // Those are kept on the device, so a player opened again still plays
+    // them when they are ready, for a few hours
     const pendingSongs = new Map();
     const pendingPlay = new Map();
     const PENDING_POLL_MS = 5000;
+    const PENDING_PLAY_KEY = "mureka_pending_play";
+    const PENDING_PLAY_KEEP_MS = 3 * 3600 * 1000;
+    let pendingPlaySaveTimer = 0;
+
+    function savePendingPlaySoon() {
+
+        clearTimeout(pendingPlaySaveTimer);
+        pendingPlaySaveTimer = setTimeout(function () {
+
+            try {
+
+                if (pendingPlay.size === 0) {
+                    localStorage.removeItem(PENDING_PLAY_KEY);
+                } else {
+
+                    localStorage.setItem(PENDING_PLAY_KEY, JSON.stringify({
+                        at: Date.now(),
+                        plays: Array.from(pendingPlay.entries()),
+                        chain: typeof afterChain !== "undefined" ? afterChain.slice() : []
+                    }));
+                }
+            } catch (e) {
+                // Kept for this run only
+            }
+        }, 0);
+    }
+
+    // Every change kept at once
+    pendingPlay.set = function (k, v) {
+
+        Map.prototype.set.call(this, k, v);
+        savePendingPlaySoon();
+
+        return this;
+    };
+    pendingPlay.delete = function (k) {
+
+        const had = Map.prototype.delete.call(this, k);
+
+        savePendingPlaySoon();
+
+        return had;
+    };
+
+    // The ones asked for before the player was opened again, a few hours
+    // at most, the order they were asked in with them
+    const restoredChain = [];
+
+    (function () {
+
+        try {
+
+            const v = JSON.parse(localStorage.getItem(PENDING_PLAY_KEY) || "null");
+
+            if (!v || !Array.isArray(v.plays) || !(Date.now() - Number(v.at) < PENDING_PLAY_KEEP_MS)) {
+                return;
+            }
+
+            for (const pair of v.plays) {
+
+                // Play now asked before the player was opened again waits for
+                // the song playing by then, rather than cutting it off
+                if (Array.isArray(pair) && (pair[1] === "now" || pair[1] === "after")) {
+                    Map.prototype.set.call(pendingPlay, String(pair[0]), "after");
+                }
+            }
+
+            for (const id of Array.isArray(v.chain) ? v.chain : []) {
+                restoredChain.push(String(id));
+            }
+        } catch (e) {
+            // Nothing kept
+        }
+    })();
+
+    // Asked for before and done meanwhile, while the player was closed: in
+    // the list now as an ordinary song, played as asked all the same
+    function adoptRestoredPending() {
+
+        for (const id of Array.from(pendingPlay.keys())) {
+
+            if (pendingSongs.has(id)) {
+                continue;
+            }
+
+            const song = cache.songs.find(function (x) {
+                return String(x.song_id) === id;
+            });
+
+            if (song && !isPendingSong(song)) {
+
+                dbgLog("Song", "asked to play when ready before the player opened again, ready now: " + (song.title || "Untitled"));
+                pendingSongs.set(id, { song: song, misses: 0 });
+            }
+        }
+    }
 
     let pendingTimer = 0;
     let pendingBusy = false;
@@ -17076,6 +17174,8 @@
 
     function settlePending() {
 
+        adoptRestoredPending();
+
         if (pendingSongs.size === 0) {
             return;
         }
@@ -17359,7 +17459,7 @@
     // were asked for. Each goes in as it is ready, behind the ones before it
     // in this order that are already in, so one that is ready sooner does
     // not jump ahead of one asked for first
-    const afterChain = [];
+    const afterChain = restoredChain.slice();
 
     // Songs of the chain that have played or were taken out of the queue
     // are let go
@@ -23134,6 +23234,14 @@
             m.style.cssText = real.style.cssText;
             m.style.position = "relative";
             m.style.opacity = "1";
+
+            // A size of its own, in an open group, kept through every change
+            if (m.__size) {
+
+                m.style.flex = m.__size.flex;
+                m.style.width = m.__size.width;
+                m.style.height = m.__size.height;
+            }
             m.title = (m.__titleLead || "") + real.title;
 
             // A group with a name of its own says it under the button
@@ -23372,10 +23480,12 @@
                 restart();
             });
 
-            // The size the buttons have in the row
-            m.style.flex = "0 0 " + width + "px";
-            m.style.width = width + "px";
-            m.style.height = at.height + "px";
+            // The size the buttons have in the row, kept as the button
+            // changes
+            m.__size = { flex: "0 0 " + width + "px", width: width + "px", height: at.height + "px" };
+            m.style.flex = m.__size.flex;
+            m.style.width = m.__size.width;
+            m.style.height = m.__size.height;
             drop.appendChild(m);
         }
 
