@@ -96,6 +96,18 @@ In development.
 - **Settings in the web view answer at once.** A stepper's number moves
   as soon as its minus or plus is pressed, as a switch already did, and
   the device's reading follows.
+- **Button groups.** Any number of button groups can be made under
+  Control buttons, each with a bar of its own to drop buttons in. A
+  button can be in the button row and in any number of groups, once in
+  each. A group is put in the button row like any button, on the phone
+  and in the web view. There it looks like the button chosen for it and
+  shows what that button shows, with a small mark, and a tap opens all its
+  buttons over the row. A tap outside or a swipe closes them, and if set,
+  they close by themselves a few seconds after the last press.
+- **New songs into a set before they play.** The question about where
+  new songs go in the play queue has Put in a set first: the likeliest
+  set, the sets used most or a new one, then the question comes again
+  for the queue, on the phone and in the web view.
 - **Notes.** A song's menu has Note, a few words kept with the song, shown
   in Information and in the menu, on the phone and in the web view. A trimmed song takes its original's
   note. Notes travel with song tweaks.

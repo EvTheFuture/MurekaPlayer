@@ -3591,6 +3591,41 @@
         line-height: 1.25;
     }
 
+    /* A button group's mark, and its buttons in a drop-down over the bar */
+    .ctlGroupMark {
+        position: absolute;
+        right: 4px;
+        bottom: 2px;
+        font-size: 0.6em;
+        line-height: 1;
+        opacity: 0.8;
+        pointer-events: none;
+    }
+
+    .ctl.ctlCopy,
+    .ctl[data-group] {
+        position: relative;
+    }
+
+    .groupDrop {
+        position: fixed;
+        z-index: 60;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px;
+        box-sizing: border-box;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+        touch-action: none;
+    }
+
+    .groupDrop .ctl {
+        flex: 0 0 auto;
+    }
+
     .pStep {
         display: inline-flex;
         align-items: center;
@@ -16634,7 +16669,10 @@
 
         for (const name of node.all) {
 
-            const def = CONTROLS[name] || { label: name, icon: "check" };
+            const grp = (node.groups || []).find(function (g) {
+                return g.id === name;
+            });
+            const def = CONTROLS[name] || (grp ? { label: grp.label, icon: CONTROLS[grp.show] ? CONTROLS[grp.show].icon : "sets" } : { label: name, icon: "check" });
             const chip = document.createElement("button");
             const text = document.createElement("span");
             let start = null;
@@ -19926,7 +19964,278 @@
     // stays at the end, it is this page's own
     let controlsKey = "";
 
+    // Button groups, as the phone keeps them: one button in the bar that
+    // looks like one of its buttons and follows it, a tap opening them all
+    function ctlGroupDefs() {
+        return state && Array.isArray(state.ctlGroups) ? state.ctlGroups : [];
+    }
+
+    function ctlGroupDef(id) {
+
+        return ctlGroupDefs().find(function (g) {
+            return g.id === id;
+        }) || null;
+    }
+
+    // A copy of a button that follows every change to it, ids left out so
+    // nothing is found twice. A press on it presses the button
+    function mirrorCtl(real, press) {
+
+        const m = document.createElement("button");
+        const extra = [];
+        const sync = function () {
+
+            m.textContent = "";
+
+            for (const n of Array.from(real.childNodes)) {
+
+                const c = n.cloneNode(true);
+
+                if (c.nodeType === 1) {
+
+                    c.removeAttribute("id");
+
+                    for (const d of c.querySelectorAll("[id]")) {
+                        d.removeAttribute("id");
+                    }
+                }
+
+                m.appendChild(c);
+            }
+
+            for (const n of extra) {
+                m.appendChild(n);
+            }
+
+            m.className = real.className + " ctlCopy";
+            m.title = (m.dataset.lead || "") + (real.title || real.getAttribute("aria-label") || "");
+            m.style.display = "";
+        };
+
+        m.type = "button";
+        sync();
+
+        if (window.MutationObserver) {
+
+            m.watch = new MutationObserver(sync);
+            m.watch.observe(real, { attributes: true, childList: true, subtree: true, characterData: true });
+        }
+
+        m.extra = function (node) {
+
+            extra.push(node);
+            m.appendChild(node);
+        };
+        m.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            press();
+        });
+
+        return m;
+    }
+
+    // The group buttons by id, made again when what they look like changes
+    const groupEls = {};
+    let groupElsKey = "";
+
+    function syncGroupEls() {
+
+        const key = JSON.stringify(ctlGroupDefs().map(function (g) {
+            return [g.id, g.show];
+        }));
+
+        if (key === groupElsKey) {
+            return;
+        }
+
+        groupElsKey = key;
+        controlsKey = "";
+
+        for (const id of Object.keys(groupEls)) {
+
+            if (groupEls[id].watch) {
+                groupEls[id].watch.disconnect();
+            }
+
+            groupEls[id].remove();
+            delete groupEls[id];
+        }
+
+        for (const g of ctlGroupDefs()) {
+
+            const def = CONTROLS[g.show];
+            const real = def ? $(def.el) : null;
+            let el;
+
+            if (real) {
+
+                el = mirrorCtl(real, function () {
+                    openWebGroup(g.id, el);
+                });
+            } else {
+
+                el = document.createElement("button");
+                el.type = "button";
+                el.className = "ctl";
+                el.appendChild(icon("sets"));
+                el.extra = function (node) {
+                    el.appendChild(node);
+                };
+                el.addEventListener("click", function (ev) {
+
+                    ev.stopPropagation();
+                    openWebGroup(g.id, el);
+                });
+            }
+
+            const mark = document.createElement("span");
+
+            mark.className = "ctlGroupMark";
+            mark.textContent = "\u25BE";
+            el.extra(mark);
+            el.dataset.group = g.id;
+            el.dataset.lead = g.label + ": ";
+            el.title = g.label + ": " + (real ? real.title || "" : "");
+            groupEls[g.id] = el;
+        }
+    }
+
+    // A group's buttons in a drop-down over the bar. Closed by a tap
+    // outside, a swipe on it, Escape, or a while after the last press
+    let webGroupEl = null;
+    let webGroupTimer = 0;
+
+    function closeWebGroup() {
+
+        clearTimeout(webGroupTimer);
+        webGroupTimer = 0;
+
+        if (!webGroupEl) {
+            return;
+        }
+
+        for (const m of webGroupEl.querySelectorAll("button")) {
+
+            if (m.watch) {
+                m.watch.disconnect();
+            }
+        }
+
+        webGroupEl.off();
+        webGroupEl.remove();
+        webGroupEl = null;
+    }
+
+    function openWebGroup(id, anchor) {
+
+        const open = webGroupEl && webGroupEl.dataset.group === id;
+
+        closeWebGroup();
+
+        const g = ctlGroupDef(id);
+
+        if (open || !g) {
+            return;
+        }
+
+        const members = (g.names || []).filter(function (n) {
+            return CONTROLS[n];
+        });
+
+        if (members.length === 0) {
+
+            toast("The group is empty, its buttons are chosen in the settings", "bad");
+            return;
+        }
+
+        const drop = document.createElement("div");
+        const bar = $("controls").getBoundingClientRect();
+        const at = anchor.getBoundingClientRect();
+        const restart = function () {
+
+            clearTimeout(webGroupTimer);
+
+            const sec = state && Number(state.ctlGroupClose) || 0;
+
+            if (sec > 0) {
+                webGroupTimer = setTimeout(closeWebGroup, sec * 1000);
+            }
+        };
+
+        drop.className = "groupDrop";
+        drop.dataset.group = id;
+        drop.style.left = bar.left + "px";
+        drop.style.width = bar.width + "px";
+
+        for (const name of members) {
+
+            const real = $(CONTROLS[name].el);
+            const m = mirrorCtl(real, function () {
+
+                real.click();
+                restart();
+            });
+
+            m.style.width = at.width + "px";
+            m.style.height = at.height + "px";
+            drop.appendChild(m);
+        }
+
+        document.body.appendChild(drop);
+
+        // Above the bar when there is room, else under it
+        const h = drop.getBoundingClientRect().height;
+
+        drop.style.top = (bar.top - h - 8 >= 0 ? bar.top - h - 8 : bar.bottom + 8) + "px";
+
+        const outside = function (ev) {
+
+            if (!drop.contains(ev.target) && !anchor.contains(ev.target)) {
+                closeWebGroup();
+            }
+        };
+        let sx = null;
+        let sy = null;
+        const down = function (ev) {
+
+            sx = ev.clientX;
+            sy = ev.clientY;
+        };
+        const move = function (ev) {
+
+            if (sx !== null && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 30) {
+
+                sx = null;
+                closeWebGroup();
+            }
+        };
+        const key = function (ev) {
+
+            if (ev.key === "Escape") {
+
+                ev.stopPropagation();
+                closeWebGroup();
+            }
+        };
+
+        document.addEventListener("pointerdown", outside, true);
+        drop.addEventListener("pointerdown", down);
+        drop.addEventListener("pointermove", move);
+        window.addEventListener("keydown", key, true);
+        drop.off = function () {
+
+            document.removeEventListener("pointerdown", outside, true);
+            window.removeEventListener("keydown", key, true);
+        };
+
+        webGroupEl = drop;
+        restart();
+    }
+
     function layoutControls(names) {
+
+        syncGroupEls();
 
         const key = names.join(",");
 
@@ -19949,6 +20258,10 @@
             $(CONTROLS[name].el).style.display = "none";
         }
 
+        for (const id of Object.keys(groupEls)) {
+            groupEls[id].remove();
+        }
+
         for (const name of names) {
 
             const def = CONTROLS[name];
@@ -19957,11 +20270,17 @@
 
                 $(def.el).style.display = "";
                 row.appendChild($(def.el));
+            } else if (groupEls[name]) {
+                row.appendChild(groupEls[name]);
             }
         }
     }
 
     function controlNameOf(el) {
+
+        if (el.dataset.group) {
+            return el.dataset.group;
+        }
 
         for (const name of CONTROL_ORDER) {
 
@@ -25191,14 +25510,34 @@
             } },
             { icon: "listPlus", label: "Add to the end", fn: function () {
                 answer("end");
-            } },
+            } }
+        ].concat((ask.sets || []).length > 0 ? [
+            { icon: "sets", label: "Put in a set first", fn: function () {
+
+                // The sets to pick from, then the phone asks again where in
+                // the play queue
+                newAsking = "Which set? The new songs go in it, then where in the play queue is asked again.";
+                openChoice(newAsking, ask.sets.map(function (o) {
+
+                    return {
+                        icon: o.key === "setnew" ? "listPlus" : "sets",
+                        label: o.label,
+                        cls: o.color ? "setRing" : "",
+                        color: o.color || "",
+                        fn: function () {
+                            answer(o.key);
+                        }
+                    };
+                }));
+            } }
+        ] : [], [
             { icon: "queue", label: "Replace the queue", fn: function () {
                 answer("replace");
             } },
             { icon: "close", label: "Leave out for now", fn: function () {
                 answer("skip");
             } }
-        ].concat(ask.making > 0 ? [
+        ], ask.making > 0 ? [
             { icon: "close", label: "Leave out these and the " + ask.making + " still being made", fn: function () {
                 answer("skipall");
             } }

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.48";
+    const VERSION = "2.0.0.51";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2953,6 +2953,8 @@
             setsOn: true,
             setSort: "added",
             seekLag: {},
+            ctlGroups: [],
+            ctlGroupClose: 4,
             setSuggest: true,
             setOldMonths: 1,
             view: "mureka",
@@ -3174,6 +3176,8 @@
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
                     seekLag: parsed.seekLag && typeof parsed.seekLag === "object" ? parsed.seekLag : {},
+                    ctlGroups: cleanCtlGroups(parsed.ctlGroups),
+                    ctlGroupClose: [0, 2, 4, 8].indexOf(Number(parsed.ctlGroupClose)) >= 0 ? Number(parsed.ctlGroupClose) : 4,
                     setSuggest: parsed.setSuggest !== false,
 
                     // Sound profiles, made whole when first used
@@ -4828,6 +4832,11 @@
 
         if (!contextMenuEl || !song) {
             return;
+        }
+
+        // Pressed through a copy in a button group, by the copy
+        if (anchor && !anchor.isConnected && ctlPressFrom && ctlPressFrom.isConnected) {
+            anchor = ctlPressFrom;
         }
 
         contextMenuEl.textContent = "";
@@ -9799,7 +9808,46 @@
         });
     }
 
-    function askNewSongs(songs) {
+    // The sets new songs can be put in from the question about them: the
+    // likeliest first, then the ones used most, and a new one. None when
+    // all of them are in a set already
+    function newSongSetChoices(songs) {
+
+        const free = songs.filter(function (x) {
+            return !songSetOf.has(String(x.song_id)) && !isPendingSong(x);
+        });
+
+        if (free.length === 0 || creatorSource) {
+            return [];
+        }
+
+        const guess = guessSetsFor(free).map(function (g) {
+            return g.set;
+        }).find(Boolean) || null;
+        const out = [];
+
+        if (guess) {
+            out.push({ key: "set:" + guess.id, label: guess.name + ", the likeliest", color: setMarkColor(guess) });
+        }
+
+        for (const entry of setsByUse()) {
+
+            if (out.length >= 5) {
+                break;
+            }
+
+            if (!guess || entry.set.id !== guess.id) {
+                out.push({ key: "set:" + entry.set.id, label: entry.set.name + " (" + entry.count + ")", color: setMarkColor(entry.set) });
+            }
+        }
+
+        out.push({ key: "setnew", label: free.length === 1 ? "New set with it" : "New set with them", color: "" });
+
+        return out;
+    }
+
+    // inSet: the name of the set the songs were just put in, said first
+    function askNewSongs(songs, inSet) {
 
         // Each with its number in the list, as the rows show it
         const numbers = hostNumbers();
@@ -9815,7 +9863,7 @@
         const outside = songs.filter(function (s) {
             return !passesFilters(s);
         }).length;
-        const text = names.join(", ") + (more > 0 ? " and " + more + " more" : "")
+        const text = (inSet ? "In the set \"" + inSet + "\" now. " : "") + names.join(", ") + (more > 0 ? " and " + more + " more" : "")
             + ". Where in the play queue do " + (songs.length === 1 ? "it" : "they") + " go? Left out, "
             + (songs.length === 1 ? "it still shows" : "they still show") + " in the Mureka list."
             + (outside === 0 ? "" : songs.length === 1 ? " The filters set now leave it out of the list."
@@ -9831,7 +9879,31 @@
         // Songs still being made would each be asked about once done, so
         // they can be left out now with these
         const making = cache.songs.filter(isPendingSong).length;
-        const ask = { n: newAskSeq, title: title, text: text, songs: songs, making: making, el: null };
+        const setChoices = inSet ? [] : newSongSetChoices(songs);
+        const ask = { n: newAskSeq, title: title, text: text, songs: songs, making: making, sets: setChoices, el: null };
+
+        // Into a set first, then asked again where in the queue
+        const intoSet = setChoices.length > 0 ? [{ label: "Put in a set first", ring: true, fn: function () {
+
+            ask.pickEl = askChoices("Which set?\nThe new " + (songs.length === 1 ? "song goes" : "songs go") + " in it, then where in the play queue is asked again.",
+                setChoices.map(function (o, i) {
+
+                    return {
+                        label: o.label,
+                        ring: i > 0 && o.key !== "setnew",
+                        color: o.color || undefined,
+                        fn: function () {
+                            finishNewAsk(ask.n, o.key);
+                        }
+                    };
+                }), function () {
+
+                    // Changed their mind: the question again, as it was
+                    if (newAsk === ask) {
+                        askNewSongs(ask.songs);
+                    }
+                }, false, true);
+        } }] : [];
         const skipAll = making > 0 ? [{ label: "Leave out these and the " + making + " still being made", ring: true, color: "#b8b8c0", fn: function () {
             finishNewAsk(ask.n, "skipall");
         } }] : [];
@@ -9846,14 +9918,15 @@
             } },
             { label: "Add to the end", ring: true, fn: function () {
                 finishNewAsk(ask.n, "end");
-            } },
+            } }
+        ].concat(intoSet, [
             { label: "Replace the queue", ring: true, color: "#e5484d", fn: function () {
                 finishNewAsk(ask.n, "replace");
             } },
             { label: "Leave out for now", ring: true, color: "#b8b8c0", fn: function () {
                 finishNewAsk(ask.n, "skip");
             } }
-        ].concat(skipAll), function () {
+        ], skipAll), function () {
 
             // Without the player's box it is asked in the web views only,
             // so it is not cancelled before the box would have been shown
@@ -9868,6 +9941,65 @@
     // skipall the same for the songs still being made as well. Anything
     // else, a newer question taking over, leaves things as they are
     function finishNewAsk(n, mode) {
+
+        // The set picker of a question answered, here or in a web view
+        if (newAsk && newAsk.n === n && newAsk.pickEl && newAsk.pickEl.parentNode) {
+            newAsk.pickEl.remove();
+        }
+
+        // Into a set, then asked again where in the play queue
+        if (newAsk && newAsk.n === n && (/^set:/.test(String(mode)) || mode === "setnew")) {
+
+            const ask = newAsk;
+
+            newAsk = null;
+
+            if (ask.el && ask.el.parentNode) {
+                ask.el.remove();
+            }
+
+            const songs = ask.songs.filter(function (x) {
+                return cache.songs.indexOf(x) !== -1;
+            });
+            const free = songs.filter(function (x) {
+                return !songSetOf.has(String(x.song_id)) && !isPendingSong(x);
+            });
+            let set = mode === "setnew" ? null : songSets.get(String(mode).slice(4)) || null;
+
+            if (free.length > 0 && (set || mode === "setnew")) {
+
+                if (!set) {
+
+                    set = newSetWith(free[0], "hand");
+                    free.slice(1).forEach(function (x) {
+                        putInSet(x, set.id, "hand");
+                    });
+                } else {
+
+                    for (const x of free) {
+                        putInSet(x, set.id, "hand");
+                    }
+                }
+
+                setsChanged();
+
+                // A question waiting about the same songs and sets has
+                // nothing left to ask
+                if (setAsk && setAsk.songs && setAsk.songs.every(function (x) {
+                    return songSetOf.has(String(x.song_id));
+                })) {
+                    finishSetAsk(setAsk.n, "no");
+                }
+            }
+
+            publishHostSoon();
+
+            if (songs.length > 0) {
+                askNewSongs(songs, set ? set.name : "");
+            }
+
+            return;
+        }
 
         if (mode === "skipall" && newAsk && newAsk.n === n) {
 
@@ -22102,14 +22234,150 @@
     // which opens the small one with a tap. Either or both can be used
     const WEB_CONTROL_NAMES = CONTROL_NAMES.concat(["songs", "minilist"]);
 
-    // The buttons a bar can hold, by its setting or by mobile or web
+    // The buttons a bar can hold, by its setting or by mobile or web. The
+    // bars take the button groups as well, a group holds buttons only, every
+    // button the web view has too, the phone passing over those it lacks
     function controlNamesFor(which) {
 
-        return which === "webControlOrder" || which === "web" ? WEB_CONTROL_NAMES : CONTROL_NAMES;
+        if (isGroupKey(which)) {
+            return WEB_CONTROL_NAMES;
+        }
+
+        const base = which === "webControlOrder" || which === "web" ? WEB_CONTROL_NAMES : CONTROL_NAMES;
+
+        return base.concat(ctlGroups().map(function (g) {
+            return g.id;
+        }));
     }
 
-    // A fresh icon for the editor, the real buttons keep their own nodes
+    // Button groups: one button in a bar standing for several, looking like
+    // the one of them chosen and showing what it shows, a tap opening all of
+    // them. Kept as an id, g and a number, the buttons in it and the one shown
+    function ctlGroups() {
+        return Array.isArray(settings.ctlGroups) ? settings.ctlGroups : [];
+    }
+
+    function ctlGroupOf(id) {
+
+        return ctlGroups().find(function (g) {
+            return g.id === id;
+        }) || null;
+    }
+
+    function isGroupName(name) {
+        return /^g[0-9]+$/.test(String(name)) && !!ctlGroupOf(String(name));
+    }
+
+    // The editor of a group goes by group: and its id
+    function isGroupKey(key) {
+        return String(key || "").indexOf("group:") === 0;
+    }
+
+    // The buttons of a group, in order, the phone's own only when asked
+    function groupMembers(g, phoneOnly) {
+
+        const allowed = phoneOnly ? CONTROL_NAMES : WEB_CONTROL_NAMES;
+        const seen = {};
+
+        return String(g && g.names || "").split(",").map(function (x) {
+            return x.trim().toLowerCase();
+        }).filter(function (x) {
+
+            if (allowed.indexOf(x) === -1 || seen[x]) {
+                return false;
+            }
+
+            seen[x] = true;
+
+            return true;
+        });
+    }
+
+    // The button a group looks like: the one chosen when it is in the
+    // group, else its first
+    function groupShown(g, phoneOnly) {
+
+        const members = groupMembers(g, phoneOnly);
+
+        return members.indexOf(g.show) >= 0 ? g.show : (members[0] || "");
+    }
+
+    function groupLabel(id) {
+
+        const i = ctlGroups().findIndex(function (g) {
+            return g.id === id;
+        });
+
+        return "Group " + (i + 1);
+    }
+
+    function cleanCtlGroups(raw) {
+
+        const seen = {};
+
+        return (Array.isArray(raw) ? raw : []).filter(function (g) {
+
+            if (!g || !/^g[0-9]+$/.test(String(g.id)) || seen[g.id]) {
+                return false;
+            }
+
+            seen[g.id] = true;
+
+            return true;
+        }).map(function (g) {
+
+            return {
+                id: String(g.id),
+                names: typeof g.names === "string" ? g.names : "",
+                show: typeof g.show === "string" ? g.show : ""
+            };
+        });
+    }
+
+    // A bar's buttons as stored: a setting of its own, or a group's list
+    function ctlListGet(key) {
+
+        if (isGroupKey(key)) {
+
+            const g = ctlGroupOf(key.slice(6));
+
+            return g ? g.names : "";
+        }
+
+        return String(settings[key] || "");
+    }
+
+    function ctlListSet(key, value) {
+
+        if (isGroupKey(key)) {
+
+            const g = ctlGroupOf(key.slice(6));
+
+            if (g) {
+                g.names = value;
+            }
+
+            return;
+        }
+
+        settings[key] = value;
+    }
+
+    // A fresh icon for the editor, the real buttons keep their own nodes.
+    // A group shows the button it looks like, with the group mark
     function controlChipIcon(name) {
+
+        if (isGroupName(name)) {
+
+            const box = document.createElement("span");
+            const shown = groupShown(ctlGroupOf(name), false);
+
+            box.style.cssText = "position:relative;display:inline-flex";
+            box.appendChild(shown ? controlChipIcon(shown) : iconSets());
+            box.appendChild(groupMark());
+
+            return box;
+        }
 
         if (name === "shuffle") {
             return makeShuffleIcon();
@@ -22183,14 +22451,16 @@
     // ending up in both rows at once
     function buildControlEditor(key) {
 
-        // The mobile bar or the web view's, each with its own order
+        // The mobile bar or the web view's, each with its own order, or a
+        // button group's buttons
         key = key || "controlOrder";
 
-        const allNames = controlNamesFor(key);
+        let allNames = controlNamesFor(key);
+        const inGroup = isGroupKey(key);
 
         const wrap = document.createElement("div");
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
-        wrap.dataset.hostControls = key === "webControlOrder" ? "web" : "mobile";
+        wrap.dataset.hostControls = inGroup ? key : (key === "webControlOrder" ? "web" : "mobile");
 
         let activeNames = [];
         let disabledNames = [];
@@ -22249,7 +22519,7 @@
 
             const seen = {};
 
-            activeNames = String(settings[key] || "")
+            activeNames = ctlListGet(key)
                 .split(",")
                 .map(function (name) {
                     return name.trim().toLowerCase();
@@ -22273,8 +22543,9 @@
         // Save the bar and redraw the real transport row
         const commit = function () {
 
-            // An empty bar would leave nothing to press, so keep play
-            if (activeNames.length === 0) {
+            // An empty bar would leave nothing to press, so keep play. A
+            // group may stay empty
+            if (activeNames.length === 0 && !inGroup) {
 
                 activeNames = ["play"];
                 disabledNames = allNames.filter(function (name) {
@@ -22282,10 +22553,12 @@
                 });
             }
 
-            settings[key] = activeNames.join(",");
+            ctlListSet(key, activeNames.join(","));
             saveSettings();
 
-            if (key === "controlOrder") {
+            if (inGroup) {
+                ctlGroupsChanged();
+            } else if (key === "controlOrder") {
                 applyControlOrder();
             } else {
                 publishHostSoon();
@@ -22588,8 +22861,42 @@
             chips[name] = makeChip(name);
         }
 
-        // Redraw from the stored setting whenever the panel is opened
+        // Redraw from the stored setting whenever the panel is opened. Groups
+        // made or taken away meanwhile get their chips or lose them
         const reload = function () {
+
+            allNames = controlNamesFor(key);
+
+            for (const name of Object.keys(chips)) {
+
+                if (allNames.indexOf(name) === -1) {
+
+                    chips[name].remove();
+                    delete chips[name];
+                }
+            }
+
+            for (const name of allNames) {
+
+                if (!chips[name]) {
+                    chips[name] = makeChip(name);
+                }
+            }
+
+            // A group's chip shows the button it looks like now
+            for (const name of allNames) {
+
+                if (isGroupName(name) && name !== dragName) {
+
+                    const fresh = makeChip(name);
+
+                    if (chips[name] && chips[name].parentNode) {
+                        chips[name].replaceWith(fresh);
+                    }
+
+                    chips[name] = fresh;
+                }
+            }
 
             loadNames();
             render(false);
@@ -22601,12 +22908,318 @@
         // Let the panel abandon a drag that is somehow still open when it closes
         endControlDrag = endDrag;
 
-        wrap.appendChild(makeLabel("Transport bar, long press a button to move it"));
+        wrap.appendChild(makeLabel(inGroup ? "In the group, long press a button to move it" : "Transport bar, long press a button to move it"));
         wrap.appendChild(activeRow);
         wrap.appendChild(makeLabel("Not shown"));
         wrap.appendChild(disabledRow);
 
         return wrap;
+    }
+
+    // The group buttons by id, each a copy of the button it looks like that
+    // follows it, a tap opening the group
+    let groupButtons = {};
+
+    // The copy a press came through, so what opens by the button opens by
+    // the copy when the button itself is not shown
+    let ctlPressFrom = null;
+
+    // A copy of a control button that follows every change to it, its icon,
+    // label, colors and words. A press on the copy presses the button
+    function mirrorControl(real, press) {
+
+        const m = document.createElement("button");
+        const extra = [];
+        const sync = function () {
+
+            m.textContent = "";
+
+            for (const n of Array.from(real.childNodes)) {
+                m.appendChild(n.cloneNode(true));
+            }
+
+            for (const n of extra) {
+                m.appendChild(n);
+            }
+
+            m.style.cssText = real.style.cssText;
+            m.style.position = "relative";
+            m.style.opacity = "1";
+            m.title = (m.__titleLead || "") + real.title;
+
+            const aria = real.getAttribute("aria-label");
+
+            if (aria) {
+                m.setAttribute("aria-label", aria);
+            }
+        };
+
+        sync();
+
+        if (window.MutationObserver) {
+
+            m.__watch = new MutationObserver(sync);
+            m.__watch.observe(real, { attributes: true, childList: true, subtree: true, characterData: true });
+        }
+
+        m.__extra = function (node) {
+
+            extra.push(node);
+            m.appendChild(node);
+        };
+        m.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            ctlPressFrom = m;
+
+            try {
+
+                if (press) {
+                    press();
+                } else {
+                    real.click();
+                }
+            } finally {
+                ctlPressFrom = null;
+            }
+        });
+
+        return m;
+    }
+
+    // The small mark in a group button's corner
+    function groupMark() {
+
+        const mark = document.createElement("span");
+
+        mark.textContent = "\u25BE";
+        mark.setAttribute("aria-hidden", "true");
+        mark.style.cssText = "position:absolute;right:3px;bottom:1px;font-size:10px;line-height:1;opacity:0.8;pointer-events:none";
+
+        return mark;
+    }
+
+    // A button for each group, made again when the groups or what one
+    // looks like changed
+    let groupButtonsKey = "";
+
+    function syncGroupButtons() {
+
+        const key = JSON.stringify(ctlGroups().map(function (g) {
+            return [g.id, groupShown(g, true)];
+        }));
+
+        if (key === groupButtonsKey) {
+            return;
+        }
+
+        groupButtonsKey = key;
+
+        for (const id of Object.keys(groupButtons)) {
+
+            const old = groupButtons[id];
+
+            if (old.__watch) {
+                old.__watch.disconnect();
+            }
+
+            old.remove();
+        }
+
+        groupButtons = {};
+
+        for (const g of ctlGroups()) {
+
+            const shown = groupShown(g, true);
+            const real = shown ? controlButtons[shown] : null;
+            let btn;
+
+            if (real) {
+
+                btn = mirrorControl(real, function () {
+                    openCtlGroup(g.id, btn);
+                });
+            } else {
+
+                btn = makeIconButton(iconSets(), groupLabel(g.id), function () {
+                    openCtlGroup(g.id, btn);
+                });
+                btn.style.position = "relative";
+                btn.__extra = function (node) {
+                    btn.appendChild(node);
+                };
+            }
+
+            btn.__extra(groupMark());
+            btn.__titleLead = groupLabel(g.id) + ": ";
+            btn.title = btn.__titleLead + (real ? real.title : "");
+            groupButtons[g.id] = btn;
+        }
+
+        enableControlRowDragging();
+    }
+
+    // The groups changed: the buttons, the row, the web view and the pages
+    function ctlGroupsChanged() {
+
+        groupButtonsKey = "";
+        closeCtlGroup();
+        applyControlOrder();
+        saveSettings();
+        publishHostSoon();
+
+        settingsRefreshers.forEach(function (fn) {
+            fn();
+        });
+    }
+
+    // A group's buttons in a drop-down by its button. Closed by a tap
+    // outside, a swipe on it, Escape, or a while after the last press
+    let groupDropEl = null;
+    let groupDropTimer = 0;
+
+    function closeCtlGroup() {
+
+        clearTimeout(groupDropTimer);
+        groupDropTimer = 0;
+
+        if (!groupDropEl) {
+            return;
+        }
+
+        for (const m of groupDropEl.querySelectorAll("button")) {
+
+            if (m.__watch) {
+                m.__watch.disconnect();
+            }
+        }
+
+        groupDropEl.__off();
+        groupDropEl.remove();
+        groupDropEl = null;
+    }
+
+    function openCtlGroup(id, anchor) {
+
+        const open = groupDropEl && groupDropEl.dataset.group === id;
+
+        closeCtlGroup();
+
+        if (open || !panelEl) {
+            return;
+        }
+
+        const g = ctlGroupOf(id);
+        const members = g ? groupMembers(g, true) : [];
+
+        if (members.length === 0) {
+
+            showToast("The group is empty, its buttons are chosen in the settings", false);
+            return;
+        }
+
+        const drop = document.createElement("div");
+        const box = panelEl.getBoundingClientRect();
+        const at = anchor.getBoundingClientRect();
+        const row = controlRowEl ? controlRowEl.getBoundingClientRect() : at;
+        const width = Math.max(at.width, 44);
+
+        drop.dataset.group = id;
+        drop.style.cssText = "position:absolute;z-index:9;display:flex;flex-wrap:wrap;gap:6px;padding:8px;box-sizing:border-box;"
+            + "background:#1d1d22;border:1px solid #3a3a42;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6);touch-action:none";
+        drop.style.left = (row.left - box.left) + "px";
+        drop.style.width = row.width + "px";
+
+        const restart = function () {
+
+            clearTimeout(groupDropTimer);
+
+            const sec = Number(settings.ctlGroupClose) || 0;
+
+            if (sec > 0) {
+                groupDropTimer = setTimeout(closeCtlGroup, sec * 1000);
+            }
+        };
+
+        for (const name of members) {
+
+            const real = controlButtons[name];
+
+            if (!real) {
+                continue;
+            }
+
+            const m = mirrorControl(real, function () {
+
+                real.click();
+                restart();
+            });
+
+            m.style.flex = "0 0 " + width + "px";
+            m.style.height = at.height + "px";
+            drop.appendChild(m);
+        }
+
+        panelEl.appendChild(drop);
+
+        // Above the row when there is room, else under it
+        const h = drop.getBoundingClientRect().height;
+        const above = row.top - box.top - h - 6;
+
+        drop.style.top = (above >= 0 ? above : row.bottom - box.top + 6) + "px";
+
+        // A tap anywhere else, or a swipe on it, closes it
+        const outside = function (ev) {
+
+            if (!drop.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
+                closeCtlGroup();
+            }
+        };
+        let sx = null;
+        let sy = null;
+        const down = function (ev) {
+
+            sx = ev.clientX;
+            sy = ev.clientY;
+        };
+        const move = function (ev) {
+
+            if (sx !== null && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 30) {
+
+                sx = null;
+                closeCtlGroup();
+            }
+        };
+        const key = function (ev) {
+
+            if (ev.key === "Escape") {
+
+                ev.stopPropagation();
+                closeCtlGroup();
+            }
+        };
+
+        document.addEventListener("pointerdown", outside, true);
+        drop.addEventListener("pointerdown", down);
+        drop.addEventListener("pointermove", move);
+        window.addEventListener("keydown", key, true);
+        drop.__off = function () {
+
+            document.removeEventListener("pointerdown", outside, true);
+            window.removeEventListener("keydown", key, true);
+        };
+
+        groupDropEl = drop;
+        restart();
+    }
+
+    // The button of a name in the row, a group's included
+    function ctlEl(name) {
+        return controlButtons[name] || groupButtons[name] || null;
+    }
+
+    function ctlElNames() {
+        return Object.keys(controlButtons).concat(Object.keys(groupButtons));
     }
 
     // Lay out the transport row from the controlOrder setting. Unknown names
@@ -22618,13 +23231,15 @@
             return;
         }
 
+        syncGroupButtons();
+
         const wanted = String(settings.controlOrder || "")
             .split(",")
             .map(function (name) {
                 return name.trim().toLowerCase();
             })
             .filter(function (name) {
-                return controlButtons[name];
+                return ctlEl(name);
             });
 
         const order = wanted.length > 0
@@ -22645,7 +23260,7 @@
             }
 
             placed[name] = true;
-            controlRowEl.appendChild(controlButtons[name]);
+            controlRowEl.appendChild(ctlEl(name));
         }
     }
 
@@ -22658,7 +23273,7 @@
                 return name.trim().toLowerCase();
             })
             .filter(function (name) {
-                return controlButtons[name];
+                return ctlEl(name);
             });
     }
 
@@ -22668,9 +23283,9 @@
 
         const before = new Map();
 
-        for (const name of Object.keys(controlButtons)) {
+        for (const name of ctlElNames()) {
 
-            const el = controlButtons[name];
+            const el = ctlEl(name);
 
             if (el && el.isConnected) {
                 before.set(name, el.getBoundingClientRect());
@@ -22679,9 +23294,9 @@
 
         applyControlOrder();
 
-        for (const name of Object.keys(controlButtons)) {
+        for (const name of ctlElNames()) {
 
-            const el = controlButtons[name];
+            const el = ctlEl(name);
             const old = before.get(name);
 
             if (!old || !el.isConnected || name === ctrlDragName || !el.animate) {
@@ -22730,7 +23345,7 @@
             ctrlGhost = null;
         }
 
-        const el = controlButtons[ctrlDragName];
+        const el = ctlEl(ctrlDragName);
 
         if (el) {
             el.style.opacity = "1";
@@ -22758,7 +23373,7 @@
 
         for (let i = 0; i < others.length; i += 1) {
 
-            const r = controlButtons[others[i]].getBoundingClientRect();
+            const r = ctlEl(others[i]).getBoundingClientRect();
 
             if (x < r.left + r.width / 2) {
 
@@ -22783,9 +23398,9 @@
     // press still works the button, only a held one picks it up
     function enableControlRowDragging() {
 
-        for (const name of Object.keys(controlButtons)) {
+        for (const name of ctlElNames()) {
 
-            const btn = controlButtons[name];
+            const btn = ctlEl(name);
 
             if (!btn || btn.dataset.dragArmed === "1") {
                 continue;
@@ -25150,6 +25765,33 @@
             if (!hostCarAudio && audio.muted) {
                 sub("Muted", "Yes");
             }
+
+            // How late the sound is heard against the song's clock, and
+            // what the playhead allows for
+            const engine = iosGain && iosCtx ? iosCtx : (fxCtx && fxEl === audio ? fxCtx : null);
+
+            if (engine) {
+
+                const ms = function (v) {
+                    return v === undefined ? "Not told" : Math.round((Number(v) || 0) * 1000) + " ms";
+                };
+
+                add("Sound engine", iosGain ? "For the fades, " + engine.state : "For the sound profile, " + engine.state);
+                sub("Engine delay", ms(engine.baseLatency));
+                sub("Way out delay", ms(engine.outputLatency) + (iosGain ? ", already in Safari's clock" : ""));
+
+                if (iosGain) {
+
+                    const known = knownSeekLag();
+
+                    sub("Measured after a move", syncWanted ? "Measuring" : (syncLag > 0 ? Math.round(syncLag * 1000) + " ms" : "None"));
+                    sub("Kept for the next move", known === null ? "None yet" : Math.round(known * 1000) + " ms");
+                }
+
+                sub("Playhead held back", Math.round(heardLag() * 1000) + " ms");
+            } else {
+                add("Sound engine", "None, the song plays on its own");
+            }
         }
 
         part("File");
@@ -27252,10 +27894,17 @@
         }
 
         const base = Number(ctx.baseLatency) || 0;
-        const out = Number(ctx.outputLatency) || 0;
-        const measured = ctx === iosCtx ? syncLag : 0;
 
-        return Math.max(0, Math.min(4, base + out + measured));
+        // Safari's song clock already allows for the way out, headphones or
+        // the speaker, as it does to keep a video in step with Bluetooth, so
+        // only the engine's own part counts there, and what is measured
+        if (ctx === iosCtx) {
+            return Math.max(0, Math.min(4, base + syncLag));
+        }
+
+        const out = Number(ctx.outputLatency) || 0;
+
+        return Math.max(0, Math.min(4, base + out));
     }
 
     // Safari on an iPhone, the song going through the sound engine, hears
@@ -28762,7 +29411,7 @@
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
-            newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text, making: newAsk.making || 0 } : null,
+            newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text, making: newAsk.making || 0, sets: newAsk.sets || [] } : null,
             setAsk: setAsk ? { n: setAsk.n, title: setAsk.title, text: setAsk.text, options: setAsk.options } : null,
             followAsk: followAsk ? { n: followAsk.n, title: followAsk.title, text: followAsk.text } : null,
             pendingCount: pendingCount(),
@@ -28817,6 +29466,12 @@
             offline: offlineMode(),
             onlineBadge: settings.webOnlineBadge === "always" ? "always" : "fade",
             controls: hostControls("web"),
+
+            // The button groups, for the web view's own group buttons
+            ctlGroups: ctlGroups().map(function (g) {
+                return { id: g.id, label: groupLabel(g.id), names: groupMembers(g, false), show: groupShown(g, false) };
+            }),
+            ctlGroupClose: Number(settings.ctlGroupClose) || 0,
             names: settings.webNames === true,
 
             // Whether the phone's hotspot is on, on, off or not known, for
@@ -29005,6 +29660,24 @@
     function hostControls(which) {
 
         const seen = {};
+
+        // A group's buttons, empty or not
+        if (isGroupKey(which)) {
+
+            return ctlListGet(which).split(",").map(function (name) {
+                return name.trim().toLowerCase();
+            }).filter(function (name) {
+
+                if (WEB_CONTROL_NAMES.indexOf(name) === -1 || seen[name]) {
+                    return false;
+                }
+
+                seen[name] = true;
+
+                return true;
+            });
+        }
+
         const names = String((which === "mobile" ? settings.controlOrder : settings.webControlOrder) || "")
             .split(",")
             .map(function (name) {
@@ -31314,7 +31987,10 @@
                 t: "controls",
                 which: el.dataset.hostControls,
                 active: hostControls(el.dataset.hostControls),
-                all: controlNamesFor(el.dataset.hostControls).slice()
+                all: controlNamesFor(el.dataset.hostControls).slice(),
+                groups: ctlGroups().map(function (g) {
+                    return { id: g.id, label: groupLabel(g.id), show: groupShown(g, false) };
+                })
             });
             return;
         }
@@ -32057,7 +32733,8 @@
 
             // The transport row rearranged in the web view. The web view's own order
             // unless the mobile editor was used from the web view
-            const which = arg && !Array.isArray(arg) && arg.which === "mobile" ? "controlOrder" : "webControlOrder";
+            const asked = arg && !Array.isArray(arg) ? String(arg.which || "") : "";
+            const which = asked === "mobile" ? "controlOrder" : (isGroupKey(asked) && ctlGroupOf(asked.slice(6)) ? asked : "webControlOrder");
             const list = Array.isArray(arg) ? arg : (arg && Array.isArray(arg.names) ? arg.names : []);
             const seen = {};
             const names = list.map(function (name) {
@@ -32073,10 +32750,12 @@
                 return true;
             });
 
-            settings[which] = (names.length > 0 ? names : ["play"]).join(",");
+            ctlListSet(which, (names.length > 0 || isGroupKey(which) ? names : ["play"]).join(","));
             saveSettings();
 
-            if (which === "controlOrder") {
+            if (isGroupKey(which)) {
+                ctlGroupsChanged();
+            } else if (which === "controlOrder") {
                 applyControlOrder();
             }
 
@@ -36023,6 +36702,10 @@
         // The small list over the web view's main page is called List there
         if (name === "minilist") {
             return "List";
+        }
+
+        if (isGroupName(name)) {
+            return groupLabel(name);
         }
 
         return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
@@ -41113,6 +41796,141 @@
         mobilePage.appendChild(makeLabel("Control buttons"));
         mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
+
+        // Button groups, each with its buttons, the one it looks like and a
+        // way to remove it. Drawn again when groups come and go
+        const groupsBox = document.createElement("div");
+        let groupsKey = "";
+
+        groupsBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
+
+        const drawGroups = function () {
+
+            const key = ctlGroups().map(function (g) {
+                return g.id;
+            }).join(",");
+
+            if (key === groupsKey) {
+                return;
+            }
+
+            groupsKey = key;
+            groupsBox.textContent = "";
+
+            for (const g of ctlGroups()) {
+
+                groupsBox.appendChild(makeSubLabel(groupLabel(g.id)));
+                groupsBox.appendChild(buildControlEditor("group:" + g.id));
+
+                const choices = function () {
+
+                    const members = groupMembers(g, false);
+
+                    return members.length > 0 ? members.map(function (n) {
+                        return { value: n, label: controlName(n) };
+                    }) : [{ value: "", label: "None yet" }];
+                };
+                const showChoices = choices();
+                const showRow = makeDropRow("Looks like", showChoices, function () {
+                    return groupShown(g, false);
+                }, function (v) {
+
+                    g.show = v;
+                    ctlGroupsChanged();
+                });
+
+                // The choice follows the buttons put in or taken out
+                settingsRefreshers.push(function () {
+
+                    if (showRow.__select) {
+
+                        const now = groupShown(g, false);
+                        const list = choices();
+
+                        // The same list the drop-down picks from, kept up
+                        showChoices.length = 0;
+                        list.forEach(function (c) {
+                            showChoices.push(c);
+                        });
+                        showRow.__select.textContent = "";
+
+                        for (const c of list) {
+
+                            const o = document.createElement("option");
+
+                            o.value = c.value;
+                            o.textContent = c.label;
+                            showRow.__select.appendChild(o);
+                        }
+
+                        showRow.__select.value = now;
+                    }
+                });
+
+                groupsBox.appendChild(withHint(showRow, "The button the group shows in the bar, with what that button shows."));
+
+                const remove = makeButton("Remove " + groupLabel(g.id), "#333", "#fff", function () {
+
+                    settings.ctlGroups = ctlGroups().filter(function (x) {
+                        return x.id !== g.id;
+                    });
+
+                    // Out of both bars as well
+                    for (const k of ["controlOrder", "webControlOrder"]) {
+
+                        settings[k] = String(settings[k] || "").split(",").filter(function (n) {
+                            return n.trim() !== g.id;
+                        }).join(",");
+                    }
+
+                    ctlGroupsChanged();
+                    drawGroups();
+                    settingsRefreshers.forEach(function (fn) {
+                        fn();
+                    });
+                });
+
+                remove.style.alignSelf = "flex-start";
+                groupsBox.appendChild(remove);
+            }
+
+            const add = makeButton("New button group", "#333", "#fff", function () {
+
+                let n = 1;
+
+                while (ctlGroupOf("g" + n)) {
+                    n += 1;
+                }
+
+                settings.ctlGroups = ctlGroups().concat([{ id: "g" + n, names: "", show: "" }]);
+                ctlGroupsChanged();
+                drawGroups();
+                settingsRefreshers.forEach(function (fn) {
+                    fn();
+                });
+            });
+
+            add.style.alignSelf = "flex-start";
+            groupsBox.appendChild(add);
+        };
+
+        drawGroups();
+        settingsRefreshers.push(drawGroups);
+
+        mobilePage.appendChild(makeLabel("Button groups"));
+        mobilePage.appendChild(makeHint("A group is one button in a bar standing for several. In the bar it looks like the button chosen and shows what that button shows, and a tap opens all its buttons. A button can be in the bar and in any number of groups, once in each. A group is put in a bar like any button, here and on the Web view page."));
+        mobilePage.appendChild(groupsBox);
+        mobilePage.appendChild(withHint(makeDropRow("Closes by itself", [
+            { label: "Never", value: "0" },
+            { label: "2 s after a press", value: "2" },
+            { label: "4 s after a press", value: "4" },
+            { label: "8 s after a press", value: "8" }
+        ], function () {
+            return String(settings.ctlGroupClose === undefined ? 4 : settings.ctlGroupClose);
+        }, function (v) {
+            settings.ctlGroupClose = Number(v) || 0;
+            publishHostSoon();
+        }), "An open group closes with a tap outside it or a swipe on it, and by itself this long after the last press in it."));
 
         // The badge in the header
         mobilePage.appendChild(makeLabel("Badges"));
