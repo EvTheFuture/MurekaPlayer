@@ -25198,7 +25198,11 @@
             { icon: "close", label: "Leave out for now", fn: function () {
                 answer("skip");
             } }
-        ]);
+        ].concat(ask.making > 0 ? [
+            { icon: "close", label: "Leave out these and the " + ask.making + " still being made", fn: function () {
+                answer("skipall");
+            } }
+        ] : []));
     }
 
     // New songs a load found offered for a set, the likeliest set first. The

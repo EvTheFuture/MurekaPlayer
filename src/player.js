@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.44";
+    const VERSION = "2.0.0.45";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -939,6 +939,10 @@
     // web views at once. The first answer anywhere closes it everywhere
     let newAsk = null;
     let newAskSeq = 0;
+
+    // Songs still being made when new songs were left out along with them,
+    // left out too once they are done instead of asked about one by one
+    const leftOutAhead = new Set();
 
     // The question whether a queue put together by hand follows the list
     // after its filter changed, open on the phone and in the web views at
@@ -6481,6 +6485,13 @@
         options.push({ key: "new", label: one ? "New set with it" : "New set with them", color: "" });
         options.push({ key: "no", label: "Not now", color: "" });
 
+        // More groups waiting their turn: all of them let go at once
+        const waiting = setAskQueue.length;
+
+        if (waiting > 0) {
+            options.push({ key: "noall", label: "Not now, nor the " + waiting + " " + (waiting === 1 ? "group" : "groups") + " after it", color: "", icon: "close" });
+        }
+
         setAskSeq += 1;
 
         const ask = { n: setAskSeq, title: title, text: text, options: options, songs: songs, group: g, el: null };
@@ -6491,7 +6502,7 @@
             return {
                 label: o.label,
                 ring: i > 0 && o.key !== "new",
-                color: o.key === "no" ? "#b8b8c0" : (o.color || undefined),
+                color: o.key === "no" || o.key === "noall" ? "#b8b8c0" : (o.color || undefined),
                 fn: function () {
                     finishSetAsk(ask.n, o.key);
                 }
@@ -6565,6 +6576,11 @@
 
         if (ask.el && ask.el.parentNode) {
             ask.el.remove();
+        }
+
+        // The groups waiting let go as well
+        if (String(key || "") === "noall") {
+            setAskQueue.length = 0;
         }
 
         // Not about sets
@@ -9754,6 +9770,15 @@
                 continue;
             }
 
+            // Left out already, while it was still being made
+            if (leftOutAhead.has(key)) {
+
+                leftOutAhead.delete(key);
+                unofferedNew.delete(key);
+                queueSkipIds.add(key);
+                continue;
+            }
+
             if (currentSong && String(currentSong.song_id) === key) {
                 continue;
             }
@@ -9801,7 +9826,13 @@
 
         newAskSeq += 1;
 
-        const ask = { n: newAskSeq, title: title, text: text, songs: songs, el: null };
+        // Songs still being made would each be asked about once done, so
+        // they can be left out now with these
+        const making = cache.songs.filter(isPendingSong).length;
+        const ask = { n: newAskSeq, title: title, text: text, songs: songs, making: making, el: null };
+        const skipAll = making > 0 ? [{ label: "Leave out these and the " + making + " still being made", ring: true, color: "#b8b8c0", fn: function () {
+            finishNewAsk(ask.n, "skipall");
+        } }] : [];
 
         newAsk = ask;
         ask.el = askChoices(title + "\n" + text, [
@@ -9820,7 +9851,7 @@
             { label: "Leave out for now", ring: true, color: "#b8b8c0", fn: function () {
                 finishNewAsk(ask.n, "skip");
             } }
-        ], function () {
+        ].concat(skipAll), function () {
 
             // Without the player's box it is asked in the web views only,
             // so it is not cancelled before the box would have been shown
@@ -9831,9 +9862,22 @@
         publishHostSoon();
     }
 
-    // mode: now, next, end, replace or skip, which leaves them out for now.
-    // Anything else, a newer question taking over, leaves things as they are
+    // mode: now, next, end, replace or skip, which leaves them out for now,
+    // skipall the same for the songs still being made as well. Anything
+    // else, a newer question taking over, leaves things as they are
     function finishNewAsk(n, mode) {
+
+        if (mode === "skipall" && newAsk && newAsk.n === n) {
+
+            for (const s of cache.songs) {
+
+                if (isPendingSong(s)) {
+                    leftOutAhead.add(String(s.song_id));
+                }
+            }
+
+            mode = "skip";
+        }
 
         const ask = newAsk;
 
@@ -28659,7 +28703,7 @@
             },
             forceAsk: forcePending ? { id: String(forcePending.song.song_id), text: forcePending.text } : null,
             goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
-            newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text } : null,
+            newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text, making: newAsk.making || 0 } : null,
             setAsk: setAsk ? { n: setAsk.n, title: setAsk.title, text: setAsk.text, options: setAsk.options } : null,
             followAsk: followAsk ? { n: followAsk.n, title: followAsk.title, text: followAsk.text } : null,
             pendingCount: pendingCount(),
