@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.42";
+    const VERSION = "2.0.0.44";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12788,6 +12788,14 @@
             resumeIosCtx("playing");
             closeHeldAsk("closed, the song plays");
 
+            // Told once the engine has settled
+            setTimeout(noteHeardLag, 1500);
+
+            // Started part way in, or moved while paused: measured
+            if (syncWanted) {
+                startSyncSoon();
+            }
+
             if (isIosLike() && anyFadeOn()) {
 
                 // A song a tap started a moment ago, fetched first say,
@@ -12802,7 +12810,14 @@
             fadeInResume();
         });
         audioOn("loadstart", function () {
+
             dropResumeFade();
+            syncFresh();
+        });
+
+        // Moved within the song: the lag heard measured again
+        audioOn("seeked", function () {
+            syncMoved();
         });
 
         // Every jump in the song counted, so a browser playing the music can
@@ -25448,7 +25463,8 @@
 
         lyricBox.style.display = "block";
 
-        const ms = isFinite(audio.currentTime) ? audio.currentTime * 1000 : 0;
+        // The line heard, not the one the song's clock has reached
+        const ms = isFinite(audio.currentTime) ? songTimes().at * 1000 : 0;
 
         // The rows are sorted, take the last one that has started
         let idx = -1;
@@ -27170,10 +27186,350 @@
     // Where the song is and how long it is: from the audio while it is
     // loaded, else for a restored song where it was left and the length
     // Mureka gives, so the times and the waveform show before Play
+    // How far behind the song's own clock the sound is heard, in seconds.
+    // A song going through a sound engine, for the fades on an iPhone or a
+    // sound profile, reaches the speaker that much later, Bluetooth more so,
+    // as far as the engine tells. 0 when it plays on its own
+    function heardLag() {
+
+        let ctx = null;
+
+        if (iosGain && iosCtx) {
+            ctx = iosCtx;
+        } else if (fxCtx && fxEl === audio) {
+            ctx = fxCtx;
+        }
+
+        if (!ctx || ctx.state !== "running") {
+            return 0;
+        }
+
+        const base = Number(ctx.baseLatency) || 0;
+        const out = Number(ctx.outputLatency) || 0;
+        const measured = ctx === iosCtx ? syncLag : 0;
+
+        return Math.max(0, Math.min(4, base + out + measured));
+    }
+
+    // Safari on an iPhone, the song going through the sound engine, hears
+    // a song later than its clock says once it has been moved, by a seek or
+    // by starting part way in, often by more than a second, and the engine
+    // does not tell. That lag is measured instead: the level going to the
+    // speaker, read every few hundredths of a second, is laid against the
+    // song's own levels until the two line up. From the start of a song the
+    // two are in step
+    const SYNC_STEP_MS = 40;
+    const SYNC_FRAME_SEC = 0.01;
+    const SYNC_MAX_SEC = 2.5;
+    const SYNC_KEEP = 125;
+    const SYNC_MIN = 75;
+    const SYNC_GOOD = 0.75;
+    const SYNC_APART_SEC = 0.08;
+    const SYNC_MARGIN = 0.05;
+
+    // The lag measured, in seconds, on top of what the engine tells
+    let syncLag = 0;
+
+    // The song's levels, 100 a second, for the link playing
+    let syncEnv = null;
+    let syncEnvFor = "";
+
+    // Levels read while it plays, with the song's clock at each
+    let syncSamples = [];
+    let syncTimer = 0;
+    let syncBuf = null;
+    let syncWanted = false;
+    let syncAgreed = 0;
+
+    // Guesses tried since the last move, given up after a while
+    let syncTries = 0;
+    const SYNC_TRIES = 25;
+
+    // A new song from its start: in step
+    function syncFresh() {
+
+        syncLag = 0;
+        syncWanted = false;
+        syncSamples = [];
+        syncAgreed = 0;
+        stopSyncTimer();
+    }
+
+    // Moved: measured again
+    function syncMoved() {
+
+        syncWanted = true;
+        syncSamples = [];
+        syncAgreed = 0;
+        syncTries = 0;
+        startSyncSoon();
+    }
+
+    function stopSyncTimer() {
+
+        if (syncTimer) {
+
+            clearInterval(syncTimer);
+            syncTimer = 0;
+        }
+    }
+
+    function startSyncSoon() {
+
+        if (!syncWanted || !iosGain || !iosMeter || !iosCtx || !audio || audio.paused) {
+            return;
+        }
+
+        loadSyncEnv();
+
+        if (!syncTimer) {
+            syncTimer = setInterval(syncTick, SYNC_STEP_MS);
+        }
+    }
+
+    // The song's levels from its file, the saved copy or the link, read at
+    // a low rate, kept for the song playing only
+    async function loadSyncEnv() {
+
+        const src = audio ? String(audio.currentSrc || audio.src || "") : "";
+        const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+
+        if (!src || !Off || syncEnvFor === src) {
+            return;
+        }
+
+        syncEnvFor = src;
+        syncEnv = null;
+
+        try {
+
+            const t0 = Date.now();
+            const bytes = await (await fetch(src)).arrayBuffer();
+            const buffer = await trimDecode(new Off(1, 1, 8000), bytes);
+            const per = Math.max(1, Math.round(buffer.sampleRate * SYNC_FRAME_SEC));
+            const n = Math.floor(buffer.length / per);
+            const chans = [];
+            const sum = new Float64Array(n + 1);
+
+            for (let c = 0; c < buffer.numberOfChannels; c++) {
+                chans.push(buffer.getChannelData(c));
+            }
+
+            // Running sums of each slice's level, so the level over any
+            // stretch is quick to work out
+            for (let i = 0; i < n; i++) {
+
+                let sq = 0;
+
+                for (const data of chans) {
+
+                    for (let j = i * per; j < (i + 1) * per; j++) {
+                        sq += data[j] * data[j];
+                    }
+                }
+
+                sum[i + 1] = sum[i] + Math.sqrt(sq / (per * chans.length));
+            }
+
+            if (syncEnvFor !== src) {
+                return;
+            }
+
+            syncEnv = { sum: sum, n: n };
+            dbgLog("Audio", "song's levels read for the lag check in " + (Date.now() - t0) + " ms");
+        } catch (e) {
+
+            dbgLog("Audio", "song's levels not read for the lag check: " + errText(e));
+
+            if (syncEnvFor === src) {
+                syncEnvFor = "";
+            }
+        }
+    }
+
+    // The song's average level from one time to another
+    function syncLevel(from, to) {
+
+        const a = Math.max(0, Math.min(syncEnv.n, Math.floor(from / SYNC_FRAME_SEC)));
+        const b = Math.max(a + 1, Math.min(syncEnv.n, Math.ceil(to / SYNC_FRAME_SEC)));
+
+        return b > syncEnv.n ? 0 : (syncEnv.sum[b] - syncEnv.sum[a]) / (b - a);
+    }
+
+    function syncTick() {
+
+        if (!syncWanted || !iosGain || !iosMeter || !iosCtx || iosCtx.state !== "running" || !audio || audio.paused) {
+
+            stopSyncTimer();
+            return;
+        }
+
+        if (audio.seeking || !syncEnv) {
+            return;
+        }
+
+        if (!syncBuf || syncBuf.length !== iosMeter.fftSize) {
+            syncBuf = new Float32Array(iosMeter.fftSize);
+        }
+
+        iosMeter.getFloatTimeDomainData(syncBuf);
+
+        let sq = 0;
+
+        for (let i = 0; i < syncBuf.length; i++) {
+            sq += syncBuf[i] * syncBuf[i];
+        }
+
+        syncSamples.push({ el: audio.currentTime, level: Math.sqrt(sq / syncBuf.length) });
+
+        if (syncSamples.length > SYNC_KEEP) {
+            syncSamples.shift();
+        }
+
+        if (syncSamples.length >= SYNC_MIN && syncSamples.length % 25 === 0) {
+            syncGuess();
+        }
+    }
+
+    // The lag that lines the two up best, taken when they line up well
+    function syncGuess() {
+
+        syncTries += 1;
+
+        if (syncTries > SYNC_TRIES) {
+
+            dbgLog("Audio", "the lag heard could not be measured here, the song's levels too even or too regular");
+            syncWanted = false;
+            stopSyncTimer();
+            return;
+        }
+
+        const n = syncSamples.length;
+        const win = iosMeter.fftSize / iosCtx.sampleRate;
+        let meanR = 0;
+
+        for (const x of syncSamples) {
+            meanR += x.level;
+        }
+
+        meanR /= n;
+
+        let varR = 0;
+
+        for (const x of syncSamples) {
+            varR += (x.level - meanR) * (x.level - meanR);
+        }
+
+        // Too even to tell anything by, a long note or quiet
+        if (varR / n < 1e-6) {
+            return;
+        }
+
+        let best = -2;
+        let bestLag = 0;
+        const e = new Float64Array(n);
+        const tried = [];
+
+        for (let lag = 0; lag <= SYNC_MAX_SEC + 1e-9; lag += SYNC_FRAME_SEC) {
+
+            let meanE = 0;
+
+            for (let i = 0; i < n; i++) {
+
+                const at = syncSamples[i].el - lag;
+
+                e[i] = syncLevel(at - win, at);
+                meanE += e[i];
+            }
+
+            meanE /= n;
+
+            let cov = 0;
+            let varE = 0;
+
+            for (let i = 0; i < n; i++) {
+
+                const de = e[i] - meanE;
+
+                cov += de * (syncSamples[i].level - meanR);
+                varE += de * de;
+            }
+
+            const r = varE > 0 ? cov / Math.sqrt(varE * varR) : -1;
+
+            tried.push({ lag: lag, r: r });
+
+            if (r > best) {
+
+                best = r;
+                bestLag = lag;
+            }
+        }
+
+        // Music with a steady beat lines up nearly as well a beat away, so
+        // the best has to stand out from any lag further off
+        let other = -2;
+
+        for (const x of tried) {
+
+            if (Math.abs(x.lag - bestLag) > SYNC_APART_SEC && x.r > other) {
+                other = x.r;
+            }
+        }
+
+        if (best < SYNC_GOOD || best - other < SYNC_MARGIN) {
+            return;
+        }
+
+        // Two guesses agreeing are enough, the lag stays until the next move
+        if (Math.abs(bestLag - syncLag) <= 0.03) {
+
+            syncAgreed += 1;
+        } else {
+
+            syncAgreed = 0;
+            dbgLog("Audio", "heard " + Math.round(bestLag * 1000) + " ms later than the song's clock and the engine say, measured (match "
+                + Math.round(best * 100) + " %)");
+        }
+
+        syncLag = bestLag;
+
+        if (syncAgreed >= 1) {
+
+            syncWanted = false;
+            stopSyncTimer();
+        }
+    }
+
+    // The engine's lag in the log whenever it changes by more than a bit
+    let lagLogged = -1;
+
+    function noteHeardLag() {
+
+        const lag = heardLag();
+
+        if (Math.abs(lag - lagLogged) < 0.05) {
+            return;
+        }
+
+        lagLogged = lag;
+
+        const ctx = iosGain && iosCtx ? iosCtx : fxCtx;
+
+        dbgLog("Audio", "heard " + Math.round(lag * 1000) + " ms after the song's own clock"
+            + (ctx ? ", engine base " + Math.round((Number(ctx.baseLatency) || 0) * 1000) + " ms, output "
+                + (ctx.outputLatency === undefined ? "not told" : Math.round((Number(ctx.outputLatency) || 0) * 1000) + " ms") : ""));
+    }
+
+    // Where the song is and how long it is. While it plays, the place heard,
+    // so the waveform and the time go with the sound
     function songTimes() {
 
         if (audio && audio.src && isFinite(audio.duration) && audio.duration > 0) {
-            return { at: isFinite(audio.currentTime) ? audio.currentTime : 0, length: audio.duration };
+
+            const at = isFinite(audio.currentTime) ? audio.currentTime : 0;
+
+            return { at: audio.paused ? at : Math.max(0, at - heardLag()), length: audio.duration };
         }
 
         const song = restoredSong();
@@ -34412,6 +34768,7 @@
             + " | ready " + audio.readyState + " net " + audio.networkState
             + " | src " + src
             + " | vol " + dbgNum(audio.volume) + (audio.muted ? " muted" : "")
+            + " | heard after " + Math.round(heardLag() * 1000) + " ms" + (syncLag > 0 ? ", " + Math.round(syncLag * 1000) + " measured" : "")
             + (audio.error ? " | error " + audio.error.code : "");
     }
 
