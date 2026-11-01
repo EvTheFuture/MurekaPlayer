@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.51";
+    const VERSION = "2.0.0.55";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22302,13 +22302,15 @@
         return members.indexOf(g.show) >= 0 ? g.show : (members[0] || "");
     }
 
+    // Its own name, or Group and its place among the groups
     function groupLabel(id) {
 
         const i = ctlGroups().findIndex(function (g) {
             return g.id === id;
         });
+        const g = ctlGroups()[i];
 
-        return "Group " + (i + 1);
+        return g && g.name ? g.name : "Group " + (i + 1);
     }
 
     function cleanCtlGroups(raw) {
@@ -22328,6 +22330,7 @@
 
             return {
                 id: String(g.id),
+                name: typeof g.name === "string" ? g.name.trim().slice(0, 40) : "",
                 names: typeof g.names === "string" ? g.names : "",
                 show: typeof g.show === "string" ? g.show : ""
             };
@@ -22926,9 +22929,11 @@
 
     // A copy of a control button that follows every change to it, its icon,
     // label, colors and words. A press on the copy presses the button
-    function mirrorControl(real, press) {
+    function mirrorControl(real, press, name) {
 
         const m = document.createElement("button");
+
+        m.__name = name || "";
         const extra = [];
         const sync = function () {
 
@@ -22946,6 +22951,16 @@
             m.style.position = "relative";
             m.style.opacity = "1";
             m.title = (m.__titleLead || "") + real.title;
+
+            // A group with a name of its own says it under the button
+            if (m.__name && real.labelSpan) {
+
+                const at = Array.prototype.indexOf.call(real.childNodes, real.labelSpan);
+
+                if (at >= 0 && m.childNodes[at]) {
+                    m.childNodes[at].textContent = m.__name;
+                }
+            }
 
             const aria = real.getAttribute("aria-label");
 
@@ -23006,7 +23021,7 @@
     function syncGroupButtons() {
 
         const key = JSON.stringify(ctlGroups().map(function (g) {
-            return [g.id, groupShown(g, true)];
+            return [g.id, groupShown(g, true), groupLabel(g.id)];
         }));
 
         if (key === groupButtonsKey) {
@@ -23038,7 +23053,7 @@
 
                 btn = mirrorControl(real, function () {
                     openCtlGroup(g.id, btn);
-                });
+                }, g.name || "");
             } else {
 
                 btn = makeIconButton(iconSets(), groupLabel(g.id), function () {
@@ -23126,18 +23141,30 @@
 
         drop.dataset.group = id;
         drop.style.cssText = "position:absolute;z-index:9;display:flex;flex-wrap:wrap;gap:6px;padding:8px;box-sizing:border-box;"
-            + "background:#1d1d22;border:1px solid #3a3a42;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6);touch-action:none";
+            + "background:#1d1d22;border:1px solid #3a3a42;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6);touch-action:none;"
+            + "transition:opacity 0.6s ease";
         drop.style.left = (row.left - box.left) + "px";
         drop.style.width = row.width + "px";
 
+        // Closes by itself a while after the last press, fading a little
+        // first, the last part of the wait or a second and a half, so there
+        // is time to press again
         const restart = function () {
 
             clearTimeout(groupDropTimer);
+            drop.style.opacity = "1";
 
             const sec = Number(settings.ctlGroupClose) || 0;
 
             if (sec > 0) {
-                groupDropTimer = setTimeout(closeCtlGroup, sec * 1000);
+
+                const warn = Math.min(1.5, sec / 2);
+
+                groupDropTimer = setTimeout(function () {
+
+                    drop.style.opacity = "0.45";
+                    groupDropTimer = setTimeout(closeCtlGroup, warn * 1000);
+                }, (sec - warn) * 1000);
             }
         };
 
@@ -23181,6 +23208,7 @@
 
             sx = ev.clientX;
             sy = ev.clientY;
+            restart();
         };
         const move = function (ev) {
 
@@ -29469,7 +29497,7 @@
 
             // The button groups, for the web view's own group buttons
             ctlGroups: ctlGroups().map(function (g) {
-                return { id: g.id, label: groupLabel(g.id), names: groupMembers(g, false), show: groupShown(g, false) };
+                return { id: g.id, label: groupLabel(g.id), named: !!g.name, names: groupMembers(g, false), show: groupShown(g, false) };
             }),
             ctlGroupClose: Number(settings.ctlGroupClose) || 0,
             names: settings.webNames === true,
@@ -40734,6 +40762,7 @@
         const nowPage = makePage();
         const soundPage = makePage();
         const soundEditPage = makePage();
+        const groupsPage = makePage();
         const publishPage = makePage();
         const setsPage = makePage();
         const cachePage = makePage();
@@ -40754,6 +40783,7 @@
             nowplaying: nowPage,
             sound: soundPage,
             soundedit: soundEditPage,
+            groups: groupsPage,
             publishing: publishPage,
             sets: setsPage,
             cache: cachePage,
@@ -41800,7 +41830,10 @@
         // Button groups, each with its buttons, the one it looks like and a
         // way to remove it. Drawn again when groups come and go
         const groupsBox = document.createElement("div");
-        let groupsKey = "";
+
+        // Never a list of groups, so the page is drawn the first time also
+        // with none yet
+        let groupsKey = null;
 
         groupsBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
 
@@ -41819,7 +41852,28 @@
 
             for (const g of ctlGroups()) {
 
-                groupsBox.appendChild(makeSubLabel(groupLabel(g.id)));
+                const head = makeSubLabel(groupLabel(g.id));
+                let remove = null;
+
+                groupsBox.appendChild(head);
+
+                // A name of its own, else Group and its place
+                groupsBox.appendChild(makeTextRow("Name", function () {
+                    return g.name || "";
+                }, function (v) {
+
+                    g.name = String(v || "").trim().slice(0, 40);
+                    head.textContent = groupLabel(g.id);
+
+                    if (remove) {
+                        remove.textContent = "Remove " + groupLabel(g.id);
+                    }
+
+                    groupButtonsKey = "";
+                    applyControlOrder();
+                    saveSettings();
+                    publishHostSoon();
+                }));
                 groupsBox.appendChild(buildControlEditor("group:" + g.id));
 
                 const choices = function () {
@@ -41869,7 +41923,7 @@
 
                 groupsBox.appendChild(withHint(showRow, "The button the group shows in the bar, with what that button shows."));
 
-                const remove = makeButton("Remove " + groupLabel(g.id), "#333", "#fff", function () {
+                remove = makeButton("Remove " + groupLabel(g.id), "#333", "#fff", function () {
 
                     settings.ctlGroups = ctlGroups().filter(function (x) {
                         return x.id !== g.id;
@@ -41917,10 +41971,11 @@
         drawGroups();
         settingsRefreshers.push(drawGroups);
 
-        mobilePage.appendChild(makeLabel("Button groups"));
-        mobilePage.appendChild(makeHint("A group is one button in a bar standing for several. In the bar it looks like the button chosen and shows what that button shows, and a tap opens all its buttons. A button can be in the bar and in any number of groups, once in each. A group is put in a bar like any button, here and on the Web view page."));
-        mobilePage.appendChild(groupsBox);
-        mobilePage.appendChild(withHint(makeDropRow("Closes by itself", [
+        // The groups are shared by every view, made on a page of their own
+        mobilePage.appendChild(makeHint("Button groups, made under Button groups on the main page, are put in the bar like any button."));
+        groupsPage.appendChild(makeHint("A group is one button in a bar standing for several. In the bar it looks like the button chosen and shows what that button shows, and a tap opens all its buttons. A button can be in a bar and in any number of groups, once in each. The groups are the same for the mobile player and the web view, and each puts any of them in its own bar, on its own page."));
+        groupsPage.appendChild(groupsBox);
+        groupsPage.appendChild(withHint(makeDropRow("Closes by itself", [
             { label: "Never", value: "0" },
             { label: "2 s after a press", value: "2" },
             { label: "4 s after a press", value: "4" },
@@ -42791,6 +42846,7 @@
             webPage.appendChild(makeLabel("Control buttons"));
             webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
             webPage.appendChild(webControlRow);
+            webPage.appendChild(makeHint("Button groups, made under Button groups on the main page, are put in the bar like any button."));
 
             // The badges along the top
             webPage.appendChild(makeLabel("Badges"));
@@ -43814,6 +43870,7 @@
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
+            [groupsPage, "Button groups", null],
             [soundPage, "Sound profiles", "The bass, mids and treble, a volume below the device's lowest step and a compressor, a profile of its own and a night profile for each Bluetooth speaker."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
             [setsPage, "Song sets", "The versions of a song kept together, to compare them and listen them through. Kept on this device and carried by song tweaks."],
@@ -43847,6 +43904,7 @@
         // this device, the music, the data and the tools
         mainPage.appendChild(makeLabel("Views"));
         mainPage.appendChild(makeHint("How the player looks in each place it can be shown."));
+        mainPage.appendChild(makePageButton("Button groups", "groups"));
         mainPage.appendChild(makePageButton("Mobile player", "mobile"));
 
         if (webPageBtn) {

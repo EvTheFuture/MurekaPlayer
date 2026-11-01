@@ -96,14 +96,17 @@ In development.
 - **Settings in the web view answer at once.** A stepper's number moves
   as soon as its minus or plus is pressed, as a switch already did, and
   the device's reading follows.
-- **Button groups.** Any number of button groups can be made under
-  Control buttons, each with a bar of its own to drop buttons in. A
+- **Button groups.** Any number of button groups can be made on the
+  Button groups page of the settings, shared by the mobile player and the
+  web view, each with a bar of its own to drop buttons in. A
   button can be in the button row and in any number of groups, once in
   each. A group is put in the button row like any button, on the phone
   and in the web view. There it looks like the button chosen for it and
   shows what that button shows, with a small mark, and a tap opens all its
-  buttons over the row. A tap outside or a swipe closes them, and if set,
-  they close by themselves a few seconds after the last press.
+  buttons over the row. A group can have a name of its own, shown under
+  it when the buttons have names. A tap outside or a swipe closes them,
+  and if set, they close by themselves a few seconds after the last press,
+  fading a little first.
 - **New songs into a set before they play.** The question about where
   new songs go in the play queue has Put in a set first: the likeliest
   set, the sets used most or a new one, then the question comes again

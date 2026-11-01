@@ -1153,12 +1153,15 @@
         line-height: 1;
     }
 
-    #controls.names .ctlLbl {
+    #controls.names .ctlLbl,
+    .groupDrop.names .ctlLbl {
         display: block;
     }
 
     #controls.names .ctl svg,
-    #controls.names .ctl .ico {
+    #controls.names .ctl .ico,
+    .groupDrop.names .ctl svg,
+    .groupDrop.names .ctl .ico {
         height: 42%;
     }
 
@@ -3607,7 +3610,14 @@
         position: relative;
     }
 
+    /* Fading a little before it closes by itself, so there is time to
+       press again */
+    .groupDrop.closing {
+        opacity: 0.45;
+    }
+
     .groupDrop {
+        transition: opacity 0.6s ease;
         position: fixed;
         z-index: 60;
         display: flex;
@@ -20010,6 +20020,13 @@
             m.className = real.className + " ctlCopy";
             m.title = (m.dataset.lead || "") + (real.title || real.getAttribute("aria-label") || "");
             m.style.display = "";
+
+            // A group with a name of its own says it under the button
+            const lbl = m.querySelector(".ctlLbl");
+
+            if (lbl && m.dataset.name) {
+                lbl.textContent = m.dataset.name;
+            }
         };
 
         m.type = "button";
@@ -20042,7 +20059,7 @@
     function syncGroupEls() {
 
         const key = JSON.stringify(ctlGroupDefs().map(function (g) {
-            return [g.id, g.show];
+            return [g.id, g.show, g.label];
         }));
 
         if (key === groupElsKey) {
@@ -20075,10 +20092,15 @@
                 });
             } else {
 
+                const lbl = document.createElement("span");
+
                 el = document.createElement("button");
                 el.type = "button";
                 el.className = "ctl";
                 el.appendChild(icon("sets"));
+                lbl.className = "ctlLbl";
+                lbl.textContent = g.label;
+                el.appendChild(lbl);
                 el.extra = function (node) {
                     el.appendChild(node);
                 };
@@ -20096,6 +20118,17 @@
             el.extra(mark);
             el.dataset.group = g.id;
             el.dataset.lead = g.label + ": ";
+
+            if (g.named) {
+
+                el.dataset.name = g.label;
+
+                const lbl = el.querySelector(".ctlLbl");
+
+                if (lbl) {
+                    lbl.textContent = g.label;
+                }
+            }
             el.title = g.label + ": " + (real ? real.title || "" : "");
             groupEls[g.id] = el;
         }
@@ -20152,18 +20185,28 @@
         const drop = document.createElement("div");
         const bar = $("controls").getBoundingClientRect();
         const at = anchor.getBoundingClientRect();
+        // Closes by itself a while after the last press, fading a little
+        // first, the last part of the wait or a second and a half
         const restart = function () {
 
             clearTimeout(webGroupTimer);
+            drop.classList.remove("closing");
 
             const sec = state && Number(state.ctlGroupClose) || 0;
 
             if (sec > 0) {
-                webGroupTimer = setTimeout(closeWebGroup, sec * 1000);
+
+                const warn = Math.min(1.5, sec / 2);
+
+                webGroupTimer = setTimeout(function () {
+
+                    drop.classList.add("closing");
+                    webGroupTimer = setTimeout(closeWebGroup, warn * 1000);
+                }, (sec - warn) * 1000);
             }
         };
 
-        drop.className = "groupDrop";
+        drop.className = "groupDrop" + ($("controls").classList.contains("names") ? " names" : "");
         drop.dataset.group = id;
         drop.style.left = bar.left + "px";
         drop.style.width = bar.width + "px";
@@ -20201,6 +20244,7 @@
 
             sx = ev.clientX;
             sy = ev.clientY;
+            restart();
         };
         const move = function (ev) {
 
