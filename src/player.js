@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.57";
+    const VERSION = "2.0.0.59";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12402,16 +12402,66 @@
     // profile for night mode, the device's own speaker and devices not set up
     // share one of each. Off unless switched on. Not on an iPhone or iPad,
     // whose player has the song go through the sound engine for its fades
-    // Where the bass cut, a high-pass filter, starts, in Hz, 0 for none
-    const SOUND_CUTS = [0, 40, 60, 80, 100, 120, 150, 200];
+    // The bass cut, a high-pass filter: everything below it cut away. Off
+    // below the lowest, in steps of 5 Hz up to the highest
+    const SOUND_CUT_MIN = 20;
+    const SOUND_CUT_MAX = 300;
 
+    function cleanCut(v) {
+
+        const n = Math.round((Number(v) || 0) / 5) * 5;
+
+        return n < SOUND_CUT_MIN ? 0 : Math.min(SOUND_CUT_MAX, n);
+    }
+
+    // Nine bands an octave apart, a shelf at each end
     const SOUND_BANDS = [
-        { type: "lowshelf", f: 100, label: "Bass" },
-        { type: "peaking", f: 300, label: "Low mids" },
-        { type: "peaking", f: 1000, label: "Mids" },
-        { type: "peaking", f: 3000, label: "High mids" },
-        { type: "highshelf", f: 8000, label: "Treble" }
+        { type: "lowshelf", f: 63, q: 0.7, label: "63" },
+        { type: "peaking", f: 125, q: 1.4, label: "125" },
+        { type: "peaking", f: 250, q: 1.4, label: "250" },
+        { type: "peaking", f: 500, q: 1.4, label: "500" },
+        { type: "peaking", f: 1000, q: 1.4, label: "1k" },
+        { type: "peaking", f: 2000, q: 1.4, label: "2k" },
+        { type: "peaking", f: 4000, q: 1.4, label: "4k" },
+        { type: "peaking", f: 8000, q: 1.4, label: "8k" },
+        { type: "highshelf", f: 16000, q: 0.7, label: "16k" }
     ];
+
+    // The five bands profiles had before, carried over to the nine: each
+    // new band takes the level the old ones give at its frequency
+    const OLD_BANDS_HZ = [100, 300, 1000, 3000, 8000];
+
+    function bandsFromFive(old) {
+
+        const at = OLD_BANDS_HZ.map(function (f) {
+            return Math.log2(f);
+        });
+
+        return SOUND_BANDS.map(function (b) {
+
+            const x = Math.log2(b.f);
+
+            if (x <= at[0]) {
+                return Number(old[0]) || 0;
+            }
+
+            if (x >= at[at.length - 1]) {
+                return Number(old[old.length - 1]) || 0;
+            }
+
+            for (let i = 1; i < at.length; i++) {
+
+                if (x <= at[i]) {
+
+                    const k = (x - at[i - 1]) / (at[i] - at[i - 1]);
+
+                    return Math.round((Number(old[i - 1]) || 0) * (1 - k) + (Number(old[i]) || 0) * k);
+                }
+            }
+
+            return 0;
+        });
+    }
 
     // How hard the compressor holds the loud parts down, the quiet ones
     // staying as they are
@@ -12443,7 +12493,8 @@
     function cleanProfile(x, i) {
 
         const o = x && typeof x === "object" ? x : {};
-        const bands = Array.isArray(o.bands) ? o.bands : [];
+        const given = Array.isArray(o.bands) ? o.bands : [];
+        const bands = given.length === OLD_BANDS_HZ.length ? bandsFromFive(given) : given;
         const num = function (v, min, max) {
 
             const n = Number(v);
@@ -12461,7 +12512,7 @@
             }),
             comp: o.comp === true,
             askLower: o.askLower === true,
-            bassCut: SOUND_CUTS.indexOf(Number(o.bassCut)) >= 0 ? Number(o.bassCut) : 0,
+            bassCut: cleanCut(o.bassCut),
             compLevel: SOUND_COMP.some(function (c) {
                 return c.value === o.compLevel;
             }) ? o.compLevel : "medium"
@@ -12474,7 +12525,10 @@
 
         const raw = settings.sound && typeof settings.sound === "object" ? settings.sound : {};
 
-        if (raw.clean === true) {
+        // Made whole before, unless saved with the five bands of before
+        if (raw.clean === true && Array.isArray(raw.profiles) && raw.profiles.every(function (p) {
+            return p && Array.isArray(p.bands) && p.bands.length === SOUND_BANDS.length;
+        })) {
             return raw;
         }
 
@@ -12728,7 +12782,7 @@
 
                     f.type = b.type;
                     f.frequency.value = b.f;
-                    f.Q.value = 0.9;
+                    f.Q.value = b.q;
                     f.gain.value = 0;
 
                     return f;
@@ -12802,7 +12856,7 @@
         };
 
         fxBands.forEach(function (b, i) {
-            put(b.gain, p.bands[i]);
+            put(b.gain, Number(p.bands[i]) || 0);
         });
 
         put(fxComp.threshold, c ? c.threshold : 0);
@@ -12996,6 +13050,11 @@
             clearInterval(btPollTimer);
             btPollTimer = 0;
         }
+    }
+
+    // A funnel, the button opening all the filters
+    function iconFilter() {
+        return makeSvgIcon([["polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" }]]);
     }
 
     // Three sliders, the sound profile button
@@ -22344,7 +22403,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters"];
 
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
@@ -22526,6 +22585,10 @@
 
         if (name === "eq") {
             return iconEq();
+        }
+
+        if (name === "filters") {
+            return iconFilter();
         }
 
         // The web view's two list buttons, drawn as they are there
@@ -32182,6 +32245,30 @@
             return;
         }
 
+        // A slider of its own beside its name, drawn by the web view as one,
+        // its words beside it read off the phone's
+        if (el.dataset.hostSlider) {
+
+            const input = el.querySelector("input");
+            const at = input ? Array.prototype.indexOf.call(el.children, input) : -1;
+
+            if (input && at >= 0) {
+
+                out.push({
+                    t: "slider",
+                    id: path + "." + at,
+                    label: hostText(el.children[0]),
+                    value: input.value,
+                    min: input.min,
+                    max: input.max,
+                    step: input.step,
+                    shown: hostText(el.children[el.children.length - 1])
+                });
+            }
+
+            return;
+        }
+
         // The bands of a sound profile, drawn by the web view as sliders of
         // its own, each set through the phone's slider by its place
         if (el.dataset.hostEq) {
@@ -34295,6 +34382,11 @@
             askSoundPick();
         });
 
+        // All the filters, the same sheet the view menu opens
+        const filtersCtrlBtn = makeIconButton(iconFilter(), "All filters", function () {
+            openTagSheet();
+        });
+
         controlButtons = {
             prev: makeIconButton(iconPrev(), "Previous", function () {
                 switchSong("tap", playPrev);
@@ -34311,7 +34403,8 @@
             rate: rateCtrlBtn,
             sets: setsCtrlBtn,
             night: nightCtrlBtn,
-            eq: eqCtrlBtn
+            eq: eqCtrlBtn,
+            filters: filtersCtrlBtn
         };
 
         updateFeedButton();
@@ -43893,7 +43986,7 @@
                 const wrap = document.createElement("div");
                 const slider = document.createElement("input");
                 const name = document.createElement("span");
-                const freq = b.f >= 1000 ? (b.f / 1000) + " kHz" : b.f + " Hz";
+                const freq = "Hz";
                 const show = function () {
 
                     const v = edit.bands[i];
@@ -43905,7 +43998,7 @@
                 col.dataset.eqLabel = b.label;
                 col.dataset.eqFreq = freq;
                 level.style.cssText = "font-size:13px;font-variant-numeric:tabular-nums;color:#fff";
-                wrap.style.cssText = "position:relative;width:36px;height:150px";
+                wrap.style.cssText = "position:relative;width:30px;height:150px";
                 slider.type = "range";
                 slider.min = "-12";
                 slider.max = "12";
@@ -43973,13 +44066,56 @@
             flat.style.alignSelf = "flex-start";
             soundEditBox.appendChild(flat);
 
-            soundEditBox.appendChild(withHint(evenDrop(makeDropRow("Bass cut", SOUND_CUTS.map(function (f) {
-                return { value: String(f), label: f === 0 ? "Off" : "Below " + f + " Hz" };
-            }), function () { return String(edit.bassCut || 0); }, function (v) {
+            // The bass cut as a slider, heard at once while moved. The web
+            // view draws its own from the same values
+            const cutRow = document.createElement("div");
+            const cutName = document.createElement("span");
+            const cutSlider = document.createElement("input");
+            const cutShown = document.createElement("span");
+            const showCut = function () {
+                cutShown.textContent = edit.bassCut > 0 ? edit.bassCut + " Hz" : "Off";
+            };
 
-                edit.bassCut = Number(v) || 0;
+            cutRow.dataset.hostSlider = "1";
+            cutRow.style.cssText = "display:flex;align-items:center;gap:10px";
+            cutName.textContent = "Bass cut";
+            cutName.style.cssText = "flex:0 0 auto";
+            cutSlider.type = "range";
+            cutSlider.min = "0";
+            cutSlider.max = String(SOUND_CUT_MAX);
+            cutSlider.step = "5";
+            cutSlider.value = String(edit.bassCut || 0);
+            cutSlider.setAttribute("aria-label", "Bass cut, Hz");
+            cutSlider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+            cutShown.style.cssText = "flex:0 0 4.5em;text-align:right;font-variant-numeric:tabular-nums";
+            showCut();
+
+            cutSlider.addEventListener("input", function () {
+
+                edit.bassCut = cleanCut(cutSlider.value);
+                showCut();
+                applySound();
+            });
+            cutSlider.addEventListener("change", function () {
+
+                edit.bassCut = cleanCut(cutSlider.value);
+                showCut();
                 soundChanged();
-            })), "A high-pass filter: everything below this is cut away, steeply, for a small speaker that rattles on deep bass or to keep it quiet at night."));
+            });
+            settingsRefreshers.push(function () {
+
+                if (document.activeElement !== cutSlider) {
+                    cutSlider.value = String(edit.bassCut || 0);
+                }
+
+                showCut();
+            });
+
+            cutRow.appendChild(cutName);
+            cutRow.appendChild(cutSlider);
+            cutRow.appendChild(cutShown);
+            soundEditBox.appendChild(cutRow);
+            soundEditBox.appendChild(makeHint("A high-pass filter: everything below this is cut away, steeply, for a small speaker that rattles on deep bass or to keep it quiet at night. Off at the left end."));
 
             soundEditBox.appendChild(soundHeading("Compressor"));
             soundEditBox.appendChild(withHint(makeBoolRow("Compressor",

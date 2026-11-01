@@ -3551,7 +3551,7 @@
     .pEq {
         display: flex;
         justify-content: space-between;
-        gap: 6px;
+        gap: 4px;
         width: 100%;
         max-width: 520px;
         padding: 6px 0;
@@ -3573,8 +3573,28 @@
 
     .pEqWrap {
         position: relative;
-        width: 44px;
+        width: 32px;
         height: 180px;
+    }
+
+    /* A slider beside its name, its value at the end */
+    .pSlider {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+    }
+
+    .pSlider input {
+        flex: 1;
+        min-width: 0;
+        accent-color: var(--accent);
+    }
+
+    .pSliderVal {
+        flex: 0 0 4.5em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
     }
 
     /* Turned on its side, top up, so it works the same in every browser */
@@ -5505,6 +5525,7 @@
         <button class="ctl" id="setsBtn" type="button" data-label="Sets" aria-label="Song sets on or off" data-icon="sets"></button>
         <button class="ctl" id="nightBtn" type="button" data-label="Night" aria-label="Night mode on or off" data-icon="moon"></button>
         <button class="ctl" id="eqBtn" type="button" data-label="EQ" aria-label="Sound profile" data-icon="eq"></button>
+        <button class="ctl" id="filtersBtn" type="button" title="All filters" data-label="Filters" aria-label="All filters" data-icon="filter"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -6324,10 +6345,11 @@
         sets: { label: "Sets", icon: "sets", el: "setsBtn" },
         night: { label: "Night", icon: "moon", el: "nightBtn" },
         eq: { label: "EQ", icon: "eq", el: "eqBtn" },
+        filters: { label: "Filters", icon: "filter", el: "filtersBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "songs", "minilist"];
 
     function icon(name) {
 
@@ -16384,6 +16406,10 @@
             return panelEq(node);
         }
 
+        if (node.t === "slider") {
+            return panelSlider(node);
+        }
+
         const text = document.createElement("div");
 
         // Lyrics and the style prompt keep their lines and capitals
@@ -16504,6 +16530,70 @@
     window.addEventListener("pointercancel", function () {
         eqMoving = false;
     });
+
+    // A slider beside its name, its words beside it. Heard on the phone
+    // while it moves, a few times a second, kept once let go
+    function panelSlider(node) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const slider = document.createElement("input");
+        const shown = document.createElement("span");
+        let sentAt = 0;
+        let later = 0;
+
+        const words = function () {
+
+            const v = Number(slider.value) || 0;
+
+            // Hz below 20 is off, as the phone has it
+            return /Hz$/.test(node.shown || "") || node.shown === "Off" ? (v < 20 ? "Off" : v + " Hz") : String(v);
+        };
+        const tell = function () {
+
+            sentAt = Date.now();
+            send("hset", { id: node.id, value: slider.value });
+        };
+
+        row.className = "pSlider";
+        name.textContent = node.label || "";
+        slider.type = "range";
+        slider.min = String(node.min);
+        slider.max = String(node.max);
+        slider.step = String(node.step || 1);
+        slider.value = String(node.value);
+        slider.setAttribute("aria-label", node.label || "");
+        shown.className = "pSliderVal";
+        shown.textContent = node.shown || words();
+
+        slider.addEventListener("pointerdown", function () {
+            eqMoving = true;
+        });
+        slider.addEventListener("input", function () {
+
+            shown.textContent = words();
+            clearTimeout(later);
+
+            if (Date.now() - sentAt >= EQ_SEND_MS) {
+                tell();
+            } else {
+                later = setTimeout(tell, EQ_SEND_MS);
+            }
+        });
+        slider.addEventListener("change", function () {
+
+            clearTimeout(later);
+            eqMoving = false;
+            shown.textContent = words();
+            panelAction("hset", { id: node.id, value: slider.value });
+        });
+
+        row.appendChild(name);
+        row.appendChild(slider);
+        row.appendChild(shown);
+
+        return row;
+    }
 
     function panelEq(node) {
 
@@ -17454,6 +17544,11 @@
     });
 
     $("allFilters").addEventListener("click", function () {
+        showPanel("filters");
+    });
+
+    // The same from the button row
+    $("filtersBtn").addEventListener("click", function () {
         showPanel("filters");
     });
 

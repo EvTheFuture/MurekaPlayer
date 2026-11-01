@@ -73,8 +73,8 @@ In development.
   in the list and the queue, and the sets are kept as they are. A pressed
   song keeps its set's color.
 - **Sound profiles and night mode.** A Sound profiles page in the settings, on
-  the phone and in the web view, holds profiles of five bands, bass, low
-  mids, mids, high mids and treble, a volume that can go below the
+  the phone and in the web view, holds profiles of nine bands an octave
+  apart, 63 Hz to 16 kHz, a volume that can go below the
   device's lowest step, and a compressor at three strengths that holds the
   loud parts down. The page lists the profiles, each with a line on what
   it does and an Edit button that opens its editor, where the bands are
@@ -93,12 +93,14 @@ In development.
   the profile turned the song down, never below the lowest step, so the
   song does not suddenly get loud. Night mode stays on until it is
   answered. A profile can also cut the bass away below a frequency, a
-  high-pass filter, from 40 to 200 Hz. The EQ button for the button row
+  high-pass filter set with a slider from 20 to 300 Hz. The EQ button for the button row
   picks any profile by hand for the speaker or headphones in use, until
   another takes over or it is set back, on the phone and in the web view.
 - **Settings in the web view answer at once.** A stepper's number moves
   as soon as its minus or plus is pressed, as a switch already did, and
   the device's reading follows.
+- **Filters button.** A button for the button row, or a group, that opens
+  all the filters, on the phone and in the web view.
 - **Button groups.** Any number of button groups can be made on the
   Button groups page of the settings, shared by the mobile player and the
   web view, each with a bar of its own to drop buttons in. A
