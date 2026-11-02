@@ -5580,6 +5580,7 @@
         <button class="chip" id="setSortAdded" type="button" data-icon="listPlus"><span class="lbl">Last added</span></button>
         <button class="chip" id="setSortCreated" type="button" data-icon="sets"><span class="lbl">Created</span></button>
         <button class="chip" id="setSortName" type="button" data-icon="alpha"><span class="lbl">Name</span></button>
+        <button class="chip" id="setFold" type="button" data-icon="sets" title="Fold each set into one row, or show every song with its set's color"><span class="lbl">Fold sets</span></button>
         <span class="chipSep"></span>
         <button class="chip" id="toCurrent" type="button" data-icon="target"><span class="lbl">Now playing</span></button>
         <span class="chipSep" id="libSep"></span>
@@ -9886,6 +9887,7 @@
         $("play").classList.toggle("flat", stopped);
         $("shuffle").classList.toggle("on", !!(s && s.shuffle));
         $("setsBtn").classList.toggle("on", !!(s && s.setsOn === true));
+        paintSetFold();
         $("nightBtn").classList.toggle("on", !!(s && s.nightOn === true));
         $("eqBtn").classList.toggle("on", !!(s && (s.soundPicked || s.soundLive)));
         $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
@@ -13050,7 +13052,22 @@
         setLabel($("viewStars"), "Stars" + (listSort === "starsUp" ? " \u2191" : (listSort === "starsDown" ? " \u2193" : "")));
         setLabel($("viewPlays"), "Plays" + (listSort === "playsUp" ? " \u2191" : (listSort === "playsDown" ? " \u2193" : "")));
         $("viewPlays").style.display = playsOn() && listView !== "sets" ? "" : "none";
+        paintSetFold();
         paintMiniSort();
+    }
+
+    // Folding sets is for Mureka's songs while the sets are kept together,
+    // lit while they fold
+    function paintSetFold() {
+
+        const b = $("setFold");
+
+        if (!b) {
+            return;
+        }
+
+        b.style.display = listView === "mureka" && state && state.setsOn === true ? "" : "none";
+        b.classList.toggle("on", !!(state && state.setsFold === true));
     }
 
     // How the sets are sorted, kept on the phone, the same everywhere
@@ -17585,6 +17602,13 @@
 
     $("viewSets").addEventListener("click", function () {
         setView("sets");
+    });
+
+    // The phone answers with the list again, read as its look changes
+    $("setFold").addEventListener("click", function () {
+
+        $("setFold").classList.toggle("on");
+        send("setsFold");
     });
 
     // A to Z or Stars sorts the view shown, Mureka's songs or the queue.

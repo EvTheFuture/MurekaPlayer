@@ -72,6 +72,13 @@ In development.
   switches the sets off and on again: off, every song stands on its own
   in the list and the queue, and the sets are kept as they are. A pressed
   song keeps its set's color.
+- **Fold sets.** A Fold sets button beside the sorts in the list's view
+  menu, on the phone and in the web view, and Fold sets in the song list
+  on the Song sets page. On, as before, a set's songs in Mureka's songs
+  come together and fold into one row under the set's name. Off, every
+  song stays in its own place on its own row with the set's color, so
+  Mureka's songs and the Sets view no longer look alike. The queue keeps
+  the sets together either way.
 - **Sound profiles and night mode.** A Sound profiles page in the settings, on
   the phone and in the web view, holds profiles of nine bands an octave
   apart, 63 Hz to 16 kHz, a volume that can go below the

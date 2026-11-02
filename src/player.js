@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.69";
+    const VERSION = "2.0.0.70";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1380,6 +1380,9 @@
     // The vocals, instrumental or all cycle when placed in the transport row
     let vocalsCtrlBtn = null;
     let setsCtrlBtn = null;
+
+    // The Fold sets button in the list's view menu
+    let setFoldBtn = null;
     let nightCtrlBtn = null;
     let eqCtrlBtn = null;
     let nightActionBtn = null;
@@ -5835,6 +5838,12 @@
         return groupSets(orderedSongs());
     }
 
+    // Mureka's songs in a list: the songs of each set brought together
+    // while sets fold, each in its own place otherwise
+    function listGroup(list) {
+        return setsFolded() ? groupSets(list) : list;
+    }
+
     // After a set changed: the lists drawn again, here and in the web view,
     // and a queue made from the list following the new order
     function setsChanged() {
@@ -5855,6 +5864,30 @@
     // there were none. Switched by the Sets button, the sets stay as they are
     function setsShown() {
         return settings.setsOn !== false;
+    }
+
+    // A set's songs in Mureka's song lists folded into one row under the
+    // set's name, or each song on a row of its own with the set's color.
+    // The queue keeps the sets together either way
+    function setsFolded() {
+        return setsShown() && settings.setsFold !== false;
+    }
+
+    function toggleSetsFolded(on) {
+
+        settings.setsFold = typeof on === "boolean" ? on : !setsFolded();
+
+        if (settings.setsFold && !setsShown()) {
+            settings.setsOn = true;
+        }
+
+        saveSettings();
+        songDataStamp++;
+        updateSetsCtrlButton();
+        updateViewButtons();
+        renderList();
+        publishHostSoon();
+        showToast(setsFolded() ? "Sets folded in the song list" : "Every song on its own row, sets by their color", true);
     }
 
     function toggleSetsShown(on) {
@@ -8172,8 +8205,9 @@
     // them unless the set is opened. Each entry of a set carries setId and
     // setColor, and in a set of several in the list the first also setCount
     // and setOpen, the others setMember. The playing song shows also in a
-    // folded set, under the first
-    function foldSets(entries, opened, playingId) {
+    // folded set, under the first. Flat, each song keeps its own row with
+    // only the set's id and color
+    function foldSets(entries, opened, playingId, flat) {
 
         if (songSetOf.size === 0 || !setsShown()) {
             return entries;
@@ -8220,9 +8254,19 @@
                 entries[k].setColor = color;
                 entries[k].setKept = isKept(entries[k].song);
 
-                if (j - i > 1 && k > i) {
+                if (j - i > 1 && k > i && !flat) {
                     entries[k].setMember = true;
                 }
+            }
+
+            if (flat) {
+
+                for (let k = i; k < j; k += 1) {
+                    out.push(entries[k]);
+                }
+
+                i = j;
+                continue;
             }
 
             if (j - i > 1) {
@@ -15989,6 +16033,16 @@
         // The sets' sort in place of the songs' while the sets show
         const onSets = listView === "sets";
 
+        // Folding sets is for Mureka's songs, with sets to fold
+        if (setFoldBtn) {
+
+            const folded = setsFolded();
+
+            setFoldBtn.style.display = LIB_VIEWS.indexOf(listView) >= 0 && songSets.size > 0 ? "" : "none";
+            setFoldBtn.style.background = folded ? "#48e1eb" : "#333";
+            setFoldBtn.style.color = folded ? "#000" : "#fff";
+        }
+
         Object.keys(setSortButtons).forEach(function (value) {
 
             const b = setSortButtons[value];
@@ -16374,16 +16428,16 @@
     function displaySongs() {
 
         if (listView === "stars") {
-            return groupSets(sortByStars(cache.songs));
+            return listGroup(sortByStars(cache.songs));
         }
 
         if (listView === "plays" && settings.playsOn === true) {
-            return groupSets(sortByPlays(cache.songs, false));
+            return listGroup(sortByPlays(cache.songs, false));
         }
 
         if (listView === "alpha") {
 
-            return groupSets(cache.songs.slice().sort(function (a, b) {
+            return listGroup(cache.songs.slice().sort(function (a, b) {
                 return (a.title || "").trim().localeCompare((b.title || "").trim());
             }));
         }
@@ -16397,8 +16451,8 @@
 
         // Default Mureka view, the canonical order for the current source,
         // with the songs still being generated first, being the newest, and
-        // the songs of a set together
-        const ordered = queueOrder();
+        // the songs of a set together while they fold
+        const ordered = listGroup(orderedSongs());
 
         return pendingSongs.size > 0 ? shownPending().concat(ordered) : ordered;
     }
@@ -30044,6 +30098,7 @@
             version: VERSION,
             shuffle: shuffleMode,
             setsOn: setsShown(),
+            setsFold: setsFolded(),
             setSort: setSortOf(),
             nightOn: sound().on && sound().night,
             soundText: soundWords(),
@@ -31825,7 +31880,7 @@
 
         return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
             creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
-            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : "", setsShown() ? "sets" : ""].join("|");
+            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : "", setsShown() ? "sets" : "", setsFolded() ? "fold" : ""].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -32188,7 +32243,7 @@
     // Entries in the order of their songs with the songs of each set together
     function groupedEntries(entries) {
 
-        if (songSetOf.size === 0) {
+        if (songSetOf.size === 0 || !setsFolded()) {
             return entries;
         }
 
@@ -32266,7 +32321,7 @@
 
         let rows = foldSets(searched.map(function (e) {
             return { song: e.song, greyed: e.greyed };
-        }), setOf ? new Set([setOf]) : openSets, playingId);
+        }), setOf ? new Set([setOf]) : openSets, playingId, !setOf && !setsFolded());
 
         if (setOf) {
 
@@ -33597,6 +33652,8 @@
             setVocalFilter(value);
         } else if (cmd === "sets") {
             toggleSetsShown(typeof arg === "boolean" ? arg : undefined);
+        } else if (cmd === "setsFold") {
+            toggleSetsFolded(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "soundPick") {
             setSoundPick(typeof arg === "string" ? arg : "");
         } else if (cmd === "soundLive") {
@@ -35154,6 +35211,16 @@
         sortRow.appendChild(viewButtons.alpha);
         sortRow.appendChild(viewButtons.stars);
         sortRow.appendChild(viewButtons.plays);
+
+        // A set's songs folded into one row in Mureka's songs, or each on
+        // its own row. Lit while folded
+        setFoldBtn = makeActionButton(iconSets(), "Fold sets", "#333", "#fff", function () {
+
+            toggleSetsFolded();
+            updateViewMenuBar();
+        });
+        setFoldBtn.title = "Fold each set into one row, or show every song with its set's color";
+        sortRow.appendChild(setFoldBtn);
 
         // In the Sets view the same row sorts the sets
         for (const choice of SET_SORTS) {
@@ -39836,7 +39903,7 @@
         }).length;
 
         if (listView !== "queue") {
-            visible = foldSets(visible, openedSets, playingId === null ? "" : String(playingId));
+            visible = foldSets(visible, openedSets, playingId === null ? "" : String(playingId), !setsFolded());
         }
 
         if (showAll) {
@@ -43992,6 +44059,10 @@
             function () { return setsShown(); },
             function (v) { toggleSetsShown(v); });
 
+        const setsFoldRow = makeBoolRow("Fold sets in the song list",
+            function () { return setsFolded(); },
+            function (v) { toggleSetsFolded(v); });
+
         const setSortRow = makeDropRow("Sort the Sets view by", SET_SORTS, setSortOf, function (v) {
             sortSetsBy(v);
         });
@@ -44033,6 +44104,7 @@
         setsPage.appendChild(makeLabel("In the list"));
         setsPage.appendChild(setsCountEl);
         setsPage.appendChild(withHint(setsOnRow, "Off, every song stands on its own in the list and the queue. The sets stay as they are. The Sets button for the button row does the same."));
+        setsPage.appendChild(withHint(setsFoldRow, "On, a set's songs next to each other in Mureka's songs fold into one row under the set's name. Off, every song has its own row with the set's color, and the queue still keeps the sets together. Fold sets in the list's view menu does the same."));
         const setSuggestRow = makeBoolRow("Suggest a set for new songs",
             function () { return settings.setSuggest !== false; },
             function (v) { settings.setSuggest = v; });
