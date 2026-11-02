@@ -73,8 +73,9 @@ In development.
   in the list and the queue, and the sets are kept as they are. A pressed
   song keeps its set's color.
 - **Fold sets.** A Fold sets button beside the sorts in the list's view
-  menu, on the phone and in the web view, and Fold sets in the song list
-  on the Song sets page. On, as before, a set's songs in Mureka's songs
+  menu, on the phone and in the web view, one beside the sort of the small
+  list over the web view's main page, and Fold sets in the song list on
+  the Song sets page. On, as before, a set's songs in Mureka's songs
   come together and fold into one row under the set's name. Off, every
   song stays in its own place on its own row with the set's color, so
   Mureka's songs and the Sets view no longer look alike. The queue keeps

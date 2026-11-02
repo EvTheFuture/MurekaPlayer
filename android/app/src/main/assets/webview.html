@@ -5483,6 +5483,7 @@
                 <span id="miniCount"></span>
                 <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs, the queue or the sets" title="Songs, the queue or the sets"><span class="lbl">Mureka</span></button>
                 <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
+                <button class="chip iconOnly" id="miniFold" type="button" data-icon="sets" aria-label="Fold sets" title="Fold each set into one row, or show every song with its set's color"></button>
                 <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
@@ -13060,14 +13061,25 @@
     // lit while they fold
     function paintSetFold() {
 
+        const on = !!(state && state.setsFold === true);
+        const sets = !!(state && state.setsOn === true);
         const b = $("setFold");
+        const mini = $("miniFold");
 
-        if (!b) {
-            return;
+        if (b) {
+
+            b.style.display = listView === "mureka" && sets ? "" : "none";
+            b.classList.toggle("on", on);
         }
 
-        b.style.display = listView === "mureka" && state && state.setsOn === true ? "" : "none";
-        b.classList.toggle("on", !!(state && state.setsFold === true));
+        // The small list's own, beside its sort
+        if (mini) {
+
+            mini.style.display = miniView === "mureka" && sets ? "" : "none";
+            mini.classList.toggle("on", on);
+            mini.title = on ? "Sets folded into one row, tap to show every song with its set's color"
+                : "Every song on its own row, tap to fold each set into one row";
+        }
     }
 
     // How the sets are sorted, kept on the phone, the same everywhere
@@ -17605,11 +17617,15 @@
     });
 
     // The phone answers with the list again, read as its look changes
-    $("setFold").addEventListener("click", function () {
+    for (const id of ["setFold", "miniFold"]) {
 
-        $("setFold").classList.toggle("on");
-        send("setsFold");
-    });
+        $(id).addEventListener("click", function () {
+
+            $("setFold").classList.toggle("on");
+            $("miniFold").classList.toggle("on");
+            send("setsFold");
+        });
+    }
 
     // A to Z or Stars sorts the view shown, Mureka's songs or the queue.
     // Each press goes one step on: A to Z, Z to A, back to the list's own
@@ -18913,6 +18929,7 @@
         $("miniView").classList.toggle("ring", miniView === "sets");
 
         paintMiniSort();
+        paintSetFold();
     }
 
     paintMiniView();
