@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.61";
+    const VERSION = "2.0.0.64";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -7670,6 +7670,8 @@
         tagSheetEl.appendChild(modelList.el);
         tagSheetEl.appendChild(clearRow);
 
+        // Swiped down to close, as the other overlays
+        swipeDownCloses(tagSheetEl, tagSheetEl, closeTagSheet);
         panelEl.appendChild(tagSheetEl);
     }
 
@@ -23294,14 +23296,26 @@
         return m;
     }
 
-    // The small mark in a group button's corner
+    // The small mark in a group button's corner, a thin chevron pointing
+    // up, where the group opens, drawn so every font shows it the same
     function groupMark() {
 
-        const mark = document.createElement("span");
+        const ns = "http://www.w3.org/2000/svg";
+        const mark = document.createElementNS(ns, "svg");
+        const line = document.createElementNS(ns, "polyline");
 
-        mark.textContent = "\u25BE";
+        mark.setAttribute("viewBox", "0 0 10 6");
+        mark.setAttribute("width", "10");
+        mark.setAttribute("height", "6");
         mark.setAttribute("aria-hidden", "true");
-        mark.style.cssText = "position:absolute;right:3px;bottom:1px;font-size:10px;line-height:1;opacity:0.8;pointer-events:none";
+        mark.style.cssText = "position:absolute;right:5px;top:5px;opacity:0.7;pointer-events:none";
+        line.setAttribute("points", "1 5 5 1 9 5");
+        line.setAttribute("fill", "none");
+        line.setAttribute("stroke", "currentColor");
+        line.setAttribute("stroke-width", "1.6");
+        line.setAttribute("stroke-linecap", "round");
+        line.setAttribute("stroke-linejoin", "round");
+        mark.appendChild(line);
 
         return mark;
     }
@@ -23379,6 +23393,9 @@
             fn();
         });
     }
+
+    // The buttons opening a window of their own, which close a group
+    const GROUP_CLOSERS = ["filters", "eq", "songs", "minilist"];
 
     // A group's buttons in a drop-down by its button. Closed by a tap
     // outside, a swipe on it, Escape, or a while after the last press
@@ -23475,6 +23492,14 @@
             }
 
             const m = mirrorControl(real, function () {
+
+                // A button opening a window of its own closes the group
+                if (GROUP_CLOSERS.indexOf(name) >= 0) {
+
+                    closeCtlGroup();
+                    real.click();
+                    return;
+                }
 
                 real.click();
                 restart();
@@ -28268,12 +28293,16 @@
     // two are in step
     const SYNC_STEP_MS = 40;
     const SYNC_FRAME_SEC = 0.01;
-    const SYNC_MAX_SEC = 4;
+    // Strict, a lag taken wrongly is worse than none: six seconds heard at
+    // least, a clear match standing well out from any other lag, and two
+    // guesses in a row agreeing. Never more than a lag ever seen
+    const SYNC_MAX_SEC = 2.5;
     const SYNC_KEEP = 375;
-    const SYNC_MIN = 75;
-    const SYNC_GOOD = 0.6;
+    const SYNC_MIN = 150;
+    const SYNC_GOOD = 0.8;
     const SYNC_APART_SEC = 0.08;
-    const SYNC_MARGIN = 0.04;
+    const SYNC_MARGIN = 0.1;
+    const SYNC_AGREE_SEC = 0.04;
 
     // The lag measured, in seconds, on top of what the engine tells
     let syncLag = 0;
@@ -28288,6 +28317,9 @@
     let syncBuf = null;
     let syncWanted = false;
     let syncAgreed = 0;
+
+    // The last clear guess, -1 for none, a second agreeing with it taken
+    let syncLastClear = -1;
 
     // Guesses tried since the last move, given up after a while
     let syncTries = 0;
@@ -28347,6 +28379,7 @@
         syncSamples = [];
         syncAgreed = 0;
         syncTries = 0;
+        syncLastClear = -1;
         startSyncSoon();
     }
 
@@ -28575,12 +28608,17 @@
             }
         }
 
-        const good = best >= SYNC_GOOD && best - other >= SYNC_MARGIN;
+        const clear = best >= SYNC_GOOD && best - other >= SYNC_MARGIN;
+        const agreed = clear && syncLastClear >= 0 && Math.abs(bestLag - syncLastClear) <= SYNC_AGREE_SEC;
+        const good = agreed;
+
+        syncLastClear = clear ? bestLag : -1;
 
         if (syncTries <= 8 || good) {
 
             dbgLog("Audio", "lag check " + syncTries + ": best " + Math.round(bestLag * 1000) + " ms, match " + Math.round(best * 100)
-                + " %, next best " + Math.round(other * 100) + " %, level " + meanR.toFixed(4) + (good ? ", taken" : ""));
+                + " %, next best " + Math.round(other * 100) + " %, level " + meanR.toFixed(4)
+                + (good ? ", taken" : (clear ? ", clear, once more to be sure" : "")));
         }
 
         if (!good) {
