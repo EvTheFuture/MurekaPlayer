@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.64";
+    const VERSION = "2.0.0.65";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23551,22 +23551,104 @@
                 closeCtlGroup();
             }
         };
+        // Swiped away any way: it follows the finger or the mouse, fading
+        // as it goes, and far enough it slides on out of sight and closes,
+        // else it springs back. A press that became a swipe presses nothing
         let sx = null;
         let sy = null;
+        let swiped = false;
+        let gone = false;
+        const SWIPE_AWAY = 50;
+        const follow = function (dx, dy) {
+
+            const dist = Math.hypot(dx, dy);
+
+            drop.style.transform = "translate(" + dx + "px," + dy + "px)";
+            drop.style.opacity = String(Math.max(0.15, 1 - dist / 220));
+        };
         const down = function (ev) {
+
+            if (gone) {
+                return;
+            }
 
             sx = ev.clientX;
             sy = ev.clientY;
+            swiped = false;
             restart();
         };
         const move = function (ev) {
 
-            if (sx !== null && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 30) {
+            if (sx === null || gone) {
+                return;
+            }
 
-                sx = null;
-                closeCtlGroup();
+            const dx = ev.clientX - sx;
+            const dy = ev.clientY - sy;
+
+            if (!swiped && Math.hypot(dx, dy) > 10) {
+
+                swiped = true;
+                clearTimeout(groupDropTimer);
+                drop.style.transition = "none";
+
+                try {
+                    drop.setPointerCapture(ev.pointerId);
+                } catch (e) {
+                    // Followed while over it only
+                }
+            }
+
+            if (swiped) {
+                follow(dx, dy);
             }
         };
+        const up = function (ev) {
+
+            if (sx === null || gone) {
+                return;
+            }
+
+            const dx = ev.clientX - sx;
+            const dy = ev.clientY - sy;
+            const dist = Math.hypot(dx, dy);
+
+            sx = null;
+
+            if (!swiped) {
+                return;
+            }
+
+            if (dist >= SWIPE_AWAY) {
+
+                // On out the way it went, fading, then gone
+                const k = 260 / Math.max(1, dist);
+
+                gone = true;
+                drop.style.transition = "transform 0.22s ease-out, opacity 0.22s ease-out";
+                follow(dx * k, dy * k);
+                drop.style.opacity = "0";
+                setTimeout(closeCtlGroup, 230);
+                return;
+            }
+
+            // Not far enough: back where it was
+            restart();
+            drop.style.transition = "transform 0.2s ease, opacity 0.2s ease";
+            drop.style.transform = "";
+            drop.style.opacity = "";
+        };
+
+        // The click a swipe ends with is not a press of the button under it
+        drop.addEventListener("click", function (ev) {
+
+            if (swiped || gone) {
+
+                ev.stopPropagation();
+                ev.preventDefault();
+                swiped = false;
+            }
+        }, true);
         const key = function (ev) {
 
             if (ev.key === "Escape") {
@@ -23579,6 +23661,8 @@
         document.addEventListener("pointerdown", outside, true);
         drop.addEventListener("pointerdown", down);
         drop.addEventListener("pointermove", move);
+        drop.addEventListener("pointerup", up);
+        drop.addEventListener("pointercancel", up);
         window.addEventListener("keydown", key, true);
         drop.__off = function () {
 
