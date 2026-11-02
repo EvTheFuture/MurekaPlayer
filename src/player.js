@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.68";
+    const VERSION = "2.0.0.69";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -12703,8 +12703,102 @@
     // over or it is set back. Not kept, a start goes by the settings again
     let soundPick = null;
 
+    // The sound tweaked live for the way out in use: a copy of the profile
+    // it started from, heard at once and never kept, until it is saved,
+    // set back or another speaker or headphones take over
+    let soundLive = null;
+    let soundLiveSerial = 0;
+
+    // Opens a profile's editor in the settings, "live" for the live tweak.
+    // Set once the settings are built
+    let openSoundEditor = null;
+
     function soundOutKey() {
         return btNow ? btNow.address : "device";
+    }
+
+    function liveSound() {
+        return soundLive && soundLive.key === soundOutKey() ? soundLive : null;
+    }
+
+    // The name of the profile the live tweak started from
+    function liveFromName() {
+
+        const from = liveSound() ? soundProfile(soundLive.from) : null;
+
+        return from ? from.name : "no profile";
+    }
+
+    // The live tweak started from the sound heard now, sound profiles
+    // switched on with it. Kept as it is when one is going on already
+    function startSoundLive() {
+
+        if (!soundOffered()) {
+
+            showToast("Sound profiles are not offered on an iPhone or iPad", false);
+            return false;
+        }
+
+        if (liveSound()) {
+            return true;
+        }
+
+        const a = activeSound();
+        const base = sound().on && a.profile ? a.profile : null;
+
+        soundLiveSerial += 1;
+        soundLive = {
+            key: soundOutKey(),
+            from: base ? base.id : "",
+            n: soundLiveSerial,
+            profile: cleanProfile(Object.assign({}, base || {}, {
+                id: "live",
+                name: base ? base.name : "Plain",
+                bands: base ? base.bands.slice() : []
+            }), 0)
+        };
+
+        if (!sound().on) {
+            sound().on = true;
+        }
+
+        dbgLog("Sound", "tweaking live from " + liveFromName() + " for " + a.where);
+        soundChanged();
+
+        return true;
+    }
+
+    // The live tweak opened in the settings
+    function openSoundLive() {
+
+        if (!startSoundLive()) {
+            return;
+        }
+
+        openSettings();
+
+        if (openSoundEditor) {
+            openSoundEditor("live");
+        }
+    }
+
+    // The live tweak moved: heard at once, nothing kept
+    function soundLiveChanged() {
+
+        applySound();
+        updateEqCtrlButton();
+        publishHostSoon();
+    }
+
+    // The live tweak dropped, the sound as picked or set again
+    function endSoundLive(why) {
+
+        if (!soundLive) {
+            return;
+        }
+
+        soundLive = null;
+        dbgLog("Sound", "live tweak ended, " + why);
     }
 
     function soundPicked() {
@@ -12717,6 +12811,10 @@
         const dev = btNow && s.devices[btNow.address] ? s.devices[btNow.address] : null;
         const where = btNow ? btNow.name : "this device";
         let p = null;
+
+        if (liveSound()) {
+            return { profile: soundLive.profile, where: where, night: s.night, picked: true, live: true };
+        }
 
         if (soundPicked()) {
             return { profile: soundProfile(soundPick.id), where: where, night: s.night, picked: true };
@@ -12778,6 +12876,10 @@
             return "No profile for " + a.where + ".";
         }
 
+        if (a.live) {
+            return "\"" + a.profile.name + "\" tweaked live for " + a.where + ".";
+        }
+
         return (s.night && !a.picked ? "Night mode, " : "") + "\"" + a.profile.name + "\" for " + a.where + (a.picked ? ", picked by hand" : "") + ".";
     }
 
@@ -12786,6 +12888,7 @@
     function setSoundPick(id) {
 
         soundPick = id && soundProfile(id) ? { key: soundOutKey(), id: id } : null;
+        endSoundLive("another profile picked");
 
         if (soundPick && !sound().on) {
             sound().on = true;
@@ -12807,25 +12910,29 @@
         const a = activeSound();
         const now = sound().on && a.profile ? a.profile.id : "";
         const picked = soundPicked();
+        const live = !!liveSound();
         const options = [{
-            label: (picked ? "" : "\u2713 ") + "As set for " + a.where,
+            label: (picked || live ? "" : "\u2713 ") + "As set for " + a.where,
             ring: true,
             fn: function () {
                 setSoundPick("");
             }
+        }, {
+            label: live ? "\u2713 Tweaked live from " + liveFromName() + ", go on" : "Tweak the sound now",
+            fn: openSoundLive
         }];
 
         for (const p of sound().profiles) {
 
             options.push({
-                label: (picked && p.id === now ? "\u2713 " : "") + p.name + (p.night ? " (night)" : ""),
+                label: (picked && !live && p.id === now ? "\u2713 " : "") + p.name + (p.night ? " (night)" : ""),
                 fn: function () {
                     setSoundPick(p.id);
                 }
             });
         }
 
-        askChoices("Sound profile for " + a.where + "\nUsed until another speaker or headphones take over, or it is set back.", options);
+        askChoices("Sound profile for " + a.where + "\nUsed until another speaker or headphones take over, or it is set back. Tweak the sound now changes it live, to save or forget.", options);
     }
 
     // The profile button lit while a profile is picked by hand
@@ -12836,7 +12943,7 @@
         }
 
         eqCtrlBtn.title = soundWords();
-        paintCtrl(eqCtrlBtn, soundPicked() ? "fill" : "plain");
+        paintCtrl(eqCtrlBtn, soundPicked() || liveSound() ? "fill" : "plain");
     }
 
     function dbToGain(db) {
@@ -13128,6 +13235,10 @@
 
                 dbgLog("Sound", "the profile picked by hand was for the speaker before, the settings again");
                 soundPick = null;
+            }
+
+            if (soundLive && soundLive.key !== soundOutKey()) {
+                endSoundLive("it was for the speaker before");
             }
 
             dbgLog("Sound", btNow ? btNow.name + " connected, " + soundWords() : "no Bluetooth device, " + soundWords());
@@ -29943,6 +30054,7 @@
                 return { id: p.id, name: p.name, night: p.night };
             }) : [],
             soundPicked: soundPicked(),
+            soundLive: liveSound() ? liveFromName() : "",
             soundWhere: activeSound().where,
             repeat: repeatMode,
             carAudio: hostCarAudio,
@@ -33487,6 +33599,13 @@
             toggleSetsShown(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "soundPick") {
             setSoundPick(typeof arg === "string" ? arg : "");
+        } else if (cmd === "soundLive") {
+
+            // The web view draws the settings page the phone shows, so the
+            // editor is opened here and the web view shows the settings
+            if (startSoundLive() && openSoundEditor) {
+                openSoundEditor("live");
+            }
         } else if (cmd === "night") {
             setNight(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "setSort") {
@@ -43995,7 +44114,7 @@
                 return [x.id, x.name, soundProfileWords(x)];
             }), devs.map(function (d) {
                 return d.address + d.name;
-            })]);
+            }), liveSound() ? soundLive.n : 0]);
 
             if (key === soundKey) {
                 return;
@@ -44033,6 +44152,18 @@
                 function (v) { setNight(v); }),
                 "Each speaker's night profile instead, quieter for sleeping. The Night button for the button row and the menu switch it too."));
             soundBox.appendChild(now);
+
+            // The sound changed live for the speaker in use, as it is heard
+            const liveBtn = makeButton(liveSound() ? "Go on tweaking" : "Tweak the sound now", "#333", "#fff", function () {
+
+                if (startSoundLive()) {
+                    openSoundEdit("live");
+                }
+            });
+
+            liveBtn.style.alignSelf = "flex-start";
+            soundBox.appendChild(liveBtn);
+            soundBox.appendChild(makeHint("Changes the sound heard now, from the profile in use, without saving it. For a speaker in a new room say. Kept until it is saved, set back or another speaker or headphones take over."));
 
             // The profiles, each with what it does and a way to its editor
             soundBox.appendChild(soundHeading("Profiles"));
@@ -44158,7 +44289,11 @@
 
         const drawSoundEdit = function () {
 
-            const edit = soundProfile(soundEditId);
+            const live = soundEditId === "live";
+            const edit = live ? (liveSound() ? soundLive.profile : null) : soundProfile(soundEditId);
+
+            // A live change is heard and shown, a kept one saved too
+            const changed = live ? soundLiveChanged : soundChanged;
 
             if (!edit) {
 
@@ -44172,7 +44307,7 @@
                 return;
             }
 
-            const key = JSON.stringify([edit.id, edit.night, lowerVolumeOffered(), sound().profiles.length]);
+            const key = JSON.stringify([edit.id, edit.night, lowerVolumeOffered(), sound().profiles.length, live ? soundLive.n : 0, live ? liveFromName() : ""]);
 
             if (key === soundEditKey) {
                 return;
@@ -44191,13 +44326,19 @@
             head.style.cssText = "display:flex;align-items:center;gap:10px";
             back.style.flex = "0 0 auto";
             back.style.padding = "6px 12px";
-            title.textContent = edit.name;
+            title.textContent = live ? "Tweaking live" : edit.name;
             title.style.cssText = "font-weight:600";
             head.appendChild(back);
             head.appendChild(title);
             soundEditBox.appendChild(head);
 
-            soundEditBox.appendChild(makeTextRow("Name", function () { return edit.name; }, function (v) {
+            // Live, only what is heard: the name and when it is used go
+            // with a profile it is saved to
+            if (live) {
+                soundEditBox.appendChild(makeHint("From " + liveFromName() + ", for " + activeSound().where + ". Heard at once and not saved, until saved below. Kept until set back or another speaker or headphones take over."));
+            }
+
+            const nameRow = makeTextRow("Name", function () { return edit.name; }, function (v) {
 
                 edit.name = String(v || "").slice(0, 60) || "Profile";
                 title.textContent = edit.name;
@@ -44205,25 +44346,32 @@
                 soundKey = "";
                 drawSound();
                 publishHostSoon();
-            }));
-            soundEditBox.appendChild(withHint(makeBoolRow("Night profile",
+            });
+            const nightRow = withHint(makeBoolRow("Night profile",
                 function () { return edit.night; },
                 function (v) {
 
                     edit.night = v;
                     soundChanged();
                     drawSoundEdit();
-                }), "Offered as a speaker's night profile, for night mode."));
+                }), "Offered as a speaker's night profile, for night mode.");
+
+            if (!live) {
+
+                soundEditBox.appendChild(nameRow);
+                soundEditBox.appendChild(nightRow);
+            }
+
             soundEditBox.appendChild(withHint(makeStepperRow("Volume, dB",
                 function () { return edit.gain; },
                 function (v) {
 
                     edit.gain = Math.max(-40, Math.min(12, Math.round(v)));
-                    soundChanged();
+                    changed();
                 }, -40, 12, 1), "Below 0 turns the song down further than the device's lowest step, for sleeping. Above 0 can clip on loud songs."));
 
             // Only a night profile turned down is left by a jump up
-            if (edit.night && lowerVolumeOffered()) {
+            if (!live && edit.night && lowerVolumeOffered()) {
 
                 soundEditBox.appendChild(withHint(makeBoolRow("Ask to lower the volume",
                     function () { return edit.askLower === true; },
@@ -44289,7 +44437,7 @@
 
                     edit.bands[i] = Math.max(-12, Math.min(12, Math.round(Number(slider.value) || 0)));
                     show();
-                    soundChanged();
+                    changed();
                 });
 
                 show();
@@ -44322,7 +44470,7 @@
                 edit.bands = SOUND_BANDS.map(function () {
                     return 0;
                 });
-                soundChanged();
+                changed();
 
                 for (const fn of shown) {
                     fn();
@@ -44366,7 +44514,7 @@
 
                 edit.bassCut = cleanCut(cutSlider.value);
                 showCut();
-                soundChanged();
+                changed();
             });
             settingsRefreshers.push(function () {
 
@@ -44389,15 +44537,70 @@
                 function (v) {
 
                     edit.comp = v;
-                    soundChanged();
+                    changed();
                 }), "Holds the loud parts down so the quiet ones can be heard at a lower volume."));
             soundEditBox.appendChild(evenDrop(makeDropRow("Compressor strength", SOUND_COMP.map(function (c) {
                 return { value: c.value, label: c.label };
             }), function () { return edit.compLevel; }, function (v) {
 
                 edit.compLevel = v;
-                soundChanged();
+                changed();
             })));
+
+            // Live: kept in the profile it came from or a new one, or
+            // forgotten
+            if (live) {
+
+                const from = soundProfile(soundLive.from);
+                const keep = document.createElement("div");
+
+                soundEditBox.appendChild(soundHeading("Keep it"));
+                keep.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+
+                if (from) {
+
+                    keep.appendChild(makeButton("Save to " + from.name, "#333", "#fff", function () {
+
+                        from.gain = edit.gain;
+                        from.bands = edit.bands.slice();
+                        from.bassCut = edit.bassCut;
+                        from.comp = edit.comp;
+                        from.compLevel = edit.compLevel;
+                        endSoundLive("saved to " + from.name);
+                        soundChanged();
+                        showToast("Saved to " + from.name, true);
+                        openSoundEdit(from.id);
+                    }));
+                }
+
+                keep.appendChild(makeButton("Save as new profile", "#333", "#fff", function () {
+
+                    const fresh = cleanProfile(Object.assign({}, edit, {
+                        id: "",
+                        bands: edit.bands.slice(),
+                        name: (btNow ? btNow.name : edit.name) + " tweaked"
+                    }), sound().profiles.length);
+
+                    sound().profiles.push(fresh);
+                    setSoundPick(fresh.id);
+                    showToast("Saved as " + fresh.name + ", picked for " + activeSound().where, true);
+                    openSoundEdit(fresh.id);
+                }));
+                keep.appendChild(makeButton("Set back", "#333", "#fff", function () {
+
+                    endSoundLive("set back");
+                    soundChanged();
+                    showToast(soundWords().replace(/\.$/, ""), true);
+                    soundKey = "";
+                    drawSound();
+                    showSettingsPage("sound");
+                    drawSoundEdit();
+                }));
+                soundEditBox.appendChild(keep);
+                soundEditBox.appendChild(makeHint("A new profile is picked for the speaker in use and can be renamed in its editor. The speakers' own choices are left as they are."));
+
+                return;
+            }
 
             // Another like it, or this one gone
             soundEditBox.appendChild(soundHeading("Profile"));
@@ -44463,6 +44666,7 @@
             showSettingsPage("soundedit");
         };
 
+        openSoundEditor = openSoundEdit;
         drawSound();
         settingsRefreshers.push(drawSound);
         settingsRefreshers.push(drawSoundEdit);

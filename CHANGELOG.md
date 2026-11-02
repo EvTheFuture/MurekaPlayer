@@ -96,6 +96,13 @@ In development.
   high-pass filter set with a slider from 20 to 300 Hz. The EQ button for the button row
   picks any profile by hand for the speaker or headphones in use, until
   another takes over or it is set back, on the phone and in the web view.
+  **Tweak the sound now**, from the EQ button or the Sound profiles page,
+  changes the sound heard live for the speaker in use, the volume, every
+  band, the bass cut and the compressor, starting from the profile in
+  use, for a speaker in a new room say. Nothing is saved until **Save to**
+  the profile it came from or **Save as new profile**, which is picked
+  for the speaker in use and can be renamed. **Set back** forgets it, and
+  it is forgotten when another speaker or headphones take over.
 - **Settings in the web view answer at once.** A stepper's number moves
   as soon as its minus or plus is pressed, as a switch already did, and
   the device's reading follows.

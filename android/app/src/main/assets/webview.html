@@ -9887,7 +9887,7 @@
         $("shuffle").classList.toggle("on", !!(s && s.shuffle));
         $("setsBtn").classList.toggle("on", !!(s && s.setsOn === true));
         $("nightBtn").classList.toggle("on", !!(s && s.nightOn === true));
-        $("eqBtn").classList.toggle("on", !!(s && s.soundPicked));
+        $("eqBtn").classList.toggle("on", !!(s && (s.soundPicked || s.soundLive)));
         $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
@@ -20891,15 +20891,30 @@
             return;
         }
 
-        const picked = state.soundPicked || "";
+        const live = state.soundLive || "";
+        const picked = live ? "" : state.soundPicked || "";
 
-        openChoice("Sound profile for " + (state.soundWhere || "the phone") + ". Used until another speaker or headphones take over, or it is set back.", [{
-            icon: picked ? "close" : "check",
+        openChoice("Sound profile for " + (state.soundWhere || "the phone") + ". Used until another speaker or headphones take over, or it is set back. Tweak the sound now changes it live, to save or forget.", [{
+            icon: picked || live ? "close" : "check",
             label: "As set for " + (state.soundWhere || "the phone"),
             fn: function () {
 
                 closeSongMenu();
                 send("soundPick", "");
+            }
+        }, {
+
+            // The phone opens the editor on its settings, shown here
+            icon: live ? "check" : "eq",
+            label: live ? "Tweaked live from " + live + ", go on" : "Tweak the sound now",
+            cls: live ? "accent" : "",
+            fn: function () {
+
+                closeSongMenu();
+                send("soundLive", "start");
+                setTimeout(function () {
+                    showPanel("settings");
+                }, 150);
             }
         }].concat(list.map(function (p) {
 
