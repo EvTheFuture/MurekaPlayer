@@ -159,6 +159,25 @@ In development.
   the song staying where it was, so only Resume playback starts it. Coming
   back into view plays on once, not once for each of the events that come
   with it.
+- **Media buttons come back after a voice assistant.** Android sends
+  Bluetooth, headset and steering wheel buttons to the app that last played
+  sound, so after a voice assistant, a call or another app spoke, the
+  buttons went there and did nothing for the player until it was played
+  from its own screen. On Android, while the player is paused, a short
+  sound from another app ending, or a Bluetooth output connecting, now
+  plays a fraction of a second of silence so the buttons come back. A
+  sound longer than three minutes, another music app say, keeps them. The
+  debug log notes other apps' sound starting and stopping, and the buttons
+  taken back.
+- **The play head follows the sound after a move on iPhone and iPad.**
+  Safari can play a song later than it says after a seek, by up to a
+  second or more. The player listens to its own sound, lines it up with
+  the song's levels and holds the play head and the lyrics back by what it
+  finds. The lag found is kept for each way out the sound engine tells of,
+  so the next move uses it at once. It is taken when the match stands
+  well out from any other lag twice in a row, or stands a little out the
+  same three times in a row. Lags kept by an earlier, looser measure are
+  thrown away. Stats for nerds shows the lag measured and the one kept.
 
 ### Build
 

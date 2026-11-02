@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.65";
+    const VERSION = "2.0.0.68";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -28387,6 +28387,10 @@
     const SYNC_APART_SEC = 0.08;
     const SYNC_MARGIN = 0.1;
     const SYNC_AGREE_SEC = 0.04;
+    // Or, with a smaller lead over the other lags, the same lag three
+    // guesses in a row, each one listening a second longer
+    const SYNC_STEADY = 3;
+    const SYNC_STEADY_MARGIN = 0.05;
 
     // The lag measured, in seconds, on top of what the engine tells
     let syncLag = 0;
@@ -28404,6 +28408,10 @@
 
     // The last clear guess, -1 for none, a second agreeing with it taken
     let syncLastClear = -1;
+
+    // The lag the guesses keep landing on and how many times in a row
+    let syncSteadyLag = -1;
+    let syncSteadyRun = 0;
 
     // Guesses tried since the last move, given up after a while
     let syncTries = 0;
@@ -28444,6 +28452,16 @@
             settings.seekLag = {};
         }
 
+        // Lags kept by an older, looser measure and past what is ever seen
+        for (const key of Object.keys(settings.seekLag)) {
+
+            const v = Number(settings.seekLag[key]);
+
+            if (!isFinite(v) || v < 0 || v > SYNC_MAX_SEC * 1000) {
+                delete settings.seekLag[key];
+            }
+        }
+
         settings.seekLag[seekLagKey()] = Math.round(lag * 1000);
         saveSettings();
     }
@@ -28464,6 +28482,8 @@
         syncAgreed = 0;
         syncTries = 0;
         syncLastClear = -1;
+        syncSteadyLag = -1;
+        syncSteadyRun = 0;
         startSyncSoon();
     }
 
@@ -28694,15 +28714,29 @@
 
         const clear = best >= SYNC_GOOD && best - other >= SYNC_MARGIN;
         const agreed = clear && syncLastClear >= 0 && Math.abs(bestLag - syncLastClear) <= SYNC_AGREE_SEC;
-        const good = agreed;
+        const fair = best >= SYNC_GOOD && best - other >= SYNC_STEADY_MARGIN;
 
         syncLastClear = clear ? bestLag : -1;
+
+        if (!fair) {
+            syncSteadyRun = 0;
+        } else if (syncSteadyRun > 0 && Math.abs(bestLag - syncSteadyLag) <= SYNC_AGREE_SEC) {
+            syncSteadyRun += 1;
+        } else {
+
+            syncSteadyLag = bestLag;
+            syncSteadyRun = 1;
+        }
+
+        const steady = syncSteadyRun >= SYNC_STEADY;
+        const good = agreed || steady;
 
         if (syncTries <= 8 || good) {
 
             dbgLog("Audio", "lag check " + syncTries + ": best " + Math.round(bestLag * 1000) + " ms, match " + Math.round(best * 100)
                 + " %, next best " + Math.round(other * 100) + " %, level " + meanR.toFixed(4)
-                + (good ? ", taken" : (clear ? ", clear, once more to be sure" : "")));
+                + (good ? (agreed ? ", taken" : ", taken, the same " + syncSteadyRun + " times in a row")
+                    : (clear ? ", clear, once more to be sure" : (fair ? ", the same " + syncSteadyRun + " times so far" : ""))));
         }
 
         if (!good) {
@@ -51234,6 +51268,12 @@
         trimPaint();
     }
 
+    // How far off an end a finger may land on the whole song and still
+    // pick it up, and how far a drag in the close up goes before it is
+    // known to be sideways or up or down
+    const TRIM_TOUCH_REACH = 32;
+    const TRIM_DECIDE_PX = 8;
+
     // Dragging and tapping on the two waveforms
     function installTrimPointers() {
 
@@ -51260,7 +51300,13 @@
             };
             const nearStart = Math.abs(ev.clientX - px(tr.start));
             const nearEnd = Math.abs(ev.clientX - px(tr.end));
-            const grab = Math.min(nearStart, nearEnd) <= 18 ? (nearStart < nearEnd ? "start" : "end") : null;
+
+            // A finger is wider than a mouse, so it may land further off
+            const reach = ev.pointerType === "mouse" ? 18 : TRIM_TOUCH_REACH;
+            const grab = Math.min(nearStart, nearEnd) <= reach ? (nearStart < nearEnd ? "start" : "end") : null;
+
+            dbgLog("Trim", "press on the whole song, " + (grab ? "the " + grab + " picked up" : "away from the ends, "
+                + Math.round(Math.min(nearStart, nearEnd)) + " px off"));
 
             tr.drag = { where: "overview", edge: grab, x: ev.clientX, moved: false };
 
@@ -51345,12 +51391,14 @@
             const moveX = ev.clientX - tr.drag.x;
             const moveY = ev.clientY - tr.drag.y;
 
-            // The first clear move decides: sideways moves the end, up or
-            // down magnifies the height
-            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > 4) {
+            // The first clear move decides: sideways moves the end, clearly
+            // up or down magnifies the height. A finger wobbles, so only a
+            // move mostly up or down counts as one
+            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > TRIM_DECIDE_PX) {
 
                 tr.drag.moved = true;
-                tr.drag.mode = Math.abs(moveY) > Math.abs(moveX) ? "gain" : "edge";
+                tr.drag.mode = Math.abs(moveY) > 2 * Math.abs(moveX) ? "gain" : "edge";
+                dbgLog("Trim", tr.drag.mode === "gain" ? "dragged up or down in the close up, the height" : "dragged sideways in the close up, the " + tr.edge);
             }
 
             if (tr.drag.mode === "gain") {

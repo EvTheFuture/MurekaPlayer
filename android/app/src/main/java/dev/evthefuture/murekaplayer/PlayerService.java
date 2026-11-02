@@ -41,7 +41,10 @@ import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
+import android.media.AudioTrack;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
@@ -143,6 +146,22 @@ public class PlayerService extends Service implements Hub.Listener {
     private static final String BT_WAS_PLAYING = "wasPlaying";
     private AudioDeviceCallback deviceWatcher;
 
+    // Android sends Bluetooth and headset buttons to the app that last
+    // played sound. A voice assistant or another app speaking in the car
+    // takes them over, and they stay there until this app plays again. So
+    // once such a short sound is over, or a Bluetooth output connects, a
+    // fraction of a second of silence is played to take them back
+    private AudioManager.AudioPlaybackCallback soundWatcher;
+    private int othersSounding = 0;
+    private long othersSince = 0;
+    private long ownChange = 0;
+    private long lastClaim = 0;
+    private long claimUntil = 0;
+    private static final long CLAIM_AFTER_MAX_MS = 3 * 60 * 1000L;
+    private static final long CLAIM_GAP_MS = 10 * 1000L;
+    private static final long OWN_CHANGE_MS = 3000;
+    private static final int CLAIM_SILENCE_MS = 300;
+
     // The cover of the playing song, fetched once per song
     private String artUrl = "";
     private Bitmap art;
@@ -205,6 +224,7 @@ public class PlayerService extends Service implements Hub.Listener {
 
         // Bluetooth coming back wants the song and its cover again
         watchAudioDevices();
+        watchOtherSound();
 
         session = new MediaSession(this, "MurekaPlayer");
         // Play, skips and seeks from here first take the sound back from a
@@ -750,6 +770,18 @@ public class PlayerService extends Service implements Hub.Listener {
 
             deviceWatcher = null;
         }
+
+        if (soundWatcher != null) {
+
+            AudioManager am = getSystemService(AudioManager.class);
+
+            if (am != null) {
+                am.unregisterAudioPlaybackCallback(soundWatcher);
+            }
+
+            soundWatcher = null;
+        }
+
         instance = null;
 
         if (hotspotWatcher != null) {
@@ -864,6 +896,12 @@ public class PlayerService extends Service implements Hub.Listener {
         // sent without this
         if (playing && !wasPlaying && artOnResume) {
             resendMetadata();
+        }
+
+        // A sound stopping right after this app's own play or pause is
+        // most likely its own, so no buttons are taken back for it
+        if (playing != wasPlaying) {
+            ownChange = System.currentTimeMillis();
         }
 
         wasPlaying = playing;
@@ -1107,8 +1145,15 @@ public class PlayerService extends Service implements Hub.Listener {
 
                 if (start) {
                     main.postDelayed(PlayerService.this::playForBluetooth, 2000);
-                } else if ("resume".equals(playOnConnect)) {
-                    Hub.note("Bluetooth", "Not playing, it was not playing when Bluetooth went away");
+                } else {
+
+                    if ("resume".equals(playOnConnect)) {
+                        Hub.note("Bluetooth", "Not playing, it was not playing when Bluetooth went away");
+                    }
+
+                    // Not playing, so the buttons are taken back for when
+                    // they are pressed, once Android has moved the sound
+                    main.postDelayed(() -> claimButtons("Bluetooth connected"), 2500);
                 }
             }
 
@@ -1158,6 +1203,165 @@ public class PlayerService extends Service implements Hub.Listener {
         };
 
         am.registerAudioDeviceCallback(deviceWatcher, main);
+    }
+
+    // Watches other apps' sound, noted for the debug overlay. When a short
+    // one is over while this app is paused, the buttons are taken back
+    private void watchOtherSound() {
+
+        AudioManager am = getSystemService(AudioManager.class);
+
+        if (am == null) {
+            return;
+        }
+
+        soundWatcher = new AudioManager.AudioPlaybackCallback() {
+
+            @Override
+            public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
+                otherSoundChanged(configs);
+            }
+        };
+
+        am.registerAudioPlaybackCallback(soundWatcher, main);
+    }
+
+    // The sounds cannot be told apart by app, and the web view's own may
+    // linger a while after a pause, so a sound starting is any rise in their
+    // number and one stopping any drop. A drop while paused, not just after
+    // this app's own play or pause and within a few minutes of the last
+    // rise, is taken as a voice assistant or a call being over
+    private void otherSoundChanged(List<AudioPlaybackConfiguration> configs) {
+
+        int count = 0;
+        StringBuilder kinds = new StringBuilder();
+
+        for (AudioPlaybackConfiguration config : configs) {
+
+            String kind = usageName(config.getAudioAttributes());
+
+            if (kind == null) {
+                continue;
+            }
+
+            count++;
+
+            if (kinds.indexOf(kind) < 0) {
+                kinds.append(kinds.length() == 0 ? "" : ", ").append(kind);
+            }
+        }
+
+        int before = othersSounding;
+        long now = System.currentTimeMillis();
+
+        othersSounding = count;
+
+        // The silence played here to take the buttons back
+        if (now < claimUntil) {
+            return;
+        }
+
+        if (count > before) {
+
+            othersSince = now;
+
+            if (!playing && now - ownChange >= OWN_CHANGE_MS) {
+                Hub.note("Media", "Sound from another app started (" + kinds + ")");
+            }
+
+            return;
+        }
+
+        if (count == before || playing || now - ownChange < OWN_CHANGE_MS) {
+            return;
+        }
+
+        long lasted = now - othersSince;
+
+        Hub.note("Media", "Sound from another app stopped after " + Math.round(lasted / 1000.0) + " s");
+
+        // Something long like another music app may keep the buttons
+        if (lasted > CLAIM_AFTER_MAX_MS) {
+            return;
+        }
+
+        claimButtons("another app's sound is over");
+    }
+
+    // The kinds of sound that can take the buttons from this app, null for
+    // the rest such as alarms, notifications and navigation
+    private static String usageName(AudioAttributes attrs) {
+
+        if (attrs == null) {
+            return null;
+        }
+
+        switch (attrs.getUsage()) {
+            case AudioAttributes.USAGE_MEDIA:
+                return "media";
+            case AudioAttributes.USAGE_GAME:
+                return "game";
+            case AudioAttributes.USAGE_UNKNOWN:
+                return "unknown";
+            case AudioAttributes.USAGE_ASSISTANT:
+                return "assistant";
+            case AudioAttributes.USAGE_VOICE_COMMUNICATION:
+                return "call";
+            default:
+                return null;
+        }
+    }
+
+    // Plays a fraction of a second of silence, so Android counts this app
+    // as the last one that played and sends the media buttons here again.
+    // Only while paused with a song, and not too often
+    private void claimButtons(String why) {
+
+        long now = System.currentTimeMillis();
+
+        if (playing || title.isEmpty() || now - lastClaim < CLAIM_GAP_MS) {
+            return;
+        }
+
+        lastClaim = now;
+        claimUntil = now + CLAIM_SILENCE_MS + 1500;
+
+        try {
+
+            int rate = 48000;
+            int frames = rate * CLAIM_SILENCE_MS / 1000;
+            AudioTrack track = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build())
+                .setAudioFormat(new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(rate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build())
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .setBufferSizeInBytes(frames * 2)
+                .build();
+
+            track.write(new short[frames], 0, frames);
+            track.play();
+            session.setActive(true);
+            Hub.note("Media", "Media buttons taken back, " + why);
+
+            main.postDelayed(() -> {
+
+                try {
+
+                    track.stop();
+                    track.release();
+                } catch (RuntimeException e) {
+                    track.release();
+                }
+            }, CLAIM_SILENCE_MS + 300);
+        } catch (RuntimeException e) {
+            Hub.note("Media", "Could not take the media buttons back: " + e.getMessage());
+        }
     }
 
     private void rememberPlaying(boolean was) {
