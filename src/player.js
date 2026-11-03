@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.72";
+    const VERSION = "2.0.0.76";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6181,6 +6181,7 @@
 
             put(set.id);
             showToast("New set of " + real.length + (real.length === 1 ? " song" : " songs"), true);
+            offerSimilarForNew(set);
         } }];
 
         for (const entry of setsByUse()) {
@@ -6205,9 +6206,11 @@
         const current = setOfSong(song);
         const options = [{ label: "New set with this song", fn: function () {
 
-            newSetWith(song, "hand");
+            const set = newSetWith(song, "hand");
+
             setsChanged();
             showToast("New set", true);
+            offerSimilarForNew(set);
         } }];
 
         for (const entry of setsByUse()) {
@@ -6539,6 +6542,78 @@
 
     // New songs found by a load: their lyrics read first, for comparing,
     // then offered for a set
+    // The songs still being made that were asked about already, so the same
+    // question is not asked again once they are ready
+    const pendingSetAsked = new Set();
+    let pendingSetTimer = 0;
+
+    // Songs still being made, laid against the sets as soon as they are
+    // seen, a moment after the first so the songs of one generation go
+    // together. Only a set they look like is offered, a set used lately is
+    // no reason on its own, and the rest are asked about once ready
+    function suggestSetsForPending() {
+
+        clearTimeout(pendingSetTimer);
+        pendingSetTimer = setTimeout(askSetsForPending, 1500);
+    }
+
+    function askSetsForPending() {
+
+        pendingSetTimer = 0;
+
+        if (creatorSource || settings.setSuggest === false || songSets.size === 0) {
+            return;
+        }
+
+        const songs = pendingList().filter(function (x) {
+
+            const id = String(x.song_id);
+
+            return !pendingSetAsked.has(id) && !songSetOf.has(id) && !setNotAuto.has(id);
+        });
+
+        if (songs.length === 0) {
+            return;
+        }
+
+        let any = false;
+
+        for (const g of guessSetsFor(songs)) {
+
+            const alike = g.why.some(function (w) {
+                return w !== "a song went into it lately";
+            });
+
+            if (!g.set || !alike) {
+                continue;
+            }
+
+            for (const x of g.songs) {
+                pendingSetAsked.add(String(x.song_id));
+            }
+
+            g.making = true;
+            setAskQueue.push(g);
+            any = true;
+            dbgLog("Sets", g.songs.length + " being made " + (g.songs.length === 1 ? "looks" : "look") + " like the set " + g.set.name + ": " + g.why.join(", "));
+        }
+
+        if (any) {
+            nextSetAsk();
+        }
+    }
+
+    // A song of a set question still in the library or still being made,
+    // by its id, as a song being made comes back as another copy once ready
+    function setAskSongThere(x) {
+
+        const id = String(x.song_id);
+
+        return cache.songs.indexOf(x) !== -1 || pendingSongs.has(id) || cache.songs.some(function (y) {
+            return String(y.song_id) === id;
+        });
+    }
+
     async function suggestSetsForNew(ids, firstLoad) {
 
         if (creatorSource || firstLoad || settings.setSuggest === false || !Array.isArray(ids) || ids.length === 0) {
@@ -6550,7 +6625,7 @@
 
             const id = String(x.song_id);
 
-            return wanted.has(id) && !songSetOf.has(id) && !setNotAuto.has(id) && !isPendingSong(x)
+            return wanted.has(id) && !songSetOf.has(id) && !setNotAuto.has(id) && !isPendingSong(x) && !pendingSetAsked.has(id)
                 && (x.generate_at || 0) * 1000 > Date.now() - SET_SUGGEST_AGE_MS;
         }).slice(0, SET_SUGGEST_MAX);
 
@@ -6590,7 +6665,7 @@
 
         const g = setAskQueue.shift();
         const songs = g.songs.filter(function (x) {
-            return cache.songs.indexOf(x) !== -1 && !songSetOf.has(String(x.song_id));
+            return setAskSongThere(x) && !songSetOf.has(String(x.song_id));
         });
 
         if (songs.length === 0) {
@@ -6604,10 +6679,12 @@
             return "\"" + ((x.title || "").trim() || "Untitled") + "\"";
         });
         const why = g.why.join(", ");
-        const title = one ? "Put the new song in a set?" : "Put the " + songs.length + " new songs in a set?";
+        const title = g.making ? (one ? "Put the song being made in a set?" : "Put the " + songs.length + " songs being made in a set?")
+            : (one ? "Put the new song in a set?" : "Put the " + songs.length + " new songs in a set?");
         const text = names.join(", ") + (songs.length > names.length ? " and " + (songs.length - names.length) + " more" : "")
             + (g.set ? (one ? " looks" : " look") + " like more versions of \"" + g.set.name + "\"" + (why ? ": " + why : "") + "."
-                : ". No set looks like " + (one ? "it" : "them") + ", one of the latest used or a new one can take " + (one ? "it." : "them."));
+                : ". No set looks like " + (one ? "it" : "them") + ", one of the latest used or a new one can take " + (one ? "it." : "them."))
+            + (g.making ? " Still being made on Mureka, " + (one ? "it is" : "they are") + " in the set as soon as " + (one ? "it is" : "they are") + " ready." : "");
         const options = [];
 
         if (g.set) {
@@ -6736,7 +6813,7 @@
         }
 
         const songs = ask.songs.filter(function (x) {
-            return cache.songs.indexOf(x) !== -1 && !songSetOf.has(String(x.song_id));
+            return setAskSongThere(x) && !songSetOf.has(String(x.song_id));
         });
         const k = String(key || "");
 
@@ -6781,7 +6858,16 @@
         }, 0);
         const before = months > 0 && oldest > 0 ? oldest - months * 30 * 86400 : 0;
 
-        for (const x of cache.songs) {
+        // The songs still being made on Mureka too, put in the set by their
+        // id and in it once ready
+        const known = new Set(cache.songs.map(function (x) {
+            return String(x.song_id);
+        }));
+        const making = pendingList().filter(function (x) {
+            return !known.has(String(x.song_id));
+        });
+
+        for (const x of making.concat(cache.songs)) {
 
             if (songSetOf.has(String(x.song_id))) {
                 continue;
@@ -6806,7 +6892,8 @@
                     song: x,
                     score: best.score,
                     why: old ? best.why.concat(["much older than the set"]) : best.why,
-                    ticked: best.score >= SIMILAR_TICKED && !old
+                    ticked: best.score >= SIMILAR_TICKED && !old,
+                    making: isPendingSong(x)
                 });
             }
         }
@@ -6819,7 +6906,24 @@
     }
 
     // The similar songs to tick, the most alike already ticked
-    function askSimilar(set) {
+    // A set just made: the songs that look like more versions of its songs
+    // offered at once. Only when one is alike enough to be ticked, songs only
+    // a little alike are no reason to ask
+    function offerSimilarForNew(set) {
+
+        if (set && similarSure(similarToSet(set))) {
+            askSimilar(set, true);
+        }
+    }
+
+    function similarSure(found) {
+
+        return found.some(function (f) {
+            return f.ticked === true;
+        });
+    }
+
+    function askSimilar(set, fresh) {
 
         const found = similarToSet(set);
         const hint = "Lyrics only count for songs played or opened in the player before.";
@@ -6845,7 +6949,7 @@
         back.setAttribute("data-mureka-notice", "1");
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
-        head.textContent = "Similar songs";
+        head.textContent = fresh ? "Similar songs for the new set" : "Similar songs";
         head.style.cssText = "font-weight:600";
         body.textContent = "Songs that look like more versions of the songs in \"" + set.name + "\", the most alike first and ticked,"
             + " the ones less alike after them. Tick the ones to add. " + hint;
@@ -6893,7 +6997,7 @@
 
             line.textContent = (f.song.title || "").trim() || "Untitled";
             line.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-            sub.textContent = why.charAt(0).toUpperCase() + why.slice(1) + " \u00B7 " + fmtDate(f.song.generate_at);
+            sub.textContent = why.charAt(0).toUpperCase() + why.slice(1) + " \u00B7 " + (f.making ? "still being made" : fmtDate(f.song.generate_at));
             sub.style.cssText = "color:#999;font-size:12px";
             name.textContent = "";
             name.appendChild(line);
@@ -6902,7 +7006,7 @@
             ticks.push({ song: f.song, box: box });
         }
 
-        const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
+        const cancelBtn = makeButton(fresh ? "Not now" : "Cancel", "#444", "#fff", close);
 
         cancelBtn.style.flex = "1";
         addBtn.style.flex = "1";
@@ -12875,6 +12979,25 @@
         return { profile: p, where: where, night: s.night };
     }
 
+    // The profiles set for the way out in use, by the speaker's own choice
+    // or this device's, "" for none. Night "" uses the day one at night
+    function soundSetFor() {
+
+        const s = sound();
+        const dev = btNow && s.devices[btNow.address] ? s.devices[btNow.address] : null;
+        const pick = function (own, fallback) {
+
+            const id = own ? own : fallback;
+
+            return id && id !== "none" && soundProfile(id) ? id : "";
+        };
+
+        return {
+            day: pick(dev ? dev.day : "", s.fallback.day),
+            night: pick(dev ? dev.night : "", s.fallback.night)
+        };
+    }
+
     // What a profile does, in a line under its name in the list
     function soundProfileWords(p) {
 
@@ -12955,8 +13078,11 @@
         const now = sound().on && a.profile ? a.profile.id : "";
         const picked = soundPicked();
         const live = !!liveSound();
+        const setFor = soundSetFor();
+        const asSet = soundProfile(sound().night && setFor.night ? setFor.night : setFor.day);
+        const here = btNow ? "this speaker" : "this device";
         const options = [{
-            label: (picked || live ? "" : "\u2713 ") + "As set for " + a.where,
+            label: (picked || live ? "" : "\u2713 ") + "As set for " + a.where + (asSet ? ": " + asSet.name : ""),
             ring: true,
             fn: function () {
                 setSoundPick("");
@@ -12968,8 +13094,16 @@
 
         for (const p of sound().profiles) {
 
+            // The speaker's own profiles ringed and said
+            const forDay = p.id === setFor.day;
+            const forNight = p.id === setFor.night;
+
             options.push({
-                label: (picked && !live && p.id === now ? "\u2713 " : "") + p.name + (p.night ? " (night)" : ""),
+                label: (picked && !live && p.id === now ? "\u2713 " : "") + p.name + (p.night ? " (night)" : "")
+                    + (forDay && forNight ? ", set for " + here + " day and night" : (forDay ? ", set for " + here
+                    : (forNight ? ", set for " + here + " at night" : ""))),
+                ring: forDay || forNight,
+                color: forDay || forNight ? "#48e1eb" : undefined,
                 fn: function () {
                     setSoundPick(p.id);
                 }
@@ -16511,6 +16645,14 @@
             pendingSongs.set(id, { song: copy, misses: 0 });
             pendingStamp += 1;
             dbgLog("Feed", "still generating: " + (copy.title || "Untitled") + " (" + id + ")");
+
+            // Its lyrics, when the feed has them already, count in finding
+            // a set it belongs in
+            if (typeof s.lyrics === "string" && s.lyrics.trim()) {
+                noteLyricPrint(id, s.lyrics);
+            }
+
+            suggestSetsForPending();
         }
 
         if (!pendingTimer) {
@@ -30111,6 +30253,8 @@
             soundPicked: soundPicked(),
             soundLive: liveSound() ? liveFromName() : "",
             soundWhere: activeSound().where,
+            soundSetDay: soundSetFor().day,
+            soundSetNight: soundSetFor().night,
             repeat: repeatMode,
             carAudio: hostCarAudio,
             fade: hostFade,
@@ -30502,7 +30646,7 @@
                 id: String(f.song.song_id),
                 title: (f.song.title || "").trim() || "Untitled",
                 why: why.charAt(0).toUpperCase() + why.slice(1),
-                date: fmtDate(f.song.generate_at),
+                date: f.making ? "still being made" : fmtDate(f.song.generate_at),
                 ticked: f.ticked
             };
         });
@@ -30600,7 +30744,9 @@
 
             for (const id of value) {
 
-                const other = hostFindSong(String(id));
+                // A song still being made is put in by its id too
+                const making = pendingSongs.get(String(id));
+                const other = hostFindSong(String(id)) || (making ? making.song : null);
 
                 if (other && !songSetOf.has(String(other.song_id))) {
                     putInSet(other, set.id, "hand");

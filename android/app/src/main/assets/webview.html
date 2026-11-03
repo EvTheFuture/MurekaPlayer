@@ -20934,10 +20934,16 @@
 
         const live = state.soundLive || "";
         const picked = live ? "" : state.soundPicked || "";
+        const setDay = state.soundSetDay || "";
+        const setNight = state.soundSetNight || "";
+        const here = !state.soundWhere || state.soundWhere === "this device" ? "this device" : "this speaker";
+        const asSet = list.find(function (p) {
+            return p.id === (state.nightOn && setNight ? setNight : setDay);
+        });
 
         openChoice("Sound profile for " + (state.soundWhere || "the phone") + ". Used until another speaker or headphones take over, or it is set back. Tweak the sound now changes it live, to save or forget.", [{
             icon: picked || live ? "close" : "check",
-            label: "As set for " + (state.soundWhere || "the phone"),
+            label: "As set for " + (state.soundWhere || "the phone") + (asSet ? ": " + asSet.name : ""),
             fn: function () {
 
                 closeSongMenu();
@@ -20959,10 +20965,17 @@
             }
         }].concat(list.map(function (p) {
 
+            // The speaker's own profiles ringed and said, the one picked by
+            // hand ticked, a night profile with the moon, or said when ticked
+            const forDay = p.id === setDay;
+            const forNight = p.id === setNight;
+            const ticked = p.id === picked;
+
             return {
-                icon: p.id === picked ? "check" : "eq",
-                label: p.name + (p.night ? " (night)" : ""),
-                cls: p.id === picked ? "accent" : "",
+                icon: ticked ? "check" : (p.night ? "moon" : "eq"),
+                label: p.name + (ticked && p.night ? " (night)" : "") + (forDay && forNight ? ", set for " + here + " day and night"
+                    : (forDay ? ", set for " + here : (forNight ? ", set for " + here + " at night" : ""))),
+                cls: forDay || forNight ? "inset" : (ticked ? "accent" : ""),
                 fn: function () {
 
                     closeSongMenu();
@@ -22955,8 +22968,28 @@
         const items = [{ icon: "listPlus", label: "New set with this song", fn: function () {
 
             closeSongMenu();
-            setAction(m, "newSet");
             toast("New set", "ok");
+
+            // The songs that look like more versions of it offered at once,
+            // read from the phone once the set is there
+            Promise.resolve(setAction(m, "newSet")).then(function () {
+
+                return new Promise(function (done) {
+                    setTimeout(done, 300);
+                });
+            }).then(function () {
+                return fetchJson("/menu?id=" + esc(m.id));
+            }).then(function (fresh) {
+
+                // Only with one alike enough to be ticked
+                if (fresh && Array.isArray(fresh.similar) && fresh.similar.some(function (f) {
+                    return f.ticked === true;
+                })) {
+                    askSimilarHere(fresh, true);
+                }
+            }).catch(function () {
+                // The set is made, only the offer is missed
+            });
         } }];
 
         for (const set of m.sets || []) {
@@ -23013,7 +23046,7 @@
 
     // The songs that look like more versions of the set's songs, to tick,
     // the most alike already ticked
-    function askSimilarHere(m) {
+    function askSimilarHere(m, fresh) {
 
         const found = m.similar || [];
 
@@ -23067,7 +23100,7 @@
                 }
             });
 
-            openChoice("Similar songs, tap to tick", items);
+            openChoice((fresh ? "Similar songs for the new set" : "Similar songs") + ", tap to tick", items);
         };
 
         draw();

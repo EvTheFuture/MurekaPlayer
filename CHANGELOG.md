@@ -72,6 +72,28 @@ In development.
   switches the sets off and on again: off, every song stands on its own
   in the list and the queue, and the sets are kept as they are. A pressed
   song keeps its set's color.
+- **Songs still being made are matched to the sets.** As soon as the
+  player sees new songs still being made on Mureka, it lays them against
+  the sets, by title, by lyrics when Mureka gives them already, and the
+  songs of one generation together, and asks whether to put them in a set
+  they look like, on the phone and in the web view. Taken, they are in the
+  set the moment they are ready. Songs that look like no set, or only
+  like the set used last, are asked about once ready, as before. Songs
+  asked about while being made are not asked about again.
+- **Suggest similar songs takes songs still being made.** A song still
+  being made on Mureka that looks like the set's songs is listed too, saying
+  still being made in place of its date, on the phone and in the web view.
+  Added, it is in the set as soon as it is ready.
+- **A new set offers the songs like it.** Making a new set from a song, or
+  from songs picked together, on the phone or in the web view, opens
+  Suggest similar songs for it at once when a song alike enough to be
+  ticked is found, to add with one tap or leave with Not now. Songs only a
+  little alike do not open it.
+- **The EQ button shows the speaker's own profiles.** In its list, As set
+  for names the profile it uses now, and the speaker's own profile and
+  night profile are ringed and say set for this speaker, or at night, on
+  the phone and in the web view. In the web view a night profile has the
+  moon in place of the EQ icon.
 - **Fold sets.** A Fold sets button beside the sorts in the list's view
   menu, on the phone and in the web view, one beside the sort of the small
   list over the web view's main page, and Fold sets in the song list on
