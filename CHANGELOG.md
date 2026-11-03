@@ -89,6 +89,13 @@ In development.
   Suggest similar songs for it at once when a song alike enough to be
   ticked is found, to add with one tap or leave with Not now. Songs only a
   little alike do not open it.
+- **The web view's trimmer is heard where the songs are.** While the songs
+  play on the phone, the trimmer in a web view plays its previews on the
+  phone too, over Bluetooth or the phone's speaker and through the sound
+  profile in use, the fade included, and its play head follows the sound
+  heard there. With the songs playing in the browser, the previews play
+  in the browser as before. Should the phone not play a preview, it plays
+  in the browser from then on.
 - **The EQ button shows the speaker's own profiles.** In its list, As set
   for names the profile it uses now, and the speaker's own profile and
   night profile are ringed and say set for this speaker, or at night, on

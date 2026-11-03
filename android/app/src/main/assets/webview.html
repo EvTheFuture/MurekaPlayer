@@ -9763,6 +9763,8 @@
 
         const s = state;
 
+        trimFollowPhone();
+
         // The stats' i follows the phone's setting, and when switched off
         // there the stats close too
         const statsOn = !!(s && s.statsButton);
@@ -27673,8 +27675,12 @@
             buildTrimmer();
         }
 
-        // Said when the music plays on the phone, the preview does not
+        // Said when the music plays on the phone: the preview goes there too
+        // when the phone can play it, else it plays here
         trimUi.where.style.display = state && !state.carAudio ? "block" : "none";
+        trimUi.where.textContent = state && state.trimRemote === true
+            ? "The preview plays on the phone, where the songs play"
+            : "The preview plays in this browser, not on the phone or its Bluetooth";
 
         // The preview needs the sound to itself, the music pauses, shown
         // at once, the next state from the phone confirms it. The phone
@@ -28053,6 +28059,13 @@
             return;
         }
 
+        // The songs play on the phone: the preview is heard there as well
+        if (trimOnPhone()) {
+
+            trimPlayPhone(from, to, mode);
+            return;
+        }
+
         // The engine stopped moving last time, or Safari interrupted it for
         // other sound, a new one is made while the tap still allows sound
         if (trimCtxStuck || trimCtx.state === "interrupted") {
@@ -28156,6 +28169,92 @@
         }, 700);
     }
 
+    // The preview played by the phone while the songs play there, unless
+    // the phone could not play it once since the trimmer opened
+    let trimPhoneSeq = 0;
+
+    function trimOnPhone() {
+        return !!(state && !state.carAudio && state.trimRemote === true && tr && !tr.phoneFailed);
+    }
+
+    // The piece asked of the phone. The play head waits at its start until
+    // the phone says it is heard
+    function trimPlayPhone(from, to, mode) {
+
+        trimPhoneSeq += 1;
+
+        const token = { phone: trimPhoneSeq };
+
+        tr.src = token;
+        tr.pieces = [];
+        tr.phone = { seq: trimPhoneSeq, startWall: 0, seen: false, sentAt: performance.now(), mode: mode };
+        tr.playFrom = from;
+        tr.playTo = to;
+        tr.playAt = 0;
+        tr.playMode = mode || "kept";
+        send("trimPreview", { id: tr.song.id, from: from, to: to, fade: trimFades(), end: tr.end, seq: trimPhoneSeq });
+        trimAnimate();
+        trimPaint();
+    }
+
+    // The phone's word on the piece: heard since when, or over
+    function trimFollowPhone() {
+
+        if (!tr || !tr.src || !tr.src.phone || !tr.phone || !state || !state.trimPos) {
+            return;
+        }
+
+        const p = state.trimPos;
+        const ph = tr.phone;
+
+        if (p.seq !== ph.seq || p.loading) {
+            return;
+        }
+
+        if (p.playing) {
+
+            const start = performance.now() - (Number(p.heard) || 0) * 1000;
+
+            // Kept steady, a later word arriving late only moves it by much
+            if (!ph.seen || Math.abs(start - ph.startWall) > 200) {
+                ph.startWall = start;
+            }
+
+            ph.seen = true;
+            return;
+        }
+
+        // Played and over, the end repeated when asked for
+        if (ph.seen) {
+
+            tr.src = null;
+            tr.pieces = [];
+            tr.phone = null;
+
+            if (tr.loop) {
+                trimPlayEnd();
+            } else {
+                trimPaint();
+            }
+
+            return;
+        }
+
+        // Never heard: played in this browser from now on
+        if (performance.now() - ph.sentAt > 1500) {
+
+            const from = tr.playFrom;
+            const to = tr.playTo;
+
+            dbgLog("Trim", "the phone did not play the preview, it plays in this browser");
+            tr.src = null;
+            tr.phone = null;
+            tr.phoneFailed = true;
+            trimUi.where.style.display = "none";
+            trimPlay(from, to, ph.mode);
+        }
+    }
+
     // Whether the preview fades out the last two seconds: with the switch on and
     // the end actually cut
     function trimFades() {
@@ -28212,6 +28311,17 @@
             return;
         }
 
+        // A piece on the phone stops there
+        if (tr.src.phone) {
+
+            tr.src = null;
+            tr.pieces = [];
+            tr.phone = null;
+            send("trimPreviewStop");
+            trimPaint();
+            return;
+        }
+
         const pieces = tr.pieces || [tr.src];
 
         tr.src = null;
@@ -28236,6 +28346,16 @@
 
         if (tr && !tr.src && tr.paused) {
             return tr.paused.at;
+        }
+
+        // On the phone, from when it is heard there, at the start until then
+        if (tr && tr.src && tr.src.phone && tr.phone) {
+
+            if (!tr.phone.startWall) {
+                return tr.playFrom;
+            }
+
+            return Math.min(tr.playTo, tr.playFrom + Math.max(0, performance.now() - tr.phone.startWall) / 1000);
         }
 
         if (!tr || !tr.src || !trimCtx) {

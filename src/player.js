@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.76";
+    const VERSION = "2.0.0.77";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30253,6 +30253,8 @@
             soundPicked: soundPicked(),
             soundLive: liveSound() ? liveFromName() : "",
             soundWhere: activeSound().where,
+            trimRemote: true,
+            trimPos: hostTrimPos(),
             soundSetDay: soundSetFor().day,
             soundSetNight: soundSetFor().night,
             repeat: repeatMode,
@@ -33473,7 +33475,17 @@
             // The web view's trimmer opened, the music pauses until it closes
             trimHoldMusic();
         } else if (cmd === "trimResume") {
+
+            rtrimStop();
+            rtrim.buffer = null;
+            rtrim.id = "";
             trimResumeMusic();
+        } else if (cmd === "trimPreview") {
+            hostTrimPreview(arg || {});
+        } else if (cmd === "trimPreviewStop") {
+
+            rtrimStop();
+            publishHostSoon();
         } else if (cmd === "hotspotSwitch" || cmd === "hotspotOff") {
 
             // The web view's hotspot or heat badge switched the hotspot on
@@ -53222,6 +53234,239 @@
     // going on is sent with the state, under the job's own id, so the web
     // view that asked can follow it and show how it went
     let hostTrimJob = null;
+
+    // The web view's trimmer heard through the phone, while the music plays
+    // on the phone: its previews go where the songs go, Bluetooth or the
+    // phone's speaker, and through the sound profile in use. The song is
+    // read once and kept while the same song is trimmed
+    const rtrim = { id: "", buffer: null, ctx: null, pieces: [], seq: 0, ask: 0, from: 0, to: 0, startCtx: 0, playCtx: null, loading: false };
+
+    // The engine and where to connect a piece: the sound profile's chain
+    // when the songs go through it, else an engine of its own
+    function rtrimOut() {
+
+        if (sound().on && soundOffered() && fxCtx && fxCut) {
+
+            if (fxCtx.state !== "running") {
+
+                fxCtx.resume().catch(function () {
+                    // Heard once it wakes
+                });
+            }
+
+            return { ctx: fxCtx, dest: fxCut };
+        }
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+
+        if (!rtrim.ctx && Ctx) {
+            rtrim.ctx = new Ctx();
+        }
+
+        if (!rtrim.ctx) {
+            return null;
+        }
+
+        if (rtrim.ctx.state !== "running") {
+
+            rtrim.ctx.resume().catch(function () {
+                // Heard once it wakes
+            });
+        }
+
+        return { ctx: rtrim.ctx, dest: rtrim.ctx.destination };
+    }
+
+    async function rtrimBytes(song) {
+
+        const url = songUrl(song);
+
+        if (!url) {
+            throw new Error("no link to the song");
+        }
+
+        try {
+
+            const store = await openStore(AUDIO_CACHE);
+            const hit = await store.match(url, { ignoreVary: true });
+
+            if (hit) {
+                return await hit.arrayBuffer();
+            }
+        } catch (e) {
+            // Not stored, downloaded below
+        }
+
+        const res = await timedFetch(url, {}, 60000);
+
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
+
+        return await res.arrayBuffer();
+    }
+
+    function rtrimStop() {
+
+        rtrim.seq += 1;
+
+        for (const piece of rtrim.pieces) {
+
+            try {
+                piece.stop();
+            } catch (e) {
+                // Already stopped
+            }
+
+            piece.disconnect();
+        }
+
+        rtrim.pieces = [];
+        rtrim.playCtx = null;
+        rtrim.loading = false;
+    }
+
+    // a: the song's id, from and to in seconds, whether the end fades and
+    // where the kept part ends, and the web view's own number for it
+    async function hostTrimPreview(a) {
+
+        rtrimStop();
+
+        const seq = rtrim.seq;
+        const id = String(a.id || "");
+        const song = hostFindSong(id);
+        const from = Math.max(0, Number(a.from) || 0);
+        const to = Math.max(from, Number(a.to) || 0);
+        const end = Number(a.end) || to;
+        const out = rtrimOut();
+
+        rtrim.ask = Number(a.seq) || 0;
+
+        if (!song || !out || to - from < 0.02) {
+
+            publishHostSoon();
+            return;
+        }
+
+        if (rtrim.id !== id || !rtrim.buffer) {
+
+            rtrim.loading = true;
+            publishHostSoon();
+
+            try {
+
+                const bytes = await rtrimBytes(song);
+                const buffer = await out.ctx.decodeAudioData(bytes);
+
+                rtrim.id = id;
+                rtrim.buffer = buffer;
+                dbgLog("Trim", "the web view's trimmer is heard on the phone, " + (song.title || "Untitled") + " read");
+            } catch (e) {
+
+                dbgLog("Trim", "the web view's preview could not be played on the phone: " + errText(e));
+
+                if (seq === rtrim.seq) {
+                    rtrim.loading = false;
+                    publishHostSoon();
+                }
+
+                return;
+            }
+
+            if (seq !== rtrim.seq) {
+                return;
+            }
+
+            rtrim.loading = false;
+        }
+
+        const ctx = out.ctx;
+        const buf = rtrim.buffer;
+        const at = ctx.currentTime + 0.05;
+        const fade = a.fade === true && to >= end - 0.0005;
+        const fadeFrom = fade ? Math.max(from, end - TRIM_FADE) : to;
+        const pieces = [];
+
+        if (fadeFrom - from > 0.001) {
+
+            const main = ctx.createBufferSource();
+
+            main.buffer = buf;
+            main.connect(out.dest);
+            main.start(at, from, fadeFrom - from);
+            main.stop(at + (fadeFrom - from));
+            pieces.push(main);
+        }
+
+        // The fading part worked into the samples, as the trimmer does
+        if (fade) {
+
+            const rate = buf.sampleRate;
+            const first = Math.max(0, Math.round(fadeFrom * rate));
+            const last = Math.min(buf.length, Math.round(end * rate));
+            const n = Math.max(1, last - first);
+            const tail = ctx.createBuffer(buf.numberOfChannels, n, rate);
+
+            for (let c = 0; c < buf.numberOfChannels; c++) {
+
+                const src = buf.getChannelData(c);
+                const dst = tail.getChannelData(c);
+
+                for (let i = 0; i < n; i++) {
+                    dst[i] = src[first + i] * Math.max(0, Math.min(1, (end - (first + i) / rate) / TRIM_FADE));
+                }
+            }
+
+            const piece = ctx.createBufferSource();
+
+            piece.buffer = tail;
+            piece.connect(out.dest);
+            piece.start(at + (fadeFrom - from));
+            piece.stop(at + (end - from));
+            pieces.push(piece);
+        }
+
+        if (pieces.length === 0) {
+            return;
+        }
+
+        pieces[pieces.length - 1].onended = function () {
+
+            if (seq !== rtrim.seq) {
+                return;
+            }
+
+            rtrim.pieces = [];
+            rtrim.playCtx = null;
+            publishHostSoon();
+        };
+
+        rtrim.pieces = pieces;
+        rtrim.from = from;
+        rtrim.to = to;
+        rtrim.startCtx = at;
+        rtrim.playCtx = ctx;
+        publishHostSoon();
+    }
+
+    // Where the web view's preview is heard on the phone now, for its play
+    // head
+    function hostTrimPos() {
+
+        if (rtrim.loading) {
+            return { seq: rtrim.ask, loading: true };
+        }
+
+        if (!rtrim.playCtx) {
+            return { seq: rtrim.ask, playing: false };
+        }
+
+        // How long it has been heard, below 0 before the first sound
+        const ctx = rtrim.playCtx;
+        const lag = (Number(ctx.baseLatency) || 0) + (Number(ctx.outputLatency) || 0);
+
+        return { seq: rtrim.ask, playing: true, heard: Math.round((ctx.currentTime - rtrim.startCtx - lag) * 1000) / 1000, from: rtrim.from, to: rtrim.to };
+    }
 
     async function hostTrim(a) {
 
