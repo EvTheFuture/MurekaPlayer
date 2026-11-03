@@ -21,11 +21,15 @@
 
 package dev.evthefuture.murekaplayer;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.bluetooth.BluetoothA2dp;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -60,6 +64,8 @@ import android.view.KeyEvent;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -225,6 +231,7 @@ public class PlayerService extends Service implements Hub.Listener {
         // Bluetooth coming back wants the song and its cover again
         watchAudioDevices();
         watchOtherSound();
+        watchA2dp();
 
         session = new MediaSession(this, "MurekaPlayer");
         // Play, skips and seeks from here first take the sound back from a
@@ -782,6 +789,19 @@ public class PlayerService extends Service implements Hub.Listener {
             soundWatcher = null;
         }
 
+        if (a2dpWatcher != null) {
+
+            try {
+                unregisterReceiver(a2dpWatcher);
+            } catch (RuntimeException e) {
+                // Gone already
+            }
+
+            a2dpWatcher = null;
+        }
+
+        main.removeCallbacks(sendHeldPause);
+
         instance = null;
 
         if (hotspotWatcher != null) {
@@ -872,15 +892,7 @@ public class PlayerService extends Service implements Hub.Listener {
             wifiLock.release();
         }
 
-        session.setPlaybackState(new PlaybackState.Builder()
-            .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
-                | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_STOP
-                | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS
-                | PlaybackState.ACTION_SEEK_TO)
-            .setState(title.isEmpty() ? PlaybackState.STATE_NONE
-                : (playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED),
-                positionMs, playing ? 1f : 0f)
-            .build());
+        sendPlaybackState(positionMs);
 
         if (!cover.equals(artUrl)) {
 
@@ -1255,6 +1267,7 @@ public class PlayerService extends Service implements Hub.Listener {
         long now = System.currentTimeMillis();
 
         othersSounding = count;
+        notePlayers(configs);
 
         // The silence played here to take the buttons back
         if (now < claimUntil) {
@@ -1286,6 +1299,49 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         claimButtons("another app's sound is over");
+    }
+
+    // All sound playing on the phone, this app's included, with where it
+    // goes, noted when it changes. A car's buttons follow the app Android
+    // takes as the one playing
+    private String playersSaid = "";
+
+    private void notePlayers(List<AudioPlaybackConfiguration> configs) {
+
+        List<String> parts = new ArrayList<>();
+
+        for (AudioPlaybackConfiguration config : configs) {
+
+            AudioAttributes attrs = config.getAudioAttributes();
+            String kind = usageName(attrs);
+
+            if (kind == null) {
+                kind = attrs != null ? "usage " + attrs.getUsage() : "unknown";
+            }
+
+            String to = "";
+
+            if (Build.VERSION.SDK_INT >= 30) {
+
+                AudioDeviceInfo dev = config.getAudioDeviceInfo();
+
+                to = dev == null ? "" : (isBluetoothOutput(dev) ? " to Bluetooth" : " to the device");
+            }
+
+            parts.add(kind + to);
+        }
+
+        // In the same order each time, so only a real change is noted
+        Collections.sort(parts);
+
+        String said = parts.isEmpty() ? "none" : String.join(", ", parts);
+
+        if (said.equals(playersSaid)) {
+            return;
+        }
+
+        playersSaid = said;
+        Hub.note("Media", "Sound playing on the phone: " + said + (playing ? ", this app playing" : ""));
     }
 
     // The kinds of sound that can take the buttons from this app, null for
@@ -1361,6 +1417,137 @@ public class PlayerService extends Service implements Hub.Listener {
             }, CLAIM_SILENCE_MS + 300);
         } catch (RuntimeException e) {
             Hub.note("Media", "Could not take the media buttons back: " + e.getMessage());
+        }
+    }
+
+    // What the media session last told Bluetooth, the lock screen and the
+    // car, -1 before anything
+    private int toldState = -1;
+
+    // A song ending and the next one starting report a pause for a moment.
+    // Told to a car, it can take the music as stopped, so a pause right
+    // after playing is held back a little and dropped if the music plays on
+    private static final long PAUSE_HOLD_MS = 700;
+    private boolean pauseHeld = false;
+    private long heldPosition = 0;
+
+    private final Runnable sendHeldPause = () -> {
+
+        pauseHeld = false;
+
+        if (!playing) {
+            putPlaybackState(title.isEmpty() ? PlaybackState.STATE_NONE : PlaybackState.STATE_PAUSED, heldPosition);
+        }
+    };
+
+    private void sendPlaybackState(long positionMs) {
+
+        int state = title.isEmpty() ? PlaybackState.STATE_NONE
+            : (playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED);
+
+        if (state == PlaybackState.STATE_PAUSED && (toldState == PlaybackState.STATE_PLAYING || pauseHeld)) {
+
+            heldPosition = positionMs;
+
+            if (!pauseHeld) {
+
+                pauseHeld = true;
+                main.postDelayed(sendHeldPause, PAUSE_HOLD_MS);
+            }
+
+            return;
+        }
+
+        if (pauseHeld) {
+
+            pauseHeld = false;
+            main.removeCallbacks(sendHeldPause);
+        }
+
+        putPlaybackState(state, positionMs);
+    }
+
+    private void putPlaybackState(int state, long positionMs) {
+
+        session.setPlaybackState(new PlaybackState.Builder()
+            .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
+                | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_STOP
+                | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                | PlaybackState.ACTION_SEEK_TO)
+            .setState(state, positionMs, state == PlaybackState.STATE_PLAYING ? 1f : 0f)
+            .build());
+
+        // Each change in the debug log, to lay beside the buttons that did
+        // or did not come from a car
+        if (state != toldState) {
+
+            toldState = state;
+            Hub.note("Media", "Media session says " + (state == PlaybackState.STATE_PLAYING ? "playing"
+                : (state == PlaybackState.STATE_PAUSED ? "paused" : "nothing")) + " at " + (positionMs / 1000) + " s"
+                + (session.isActive() ? "" : ", but the session is not active"));
+        }
+    }
+
+    // The A2DP stream to a Bluetooth device starting and stopping, and the
+    // device connecting, in the debug log. A car that stops sending its
+    // buttons can be laid beside them
+    private BroadcastReceiver a2dpWatcher;
+
+    @SuppressLint("MissingPermission")
+    private void watchA2dp() {
+
+        a2dpWatcher = new BroadcastReceiver() {
+
+            @Override
+            public void onReceive(Context c, Intent intent) {
+
+                String name = "a device";
+
+                try {
+
+                    BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+
+                    if (d != null && BtWatch.permitted(c) && d.getName() != null) {
+                        name = d.getName();
+                    }
+                } catch (RuntimeException e) {
+                    name = "a device";
+                }
+
+                int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+
+                if (BluetoothA2dp.ACTION_PLAYING_STATE_CHANGED.equals(intent.getAction())) {
+
+                    Hub.note("Bluetooth", "Sound stream to " + name + (state == BluetoothA2dp.STATE_PLAYING
+                        ? " started" : " stopped"));
+                    return;
+                }
+
+                String what = state == BluetoothProfile.STATE_CONNECTED ? "connected"
+                    : (state == BluetoothProfile.STATE_DISCONNECTED ? "disconnected"
+                    : (state == BluetoothProfile.STATE_CONNECTING ? "connecting" : "disconnecting"));
+
+                Hub.note("Bluetooth", "Sound link to " + name + " " + what);
+            }
+        };
+
+        IntentFilter filter = new IntentFilter();
+
+        filter.addAction(BluetoothA2dp.ACTION_PLAYING_STATE_CHANGED);
+        filter.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
+
+        // Sent by the Bluetooth stack's own process, so taken from outside
+        try {
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(a2dpWatcher, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                registerReceiver(a2dpWatcher, filter);
+            }
+        } catch (RuntimeException e) {
+
+            a2dpWatcher = null;
+            Hub.note("Bluetooth", "The sound stream cannot be followed: " + e.getMessage());
         }
     }
 

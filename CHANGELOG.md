@@ -184,6 +184,14 @@ In development.
   sound longer than three minutes, another music app say, keeps them. The
   debug log notes other apps' sound starting and stopping, and the buttons
   taken back.
+- **A song changing no longer tells a car the music stopped.** The pause
+  of a moment between one song ending and the next starting is held back
+  from the media session for 0.7 seconds and dropped when the music plays
+  on, so a car or headset sees the music playing throughout. A real pause
+  reaches them 0.7 seconds later. On Android, the debug log also notes
+  what the media session tells, the Bluetooth sound stream starting and
+  stopping, its link coming and going, and all sound playing on the
+  device and where it goes, to tell why a car's buttons stop arriving.
 - **The play head follows the sound after a move on iPhone and iPad.**
   Safari can play a song later than it says after a seek, by up to a
   second or more. The player listens to its own sound, lines it up with
