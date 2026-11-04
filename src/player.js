@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.81";
+    const VERSION = "2.0.0.82";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1096,6 +1096,11 @@
 
     // A one-shot seek applied once the next song has loaded, used when resuming
     let pendingSeek = 0;
+
+    // The place a move by loading the song again goes to, shown until the
+    // song is there, null otherwise
+    let movingTo = null;
+    let movingTimer = 0;
 
     // When the playing song was asked to start and when its clock last moved,
     // so a tap on it can tell a song that plays from one that only seems to
@@ -13794,6 +13799,24 @@
             dropResumeFade();
         });
 
+        // A move by loading the song again is done once it is there
+        audioOn("seeked", function () {
+
+            if (movingTo !== null && Math.abs((audio.currentTime || 0) - movingTo) < 0.6) {
+
+                movingTo = null;
+                clearTimeout(movingTimer);
+            }
+        });
+        audioOn("playing", function () {
+
+            if (movingTo !== null && Math.abs((audio.currentTime || 0) - movingTo) < 0.6) {
+
+                movingTo = null;
+                clearTimeout(movingTimer);
+            }
+        });
+
         // Every jump in the song counted, so a browser playing the music can
         // tell a jump asked for from the phone's place drifting
         audioOn("seeking", function () {
@@ -15148,14 +15171,14 @@
             && audio.currentTime > restartAfter) {
 
             dbgLog("Song", "previous restarts the song");
-            audio.currentTime = 0;
+            moveTo(0);
             updateSeekDisplay();
             publishHostSoon();
             return;
         }
 
         if (!playPrevSong() && audio) {
-            audio.currentTime = 0;
+            moveTo(0);
         }
     }
 
@@ -22292,7 +22315,7 @@
             return;
         }
 
-        audio.currentTime = Math.max(0, Math.min(audio.duration - 0.5, audio.currentTime + seconds));
+        moveTo(audio.currentTime + seconds);
     }
 
     // With Debug mode on, say why a key was passed over
@@ -28922,6 +28945,10 @@
     // so the waveform and the time go with the sound
     function songTimes() {
 
+        if (movingTo !== null && audio) {
+            return { at: movingTo, length: isFinite(audio.duration) && audio.duration > 0 ? audio.duration : movingTo + 1 };
+        }
+
         if (audio && audio.src && isFinite(audio.duration) && audio.duration > 0) {
 
             const at = isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -28941,13 +28968,77 @@
         return { at: 0, length: 0 };
     }
 
+    // A move within the playing song. On an iPhone or iPad, with the song
+    // going through the sound engine, Safari plays on about a second and a
+    // half of the old place after a jump and stays that much behind its
+    // clock. A song started anew is in step, so the song is loaded again
+    // and starts at the new place as it loads, the way a song resumed at
+    // its place does. Everywhere else it is an ordinary jump
+    function moveTo(t) {
+
+        if (!audio || !audio.src) {
+            return;
+        }
+
+        const length = isFinite(audio.duration) ? audio.duration : t + 1;
+        const at = Math.max(0, Math.min(length - 0.5, t));
+
+        if (!iosGain || String(audio.src).indexOf("blob:") !== 0) {
+
+            audio.currentTime = at;
+            return;
+        }
+
+        const src = audio.src;
+        const playing = !audio.paused;
+
+        dbgLog("Audio", "moved to " + dbgNum(at) + " by loading the song again, Safari would play on from the old place");
+
+        // The reload's own events are no pause, no interruption and no new
+        // song, and the place shown is the new one all along
+        heldReleasing = true;
+        clearTimeout(heldReleaseTimer);
+        heldReleaseTimer = setTimeout(function () {
+            heldReleasing = false;
+        }, 1500);
+        movingTo = at;
+        clearTimeout(movingTimer);
+        movingTimer = setTimeout(function () {
+            movingTo = null;
+        }, 3000);
+
+        try {
+
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+            pendingSeek = at > 0 ? at : 0;
+            audio.src = src;
+
+            if (playing) {
+
+                const go = audio.play();
+
+                if (go && go.catch) {
+                    go.catch(function (e) {
+                        dbgLog("Audio", "the song did not play on after the move: " + errText(e));
+                    });
+                }
+            }
+        } catch (e) {
+
+            movingTo = null;
+            dbgLog("Audio", "the move could not load the song again: " + errText(e));
+        }
+    }
+
     // Move to a time: the audio when it is loaded, else the place a
     // restored song starts from when Play is pressed
     function seekToTime(t) {
 
         if (audio && audio.src && isFinite(audio.duration)) {
 
-            audio.currentTime = Math.max(0, Math.min(audio.duration - 0.5, t));
+            moveTo(t);
             return;
         }
 
@@ -29068,7 +29159,7 @@
         setHandler("seekto", function (details) {
 
             if (audio && details && typeof details.seekTime === "number") {
-                audio.currentTime = details.seekTime;
+                moveTo(details.seekTime);
                 updateSeekDisplay();
             }
         });

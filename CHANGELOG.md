@@ -240,7 +240,12 @@ In development.
   holds the play head back by a delay measured once before, which left it
   a second or more behind the music, so a song could end before the play
   head reached the end. Only the sound engine's own delay is allowed for,
-  and delays kept from before are dropped.
+  and delays kept from before are dropped. A move within a song, by the seek bar,
+  the waveform, Previous going back to the start, a key or the lock
+  screen, loads the song again and starts it at the new place, as a song
+  started anew, when the song goes through the sound engine for the fades.
+  Safari otherwise plays on about a second and a half of the old place
+  after a jump and then stays that far behind the play head.
 
 ### Build
 
