@@ -800,8 +800,6 @@ public class PlayerService extends Service implements Hub.Listener {
             a2dpWatcher = null;
         }
 
-        main.removeCallbacks(sendHeldPause);
-
         instance = null;
 
         if (hotspotWatcher != null) {
@@ -892,8 +890,6 @@ public class PlayerService extends Service implements Hub.Listener {
             wifiLock.release();
         }
 
-        sendPlaybackState(positionMs);
-
         if (!cover.equals(artUrl)) {
 
             artUrl = cover;
@@ -909,6 +905,10 @@ public class PlayerService extends Service implements Hub.Listener {
         if (playing && !wasPlaying && artOnResume) {
             resendMetadata();
         }
+
+        // The state after the song, so a car hears of a new song first and
+        // then that it plays, from its start
+        sendPlaybackState(positionMs);
 
         // A sound stopping right after this app's own play or pause is
         // most likely its own, so no buttons are taken back for it
@@ -1424,45 +1424,13 @@ public class PlayerService extends Service implements Hub.Listener {
     // car, -1 before anything
     private int toldState = -1;
 
-    // A song ending and the next one starting report a pause for a moment.
-    // Told to a car, it can take the music as stopped, so a pause right
-    // after playing is held back a little and dropped if the music plays on
-    private static final long PAUSE_HOLD_MS = 700;
-    private boolean pauseHeld = false;
-    private long heldPosition = 0;
-
-    private final Runnable sendHeldPause = () -> {
-
-        pauseHeld = false;
-
-        if (!playing) {
-            putPlaybackState(title.isEmpty() ? PlaybackState.STATE_NONE : PlaybackState.STATE_PAUSED, heldPosition);
-        }
-    };
-
+    // Every change told as it comes, the short pause between one song
+    // ending and the next starting too: a car takes the music as playing
+    // again from it. Held back, a car was left showing the music paused
     private void sendPlaybackState(long positionMs) {
 
         int state = title.isEmpty() ? PlaybackState.STATE_NONE
             : (playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED);
-
-        if (state == PlaybackState.STATE_PAUSED && (toldState == PlaybackState.STATE_PLAYING || pauseHeld)) {
-
-            heldPosition = positionMs;
-
-            if (!pauseHeld) {
-
-                pauseHeld = true;
-                main.postDelayed(sendHeldPause, PAUSE_HOLD_MS);
-            }
-
-            return;
-        }
-
-        if (pauseHeld) {
-
-            pauseHeld = false;
-            main.removeCallbacks(sendHeldPause);
-        }
 
         putPlaybackState(state, positionMs);
     }

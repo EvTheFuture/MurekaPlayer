@@ -22911,6 +22911,9 @@
             { icon: "target", label: "Suggest similar songs", fn: function () {
                 askSimilarHere(m);
             } },
+            { icon: "link", label: "Share the set", fn: function () {
+                askShareSetHere(m);
+            } },
             { icon: "pencil", label: "Rename the set", fn: function () {
 
                 closeSongMenu();
@@ -23044,6 +23047,150 @@
         } });
 
         openChoice("Color of \"" + set.name + "\"", items);
+    }
+
+    // A whole set to hand on: its songs ticked, to untick the ones to leave
+    // out, then their links on Mureka, an empty line between them, or a
+    // line for another player's Import, copied or shared
+    function askShareSetHere(m) {
+
+        const songs = m.set && Array.isArray(m.set.songs) ? m.set.songs : [];
+        const on = {};
+
+        if (songs.length === 0) {
+
+            closeSongMenu();
+            toast("The phone sent no songs for the set, update the app", "bad");
+            return;
+        }
+
+        for (const x of songs) {
+            on[x.id] = true;
+        }
+
+        const picked = function () {
+
+            return songs.filter(function (x) {
+                return on[x.id];
+            });
+        };
+
+        const links = function () {
+
+            const all = picked();
+            const got = all.map(function (x) {
+                return x.link;
+            }).filter(Boolean);
+
+            return { text: got.join("\n\n"), count: got.length, without: all.length - got.length };
+        };
+
+        const linksDone = function (got, how) {
+
+            return got.count + (got.count === 1 ? " link" : " links") + (got.without > 0 ? ", " + got.without + " without one left out" : "") + how;
+        };
+
+        const draw = function () {
+
+            const n = picked().length;
+            const items = songs.map(function (x) {
+
+                return {
+                    icon: on[x.id] ? "check" : "circle",
+                    label: x.title + (x.published ? "" : " (draft)") + (x.link ? "" : ", no link yet"),
+                    cls: on[x.id] ? "inset" : "",
+                    fn: function () {
+
+                        on[x.id] = !on[x.id];
+                        draw();
+                    }
+                };
+            });
+
+            items.push({ icon: "check", label: "All", fn: function () {
+
+                for (const x of songs) {
+                    on[x.id] = true;
+                }
+
+                draw();
+            } });
+
+            items.push({ icon: "circle", label: "None", fn: function () {
+
+                for (const x of songs) {
+                    on[x.id] = false;
+                }
+
+                draw();
+            } });
+
+            items.push({ icon: "copy", label: "Copy the links (" + n + ")", cls: n > 0 ? "accent" : "", fn: function () {
+
+                const got = links();
+
+                if (got.count === 0) {
+
+                    toast("None of these songs has a link on Mureka yet", "bad");
+                    return;
+                }
+
+                closeSongMenu();
+
+                const ok = copyText(got.text);
+
+                toast(ok ? "Copied " + linksDone(got, "") : "This browser could not copy them", ok ? "ok" : "bad");
+            } });
+
+            if (navigator.share) {
+
+                items.push({ icon: "link", label: "Share the links (" + n + ")", fn: function () {
+
+                    const got = links();
+
+                    if (got.count === 0) {
+
+                        toast("None of these songs has a link on Mureka yet", "bad");
+                        return;
+                    }
+
+                    closeSongMenu();
+                    navigator.share({ title: m.set.name, text: got.text }).catch(function () {
+                        // Closed without sharing
+                    });
+                } });
+            }
+
+            // The line for Import, with the kinds of values chosen next
+            items.push({ icon: "copy", label: "For the player (" + n + ")", fn: function () {
+
+                if (n === 0) {
+                    return;
+                }
+
+                askCopy("songs", picked().map(function (x) {
+                    return x.id;
+                }), "copy");
+            } });
+
+            if (navigator.share) {
+
+                items.push({ icon: "link", label: "Share for the player (" + n + ")", fn: function () {
+
+                    if (n === 0) {
+                        return;
+                    }
+
+                    askCopy("songs", picked().map(function (x) {
+                        return x.id;
+                    }), "share");
+                } });
+            }
+
+            openChoice("Share \"" + m.set.name + "\", tap a song to leave it out", items);
+        };
+
+        draw();
     }
 
     // The songs that look like more versions of the set's songs, to tick,

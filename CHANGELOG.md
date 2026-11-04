@@ -89,6 +89,23 @@ In development.
   Suggest similar songs for it at once when a song alike enough to be
   ticked is found, to add with one tap or leave with Not now. Songs only a
   little alike do not open it.
+- **The Sound profiles page says what is heard.** The profiles are listed
+  by name, here, in the drop-downs and in the EQ button's list, and the one
+  heard now says in use. While the sound is tweaked live, a Live sound row
+  comes first, in use, with Edit to go on tweaking, Save as new, Set back,
+  and Overwrite with a drop-down of the profiles, the one it came from
+  picked. The live editor overwrites the same way. A profile saved or
+  overwritten is the one in use from then on, picked for the speaker
+  unless it is set for it already. Each speaker's name on the page is in
+  the accent color.
+- **Share a whole set.** Share the set, in a set's menu on the phone and in
+  the web view, lists its songs all ticked, to untick the ones to leave
+  out. Links copies their links on Mureka, an empty line between them, to
+  send to anyone, and For the player copies a line for Import in another
+  Mureka Player, with the kinds of values chosen as for picked songs.
+  Where the device can share, the text can be handed to another app as
+  well. A song without a link on Mureka yet is said in the list and left
+  out of the links.
 - **The web view's trimmer is heard where the songs are.** While the songs
   play on the phone, the trimmer in a web view plays its previews on the
   phone too, over Bluetooth or the phone's speaker and through the sound
@@ -213,23 +230,17 @@ In development.
   sound longer than three minutes, another music app say, keeps them. The
   debug log notes other apps' sound starting and stopping, and the buttons
   taken back.
-- **A song changing no longer tells a car the music stopped.** The pause
-  of a moment between one song ending and the next starting is held back
-  from the media session for 0.7 seconds and dropped when the music plays
-  on, so a car or headset sees the music playing throughout. A real pause
-  reaches them 0.7 seconds later. On Android, the debug log also notes
-  what the media session tells, the Bluetooth sound stream starting and
-  stopping, its link coming and going, and all sound playing on the
-  device and where it goes, to tell why a car's buttons stop arriving.
-- **The play head follows the sound after a move on iPhone and iPad.**
-  Safari can play a song later than it says after a seek, by up to a
-  second or more. The player listens to its own sound, lines it up with
-  the song's levels and holds the play head and the lyrics back by what it
-  finds. The lag found is kept for each way out the sound engine tells of,
-  so the next move uses it at once. It is taken when the match stands
-  well out from any other lag twice in a row, or stands a little out the
-  same three times in a row. Lags kept by an earlier, looser measure are
-  thrown away. Stats for nerds shows the lag measured and the one kept.
+- **Why a car's buttons stop arriving, in the debug log.** On Android, the
+  debug log notes what the media session tells, the Bluetooth sound
+  stream starting and stopping, its link coming and going, and all sound
+  playing on the device and where it goes. A new song is told before that
+  it plays, so a car hears of the song first.
+- **The play head on an iPhone or iPad goes by the song's own clock.** After
+  a move in a song it no longer guesses a delay from the sound's levels or
+  holds the play head back by a delay measured once before, which left it
+  a second or more behind the music, so a song could end before the play
+  head reached the end. Only the sound engine's own delay is allowed for,
+  and delays kept from before are dropped.
 
 ### Build
 

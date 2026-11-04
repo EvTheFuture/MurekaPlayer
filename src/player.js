@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.77";
+    const VERSION = "2.0.0.81";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3054,7 +3054,6 @@
             vocalFilter: "all",
             setsOn: true,
             setSort: "added",
-            seekLag: {},
             ctlGroups: [],
             ctlGroupClose: 4,
             setSuggest: true,
@@ -3277,7 +3276,6 @@
                     vocalFilter: vocalFilter,
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
-                    seekLag: parsed.seekLag && typeof parsed.seekLag === "object" ? parsed.seekLag : {},
                     ctlGroups: cleanCtlGroups(parsed.ctlGroups),
                     ctlGroupClose: [0, 2, 4, 8].indexOf(Number(parsed.ctlGroupClose)) >= 0 ? Number(parsed.ctlGroupClose) : 4,
                     setSuggest: parsed.setSuggest !== false,
@@ -5985,6 +5983,9 @@
             { label: "Suggest similar songs", fn: function () {
                 askSimilar(set);
             } },
+            { label: "Share the set", fn: function () {
+                askShareSet(set);
+            } },
             { label: "Rename the set", fn: function () {
 
                 askText("Name of the set", set.name, "Rename", function (name) {
@@ -6906,6 +6907,188 @@
     }
 
     // The similar songs to tick, the most alike already ticked
+    // A song's link on Mureka, "" without a share key
+    function songLink(song) {
+        return song && song.share_key ? "https://www.mureka.ai/song-detail/" + song.share_key : "";
+    }
+
+    // The links of songs one per paragraph, an empty line between them,
+    // and how many songs had none
+    function linksText(songs) {
+
+        const links = songs.map(songLink).filter(Boolean);
+
+        return { text: links.join("\n\n"), count: links.length, without: songs.length - links.length };
+    }
+
+    // A whole set to hand on: its songs ticked, to untick the ones to leave
+    // out, then their links on Mureka, an empty line between them, or a
+    // line for another player's Import
+    function askShareSet(set) {
+
+        const songs = setSongs(set.id);
+
+        if (songs.length === 0 || !panelEl) {
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const body = document.createElement("div");
+        const quick = document.createElement("div");
+        const list = document.createElement("div");
+        const row = document.createElement("div");
+        const ticks = [];
+
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        back.setAttribute("data-mureka-notice", "1");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:380px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = "Share \"" + set.name + "\"";
+        head.style.cssText = "font-weight:600";
+        body.textContent = "Untick the songs to leave out. Links gives their links on Mureka, an empty line between them, for anyone."
+            + " For the player gives a line for Import in another Mureka Player.";
+        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        quick.style.cssText = "display:flex;gap:6px";
+        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
+        row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+
+        const close = function () {
+            back.remove();
+        };
+
+        const picked = function () {
+
+            return ticks.filter(function (t) {
+                return t.box.get();
+            }).map(function (t) {
+                return t.song;
+            });
+        };
+
+        const linksBtn = makeButton("Links", "#48e1eb", "#000", function () {
+
+            const got = linksText(picked());
+
+            if (got.count === 0) {
+
+                showToast("None of these songs has a link on Mureka yet", false);
+                return;
+            }
+
+            close();
+            copyText(got.text).then(function (ok) {
+
+                const what = got.count + (got.count === 1 ? " link" : " links") + (got.without > 0 ? ", " + got.without + " without one left out" : "");
+
+                showToast(ok ? "Copied " + what : "Could not copy, shown instead", ok);
+
+                // Shown to share on, or to copy by hand
+                if (!ok || navigator.share) {
+                    showTextToCopy(set.name, got.text, ok ? "Copied, or share it on" : null);
+                }
+            });
+        });
+
+        const playerBtn = makeButton("For the player", "#333", "#fff", function () {
+
+            const ids = picked().map(function (x) {
+                return String(x.song_id);
+            });
+
+            close();
+            askCopyTypes("songs", "Copy", function (types) {
+
+                const line = makeShareLine("songs", ids, types, "");
+
+                copyLine(line, "songs");
+
+                if (line.text && navigator.share) {
+                    showTextToCopy(set.name + " for Mureka Player", line.text, "Copied, or share it on");
+                }
+            });
+        });
+
+        const paint = function () {
+
+            const n = picked().length;
+
+            for (const b of [linksBtn, playerBtn]) {
+
+                b.disabled = n === 0;
+                b.style.opacity = n === 0 ? "0.4" : "1";
+            }
+
+            linksBtn.textContent = "Links (" + n + ")";
+        };
+
+        for (const x of songs) {
+
+            const box = makeTickBox("", true, paint);
+            const name = box.el.children[1];
+            const line = document.createElement("div");
+            const sub = document.createElement("div");
+
+            line.textContent = (x.title || "").trim() || "Untitled";
+            line.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+            sub.textContent = (x.publish_state === 1 ? "Public" : "Draft") + (songLink(x) ? "" : ", no link yet")
+                + (isKept(x) ? ", kept" : "") + " \u00B7 " + fmtDate(x.generate_at);
+            sub.style.cssText = "color:#999;font-size:12px";
+            name.textContent = "";
+            name.appendChild(line);
+            name.appendChild(sub);
+            list.appendChild(box.el);
+            ticks.push({ song: x, box: box });
+        }
+
+        const allBtn = makeButton("All", "#333", "#fff", function () {
+
+            for (const t of ticks) {
+                t.box.set(true);
+            }
+
+            paint();
+        });
+        const noneBtn = makeButton("None", "#333", "#fff", function () {
+
+            for (const t of ticks) {
+                t.box.set(false);
+            }
+
+            paint();
+        });
+        const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
+
+        allBtn.style.flex = "1";
+        noneBtn.style.flex = "1";
+        quick.appendChild(allBtn);
+        quick.appendChild(noneBtn);
+
+        for (const b of [cancelBtn, playerBtn, linksBtn]) {
+
+            b.style.flex = "1";
+            row.appendChild(b);
+        }
+
+        card.appendChild(head);
+        card.appendChild(body);
+        card.appendChild(quick);
+        card.appendChild(list);
+        card.appendChild(row);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        paint();
+        panelEl.appendChild(back);
+    }
+
     // A set just made: the songs that look like more versions of its songs
     // offered at once. Only when one is alike enough to be ticked, songs only
     // a little alike are no reason to ask
@@ -12938,6 +13121,66 @@
         publishHostSoon();
     }
 
+    // The profiles by name, as every list shows them
+    function profilesByName() {
+
+        return sound().profiles.slice().sort(function (a, b) {
+            return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+        });
+    }
+
+    // The live tweak written into a profile, which is heard from then on:
+    // the one it came from as it was, another one picked for the way out
+    // in use unless it is the one set for it already
+    function saveLiveTo(p) {
+
+        const live = liveSound();
+
+        if (!live || !p) {
+            return;
+        }
+
+        const e = live.profile;
+
+        p.gain = e.gain;
+        p.bands = e.bands.slice();
+        p.bassCut = e.bassCut;
+        p.comp = e.comp;
+        p.compLevel = e.compLevel;
+        endSoundLive("saved to " + p.name);
+
+        if (p.id !== live.from && (!activeSound().profile || activeSound().profile.id !== p.id)) {
+            setSoundPick(p.id);
+        } else {
+            soundChanged();
+        }
+
+        showToast("Saved to " + p.name + ", in use for " + activeSound().where, true);
+    }
+
+    // The live tweak as a profile of its own, picked for the way out in use
+    function saveLiveAsNew() {
+
+        const live = liveSound();
+
+        if (!live) {
+            return null;
+        }
+
+        const e = live.profile;
+        const fresh = cleanProfile(Object.assign({}, e, {
+            id: "",
+            bands: e.bands.slice(),
+            name: (btNow ? btNow.name : e.name) + " tweaked"
+        }), sound().profiles.length);
+
+        sound().profiles.push(fresh);
+        setSoundPick(fresh.id);
+        showToast("Saved as " + fresh.name + ", in use for " + activeSound().where, true);
+
+        return fresh;
+    }
+
     // The live tweak dropped, the sound as picked or set again
     function endSoundLive(why) {
 
@@ -13092,7 +13335,7 @@
             fn: openSoundLive
         }];
 
-        for (const p of sound().profiles) {
+        for (const p of profilesByName()) {
 
             // The speaker's own profiles ringed and said
             const forDay = p.id === setFor.day;
@@ -13534,11 +13777,6 @@
             // Told once the engine has settled
             setTimeout(noteHeardLag, 1500);
 
-            // Started part way in, or moved while paused: measured
-            if (syncWanted) {
-                startSyncSoon();
-            }
-
             if (isIosLike() && anyFadeOn()) {
 
                 // A song a tap started a moment ago, fetched first say,
@@ -13553,14 +13791,7 @@
             fadeInResume();
         });
         audioOn("loadstart", function () {
-
             dropResumeFade();
-            syncFresh();
-        });
-
-        // Moved within the song: the lag heard measured again
-        audioOn("seeked", function () {
-            syncMoved();
         });
 
         // Every jump in the song counted, so a browser playing the music can
@@ -26547,15 +26778,6 @@
                 add("Sound engine", iosGain ? "For the fades, " + engine.state : "For the sound profile, " + engine.state);
                 sub("Engine delay", ms(engine.baseLatency));
                 sub("Way out delay", ms(engine.outputLatency) + (iosGain ? ", already in Safari's clock" : ""));
-
-                if (iosGain) {
-
-                    const known = knownSeekLag();
-
-                    sub("Measured after a move", syncWanted ? "Measuring" : (syncLag > 0 ? Math.round(syncLag * 1000) + " ms" : "None"));
-                    sub("Kept for the next move", known === null ? "None yet" : Math.round(known * 1000) + " ms");
-                }
-
                 sub("Playhead held back", Math.round(heardLag() * 1000) + " ms");
             } else {
                 add("Sound engine", "None, the song plays on its own");
@@ -28665,407 +28887,15 @@
 
         // Safari's song clock already allows for the way out, headphones or
         // the speaker, as it does to keep a video in step with Bluetooth, so
-        // only the engine's own part counts there, and what is measured
+        // only the engine's own part counts there. Nothing is guessed on
+        // top of what the engine tells
         if (ctx === iosCtx) {
-            return Math.max(0, Math.min(4, base + syncLag));
+            return Math.max(0, Math.min(4, base));
         }
 
         const out = Number(ctx.outputLatency) || 0;
 
         return Math.max(0, Math.min(4, base + out));
-    }
-
-    // Safari on an iPhone, the song going through the sound engine, hears
-    // a song later than its clock says once it has been moved, by a seek or
-    // by starting part way in, often by more than a second, and the engine
-    // does not tell. That lag is measured instead: the level going to the
-    // speaker, read every few hundredths of a second, is laid against the
-    // song's own levels until the two line up. From the start of a song the
-    // two are in step
-    const SYNC_STEP_MS = 40;
-    const SYNC_FRAME_SEC = 0.01;
-    // Strict, a lag taken wrongly is worse than none: six seconds heard at
-    // least, a clear match standing well out from any other lag, and two
-    // guesses in a row agreeing. Never more than a lag ever seen
-    const SYNC_MAX_SEC = 2.5;
-    const SYNC_KEEP = 375;
-    const SYNC_MIN = 150;
-    const SYNC_GOOD = 0.8;
-    const SYNC_APART_SEC = 0.08;
-    const SYNC_MARGIN = 0.1;
-    const SYNC_AGREE_SEC = 0.04;
-    // Or, with a smaller lead over the other lags, the same lag three
-    // guesses in a row, each one listening a second longer
-    const SYNC_STEADY = 3;
-    const SYNC_STEADY_MARGIN = 0.05;
-
-    // The lag measured, in seconds, on top of what the engine tells
-    let syncLag = 0;
-
-    // The song's levels, 100 a second, for the link playing
-    let syncEnv = null;
-    let syncEnvFor = "";
-
-    // Levels read while it plays, with the song's clock at each
-    let syncSamples = [];
-    let syncTimer = 0;
-    let syncBuf = null;
-    let syncWanted = false;
-    let syncAgreed = 0;
-
-    // The last clear guess, -1 for none, a second agreeing with it taken
-    let syncLastClear = -1;
-
-    // The lag the guesses keep landing on and how many times in a row
-    let syncSteadyLag = -1;
-    let syncSteadyRun = 0;
-
-    // Guesses tried since the last move, given up after a while
-    let syncTries = 0;
-    const SYNC_TRIES = 40;
-
-    // A new song from its start: in step
-    function syncFresh() {
-
-        syncLag = 0;
-        syncWanted = false;
-        syncSamples = [];
-        syncAgreed = 0;
-        stopSyncTimer();
-    }
-
-    // The lag last measured after a move, for each way out the engine tells
-    // of, Bluetooth with its own delay apart from the speaker. Used at once
-    // after the next move, until it is measured again
-    function seekLagKey() {
-
-        const ctx = iosCtx;
-        const told = ctx ? (Number(ctx.baseLatency) || 0) + (Number(ctx.outputLatency) || 0) : 0;
-
-        return String(Math.round(told * 20) * 50);
-    }
-
-    function knownSeekLag() {
-
-        const all = settings.seekLag && typeof settings.seekLag === "object" ? settings.seekLag : {};
-        const v = Number(all[seekLagKey()]);
-
-        return isFinite(v) && v >= 0 && v <= SYNC_MAX_SEC * 1000 ? v / 1000 : null;
-    }
-
-    function rememberSeekLag(lag) {
-
-        if (!settings.seekLag || typeof settings.seekLag !== "object") {
-            settings.seekLag = {};
-        }
-
-        // Lags kept by an older, looser measure and past what is ever seen
-        for (const key of Object.keys(settings.seekLag)) {
-
-            const v = Number(settings.seekLag[key]);
-
-            if (!isFinite(v) || v < 0 || v > SYNC_MAX_SEC * 1000) {
-                delete settings.seekLag[key];
-            }
-        }
-
-        settings.seekLag[seekLagKey()] = Math.round(lag * 1000);
-        saveSettings();
-    }
-
-    // Moved: the lag last measured after a move until measured again
-    function syncMoved() {
-
-        const known = knownSeekLag();
-
-        if (known !== null && iosGain) {
-
-            syncLag = known;
-            dbgLog("Audio", "moved, " + Math.round(known * 1000) + " ms taken from the last measure until measured again");
-        }
-
-        syncWanted = true;
-        syncSamples = [];
-        syncAgreed = 0;
-        syncTries = 0;
-        syncLastClear = -1;
-        syncSteadyLag = -1;
-        syncSteadyRun = 0;
-        startSyncSoon();
-    }
-
-    function stopSyncTimer() {
-
-        if (syncTimer) {
-
-            clearInterval(syncTimer);
-            syncTimer = 0;
-        }
-    }
-
-    function startSyncSoon() {
-
-        if (!syncWanted || !iosGain || !iosMeter || !iosCtx || !audio || audio.paused) {
-            return;
-        }
-
-        loadSyncEnv();
-
-        if (!syncTimer) {
-            syncTimer = setInterval(syncTick, SYNC_STEP_MS);
-        }
-    }
-
-    // The song's levels from its file, the saved copy or the link, read at
-    // a low rate, kept for the song playing only
-    async function loadSyncEnv() {
-
-        const src = audio ? String(audio.currentSrc || audio.src || "") : "";
-        const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-
-        if (!src || !Off || syncEnvFor === src) {
-            return;
-        }
-
-        syncEnvFor = src;
-        syncEnv = null;
-
-        try {
-
-            const t0 = Date.now();
-            const bytes = await (await fetch(src)).arrayBuffer();
-            const buffer = await trimDecode(new Off(1, 1, 8000), bytes);
-            const per = Math.max(1, Math.round(buffer.sampleRate * SYNC_FRAME_SEC));
-            const n = Math.floor(buffer.length / per);
-            const chans = [];
-            const sum = new Float64Array(n + 1);
-
-            for (let c = 0; c < buffer.numberOfChannels; c++) {
-                chans.push(buffer.getChannelData(c));
-            }
-
-            // Running sums of each slice's level, so the level over any
-            // stretch is quick to work out
-            for (let i = 0; i < n; i++) {
-
-                let sq = 0;
-
-                for (const data of chans) {
-
-                    for (let j = i * per; j < (i + 1) * per; j++) {
-                        sq += data[j] * data[j];
-                    }
-                }
-
-                sum[i + 1] = sum[i] + Math.sqrt(sq / (per * chans.length));
-            }
-
-            if (syncEnvFor !== src) {
-                return;
-            }
-
-            syncEnv = { sum: sum, n: n };
-            dbgLog("Audio", "song's levels read for the lag check in " + (Date.now() - t0) + " ms");
-        } catch (e) {
-
-            dbgLog("Audio", "song's levels not read for the lag check: " + errText(e));
-
-            if (syncEnvFor === src) {
-                syncEnvFor = "";
-            }
-        }
-    }
-
-    // The song's average level from one time to another
-    function syncLevel(from, to) {
-
-        const a = Math.max(0, Math.min(syncEnv.n, Math.floor(from / SYNC_FRAME_SEC)));
-        const b = Math.max(a + 1, Math.min(syncEnv.n, Math.ceil(to / SYNC_FRAME_SEC)));
-
-        return b > syncEnv.n ? 0 : (syncEnv.sum[b] - syncEnv.sum[a]) / (b - a);
-    }
-
-    // The song's clock between its own updates, which some browsers make
-    // only a few times a second, worked out from the time since
-    let syncClock = { el: -1, at: 0 };
-
-    function syncSongTime() {
-
-        const el = audio.currentTime;
-        const now = performance.now();
-
-        if (el !== syncClock.el) {
-
-            syncClock = { el: el, at: now };
-            return el;
-        }
-
-        return el + Math.min(0.5, (now - syncClock.at) / 1000) * (audio.playbackRate || 1);
-    }
-
-    function syncTick() {
-
-        if (!syncWanted || !iosGain || !iosMeter || !iosCtx || iosCtx.state !== "running" || !audio || audio.paused) {
-
-            stopSyncTimer();
-            return;
-        }
-
-        if (audio.seeking || !syncEnv) {
-            return;
-        }
-
-        if (!syncBuf || syncBuf.length !== iosMeter.fftSize) {
-            syncBuf = new Float32Array(iosMeter.fftSize);
-        }
-
-        iosMeter.getFloatTimeDomainData(syncBuf);
-
-        let sq = 0;
-
-        for (let i = 0; i < syncBuf.length; i++) {
-            sq += syncBuf[i] * syncBuf[i];
-        }
-
-        syncSamples.push({ el: syncSongTime(), level: Math.sqrt(sq / syncBuf.length) });
-
-        if (syncSamples.length > SYNC_KEEP) {
-            syncSamples.shift();
-        }
-
-        if (syncSamples.length >= SYNC_MIN && syncSamples.length % 25 === 0) {
-            syncGuess();
-        }
-    }
-
-    // The lag that lines the two up best. Taken when they line up well and
-    // the best stands out from lags further off, music with a steady beat
-    // lining up nearly as well a beat away. The longer it listens the more
-    // of the song's changes it has to go by. The first guesses go to the
-    // log, so a lag never found can be told
-
-    function syncGuess() {
-
-        syncTries += 1;
-
-        const n = syncSamples.length;
-        const win = iosMeter.fftSize / iosCtx.sampleRate;
-        let meanR = 0;
-
-        for (const x of syncSamples) {
-            meanR += x.level;
-        }
-
-        meanR /= n;
-
-        let varR = 0;
-
-        for (const x of syncSamples) {
-            varR += (x.level - meanR) * (x.level - meanR);
-        }
-
-        const tried = [];
-        let best = -2;
-        let bestLag = 0;
-
-        // Too even to tell anything by, a long note, quiet or no sound read
-        if (varR / n >= 1e-7) {
-
-            const e = new Float64Array(n);
-
-            for (let lag = 0; lag <= SYNC_MAX_SEC + 1e-9; lag += SYNC_FRAME_SEC) {
-
-                let meanE = 0;
-
-                for (let i = 0; i < n; i++) {
-
-                    const at = syncSamples[i].el - lag;
-
-                    e[i] = syncLevel(at - win, at);
-                    meanE += e[i];
-                }
-
-                meanE /= n;
-
-                let cov = 0;
-                let varE = 0;
-
-                for (let i = 0; i < n; i++) {
-
-                    const de = e[i] - meanE;
-
-                    cov += de * (syncSamples[i].level - meanR);
-                    varE += de * de;
-                }
-
-                const r = varE > 0 ? cov / Math.sqrt(varE * varR) : -1;
-
-                tried.push({ lag: lag, r: r });
-
-                if (r > best) {
-
-                    best = r;
-                    bestLag = lag;
-                }
-            }
-        }
-
-        let other = -2;
-
-        for (const x of tried) {
-
-            if (Math.abs(x.lag - bestLag) > SYNC_APART_SEC && x.r > other) {
-                other = x.r;
-            }
-        }
-
-        const clear = best >= SYNC_GOOD && best - other >= SYNC_MARGIN;
-        const agreed = clear && syncLastClear >= 0 && Math.abs(bestLag - syncLastClear) <= SYNC_AGREE_SEC;
-        const fair = best >= SYNC_GOOD && best - other >= SYNC_STEADY_MARGIN;
-
-        syncLastClear = clear ? bestLag : -1;
-
-        if (!fair) {
-            syncSteadyRun = 0;
-        } else if (syncSteadyRun > 0 && Math.abs(bestLag - syncSteadyLag) <= SYNC_AGREE_SEC) {
-            syncSteadyRun += 1;
-        } else {
-
-            syncSteadyLag = bestLag;
-            syncSteadyRun = 1;
-        }
-
-        const steady = syncSteadyRun >= SYNC_STEADY;
-        const good = agreed || steady;
-
-        if (syncTries <= 8 || good) {
-
-            dbgLog("Audio", "lag check " + syncTries + ": best " + Math.round(bestLag * 1000) + " ms, match " + Math.round(best * 100)
-                + " %, next best " + Math.round(other * 100) + " %, level " + meanR.toFixed(4)
-                + (good ? (agreed ? ", taken" : ", taken, the same " + syncSteadyRun + " times in a row")
-                    : (clear ? ", clear, once more to be sure" : (fair ? ", the same " + syncSteadyRun + " times so far" : ""))));
-        }
-
-        if (!good) {
-
-            if (syncTries >= SYNC_TRIES) {
-
-                dbgLog("Audio", "the lag heard could not be measured here");
-                syncWanted = false;
-                stopSyncTimer();
-            }
-
-            return;
-        }
-
-        if (Math.abs(bestLag - syncLag) > 0.03) {
-            dbgLog("Audio", "heard " + Math.round(bestLag * 1000) + " ms later than the song's clock and the engine say, measured");
-        }
-
-        syncLag = bestLag;
-        rememberSeekLag(bestLag);
-        syncWanted = false;
-        stopSyncTimer();
     }
 
     // The engine's lag in the log whenever it changes by more than a bit
@@ -30247,7 +30077,7 @@
 
             // The profiles to pick from by the profile button, and the one
             // picked by hand for the way out in use
-            soundPicks: soundOffered() ? sound().profiles.map(function (p) {
+            soundPicks: soundOffered() ? profilesByName().map(function (p) {
                 return { id: p.id, name: p.name, night: p.night };
             }) : [],
             soundPicked: soundPicked(),
@@ -30611,7 +30441,18 @@
                 return !setSongMatches(x);
             }).length,
             done: set.done === true,
-            songKept: isKept(song)
+            songKept: isKept(song),
+
+            // Its songs, to share the set
+            songs: songs.map(function (x) {
+
+                return {
+                    id: String(x.song_id),
+                    title: (x.title || "").trim() || "Untitled",
+                    published: x.publish_state === 1,
+                    link: songLink(x)
+                };
+            })
         };
     }
 
@@ -36486,7 +36327,7 @@
             + " | ready " + audio.readyState + " net " + audio.networkState
             + " | src " + src
             + " | vol " + dbgNum(audio.volume) + (audio.muted ? " muted" : "")
-            + " | heard after " + Math.round(heardLag() * 1000) + " ms" + (syncLag > 0 ? ", " + Math.round(syncLag * 1000) + " measured" : "")
+            + " | heard after " + Math.round(heardLag() * 1000) + " ms"
             + (audio.error ? " | error " + audio.error.code : "");
     }
 
@@ -44316,7 +44157,7 @@
 
             if (strong) {
 
-                el.style.color = "#fff";
+                el.style.color = "#48e1eb";
                 el.style.fontWeight = "600";
                 delete el.dataset.section;
             }
@@ -44336,6 +44177,50 @@
             return row;
         };
 
+        // The live sound written over a profile picked in a drop-down, the
+        // one it came from first. In the page, not a question over it, so
+        // the web view shows it as well
+        let liveOverId = "";
+
+        const liveOverRow = function (after) {
+
+            const live = liveSound();
+            const list = profilesByName();
+            const box = document.createElement("div");
+
+            if (!live || list.length === 0) {
+                return box;
+            }
+
+            if (!list.some(function (p) {
+                return p.id === liveOverId;
+            })) {
+                liveOverId = soundProfile(live.from) ? live.from : list[0].id;
+            }
+
+            const btn = makeButton("Overwrite", "#333", "#fff", function () {
+
+                const p = soundProfile(liveOverId);
+
+                if (p) {
+
+                    saveLiveTo(p);
+                    after(p);
+                }
+            });
+
+            box.style.cssText = "display:flex;flex-direction:column;gap:6px";
+            box.appendChild(evenDrop(makeDropRow("Overwrite profile", list.map(function (p) {
+                return { value: p.id, label: p.name + (p.id === live.from ? " (it came from)" : "") };
+            }), function () { return liveOverId; }, function (v) {
+                liveOverId = v;
+            })));
+            btn.style.alignSelf = "flex-start";
+            box.appendChild(btn);
+
+            return box;
+        };
+
         const drawSound = function () {
 
             const sd = sound();
@@ -44344,7 +44229,8 @@
                 return [x.id, x.name, soundProfileWords(x)];
             }), devs.map(function (d) {
                 return d.address + d.name;
-            }), liveSound() ? soundLive.n : 0]);
+            }), liveSound() ? [soundLive.n, soundProfileWords(soundLive.profile), liveFromName()] : 0,
+            sd.on && activeSound().profile ? activeSound().profile.id : "", activeSound().where]);
 
             if (key === soundKey) {
                 return;
@@ -44395,24 +44281,27 @@
             soundBox.appendChild(liveBtn);
             soundBox.appendChild(makeHint("Changes the sound heard now, from the profile in use, without saving it. For a speaker in a new room say. Kept until it is saved, set back or another speaker or headphones take over."));
 
-            // The profiles, each with what it does and a way to its editor
+            // The profiles, each with what it does and a way to its editor,
+            // the one heard now said, and the live tweak first while there
+            // is one
             soundBox.appendChild(soundHeading("Profiles"));
 
-            for (const prof of sd.profiles) {
+            const live = liveSound();
+            const heard = sd.on && !live && activeSound().profile ? activeSound().profile.id : "";
+            const profileRow = function (title, said, inUse, open) {
 
                 const row = document.createElement("div");
                 const col = document.createElement("div");
                 const name = document.createElement("div");
-                const words = makeHint(soundProfileWords(prof));
-                const editBtn = makeButton("Edit", "#333", "#fff", function () {
-                    openSoundEdit(prof.id);
-                });
+                const words = makeHint(said);
+                const editBtn = makeButton("Edit", "#333", "#fff", open);
 
                 row.style.cssText = "display:flex;align-items:center;gap:10px";
                 col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px";
                 col.dataset.hostCol = "1";
-                name.textContent = prof.name;
-                name.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+                name.textContent = title + (inUse ? ", in use" : "");
+                name.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                    + (inUse ? ";color:#48e1eb" : "");
                 editBtn.style.flex = "0 0 auto";
                 editBtn.style.padding = "6px 14px";
                 col.appendChild(name);
@@ -44420,6 +44309,50 @@
                 row.appendChild(col);
                 row.appendChild(editBtn);
                 soundBox.appendChild(row);
+            };
+
+            if (live) {
+
+                profileRow("Live sound", "Tweaked from " + liveFromName() + " for " + activeSound().where + ", not saved. "
+                    + soundProfileWords(live.profile), sd.on, function () {
+
+                    if (startSoundLive()) {
+                        openSoundEdit("live");
+                    }
+                });
+
+                const keep = document.createElement("div");
+
+                keep.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+                keep.appendChild(makeButton("Save as new", "#333", "#fff", function () {
+
+                    const fresh = saveLiveAsNew();
+
+                    if (fresh) {
+                        openSoundEdit(fresh.id);
+                    }
+                }));
+                keep.appendChild(makeButton("Set back", "#333", "#fff", function () {
+
+                    endSoundLive("set back");
+                    soundChanged();
+                    showToast(soundWords().replace(/\.$/, ""), true);
+                    soundKey = "";
+                    drawSound();
+                }));
+                soundBox.appendChild(keep);
+                soundBox.appendChild(liveOverRow(function () {
+
+                    soundKey = "";
+                    drawSound();
+                }));
+            }
+
+            for (const prof of profilesByName()) {
+
+                profileRow(prof.name, soundProfileWords(prof), prof.id === heard, function () {
+                    openSoundEdit(prof.id);
+                });
             }
 
             const newBtn = makeButton("New profile", "#333", "#fff", function () {
@@ -44442,7 +44375,7 @@
 
                 const out = phone ? [] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
 
-                return out.concat(sound().profiles.filter(function (x) {
+                return out.concat(profilesByName().filter(function (x) {
                     return !x.night;
                 }).map(function (x) {
                     return { value: x.id, label: x.name };
@@ -44452,7 +44385,7 @@
 
                 const out = phone ? [{ value: "", label: "None" }] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
 
-                return out.concat(sound().profiles.filter(function (x) {
+                return out.concat(profilesByName().filter(function (x) {
                     return x.night;
                 }).map(function (x) {
                     return { value: x.id, label: x.name };
@@ -44791,30 +44724,18 @@
 
                     keep.appendChild(makeButton("Save to " + from.name, "#333", "#fff", function () {
 
-                        from.gain = edit.gain;
-                        from.bands = edit.bands.slice();
-                        from.bassCut = edit.bassCut;
-                        from.comp = edit.comp;
-                        from.compLevel = edit.compLevel;
-                        endSoundLive("saved to " + from.name);
-                        soundChanged();
-                        showToast("Saved to " + from.name, true);
+                        saveLiveTo(from);
                         openSoundEdit(from.id);
                     }));
                 }
 
                 keep.appendChild(makeButton("Save as new profile", "#333", "#fff", function () {
 
-                    const fresh = cleanProfile(Object.assign({}, edit, {
-                        id: "",
-                        bands: edit.bands.slice(),
-                        name: (btNow ? btNow.name : edit.name) + " tweaked"
-                    }), sound().profiles.length);
+                    const fresh = saveLiveAsNew();
 
-                    sound().profiles.push(fresh);
-                    setSoundPick(fresh.id);
-                    showToast("Saved as " + fresh.name + ", picked for " + activeSound().where, true);
-                    openSoundEdit(fresh.id);
+                    if (fresh) {
+                        openSoundEdit(fresh.id);
+                    }
                 }));
                 keep.appendChild(makeButton("Set back", "#333", "#fff", function () {
 
@@ -44827,7 +44748,10 @@
                     drawSoundEdit();
                 }));
                 soundEditBox.appendChild(keep);
-                soundEditBox.appendChild(makeHint("A new profile is picked for the speaker in use and can be renamed in its editor. The speakers' own choices are left as they are."));
+                soundEditBox.appendChild(liveOverRow(function (p) {
+                    openSoundEdit(p.id);
+                }));
+                soundEditBox.appendChild(makeHint("A new profile, or another one overwritten, is picked for the speaker in use, a new one can be renamed in its editor. The speakers' own choices are left as they are."));
 
                 return;
             }
@@ -54557,7 +54481,7 @@
 
     // Text the clipboard would not take, shown in a box to select and copy
     // by hand, or to hand on with the share sheet where there is one
-    function showTextToCopy(title, text) {
+    function showTextToCopy(title, text, said) {
 
         if (!panelEl) {
             return;
@@ -54574,7 +54498,7 @@
         back.setAttribute("data-mureka-notice", "1");
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
-        head.textContent = title + ", select it and copy";
+        head.textContent = said ? title + ", " + said.charAt(0).toLowerCase() + said.slice(1) : title + ", select it and copy";
         head.style.cssText = "font-weight:600";
 
         // At least 16 pixels, below that iOS zooms the page in on focus
