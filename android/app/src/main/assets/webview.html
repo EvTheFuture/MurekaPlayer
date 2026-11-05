@@ -1394,6 +1394,12 @@
         transition: opacity 0.5s ease;
     }
 
+    /* At the top instead, where it would cover a button of a box open */
+    #toast.atTop {
+        bottom: auto;
+        top: 6vh;
+    }
+
     /* In view, it fades out again when the class goes */
     #toast.shown {
         opacity: 1;
@@ -13658,6 +13664,18 @@
         row.setAttribute("role", "button");
         row.className = "row pending";
         row.dataset.id = song.id;
+
+        // Put in a set already, the set's color at its start, under its head
+        if (song.setColor) {
+
+            row.classList.add("inSet");
+            row.style.setProperty("--setColor", song.setColor);
+        }
+
+        if (song.setSong) {
+            row.classList.add("setSong");
+        }
+
         songLine(song, row);
 
         const thumb = row.querySelector(".thumb");
@@ -21499,6 +21517,22 @@
         }, 550);
     }
 
+    // The note moved to the top when it would cover a button of a box or a
+    // sheet open, the import's for one
+    function toastClear(el) {
+
+        const r = el.getBoundingClientRect();
+        const covered = Array.from(document.querySelectorAll("#songMenu button, #panel button, #confirmPop button, #songMenu .menuItem"))
+            .some(function (b) {
+
+                const q = b.getBoundingClientRect();
+
+                return q.width > 0 && q.left < r.right && q.right > r.left && q.top < r.bottom && q.bottom > r.top;
+            });
+
+        el.classList.toggle("atTop", covered);
+    }
+
     function toast(text, kind, waitMs) {
 
         const el = $("toast");
@@ -21522,8 +21556,10 @@
 
         el.appendChild(document.createTextNode(text));
         clearTimeout(toastGoneTimer);
+        el.classList.remove("atTop");
         el.style.display = "block";
         el.classList.add("shown");
+        toastClear(el);
         clearTimeout(toastTimer);
 
         // Waiting stays until the answer replaces it, a minute at the most,

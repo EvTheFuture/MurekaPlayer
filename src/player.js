@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.83";
+    const VERSION = "2.0.0.85";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8508,11 +8508,8 @@
         const out = [];
         let i = 0;
 
+        // A song still being made that is in a set already counts with it
         const setIdOf = function (e) {
-
-            if (isPendingSong(e.song)) {
-                return "";
-            }
 
             const m = songSetOf.get(String(e.song.song_id));
 
@@ -8571,7 +8568,7 @@
 
             for (let k = i + 1; k < j; k += 1) {
 
-                if (open || String(entries[k].song.song_id) === playingId) {
+                if (open || String(entries[k].song.song_id) === playingId || isPendingSong(entries[k].song)) {
                     out.push(entries[k]);
                 }
             }
@@ -8613,7 +8610,7 @@
                 e.setCount = 0;
                 e.setUnder = true;
 
-                if (!open && String(e.song.song_id) !== String(playingId)) {
+                if (!open && String(e.song.song_id) !== String(playingId) && !isPendingSong(e.song)) {
                     continue;
                 }
             } else if (e.setMember) {
@@ -13850,6 +13847,11 @@
             dropResumeFade();
         });
 
+        // Music from the first play on, however the play came about
+        audioOn("play", function () {
+            iosSessionPlayback();
+        });
+
         // A move by loading the song again is done once it is there
         audioOn("seeked", function () {
 
@@ -16893,11 +16895,71 @@
         // the songs of a set together while they fold
         const ordered = listGroup(orderedSongs());
 
-        return pendingSongs.size > 0 ? shownPending().concat(ordered) : ordered;
+        return pendingSongs.size > 0 ? withPendingPlaced(shownPending(), ordered, function (x) {
+            return x;
+        }) : ordered;
     }
 
     // The songs still being generated that the list shows: the account's own, and
     // not while only published songs are shown, which they never are yet
+    // The songs still being made first, those put in a set already just
+    // before the first song of their set in the list instead, so they show
+    // in the set while they are made. at reads the song of an item
+    function withPendingPlaced(pending, list, at) {
+
+        const top = [];
+        const bySet = new Map();
+
+        for (const p of pending) {
+
+            const m = songSetOf.get(String(at(p).song_id));
+
+            if (m && songSets.has(m.set)) {
+
+                if (!bySet.has(m.set)) {
+                    bySet.set(m.set, []);
+                }
+
+                bySet.get(m.set).push(p);
+            } else {
+                top.push(p);
+            }
+        }
+
+        if (bySet.size === 0) {
+            return top.concat(list);
+        }
+
+        const out = [];
+
+        for (const x of list) {
+
+            const m = songSetOf.get(String(at(x).song_id));
+            const waiting = m ? bySet.get(m.set) : null;
+
+            if (waiting) {
+
+                for (const p of waiting) {
+                    out.push(p);
+                }
+
+                bySet.delete(m.set);
+            }
+
+            out.push(x);
+        }
+
+        // A set with none of its songs in the list has them on top
+        bySet.forEach(function (rest) {
+
+            for (const p of rest) {
+                top.push(p);
+            }
+        });
+
+        return top.concat(out);
+    }
+
     function shownPending() {
         return creatorSource || publishFilter === "published" ? [] : pendingList();
     }
@@ -16974,22 +17036,75 @@
     // tap, and the gain goes in only with it awake, an asleep one would
     // silence the song. A song from Mureka is then asked for openly, so the
     // gain may read it, as the stored copies already are
+    // Until the player first plays, Safari is told the page's sound is
+    // ambient: mixed with another app's music and not taking the phone's
+    // sound from it, should the page make any. Mureka's own page may, as
+    // the player opens or comes back in view. From the first play on it is
+    // music, heard with the ring switch on silent and on the lock screen
+    let iosPlayedOnce = false;
+
+    function iosSessionAmbient() {
+
+        if (iosPlayedOnce || !isIosLike() || !navigator.audioSession) {
+            return;
+        }
+
+        try {
+
+            navigator.audioSession.type = "ambient";
+            dbgLog("Audio", "the page's sound mixes with other apps until the player plays");
+        } catch (e) {
+            // Safari before the setting, as before
+        }
+    }
+
+    function iosSessionPlayback() {
+
+        iosPlayedOnce = true;
+
+        if (!isIosLike() || !navigator.audioSession) {
+            return;
+        }
+
+        try {
+
+            if (navigator.audioSession.type !== "playback") {
+                navigator.audioSession.type = "playback";
+            }
+        } catch (e) {
+            // Safari before the setting, as before
+        }
+    }
+
+    // Sound on the page the player did not start, in the debug log, to tell
+    // which takes the phone's sound from other apps
+    function notePageMedia(why) {
+
+        const others = Array.from(document.querySelectorAll("audio, video")).filter(function (el) {
+            return el !== audio && !el.paused;
+        });
+
+        if (others.length > 0) {
+
+            dbgLog("Audio", why + ": the page plays " + others.map(function (el) {
+                return el.tagName.toLowerCase() + (el.muted ? " muted" : "") + (el.id ? " #" + el.id : "");
+            }).join(", ") + " itself");
+        }
+    }
+
     function wakeIosCtx() {
 
         if (!isIosLike()) {
             return;
         }
 
+        iosSessionPlayback();
+
         const Ctx = window.AudioContext || window.webkitAudioContext;
 
         if (!iosCtx && Ctx) {
 
             try {
-
-                // Heard as music, also with the ring switch on silent
-                if (navigator.audioSession) {
-                    navigator.audioSession.type = "playback";
-                }
 
                 iosCtx = new Ctx();
                 iosCtx.addEventListener("statechange", iosCtxStateChanged);
@@ -18361,6 +18476,7 @@
         switchingTrack = true;
         primingUrl = url;
         audio.src = url;
+        iosSessionPlayback();
 
         try {
 
@@ -20415,6 +20531,7 @@
         }
 
         userPaused = false;
+        iosSessionPlayback();
         resumeIosCtx("play");
         prepareSound();
 
@@ -32434,9 +32551,11 @@
 
         // Songs still being generated first, in the list's own order only
         const pending = view === "mureka" ? shownPending() : [];
-        const searched = pending.map(function (song) {
+        const searched = withPendingPlaced(pending.map(function (song) {
             return { song: song, greyed: false };
-        }).concat(prepared.entries).filter(function (e) {
+        }), prepared.entries, function (e) {
+            return e.song;
+        }).filter(function (e) {
             return searchMatches(e.song, q);
         });
 
@@ -32541,6 +32660,9 @@
                     id: String(song.song_id),
                     title: title,
                     pending: true,
+                    setId: e.setId || "",
+                    setColor: e.setColor || "",
+                    setSong: e.setUnder === true,
                     playWhenReady: pendingPlay.has(String(song.song_id)),
                     playAfter: pendingPlay.get(String(song.song_id)) === "after",
                     cover: song.cover ? coverUrl(song) : "",
@@ -35624,6 +35746,10 @@
         renderList();
         setStatus("Cached songs: " + cache.songs.length);
 
+        // Mixed with other apps' sound until the player plays
+        iosSessionAmbient();
+        notePageMedia("as the player opened");
+
         buildContextMenu();
         buildSettings();
         buildInfo();
@@ -36870,7 +36996,12 @@
         }, opts);
 
         document.addEventListener("visibilitychange", function () {
+
             dbgLog("Page", document.hidden ? "hidden" : "visible");
+
+            if (!document.hidden && isIosLike()) {
+                notePageMedia("back in view");
+            }
         });
 
         window.addEventListener("focus", function () {
@@ -38989,7 +39120,7 @@
     }
 
     // A song still being generated, greyed, saying so, and a tap tells
-    function buildPendingRow(song) {
+    function buildPendingRow(song, fold) {
 
         const item = document.createElement("div");
         const dot = document.createElement("span");
@@ -39020,6 +39151,13 @@
         item.appendChild(numEl);
         item.appendChild(titleEl);
         item.appendChild(stateEl);
+
+        // Put in a set already, the set's bar as its songs have
+        if (fold && fold.setColor) {
+
+            item.dataset.setBar = "inset 3px 0 0 " + fold.setColor;
+            item.style.boxShadow = item.dataset.setBar;
+        }
 
         item.addEventListener("click", function () {
             pendingTap(song);
@@ -39488,7 +39626,7 @@
     function buildSongRow(song, number, isPlaying, dimmed, queueIndex, fold) {
 
         if (isPendingSong(song)) {
-            return buildPendingRow(song);
+            return buildPendingRow(song, fold);
         }
 
         const title = (song.title || "").trim() || "Untitled";

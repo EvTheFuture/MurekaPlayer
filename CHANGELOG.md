@@ -80,6 +80,11 @@ In development.
   set the moment they are ready. Songs that look like no set, or only
   like the set used last, are asked about once ready, as before. Songs
   asked about while being made are not asked about again.
+- **Songs being made show in their set.** A song still being made on
+  Mureka that is in a set already leaves the top of the list and shows in
+  its set, with the set's colored bar: under the set's name, at the top of
+  its songs, folded or not, or just above the set's first song with Fold
+  sets off. On the phone and in the web view.
 - **Suggest similar songs takes songs still being made.** A song still
   being made on Mureka that looks like the set's songs is listed too, saying
   still being made in place of its date, on the phone and in the web view.
@@ -89,6 +94,16 @@ In development.
   Suggest similar songs for it at once when a song alike enough to be
   ticked is found, to add with one tap or leave with Not now. Songs only a
   little alike do not open it.
+- **Other apps keep playing until the player plays.** On an iPhone or iPad,
+  the page's sound is ambient until the player first plays a song, so
+  opening the player or coming back to it does not take the sound from
+  another app's music, should the page make any sound. From the first play
+  on it is music as before, heard with the ring switch on silent and on
+  the lock screen. The debug log says when the page plays sound the player
+  did not start.
+- **Notes in the web view keep clear of a box's buttons.** A note that
+  would cover a button of a box or a sheet open, the import's say, shows at
+  the top of the screen instead.
 - **Night mode as a speaker connects.** Each Bluetooth speaker on the
   Sound profiles page has Night mode as it connects: Stays on, Ask or Goes
   off. With night mode on as that speaker connects, Ask asks whether to
