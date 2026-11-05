@@ -89,6 +89,12 @@ In development.
   Suggest similar songs for it at once when a song alike enough to be
   ticked is found, to add with one tap or leave with Not now. Songs only a
   little alike do not open it.
+- **Night mode as a speaker connects.** Each Bluetooth speaker on the
+  Sound profiles page has Night mode as it connects: Stays on, Ask or Goes
+  off. With night mode on as that speaker connects, Ask asks whether to
+  switch it off, on the phone and in the web view, and Goes off switches
+  it off by itself. The speaker's volume is its own, so the night
+  profile's question about lowering the volume is not asked then.
 - **The Sound profiles page says what is heard.** The profiles are listed
   by name, here, in the drop-downs and in the EQ button's list, and the one
   heard now says in use. While the sound is tweaked live, a Live sound row

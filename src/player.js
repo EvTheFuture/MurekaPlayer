@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.82";
+    const VERSION = "2.0.0.83";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13005,7 +13005,10 @@
                 devices[a] = {
                     name: String(d.name || a).slice(0, 80),
                     day: has(d.day) || d.day === "none" ? d.day : "",
-                    night: has(d.night) || d.night === "none" ? d.night : ""
+                    night: has(d.night) || d.night === "none" ? d.night : "",
+                    nightOff: NIGHT_ON_CONNECT.some(function (c) {
+                        return c.value === d.nightOff;
+                    }) ? d.nightOff : "keep"
                 };
             }
         }
@@ -13023,6 +13026,50 @@
         };
 
         return settings.sound;
+    }
+
+    // What night mode does when a speaker connects while it is on
+    const NIGHT_ON_CONNECT = [
+        { value: "keep", label: "Stays on" },
+        { value: "ask", label: "Ask" },
+        { value: "off", label: "Goes off" }
+    ];
+
+    // A speaker connected while night mode is on: left on, asked about or
+    // switched off, as set for that speaker. Its volume is its own, so the
+    // night profile's question about lowering the volume is not asked
+    function nightOnConnect() {
+
+        const s = sound();
+
+        if (!btNow || !s.night) {
+            return;
+        }
+
+        const dev = s.devices[btNow.address];
+        const how = dev && dev.nightOff ? dev.nightOff : "keep";
+        const name = btNow.name;
+
+        if (how === "off") {
+
+            dbgLog("Sound", name + " connected, night mode goes off as set for it");
+            setNight(false, true);
+            return;
+        }
+
+        if (how !== "ask") {
+            return;
+        }
+
+        askLikeSets("Switch night mode off?", name + " connected with night mode on.", [
+            { key: "off", label: "Night mode off", icon: "moon" },
+            { key: "keep", label: "Keep it on", icon: "close", plain: true }
+        ], function (key) {
+
+            if (key === "off" && sound().night) {
+                setNight(false, true);
+            }
+        });
     }
 
     function soundProfile(id) {
@@ -13550,13 +13597,13 @@
     // with a night profile that asks for it, the question comes first and
     // night mode stays until it is answered, so the song does not get loud
     // while waiting
-    function setNight(on) {
+    function setNight(on, noLower) {
 
         const s = sound();
         const want = typeof on === "boolean" ? on : !s.night;
         const was = activeSound();
 
-        if (s.night && !want && s.on && was.night && was.profile && was.profile.night
+        if (!noLower && s.night && !want && s.on && was.night && was.profile && was.profile.night
             && was.profile.askLower && was.profile.gain < 0 && lowerVolumeOffered()) {
 
             askNightOff(was.profile);
@@ -13671,6 +13718,10 @@
             applySound();
             updateNightCtrlButton();
             publishHostSoon();
+
+            if (btNow) {
+                nightOnConnect();
+            }
         }
     }
 
@@ -44460,7 +44511,7 @@
 
             // Which profiles each speaker takes
             soundBox.appendChild(soundHeading("Speakers"));
-            soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode."));
+            soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode. Night mode as it connects says whether night mode stays on, is asked about or goes off when that speaker connects while it is on."));
 
             const dayChoices = function (phone) {
 
@@ -44496,6 +44547,18 @@
                     set("night", v);
                     soundChanged();
                 })));
+
+                // A speaker of its own, connecting while night mode is on
+                if (!phone) {
+
+                    soundBox.appendChild(even(makeDropRow("Night mode as it connects", NIGHT_ON_CONNECT, function () {
+                        return get("nightOff") || "keep";
+                    }, function (v) {
+
+                        set("nightOff", v);
+                        soundChanged();
+                    })));
+                }
             };
 
             speaker("This device and others not set up", function (k) {
@@ -44516,7 +44579,7 @@
                     const all = sound().devices;
 
                     if (!all[d.address]) {
-                        all[d.address] = { name: String(d.name || d.address), day: "", night: "" };
+                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep" };
                     }
 
                     all[d.address][k] = v;
