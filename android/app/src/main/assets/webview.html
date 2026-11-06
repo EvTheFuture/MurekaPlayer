@@ -1394,6 +1394,16 @@
         transition: opacity 0.5s ease;
     }
 
+    /* A song put in the queue by hand: its turn and title in gold */
+    .row.queued .rowNum {
+        color: var(--gold);
+        font-weight: 600;
+    }
+
+    .row.queued:not(.playing) .rowTitle {
+        color: #f3dc8a;
+    }
+
     /* At the top instead, where it would cover a button of a box open */
     #toast.atTop {
         bottom: auto;
@@ -13289,6 +13299,16 @@
 
         num.className = "rowNum";
         num.textContent = song.number ? String(song.number) : "";
+
+        // Put in the queue by hand: its turn in place of its number, the
+        // row tinted gold
+        if (song.queued) {
+
+            num.textContent = "Q" + song.queued;
+            row.classList.add("queued");
+            row.title = "Queued, number " + song.queued + " of the songs put in by hand";
+        }
+
         row.appendChild(num);
         row.appendChild(makeThumb(song.cover));
 

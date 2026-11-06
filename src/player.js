@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.86";
+    const VERSION = "2.0.0.87";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15283,6 +15283,27 @@
     const playLastMarks = new Set();
 
     // Whether a song was put in to play next and has not played yet
+    // The songs put in the queue by hand, Play next or Play last, still to
+    // come, with their turn among them: 1 plays first
+    function handQueued() {
+
+        const out = new Map();
+        let n = 0;
+
+        for (let i = Math.max(0, queuePos + 1); i < queue.length; i += 1) {
+
+            const id = String(queue[i].song_id);
+
+            if ((playNextMarks.has(id) || playLastMarks.has(id)) && !out.has(id)) {
+
+                n += 1;
+                out.set(id, n);
+            }
+        }
+
+        return out;
+    }
+
     function isPlayNext(id) {
 
         const key = String(id);
@@ -32320,7 +32341,12 @@
 
         return [publishFilter, settings.vocalFilter || "all", settings.smartEnabled === true ? hostSmartText() : "",
             creatorSource ? creatorSource.user_id : "", activePlaylist ? activePlaylist.name : "",
-            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : "", setsShown() ? "sets" : "", setsFolded() ? "fold" : ""].join("|");
+            cache.songs.length, songDataStamp, pendingStamp, showLeftOut() ? "all" : "", setsShown() ? "sets" : "", setsFolded() ? "fold" : "",
+
+            // The songs put in the queue by hand and their turns, marked
+            Array.from(handQueued()).map(function (t) {
+                return t[0] + ":" + t[1];
+            }).join(",")].join("|");
     }
 
     // Whether the playing song is stored on the phone, or how far it has
@@ -32720,6 +32746,9 @@
             return hostSetsList(req);
         }
 
+        // The songs put in the queue by hand and their turns, not in the
+        // queue itself
+        const queuedTurns = req && req.view === "queue" ? new Map() : handQueued();
         const q = String(req && req.q ? req.q : "").trim().toLowerCase();
         const offset = Math.max(0, Number(req && req.offset) || 0);
         const limit = Math.max(1, Math.min(200, Number(req && req.limit) || 60));
@@ -32880,6 +32909,7 @@
                 duration: (song.duration_milliseconds || 0) / 1000,
                 playing: String(song.song_id) === playingId,
                 playNext: isPlayNext(song.song_id),
+                queued: queuedTurns.get(String(song.song_id)) || 0,
                 plays: songPlays(song),
                 greyed: e.greyed === true,
                 place: e.greyed || e.setMember ? 0 : place,
@@ -32927,6 +32957,7 @@
     // is opened or searched. All of it at once, there are never many
     function hostSetsList(req) {
 
+        const queuedTurns = handQueued();
         const q = String(req && req.q ? req.q : "").trim().toLowerCase();
         const opened = new Set(String(req && req.sets ? req.sets : "").split(",").filter(Boolean));
         const doneOpen = String(req && req.done ? req.done : "") === "1";
@@ -32977,6 +33008,7 @@
                     duration: (x.duration_milliseconds || 0) / 1000,
                     playing: id === playingId,
                     playNext: isPlayNext(x.song_id),
+                    queued: queuedTurns.get(String(x.song_id)) || 0,
                     plays: songPlays(x),
                     greyed: !setSongMatches(x),
                     place: 0,
@@ -39867,6 +39899,21 @@
             numEl.style.color = "#48e1eb";
         }
 
+        // Put in the queue by hand: its turn in place of its number and a
+        // golden title, outside the queue view
+        const turn = lazyState && lazyState.queued ? lazyState.queued.get(String(song.song_id)) : 0;
+
+        if (turn) {
+
+            numEl.textContent = "Q" + turn;
+            numEl.style.color = STAR_GOLD;
+            item.title = "Queued, number " + turn + " of the songs put in by hand";
+
+            if (!isPlaying) {
+                titleEl.style.color = "#f3dc8a";
+            }
+        }
+
         item.appendChild(dot);
         item.appendChild(numEl);
 
@@ -40401,7 +40448,8 @@
 
         lazyRows = visible;
         lazyRendered = 0;
-        lazyState = { byQueueIndex: byQueueIndex, playingId: playingId, numberById: numberById };
+        lazyState = { byQueueIndex: byQueueIndex, playingId: playingId, numberById: numberById,
+            queued: listView === "queue" ? new Map() : handQueued() };
 
         // Always build far enough to include the playing song, so it can be
         // scrolled into view, and at least one chunk

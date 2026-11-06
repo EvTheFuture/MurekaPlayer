@@ -80,6 +80,10 @@ In development.
   set the moment they are ready. Songs that look like no set, or only
   like the set used last, are asked about once ready, as before. Songs
   asked about while being made are not asked about again.
+- **Queued songs show in the lists.** A song put in the queue by hand, with
+  Play next or Play last, has its title in gold in Mureka's songs and the
+  Sets view, and its turn among those songs, Q1 the first to play, in
+  place of its number, on the phone and in the web view, until it plays.
 - **A set's place in the list, as chosen.** A set's place in the list, on
   the Song sets page, says where a set goes in Mureka's songs, newest
   first: by its latest change (the default), so a set just made or just
