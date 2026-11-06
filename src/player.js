@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.87";
+    const VERSION = "2.0.0.88";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15274,6 +15274,65 @@
         setStatus("Playing next: " + (song.title || "Untitled"));
     }
 
+    // How many songs other than this one were put in the queue by hand and
+    // are still to come
+    function queuedBeside(song) {
+
+        const turns = handQueued();
+
+        return turns.size - (turns.has(String(song.song_id)) ? 1 : 0);
+    }
+
+    // A song put in after the last of the songs put in by hand, so it plays
+    // once they have, marked as put in by hand itself
+    function addAfterQueued(song) {
+
+        if (queueIdle()) {
+
+            addWhileIdle(song, true);
+            return;
+        }
+
+        const key = String(song.song_id);
+        let oldOffset = -1;
+
+        for (let i = queue.length - 1; i > queuePos; i -= 1) {
+
+            if (queue[i].song_id === song.song_id) {
+
+                oldOffset = i - queuePos;
+                queue.splice(i, 1);
+            }
+        }
+
+        let last = queuePos;
+
+        for (let i = queuePos + 1; i < queue.length; i += 1) {
+
+            const id = String(queue[i].song_id);
+
+            if (playNextMarks.has(id) || playLastMarks.has(id)) {
+                last = i;
+            }
+        }
+
+        queue.splice(last + 1, 0, song);
+        playNextMarks.set(key, oldOffset);
+        playLastMarks.delete(key);
+        renderList();
+
+        // Right after the playing one when nothing else was put in
+        if (last === queuePos) {
+
+            setArtTransition("none");
+            setArtSources();
+            positionArt(0);
+            prefetchNext();
+        }
+
+        setStatus("Playing after the queued songs: " + (song.title || "Untitled"));
+    }
+
     // Songs put in to play next, with how far after the playing song each
     // one was before, -1 when it was not in the queue at all
     const playNextMarks = new Map();
@@ -15282,7 +15341,6 @@
     // keeps them at its end
     const playLastMarks = new Set();
 
-    // Whether a song was put in to play next and has not played yet
     // The songs put in the queue by hand, Play next or Play last, still to
     // come, with their turn among them: 1 plays first
     function handQueued() {
@@ -15304,6 +15362,7 @@
         return out;
     }
 
+    // Whether a song was put in to play next and has not played yet
     function isPlayNext(id) {
 
         const key = String(id);
@@ -30878,6 +30937,7 @@
             // Where it comes up in the queue, for Remove from queue, and
             // where the queue is, for taking a part of it out
             queueAt: upcomingIndex(song),
+            queuedBeside: queuedBeside(song),
             queuePos: queuePos,
             queueLength: queue.length,
 
@@ -33625,6 +33685,8 @@
             playOnlyThis(song);
         } else if (act === "playNext") {
             addNext(song);
+        } else if (act === "playAfterQueued") {
+            addAfterQueued(song);
         } else if (act === "addQueue") {
             addLast(song);
         } else if (act === "refresh") {
@@ -55608,6 +55670,16 @@
         addMenuRow("Play next", "#fff", function () {
             addNext(song);
         }, "listPlusTop");
+
+        // With songs put in by hand already: after them
+        const beside = queuedBeside(song);
+
+        if (beside > 0) {
+
+            addMenuRow("Play after queued (" + beside + ")", "#fff", function () {
+                addAfterQueued(song);
+            }, "listPlusTop");
+        }
 
         addMenuRow("Play last", "#fff", function () {
             addLast(song);

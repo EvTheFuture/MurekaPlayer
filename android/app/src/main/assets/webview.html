@@ -22397,6 +22397,16 @@
             closeSongMenu();
         }));
 
+        // With songs put in by hand already: after them
+        if (m.queuedBeside > 0) {
+
+            box.appendChild(menuItem("listPlusTop", "Play after queued (" + m.queuedBeside + ")", function () {
+
+                songAction("playAfterQueued");
+                closeSongMenu();
+            }));
+        }
+
         box.appendChild(menuItem("listPlus", "Play last", function () {
 
             songAction("addQueue");
