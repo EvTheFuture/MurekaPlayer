@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.85";
+    const VERSION = "2.0.0.86";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3059,6 +3059,7 @@
             vocalFilter: "all",
             setsOn: true,
             setSort: "added",
+            setPlace: "change",
             ctlGroups: [],
             ctlGroupClose: 4,
             setSuggest: true,
@@ -3281,6 +3282,7 @@
                     vocalFilter: vocalFilter,
                     setsOn: parsed.setsOn !== false,
                     setSort: ["added", "created", "name"].indexOf(parsed.setSort) >= 0 ? parsed.setSort : "added",
+                    setPlace: ["trim", "change", "mureka"].indexOf(parsed.setPlace) >= 0 ? parsed.setPlace : "change",
                     ctlGroups: cleanCtlGroups(parsed.ctlGroups),
                     ctlGroupClose: [0, 2, 4, 8].indexOf(Number(parsed.ctlGroupClose)) >= 0 ? Number(parsed.ctlGroupClose) : 4,
                     setSuggest: parsed.setSuggest !== false,
@@ -5829,6 +5831,183 @@
             done.add(m.set);
 
             for (const y of setOrder(members)) {
+                out.push(y);
+            }
+        }
+
+        return out;
+    }
+
+    // When a song trimmed here was made, as the song it was trimmed from
+    // was, by the trimmed song's ID, in seconds. Kept across visits
+    const TRIM_ORIGIN_KEY = "mureka_trim_origin";
+    const trimOrigin = new Map();
+
+    try {
+
+        const raw = JSON.parse(localStorage.getItem(TRIM_ORIGIN_KEY) || "{}");
+
+        Object.keys(raw).forEach(function (id) {
+
+            const t = Number(raw[id]);
+
+            if (t > 0) {
+                trimOrigin.set(id, t);
+            }
+        });
+    } catch (e) {
+        // None kept
+    }
+
+    function noteTrimOrigin(from, to) {
+
+        const t = trimOrigin.get(String(from.song_id)) || Number(from.generate_at) || 0;
+
+        if (t <= 0) {
+            return;
+        }
+
+        trimOrigin.set(String(to.song_id), t);
+
+        const out = {};
+
+        trimOrigin.forEach(function (v, id) {
+            out[id] = v;
+        });
+
+        try {
+            localStorage.setItem(TRIM_ORIGIN_KEY, JSON.stringify(out));
+        } catch (e) {
+            // Full, kept for this visit only
+        }
+    }
+
+    // How a set takes its place among Mureka's songs: by its latest change,
+    // a song put in or the set made, by its newest song with a trimmed one
+    // as old as the song it was trimmed from, or by its newest song as
+    // Mureka has it
+    const SET_PLACES = [
+        { value: "change", label: "Its latest change" },
+        { value: "trim", label: "Its newest song, trims as their original" },
+        { value: "mureka", label: "Its newest song, as on Mureka" }
+    ];
+
+    function setPlaceOf() {
+
+        return SET_PLACES.some(function (x) {
+            return x.value === settings.setPlace;
+        }) ? settings.setPlace : "change";
+    }
+
+    // Mureka's songs, newest first, with each set's songs together at its
+    // place, as chosen. With sets not folded only a trimmed song moves, to
+    // where its original was, when trims go by their original. Published
+    // songs go by their publish date, so there the sets keep Mureka's place
+    function placeSets(list, fold) {
+
+        const how = setPlaceOf();
+
+        if (how === "mureka" || (!creatorSource && publishFilter === "published")) {
+            return fold ? groupSets(list) : list;
+        }
+
+        if (!fold && how !== "trim") {
+            return list;
+        }
+
+        const made = function (x) {
+            return Number(x.generate_at) || 0;
+        };
+        const was = function (x) {
+            return how === "trim" ? trimOrigin.get(String(x.song_id)) || made(x) : made(x);
+        };
+        const bySet = new Map();
+
+        if (fold && setsShown()) {
+
+            for (const x of list) {
+
+                const m = songSetOf.get(String(x.song_id));
+
+                if (m && songSets.has(m.set)) {
+
+                    if (!bySet.has(m.set)) {
+                        bySet.set(m.set, []);
+                    }
+
+                    bySet.get(m.set).push(x);
+                }
+            }
+        }
+
+        const blocks = [];
+        const rest = [];
+
+        for (const x of list) {
+
+            const m = songSetOf.get(String(x.song_id));
+            const members = m ? bySet.get(m.set) : null;
+
+            if (members && members.length > 1) {
+                continue;
+            }
+
+            if (how === "trim" && trimOrigin.has(String(x.song_id))) {
+                blocks.push({ time: was(x), songs: [x] });
+            } else {
+                rest.push(x);
+            }
+        }
+
+        bySet.forEach(function (members, id) {
+
+            if (members.length < 2) {
+                return;
+            }
+
+            const set = songSets.get(id);
+            let time = 0;
+
+            for (const x of members) {
+                time = Math.max(time, was(x));
+            }
+
+            if (how === "change") {
+                time = Math.max(time, (Number(set.added) || 0) / 1000, (Number(set.created) || 0) / 1000);
+            }
+
+            blocks.push({ time: time, songs: setOrder(members) });
+        });
+
+        if (blocks.length === 0) {
+            return list;
+        }
+
+        // Newest first, the other songs as Mureka has them
+        blocks.sort(function (a, b) {
+            return b.time - a.time;
+        });
+
+        const out = [];
+        let b = 0;
+
+        for (const x of rest) {
+
+            while (b < blocks.length && blocks[b].time >= made(x)) {
+
+                for (const y of blocks[b].songs) {
+                    out.push(y);
+                }
+
+                b += 1;
+            }
+
+            out.push(x);
+        }
+
+        for (; b < blocks.length; b += 1) {
+
+            for (const y of blocks[b].songs) {
                 out.push(y);
             }
         }
@@ -13677,9 +13856,19 @@
 
     // The connected Bluetooth device the profiles go by: the first with a
     // profile of its own, else the first connected. Read from the app
+    // A speaker found connected as the player starts, on the first look or
+    // in its first seconds, was there before: night mode is left as it is
+    // then, only a speaker connecting while the player runs counts
+    let btLooked = false;
+    const BT_SETTLE_MS = 15000;
+    const btSince = Date.now();
+
     function readBluetoothSound() {
 
         let info = {};
+        const settled = btLooked && Date.now() - btSince > BT_SETTLE_MS;
+
+        btLooked = true;
 
         try {
             info = JSON.parse(window.MurekaHost && window.MurekaHost.btDevices ? window.MurekaHost.btDevices() || "{}" : "{}");
@@ -13716,8 +13905,10 @@
             updateNightCtrlButton();
             publishHostSoon();
 
-            if (btNow) {
+            if (btNow && settled) {
                 nightOnConnect();
+            } else if (btNow && sound().night) {
+                dbgLog("Sound", btNow.name + " was there as the player started, night mode left as it is");
             }
         }
     }
@@ -16892,8 +17083,9 @@
 
         // Default Mureka view, the canonical order for the current source,
         // with the songs still being generated first, being the newest, and
-        // the songs of a set together while they fold
-        const ordered = listGroup(orderedSongs());
+        // the songs of a set together while they fold, each set where it
+        // is to be
+        const ordered = placeSets(orderedSongs(), setsFolded());
 
         return pendingSongs.size > 0 ? withPendingPlaced(shownPending(), ordered, function (x) {
             return x;
@@ -32443,7 +32635,7 @@
             return hostListMemo;
         }
 
-        let source = orderedSongs();
+        let source = placeSets(orderedSongs(), setsFolded());
 
         if (view === "alpha" || view === "alphaDesc") {
 
@@ -44342,6 +44534,15 @@
             function () { return setsFolded(); },
             function (v) { toggleSetsFolded(v); });
 
+        const setPlaceRow = makeDropRow("A set's place in the list", SET_PLACES, setPlaceOf, function (v) {
+
+            settings.setPlace = v;
+            saveSettings();
+            songDataStamp++;
+            renderList();
+            publishHostSoon();
+        });
+
         const setSortRow = makeDropRow("Sort the Sets view by", SET_SORTS, setSortOf, function (v) {
             sortSetsBy(v);
         });
@@ -44384,6 +44585,8 @@
         setsPage.appendChild(setsCountEl);
         setsPage.appendChild(withHint(setsOnRow, "Off, every song stands on its own in the list and the queue. The sets stay as they are. The Sets button for the button row does the same."));
         setsPage.appendChild(withHint(setsFoldRow, "On, a set's songs next to each other in Mureka's songs fold into one row under the set's name. Off, every song has its own row with the set's color, and the queue still keeps the sets together. Fold sets in the list's view menu does the same."));
+        setsPage.appendChild(setPlaceRow);
+        setsPage.appendChild(makeHint("Where a set goes in Mureka's songs, newest first. Its latest change puts a set just made, or just given a song, first. Its newest song with trims as their original keeps a set, and a trimmed song, where the song trimmed was. As on Mureka a set goes where its newest song is on Mureka, a trimmed one as new as the trim."));
         const setSuggestRow = makeBoolRow("Suggest a set for new songs",
             function () { return settings.setSuggest !== false; },
             function (v) { settings.setSuggest = v; });
@@ -53277,7 +53480,13 @@
 
         for (const s of extractSongs(json.data || json)) {
 
-            if (String(s.song_id) !== String(song.song_id) && copySongTweaks(song, s)) {
+            if (String(s.song_id) === String(song.song_id)) {
+                continue;
+            }
+
+            noteTrimOrigin(song, s);
+
+            if (copySongTweaks(song, s)) {
                 carried = true;
             }
         }

@@ -80,6 +80,13 @@ In development.
   set the moment they are ready. Songs that look like no set, or only
   like the set used last, are asked about once ready, as before. Songs
   asked about while being made are not asked about again.
+- **A set's place in the list, as chosen.** A set's place in the list, on
+  the Song sets page, says where a set goes in Mureka's songs, newest
+  first: by its latest change (the default), so a set just made or just
+  given a song comes first; by its newest song with a trimmed song as old
+  as the song it was trimmed from, so a trim moves neither the set nor the
+  trimmed song to the top; or by its newest song as on Mureka, as before.
+  With the songs by their publish date, the sets keep Mureka's place.
 - **Songs being made show in their set.** A song still being made on
   Mureka that is in a set already leaves the top of the list and shows in
   its set, with the set's colored bar: under the set's name, at the top of
@@ -109,7 +116,9 @@ In development.
   off. With night mode on as that speaker connects, Ask asks whether to
   switch it off, on the phone and in the web view, and Goes off switches
   it off by itself. The speaker's volume is its own, so the night
-  profile's question about lowering the volume is not asked then.
+  profile's question about lowering the volume is not asked then. Only a
+  speaker connecting while the player runs counts, one already connected
+  as the player starts leaves night mode as it is.
 - **The Sound profiles page says what is heard.** The profiles are listed
   by name, here, in the drop-downs and in the EQ button's list, and the one
   heard now says in use. While the sound is tweaked live, a Live sound row
