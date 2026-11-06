@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.1";
+    const VERSION = "2.0.1.2";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -61442,8 +61442,10 @@
         display: none !important;
     }
 
+    /* Hidden with the weight of the phone layout's own chip rule, which
+       would show it otherwise and push the header onto two rows */
     html:not(.inPage) #pageBack {
-        display: none;
+        display: none !important;
     }
 
     html.phone #pageBack {

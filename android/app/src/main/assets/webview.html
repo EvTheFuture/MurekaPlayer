@@ -4767,8 +4767,10 @@
         display: none !important;
     }
 
+    /* Hidden with the weight of the phone layout's own chip rule, which
+       would show it otherwise and push the header onto two rows */
     html:not(.inPage) #pageBack {
-        display: none;
+        display: none !important;
     }
 
     html.phone #pageBack {
