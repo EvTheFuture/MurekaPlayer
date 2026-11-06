@@ -18,9 +18,9 @@ Binaries:
   https://github.com/EvTheFuture/MurekaPlayer/releases/download/v%v/mureka-player-%v.apk
 
 Builds:
-  - versionName: 2.0.0
-    versionCode: 200000000
-    commit: 184a405c758ce804c7a1b51d3091d95912f50598
+  - versionName: 2.0.1
+    versionCode: 200010000
+    commit: e5651068c4dbb1b17258551a446d2cb0072ec6f4
     subdir: android/app
     gradle:
       - yes
@@ -30,5 +30,5 @@ AllowedAPKSigningKeys: 0e98be50f56804d94dd0398dd32d62e52969e0f157a499ba09c42c0c8
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
 UpdateCheckData: android/version.properties|versionCode=(\d+)|.|versionName=(.+)
-CurrentVersion: 2.0.0
-CurrentVersionCode: 200000000
+CurrentVersion: 2.0.1
+CurrentVersionCode: 200010000
