@@ -58,7 +58,7 @@ KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all addons android apk debug release install install-debug signing check version bookmarklet fdroid prune clean distclean
+.PHONY: help all addons android apk debug release install install-debug signing check version embed hooks bookmarklet fdroid prune clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
@@ -70,8 +70,10 @@ help:
 	@echo "  make install        build and install the release APK on the connected phone"
 	@echo "  make install-debug  build and install the debug APK on the connected phone"
 	@echo "  make signing        ask again which key signs the APKs"
-	@echo "  make check          syntax check the player and compare versions"
+	@echo "  make check          syntax check the player, compare versions and the embedded web view"
 	@echo "  make version        bump manifest.json to the player version"
+	@echo "  make embed          write the web view's page into src/player.js"
+	@echo "  make hooks          let git check the embedded web view before each commit"
 	@echo "  make bookmarklet    pin the release bookmarklet to a tag, TAG=v$(VERSION) unless given"
 	@echo "  make fdroid         the F-Droid recipe for a tag in fdroid/, TAG=v$(VERSION) unless given"
 	@echo "  make prune          remove release APKs older than $(VERSION), make all does it last"
@@ -85,7 +87,7 @@ help:
 
 # The manifest is brought to the player's version first, so a build never
 # stops on a version mismatch it could have fixed itself
-all: version check addons release prune
+all: version embed check addons release prune
 	@echo "Built everything at version $(VERSION)"
 
 # The browser add-on packages, including the version check build.sh does
@@ -124,6 +126,17 @@ prune:
 	    fi; \
 	done
 
+# The web view's page written into the player, which the add-on and the
+# bookmarklet carry with it. Run after every change to webview.html
+embed:
+	./embed-webview.sh
+
+# Git checks before each commit that the player carries the web view's
+# page as it is staged, and refuses the commit otherwise
+hooks:
+	git config core.hooksPath .githooks
+	@echo "git now runs .githooks/pre-commit before each commit"
+
 # The release bookmarklet, pinned to a tag with the player's hash. Tag the
 # release first
 TAG ?= v$(VERSION)
@@ -141,6 +154,7 @@ fdroid:
 # cheap, so they run before anything is packaged
 check:
 	@node --check src/player.js && echo "player.js parses"
+	@./embed-webview.sh --check
 	@node --check src/content.js && echo "content.js parses"
 	@node --check src/background.js && echo "background.js parses"
 	@manifest=$$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' manifest.json | head -1); \

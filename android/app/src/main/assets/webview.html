@@ -4760,6 +4760,21 @@
         display: none !important;
     }
 
+    /* In the Mureka page the browser plays the music, its volume is the
+       device's own, and a button goes back to the player there. On a phone
+       it takes the place of where the music plays */
+    html.inPage #volBtn {
+        display: none !important;
+    }
+
+    html:not(.inPage) #pageBack {
+        display: none;
+    }
+
+    html.phone #pageBack {
+        grid-column: 3;
+    }
+
     #signin button {
         margin-left: 12px;
         padding: 6px 14px;
@@ -5572,6 +5587,7 @@
             </span>
             <div id="status" class="marquee"></div>
         </div>
+        <button class="chip iconOnly" id="pageBack" type="button" data-icon="phone" aria-label="Mobile player" title="Mobile player"></button>
         <button class="chip iconOnly" id="fullBtn" type="button" data-icon="fullscreen" aria-label="Fullscreen" title="Fullscreen"></button>
         <button class="chip iconOnly" id="actionsBtn" type="button" data-icon="menu" aria-label="Actions" title="Actions"></button>
         <button class="chip iconOnly" id="settingsBtn" type="button" data-icon="settings" aria-label="Settings" title="Settings"></button>
@@ -5744,6 +5760,124 @@
     };
 
     const NS = "http://www.w3.org/2000/svg";
+
+    // Inside the Mureka page itself, laid over the player there, which
+    // answers this page's requests at once in place of the app on a phone.
+    // A page of another site framing this one cannot reach it, asking a
+    // parent of another origin throws
+    const inPageHost = (function () {
+
+        try {
+
+            const parent = window.parent;
+            const host = parent && parent !== window ? parent.__murekaInPage : null;
+
+            return host && typeof host.request === "function" ? host : null;
+        } catch (e) {
+            return null;
+        }
+    })();
+    const inPage = !!inPageHost;
+
+    // The page's own requests go to the player of the page. One for another
+    // address goes out as usual
+    if (inPage) {
+
+        const outFetch = window.fetch.bind(window);
+
+        const stopped = function () {
+            return new DOMException("The request was stopped", "AbortError");
+        };
+
+        window.fetch = function (resource, options) {
+
+            const url = typeof resource === "string" ? resource : String((resource && resource.url) || "");
+            const opts = options || {};
+            const signal = opts.signal || null;
+
+            if (url.charAt(0) !== "/" || url.charAt(1) === "/") {
+                return outFetch(resource, options);
+            }
+
+            if (signal && signal.aborted) {
+                return Promise.reject(stopped());
+            }
+
+            // Asked at once, so a tap on Play reaches the player within the
+            // tap itself, which a browser asks for before it plays
+            let asked;
+
+            try {
+                asked = inPageHost.request(url, String(opts.method || "GET").toUpperCase(), opts.body === undefined ? null : opts.body);
+            } catch (e) {
+                asked = Promise.reject(e);
+            }
+
+            const answered = Promise.resolve(asked).then(function (a) {
+
+                const status = a && a.status >= 200 && a.status <= 599 ? a.status : 500;
+                const body = a && a.body !== undefined && a.body !== null ? a.body : "";
+
+                return new Response(status === 204 ? null : body, {
+                    status: status,
+                    headers: { "Content-Type": (a && a.type) || "application/json" }
+                });
+            });
+
+            if (!signal) {
+                return answered;
+            }
+
+            return new Promise(function (resolve, reject) {
+
+                const stop = function () {
+                    reject(stopped());
+                };
+
+                signal.addEventListener("abort", stop);
+                answered.then(function (res) {
+
+                    signal.removeEventListener("abort", stop);
+                    resolve(res);
+                }, function (e) {
+
+                    signal.removeEventListener("abort", stop);
+                    reject(e);
+                });
+            });
+        };
+
+        // What the app's own screen asks of the app, done by the player of
+        // the page: back to it, and a file saved by the browser
+        window.MurekaApp = {
+            showMureka: function () {
+                inPageHost.back();
+            },
+            saveFrom: function (name, path, type) {
+
+                window.fetch(path, { cache: "no-store" }).then(function (res) {
+
+                    if (!res.ok) {
+                        throw new Error("HTTP " + res.status);
+                    }
+
+                    return res.blob();
+                }).then(function (blob) {
+
+                    inPageHost.save(name, blob.type ? blob : new Blob([blob], { type: type }));
+
+                    if (window.__murekaAppSaved) {
+                        window.__murekaAppSaved(true, name);
+                    }
+                }).catch(function () {
+
+                    if (window.__murekaAppSaved) {
+                        window.__murekaAppSaved(false, "Could not save " + name);
+                    }
+                });
+            }
+        };
+    }
 
     // The phone's password for the web view, when one is set. Any answer
     // saying this browser has not signed in brings up the sign in screen,
@@ -5944,11 +6078,15 @@
 
     // The app's own screen on a tablet: this page in the app, over the
     // device itself, with the app's bridge
-    const appScreen = location.hostname === "127.0.0.1"
+    // The page itself counts as one too: this browser is the one playing,
+    // so it has no choice of where the music plays, no password, and its
+    // saving is done by the player there
+    const appScreen = inPage || (location.hostname === "127.0.0.1"
         && navigator.userAgent.indexOf("MurekaPlayerApp/") >= 0
-        && typeof window.MurekaApp === "object" && window.MurekaApp !== null;
+        && typeof window.MurekaApp === "object" && window.MurekaApp !== null);
 
     document.documentElement.classList.toggle("appScreen", appScreen);
+    document.documentElement.classList.toggle("inPage", inPage);
 
     // Signed out, the app's own screen has the Mureka page a tap away
     if (appScreen) {
@@ -7342,7 +7480,7 @@
     // phone, and should the phone fail to give it at all, the song is played
     // straight from Mureka, once
     function songAt(src) {
-        return src ? "/song?u=" + encodeURIComponent(src) : "";
+        return src ? (inPage ? src : "/song?u=" + encodeURIComponent(src)) : "";
     }
 
     // An address from the phone used straight, only when it is https on
@@ -11339,7 +11477,7 @@
     // other systems in their own media controls: the song, its cover, play
     // and pause, next and previous and seeking, all sent on to the phone. A
     // browser shows it while this page plays the music itself
-    const hasSession = "mediaSession" in navigator;
+    const hasSession = !inPage && "mediaSession" in navigator;
     let sessionKey = "";
 
     // The seeking actions, kept by name so they can be withdrawn and offered
@@ -11608,6 +11746,12 @@
     // and only then shows the picture, which the browser has by then. At
     // most three at a time, a list page of thumbnails asks in turn
     function coverAt(url) {
+
+        // In the Mureka page the browser loads a cover from Mureka itself
+        if (inPage) {
+            return url;
+        }
+
         return "/cover?u=" + encodeURIComponent(url);
     }
 
@@ -11686,6 +11830,12 @@
 
     async function readCover(job) {
 
+        // In the Mureka page a thumbnail is loaded by the browser itself,
+        // only a big cover is asked of the player, which has it kept
+        if (inPage && !job.keep) {
+            return true;
+        }
+
         const ctrl = window.AbortController ? new AbortController() : null;
         let stall = 0;
 
@@ -11706,7 +11856,7 @@
 
             watch();
 
-            const res = await fetch(coverAt(job.url), ctrl ? { signal: ctrl.signal } : {});
+            const res = await fetch(inPage ? "/cover?u=" + encodeURIComponent(job.url) : coverAt(job.url), ctrl ? { signal: ctrl.signal } : {});
 
             if (!res.ok) {
                 return false;
@@ -17510,6 +17660,13 @@
 
     // Fullscreen for the browser showing the web view, where it offers it
     function fullscreenOn() {
+
+        // In the Mureka page, the page itself goes fullscreen, so going back
+        // to the player there keeps it
+        if (inPage) {
+            return inPageHost.isFullscreen();
+        }
+
         return !!(document.fullscreenElement || document.webkitFullscreenElement);
     }
 
@@ -17535,7 +17692,8 @@
 
     // Where the browser cannot go fullscreen, a Tesla among them, or where
     // it said it could but did not the last time
-    let fullscreenOffered = !teslaBrowser && !appScreen && !fullscreenFailedBefore()
+    let fullscreenOffered = inPage ? inPageHost.fullscreenOffered()
+        : !teslaBrowser && !appScreen && !fullscreenFailedBefore()
         && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 
     if (!fullscreenOffered) {
@@ -17561,9 +17719,26 @@
         toast("Fullscreen does not work in this browser", "bad");
     }
 
+    // Back to the player in the Mureka page, which keeps this page as it
+    // is for the next time
+    $("pageBack").addEventListener("click", function () {
+
+        if (inPage) {
+            inPageHost.back();
+        }
+    });
+
     $("fullBtn").addEventListener("click", function () {
 
         const root = document.documentElement;
+
+        // The player of the page puts the whole page fullscreen, within this
+        // tap
+        if (inPage) {
+
+            inPageHost.fullscreen(!fullscreenOn());
+            return;
+        }
 
         if (fullscreenOn()) {
 
@@ -20042,7 +20217,7 @@
 
     function nextPoll(ms) {
 
-        if (appScreen && document.hidden) {
+        if ((appScreen && document.hidden) || (inPage && inPageHost.hidden())) {
 
             pollParked = true;
             return;
@@ -20050,6 +20225,19 @@
 
         setTimeout(poll, ms);
     }
+
+    // The player of the page shows this page again, or went fullscreen or
+    // left it
+    window.__murekaInPageChanged = function () {
+
+        paintFullscreen();
+
+        if (pollParked && !inPageHost.hidden()) {
+
+            pollParked = false;
+            poll();
+        }
+    };
 
     document.addEventListener("visibilitychange", function () {
 
@@ -26516,10 +26704,11 @@
             }));
         }
 
-        // The Mureka page with the player, behind this screen in the app
+        // The Mureka page with the player, behind this screen in the app,
+        // or the player itself in the Mureka page
         if (appScreen) {
 
-            box.appendChild(menuItem("mureka", "Mureka page", function () {
+            box.appendChild(menuItem(inPage ? "phone" : "mureka", inPage ? "Mobile player" : "Mureka page", function () {
 
                 $("actionsPop").style.display = "none";
                 window.MurekaApp.showMureka();

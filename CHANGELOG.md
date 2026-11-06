@@ -285,9 +285,29 @@ In development.
   started anew, when the song goes through the sound engine for the fades.
   Safari otherwise plays on about a second and a half of the old place
   after a jump and then stays that far behind the play head.
+- **The web view in the add-on and the bookmarklet.** The web view's
+  large layout can now fill the screen over the Mureka page itself, with
+  the player there playing the music, no app needed. Web view in the
+  actions opens it, and in landscape a Web view button in the header
+  does too. With Web view in landscape on, it comes by itself when the
+  screen turns to landscape and the mobile player comes back in
+  portrait. A phone button in the web view's bar goes back to the mobile
+  player at any time, and in landscape a round Web view button in the
+  corner goes to the web view again, where it was left. Its fullscreen
+  is the page's, so it stays on either way. The page is carried inside
+  the player, so nothing more is loaded for it, and the release
+  bookmarklet's hash covers it too. Where a site does not let the page
+  run, the player says so and stays.
+- Fold sets in the song list is kept when the player opens again.
 
 ### Build
 
+- **make embed** writes the web view's page into src/player.js between
+  the WEBVIEW PAGE markers, as it is, in a String.raw template.
+  make check, build.sh and release-bookmarklet.sh refuse to go on when
+  the player does not carry the current page, and **make hooks** lets git
+  refuse such a commit, comparing the staged copies. The app's copy of
+  the player goes without the page.
 - **make fdroid** writes the F-Droid build recipe for a tagged release to
   fdroid/, in the form F-Droid keeps it, ready to copy to fdroiddata. It
   checks that the tag carries the version and the store changelog, and,

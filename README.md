@@ -141,6 +141,8 @@ browser download.
 - fastlane/, fdroid/         Store texts and the F-Droid build recipe
 - Makefile                   Checks, add-on packages, the APK and releases
 - build.sh                   Builds the add-on packages
+- embed-webview.sh           Writes the web view's page into src/player.js
+- .githooks/pre-commit       Refuses a commit whose player lacks the current web view page
 - release-bookmarklet.sh     Pins the release bookmarklet to a tag
 - privacy.html               The privacy policy
 
@@ -148,6 +150,14 @@ browser download.
 
 `make help` lists what the Makefile does: `make check`, `make addons`,
 `make release`, `make install` and `make bookmarklet` among others.
+
+The web view's page, android/app/src/main/assets/webview.html, is also
+written into src/player.js between the WEBVIEW PAGE markers, so the add-on
+and the bookmarklet carry it inside the player, covered by its hash. After
+changing the page, run `make embed` and commit both files. `make hooks`
+once lets git refuse a commit where the two do not match, and `make
+check`, build.sh and release-bookmarklet.sh refuse to go on as well. The
+app copies the player without the page, it serves its own.
 
 To run the add-on in Firefox on Android:
 `web-ext run -t firefox-android --adb-device IP_ADDRESS:5555 --firefox-apk org.mozilla.firefox`

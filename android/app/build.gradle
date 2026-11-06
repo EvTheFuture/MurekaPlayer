@@ -230,10 +230,31 @@ dependencies {
 }
 
 // The player is the same file the extension and the bookmarklet use. It is
-// copied in from the repository at build time, so there is only one copy
+// copied in from the repository at build time, so there is only one copy.
+// The web view's page written into it is for a browser, the app serves its
+// own, so the app's copy goes without it and the player sees an empty page
 def copyPlayer = tasks.register("copyPlayer", Copy) {
     from(rootProject.file("../src/player.js"))
     into(layout.projectDirectory.dir("src/main/assets"))
+
+    def page = [skip: false]
+
+    filter { String line ->
+
+        if (line == "    // BEGIN WEBVIEW PAGE") {
+
+            page.skip = true
+            return line + "\n    const WEBVIEW_PAGE = \"\";"
+        }
+
+        if (line == "    // END WEBVIEW PAGE") {
+
+            page.skip = false
+            return line
+        }
+
+        return page.skip ? null : line
+    }
 }
 
 tasks.named("preBuild") {

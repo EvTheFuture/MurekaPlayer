@@ -41,6 +41,10 @@ if [ "$MANIFEST_VERSION" != "$PLAYER_VERSION" ]; then
     exit 1
 fi
 
+# Refuse to build if the web view's page in the player is not the current
+# webview.html, make embed writes it
+./embed-webview.sh --check
+
 # The Chrome Web Store only accepts one to four dot separated integers, so a
 # development suffix such as the k in 1.4.2k becomes a fourth component. Letters
 # are treated as base 26, so the sequence still increases with every build

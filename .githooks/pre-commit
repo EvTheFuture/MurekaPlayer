@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# Refuse a commit whose src/player.js does not carry the web view's page as
+# it is staged. The staged copies are compared, not the working tree, so a
+# page changed but not embedded, or embedded but not added, is caught.
+#
+# Turned on once with make hooks, which runs:
+#   git config core.hooksPath .githooks
+
+set -e
+
+PLAYER="src/player.js"
+PAGE="android/app/src/main/assets/webview.html"
+
+# Nothing to compare unless one of the two is part of the commit
+if git diff --cached --quiet -- "$PLAYER" "$PAGE"; then
+    exit 0
+fi
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+git show ":$PLAYER" > "$TMP/player.js"
+git show ":$PAGE" > "$TMP/webview.html"
+
+if ! ./embed-webview.sh --check "$TMP/player.js" "$TMP/webview.html" >/dev/null; then
+
+    echo "pre-commit: the staged $PLAYER does not carry the staged $PAGE"
+    echo "pre-commit: run make embed, then git add $PLAYER"
+    exit 1
+fi

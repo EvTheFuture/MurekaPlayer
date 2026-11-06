@@ -36,6 +36,24 @@ if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     exit 1
 fi
 
+# The tag's player has to carry the tag's own web view page, which the
+# hash then covers too. A release from before the page was written into
+# the player has no markers and is taken as it is
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+git show "$TAG:src/player.js" > "$TMP/player.js"
+
+if grep -qx "    // BEGIN WEBVIEW PAGE" "$TMP/player.js"; then
+
+    git show "$TAG:android/app/src/main/assets/webview.html" > "$TMP/webview.html"
+
+    if ! ./embed-webview.sh --check "$TMP/player.js" "$TMP/webview.html" >/dev/null; then
+
+        echo "The player in $TAG does not carry its own webview.html, run make embed, commit and tag again"
+        exit 1
+    fi
+fi
+
 HASH="sha384-$(git show "$TAG:src/player.js" | openssl dgst -sha384 -binary | openssl base64 -A)"
 URL="https://cdn.jsdelivr.net/gh/EvTheFuture/MurekaPlayer@$TAG/src/player.js"
 LINE="javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlayerToggle();return}var s=document.createElement(\"script\");s.src=\"$URL\";s.integrity=\"$HASH\";s.crossOrigin=\"anonymous\";document.body.appendChild(s)})();"
