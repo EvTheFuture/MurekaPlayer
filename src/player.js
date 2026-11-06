@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.0.88";
+    const VERSION = "2.0.0.89";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -40427,6 +40427,7 @@
         // the same view builds that far again, and no further. Once at the
         // end of a long list and back up, a redraw no longer builds all of it
         const builtRows = listEl.children.length;
+        const keptTop = listEl.scrollTop;
         const seenTo = listEl.scrollTop + listEl.clientHeight;
         const rowsSeen = builtRows > 0 && listEl.scrollHeight > 0
             ? Math.ceil(seenTo / (listEl.scrollHeight / builtRows))
@@ -40500,7 +40501,9 @@
         const key = [listView, query, publishFilter, settings.vocalFilter, showAll ? "all" : "",
             activePlaylist ? activePlaylist.name : "", creatorSource ? creatorSource.user_id : ""].join("|");
 
-        if (key !== lazyKey) {
+        const sameView = key === lazyKey;
+
+        if (!sameView) {
 
             lazyKey = key;
             lazyKeep = 0;
@@ -40533,6 +40536,12 @@
         }
 
         renderMoreRows(target);
+
+        // The same view drawn again, a song put in the queue say, stays where
+        // it was scrolled to, so the songs around it are at hand
+        if (sameView && keptTop > 0) {
+            listEl.scrollTop = keptTop;
+        }
 
         // Update the counts line, shown rows against the library total and queue
         // An active creator and playlist lead the line so the scope stays clear

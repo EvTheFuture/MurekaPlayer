@@ -86,6 +86,9 @@ In development.
   place of its number, on the phone and in the web view, until it plays.
   With songs put in by hand already, a song's menu also has Play after
   queued, with how many there are, to put it in after the last of them.
+  Putting a song in the queue from the list leaves the list where it was
+  scrolled to, in the web view and its small list too, which went back to
+  the top before, so the songs around it are at hand.
 - **A set's place in the list, as chosen.** A set's place in the list, on
   the Song sets page, says where a set goes in Mureka's songs, newest
   first: by its latest change (the default), so a set just made or just

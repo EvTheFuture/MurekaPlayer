@@ -17941,14 +17941,16 @@
             }
         }
 
+        // Read again where it was scrolled to, so a song put in the queue
+        // from the list leaves the songs around it at hand
         if (l !== null && listSigSeen !== null && l !== listSigSeen) {
 
             if ($("browse").style.display === "flex" && listView !== "queue") {
-                refreshList();
+                keepListPlace();
             }
 
             if (miniOpen && miniView !== "queue") {
-                refreshMini();
+                keepMiniPlace();
             }
         }
 
