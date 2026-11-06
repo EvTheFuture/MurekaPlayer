@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1
+
+Android only: for F-Droid. The code is the same as 2.0.0, this release adds
+the screenshots of the F-Droid listing. The add-on and the bookmarklet are
+unchanged and not released as 2.0.1.
+
 ## 2.0.0
 
 The big news is a new Android app. It runs the same player as the add-on and
