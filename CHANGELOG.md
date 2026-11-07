@@ -299,6 +299,15 @@ In development.
   bookmarklet's hash covers it too. Where a site does not let the page
   run, the player says so and stays.
 - Fold sets in the song list is kept when the player opens again.
+- **Play head zoomed in.** A new setting for the zoomed waveform, for the
+  mobile player and the web view alike, and each browser can have its
+  own. Stays in the middle is the play head as before, with the waveform
+  sliding under it and the whole song as a thin line at its foot. Moves
+  along the song puts it where the song is, as zoomed out: at the left
+  edge at the start, in the middle halfway and at the right edge at the
+  end, the view moving with it at an even pace. Everything left of it is
+  then the played part, so the thin line and the color past the play
+  head are not needed.
 
 ### Build
 

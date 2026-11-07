@@ -6651,6 +6651,15 @@
         return PROGRESS_LOOKS.indexOf(v) !== -1 ? v : "wave";
     }
 
+    // Where the play head is on the zoomed waveform: in the middle, or
+    // moving along the view as the song goes, as when zoomed out, with the
+    // progress ending at the play head and no thin line at the foot then
+    const PLAY_HEAD_MODES = ["center", "travel"];
+
+    function playHeadMode(v) {
+        return PLAY_HEAD_MODES.indexOf(v) !== -1 ? v : "center";
+    }
+
     // The look as the phone has it, where this browser starts from
     function phoneLook(raw) {
 
@@ -6668,6 +6677,7 @@
             waveSource: s.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: s.waveZoomKeep === true,
             progressLook: progressLook(s.waveZoomProgressLook),
+            headMode: playHeadMode(s.waveZoomPlayHead),
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
@@ -6741,6 +6751,11 @@
         // it could be set follows the phone
         s.waveZoomProgressLook = PROGRESS_LOOKS.indexOf(look.progressLook) !== -1
             ? look.progressLook : progressLook(raw.waveZoomProgressLook);
+
+        // Where the play head is zoomed in. A look kept before it could be
+        // set follows the phone
+        s.waveZoomPlayHead = PLAY_HEAD_MODES.indexOf(look.headMode) !== -1
+            ? look.headMode : playHeadMode(raw.waveZoomPlayHead);
 
         // Our own waveform when chosen and the phone has it ready, and
         // whether it is still being worked out there
@@ -6932,6 +6947,7 @@
         { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "select", values: ["mureka", "song"] },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
+        { label: "Play head zoomed in", page: "Web view", key: "headMode", kind: "select", values: PLAY_HEAD_MODES },
         { label: "Song's progress on the waveform", page: "Web view", key: "progressLook", kind: "select",
             values: PROGRESS_LOOKS },
         { label: "Lyrics", page: "Web view", key: "lyrics", kind: "select", values: ["off", "info", "cover"] },
@@ -10300,6 +10316,12 @@
             return Math.max(0, Math.min(1 - span(), s));
         }
 
+        // Whether the play head moves along the view instead of staying in
+        // the middle
+        function travels() {
+            return !!(hooks.travel && hooks.travel());
+        }
+
         // The view with the play head in the centre, eased near the ends
         // of the song: the play head glides in from the edge to the centre
         // and out again while the waveform speeds up and slows down to
@@ -10308,6 +10330,13 @@
 
             const s = span();
             const room = 1 - s;
+
+            // Moving along the song, the play head is as far across the view
+            // as the song has come, so the view moves with it at an even pace
+            if (travels()) {
+                return clampStart(Math.max(0, Math.min(1, frac)) * room);
+            }
+
             const w = Math.min(s * EASE_PART, room / 2);
             const u = frac - s / 2;
 
@@ -10556,12 +10585,14 @@
             // out. Elsewhere it moves the play head in the part in view
             const box = el.getBoundingClientRect();
             const sp = span();
-            let overview = sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            const travel = travels();
+            let overview = !travel && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
 
             // Zoomed in with the song's progress over the waveform, its edge
             // is grabbed at any height to move through the whole song. The
-            // play head comes first when the two are close together
-            if (!overview && sp < 1 && hooks.edge && hooks.edge()) {
+            // play head comes first when the two are close together. With
+            // the play head moving along, the two are one and the same
+            if (!overview && !travel && sp < 1 && hooks.edge && hooks.edge()) {
 
                 const r = hooks.rect();
                 const pf = hooks.playFrac();
@@ -10957,7 +10988,9 @@
         const played = Math.round(frac / span * count);
         // The song's progress across the whole waveform, under it, over it or
         // as the waveform's own color, in the colors the phone has. Zoomed
-        // out it lies on the played part
+        // out it lies on the played part, and so it does zoomed in with the
+        // play head moving along, which leaves out the thin line at the foot
+        const travel = !!state && playHeadMode(state.waveZoomPlayHead) === "travel";
         const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
         const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(71, 224, 235, 1)";
@@ -10968,7 +11001,7 @@
         const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
         const headFill = state && state.playHeadFill ? state.playHeadFill : "rgba(255, 255, 255, 0.6)";
         const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill,
-            restFill, headX, headFill].join(",");
+            restFill, headX, headFill, travel].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -11005,11 +11038,11 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        if (span < 1) {
+        if (span < 1 && !travel) {
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, span < 1 ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, span < 1 && !travel ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // The synced lyrics, rolling exactly like the phone's. Five rows, each
@@ -21396,6 +21429,9 @@
         },
         edge: function () {
             return !!state && progressLook(state.waveZoomProgressLook) !== "off";
+        },
+        travel: function () {
+            return !!state && playHeadMode(state.waveZoomPlayHead) === "travel";
         },
         zoomable: function () {
             return !!(state && state.wave && state.wave.length) && $("wave").style.display !== "none";

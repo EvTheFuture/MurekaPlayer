@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.2";
+    const VERSION = "2.0.1.3";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -427,6 +427,27 @@
     const PLAY_HEAD_HINT = "The thin line across the waveform where the song is, and how much of it shows.";
     const PROGRESS_AHEAD_HINT = "The color of the progress where it reaches past the play head, on the part still "
         + "to come in view.";
+
+    // Where the play head is on the zoomed waveform: in the middle with the
+    // waveform sliding under it, or moving along the view as the song goes,
+    // from the left edge at its start to the right edge at its end, as when
+    // zoomed out. Moving along, the song's progress ends at the play head
+    // as it does zoomed out, so the thin line at the foot and the color past
+    // the play head are left out
+    const PLAY_HEAD_MODES = ["center", "travel"];
+    const PLAY_HEAD_MODE_CHOICES = [
+        { value: "center", label: "Stays in the middle" },
+        { value: "travel", label: "Moves along the song" }
+    ];
+    const PLAY_HEAD_MODE_HINT = "Zoomed in, the play head either stays in the middle while the waveform slides "
+        + "under it, with the whole song as a thin line at its foot, or moves along as the song goes: at the left "
+        + "edge at the start, in the middle halfway and at the right edge at the end, as zoomed out. Moving along, "
+        + "everything left of it is played and in the played colors, as zoomed out, so the thin line and the color "
+        + "past the play head are left out.";
+
+    function playHeadMode(v) {
+        return PLAY_HEAD_MODES.indexOf(v) !== -1 ? v : "center";
+    }
 
     // How the song's progress shows on the waveform: a bar over it, a bar
     // behind it, the waveform itself colored, or not at all. Kept under a
@@ -3141,6 +3162,8 @@
             webWaveZoomKeep: false,
             waveProgressLook: "wave",
             webWaveProgressLook: "wave",
+            wavePlayHeadMode: "center",
+            webWavePlayHeadMode: "center",
             waveColor: WAVE_PLAYED_COLOR,
             webWaveColor: WEB_WAVE_PLAYED_COLOR,
             waveAlpha: 100,
@@ -3403,6 +3426,8 @@
                     webWaveZoomKeep: parsed.webWaveZoomKeep === true,
                     waveProgressLook: progressLook(parsed.waveProgressLook),
                     webWaveProgressLook: progressLook(parsed.webWaveProgressLook),
+                    wavePlayHeadMode: playHeadMode(parsed.wavePlayHeadMode),
+                    webWavePlayHeadMode: playHeadMode(parsed.webWavePlayHeadMode),
                     waveColor: progressColor(parsed.waveColor, WAVE_PLAYED_COLOR),
                     webWaveColor: progressColor(parsed.webWaveColor, WEB_WAVE_PLAYED_COLOR),
                     waveAlpha: progressAlpha(parsed.waveAlpha, 100),
@@ -28508,6 +28533,12 @@
             return Math.max(0, Math.min(1 - span(), s));
         }
 
+        // Whether the play head moves along the view instead of staying in
+        // the middle
+        function travels() {
+            return !!(hooks.travel && hooks.travel());
+        }
+
         // The view with the play head in the centre, eased near the ends
         // of the song: the play head glides in from the edge to the centre
         // and out again while the waveform speeds up and slows down to
@@ -28516,6 +28547,13 @@
 
             const s = span();
             const room = 1 - s;
+
+            // Moving along the song, the play head is as far across the view
+            // as the song has come, so the view moves with it at an even pace
+            if (travels()) {
+                return clampStart(Math.max(0, Math.min(1, frac)) * room);
+            }
+
             const w = Math.min(s * EASE_PART, room / 2);
             const u = frac - s / 2;
 
@@ -28764,12 +28802,14 @@
             // out. Elsewhere it moves the play head in the part in view
             const box = el.getBoundingClientRect();
             const sp = span();
-            let overview = sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            const travel = travels();
+            let overview = !travel && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
 
             // Zoomed in with the song's progress over the waveform, its edge
             // is grabbed at any height to move through the whole song. The
-            // play head comes first when the two are close together
-            if (!overview && sp < 1 && hooks.edge && hooks.edge()) {
+            // play head comes first when the two are close together. With
+            // the play head moving along, the two are one and the same
+            if (!overview && !travel && sp < 1 && hooks.edge && hooks.edge()) {
 
                 const r = hooks.rect();
                 const pf = hooks.playFrac();
@@ -29180,7 +29220,10 @@
         const start = waveZoomer ? waveZoomer.start(frac) : 0;
 
         // The song's progress across the whole waveform, under it, over it or
-        // as the waveform's own color. Zoomed out it lies on the played part
+        // as the waveform's own color. Zoomed out it lies on the played part,
+        // and so it does zoomed in with the play head moving along, which
+        // leaves out the thin line at the foot
+        const travel = playHeadMode(settings.wavePlayHeadMode) === "travel";
         const look = progressLook(settings.waveProgressLook);
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
@@ -29210,11 +29253,11 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        if (span < 1) {
+        if (span < 1 && !travel) {
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, span < 1 ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, span < 1 && !travel ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // A value of a waveform over a slice of it, from and to as fractions of
@@ -30655,6 +30698,7 @@
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: settings.webWaveZoomKeep === true,
             waveZoomProgressLook: progressLook(settings.webWaveProgressLook),
+            waveZoomPlayHead: playHeadMode(settings.webWavePlayHeadMode),
             waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
             waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
             wavePlayedFill: progressFill(settings.webWaveColor, progressAlpha(settings.webWaveAlpha, 100)),
@@ -35933,6 +35977,9 @@
             },
             edge: function () {
                 return progressLook(settings.waveProgressLook) !== "off";
+            },
+            travel: function () {
+                return playHeadMode(settings.wavePlayHeadMode) === "travel";
             },
             zoomable: function () {
                 return !!waveData && waveCanvas.style.display !== "none";
@@ -43768,6 +43815,15 @@
             });
 
 
+        const wavePlayHeadRow = makeDropRow("Play head zoomed in", PLAY_HEAD_MODE_CHOICES,
+            function () { return playHeadMode(settings.wavePlayHeadMode); },
+            function (v) {
+
+                settings.wavePlayHeadMode = v;
+                drawWave();
+                paintMobileWave();
+            });
+
         const waveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
             function () { return progressLook(settings.waveProgressLook); },
             function (v) {
@@ -43799,17 +43855,19 @@
 
 
         // The waveform: whether it shows and where it comes from, how it
-        // zooms, its colors, then how the song's progress shows on it and
-        // in which colors. Without the waveform the rest is hidden, and
-        // without the progress on it so are its colors
+        // zooms and where its play head is, its colors, then how the song's
+        // progress shows on it and in which colors. Without the waveform the
+        // rest is hidden, without the progress on it its colors, and with
+        // the play head moving along the color past it
         const mobileWave = [
             withHint(waveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colors. Until a song is cached it shows Mureka's. The web view has its own choice."),
             withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."),
+            withHint(wavePlayHeadRow, PLAY_HEAD_MODE_HINT),
             withHint(waveColorRow, WAVE_COLOR_HINT),
             withHint(waveRestColorRow, WAVE_REST_HINT),
-            withHint(playHeadColorRow, PLAY_HEAD_HINT),
-            withHint(waveProgressRow, PROGRESS_LOOK_HINT + " The play head comes first when the two are close together.")
+            withHint(playHeadColorRow, PLAY_HEAD_HINT)
         ];
+        const mobileWaveLook = withHint(waveProgressRow, PROGRESS_LOOK_HINT + " The play head comes first when the two are close together.");
         const mobileWaveProgress = [
             withHint(waveProgressColorRow, PROGRESS_COLOR_HINT),
             withHint(waveProgressAheadRow, PROGRESS_AHEAD_HINT)
@@ -43824,20 +43882,21 @@
         paintMobileWave = function () {
 
             const on = settings.waveSeek === true;
+            const center = playHeadMode(settings.wavePlayHeadMode) === "center";
             const progress = progressLook(settings.waveProgressLook) !== "off";
 
             mobileWave.forEach(function (el) {
                 showSettingsRow(el, on);
             });
-            mobileWaveProgress.forEach(function (el) {
-                showSettingsRow(el, on && progress);
-            });
+            showSettingsRow(mobileWaveLook, on);
+            showSettingsRow(mobileWaveProgress[0], on && progress);
+            showSettingsRow(mobileWaveProgress[1], on && progress && center);
             showSettingsRow(mobileWaveReset, on);
         };
 
         mobilePage.appendChild(makeLabel("Waveform"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
-        mobileWave.concat(mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
+        mobileWave.concat([mobileWaveLook], mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
             mobilePage.appendChild(el);
         });
         paintMobileWave();
@@ -44783,6 +44842,14 @@
                 });
 
 
+            const webPlayHeadModeRow = makeDropRow("Play head zoomed in", PLAY_HEAD_MODE_CHOICES,
+                function () { return playHeadMode(settings.webWavePlayHeadMode); },
+                function (v) {
+
+                    settings.webWavePlayHeadMode = v;
+                    publishHostSoon();
+                });
+
             const webWaveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
                 function () { return progressLook(settings.webWaveProgressLook); },
                 function (v) {
@@ -44854,12 +44921,13 @@
             webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
             webPage.appendChild(withHint(webWaveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
             webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
+            webPage.appendChild(withHint(webPlayHeadModeRow, PLAY_HEAD_MODE_HINT + " Each browser can have this set for itself."));
             webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
             webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
             webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
             webPage.appendChild(withHint(webWaveProgressRow, PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
             webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
-            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT));
+            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT + " Not used with the play head moving along."));
             webPage.appendChild(webWaveReset);
 
             // Where the small song list opens on a wide screen
@@ -63326,6 +63394,15 @@
         return PROGRESS_LOOKS.indexOf(v) !== -1 ? v : "wave";
     }
 
+    // Where the play head is on the zoomed waveform: in the middle, or
+    // moving along the view as the song goes, as when zoomed out, with the
+    // progress ending at the play head and no thin line at the foot then
+    const PLAY_HEAD_MODES = ["center", "travel"];
+
+    function playHeadMode(v) {
+        return PLAY_HEAD_MODES.indexOf(v) !== -1 ? v : "center";
+    }
+
     // The look as the phone has it, where this browser starts from
     function phoneLook(raw) {
 
@@ -63343,6 +63420,7 @@
             waveSource: s.webWaveSource === "song" ? "song" : "mureka",
             waveZoomKeep: s.waveZoomKeep === true,
             progressLook: progressLook(s.waveZoomProgressLook),
+            headMode: playHeadMode(s.waveZoomPlayHead),
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
@@ -63416,6 +63494,11 @@
         // it could be set follows the phone
         s.waveZoomProgressLook = PROGRESS_LOOKS.indexOf(look.progressLook) !== -1
             ? look.progressLook : progressLook(raw.waveZoomProgressLook);
+
+        // Where the play head is zoomed in. A look kept before it could be
+        // set follows the phone
+        s.waveZoomPlayHead = PLAY_HEAD_MODES.indexOf(look.headMode) !== -1
+            ? look.headMode : playHeadMode(raw.waveZoomPlayHead);
 
         // Our own waveform when chosen and the phone has it ready, and
         // whether it is still being worked out there
@@ -63607,6 +63690,7 @@
         { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "select", values: ["mureka", "song"] },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
+        { label: "Play head zoomed in", page: "Web view", key: "headMode", kind: "select", values: PLAY_HEAD_MODES },
         { label: "Song's progress on the waveform", page: "Web view", key: "progressLook", kind: "select",
             values: PROGRESS_LOOKS },
         { label: "Lyrics", page: "Web view", key: "lyrics", kind: "select", values: ["off", "info", "cover"] },
@@ -66975,6 +67059,12 @@
             return Math.max(0, Math.min(1 - span(), s));
         }
 
+        // Whether the play head moves along the view instead of staying in
+        // the middle
+        function travels() {
+            return !!(hooks.travel && hooks.travel());
+        }
+
         // The view with the play head in the centre, eased near the ends
         // of the song: the play head glides in from the edge to the centre
         // and out again while the waveform speeds up and slows down to
@@ -66983,6 +67073,13 @@
 
             const s = span();
             const room = 1 - s;
+
+            // Moving along the song, the play head is as far across the view
+            // as the song has come, so the view moves with it at an even pace
+            if (travels()) {
+                return clampStart(Math.max(0, Math.min(1, frac)) * room);
+            }
+
             const w = Math.min(s * EASE_PART, room / 2);
             const u = frac - s / 2;
 
@@ -67231,12 +67328,14 @@
             // out. Elsewhere it moves the play head in the part in view
             const box = el.getBoundingClientRect();
             const sp = span();
-            let overview = sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            const travel = travels();
+            let overview = !travel && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
 
             // Zoomed in with the song's progress over the waveform, its edge
             // is grabbed at any height to move through the whole song. The
-            // play head comes first when the two are close together
-            if (!overview && sp < 1 && hooks.edge && hooks.edge()) {
+            // play head comes first when the two are close together. With
+            // the play head moving along, the two are one and the same
+            if (!overview && !travel && sp < 1 && hooks.edge && hooks.edge()) {
 
                 const r = hooks.rect();
                 const pf = hooks.playFrac();
@@ -67632,7 +67731,9 @@
         const played = Math.round(frac / span * count);
         // The song's progress across the whole waveform, under it, over it or
         // as the waveform's own color, in the colors the phone has. Zoomed
-        // out it lies on the played part
+        // out it lies on the played part, and so it does zoomed in with the
+        // play head moving along, which leaves out the thin line at the foot
+        const travel = !!state && playHeadMode(state.waveZoomPlayHead) === "travel";
         const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
         const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(71, 224, 235, 1)";
@@ -67643,7 +67744,7 @@
         const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
         const headFill = state && state.playHeadFill ? state.playHeadFill : "rgba(255, 255, 255, 0.6)";
         const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill,
-            restFill, headX, headFill].join(",");
+            restFill, headX, headFill, travel].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -67680,11 +67781,11 @@
             drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
         }
 
-        if (span < 1) {
+        if (span < 1 && !travel) {
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, span < 1 ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, span < 1 && !travel ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // The synced lyrics, rolling exactly like the phone's. Five rows, each
@@ -78071,6 +78172,9 @@
         },
         edge: function () {
             return !!state && progressLook(state.waveZoomProgressLook) !== "off";
+        },
+        travel: function () {
+            return !!state && playHeadMode(state.waveZoomPlayHead) === "travel";
         },
         zoomable: function () {
             return !!(state && state.wave && state.wave.length) && $("wave").style.display !== "none";
