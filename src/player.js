@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.24";
+    const VERSION = "2.0.1.26";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -661,19 +661,18 @@
     // The first is the one Add to last playlist uses
     const PLAYLIST_USED_KEY = "mureka_playlists_used";
 
-    // Songs taken out of a playlist for a move, kept until they are back in
+    // Songs taken out of a playlist for a move by 2.0.1.19 to 2.0.1.24,
+    // kept until they are back in
     const PLAYLIST_MEND_KEY = "mureka_playlist_mend";
 
-    // How Mureka orders songs added in one request, learned the first time:
-    // "last", the request's last song on top, as if added one at a time,
-    // "first", its first song on top, or "single", one request a second apart
-    const PLAYLIST_BATCH_KEY = "mureka_playlist_batch";
+    // Each playlist's order as set here, kept on this device and carried in
+    // the export of song tweaks. Mureka keeps a playlist newest added first
+    // and has no way to reorder it short of adding every song again, a
+    // second apart, so the order lives here: { id: { order: [ids], at } }
+    const PLAYLIST_ORDER_KEY = "mureka_playlist_orders";
 
     // A playlist's songs read from Mureka are taken as they are this long
     const PLAYLIST_FRESH_MS = 60000;
-
-    // Songs added one at a time, a second apart, each with a time of its own
-    const PLAYLIST_ADD_GAP_MS = 1100;
 
     // Whether the playlists have been read at all, and why not when it failed
     let playlistsRead = false;
@@ -685,7 +684,7 @@
     const playlistDetails = new Map();
     const playlistReads = new Map();
 
-    // Moves made one after another, never two at once
+    // Undos made one after another, never two at once
     let playlistWork = Promise.resolve();
 
     // The list's songs in the open playlist's order, made again when that
@@ -701,21 +700,10 @@
     let playlistDeleteArmed = "";
     let playlistDeleteTimer = 0;
 
-    // A new order dragged in the open playlist, shown at once and sent to
-    // Mureka with Save order, { id, order }, null when there is none
-    let playlistDraft = null;
-    let playlistDraftSaving = false;
-    let playlistDraftBarEl = null;
-    let playlistDraftTextEl = null;
 
     // A playlist was opened from the Playlists page, the web view closes
     // its copy of the page on its next reading
     let playlistsPanelDone = false;
-
-    // A dragged order is sent to Mureka by itself this long after the last
-    // drag, and at once when the playlist or the list's view is left
-    const PLAYLIST_AUTOSAVE_MS = 8000;
-    let playlistDraftTimer = 0;
 
     // Over the list while a playlist is open: its cover, name, songs and
     // time, Play, Shuffle and a way back to all songs
@@ -862,13 +850,15 @@
         line.appendChild(ring);
         line.appendChild(progressTextEl);
 
-        // Only the reading of play counts is stopped from here, loads and
-        // caching have their own buttons
+        // Whatever runs is stopped from here too: a load, a rescan, caching
+        // or the reading of play counts
         progressStopEl = document.createElement("button");
         progressStopEl.type = "button";
         progressStopEl.textContent = "Stop";
-        progressStopEl.style.cssText = "flex:0 0 auto;display:none;padding:2px 10px;border:1px solid #48e1eb;border-radius:10px;background:transparent;color:#48e1eb;font-size:12px;cursor:pointer";
-        progressStopEl.addEventListener("click", stopPlaysJob);
+        progressStopEl.title = "Stop";
+        progressStopEl.style.cssText = "flex:0 0 auto;padding:2px 10px;border:0;border-radius:10px;background:transparent;"
+            + "box-shadow:inset 0 0 0 1.5px #ff6b6b;color:#ff6b6b;font-size:12px;cursor:pointer";
+        progressStopEl.addEventListener("click", stopProgressJob);
         line.appendChild(progressStopEl);
 
         progressBarEl = document.createElement("div");
@@ -924,7 +914,6 @@
             : (done > 0 ? " " + done : "")) + " (" + timing + ")";
 
         progressBarEl.style.display = total > 0 ? "block" : "none";
-        progressStopEl.style.display = p.kind === "plays" ? "block" : "none";
         progressFillEl.style.width = total > 0 ? Math.round(Math.max(0, Math.min(1, done / total)) * 100) + "%" : "0";
         progressEl.style.display = "block";
 
@@ -16237,10 +16226,6 @@
     // Switch the list view and refresh
     function setView(view) {
 
-        if (view !== "mureka" && playlistDraft) {
-            savePlaylistDraft();
-        }
-
         listView = view;
 
         if (LIB_VIEWS.indexOf(view) >= 0) {
@@ -20168,6 +20153,48 @@
         playsJob = job;
         showToast("Reading the plays of " + todo.length + " songs", "wait");
         runPlaysJob(job, todo);
+    }
+
+    // Stop what the progress line shows: a load, a rescan, caching songs or
+    // the reading of play counts. Songs read so far stay
+    function stopProgressJob() {
+
+        const kind = progressKind;
+
+        if (kind === "plays") {
+
+            stopPlaysJob();
+            showToast("Stopped reading play counts", true);
+            return;
+        }
+
+        if (kind === "cache" || cacheRunning) {
+
+            cacheRunning = false;
+            setProgress(null);
+            updateCacheButton();
+            setStatus("Caching stopped");
+            showToast("Caching stopped", true);
+            return;
+        }
+
+        if (running) {
+
+            const what = runOwner === "rescan" ? "Rescan" : "Loading";
+
+            running = false;
+            runOwner = null;
+            loadToken += 1;
+            saveCache();
+            setProgress(null);
+            updateButton();
+            renderList();
+            setStatus(what + " stopped, the songs read so far are kept");
+            showToast(what + " stopped", true);
+            return;
+        }
+
+        setProgress(null);
     }
 
     function stopPlaysJob() {
@@ -31389,6 +31416,20 @@
             }),
             playlistOpen: openEditablePlaylist() ? { id: String(activePlaylist.playlist_id), name: activePlaylist.name } : null,
             playlistDrag: hostPlaylistDrag(),
+
+            // Every playlist for the web view's own Playlists popup and its
+            // small list, with covers, read the first time it asks
+            playlistsAll: playlists.slice(0, 200).map(function (p) {
+                return {
+                    id: String(p.playlist_id),
+                    name: p.name,
+                    count: p.song_count,
+                    cover: p.cover ? coverUrl({ cover: p.cover }) : "",
+                    liked: p.liked,
+                    open: !!(activePlaylist && String(activePlaylist.playlist_id) === String(p.playlist_id))
+                };
+            }),
+            playlistsRead: playlistsRead,
             playlistHead: hostPlaylistHead(),
             soundText: soundWords(),
 
@@ -34794,6 +34835,8 @@
             rescan();
         } else if (cmd === "readPlays") {
             startPlaysJob();
+        } else if (cmd === "stopWork") {
+            stopProgressJob();
         } else if (cmd === "stopPlays") {
             stopPlaysJob();
         } else if (cmd === "closeInfo") {
@@ -34806,15 +34849,25 @@
             playOpenPlaylist(!!(arg && arg.shuffle));
         } else if (cmd === "playlistClose") {
             clearPlaylist();
+        } else if (cmd === "playlistOpenId") {
+
+            const pl = arg ? playlistById(arg.id) : null;
+
+            if (pl) {
+                openPlaylist(pl, arg.play === true);
+            }
+        } else if (cmd === "playlistCreate") {
+
+            const name = arg && arg.name ? String(arg.name).trim().slice(0, 50) : "";
+
+            if (name) {
+                createPlaylist(name, "");
+            }
         } else if (cmd === "playlistDrag") {
 
             if (arg && arg.id) {
                 dragInPlaylistById(String(arg.id), arg.before ? String(arg.before) : "");
             }
-        } else if (cmd === "playlistDraftSave") {
-            savePlaylistDraft();
-        } else if (cmd === "playlistDraftUndo") {
-            undoPlaylistDraft();
         } else if (cmd === "readPlaylists") {
 
             if (!playlistsLoading) {
@@ -37549,7 +37602,6 @@
         window.addEventListener("resize", placeCounts);
         bodyEl.appendChild(buildSelBar());
         bodyEl.appendChild(buildPlaylistHead());
-        bodyEl.appendChild(buildPlaylistDraftBar());
         bodyEl.appendChild(buildProgress());
         bodyEl.appendChild(listWrapEl);
 
@@ -47655,6 +47707,9 @@
 
         // Song sets and notes, from 2.1 on
         data.sets = setsData();
+
+        // The playlists' orders set here
+        data.playlistOrders = loadPlaylistOrders();
         data.notes = {};
 
         songNotes.forEach(function (value, key) {
@@ -47750,6 +47805,7 @@
             creators: [],
             sets: { sets: [], members: [], notAuto: [] },
             notes: [],
+            orders: [],
             cleared: { rating: [], bpm: [], instr: [], ignore: [] },
             settings: (data.settings && typeof data.settings === "object") ? data.settings : null,
             appSettings: (data.appSettings && typeof data.appSettings === "object") ? data.appSettings : null,
@@ -47943,6 +47999,22 @@
             }
         }
 
+        // The playlists' orders, each with when it was set
+        if (data.playlistOrders && typeof data.playlistOrders === "object") {
+
+            for (const id of Object.keys(data.playlistOrders)) {
+
+                const o = data.playlistOrders[id];
+
+                if (/^\d{1,25}$/.test(id) && o && Array.isArray(o.order)) {
+
+                    out.orders.push([id, o.order.filter(function (x) {
+                        return /^\d{1,25}$/.test(String(x));
+                    }).map(String).slice(0, 5000), Number(o.at) || 0]);
+                }
+            }
+        }
+
         // Trim marks in files from 1.9.9.55 to 1.9.9.148 are left out, Mureka
         // marks trimmed songs itself
         return out;
@@ -48011,8 +48083,24 @@
 
         const plan = {
             ratings: [], bpm: [], instr: [], ignore: [], trimmed: [], creators: [], clears: [], same: 0, conflicts: [],
-            sets: [], setDefs: [], notAuto: [], notes: []
+            sets: [], setDefs: [], notAuto: [], notes: [], orders: []
         };
+
+        // A playlist's order: the one set last wins, here or in the file
+        const ownOrders = loadPlaylistOrders();
+
+        for (const entry of p.orders || []) {
+
+            const mine = ownOrders[entry[0]];
+
+            if (mine && Array.isArray(mine.order) && mine.order.join(",") === entry[1].join(",")) {
+                plan.same++;
+            } else if (!mine || (Number(mine.at) || 0) < entry[2]) {
+                plan.orders.push(entry);
+            } else {
+                plan.same++;
+            }
+        }
 
         // A song in no set here goes into the file's set, the set made here
         // as it was there. A song in a set here stays where it is, and one
@@ -48551,6 +48639,27 @@
             songNotes.set(entry[0], entry[1]);
         }
 
+        if (plan.orders && plan.orders.length > 0) {
+
+            const all = loadPlaylistOrders();
+
+            for (const entry of plan.orders) {
+                all[entry[0]] = { order: entry[1], at: entry[2] || Date.now() };
+            }
+
+            storePlaylistOrders(all);
+
+            // The open playlist in its new order at once
+            if (activePlaylist && playlistDetails.has(String(activePlaylist.playlist_id))) {
+
+                const d = playlistDetails.get(String(activePlaylist.playlist_id));
+
+                d.order = withOwnOrder(String(activePlaylist.playlist_id), d.murekaOrder || d.order);
+                activePlaylist.order = d.order;
+                playlistChanged(true);
+            }
+        }
+
         if (plan.sets.length > 0 || plan.notAuto.length > 0) {
             saveSets();
         }
@@ -48644,7 +48753,8 @@
         { key: "ignore", label: "Ignored songs" },
         { key: "creators", label: "Saved creators" },
         { key: "sets", label: "Song sets" },
-        { key: "notes", label: "Notes" }
+        { key: "notes", label: "Notes" },
+        { key: "orders", label: "Playlist orders" }
     ];
 
     // Every kind, with how much the file brings of it: new values, values
@@ -48665,7 +48775,8 @@
                 trimmed: plan.trimmed.length,
                 creators: plan.creators.length,
                 sets: plan.sets.length,
-                notes: plan.notes.length
+                notes: plan.notes.length,
+                orders: plan.orders ? plan.orders.length : 0
             }[type.key];
             const removed = plan.clears.filter(function (c) {
                 return c[0] === type.key;
@@ -48717,6 +48828,7 @@
             setDefs: keep("sets") ? plan.setDefs : [],
             notAuto: keep("sets") ? plan.notAuto : [],
             notes: keep("notes") ? plan.notes : [],
+            orders: keep("orders") ? plan.orders || [] : [],
             clears: plan.clears.filter(function (c) {
                 return keep(c[0]);
             }),
@@ -48848,7 +48960,7 @@
     function mergeSummary(plan, answers) {
 
         const added = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.ignore.length
-            + plan.trimmed.length + plan.sets.length + plan.notes.length;
+            + plan.trimmed.length + plan.sets.length + plan.notes.length + (plan.orders ? plan.orders.length : 0);
         const taken = answers.filter(Boolean).length;
         const parts = [];
 
@@ -49066,7 +49178,8 @@
         if (!asked) {
 
             const fresh = plan.ratings.length + plan.bpm.length + plan.instr.length + plan.ignore.length
-                + plan.trimmed.length + plan.creators.length + plan.clears.length + plan.sets.length + plan.notes.length;
+                + plan.trimmed.length + plan.creators.length + plan.clears.length + plan.sets.length + plan.notes.length
+                + (plan.orders ? plan.orders.length : 0);
             const when = p.exported ? p.exported.slice(0, 10) : "an unknown date";
             const types = planTypes(plan);
 
@@ -56385,11 +56498,6 @@
         const key = String(pl.playlist_id);
         const known = playlistDetails.get(key);
 
-        // Left for another playlist, a dragged order goes to Mureka
-        if (playlistDraft && playlistDraft.id !== key) {
-            savePlaylistDraft();
-        }
-
         activePlaylist = { playlist_id: pl.playlist_id, name: pl.name, ids: pl.ids, order: known ? known.order : null };
 
         // Sorted by Mureka, the queue or the sets, the list would not show
@@ -56432,10 +56540,6 @@
     // Clear the active playlist so the whole library shows again
     function clearPlaylist() {
 
-        if (playlistDraft) {
-            savePlaylistDraft();
-        }
-
         activePlaylist = null;
         playlistsPanelDone = true;
         playlistEditing = null;
@@ -56455,7 +56559,6 @@
 
         updatePlaylistButton();
         renderPlaylists();
-        paintPlaylistDraftBar();
         paintPlaylistHead();
         renderList();
         publishHostSoon();
@@ -56466,56 +56569,140 @@
         }
     }
 
-    // The order the open playlist is shown in: one dragged here and not
-    // saved yet, or Mureka's
+    // The order the open playlist is shown in
     function shownPlaylistOrder() {
-
-        if (playlistDraft && activePlaylist && String(activePlaylist.playlist_id) === playlistDraft.id) {
-            return playlistDraft.order;
-        }
-
         return activePlaylist && Array.isArray(activePlaylist.order) ? activePlaylist.order : [];
     }
 
     // Songs of the open playlist are dragged to new places in the list
     // sorted the playlist's way, not searched, when it can be changed
     function playlistDragOn() {
-        return listView === "mureka" && !searchQuery && playlistOrdered() && !!openEditablePlaylist() && !playlistDraftSaving;
+        return listView === "mureka" && !searchQuery && playlistOrdered() && !!openEditablePlaylist();
     }
 
-    // A song dragged from one place to another, kept here until Save order
+    function loadPlaylistOrders() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(PLAYLIST_ORDER_KEY) || "{}");
+
+            return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function storePlaylistOrders(all) {
+
+        exportsVersion += 1;
+
+        try {
+            localStorage.setItem(PLAYLIST_ORDER_KEY, JSON.stringify(all));
+        } catch (e) {
+            // Full, kept for this visit only
+        }
+    }
+
+    // Mureka's order with the one set here over it: the songs ordered here
+    // in that order, songs added since on top as Mureka has them, songs
+    // gone since left out
+    function withOwnOrder(key, murekaOrder) {
+
+        const own = loadPlaylistOrders()[key];
+
+        if (!own || !Array.isArray(own.order) || own.order.length === 0) {
+            return murekaOrder.slice();
+        }
+
+        const there = new Set(murekaOrder);
+        const kept = own.order.map(String).filter(function (id) {
+            return there.has(id);
+        });
+        const inKept = new Set(kept);
+
+        return murekaOrder.filter(function (id) {
+            return !inKept.has(id);
+        }).concat(kept);
+    }
+
+    // A playlist put in an order here, at once, kept on this device. undo,
+    // when given, is the order to go back to from the note
+    function setPlaylistOrder(pl, order, undo) {
+
+        const key = String(pl.playlist_id);
+        const all = loadPlaylistOrders();
+
+        all[key] = { order: order.slice(), at: Date.now() };
+        storePlaylistOrders(all);
+
+        const detail = playlistDetails.get(key);
+
+        if (detail) {
+            detail.order = order.slice();
+        }
+
+        if (activePlaylist && String(activePlaylist.playlist_id) === key) {
+            activePlaylist.order = detail ? detail.order : order.slice();
+        }
+
+        playlistChanged(true);
+
+        if (undo) {
+
+            showToast("Moved in " + pl.name, true, function () {
+
+                const now = playlistDetails.get(key);
+
+                setPlaylistOrder(pl, fitOrder(undo, now ? now.order : undo), null);
+                showToast("Undone in " + pl.name, true);
+            });
+        }
+    }
+
+    // An order fitted to the songs a playlist has now: those of it in its
+    // order, songs not in it on top as they stand now
+    function fitOrder(order, current) {
+
+        const there = new Set(current);
+        const kept = order.filter(function (id) {
+            return there.has(id);
+        });
+        const inKept = new Set(kept);
+
+        return current.filter(function (id) {
+            return !inKept.has(id);
+        }).concat(kept);
+    }
+
+    // A song dragged from one place to another in the open playlist
     function dragInPlaylist(from, to) {
 
-        const order = shownPlaylistOrder().slice();
+        const pl = openEditablePlaylist();
+        const before = shownPlaylistOrder().slice();
+        const order = before.slice();
 
-        if (from < 0 || to < 0 || from >= order.length || to >= order.length || from === to) {
+        if (!pl || from < 0 || to < 0 || from >= order.length || to >= order.length || from === to) {
             return;
         }
 
         const id = order.splice(from, 1)[0];
 
         order.splice(to, 0, id);
-        playlistDraft = { id: String(activePlaylist.playlist_id), order: order };
-        playlistDraftChanged();
-        savePlaylistDraftSoon();
-    }
-
-    // Sent by itself once the dragging has been still a while
-    function savePlaylistDraftSoon() {
-
-        clearTimeout(playlistDraftTimer);
-        playlistDraftTimer = setTimeout(savePlaylistDraft, PLAYLIST_AUTOSAVE_MS);
+        setPlaylistOrder(pl, order, before);
     }
 
     // A song dragged in the web view, before another song or, with none,
     // to the bottom
-    function dragInPlaylistById(id, before) {
+    function dragInPlaylistById(id, beforeId) {
 
-        if (!playlistDragOn() && !(playlistOrdered() && openEditablePlaylist() && !playlistDraftSaving)) {
+        const pl = openEditablePlaylist();
+
+        if (!pl || !playlistOrdered()) {
             return;
         }
 
-        const order = shownPlaylistOrder().slice();
+        const before = shownPlaylistOrder().slice();
+        const order = before.slice();
         const from = order.indexOf(String(id));
 
         if (from < 0) {
@@ -56524,136 +56711,18 @@
 
         order.splice(from, 1);
 
-        const at = before ? order.indexOf(String(before)) : -1;
+        const at = beforeId ? order.indexOf(String(beforeId)) : -1;
 
         order.splice(at >= 0 ? at : order.length, 0, String(id));
-        playlistDraft = { id: String(activePlaylist.playlist_id), order: order };
-        playlistDraftChanged();
-        savePlaylistDraftSoon();
+        setPlaylistOrder(pl, order, before);
     }
 
-    // What the web view needs to drag in the open playlist and to show its
-    // Save order and Undo
+    // What the web view needs to drag in the open playlist
     function hostPlaylistDrag() {
 
         const pl = openEditablePlaylist();
 
-        if (!pl || !playlistOrdered()) {
-            return null;
-        }
-
-        return {
-            on: !playlistDraftSaving,
-            name: pl.name,
-            draft: shownPlaylistOrder() !== activePlaylist.order,
-            saving: playlistDraftSaving
-        };
-    }
-
-    function playlistDraftChanged() {
-
-        playlistOrderStamp += 1;
-        playlistSongsMemo = null;
-        hostListStamp += 1;
-        songDataStamp++;
-
-        paintPlaylistDraftBar();
-        paintPlaylistHead();
-        renderList();
-        publishHostSoon();
-        rebuildUpcoming();
-    }
-
-    function undoPlaylistDraft() {
-
-        if (playlistDraftSaving) {
-            return;
-        }
-
-        clearTimeout(playlistDraftTimer);
-        playlistDraft = null;
-        playlistDraftChanged();
-    }
-
-    // Send the dragged order to Mureka. Read again first: songs added
-    // elsewhere since go on top, songs gone since are left out
-    function savePlaylistDraft() {
-
-        const d = playlistDraft;
-        const pl = d ? playlistById(d.id) : null;
-
-        clearTimeout(playlistDraftTimer);
-
-        if (!d || !editablePlaylist(pl) || playlistDraftSaving) {
-            return;
-        }
-
-        const save = async function () {
-
-            playlistDraftSaving = true;
-            paintPlaylistDraftBar();
-            renderList();
-
-            try {
-
-                const detail = await readPlaylist(pl);
-
-                if (!detail) {
-                    return;
-                }
-
-                const now = detail.order.slice();
-                const kept = d.order.filter(function (id) {
-                    return now.indexOf(id) >= 0;
-                });
-                const added = now.filter(function (id) {
-                    return kept.indexOf(id) < 0;
-                });
-
-                if (await applyPlaylistOrder(pl, now, added.concat(kept)) && playlistDraft === d) {
-                    playlistDraft = null;
-                }
-            } finally {
-
-                playlistDraftSaving = false;
-                playlistDraftChanged();
-            }
-        };
-
-        playlistWork = playlistWork.then(save, save);
-    }
-
-    // Over the list while a dragged order waits: Save order and Undo
-    function buildPlaylistDraftBar() {
-
-        playlistDraftBarEl = document.createElement("div");
-        playlistDraftBarEl.style.cssText = "display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 8px;"
-            + "border-radius:8px;background:#26262c;border:1px solid rgba(72,225,235,0.5)";
-
-        playlistDraftTextEl = document.createElement("span");
-        playlistDraftTextEl.style.cssText = "flex:1 1 auto;min-width:0;font-size:12px;color:#ccc";
-        playlistDraftBarEl.appendChild(playlistDraftTextEl);
-
-        // Undo ringed in red, Save now ringed in cyan on the right
-        const undo = makeButton("Undo", "#1d1d22", "#ff6b6b", undoPlaylistDraft);
-        const save = makeButton("Save now", "#1d1d22", "#48e1eb", savePlaylistDraft);
-
-        undo.style.flex = "0 0 auto";
-        undo.style.boxShadow = "inset 0 0 0 2px #ff6b6b";
-        save.style.flex = "0 0 auto";
-        save.style.boxShadow = "inset 0 0 0 2px #48e1eb";
-        playlistDraftBarEl.appendChild(undo);
-        playlistDraftBarEl.appendChild(save);
-
-        // The page put away, a dragged order is not left waiting
-        document.addEventListener("visibilitychange", function () {
-
-            if (document.hidden && playlistDraft) {
-                savePlaylistDraft();
-            }
-        });
-
-        return playlistDraftBarEl;
+        return pl && playlistOrdered() ? { on: true, name: pl.name } : null;
     }
 
     // The open playlist over the list: its cover, name, songs and time,
@@ -56795,23 +56864,6 @@
             time: playlistTimeText(playlistSeconds(songs)),
             cover: pl && pl.cover ? coverUrl({ cover: pl.cover }) : ""
         };
-    }
-
-    function paintPlaylistDraftBar() {
-
-        if (!playlistDraftBarEl) {
-            return;
-        }
-
-        const on = !!(playlistDraft && activePlaylist && String(activePlaylist.playlist_id) === playlistDraft.id);
-
-        playlistDraftBarEl.style.display = on ? "flex" : "none";
-
-        if (on) {
-            playlistDraftTextEl.textContent = playlistDraftSaving
-                ? "Saving the order of " + activePlaylist.name
-                : "New order in " + activePlaylist.name + ", saved by itself in a moment";
-        }
     }
 
     // Tint the Playlists button while a playlist is open
@@ -56987,7 +57039,7 @@
                 dbgLog("Mureka", "playlist " + key + " says it has more songs than the " + order.length + " read");
             }
 
-            const detail = { order: order, songs: songs, added: added, at: Date.now() };
+            const detail = { order: withOwnOrder(key, order), murekaOrder: order, songs: songs, added: added, at: Date.now() };
             const before = playlistById(key);
             const record = playlistRecord(Object.assign({}, head, {
                 playlist_id: head.playlist_id || pl.playlist_id,
@@ -57006,7 +57058,7 @@
 
             if (activePlaylist && String(activePlaylist.playlist_id) === key) {
 
-                activePlaylist.order = order;
+                activePlaylist.order = detail.order;
                 activePlaylist.ids = (before || record).ids;
                 activePlaylist.name = (before || record).name;
             }
@@ -57388,193 +57440,33 @@
     // Move a song of the open playlist: "top", "up", "down" or "bottom"
     function movePlaylistSong(pl, id, where) {
 
-        playlistWork = playlistWork.then(function () {
-            return moveInPlaylist(pl, String(id), where);
-        }, function () {
-            return moveInPlaylist(pl, String(id), where);
-        });
-
-        return playlistWork;
-    }
-
-    async function moveInPlaylist(pl, id, where) {
-
-        let detail = playlistDetails.get(String(pl.playlist_id));
-
-        if (!detail || Date.now() - detail.at > 5000) {
-            detail = await readPlaylist(pl);
-        }
-
-        if (!detail) {
-            return false;
-        }
-
-        const now = detail.order.slice();
-        const at = now.indexOf(id);
+        const now = shownPlaylistOrder().slice();
+        const at = now.indexOf(String(id));
 
         if (at < 0) {
-            return false;
+            return;
         }
 
         const to = where === "top" ? 0 : (where === "up" ? at - 1 : (where === "down" ? at + 1 : now.length - 1));
 
         if (to < 0 || to >= now.length || to === at) {
-            return true;
+            return;
         }
 
-        const wanted = now.slice();
+        const order = now.slice();
 
-        wanted.splice(at, 1);
-        wanted.splice(to, 0, id);
-
-        return applyPlaylistOrder(pl, now, wanted);
+        order.splice(at, 1);
+        order.splice(to, 0, String(id));
+        setPlaylistOrder(pl, order, now);
     }
 
-    // Bring a playlist from one order to another. Adding puts a song at the
-    // top, so the songs at the end of the wanted order that already stand
-    // in that order stay, and the rest are taken out and added back from
-    // the bottom up
-    // again: the second try, one song at a time, after Mureka did not keep
-    // the order of songs added together
-    async function applyPlaylistOrder(pl, now, wanted, noUndo, again) {
-
-        let k = now.length - 1;
-        let i = wanted.length - 1;
-
-        for (; i >= 0; i -= 1) {
-
-            while (k >= 0 && now[k] !== wanted[i]) {
-                k -= 1;
-            }
-
-            if (k < 0) {
-                break;
-            }
-
-            k -= 1;
-        }
-
-        const redo = wanted.slice(0, i + 1);
-
-        if (redo.length === 0) {
-            return true;
-        }
-
-        userTry("moving in a playlist");
-        showToast(redo.length > 3 ? "Moving, " + redo.length + " songs go out and back in" : "Moving", "wait");
-
-        // When Mureka says the songs were added, before, to see whether
-        // adding them again gives them a new time
-        const known = playlistDetails.get(String(pl.playlist_id));
-        const addedBefore = new Map();
-
-        for (const id of redo) {
-            addedBefore.set(id, known && known.added ? known.added.get(id) || 0 : 0);
-        }
-
-        // Noted first, so songs taken out are put back even if the app closes
-        writePlaylistMend({ id: String(pl.playlist_id), name: pl.name, ids: redo });
-
-        try {
-            await playlistPost("/api/pgc/playlist/content/remove", { playlist_id: pl.playlist_id, content_ids: redo.map(Number) });
-        } catch (e) {
-
-            writePlaylistMend(null);
-            showToast("Could not move in " + pl.name + ", " + errText(e), false);
-            return false;
-        }
-
-        const ok = await addInOrder(pl, redo, wanted);
-
-        if (!ok) {
-
-            showToast("The move did not finish, the songs taken out go back in when Mureka answers", false);
-            setTimeout(mendPlaylist, 10000);
-            return false;
-        }
-
-        writePlaylistMend(null);
-
-        // Read back: the order shown is Mureka's own, never only the one
-        // asked for. A moment first, for Mureka to have it all in place
-        await new Promise(function (r) {
-            setTimeout(r, 800);
-        });
-
-        const back = await readPlaylist(pl);
-
-        if (back) {
-
-            const kept = back.order.length === wanted.length && back.order.every(function (id, n) {
-                return id === wanted[n];
-            });
-            const times = redo.slice(0, 8).map(function (id) {
-                return id.slice(-4) + " " + (addedBefore.get(id) || "?") + " to " + (back.added ? back.added.get(id) || "?" : "?");
-            }).join(", ");
-
-            dbgLog("Mureka", "playlist " + pl.name + " after a move: " + (kept ? "in the order asked for" : "NOT in the order asked for")
-                + ". Added times of the songs moved, before to after: " + times
-                + (kept ? "" : ". Asked " + wanted.map(function (id) {
-                    return id.slice(-4);
-                }).join(" ") + ", Mureka has " + back.order.map(function (id) {
-                    return id.slice(-4);
-                }).join(" ")));
-
-            // Songs added together share a second, and Mureka did not keep
-            // their order: from now on one at a time, a second apart, and
-            // this move once more that way
-            if (!kept && playlistBatchUsed && !again) {
-
-                try {
-                    localStorage.setItem(PLAYLIST_BATCH_KEY, "single");
-                } catch (e) {
-                }
-
-                dbgLog("Mureka", "songs added together did not keep their order, one at a time from now on, the move once more");
-
-                return applyPlaylistOrder(pl, back.order.slice(), wanted, noUndo, true);
-            }
-
-            if (!kept) {
-
-                // A dragged order Mureka did not take is not shown as if it had
-                if (playlistDraft && playlistDraft.id === String(pl.playlist_id)) {
-                    playlistDraft = null;
-                }
-
-                playlistChanged(true);
-                showToast("Mureka did not keep the new order of " + pl.name, false);
-                return false;
-            }
-        } else {
-
-            const detail = playlistDetails.get(String(pl.playlist_id));
-
-            if (detail) {
-
-                detail.order = wanted.slice();
-
-                if (activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id)) {
-                    activePlaylist.order = detail.order;
-                }
-            }
-        }
-
-        playlistChanged(true);
-        showToast("Moved in " + pl.name, true, noUndo ? null : function () {
-            restorePlaylistOrder(pl, now);
-        });
-
-        return true;
-    }
-
-    // Undo: the playlist back to an order it had. Songs of it no longer in
-    // it are added again, songs added since stay, on top
+    // Undo of taking out: the songs added to Mureka again, and the order
+    // as it was here
     function restorePlaylistOrder(pl, was) {
 
         const work = async function () {
 
-            let detail = await readPlaylist(pl);
+            const detail = await readPlaylist(pl);
 
             if (!detail) {
                 return;
@@ -57594,140 +57486,20 @@
                     return;
                 }
 
-                detail = await readPlaylist(pl);
+                const back = await readPlaylist(pl);
 
-                if (!detail) {
+                if (!back) {
                     return;
                 }
             }
 
-            const now = detail.order.slice();
-            const kept = was.filter(function (id) {
-                return now.indexOf(id) >= 0;
-            });
-            const added = now.filter(function (id) {
-                return kept.indexOf(id) < 0;
-            });
-
-            if (await applyPlaylistOrder(pl, now, added.concat(kept), true)) {
-                showToast("Undone in " + pl.name, true);
-            }
+            setPlaylistOrder(pl, fitOrder(was, playlistDetails.get(String(pl.playlist_id)).order), null);
+            showToast("Undone in " + pl.name, true);
         };
 
         playlistWork = playlistWork.then(work, work);
 
         return playlistWork;
-    }
-
-    // Add songs back so the first of redo ends on top. In one request when
-    // Mureka is known to keep that order, otherwise one at a time, a second
-    // apart. The first time one request is tried and the order read back
-    // Whether the last adding back put several songs in one request
-    let playlistBatchUsed = false;
-
-    async function addInOrder(pl, redo, wanted) {
-
-        playlistBatchUsed = false;
-
-        const add = function (ids) {
-
-            if (ids.length > 1) {
-                playlistBatchUsed = true;
-            }
-
-            return playlistPost("/api/pgc/playlist/content/add", { playlist_id: pl.playlist_id, song_ids: ids.map(Number) });
-        };
-        const bottomUp = redo.slice().reverse();
-
-        try {
-
-            if (redo.length === 1) {
-
-                await add(redo);
-                return true;
-            }
-
-            let mode = "";
-
-            try {
-                mode = localStorage.getItem(PLAYLIST_BATCH_KEY) || "";
-            } catch (e) {
-                mode = "";
-            }
-
-            if (mode === "last" || mode === "first") {
-
-                await add(mode === "last" ? bottomUp : redo);
-                return true;
-            }
-
-            if (mode !== "single") {
-
-                // Learned once: added in one request, read back
-                await add(bottomUp);
-
-                const back = await readPlaylist(pl);
-                const top = back ? back.order.slice(0, redo.length) : [];
-                const same = function (a, b) {
-                    return a.length === b.length && a.every(function (x, n) {
-                        return x === b[n];
-                    });
-                };
-                const learned = same(top, redo) ? "last" : (same(top, bottomUp) ? "first" : "single");
-
-                // Songs whose ids already ran up or down could have come out
-                // that way by their ids alone, nothing is learned from them
-                const byId = redo.slice().sort(function (a, b) {
-                    return Number(a) - Number(b);
-                });
-                const telling = !same(redo, byId) && !same(redo, byId.slice().reverse());
-
-                dbgLog("Mureka", "songs added to a playlist in one request came out "
-                    + (learned === "last" ? "as if added one at a time" : (learned === "first" ? "the first on top" : "in no order kept"))
-                    + (telling ? "" : ", in the order of their ids, so not taken as the rule"));
-
-                if (telling) {
-
-                    try {
-                        localStorage.setItem(PLAYLIST_BATCH_KEY, learned);
-                    } catch (e) {
-                    }
-                }
-
-                if (learned === "last") {
-                    return true;
-                }
-
-                // Out of order, they go out again and back in as learned
-                await playlistPost("/api/pgc/playlist/content/remove", { playlist_id: pl.playlist_id, content_ids: redo.map(Number) });
-
-                if (learned === "first") {
-
-                    await add(redo);
-                    return true;
-                }
-            }
-
-            // One at a time from here, whatever was tried before
-            playlistBatchUsed = false;
-
-            for (let n = 0; n < bottomUp.length; n += 1) {
-
-                if (n > 0) {
-                    await new Promise(function (r) {
-                        setTimeout(r, PLAYLIST_ADD_GAP_MS);
-                    });
-                }
-
-                await add([bottomUp[n]]);
-            }
-
-            return true;
-        } catch (e) {
-
-            dbgLog("Mureka", "songs could not go back in " + pl.name + ": " + errText(e));
-            return false;
-        }
     }
 
     function writePlaylistMend(m) {
@@ -57894,7 +57666,7 @@
         const last = lastPlaylist();
         const open = openEditablePlaylist();
         const order = open && activePlaylist && Array.isArray(activePlaylist.order) ? activePlaylist.order : [];
-        const at = open && shownPlaylistOrder() === order ? order.indexOf(id) : -1;
+        const at = open ? order.indexOf(id) : -1;
 
         return {
             read: playlistsRead,
@@ -59367,9 +59139,7 @@
                 removeSongsFromPlaylist(openPl, [song.song_id]);
             }, "close");
 
-            const drafted = shownPlaylistOrder() !== activePlaylist.order;
-
-            if (at > 0 && !drafted) {
+            if (at > 0) {
 
                 addMenuRow("Move to top", "#fff", function () {
                     movePlaylistSong(openPl, song.song_id, "top");
@@ -59380,7 +59150,7 @@
                 }, "arrowUp");
             }
 
-            if (at >= 0 && at < order.length - 1 && !drafted) {
+            if (at >= 0 && at < order.length - 1) {
 
                 addMenuRow("Move down", "#fff", function () {
                     movePlaylistSong(openPl, song.song_id, "down");
@@ -60971,6 +60741,113 @@
         font: inherit;
         font-weight: 600;
         cursor: pointer;
+    }
+
+    /* A list's cover held under the mouse a moment, shown large beside it */
+    #coverZoom {
+        position: fixed;
+        z-index: 70;
+        display: none;
+        border-radius: 14px;
+        background: var(--card) center / cover no-repeat;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.65);
+        pointer-events: none;
+    }
+
+    /* The playlists over a blurred page, each with its cover */
+    #plPop {
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    #plBox {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 2vh 2vw;
+        width: min(720px, 92vw);
+        max-height: 88vh;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    #plTop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    #plTitle {
+        flex: 1 1 auto;
+        font-weight: 600;
+        font-size: 1.15em;
+    }
+
+    #plRows {
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .plRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 8px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        cursor: pointer;
+    }
+
+    .plRow.on {
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
+    .plRow .thumb {
+        width: calc(var(--ctl-h) * 1.05);
+        height: calc(var(--ctl-h) * 1.05);
+    }
+
+    .plRow .plRowText {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .plRow .plRowName,
+    .plRow .plRowCount {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .plRow .plRowName {
+        font-weight: 600;
+    }
+
+    .plRow .plRowCount {
+        font-size: 0.85em;
+        color: var(--muted);
+    }
+
+    /* Stop beside the line of what the phone works on, ringed in red */
+    .workStop {
+        margin-left: auto;
+        flex: 0 0 auto;
+        color: #ff6b6b;
+        background: transparent;
+        border-color: transparent;
+        box-shadow: inset 0 0 0 2px #ff6b6b;
     }
 
     .toastUndo {
@@ -64104,51 +63981,6 @@
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
     }
 
-    /* A new order dragged in the open playlist, not sent to Mureka yet */
-    #plDraft {
-        position: fixed;
-        left: 50%;
-        top: calc(12px + env(safe-area-inset-top));
-        transform: translateX(-50%);
-        z-index: 61;
-        display: none;
-        align-items: center;
-        gap: 8px;
-        max-width: calc(100vw - 32px);
-        box-sizing: border-box;
-        padding: 8px 10px;
-        border-radius: 14px;
-        border: 1px solid rgba(72, 225, 235, 0.55);
-        background: var(--card);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-    }
-
-    /* Undo ringed in red, Save now ringed in cyan on the right */
-    #plDraftUndo,
-    #plDraftSave {
-        background: rgba(0, 0, 0, 0.25);
-        border-color: transparent;
-    }
-
-    #plDraftUndo {
-        color: #ff6b6b;
-        box-shadow: inset 0 0 0 2px #ff6b6b;
-    }
-
-    #plDraftSave {
-        color: var(--accent);
-        box-shadow: inset 0 0 0 2px var(--accent);
-    }
-
-    #plDraftText {
-        flex: 1 1 auto;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--text);
-    }
-
     #pickCount {
         flex: 1 1 auto;
         min-width: 0;
@@ -65353,11 +65185,6 @@
     </div>
 </div>
 <div id="toast"></div>
-<div id="plDraft">
-    <span id="plDraftText"></span>
-    <button class="chip" id="plDraftUndo" type="button">Undo</button>
-    <button class="chip" id="plDraftSave" type="button">Save now</button>
-</div>
 <div id="pickBar">
     <span id="pickCount"></span>
     <button class="chip" id="pickCopy" type="button">Copy</button>
@@ -65368,6 +65195,19 @@
 </div>
 <div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
 <div id="hotspotPop"><span id="hotspotText"></span><button id="hotspotStart" type="button">Start the helper now</button><button id="hotspotClose" type="button" data-icon="close" aria-label="Close" title="Close"></button></div>
+<div id="coverZoom"></div>
+<div id="plPop">
+    <div id="plBox">
+        <div id="plTop">
+            <span id="plTitle">Playlists</span>
+            <button class="chip" id="plNew" type="button" data-icon="pencil"><span class="lbl">New playlist</span></button>
+            <button class="chip" id="plAll" type="button" data-icon="all"><span class="lbl">All songs</span></button>
+            <button class="chip" id="plEdit" type="button" data-icon="sliders"><span class="lbl">Edit</span></button>
+            <button class="chip iconOnly" id="plClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="plRows"></div>
+    </div>
+</div>
 <div id="songMenu">
     <div id="menuBox">
         <div id="menuTitle"></div>
@@ -69781,8 +69621,15 @@
         $("toPlBtn").classList.toggle("on", !!(toPl && toPl.has));
         $("plOpenBtn").classList.toggle("on", !!(s && s.playlist));
         $("plOpenBtn").title = s && s.playlist ? "Playlists, " + s.playlist + " open" : "Playlists";
-        paintPlaylistDraft(s && s.playlistDrag ? s.playlistDrag : null);
         paintPlaylistHead($("plHead"), s && s.playlistHead ? s.playlistHead : null);
+
+        if ($("plPop").style.display === "flex") {
+            paintPlPop();
+        }
+
+        if (miniOpen && miniView === "playlists") {
+            paintMiniPlaylists();
+        }
         paintPlaylistHead($("miniPlHead"), s && s.playlistHead ? s.playlistHead : null);
         $("toPlBtn").title = toPl ? (toPl.has ? "In " + toPl.name : "Add the playing song to " + toPl.name) : "Add the playing song to a playlist";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
@@ -71994,6 +71841,26 @@
         return String(f.kind) + "|" + String(f.at || f.why);
     }
 
+    // Stop on the line of what the phone works on, also on the copy in
+    // the small list
+    document.addEventListener("click", function (ev) {
+
+        const b = ev.target.closest ? ev.target.closest("[data-work-stop]") : null;
+
+        if (!b) {
+            return;
+        }
+
+        ev.stopPropagation();
+        b.disabled = true;
+        send("stopWork").then(function () {
+
+            setTimeout(function () {
+                refreshList();
+            }, 600);
+        });
+    }, true);
+
     // The note's buttons, also on the copy the small list shows
     document.addEventListener("click", function (ev) {
 
@@ -72100,6 +71967,15 @@
             ? " " + done + " " + rough + total
             : (done > 0 ? " " + done : "")) + (timing ? " (" + timing + ")" : ""));
 
+        // Stop, beside the line here and on its copy in the small list
+        const stop = document.createElement("button");
+
+        stop.type = "button";
+        stop.className = "chip workStop";
+        stop.dataset.workStop = "1";
+        stop.appendChild(icon("stop"));
+        stop.appendChild(document.createTextNode("Stop"));
+        row.appendChild(stop);
         $("libLoad").appendChild(row);
 
         if (frac < 0) {
@@ -72664,7 +72540,7 @@
     // box is the list the row is in, the song list or the small one
     // A handle on a song of the open playlist, when it can be changed and
     // the list stands in the playlist's own order, not sorted or searched.
-    // A drop changes the order on the phone, Save order sends it to Mureka
+    // A drop puts it in the new place on the phone at once
     function playlistGrip(row, box, query) {
 
         const pd = state && state.playlistDrag ? state.playlistDrag : null;
@@ -72744,20 +72620,6 @@
         button("\u00D7", "All songs again", function () {
             send("playlistClose");
         });
-    }
-
-    function paintPlaylistDraft(pd) {
-
-        const on = !!(pd && pd.draft);
-
-        $("plDraft").style.display = on ? "flex" : "none";
-
-        if (on) {
-
-            $("plDraftText").textContent = pd.saving ? "Saving the order of " + pd.name : "New order in " + pd.name + ", saved by itself in a moment";
-            $("plDraftSave").disabled = !!pd.saving;
-            $("plDraftUndo").disabled = !!pd.saving;
-        }
     }
 
     // kind "playlist" drags a song of the open playlist, otherwise the
@@ -73221,7 +73083,8 @@
     const MINI_VIEWS = [
         { view: "mureka", icon: "mureka", label: "Mureka" },
         { view: "queue", icon: "queue", label: "Queue" },
-        { view: "sets", icon: "sets", label: "Sets" }
+        { view: "sets", icon: "sets", label: "Sets" },
+        { view: "playlists", icon: "playlists", label: "Playlists" }
     ];
     let miniView = "mureka";
 
@@ -73229,7 +73092,7 @@
 
         const kept = localStorage.getItem("murekaMiniView");
 
-        miniView = kept === "queue" || kept === "sets" ? kept : "mureka";
+        miniView = kept === "queue" || kept === "sets" || kept === "playlists" ? kept : "mureka";
     } catch (e) {
         // Mureka's songs then
     }
@@ -74763,7 +74626,7 @@
             fromChip("playlists", (f.playlist ? f.playlist : "Playlists") + "  \u203A", !!f.playlist, function () {
 
                 closeFrom();
-                showPanel("playlists");
+                openPlPop();
             })
         ]));
 
@@ -77558,9 +77421,7 @@
 
     $("closePanel").addEventListener("click", closePanel);
 
-    $("playlistsBtn").addEventListener("click", function () {
-        showPanel("playlists");
-    });
+    $("playlistsBtn").addEventListener("click", openPlPop);
 
     // Fullscreen for the browser showing the web view, where it offers it
     function fullscreenOn() {
@@ -79054,7 +78915,10 @@
         setIcon($("miniView"), info.icon);
         setLabel($("miniView"), info.label);
         $("miniView").classList.toggle("on", miniView === "queue");
-        $("miniView").classList.toggle("ring", miniView === "sets");
+        $("miniView").classList.toggle("ring", miniView === "sets" || miniView === "playlists");
+
+        // Sorting is not for the playlists
+        $("miniSort").style.display = miniView === "playlists" ? "none" : "";
 
         paintMiniSort();
         paintSetFold();
@@ -79079,6 +78943,54 @@
         paintMiniView();
         loadMini(true);
     });
+
+    // The playlists in the small list, searched by name. One picked goes
+    // into the queue and plays, and the small list shows the queue
+    let miniPlKey = null;
+
+    function paintMiniPlaylists() {
+
+        const q = miniQuery.trim().toLowerCase();
+        const list = knownPlaylists().filter(function (p) {
+            return !q || p.name.toLowerCase().indexOf(q) >= 0;
+        });
+        const key = q + "|" + JSON.stringify(list);
+
+        if (key === miniPlKey) {
+            return;
+        }
+
+        miniPlKey = key;
+
+        const box = $("miniRows");
+
+        clearMiniRows();
+
+        for (const p of list) {
+
+            const row = playlistRow(p, function () {
+
+                send("playlistOpenId", { id: p.id, play: true });
+                miniView = "queue";
+
+                try {
+                    localStorage.setItem("murekaMiniView", miniView);
+                } catch (e) {
+                    // Only for this visit then
+                }
+
+                paintMiniView();
+                setTimeout(function () {
+                    loadMini(true);
+                }, 400);
+            });
+
+            box.appendChild(row);
+            thumbsFor(box, row);
+        }
+
+        $("miniCount").textContent = list.length + (list.length === 1 ? " playlist" : " playlists");
+    }
 
     // The queue in the small list, all of it, played songs dimmed, a tap
     // goes to that song, opened at the playing one
@@ -79232,6 +79144,22 @@
 
         if (reset) {
             miniStayTop = false;
+        }
+
+        if (miniView === "playlists") {
+
+            if (reset) {
+
+                miniToken += 1;
+                miniPlKey = null;
+                hideMiniEdge();
+            }
+
+            if (miniOpen) {
+                paintMiniPlaylists();
+            }
+
+            return;
         }
 
         if (miniView === "sets") {
@@ -81129,9 +81057,7 @@
 
     // The playing song into the playlist songs went into last, or picked
     // here when there is none yet
-    $("plOpenBtn").addEventListener("click", function () {
-        showPanel("playlists");
-    });
+    $("plOpenBtn").addEventListener("click", openPlPop);
 
     $("toPlBtn").addEventListener("click", function () {
 
@@ -83054,12 +82980,7 @@
     }
 
     $("pickCopy").addEventListener("click", copyPicked);
-    $("plDraftSave").addEventListener("click", function () {
-        send("playlistDraftSave");
-    });
-    $("plDraftUndo").addEventListener("click", function () {
-        send("playlistDraftUndo");
-    });
+
     $("pickList").addEventListener("click", function () {
 
         if (picked.size === 0) {
@@ -83152,6 +83073,208 @@
             move("Move to bottom", "bottom", "arrowDown");
         }
     }
+
+    // A row for a playlist: its cover, name and number of songs. tap is
+    // what picking it does
+    function playlistRow(p, tap) {
+
+        const row = document.createElement("div");
+        const text = document.createElement("div");
+        const name = document.createElement("div");
+        const count = document.createElement("div");
+
+        row.className = "plRow" + (p.open ? " on" : "");
+        row.setAttribute("role", "button");
+        row.dataset.plId = p.id;
+        row.appendChild(makeThumb(p.cover || ""));
+        text.className = "plRowText";
+        name.className = "plRowName";
+        count.className = "plRowCount";
+        name.textContent = p.name;
+        count.textContent = p.count + (p.count === 1 ? " song" : " songs") + (p.open ? " \u00B7 open" : "");
+        text.appendChild(name);
+        text.appendChild(count);
+        row.appendChild(text);
+        row.addEventListener("click", tap);
+
+        return row;
+    }
+
+    // The playlists the phone knows, read there the first time they are asked
+    function knownPlaylists() {
+
+        const list = state && Array.isArray(state.playlistsAll) ? state.playlistsAll : [];
+
+        if (state && state.playlistsRead !== true) {
+            send("readPlaylists");
+        }
+
+        return list;
+    }
+
+    // The Playlists popup over the blurred page. A playlist picked opens
+    // in the lists, Play on its row plays it. Edit shows the phone's page
+    // for making and changing them
+    let plPopKey = null;
+
+    function openPlPop() {
+
+        plPopKey = null;
+        paintPlPop();
+        $("plPop").style.display = "flex";
+    }
+
+    function closePlPop() {
+        $("plPop").style.display = "none";
+    }
+
+    function paintPlPop() {
+
+        const list = knownPlaylists();
+        const key = JSON.stringify(list);
+
+        if (key === plPopKey) {
+            return;
+        }
+
+        plPopKey = key;
+
+        const box = $("plRows");
+
+        box.textContent = "";
+
+        if (list.length === 0) {
+
+            const msg = document.createElement("div");
+
+            msg.className = "plRowCount";
+            msg.textContent = state && state.playlistsRead ? "No playlists yet" : "Reading the playlists";
+            box.appendChild(msg);
+            return;
+        }
+
+        for (const p of list) {
+
+            const row = playlistRow(p, function () {
+
+                closePlPop();
+                send("playlistOpenId", { id: p.id, play: false });
+            });
+            const play = document.createElement("button");
+
+            play.type = "button";
+            play.className = "chip";
+            play.textContent = "Play";
+            play.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                closePlPop();
+                send("playlistOpenId", { id: p.id, play: true });
+            });
+            row.appendChild(play);
+            box.appendChild(row);
+        }
+    }
+
+    $("plClose").addEventListener("click", closePlPop);
+    $("plPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("plPop")) {
+            closePlPop();
+        }
+    });
+    $("plAll").addEventListener("click", function () {
+
+        closePlPop();
+        send("playlistClose");
+    });
+    $("plEdit").addEventListener("click", function () {
+
+        closePlPop();
+        showPanel("playlists");
+    });
+    $("plNew").addEventListener("click", function () {
+
+        askText("New playlist", "", "Create", function (typed) {
+
+            const name = String(typed || "").trim().slice(0, 50);
+
+            if (name) {
+                send("playlistCreate", { name: name });
+            }
+        });
+    });
+
+    // A cover in a list held under the mouse for a moment comes up large
+    // beside it, as tooltips do. Mice only, a finger has its long press.
+    // Gone as the mouse leaves it, presses, or the list scrolls
+    const COVER_ZOOM_MS = 600;
+    let coverZoomTimer = 0;
+    let coverZoomFor = null;
+
+    function hideCoverZoom() {
+
+        clearTimeout(coverZoomTimer);
+        coverZoomFor = null;
+        $("coverZoom").style.display = "none";
+    }
+
+    function showCoverZoom(thumb) {
+
+        const picture = getComputedStyle(thumb).backgroundImage;
+
+        if (!picture || picture === "none" || !document.contains(thumb)) {
+            return;
+        }
+
+        const zoom = $("coverZoom");
+        const r = thumb.getBoundingClientRect();
+        const size = Math.round(Math.min(320, window.innerHeight * 0.6, window.innerWidth * 0.45));
+        let left = r.right + 12;
+
+        // On the side with room, kept inside the window
+        if (left + size > window.innerWidth - 8) {
+            left = r.left - size - 12;
+        }
+
+        left = Math.max(8, left);
+
+        const top = Math.max(8, Math.min(window.innerHeight - size - 8, r.top + r.height / 2 - size / 2));
+
+        zoom.style.backgroundImage = picture;
+        zoom.style.width = size + "px";
+        zoom.style.height = size + "px";
+        zoom.style.left = left + "px";
+        zoom.style.top = top + "px";
+        zoom.style.display = "block";
+    }
+
+    document.addEventListener("pointerover", function (ev) {
+
+        if (ev.pointerType !== "mouse") {
+            return;
+        }
+
+        const thumb = ev.target && ev.target.closest ? ev.target.closest(".thumb") : null;
+
+        if (thumb === coverZoomFor) {
+            return;
+        }
+
+        hideCoverZoom();
+
+        if (!thumb) {
+            return;
+        }
+
+        coverZoomFor = thumb;
+        coverZoomTimer = setTimeout(function () {
+            showCoverZoom(thumb);
+        }, COVER_ZOOM_MS);
+    }, true);
+    document.addEventListener("pointerdown", hideCoverZoom, true);
+    document.addEventListener("scroll", hideCoverZoom, true);
+    document.addEventListener("wheel", hideCoverZoom, { capture: true, passive: true });
 
     // Which playlist songs go into, the latest used first, or a new one
     // named here. ids are the songs, title names one of them
@@ -86776,7 +86899,7 @@
         box.appendChild(menuItem("playlists", "Playlists", function () {
 
             $("actionsPop").style.display = "none";
-            showPanel("playlists");
+            openPlPop();
         }));
 
         box.appendChild(menuItem("person", "Creators", function () {

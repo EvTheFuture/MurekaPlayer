@@ -12,9 +12,9 @@ In development.
     the cover from the playing song or from a picture, and deletes the
     playlist with a second tap. Liked Songs follows the hearts and has no
     Edit.
-  - Opening a playlist shows its songs in the playlist's order, newest
-    added first as on Mureka, drafts included, and a queue made from the
-    list plays them in that order. Play starts it from the top, shuffled
+  - Opening a playlist shows its songs in the playlist's order, the one
+    set in the player, or newest added first as on Mureka, drafts
+    included, and a queue made from the list plays them in that order. Play starts it from the top, shuffled
     with shuffle on, never the song paused or stopped before.
   - Over the list of an open playlist, in the mobile player and over the
     web view's big and small lists: its cover, name, number of songs and
@@ -29,27 +29,28 @@ In development.
   - The songs of an open playlist have a handle to drag them to new
     places, in the mobile player's list and in the web view's list and
     small list, as long as the list stands in the playlist's own order,
-    not sorted or searched. The new order shows at once, and the queue
-    follows it. It goes to Mureka by itself eight seconds after the last
-    drag, and at once when another playlist, All songs or another view
-    is picked, or the page is put away. Undo, ringed in red, and Save now,
-    ringed in cyan on the right, sit in the bar over the mobile player's
-    list and at the top of the web view.
-  - Two new buttons for the button row: Playlists opens the Playlists
-    page, and is lit while a playlist is open, and To playlist adds the
-    playing song to the playlist used last, and is lit while the song is
-    in it. Picking a playlist closes the Playlists page, in the web view
-    too.
-  - Mureka has no way to reorder a playlist, so a move takes the songs
-    that have to go above out and adds them back. The songs taken out are
-    noted first and put back the next time the playlists are read, should
-    the connection drop in between. After every move the playlist is read
-    back from Mureka, and the order shown is Mureka's own. When Mureka did
-    not keep the order asked for, a note says so, and the debug log has
-    both orders and when Mureka says the moved songs were added. Songs
-    added back in one request share a second, and Mureka may put them in
-    another order, so when that is what happened, the move is made once
-    more with one song a second, the way kept from then on.
+    not sorted or searched. The new order holds at once, and the queue
+    follows it.
+  - Two new buttons for the button row: Playlists opens the playlists,
+    and is lit while a playlist is open, and To playlist adds the playing
+    song to the playlist used last, and is lit while the song is in it.
+    Picking a playlist closes the playlists.
+  - In the web view the playlists come over the blurred page, each with
+    its cover, name and number of songs. Picking one opens it in the
+    lists, Play on its row plays it, and New playlist, All songs and Edit,
+    for the phone's page that changes them, sit at the top.
+  - The web view's small list has Playlists as a fourth view beside
+    Mureka, Queue and Sets, its button going round all four. A playlist
+    picked there goes into the queue and plays, and the small list shows
+    the queue.
+  - Mureka keeps a playlist newest added first and has no way to reorder
+    it, short of adding every song again a second apart, minutes for a
+    long playlist. So the order set in the player is kept by the player,
+    on the device, and goes with the export of song tweaks, Playlist
+    orders being one more kind an import can take or leave, the one set
+    last winning. Songs added to the playlist elsewhere come on top, songs
+    taken out elsewhere drop out. On mureka.ai the playlist keeps
+    Mureka's own order.
   - Adding to a playlist, taking out of one and moving in one say so in a
     note with Undo, on the phone and in the web view, which puts the
     playlist back as it was.
@@ -397,6 +398,14 @@ In development.
   picture is uploaded: the upload's host and path, and the parts of the
   storage pass that say where it goes. Keys, tokens and the signature
   are never logged.
+- **Covers larger under the mouse.** In the web view, a cover in a list
+  or among the playlists, held under the mouse for about half a second,
+  comes up large beside it, and goes as the mouse leaves, presses or the
+  list scrolls. A finger keeps its long press.
+- **Stop beside what is running.** The line that shows a load, a rescan,
+  caching songs or the reading of play counts has a Stop, ringed in red,
+  in the mobile player, over the web view's list and in its small list.
+  A stopped load or rescan keeps the songs read so far.
 
 ### Build
 

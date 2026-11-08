@@ -1376,6 +1376,113 @@
         cursor: pointer;
     }
 
+    /* A list's cover held under the mouse a moment, shown large beside it */
+    #coverZoom {
+        position: fixed;
+        z-index: 70;
+        display: none;
+        border-radius: 14px;
+        background: var(--card) center / cover no-repeat;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.65);
+        pointer-events: none;
+    }
+
+    /* The playlists over a blurred page, each with its cover */
+    #plPop {
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    #plBox {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 2vh 2vw;
+        width: min(720px, 92vw);
+        max-height: 88vh;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    #plTop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    #plTitle {
+        flex: 1 1 auto;
+        font-weight: 600;
+        font-size: 1.15em;
+    }
+
+    #plRows {
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .plRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 8px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        cursor: pointer;
+    }
+
+    .plRow.on {
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
+    .plRow .thumb {
+        width: calc(var(--ctl-h) * 1.05);
+        height: calc(var(--ctl-h) * 1.05);
+    }
+
+    .plRow .plRowText {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .plRow .plRowName,
+    .plRow .plRowCount {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .plRow .plRowName {
+        font-weight: 600;
+    }
+
+    .plRow .plRowCount {
+        font-size: 0.85em;
+        color: var(--muted);
+    }
+
+    /* Stop beside the line of what the phone works on, ringed in red */
+    .workStop {
+        margin-left: auto;
+        flex: 0 0 auto;
+        color: #ff6b6b;
+        background: transparent;
+        border-color: transparent;
+        box-shadow: inset 0 0 0 2px #ff6b6b;
+    }
+
     .toastUndo {
         margin-left: 12px;
         padding: 6px 14px;
@@ -4507,51 +4614,6 @@
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
     }
 
-    /* A new order dragged in the open playlist, not sent to Mureka yet */
-    #plDraft {
-        position: fixed;
-        left: 50%;
-        top: calc(12px + env(safe-area-inset-top));
-        transform: translateX(-50%);
-        z-index: 61;
-        display: none;
-        align-items: center;
-        gap: 8px;
-        max-width: calc(100vw - 32px);
-        box-sizing: border-box;
-        padding: 8px 10px;
-        border-radius: 14px;
-        border: 1px solid rgba(72, 225, 235, 0.55);
-        background: var(--card);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-    }
-
-    /* Undo ringed in red, Save now ringed in cyan on the right */
-    #plDraftUndo,
-    #plDraftSave {
-        background: rgba(0, 0, 0, 0.25);
-        border-color: transparent;
-    }
-
-    #plDraftUndo {
-        color: #ff6b6b;
-        box-shadow: inset 0 0 0 2px #ff6b6b;
-    }
-
-    #plDraftSave {
-        color: var(--accent);
-        box-shadow: inset 0 0 0 2px var(--accent);
-    }
-
-    #plDraftText {
-        flex: 1 1 auto;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--text);
-    }
-
     #pickCount {
         flex: 1 1 auto;
         min-width: 0;
@@ -5756,11 +5818,6 @@
     </div>
 </div>
 <div id="toast"></div>
-<div id="plDraft">
-    <span id="plDraftText"></span>
-    <button class="chip" id="plDraftUndo" type="button">Undo</button>
-    <button class="chip" id="plDraftSave" type="button">Save now</button>
-</div>
 <div id="pickBar">
     <span id="pickCount"></span>
     <button class="chip" id="pickCopy" type="button">Copy</button>
@@ -5771,6 +5828,19 @@
 </div>
 <div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
 <div id="hotspotPop"><span id="hotspotText"></span><button id="hotspotStart" type="button">Start the helper now</button><button id="hotspotClose" type="button" data-icon="close" aria-label="Close" title="Close"></button></div>
+<div id="coverZoom"></div>
+<div id="plPop">
+    <div id="plBox">
+        <div id="plTop">
+            <span id="plTitle">Playlists</span>
+            <button class="chip" id="plNew" type="button" data-icon="pencil"><span class="lbl">New playlist</span></button>
+            <button class="chip" id="plAll" type="button" data-icon="all"><span class="lbl">All songs</span></button>
+            <button class="chip" id="plEdit" type="button" data-icon="sliders"><span class="lbl">Edit</span></button>
+            <button class="chip iconOnly" id="plClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="plRows"></div>
+    </div>
+</div>
 <div id="songMenu">
     <div id="menuBox">
         <div id="menuTitle"></div>
@@ -10184,8 +10254,15 @@
         $("toPlBtn").classList.toggle("on", !!(toPl && toPl.has));
         $("plOpenBtn").classList.toggle("on", !!(s && s.playlist));
         $("plOpenBtn").title = s && s.playlist ? "Playlists, " + s.playlist + " open" : "Playlists";
-        paintPlaylistDraft(s && s.playlistDrag ? s.playlistDrag : null);
         paintPlaylistHead($("plHead"), s && s.playlistHead ? s.playlistHead : null);
+
+        if ($("plPop").style.display === "flex") {
+            paintPlPop();
+        }
+
+        if (miniOpen && miniView === "playlists") {
+            paintMiniPlaylists();
+        }
         paintPlaylistHead($("miniPlHead"), s && s.playlistHead ? s.playlistHead : null);
         $("toPlBtn").title = toPl ? (toPl.has ? "In " + toPl.name : "Add the playing song to " + toPl.name) : "Add the playing song to a playlist";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
@@ -12397,6 +12474,26 @@
         return String(f.kind) + "|" + String(f.at || f.why);
     }
 
+    // Stop on the line of what the phone works on, also on the copy in
+    // the small list
+    document.addEventListener("click", function (ev) {
+
+        const b = ev.target.closest ? ev.target.closest("[data-work-stop]") : null;
+
+        if (!b) {
+            return;
+        }
+
+        ev.stopPropagation();
+        b.disabled = true;
+        send("stopWork").then(function () {
+
+            setTimeout(function () {
+                refreshList();
+            }, 600);
+        });
+    }, true);
+
     // The note's buttons, also on the copy the small list shows
     document.addEventListener("click", function (ev) {
 
@@ -12503,6 +12600,15 @@
             ? " " + done + " " + rough + total
             : (done > 0 ? " " + done : "")) + (timing ? " (" + timing + ")" : ""));
 
+        // Stop, beside the line here and on its copy in the small list
+        const stop = document.createElement("button");
+
+        stop.type = "button";
+        stop.className = "chip workStop";
+        stop.dataset.workStop = "1";
+        stop.appendChild(icon("stop"));
+        stop.appendChild(document.createTextNode("Stop"));
+        row.appendChild(stop);
         $("libLoad").appendChild(row);
 
         if (frac < 0) {
@@ -13067,7 +13173,7 @@
     // box is the list the row is in, the song list or the small one
     // A handle on a song of the open playlist, when it can be changed and
     // the list stands in the playlist's own order, not sorted or searched.
-    // A drop changes the order on the phone, Save order sends it to Mureka
+    // A drop puts it in the new place on the phone at once
     function playlistGrip(row, box, query) {
 
         const pd = state && state.playlistDrag ? state.playlistDrag : null;
@@ -13147,20 +13253,6 @@
         button("\u00D7", "All songs again", function () {
             send("playlistClose");
         });
-    }
-
-    function paintPlaylistDraft(pd) {
-
-        const on = !!(pd && pd.draft);
-
-        $("plDraft").style.display = on ? "flex" : "none";
-
-        if (on) {
-
-            $("plDraftText").textContent = pd.saving ? "Saving the order of " + pd.name : "New order in " + pd.name + ", saved by itself in a moment";
-            $("plDraftSave").disabled = !!pd.saving;
-            $("plDraftUndo").disabled = !!pd.saving;
-        }
     }
 
     // kind "playlist" drags a song of the open playlist, otherwise the
@@ -13624,7 +13716,8 @@
     const MINI_VIEWS = [
         { view: "mureka", icon: "mureka", label: "Mureka" },
         { view: "queue", icon: "queue", label: "Queue" },
-        { view: "sets", icon: "sets", label: "Sets" }
+        { view: "sets", icon: "sets", label: "Sets" },
+        { view: "playlists", icon: "playlists", label: "Playlists" }
     ];
     let miniView = "mureka";
 
@@ -13632,7 +13725,7 @@
 
         const kept = localStorage.getItem("murekaMiniView");
 
-        miniView = kept === "queue" || kept === "sets" ? kept : "mureka";
+        miniView = kept === "queue" || kept === "sets" || kept === "playlists" ? kept : "mureka";
     } catch (e) {
         // Mureka's songs then
     }
@@ -15166,7 +15259,7 @@
             fromChip("playlists", (f.playlist ? f.playlist : "Playlists") + "  \u203A", !!f.playlist, function () {
 
                 closeFrom();
-                showPanel("playlists");
+                openPlPop();
             })
         ]));
 
@@ -17961,9 +18054,7 @@
 
     $("closePanel").addEventListener("click", closePanel);
 
-    $("playlistsBtn").addEventListener("click", function () {
-        showPanel("playlists");
-    });
+    $("playlistsBtn").addEventListener("click", openPlPop);
 
     // Fullscreen for the browser showing the web view, where it offers it
     function fullscreenOn() {
@@ -19457,7 +19548,10 @@
         setIcon($("miniView"), info.icon);
         setLabel($("miniView"), info.label);
         $("miniView").classList.toggle("on", miniView === "queue");
-        $("miniView").classList.toggle("ring", miniView === "sets");
+        $("miniView").classList.toggle("ring", miniView === "sets" || miniView === "playlists");
+
+        // Sorting is not for the playlists
+        $("miniSort").style.display = miniView === "playlists" ? "none" : "";
 
         paintMiniSort();
         paintSetFold();
@@ -19482,6 +19576,54 @@
         paintMiniView();
         loadMini(true);
     });
+
+    // The playlists in the small list, searched by name. One picked goes
+    // into the queue and plays, and the small list shows the queue
+    let miniPlKey = null;
+
+    function paintMiniPlaylists() {
+
+        const q = miniQuery.trim().toLowerCase();
+        const list = knownPlaylists().filter(function (p) {
+            return !q || p.name.toLowerCase().indexOf(q) >= 0;
+        });
+        const key = q + "|" + JSON.stringify(list);
+
+        if (key === miniPlKey) {
+            return;
+        }
+
+        miniPlKey = key;
+
+        const box = $("miniRows");
+
+        clearMiniRows();
+
+        for (const p of list) {
+
+            const row = playlistRow(p, function () {
+
+                send("playlistOpenId", { id: p.id, play: true });
+                miniView = "queue";
+
+                try {
+                    localStorage.setItem("murekaMiniView", miniView);
+                } catch (e) {
+                    // Only for this visit then
+                }
+
+                paintMiniView();
+                setTimeout(function () {
+                    loadMini(true);
+                }, 400);
+            });
+
+            box.appendChild(row);
+            thumbsFor(box, row);
+        }
+
+        $("miniCount").textContent = list.length + (list.length === 1 ? " playlist" : " playlists");
+    }
 
     // The queue in the small list, all of it, played songs dimmed, a tap
     // goes to that song, opened at the playing one
@@ -19635,6 +19777,22 @@
 
         if (reset) {
             miniStayTop = false;
+        }
+
+        if (miniView === "playlists") {
+
+            if (reset) {
+
+                miniToken += 1;
+                miniPlKey = null;
+                hideMiniEdge();
+            }
+
+            if (miniOpen) {
+                paintMiniPlaylists();
+            }
+
+            return;
         }
 
         if (miniView === "sets") {
@@ -21532,9 +21690,7 @@
 
     // The playing song into the playlist songs went into last, or picked
     // here when there is none yet
-    $("plOpenBtn").addEventListener("click", function () {
-        showPanel("playlists");
-    });
+    $("plOpenBtn").addEventListener("click", openPlPop);
 
     $("toPlBtn").addEventListener("click", function () {
 
@@ -23457,12 +23613,7 @@
     }
 
     $("pickCopy").addEventListener("click", copyPicked);
-    $("plDraftSave").addEventListener("click", function () {
-        send("playlistDraftSave");
-    });
-    $("plDraftUndo").addEventListener("click", function () {
-        send("playlistDraftUndo");
-    });
+
     $("pickList").addEventListener("click", function () {
 
         if (picked.size === 0) {
@@ -23555,6 +23706,208 @@
             move("Move to bottom", "bottom", "arrowDown");
         }
     }
+
+    // A row for a playlist: its cover, name and number of songs. tap is
+    // what picking it does
+    function playlistRow(p, tap) {
+
+        const row = document.createElement("div");
+        const text = document.createElement("div");
+        const name = document.createElement("div");
+        const count = document.createElement("div");
+
+        row.className = "plRow" + (p.open ? " on" : "");
+        row.setAttribute("role", "button");
+        row.dataset.plId = p.id;
+        row.appendChild(makeThumb(p.cover || ""));
+        text.className = "plRowText";
+        name.className = "plRowName";
+        count.className = "plRowCount";
+        name.textContent = p.name;
+        count.textContent = p.count + (p.count === 1 ? " song" : " songs") + (p.open ? " \u00B7 open" : "");
+        text.appendChild(name);
+        text.appendChild(count);
+        row.appendChild(text);
+        row.addEventListener("click", tap);
+
+        return row;
+    }
+
+    // The playlists the phone knows, read there the first time they are asked
+    function knownPlaylists() {
+
+        const list = state && Array.isArray(state.playlistsAll) ? state.playlistsAll : [];
+
+        if (state && state.playlistsRead !== true) {
+            send("readPlaylists");
+        }
+
+        return list;
+    }
+
+    // The Playlists popup over the blurred page. A playlist picked opens
+    // in the lists, Play on its row plays it. Edit shows the phone's page
+    // for making and changing them
+    let plPopKey = null;
+
+    function openPlPop() {
+
+        plPopKey = null;
+        paintPlPop();
+        $("plPop").style.display = "flex";
+    }
+
+    function closePlPop() {
+        $("plPop").style.display = "none";
+    }
+
+    function paintPlPop() {
+
+        const list = knownPlaylists();
+        const key = JSON.stringify(list);
+
+        if (key === plPopKey) {
+            return;
+        }
+
+        plPopKey = key;
+
+        const box = $("plRows");
+
+        box.textContent = "";
+
+        if (list.length === 0) {
+
+            const msg = document.createElement("div");
+
+            msg.className = "plRowCount";
+            msg.textContent = state && state.playlistsRead ? "No playlists yet" : "Reading the playlists";
+            box.appendChild(msg);
+            return;
+        }
+
+        for (const p of list) {
+
+            const row = playlistRow(p, function () {
+
+                closePlPop();
+                send("playlistOpenId", { id: p.id, play: false });
+            });
+            const play = document.createElement("button");
+
+            play.type = "button";
+            play.className = "chip";
+            play.textContent = "Play";
+            play.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                closePlPop();
+                send("playlistOpenId", { id: p.id, play: true });
+            });
+            row.appendChild(play);
+            box.appendChild(row);
+        }
+    }
+
+    $("plClose").addEventListener("click", closePlPop);
+    $("plPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("plPop")) {
+            closePlPop();
+        }
+    });
+    $("plAll").addEventListener("click", function () {
+
+        closePlPop();
+        send("playlistClose");
+    });
+    $("plEdit").addEventListener("click", function () {
+
+        closePlPop();
+        showPanel("playlists");
+    });
+    $("plNew").addEventListener("click", function () {
+
+        askText("New playlist", "", "Create", function (typed) {
+
+            const name = String(typed || "").trim().slice(0, 50);
+
+            if (name) {
+                send("playlistCreate", { name: name });
+            }
+        });
+    });
+
+    // A cover in a list held under the mouse for a moment comes up large
+    // beside it, as tooltips do. Mice only, a finger has its long press.
+    // Gone as the mouse leaves it, presses, or the list scrolls
+    const COVER_ZOOM_MS = 600;
+    let coverZoomTimer = 0;
+    let coverZoomFor = null;
+
+    function hideCoverZoom() {
+
+        clearTimeout(coverZoomTimer);
+        coverZoomFor = null;
+        $("coverZoom").style.display = "none";
+    }
+
+    function showCoverZoom(thumb) {
+
+        const picture = getComputedStyle(thumb).backgroundImage;
+
+        if (!picture || picture === "none" || !document.contains(thumb)) {
+            return;
+        }
+
+        const zoom = $("coverZoom");
+        const r = thumb.getBoundingClientRect();
+        const size = Math.round(Math.min(320, window.innerHeight * 0.6, window.innerWidth * 0.45));
+        let left = r.right + 12;
+
+        // On the side with room, kept inside the window
+        if (left + size > window.innerWidth - 8) {
+            left = r.left - size - 12;
+        }
+
+        left = Math.max(8, left);
+
+        const top = Math.max(8, Math.min(window.innerHeight - size - 8, r.top + r.height / 2 - size / 2));
+
+        zoom.style.backgroundImage = picture;
+        zoom.style.width = size + "px";
+        zoom.style.height = size + "px";
+        zoom.style.left = left + "px";
+        zoom.style.top = top + "px";
+        zoom.style.display = "block";
+    }
+
+    document.addEventListener("pointerover", function (ev) {
+
+        if (ev.pointerType !== "mouse") {
+            return;
+        }
+
+        const thumb = ev.target && ev.target.closest ? ev.target.closest(".thumb") : null;
+
+        if (thumb === coverZoomFor) {
+            return;
+        }
+
+        hideCoverZoom();
+
+        if (!thumb) {
+            return;
+        }
+
+        coverZoomFor = thumb;
+        coverZoomTimer = setTimeout(function () {
+            showCoverZoom(thumb);
+        }, COVER_ZOOM_MS);
+    }, true);
+    document.addEventListener("pointerdown", hideCoverZoom, true);
+    document.addEventListener("scroll", hideCoverZoom, true);
+    document.addEventListener("wheel", hideCoverZoom, { capture: true, passive: true });
 
     // Which playlist songs go into, the latest used first, or a new one
     // named here. ids are the songs, title names one of them
@@ -27179,7 +27532,7 @@
         box.appendChild(menuItem("playlists", "Playlists", function () {
 
             $("actionsPop").style.display = "none";
-            showPanel("playlists");
+            openPlPop();
         }));
 
         box.appendChild(menuItem("person", "Creators", function () {
