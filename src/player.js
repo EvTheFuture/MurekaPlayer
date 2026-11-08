@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.28";
+    const VERSION = "2.0.1.30";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -61264,7 +61264,9 @@
     }
 
     /* The list and sort buttons keep one width whatever they say, so the
-       buttons beside them stay in place while switching */
+       buttons beside them stay in place while switching. The list button
+       comes after sort and fold, so it stays put when they are not there:
+       the buttons line up from the right */
     #miniTop #miniView,
     #miniTop #miniSort {
         flex: 0 0 auto;
@@ -65107,9 +65109,9 @@
             <div class="plHead" id="miniPlHead"></div>
             <div id="miniTop">
                 <span id="miniCount"></span>
-                <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs, the queue or the sets" title="Songs, the queue or the sets"><span class="lbl">Mureka</span></button>
                 <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
                 <button class="chip iconOnly" id="miniFold" type="button" data-icon="sets" aria-label="Fold sets" title="Fold each set into one row, or show every song with its set's color"></button>
+                <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs, the queue or the sets" title="Songs, the queue or the sets"><span class="lbl">Mureka</span></button>
                 <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>

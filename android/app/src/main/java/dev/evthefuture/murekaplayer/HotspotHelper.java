@@ -75,8 +75,10 @@ import java.util.function.Supplier;
 // Every other command is one run: one line with the answer, then exit
 // No lambdas, since it runs from a plain dex without desugaring. The
 // Bluetooth calls run as the shell, which holds every Bluetooth
-// permission, so the lint check for the app's own is turned off here
-@SuppressLint("MissingPermission")
+// permission, so the lint check for the app's own is turned off here. So
+// are the checks for Android's hidden calls: the limits on them are for
+// apps, not for a program run as the shell with app_process
+@SuppressLint({"MissingPermission", "BlockedPrivateApi", "DiscouragedPrivateApi", "SoonBlockedPrivateApi"})
 public final class HotspotHelper {
 
     private static final String SHELL = "com.android.shell";
@@ -516,10 +518,11 @@ public final class HotspotHelper {
     // permission, which the shell has and an app cannot be given
     private static String bluetooth(String what, String address) throws Exception {
 
-        BluetoothAdapter adapter = btAdapter();
+        StringBuilder why = new StringBuilder();
+        BluetoothAdapter adapter = btAdapter(why);
 
         if (adapter == null) {
-            return "no Bluetooth on this phone";
+            return "Bluetooth could not be reached from the helper: " + why;
         }
 
         if ("on".equals(what)) {
@@ -602,10 +605,37 @@ public final class HotspotHelper {
         return "unknown Bluetooth command";
     }
 
+    // Whether Android's own modules, Bluetooth among them, have been told
+    // where their services are. An app gets that as it starts, a program
+    // run with app_process does not, and without it there is no adapter
+    private static boolean modulesReady = false;
+
+    private static synchronized void readyModules(StringBuilder why) {
+
+        if (modulesReady) {
+            return;
+        }
+
+        modulesReady = true;
+
+        try {
+
+            Method init = Class.forName("android.app.ActivityThread").getDeclaredMethod("initializeMainlineModules");
+
+            init.setAccessible(true);
+            init.invoke(null);
+        } catch (Throwable t) {
+            why.append("modules not set up (").append(t.getCause() != null ? t.getCause() : t).append("); ");
+        }
+    }
+
     // The Bluetooth adapter speaking as the shell. Made the way Android
-    // makes it for a context, here the shell's. The default adapter is
-    // the fallback, which on older Android takes the shell's uid anyway
-    private static BluetoothAdapter btAdapter() {
+    // makes it for a context, here the shell's, else straight from the
+    // Bluetooth manager service, else the default adapter. Null with what
+    // went wrong in why
+    private static BluetoothAdapter btAdapter(StringBuilder why) {
+
+        readyModules(why);
 
         try {
 
@@ -618,11 +648,74 @@ public final class HotspotHelper {
             if (adapter != null) {
                 return adapter;
             }
+
+            why.append("the Bluetooth manager had no adapter; ");
         } catch (Throwable t) {
-            say("Bluetooth manager not made: " + (t.getCause() != null ? t.getCause() : t));
+            why.append("no Bluetooth manager (").append(t.getCause() != null ? t.getCause() : t).append("); ");
         }
 
-        return BluetoothAdapter.getDefaultAdapter();
+        BluetoothAdapter direct = btAdapterDirect(why);
+
+        if (direct != null) {
+            return direct;
+        }
+
+        try {
+
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+
+            if (adapter != null) {
+                return adapter;
+            }
+
+            why.append("no default adapter");
+        } catch (Throwable t) {
+            why.append("no default adapter (").append(t).append(")");
+        }
+
+        return null;
+    }
+
+    // The adapter made from the Bluetooth manager service itself, with the
+    // shell as the caller, for when the modules could not be set up
+    private static BluetoothAdapter btAdapterDirect(StringBuilder why) {
+
+        if (Build.VERSION.SDK_INT < 31) {
+            return null;
+        }
+
+        try {
+
+            IBinder service = (IBinder) Class.forName("android.os.ServiceManager")
+                .getMethod("getService", String.class).invoke(null, "bluetooth_manager");
+
+            if (service == null) {
+
+                why.append("no Bluetooth manager service; ");
+                return null;
+            }
+
+            Object manager = Class.forName("android.bluetooth.IBluetoothManager$Stub")
+                .getMethod("asInterface", IBinder.class).invoke(null, service);
+            AttributionSource who = new AttributionSource.Builder(SHELL_UID).setPackageName(SHELL).build();
+
+            for (Constructor<?> c : BluetoothAdapter.class.getDeclaredConstructors()) {
+
+                Class<?>[] p = c.getParameterTypes();
+
+                if (p.length == 2 && p[0].isInstance(manager) && p[1] == AttributionSource.class) {
+
+                    c.setAccessible(true);
+                    return (BluetoothAdapter) c.newInstance(manager, who);
+                }
+            }
+
+            why.append("no way to make an adapter from the service; ");
+        } catch (Throwable t) {
+            why.append("no adapter from the service (").append(t.getCause() != null ? t.getCause() : t).append("); ");
+        }
+
+        return null;
     }
 
     // The device's connect or disconnect, every profile it has enabled, a
