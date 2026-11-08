@@ -4,6 +4,30 @@
 
 In development.
 
+- **Playlists.** Mureka's own playlists, so they show on mureka.ai and on
+  every device, can now be made and changed in the player, on the phone
+  and in the web view alike:
+  - The Playlists page has New playlist, then each playlist with its
+    cover, Play and Edit. Edit changes the name and the description, takes
+    the cover from the playing song or from a picture, and deletes the
+    playlist with a second tap. Liked Songs follows the hearts and has no
+    Edit.
+  - Opening a playlist shows its songs in the playlist's order, newest
+    added first as on Mureka, drafts included, and a queue made from the
+    list plays them in that order. Play starts it from the top, shuffled
+    with shuffle on.
+  - A song's menu has Add to the playlist used last, by name, and Add to
+    playlist, which offers the playlists, the latest used first, and New
+    playlist. With a playlist open, it also has Remove from the playlist
+    and Move to top, Move up, Move down and Move to bottom.
+  - Picked songs go into a playlist with Playlist in the bar for picked
+    songs, and out of the open playlist with Remove.
+  - A new button for the button row, Playlist, adds the playing song to
+    the playlist used last, and is lit while the song is in it.
+  - Mureka has no way to reorder a playlist, so a move takes the songs
+    that have to go above out and adds them back. The songs taken out are
+    noted first and put back the next time the playlists are read, should
+    the connection drop in between.
 - **Song sets.** The versions of a song, made again and again on Mureka,
   can be kept together in a set, to compare them and listen them through.
   A song's menu has Add to a set: a new set with the song, or one of the
@@ -284,7 +308,29 @@ In development.
   screen, loads the song again and starts it at the new place, as a song
   started anew, when the song goes through the sound engine for the fades.
   Safari otherwise plays on about a second and a half of the old place
-  after a jump and then stays that far behind the play head.
+  after a jump and then stays that far behind the play head. While a song
+  plays through the sound engine, the play head goes by the engine's clock
+  from where the song started playing: Safari's own clock for the song
+  stands still for a few tenths of a second about half a second after a
+  song starts or plays on, and stays that far behind the sound after. The
+  page's own clock moves the play head smoothly between the engine's
+  steps, which come only a few times a second, and the delay on the way
+  out to the speaker or headphones, as the engine tells it, is allowed
+  for, about a fifth of a second with Bluetooth headphones. At a pause the
+  play head stays where the sound was, and the song plays on from there:
+  Safari's own clock would take it back a few tenths of a second, so the
+  song is loaded again at that place, in the silence before its fade in.
+  A song streamed from Mureka, its stored copy too slow as it started,
+  plays on from the stored copy, or from the stream loaded again at that
+  place when no copy is stored, and with the sound engine woken only
+  after the song plays on, the play head goes by its clock from then. A
+  song started from its beginning is heard the delay on the way out later
+  still than one loaded at a place, and the play head allows for that
+  too. A song still playing stops before the next one loads, as one that
+  ended has, since swapped while it plays the new song is heard later
+  again. The debug log tells how the song's clock, the
+  engine's and the play head run the first seconds after a song plays, and
+  the delay on the way out whenever it changes.
 - **The web view in the add-on and the bookmarklet.** The web view's
   large layout can now fill the screen over the Mureka page itself, with
   the player there playing the music, no app needed. Web view in the
@@ -299,6 +345,8 @@ In development.
   bookmarklet's hash covers it too. Where a site does not let the page
   run, the player says so and stays.
 - Fold sets in the song list is kept when the player opens again.
+- The fade settings say which way they fade: Fade out for a song tapped,
+  Fade in when playing on, Silence before the fade in and so on.
 - **Play head zoomed in.** A new setting for the zoomed waveform, for the
   mobile player and the web view alike, and each browser can have its
   own. Stays in the middle is the play head as before, with the waveform
@@ -307,7 +355,23 @@ In development.
   edge at the start, in the middle halfway and at the right edge at the
   end, the view moving with it at an even pace. Everything left of it is
   then the played part, so the thin line and the color past the play
-  head are not needed.
+  head are not needed. Dragging it, the play head goes with the finger
+  right out to the edge, and past two thirds of the way the waveform
+  scrolls on, the faster the further out, up to the whole song in about
+  three seconds at the very edge.
+- **The song's text reaches the list on a wide screen.** With the small
+  list beside the song in the web view, the panel holding the song's text
+  now reaches out to the list, so no strip of the cover shows between
+  them on a wide screen.
+- **Covers over Bluetooth while offline.** With no internet, the cover
+  sent to the lock screen and over Bluetooth is the one stored on the
+  device, also with Remote artwork URL on, and the app sends its stored
+  cover when Mureka's cannot be downloaded.
+- **The Mureka requests log shows playlists and picture uploads.** It now
+  also logs what Mureka answers when a playlist is opened, and when a
+  picture is uploaded: the upload's host and path, and the parts of the
+  storage pass that say where it goes. Keys, tokens and the signature
+  are never logged.
 
 ### Build
 

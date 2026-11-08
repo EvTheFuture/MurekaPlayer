@@ -5562,6 +5562,7 @@
         <button class="ctl" id="nightBtn" type="button" data-label="Night" aria-label="Night mode on or off" data-icon="moon"></button>
         <button class="ctl" id="eqBtn" type="button" data-label="EQ" aria-label="Sound profile" data-icon="eq"></button>
         <button class="ctl" id="filtersBtn" type="button" title="All filters" data-label="Filters" aria-label="All filters" data-icon="filter"></button>
+        <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="Playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -5659,6 +5660,8 @@
     <span id="pickCount"></span>
     <button class="chip" id="pickCopy" type="button">Copy</button>
     <button class="chip" id="pickShare" type="button" style="display:none">Share</button>
+    <button class="chip" id="pickList" type="button">Playlist</button>
+    <button class="chip" id="pickOut" type="button" style="display:none">Remove</button>
     <button class="chip" id="pickDone" type="button">Done</button>
 </div>
 <div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
@@ -6506,10 +6509,11 @@
         night: { label: "Night", icon: "moon", el: "nightBtn" },
         eq: { label: "EQ", icon: "eq", el: "eqBtn" },
         filters: { label: "Filters", icon: "filter", el: "filtersBtn" },
+        toplaylist: { label: "Playlist", icon: "queueAdd", el: "toPlBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "toplaylist", "songs", "minilist"];
 
     function icon(name) {
 
@@ -10067,6 +10071,12 @@
         $("eqBtn").classList.toggle("on", !!(s && (s.soundPicked || s.soundLive)));
         $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
+
+        // Lit while the playing song is in the playlist songs went into last
+        const toPl = s && s.toPlaylist ? s.toPlaylist : null;
+
+        $("toPlBtn").classList.toggle("on", !!(toPl && toPl.has));
+        $("toPlBtn").title = toPl ? (toPl.has ? "In " + toPl.name : "Add the playing song to " + toPl.name) : "Add the playing song to a playlist";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
         $("repeat").classList.toggle("on", !!(s && s.repeat === "all"));
         $("repeat").classList.toggle("ring", !!(s && s.repeat === "one"));
@@ -10284,7 +10294,9 @@
     // the middle only near the start and the end. Dragging moves the play
     // head as before. Past two thirds of the way to an edge with more song
     // beyond it, the play head stays there and the waveform scrolls
-    // instead, faster the nearer the finger is to the edge. Let go, the
+    // instead, faster the nearer the finger is to the edge. With the play
+    // head moving along the song, it goes with the finger right out to the
+    // edge, and the waveform scrolls on much faster out there. Let go, the
     // waveform glides back so the play head is in the middle again. A tap
     // zoomed in seeks a moment later, so a second tap can zoom out instead.
     // hooks: ready() a song to seek in, zoomable() a waveform shown,
@@ -10297,6 +10309,12 @@
         const ZOOM_MAX = 32;
         const EDGE = 2 / 3;
         const EDGE_SPEED = 1.5;
+
+        // With the play head moving along, the finger takes it right out to
+        // the edge, and the waveform scrolls on the faster the further out
+        // it is: from a crawl past two thirds to the whole song in about
+        // this many seconds at the very edge, however far zoomed in
+        const EDGE_SONG_SEC = 3;
         const GLIDE_MS = 350;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
@@ -10491,7 +10509,25 @@
 
             d.at = now;
 
-            if (sp < 1) {
+            if (sp < 1 && travels()) {
+
+                const right = Math.min(1, (d.px - EDGE) / (1 - EDGE));
+                const left = Math.min(1, (1 - EDGE - d.px) / (1 - EDGE));
+                const slow = EDGE_SPEED * sp;
+                const fast = Math.max(slow, 1 / EDGE_SONG_SEC);
+
+                // Rising from nothing, by the same factor for every bit
+                // further out, so the slow end stays fine to aim with
+                const speed = function (k) {
+                    return k * slow * Math.pow(fast / slow, k);
+                };
+
+                if (right > 0 && d.start < 1 - sp) {
+                    d.start = clampStart(d.start + speed(right) * dt);
+                } else if (left > 0 && d.start > 0) {
+                    d.start = clampStart(d.start - speed(left) * dt);
+                }
+            } else if (sp < 1) {
 
                 const right = (d.px - EDGE) / (1 - EDGE);
                 const left = (1 - EDGE - d.px) / (1 - EDGE);
@@ -18785,15 +18821,22 @@
 
         if (on && (!was || relayout)) {
 
-            const main = $("main").getBoundingClientRect();
+            const mainEl = $("main");
+            const main = mainEl.getBoundingClientRect();
             const seek = $("seek").getBoundingClientRect();
+            const space = $("coverSpace").getBoundingClientRect();
+            const gap = parseFloat(getComputedStyle(mainEl).columnGap) || 0;
             const rest = coverAtRest();
+            // Where the list beside it starts, placeMini puts it there
+            const listLeft = Math.max(space.right + gap, rest.right + 3 + 16);
 
-            // As tall as the list beside it, and a little wider than the
-            // cover, so no edge of a bright cover shows round its corners
+            // As tall as the list beside it, a little wider than the cover
+            // on the left, so no edge of a bright cover shows round its
+            // corners, and on the right out to the list, so no strip of
+            // the cover shows between them on a wide screen
             sideBox = {
                 left: rest.left - 3,
-                right: rest.right + 3,
+                right: listLeft - 16,
                 top: main.top,
                 bottom: seek.top - 10
             };
@@ -21250,6 +21293,25 @@
         })));
     });
 
+    // The playing song into the playlist songs went into last, or picked
+    // here when there is none yet
+    $("toPlBtn").addEventListener("click", function () {
+
+        if (!state || !state.id) {
+
+            toast("Nothing is playing", "bad");
+            return;
+        }
+
+        if (!state.toPlaylist) {
+
+            pickPlaylist([state.id], state.title || "");
+            return;
+        }
+
+        send("toPlaylist");
+    });
+
     $("nightBtn").addEventListener("click", function () {
 
         $("nightBtn").classList.toggle("on");
@@ -22856,6 +22918,9 @@
         const n = picked.size;
 
         $("pickBar").style.display = picking ? "flex" : "none";
+
+        // Remove is for the playlist open, when it can be changed
+        $("pickOut").style.display = state && state.playlistOpen ? "" : "none";
         $("pickCount").textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
@@ -23129,12 +23194,149 @@
     }
 
     $("pickCopy").addEventListener("click", copyPicked);
+    $("pickList").addEventListener("click", function () {
+
+        if (picked.size === 0) {
+
+            toast("Pick songs first", "bad");
+            return;
+        }
+
+        pickPlaylist(Array.from(picked.keys()), "");
+    });
+    $("pickOut").addEventListener("click", function () {
+
+        if (picked.size === 0) {
+
+            toast("Pick songs first", "bad");
+            return;
+        }
+
+        send("playlistRemove", { ids: Array.from(picked.keys()) }).then(stopPicking);
+    });
     $("pickDone").addEventListener("click", stopPicking);
 
     if (navigator.share) {
 
         $("pickShare").style.display = "";
         $("pickShare").addEventListener("click", sharePicked);
+    }
+
+    // Playlists in a song's menu: the one songs went into last, any other,
+    // and with a playlist open, the song out of it and moved there
+    function playlistMenuItems(m, box, close) {
+
+        const pl = m.playlists;
+
+        if (!pl) {
+            return;
+        }
+
+        const act = function (action, value) {
+            return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
+        };
+
+        menuLine(box);
+
+        if (pl.last && !pl.last.has) {
+
+            box.appendChild(menuItem("listPlus", "Add to " + pl.last.name, function () {
+
+                close();
+                act("toPlaylist", pl.last.id);
+            }));
+        }
+
+        box.appendChild(menuItem("playlists", "Add to playlist", function () {
+
+            close();
+            pickPlaylist([m.id], m.title);
+        }));
+
+        if (!pl.open) {
+            return;
+        }
+
+        const o = pl.open;
+
+        box.appendChild(menuItem("close", "Remove from " + o.name, function () {
+
+            close();
+            act("fromPlaylist");
+        }, "warn"));
+
+        const move = function (label, where, iconName) {
+
+            box.appendChild(menuItem(iconName, label, function () {
+
+                close();
+                act("playlistMove", where);
+            }));
+        };
+
+        if (o.at > 0) {
+
+            move("Move to top", "top", "arrowUp");
+            move("Move up", "up", "arrowUp");
+        }
+
+        if (o.at >= 0 && o.at < o.count - 1) {
+
+            move("Move down", "down", "arrowDown");
+            move("Move to bottom", "bottom", "arrowDown");
+        }
+    }
+
+    // Which playlist songs go into, the latest used first, or a new one
+    // named here. ids are the songs, title names one of them
+    function pickPlaylist(ids, title) {
+
+        const list = state && Array.isArray(state.playlistsPick) ? state.playlistsPick : [];
+        const one = ids.length === 1;
+        const add = function (value) {
+
+            if (one) {
+                return send("songAction", { id: ids[0], action: "toPlaylist", value: value });
+            }
+
+            return send("playlistAdd", Object.assign({ ids: ids }, value));
+        };
+        const items = [{ icon: "pencil", label: "New playlist", fn: function () {
+
+            closeSongMenu();
+            askText("New playlist", one ? title || "" : "", "Create", function (typed) {
+
+                const name = String(typed || "").trim().slice(0, 50);
+
+                if (name) {
+                    add({ name: name }).then(stopPickingAfter);
+                }
+            });
+        } }];
+
+        for (const p of list) {
+
+            items.push({ icon: "playlists", label: p.name + "  (" + p.count + ")", fn: function () {
+
+                closeSongMenu();
+                add(one ? p.id : { id: p.id }).then(stopPickingAfter);
+            } });
+        }
+
+        // Not read on the phone yet, asked for now, there in a moment
+        if (list.length === 0) {
+            send("readPlaylists");
+        }
+
+        openChoice("Add " + (one ? "\"" + (title || "the song") + "\"" : ids.length + " songs") + " to a playlist", items);
+    }
+
+    // Picked songs that went into a playlist are let go
+    function stopPickingAfter() {
+
+        if (picking) {
+            stopPicking();
+        }
     }
 
     // The choices for one song that do not start it playing, shared by the
@@ -23554,6 +23756,8 @@
         const act = function (action, value) {
             return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
         };
+
+        playlistMenuItems(m, box, close);
 
         // Pick songs to share with another player
         if (!fromActions) {

@@ -1773,8 +1773,9 @@ public class PlayerService extends Service implements Hub.Listener {
     }
 
     // Download and shrink the cover off the main thread. A newer song that
-    // arrives meanwhile wins, the late one is dropped
-    @SuppressWarnings("deprecation")
+    // arrives meanwhile wins, the late one is dropped. Offline, or with
+    // Mureka not answering, the cover stored on the phone goes out instead,
+    // the one the web view shows, so a car still gets a picture
     private void fetchArt(final String url) {
 
         if (url.isEmpty()) {
@@ -1783,43 +1784,10 @@ public class PlayerService extends Service implements Hub.Listener {
 
         io.execute(() -> {
 
-            Bitmap bmp = null;
+            Bitmap bmp = PlayerWeb.hasNetwork() ? downloadArt(url) : null;
 
-            try {
-
-                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-
-                c.setConnectTimeout(10000);
-                c.setReadTimeout(15000);
-
-                byte[] data;
-
-                try (InputStream in = c.getInputStream()) {
-                    data = readCapped(in, MAX_ART_BYTES);
-                } finally {
-                    c.disconnect();
-                }
-
-                bmp = data == null ? null : decodeSmall(data, 512);
-
-                if (bmp == null) {
-                    Hub.note("Cover", "downloaded but could not be read");
-                } else {
-                    Hub.note("Cover", "loaded " + bmp.getWidth() + "x" + bmp.getHeight());
-                }
-
-                if (bmp != null && Math.max(bmp.getWidth(), bmp.getHeight()) > 512) {
-
-                    float f = 512f / Math.max(bmp.getWidth(), bmp.getHeight());
-
-                    bmp = Bitmap.createScaledBitmap(bmp, Math.round(bmp.getWidth() * f),
-                        Math.round(bmp.getHeight() * f), true);
-                }
-            } catch (Exception | OutOfMemoryError e) {
-
-                bmp = null;
-                Hub.note("Cover", "could not load, " + e.getClass().getSimpleName()
-                    + (e.getMessage() != null ? " " + e.getMessage() : ""));
+            if (bmp == null) {
+                bmp = storedArt(url);
             }
 
             final Bitmap done = bmp;
@@ -1834,5 +1802,87 @@ public class PlayerService extends Service implements Hub.Listener {
                 }
             });
         });
+    }
+
+    // The cover from its web address, null when it could not be had
+    @SuppressWarnings("deprecation")
+    private Bitmap downloadArt(String url) {
+
+        try {
+
+            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(15000);
+
+            byte[] data;
+
+            try (InputStream in = c.getInputStream()) {
+                data = readCapped(in, MAX_ART_BYTES);
+            } finally {
+                c.disconnect();
+            }
+
+            Bitmap bmp = data == null ? null : decodeSmall(data, 512);
+
+            if (bmp == null) {
+                Hub.note("Cover", "downloaded but could not be read");
+            } else {
+                Hub.note("Cover", "loaded " + bmp.getWidth() + "x" + bmp.getHeight());
+            }
+
+            return fitArt(bmp);
+        } catch (Exception | OutOfMemoryError e) {
+
+            Hub.note("Cover", "could not load, " + e.getClass().getSimpleName()
+                + (e.getMessage() != null ? " " + e.getMessage() : ""));
+
+            return null;
+        }
+    }
+
+    // The cover kept on the phone, or the player's own copy of it, null
+    // when there is neither
+    private Bitmap storedArt(String url) {
+
+        CoverCache.init(this);
+
+        java.io.File file = CoverCache.get(url);
+
+        if (file == null) {
+
+            Hub.note("Cover", "no stored copy on the phone either");
+            return null;
+        }
+
+        try (InputStream in = new java.io.FileInputStream(file)) {
+
+            byte[] data = readCapped(in, MAX_ART_BYTES);
+            Bitmap bmp = data == null ? null : decodeSmall(data, 512);
+
+            if (bmp == null) {
+                Hub.note("Cover", "the stored copy could not be read");
+            } else {
+                Hub.note("Cover", "the stored copy goes out, " + bmp.getWidth() + "x" + bmp.getHeight());
+            }
+
+            return fitArt(bmp);
+        } catch (Exception | OutOfMemoryError e) {
+
+            Hub.note("Cover", "the stored copy could not be read, " + e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    // At most 512 pixels on its longer side
+    private static Bitmap fitArt(Bitmap bmp) {
+
+        if (bmp == null || Math.max(bmp.getWidth(), bmp.getHeight()) <= 512) {
+            return bmp;
+        }
+
+        float f = 512f / Math.max(bmp.getWidth(), bmp.getHeight());
+
+        return Bitmap.createScaledBitmap(bmp, Math.round(bmp.getWidth() * f), Math.round(bmp.getHeight() * f), true);
     }
 }

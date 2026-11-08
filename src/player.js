@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.3";
+    const VERSION = "2.0.1.19";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -653,6 +653,54 @@
     // True while a playlist load is in progress
     let playlistsLoading = false;
 
+    // Playlists, Mureka's own, so they show on mureka.ai and on every
+    // device. Mureka keeps a playlist newest added first and has no way to
+    // reorder one, so a move takes songs out and adds them back
+
+    // The playlists songs went into, the latest first, kept on this device.
+    // The first is the one Add to last playlist uses
+    const PLAYLIST_USED_KEY = "mureka_playlists_used";
+
+    // Songs taken out of a playlist for a move, kept until they are back in
+    const PLAYLIST_MEND_KEY = "mureka_playlist_mend";
+
+    // How Mureka orders songs added in one request, learned the first time:
+    // "last", the request's last song on top, as if added one at a time,
+    // "first", its first song on top, or "single", one request a second apart
+    const PLAYLIST_BATCH_KEY = "mureka_playlist_batch";
+
+    // A playlist's songs read from Mureka are taken as they are this long
+    const PLAYLIST_FRESH_MS = 60000;
+
+    // Songs added one at a time, a second apart, each with a time of its own
+    const PLAYLIST_ADD_GAP_MS = 1100;
+
+    // Whether the playlists have been read at all, and why not when it failed
+    let playlistsRead = false;
+    let playlistsError = "";
+
+    // Each playlist's songs as read from Mureka: the ids in its order, the
+    // songs themselves for those the library held here does not have, and
+    // when they were read
+    const playlistDetails = new Map();
+    const playlistReads = new Map();
+
+    // Moves made one after another, never two at once
+    let playlistWork = Promise.resolve();
+
+    // The list's songs in the open playlist's order, made again when that
+    // order or the library changes
+    let playlistOrderStamp = 0;
+    let playlistSongsMemo = null;
+
+    // The playlist being made or edited on the Playlists page, null when
+    // none is. Its fields kept here, so a new drawing of the page keeps
+    // what was typed
+    let playlistEditing = null;
+    let playlistsEditEl = null;
+    let playlistDeleteArmed = "";
+    let playlistDeleteTimer = 0;
+
     // The logged in user id, learned from the account's own feed, used to
     // list the creators the account follows
     let selfUserId = loadSelfUserId();
@@ -1122,6 +1170,18 @@
     // song is there, null otherwise
     let movingTo = null;
     let movingTimer = 0;
+
+    // How far before the place moved to the play head shows it, the delay
+    // to the ear, so a song played on goes on from where the play head
+    // stood
+    let movingLag = 0;
+
+    // Where the song and the sound engine's clock were as the song started
+    // playing, for the play head on an iPhone or iPad, see markEngineClock,
+    // and how far the play head was from the song's own clock as it paused
+    let engineMark = null;
+    let seekedThisLoad = false;
+    let pauseHold = null;
 
     // When the playing song was asked to start and when its clock last moved,
     // so a tap on it can tell a song that plays from one that only seems to
@@ -6046,9 +6106,10 @@
         return out;
     }
 
-    // The order a queue made from the list follows, sets together
+    // The order a queue made from the list follows, sets together, or an
+    // open playlist's own order
     function queueOrder() {
-        return groupSets(orderedSongs());
+        return playlistOrdered() ? orderedSongs() : groupSets(orderedSongs());
     }
 
     // Mureka's songs in a list: the songs of each set brought together
@@ -7561,7 +7622,7 @@
             return true;
         }
 
-        return activePlaylist.ids.has(song.song_id);
+        return activePlaylist.ids.has(String(song.song_id));
     }
 
     // Whether a song passes every active filter, vocals and playlist together
@@ -7569,7 +7630,8 @@
     // published by definition, so the filter only applies to the account's own songs
     function passesPublishFilter(song) {
 
-        if (creatorSource || publishFilter === "all") {
+        // A playlist holds drafts too, open it shows them all
+        if (creatorSource || publishFilter === "all" || activePlaylist) {
             return true;
         }
 
@@ -14064,9 +14126,34 @@
             }
 
             fadeInResume();
+            playOnReloading = false;
+
+            const before = isIosLike() && iosGain ? songTimes().at : null;
+
+            markEngineClock();
+
+            if (before !== null) {
+
+                const after = songTimes().at;
+                const fresh = freshLag();
+
+                dbgLog("Audio", "playing, the play head at " + dbgNum(after)
+                    + (Math.abs(after - before) >= 0.05 ? ", it stood at " + dbgNum(before) + " a moment before" : "")
+                    + (engineMark ? "" : ", the sound engine not running, the song's own clock for now")
+                    + (fresh >= 0.01 ? ", from the beginning, held back a further " + Math.round(fresh * 1000) + " ms" : ""));
+            }
+
+            checkClockAfterPlay();
         });
+
+        // A song loaded again to play on keeps its fade in
         audioOn("loadstart", function () {
-            dropResumeFade();
+
+            seekedThisLoad = false;
+
+            if (!playOnReloading) {
+                dropResumeFade();
+            }
         });
 
         // Music from the first play on, however the play came about
@@ -14077,11 +14164,74 @@
         // A move by loading the song again is done once it is there
         audioOn("seeked", function () {
 
+            seekedThisLoad = true;
+
             if (movingTo !== null && Math.abs((audio.currentTime || 0) - movingTo) < 0.6) {
 
                 movingTo = null;
                 clearTimeout(movingTimer);
             }
+
+            // Moved while playing, the engine's clock counts from here
+            markEngineClock();
+        });
+
+        // Paused, the play head stays where the sound was, however far that
+        // is from the song's own clock, and the song plays on from there
+        audioOn("pause", function () {
+
+            const shown = engineSongTime(true);
+            const lag = shown === null ? 0 : heardLag();
+            const fresh = shown === null ? 0 : freshLag();
+
+            engineMark = null;
+            pauseHold = null;
+
+            // Stopped for the next song, nothing to hold
+            if (switchingTrack) {
+                return;
+            }
+
+            if (shown === null || !isFinite(audio.currentTime)) {
+
+                if (isIosLike() && isFinite(audio.currentTime)) {
+                    dbgLog("Audio", "paused, the song's clock at " + dbgNum(audio.currentTime) + ", the play head with it"
+                        + (iosGain ? "" : ", the song not through the sound engine"));
+                }
+
+                return;
+            }
+
+            const offset = shown - audio.currentTime;
+
+            dbgLog("Audio", "paused, the song's clock at " + dbgNum(audio.currentTime) + ", the sound engine's at " + dbgNum(shown)
+                + ", the play head at " + dbgNum(shown - lag));
+
+            if (Math.abs(offset) >= 0.02 || lag >= 0.02) {
+                pauseHold = { el: audio, offset: offset, lag: lag, fresh: fresh };
+            }
+
+            readyPlayOnCopy();
+
+            // Shown where it stands, the time told before the pause may
+            // have drawn it at the song's own clock
+            if (!isSeeking) {
+                updateSeekDisplay();
+            }
+        });
+
+        // Moved, waiting for more of the song or another song: the play head
+        // goes by the song's own clock until it plays again
+        ["seeking", "waiting", "emptied", "ended"].forEach(function (name) {
+
+            audioOn(name, function () {
+
+                engineMark = null;
+
+                if (name !== "waiting") {
+                    pauseHold = null;
+                }
+            });
         });
         audioOn("playing", function () {
 
@@ -17104,6 +17254,11 @@
 
     function orderedSongs() {
 
+        // An open playlist in its own order
+        if (playlistOrdered()) {
+            return playlistOrderedSongs();
+        }
+
         if (!creatorSource && publishFilter === "published" && cache.complete) {
 
             // A draft has no publish date. Shown greyed, it goes where it
@@ -17196,6 +17351,11 @@
         // with the songs still being generated first, being the newest, and
         // the songs of a set together while they fold, each set where it
         // is to be
+        // An open playlist in its own order, its sets not brought together
+        if (playlistOrdered()) {
+            return orderedSongs();
+        }
+
         const ordered = placeSets(orderedSongs(), setsFolded());
 
         return pendingSongs.size > 0 ? withPendingPlaced(shownPending(), ordered, function (x) {
@@ -17461,6 +17621,8 @@
         if (iosCtx.state === "running" && audio && !audio.paused && isIosLike() && anyFadeOn()) {
             wireIosGain();
         }
+
+        lateEngineMark();
     }
 
     function wireIosGain() {
@@ -17499,6 +17661,17 @@
 
             if (!iosWatchTimer) {
                 iosWatchTimer = setInterval(watchIosEngine, IOS_WATCH_MS);
+            }
+
+            // Headphones connected or gone, the delay to the ear may change
+            if (navigator.mediaDevices && navigator.mediaDevices.addEventListener && !outputWatched) {
+
+                outputWatched = true;
+                navigator.mediaDevices.addEventListener("devicechange", function () {
+
+                    dbgLog("Audio", "an output came or went");
+                    setTimeout(noteHeardLag, 1000);
+                });
             }
         } catch (e) {
 
@@ -17943,6 +18116,12 @@
     }
 
     function watchIosEngine() {
+
+        if (engineMark) {
+            noteHeardLag();
+        }
+
+        lateEngineMark();
 
         if (!iosGain || !iosCtx || !audio || audio.paused || audio.seeking || audio.readyState < 3 || isPriming()) {
 
@@ -19458,6 +19637,17 @@
             try {
 
                 const u = new URL(String(url), location.href);
+                const sending = /^(PUT|POST)$/i.test(String(method || ""));
+
+                // A picture sent to Mureka's storage, a playlist's own cover
+                // say, goes to another host. Its host and path are logged,
+                // never its query, which carries the signature
+                if (u.host !== location.host && sending && /^https?:$/.test(u.protocol)) {
+
+                    dbgLog("Mureka", String(method).toUpperCase() + " to " + u.host + u.pathname.slice(0, 120)
+                        + (body && typeof body === "object" ? " [" + (body.constructor && body.constructor.name ? body.constructor.name : "data") + "]" : ""));
+                    return;
+                }
 
                 if (u.host !== location.host || u.pathname.indexOf("/api/") !== 0) {
                     return;
@@ -19517,6 +19707,11 @@
         // sent all the time, are left out, the player logs its own already.
         // Of the reads only the two Mureka's trim screen makes first, song
         // check and song info with the silence at the ends
+        // The reads whose answers are logged: the trim screen's two, a
+        // playlist with its songs, and the storage pass a picture upload
+        // asks for, of which only the harmless parts are kept
+        const READ_ANSWERS = ["/api/pgc/song/check", "/api/pgc/song/info", "/api/pgc/playlist/detail", "/api/misc/cos-token"];
+
         const answerFor = function (method, url) {
 
             const verb = String(method || "GET").toUpperCase();
@@ -19531,7 +19726,7 @@
                 }
 
                 if ((verb === "GET" || verb === "HEAD")
-                    && u.pathname !== "/api/pgc/song/check" && u.pathname !== "/api/pgc/song/info") {
+                    && READ_ANSWERS.indexOf(u.pathname) < 0) {
                     return "";
                 }
 
@@ -19541,9 +19736,45 @@
             }
         };
 
+        // Of the storage pass, the names of its parts and only the values
+        // that say where a picture goes and until when, never a key
+        const passShape = function (text) {
+
+            const safe = /^(code|msg|bucket|region|host|domain|endpoint|path|dir|prefix|url|cdn|expire.*|start.*|key_?prefix)$/i;
+            const walk = function (v, name) {
+
+                if (Array.isArray(v)) {
+                    return v.map(function (x) { return walk(x, name); });
+                }
+
+                if (v && typeof v === "object") {
+
+                    const out = {};
+
+                    Object.keys(v).forEach(function (k) {
+                        out[k] = walk(v[k], k);
+                    });
+
+                    return out;
+                }
+
+                return safe.test(name || "") && !/secret|token|sign|cred/i.test(name || "") ? v : "***";
+            };
+
+            try {
+                return JSON.stringify(walk(JSON.parse(text), ""));
+            } catch (e) {
+                return "[not JSON]";
+            }
+        };
+
         const logAnswer = function (what, status, text) {
+
+            const pass = /cos-token/.test(what);
+            const long = /playlist\/detail/.test(what);
+
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
-                + redact(text).replace(/\s+/g, " ").slice(0, 800));
+                + (pass ? passShape(text) : redact(text)).replace(/\s+/g, " ").slice(0, long ? 3000 : 800));
         };
 
         const sumUp = function (kind, json) {
@@ -20838,6 +21069,10 @@
         resumeIosCtx("play");
         prepareSound();
 
+        // On an iPhone or iPad, from where the sound was, not where Safari's
+        // clock had the song
+        playOnWhereHeard();
+
         const started = audio.play();
 
         if (!started || typeof started.catch !== "function") {
@@ -21207,6 +21442,22 @@
         // The load that follows flips paused, mark it so the pause listener
         // does not read that as an interruption, cleared once playing fires
         switchingTrack = true;
+        dropPlayOnCopy();
+
+        // A song still playing stops first, as one that ended has. On an
+        // iPhone or iPad, swapped while it plays, the new song is heard
+        // later than its clock tells, behind what is left of the old one on
+        // its way through the sound engine, and the play head runs ahead
+        if (iosGain && !audio.paused) {
+
+            dbgLog("Audio", "the song playing stops before the next one loads");
+
+            try {
+                audio.pause();
+            } catch (e) {
+                dbgLog("Audio", "the song playing could not be stopped first: " + errText(e));
+            }
+        }
 
         if (currentObjectUrl) {
             URL.revokeObjectURL(currentObjectUrl);
@@ -23537,7 +23788,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "toplaylist"];
 
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
@@ -23723,6 +23974,10 @@
 
         if (name === "filters") {
             return iconFilter();
+        }
+
+        if (name === "toplaylist") {
+            return iconPlaylistAdd();
         }
 
         // The web view's two list buttons, drawn as they are there
@@ -26015,6 +26270,7 @@
 
         refreshNowStars();
         updateRateButton();
+        updatePlaylistCtl();
 
         if (!playerTitle) {
             return;
@@ -28501,7 +28757,9 @@
     // the middle only near the start and the end. Dragging moves the play
     // head as before. Past two thirds of the way to an edge with more song
     // beyond it, the play head stays there and the waveform scrolls
-    // instead, faster the nearer the finger is to the edge. Let go, the
+    // instead, faster the nearer the finger is to the edge. With the play
+    // head moving along the song, it goes with the finger right out to the
+    // edge, and the waveform scrolls on much faster out there. Let go, the
     // waveform glides back so the play head is in the middle again. A tap
     // zoomed in seeks a moment later, so a second tap can zoom out instead.
     // hooks: ready() a song to seek in, zoomable() a waveform shown,
@@ -28514,6 +28772,12 @@
         const ZOOM_MAX = 32;
         const EDGE = 2 / 3;
         const EDGE_SPEED = 1.5;
+
+        // With the play head moving along, the finger takes it right out to
+        // the edge, and the waveform scrolls on the faster the further out
+        // it is: from a crawl past two thirds to the whole song in about
+        // this many seconds at the very edge, however far zoomed in
+        const EDGE_SONG_SEC = 3;
         const GLIDE_MS = 350;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
@@ -28708,7 +28972,25 @@
 
             d.at = now;
 
-            if (sp < 1) {
+            if (sp < 1 && travels()) {
+
+                const right = Math.min(1, (d.px - EDGE) / (1 - EDGE));
+                const left = Math.min(1, (1 - EDGE - d.px) / (1 - EDGE));
+                const slow = EDGE_SPEED * sp;
+                const fast = Math.max(slow, 1 / EDGE_SONG_SEC);
+
+                // Rising from nothing, by the same factor for every bit
+                // further out, so the slow end stays fine to aim with
+                const speed = function (k) {
+                    return k * slow * Math.pow(fast / slow, k);
+                };
+
+                if (right > 0 && d.start < 1 - sp) {
+                    d.start = clampStart(d.start + speed(right) * dt);
+                } else if (left > 0 && d.start > 0) {
+                    d.start = clampStart(d.start - speed(left) * dt);
+                }
+            } else if (sp < 1) {
 
                 const right = (d.px - EDGE) / (1 - EDGE);
                 const left = (1 - EDGE - d.px) / (1 - EDGE);
@@ -29385,6 +29667,7 @@
     function heardLag() {
 
         let ctx = null;
+        const byEngine = engineMark !== null;
 
         if (iosGain && iosCtx) {
             ctx = iosCtx;
@@ -29400,29 +29683,53 @@
 
         // Safari's song clock already allows for the way out, headphones or
         // the speaker, as it does to keep a video in step with Bluetooth, so
-        // only the engine's own part counts there. Nothing is guessed on
-        // top of what the engine tells
-        if (ctx === iosCtx) {
+        // only the engine's own part counts there. Going by the engine's
+        // clock, the way out counts as well, as the engine tells it.
+        // Nothing is guessed on top of what the engine tells
+        if (ctx === iosCtx && !byEngine) {
             return Math.max(0, Math.min(4, base));
         }
 
         const out = Number(ctx.outputLatency) || 0;
 
-        return Math.max(0, Math.min(4, base + out));
+        return Math.max(0, Math.min(4, base + out + freshLag()));
     }
 
-    // The engine's lag in the log whenever it changes by more than a bit
+    // A song started from its beginning, with no move since it loaded, is
+    // heard the way out's delay later still than one loaded at a place,
+    // which Safari starts with a move. With Bluetooth headphones that is a
+    // fifth of a second or so, and the play head was that far ahead
+    function freshLag() {
+
+        if (seekedThisLoad || !engineMark || !iosGain || !iosCtx || iosCtx.state !== "running") {
+            return 0;
+        }
+
+        return Math.max(0, Math.min(2, Number(iosCtx.outputLatency) || 0));
+    }
+
+    // The engine's lag in the log whenever it or the way out changes by
+    // more than a bit, headphones connected say
     let lagLogged = -1;
+    let outLogged = -1;
+    let outputWatched = false;
 
     function noteHeardLag() {
 
-        const lag = heardLag();
+        if (!audio || audio.paused) {
+            return;
+        }
 
-        if (Math.abs(lag - lagLogged) < 0.05) {
+        const lag = heardLag();
+        const lagCtx = iosGain && iosCtx ? iosCtx : fxCtx;
+        const out = lagCtx ? Number(lagCtx.outputLatency) || 0 : 0;
+
+        if (Math.abs(lag - lagLogged) < 0.02 && Math.abs(out - outLogged) < 0.02) {
             return;
         }
 
         lagLogged = lag;
+        outLogged = out;
 
         const ctx = iosGain && iosCtx ? iosCtx : fxCtx;
 
@@ -29431,19 +29738,148 @@
                 + (ctx.outputLatency === undefined ? "not told" : Math.round((Number(ctx.outputLatency) || 0) * 1000) + " ms") : ""));
     }
 
+    // The play head on an iPhone or iPad with the song going through the
+    // sound engine goes by the engine's clock. Safari's own clock for the
+    // song stands still for a few tenths of a second about half a second
+    // after the song starts or plays on, and stays that far behind the
+    // sound after, while the engine's clock runs on with it. Where the song
+    // is and the engine's clock are noted as it starts playing, and the play
+    // head counts on from there with the engine. Should the two part by
+    // more than a second, the song stalled or jumped without a word, and it
+    // is noted again from the song's own clock
+    // The engine's clock moves on in steps, a sixth of a second or so on
+    // an iPhone, too coarse for a waveform gliding past. The page's own
+    // clock, fine and steady, moves the play head in between, and the
+    // engine's keeps it honest: should the two part by more than half a
+    // second, the engine stopped or the song stalled, and the play head is
+    // set to the engine's place from there
+    const ENGINE_PART_SEC = 1.5;
+    const ENGINE_STEP_SEC = 0.5;
+
+    function markEngineClock() {
+
+        engineMark = null;
+
+        if (!iosGain || !iosCtx || iosCtx.state !== "running" || !audio || audio.paused || audio.seeking
+            || !isFinite(audio.currentTime)) {
+            return;
+        }
+
+        pauseHold = null;
+        engineMark = { el: audio, song: audio.currentTime, engine: iosCtx.currentTime, page: performance.now() };
+        noteHeardLag();
+    }
+
+    // The engine woke after the song started playing, interrupted while
+    // it was paused say, so the play head goes by its clock from now
+    function lateEngineMark() {
+
+        if (engineMark || !iosGain || !iosCtx || iosCtx.state !== "running" || !audio || audio.paused
+            || audio.seeking || audio.readyState < 3 || movingTo !== null) {
+            return;
+        }
+
+        const before = songTimes().at;
+
+        markEngineClock();
+
+        if (engineMark) {
+            dbgLog("Audio", "the sound engine runs again, the play head goes by its clock from " + dbgNum(songTimes().at)
+                + ", it stood at " + dbgNum(before));
+        }
+    }
+
+    // Where the song is by the engine's clock, null when the song's own
+    // clock is the one to go by. As the song pauses, where it was a moment
+    // before
+    function engineSongTime(pausing) {
+
+        const m = engineMark;
+
+        if (!m || m.el !== audio || (audio.paused && !pausing) || audio.seeking || !iosCtx || iosCtx.state !== "running") {
+            return null;
+        }
+
+        const now = performance.now();
+        const byEngine = m.song + (iosCtx.currentTime - m.engine);
+        let at = m.song + (now - m.page) / 1000;
+
+        if (Math.abs(at - byEngine) > ENGINE_STEP_SEC) {
+
+            m.song = byEngine;
+            m.engine = iosCtx.currentTime;
+            m.page = now;
+            at = byEngine;
+        }
+
+        if (Math.abs(at - audio.currentTime) > ENGINE_PART_SEC) {
+
+            dbgLog("Audio", "the play head goes by the song's clock again, the engine's had it at " + dbgNum(at)
+                + ", the song's at " + dbgNum(audio.currentTime));
+            markEngineClock();
+            return null;
+        }
+
+        return at;
+    }
+
+    // Where the song is without the delay to the ear: by the engine's clock
+    // where that is the one, else the song's own
+    function songClockAt() {
+
+        const engine = engineSongTime();
+
+        if (engine !== null) {
+            return engine;
+        }
+
+        if (!audio || !isFinite(audio.currentTime)) {
+            return 0;
+        }
+
+        // Paused, where the play head stood
+        return audio.currentTime + (audio.paused && pauseHold && pauseHold.el === audio ? pauseHold.offset : 0);
+    }
+
     // Where the song is and how long it is. While it plays, the place heard,
     // so the waveform and the time go with the sound
     function songTimes() {
 
         if (movingTo !== null && audio) {
-            return { at: movingTo, length: isFinite(audio.duration) && audio.duration > 0 ? audio.duration : movingTo + 1 };
+            return { at: Math.max(0, movingTo - movingLag), length: isFinite(audio.duration) && audio.duration > 0 ? audio.duration : movingTo + 1 };
         }
 
         if (audio && audio.src && isFinite(audio.duration) && audio.duration > 0) {
 
             const at = isFinite(audio.currentTime) ? audio.currentTime : 0;
 
-            return { at: audio.paused ? at : Math.max(0, at - heardLag()), length: audio.duration };
+            const held = pauseHold && pauseHold.el === audio ? pauseHold : null;
+
+            // Paused, where the play head stood. Safari tells the time once
+            // more as the song pauses, before the pause itself is told, and
+            // the engine's clock still has it then
+            if (audio.paused) {
+
+                if (!held && engineMark && engineMark.el === audio) {
+
+                    const shown = engineSongTime(true);
+
+                    if (shown !== null) {
+                        return { at: Math.max(0, Math.min(audio.duration, shown - heardLag())), length: audio.duration };
+                    }
+                }
+
+                const shift = held ? held.offset - held.lag : 0;
+
+                return { at: Math.max(0, Math.min(audio.duration, at + shift)), length: audio.duration };
+            }
+
+            // Played on but not playing yet, where the play head stood
+            if (held && !engineMark) {
+                return { at: Math.max(0, Math.min(audio.duration, at + held.offset - held.lag)), length: audio.duration };
+            }
+
+            return { at: Math.max(0, Math.min(audio.duration, songClockAt() - heardLag())), length: audio.duration };
         }
 
         const song = restoredSong();
@@ -29483,6 +29919,7 @@
         const playing = !audio.paused;
 
         dbgLog("Audio", "moved to " + dbgNum(at) + " by loading the song again, Safari would play on from the old place");
+        movingLag = 0;
 
         // The reload's own events are no pause, no interruption and no new
         // song, and the place shown is the new one all along
@@ -29520,6 +29957,210 @@
             movingTo = null;
             dbgLog("Audio", "the move could not load the song again: " + errText(e));
         }
+    }
+
+    // A paused song played on from where the sound was when it paused, on
+    // an iPhone or iPad with the song going through the sound engine.
+    // Safari's own clock for the song is a few tenths of a second behind the
+    // sound by then, and played on as it is, the song would go back that
+    // far. So it is loaded again at the place heard, as a move is, see
+    // moveTo, in the silence before its fade in, and the play head goes on
+    // from where it stood
+    let playOnReloading = false;
+    let playOnReloadTimer = 0;
+
+    // A song streamed from Mureka, its stored copy too slow as it started,
+    // would be fetched anew to load it again at a place. So as it pauses,
+    // the stored copy is made ready, and the song plays on from that. With
+    // no copy stored, the stream is loaded again, a moment slower
+    let playOnCopy = null;
+    let playOnCopyToken = 0;
+
+    function dropPlayOnCopy() {
+
+        playOnCopyToken += 1;
+
+        if (playOnCopy) {
+
+            URL.revokeObjectURL(playOnCopy.url);
+            playOnCopy = null;
+        }
+    }
+
+    function readyPlayOnCopy() {
+
+        dropPlayOnCopy();
+
+        if (!iosGain || !audio || !currentSong || String(audio.src).indexOf("blob:") === 0
+            || !cachedIds.has(currentSong.song_id)) {
+            return;
+        }
+
+        const link = songUrl(currentSong);
+
+        if (!link) {
+            return;
+        }
+
+        const token = playOnCopyToken;
+        const el = audio;
+        const id = currentSong.song_id;
+
+        openStore(AUDIO_CACHE).then(function (store) {
+            return store.match(link, { ignoreVary: true });
+        }).then(function (resp) {
+            return resp ? resp.blob() : null;
+        }).then(function (blob) {
+
+            if (!blob || token !== playOnCopyToken || audio !== el || !audio.paused || !currentSong
+                || currentSong.song_id !== id) {
+                return;
+            }
+
+            playOnCopy = { el: el, id: id, url: URL.createObjectURL(blob) };
+            dbgLog("Audio", "the song streams from Mureka, it plays on from the stored copy");
+        }).catch(function (e) {
+            dbgLog("Audio", "the stored copy could not be made ready to play on from: " + errText(e));
+        });
+    }
+
+    function playOnWhereHeard() {
+
+        const held = pauseHold && pauseHold.el === audio ? pauseHold : null;
+        const hold = held ? held.offset : 0;
+        const copy = playOnCopy && playOnCopy.el === audio && currentSong && playOnCopy.id === currentSong.song_id
+            ? playOnCopy : null;
+        const fromBlob = String(audio ? audio.src : "").indexOf("blob:") === 0;
+        const fromLink = !fromBlob && !copy && /^https?:/i.test(String(audio ? audio.src : ""));
+
+        if (Math.abs(hold) < 0.05 || !iosGain || !audio || !audio.paused || audio.ended || (!fromBlob && !copy && !fromLink)) {
+            return;
+        }
+
+        const length = isFinite(audio.duration) ? audio.duration : 0;
+        const from = audio.currentTime;
+        // Loaded at a place, the song is heard sooner than from its
+        // beginning, so it plays on that much further back
+        const fresh = held.fresh || 0;
+        const at = Math.max(0, Math.min(length > 0 ? length - 0.5 : from + hold - fresh, from + hold - fresh));
+
+        // Near the end it is as good as over
+        if (length > 0 && length - at < 1) {
+            return;
+        }
+
+        const src = copy ? copy.url : audio.src;
+
+        // The copy is the song's own from now, let go with the next one
+        if (copy) {
+
+            if (currentObjectUrl && currentObjectUrl !== copy.url) {
+                URL.revokeObjectURL(currentObjectUrl);
+            }
+
+            playOnCopy = null;
+            currentObjectUrl = copy.url;
+        }
+
+        dbgLog("Audio", "plays on at " + dbgNum(at) + ", where the sound was, Safari's clock had " + dbgNum(from)
+            + (copy ? ", from the stored copy" : fromLink ? ", streamed from Mureka again, no stored copy" : ""));
+
+        // A stream takes longer to be there at the place
+        const waitMs = fromLink ? 8000 : 3000;
+
+        // The reload's own events are no pause, no new song and no end of
+        // the fade in waiting, and the place shown stays where it was
+        heldReleasing = true;
+        clearTimeout(heldReleaseTimer);
+        heldReleaseTimer = setTimeout(function () {
+            heldReleasing = false;
+        }, 1500);
+        playOnReloading = true;
+        clearTimeout(playOnReloadTimer);
+        playOnReloadTimer = setTimeout(function () {
+            playOnReloading = false;
+        }, waitMs);
+        movingLag = held.lag - fresh;
+        movingTo = at;
+        clearTimeout(movingTimer);
+        movingTimer = setTimeout(function () {
+            movingTo = null;
+        }, waitMs);
+
+        try {
+
+            audio.removeAttribute("src");
+            audio.load();
+            pendingSeek = at;
+            audio.src = src;
+        } catch (e) {
+
+            movingTo = null;
+            playOnReloading = false;
+            dbgLog("Audio", "the song could not be loaded again to play on: " + errText(e));
+        }
+    }
+
+    // How Safari's clock goes the first seconds after a song starts or plays
+    // on, against the time passed, in one line: a jump shows as a step. The
+    // engine's clock and the play head's beside it, the engine's as a dash
+    // when the song does not go through it. On an iPhone or iPad
+    const CLOCK_CHECK_MS = [250, 500, 750, 1000, 1500, 2000, 3000];
+    let clockCheckTimers = [];
+
+    function checkClockAfterPlay() {
+
+        clockCheckTimers.forEach(clearTimeout);
+        clockCheckTimers = [];
+
+        if (!isIosLike() || !audio || !currentSong) {
+            return;
+        }
+
+        const el = audio;
+        const id = currentSong.song_id;
+        const t0 = performance.now();
+        const at0 = el.currentTime;
+        const engineOn = !!(iosGain && iosCtx);
+        const ctx0 = engineOn ? iosCtx.currentTime : 0;
+        const head0 = songClockAt();
+        const seen = [];
+
+        const tell = function (whole) {
+
+            clockCheckTimers.forEach(clearTimeout);
+            clockCheckTimers = [];
+            dbgLog("Audio", "clock from " + dbgNum(at0) + (engineOn ? ", through the sound engine" : ", not through the sound engine")
+                + ", play head from " + dbgNum(head0) + ", song/engine/play head ahead of the time passed: "
+                + (seen.length ? seen.join(", ") : "none") + (whole ? "" : ", cut short"));
+        };
+
+        CLOCK_CHECK_MS.forEach(function (ms, i) {
+
+            clockCheckTimers.push(setTimeout(function () {
+
+                // Paused, moved or another song: what was seen so far
+                if (el !== audio || !currentSong || currentSong.song_id !== id || el.paused || el.seeking) {
+
+                    tell(false);
+                    return;
+                }
+
+                const real = (performance.now() - t0) / 1000;
+                const song = el.currentTime - at0 - real;
+                const head = songClockAt() - head0 - real;
+                const signed = function (v) {
+                    return (v >= 0 ? "+" : "") + v.toFixed(2);
+                };
+                const engine = engineOn && iosCtx ? signed(iosCtx.currentTime - ctx0 - real) : "-";
+
+                seen.push((ms / 1000) + " s " + signed(song) + "/" + engine + "/" + signed(head));
+
+                if (i === CLOCK_CHECK_MS.length - 1) {
+                    tell(true);
+                }
+            }, ms));
+        });
     }
 
     // Move to a time: the audio when it is loaded, else the place a
@@ -29745,8 +30386,10 @@
         // Chromium fetches artwork in the browser process and is happier with
         // an ordinary https url than with a few hundred kilobytes of base64.
         // The data urls exist because iOS would not take blob urls, so which
-        // form is used is a setting rather than a guess about the browser
-        if (settings.remoteArtwork) {
+        // form is used is a setting rather than a guess about the browser.
+        // Offline the link cannot be fetched, so the stored copy goes out
+        // whatever the setting, to the lock screen and over Bluetooth
+        if (settings.remoteArtwork && !offlineMode()) {
 
             const remote = coverUrl(song);
 
@@ -30579,7 +31222,7 @@
             cover: song ? coverUrl(song) : "",
             src: song ? (songUrl(song) || "") : "",
             playing: hasAudio && !audio.paused,
-            position: hasAudio ? (isFinite(audio.currentTime) ? audio.currentTime : 0) : times.at,
+            position: hasAudio ? songClockAt() : times.at,
             duration: duration,
             rating: song ? getRating(song) : null,
             liked: song ? song.is_liked === true : false,
@@ -30654,6 +31297,15 @@
             setsFold: setsFolded(),
             setSort: setSortOf(),
             nightOn: sound().on && sound().night,
+
+            // The button for the playlist songs went into last, the
+            // playlists to pick for picked songs, and the one open when it
+            // can be changed
+            toPlaylist: hostToPlaylist(),
+            playlistsPick: playlistsToPick().slice(0, 60).map(function (p) {
+                return { id: String(p.playlist_id), name: p.name, count: p.song_count };
+            }),
+            playlistOpen: openEditablePlaylist() ? { id: String(activePlaylist.playlist_id), name: activePlaylist.name } : null,
             soundText: soundWords(),
 
             // The profiles to pick from by the profile button, and the one
@@ -31000,7 +31652,10 @@
             mergeTo: hostSetsToPick(song, true),
             setColors: SET_COLORS,
             similar: hostSimilar(song),
-            note: songNote(song)
+            note: songNote(song),
+
+            // The playlists to add it to, and its place in the one open
+            playlists: hostPlaylistsFor(song)
         };
     }
 
@@ -32029,6 +32684,12 @@
             return;
         }
 
+        // The cover as a link or the stored copy, by whether it can be
+        // fetched now
+        if (settings.remoteArtwork) {
+            reassertNowPlaying();
+        }
+
         // Said only once it has lasted a few seconds, a network changing
         // over drops the internet for a blink, and longer while the app
         // moves its hotspot or VPNs. Back before it was said, nothing is
@@ -32557,7 +33218,7 @@
             return String(x.song_id) === wanted;
         }) || queue.find(function (x) {
             return String(x.song_id) === wanted;
-        }) || null;
+        }) || playlistSong(wanted);
     }
 
     // The number each song carries in the phone's list, the same rule the
@@ -32743,6 +33404,7 @@
             published: publishFilter,
             creator: creatorSource ? creatorSource.stage_name || "Artist" : "",
             playlist: activePlaylist ? activePlaylist.name || "Playlist" : "",
+
             vocals: settings.vocalFilter || "all",
             smart: settings.smartEnabled === true,
             smartText: settings.smartEnabled === true ? hostSmartText() : "",
@@ -32784,7 +33446,7 @@
             return hostListMemo;
         }
 
-        let source = placeSets(orderedSongs(), setsFolded());
+        let source = playlistOrdered() ? orderedSongs() : placeSets(orderedSongs(), setsFolded());
 
         if (view === "alpha" || view === "alphaDesc") {
 
@@ -33797,6 +34459,8 @@
             setRating(song, nextRating(getRating(song), n));
         } else if (["newSet", "toSet", "outOfSet", "renameSet", "setColor", "addToSet", "keep", "playSet", "playSetAll", "doneSet", "mergeSet", "dissolveSet"].indexOf(act) >= 0) {
             hostSetAction(song, act, a.value);
+        } else if (["toPlaylist", "fromPlaylist", "playlistMove"].indexOf(act) >= 0) {
+            hostPlaylistAction(song, act, a.value);
         } else if (act === "note") {
 
             setSongNote(song, a.value === null || a.value === undefined ? "" : String(a.value).slice(0, 2000));
@@ -34043,6 +34707,15 @@
             stopPlaysJob();
         } else if (cmd === "closeInfo") {
             closeInfo();
+        } else if (cmd === "toPlaylist") {
+            addPlayingToLastPlaylist();
+        } else if (cmd === "readPlaylists") {
+
+            if (!playlistsLoading) {
+                loadPlaylists();
+            }
+        } else if (cmd === "playlistAdd" || cmd === "playlistRemove") {
+            hostPlaylistMany(cmd, arg || {});
         } else if (cmd === "openPlaylists") {
             openPlaylists();
         } else if (cmd === "closePlaylists") {
@@ -36166,7 +36839,10 @@
             sets: setsCtrlBtn,
             night: nightCtrlBtn,
             eq: eqCtrlBtn,
-            filters: filtersCtrlBtn
+            filters: filtersCtrlBtn,
+
+            // The playing song into the playlist songs went into last
+            toplaylist: makeIconButton(iconPlaylistAdd(), "Add the playing song to a playlist", addPlayingToLastPlaylist)
         };
 
         updateFeedButton();
@@ -38781,6 +39457,10 @@
             return "EQ";
         }
 
+        if (name === "toplaylist") {
+            return "Playlist";
+        }
+
         return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
     }
 
@@ -39169,6 +39849,18 @@
         ]);
     }
 
+    // A list with a plus, for adding to a playlist
+    function iconPlaylistAdd() {
+
+        return makeSvgIcon([
+            ["line", { x1: "3", y1: "6", x2: "15", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "15", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "11", y2: "18" }],
+            ["line", { x1: "18", y1: "13", x2: "18", y2: "21" }],
+            ["line", { x1: "14", y1: "17", x2: "22", y2: "17" }]
+        ]);
+    }
+
     function iconPlaylists() {
 
         return makeSvgIcon([
@@ -39448,6 +40140,7 @@
     const selectedSongs = new Map();
     let selBarEl = null;
     let selCountEl = null;
+    let selOutBtn = null;
 
     function startSelect(song) {
 
@@ -39500,6 +40193,11 @@
         const n = selectedSongs.size;
 
         selBarEl.style.display = selectMode ? "flex" : "none";
+
+        // Remove is for the playlist open, when it can be changed
+        if (selOutBtn) {
+            selOutBtn.style.display = openEditablePlaylist() ? "" : "none";
+        }
         selCountEl.textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
@@ -39714,6 +40412,34 @@
         setBtn.title = "Put the picked songs in a set";
         setBtn.style.flex = "0 0 auto";
         selBarEl.appendChild(setBtn);
+
+        const listBtn = makeButton("Playlist", "#333", "#fff", function () {
+
+            if (selectedSongs.size === 0) {
+
+                showToast("Pick songs first", false);
+                return;
+            }
+
+            pickPlaylistFor(Array.from(selectedSongs.values()), endSelect);
+        });
+
+        listBtn.title = "Add the picked songs to a playlist";
+        listBtn.style.flex = "0 0 auto";
+        selBarEl.appendChild(listBtn);
+
+        selOutBtn = makeButton("Remove", "#333", STAR_GOLD, function () {
+
+            const pl = openEditablePlaylist();
+
+            if (pl && selectedSongs.size > 0) {
+                removeSongsFromPlaylist(pl, Array.from(selectedSongs.keys())).then(endSelect);
+            }
+        });
+
+        selOutBtn.title = "Take the picked songs out of the open playlist";
+        selOutBtn.style.flex = "0 0 auto";
+        selBarEl.appendChild(selOutBtn);
 
         const doneBtn = makeButton("Done", "#333", "#fff", endSelect);
 
@@ -43039,13 +43765,13 @@
             function () { return settings.heldPlayAsk !== false; },
             function (v) { settings.heldPlayAsk = v; });
 
-        const fadeReadyRow = makeFadeRow("A new song when ready, seconds", "ready");
-        const fadeTapRow = makeFadeRow("A song tapped, seconds", "tap");
-        const fadeSwipeRow = makeFadeRow("A swipe on the cover, seconds", "swipe");
-        const fadeMediaRow = makeFadeRow("Media controls, seconds", "media");
-        const fadeKeyRow = makeFadeRow("Keyboard shortcuts, seconds", "key");
+        const fadeReadyRow = makeFadeRow("Fade out for a new song when ready, seconds", "ready");
+        const fadeTapRow = makeFadeRow("Fade out for a song tapped, seconds", "tap");
+        const fadeSwipeRow = makeFadeRow("Fade out for a swipe on the cover, seconds", "swipe");
+        const fadeMediaRow = makeFadeRow("Fade out for media controls, seconds", "media");
+        const fadeKeyRow = makeFadeRow("Fade out for keyboard shortcuts, seconds", "key");
         const fadeResumeRow = makeFadeRow("Fade in when playing on, seconds", "resume");
-        const fadeHushRow = makeStepperRow("Silence before fading in, seconds", function () {
+        const fadeHushRow = makeStepperRow("Silence before the fade in, seconds", function () {
             return hushSeconds(settings.fadeResumeHushSec);
         }, function (v) {
             settings.fadeResumeHushSec = hushSeconds(v);
@@ -43563,14 +44289,14 @@
         playbackPage.appendChild(withHint(directRow, "On plays a song straight from Mureka's link, so it starts at once, and saves a copy for later once it plays. Off downloads the whole song first, which starts slower. With no signal the saved copy plays either way."));
         playbackPage.appendChild(withHint(heldAskRow, "When another app such as a video app took the sound, the browser only gives it back after a tap. On, a box with a large Resume playback button asks for that tap when the player is back in view. Off, a short note asks for Play instead."));
         playbackPage.appendChild(makeLabel("Fades"));
-        playbackPage.appendChild(makeHint("The playing song fades out before another one starts, for each way of switching that is on, over its own seconds. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
-        playbackPage.appendChild(withHint(fadeReadyRow, "A song still being made, asked to play as soon as it is ready, and a new song played now from the question that offers new songs."));
-        playbackPage.appendChild(withHint(fadeTapRow, "A song tapped in the list or the queue, here or in the web view, and Next and Previous on the screen."));
-        playbackPage.appendChild(withHint(fadeSwipeRow, "A swipe on the cover, here or in the web view. The fade starts as the cover glides."));
-        playbackPage.appendChild(withHint(fadeMediaRow, "Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
-        playbackPage.appendChild(withHint(fadeKeyRow, "N and P on a keyboard, here or in the web view."));
-        playbackPage.appendChild(withHint(fadeResumeRow, "A paused song comes back softly when it plays on, after a pause or after another app had the sound. On an iPhone it also hides the short stutter Safari makes then."));
-        playbackPage.appendChild(withHint(fadeHushRow, "How long a song playing on stays silent before it fades in, over the short stutter an iPhone may make as the sound comes back. Steps by a tenth of a second."));
+        playbackPage.appendChild(makeHint("The fade outs: the playing song fades out before another one starts, for each way of switching that is on, over its own seconds. The fade in: a paused song comes up softly when it plays on. Typed, a value can be as fine as 0.25. Browsers playing the music fade along."));
+        playbackPage.appendChild(withHint(fadeReadyRow, "Fades the playing song out before a song still being made, asked to play as soon as it is ready, or a new song played now from the question that offers new songs."));
+        playbackPage.appendChild(withHint(fadeTapRow, "Fades the playing song out before a song tapped in the list or the queue, here or in the web view, and before Next and Previous on the screen."));
+        playbackPage.appendChild(withHint(fadeSwipeRow, "Fades the playing song out at a swipe on the cover, here or in the web view. The fade out starts as the cover glides."));
+        playbackPage.appendChild(withHint(fadeMediaRow, "Fades the playing song out before Next and Previous from the lock screen, the notification, Bluetooth, a steering wheel or a browser's media keys."));
+        playbackPage.appendChild(withHint(fadeKeyRow, "Fades the playing song out before N and P on a keyboard, here or in the web view."));
+        playbackPage.appendChild(withHint(fadeResumeRow, "Fades a paused song in when it plays on, after a pause or after another app had the sound. On an iPhone it also hides the short stutter Safari makes then."));
+        playbackPage.appendChild(withHint(fadeHushRow, "How long a song playing on stays silent before its fade in starts, over the short stutter an iPhone may make as the sound comes back. Steps by a tenth of a second."));
         nowPage.appendChild(makeLabel("Artwork"));
         nowPage.appendChild(makeHint("The cover shown on the lock screen, in the notification and on screens connected over Bluetooth."));
         nowPage.appendChild(withHint(artworkRow, "Hands the cover over as a web link instead of the picture itself. Better on Android, keep it off on an iPhone."));
@@ -54861,7 +55587,8 @@
         publishHostSoon();
     }
 
-    // Build the playlists overlay once, it covers the panel until closed
+    // Build the Playlists page once, it covers the panel until closed. The
+    // web view shows the same page as its Playlists panel
     function buildPlaylists() {
 
         playlistsEl = document.createElement("div");
@@ -54878,7 +55605,7 @@
             "gap:10px"
         ].join(";");
 
-        // Heading row with a Done button that closes the overlay
+        // Heading row with a Done button that closes the page
         const head = document.createElement("div");
         head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
 
@@ -54893,22 +55620,39 @@
         head.appendChild(heading);
         head.appendChild(doneBtn);
 
-        // All songs entry clears the active playlist and shows the whole library
+        // A new playlist, and the whole library again
+        const top = document.createElement("div");
+        top.style.cssText = "display:flex;gap:6px";
+
+        const newBtn = makeButton("New playlist", "#48e1eb", "#000", function () {
+            startEditPlaylist(null);
+        });
+
         const allBtn = makeButton("All songs", "#333", "#fff", clearPlaylist);
-        allBtn.style.textAlign = "left";
+
+        newBtn.style.flex = "1 1 0";
+        allBtn.style.flex = "1 1 0";
+        top.appendChild(newBtn);
+        top.appendChild(allBtn);
+
+        // Making or editing a playlist, shown while one is
+        playlistsEditEl = document.createElement("div");
+        playlistsEditEl.style.cssText = "display:none;flex-direction:column;gap:8px;padding:10px;"
+            + "border-radius:8px;background:#26262c;border:1px solid rgba(72,225,235,0.5)";
 
         // Container that the playlist rows are rendered into
         playlistsListEl = document.createElement("div");
         playlistsListEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
 
         playlistsEl.appendChild(head);
-        playlistsEl.appendChild(allBtn);
+        playlistsEl.appendChild(top);
+        playlistsEl.appendChild(playlistsEditEl);
         playlistsEl.appendChild(playlistsListEl);
 
         panelEl.appendChild(playlistsEl);
     }
 
-    // Show the playlists overlay, loading the list the first time it opens
+    // Show the Playlists page, reading the playlists again when they are old
     function openPlaylists() {
 
         closeDropdowns();
@@ -54924,21 +55668,28 @@
             playlistsEl.style.display = "flex";
         }
 
-        if (playlists.length === 0 && !playlistsLoading) {
+        renderPlaylists();
+
+        if (!playlistsLoading) {
             loadPlaylists();
         }
     }
 
-    // Hide the playlists overlay
+    // Hide the Playlists page, what was being edited is let go
     function closePlaylists() {
+
+        playlistEditing = null;
 
         if (playlistsEl) {
             playlistsEl.style.display = "none";
         }
+
+        publishHostSoon();
     }
 
-    // Fetch the user playlists, following pagination, keeping only own lists
-    // Each playlist carries its song_ids inline, so no detail call is needed
+    // Fetch the user playlists, following pagination, keeping only own
+    // lists. Each playlist carries its song_ids inline, the order comes
+    // with a playlist's own reading
     async function loadPlaylists() {
 
         playlistsLoading = true;
@@ -54947,6 +55698,7 @@
         const collected = [];
         let lastId = null;
         let guard = 0;
+        let failed = "";
 
         try {
 
@@ -54964,6 +55716,8 @@
                 const json = await res.json();
 
                 if (!json || json.code !== 0 || !json.data) {
+
+                    failed = json && json.msg ? String(json.msg) : "HTTP " + res.status;
                     break;
                 }
 
@@ -54976,12 +55730,7 @@
                         return;
                     }
 
-                    collected.push({
-                        playlist_id: p.playlist_id,
-                        name: p.name || "Untitled",
-                        song_count: p.song_count || (p.song_ids ? p.song_ids.length : 0),
-                        ids: new Set(p.song_ids || [])
-                    });
+                    collected.push(playlistRecord(p, playlistById(p.playlist_id)));
                 });
 
                 lastId = json.data.last_id;
@@ -54991,14 +55740,39 @@
                     break;
                 }
             }
-
-            playlists = collected;
         } catch (e) {
-            playlists = collected;
+            failed = errText(e);
         }
 
+        // A failed reading keeps the playlists known before
+        if (collected.length > 0 || !failed) {
+            playlists = collected;
+            playlistsRead = true;
+        }
+
+        playlistsError = failed;
         playlistsLoading = false;
+
+        if (failed) {
+            dbgLog("Mureka", "the playlists could not be read: " + failed);
+        }
+
+        // The open playlist follows its new name and songs
+        if (activePlaylist) {
+
+            const pl = playlistById(activePlaylist.playlist_id);
+
+            if (pl) {
+
+                activePlaylist.name = pl.name;
+                activePlaylist.ids = pl.ids;
+            }
+        }
+
         renderPlaylists();
+        updatePlaylistButton();
+        publishHostSoon();
+        mendPlaylist();
     }
 
     // The songs the account signed in here has liked, from its Liked Songs
@@ -55125,73 +55899,406 @@
         }
     }
 
-    // Render the playlist rows, or a loading or empty message
+    // Render the playlist rows and the playlist being edited
     function renderPlaylists() {
 
         if (!playlistsListEl) {
             return;
         }
 
+        renderPlaylistEdit();
         playlistsListEl.textContent = "";
 
-        if (playlistsLoading) {
+        const say = function (text) {
 
             const msg = document.createElement("div");
-            msg.textContent = "Loading playlists...";
+
+            msg.textContent = text;
             msg.style.cssText = "color:#888;padding:4px 2px";
             playlistsListEl.appendChild(msg);
+        };
+
+        if (playlistsLoading && playlists.length === 0) {
+
+            say("Loading playlists...");
+            return;
+        }
+
+        if (playlistsError && playlists.length === 0) {
+
+            say("Could not read the playlists, " + playlistsError);
             return;
         }
 
         if (playlists.length === 0) {
 
-            const msg = document.createElement("div");
-            msg.textContent = "No playlists found";
-            msg.style.cssText = "color:#888;padding:4px 2px";
-            playlistsListEl.appendChild(msg);
+            say("No playlists yet");
             return;
         }
 
         playlists.forEach(function (pl) {
 
-            const active = activePlaylist && activePlaylist.playlist_id === pl.playlist_id;
-            const bg = active ? "#48e1eb" : "#333";
-            const fg = active ? "#000" : "#fff";
+            const active = activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id);
+            const row = document.createElement("div");
 
-            const btn = makeButton(pl.name + "  (" + pl.song_count + ")", bg, fg, function () {
-                selectPlaylist(pl);
+            row.style.cssText = "display:flex;align-items:center;gap:6px";
+
+            // The cover, the phone's own, the web view draws the row without
+            // it. A picture that does not load leaves the grey square
+            const art = document.createElement("div");
+
+            art.style.cssText = "flex:0 0 auto;width:34px;height:34px;border-radius:5px;background:#333 center/cover no-repeat";
+
+            if (pl.cover) {
+                art.style.backgroundImage = "url(\"" + coverUrl({ cover: pl.cover }).replace(/["\\]/g, "") + "\")";
+            }
+
+            row.appendChild(art);
+
+            const open = makeButton(pl.name + "  (" + pl.song_count + ")", active ? "#48e1eb" : "#333", active ? "#000" : "#fff", function () {
+                openPlaylist(pl, false);
             });
 
-            btn.style.textAlign = "left";
-            playlistsListEl.appendChild(btn);
+            open.style.textAlign = "left";
+            open.style.flex = "1 1 auto";
+            open.style.minWidth = "0";
+            open.style.overflow = "hidden";
+            open.style.textOverflow = "ellipsis";
+            open.style.whiteSpace = "nowrap";
+            open.title = pl.description || pl.name;
+            row.appendChild(open);
+
+            const play = makeButton("Play", "#333", "#fff", function () {
+                openPlaylist(pl, true);
+            });
+
+            play.style.flex = "0 0 auto";
+            row.appendChild(play);
+
+            // Liked Songs follows the hearts, it is not edited here
+            if (editablePlaylist(pl)) {
+
+                const edit = makeButton("Edit", "#333", "#fff", function () {
+                    startEditPlaylist(pl);
+                });
+
+                edit.style.flex = "0 0 auto";
+                row.appendChild(edit);
+            }
+
+            playlistsListEl.appendChild(row);
         });
     }
 
-    // Select a playlist as the active filter, then refresh the list and queue
-    function selectPlaylist(pl) {
+    // The fields of the playlist being made or edited, its covers and
+    // Delete, which asks with a second tap
+    function renderPlaylistEdit() {
 
-        activePlaylist = { playlist_id: pl.playlist_id, name: pl.name, ids: pl.ids };
+        if (!playlistsEditEl) {
+            return;
+        }
 
-        updatePlaylistButton();
-        queueFollowFilter();
-        renderList();
+        playlistsEditEl.textContent = "";
+
+        const ed = playlistEditing;
+
+        if (!ed) {
+
+            playlistsEditEl.style.display = "none";
+            return;
+        }
+
+        playlistsEditEl.style.display = "flex";
+
+        const pl = ed.id ? playlistById(ed.id) : null;
+        const title = document.createElement("div");
+
+        title.textContent = pl ? "Edit " + pl.name : "New playlist";
+        title.style.cssText = "font-weight:600";
+        playlistsEditEl.appendChild(title);
+
+        const field = function (key, placeholder, max) {
+
+            const input = document.createElement("input");
+
+            input.type = "text";
+            input.placeholder = placeholder;
+            input.maxLength = max;
+            input.value = ed[key] || "";
+            input.style.cssText = "width:100%;box-sizing:border-box;padding:7px 9px;border-radius:6px;"
+                + "border:1px solid #444;background:#1d1d22;color:#fff;font-size:14px";
+            input.addEventListener("input", function () {
+                ed[key] = input.value;
+            });
+            input.addEventListener("keydown", function (ev) {
+
+                ev.stopPropagation();
+
+                if (ev.key === "Enter") {
+                    savePlaylistEdit();
+                }
+            });
+            playlistsEditEl.appendChild(input);
+
+            return input;
+        };
+
+        field("name", "Name", 50);
+        field("description", "Description", 200);
+
+        const buttons = document.createElement("div");
+
+        buttons.style.cssText = "display:flex;gap:6px";
+
+        const save = makeButton(pl ? "Save" : "Create", "#48e1eb", "#000", savePlaylistEdit);
+        const cancel = makeButton("Cancel", "#333", "#fff", function () {
+
+            playlistEditing = null;
+            renderPlaylists();
+            publishHostSoon();
+        });
+
+        save.style.flex = "1 1 0";
+        cancel.style.flex = "1 1 0";
+        buttons.appendChild(save);
+        buttons.appendChild(cancel);
+        playlistsEditEl.appendChild(buttons);
+
+        if (!pl) {
+            return;
+        }
+
+        // The cover from the song playing, or a picture of the phone's own
+        const covers = document.createElement("div");
+
+        covers.style.cssText = "display:flex;gap:6px";
+
+        const fromSong = makeButton("Cover from the playing song", "#333", "#fff", function () {
+
+            if (!currentSong || !currentSong.cover) {
+
+                showToast("Play a song with a cover first", false);
+                return;
+            }
+
+            changePlaylist(pl, { cover: currentSong.cover }, "The cover of " + pl.name + " changed");
+        });
+
+        fromSong.style.flex = "1 1 0";
+        covers.appendChild(fromSong);
+
+        const picture = makeButton("Cover from a picture", "#333", "#fff", function () {
+            pickPlaylistCover(pl);
+        });
+
+        // A picture is picked on the phone, not from the web view
+        picture.dataset.hostSkip = "1";
+        picture.style.flex = "1 1 0";
+        covers.appendChild(picture);
+        playlistsEditEl.appendChild(covers);
+
+        const armed = playlistDeleteArmed === String(pl.playlist_id);
+        const del = makeButton(armed ? "Tap again to delete " + pl.name : "Delete playlist", armed ? "#ff6b6b" : "#3a2626", armed ? "#000" : "#ff8a8a", function () {
+
+            if (!armed) {
+
+                playlistDeleteArmed = String(pl.playlist_id);
+                clearTimeout(playlistDeleteTimer);
+                playlistDeleteTimer = setTimeout(function () {
+
+                    playlistDeleteArmed = "";
+                    renderPlaylists();
+                    publishHostSoon();
+                }, 5000);
+                renderPlaylists();
+                publishHostSoon();
+                return;
+            }
+
+            playlistDeleteArmed = "";
+            clearTimeout(playlistDeleteTimer);
+            deletePlaylist(pl);
+        });
+
+        playlistsEditEl.appendChild(del);
+    }
+
+    function startEditPlaylist(pl) {
+
+        playlistDeleteArmed = "";
+        playlistEditing = pl
+            ? { id: String(pl.playlist_id), name: pl.name, description: pl.description || "" }
+            : { id: "", name: "", description: "" };
         renderPlaylists();
+        publishHostSoon();
+
+        if (playlistsEl) {
+            playlistsEl.scrollTop = 0;
+        }
+    }
+
+    // Create or Save on the Playlists page
+    async function savePlaylistEdit() {
+
+        const ed = playlistEditing;
+
+        if (!ed) {
+            return;
+        }
+
+        const name = String(ed.name || "").trim().slice(0, 50);
+
+        if (!name) {
+
+            showToast("Give the playlist a name", false);
+            return;
+        }
+
+        const description = String(ed.description || "").trim().slice(0, 200);
+
+        if (!ed.id) {
+
+            const made = await createPlaylist(name, description);
+
+            if (made) {
+
+                playlistEditing = null;
+                renderPlaylists();
+                publishHostSoon();
+            }
+
+            return;
+        }
+
+        const pl = playlistById(ed.id);
+
+        if (!pl) {
+            return;
+        }
+
+        if (await changePlaylist(pl, { name: name, description: description }, "Saved " + name)) {
+
+            playlistEditing = null;
+            renderPlaylists();
+            publishHostSoon();
+        }
+    }
+
+    // A picture of the phone's own, its square chosen in the cover editor,
+    // uploaded and made the playlist's cover
+    function pickPlaylistCover(pl) {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (!file) {
+                return;
+            }
+
+            if (file.size > COVER_FILE_MAX) {
+
+                showToast("The picture is too large, at most 20 MB", false);
+                return;
+            }
+
+            openCoverEditor(file, pl.name, panelEl || document.body, false, async function (crop, why) {
+
+                if (!crop) {
+
+                    if (why) {
+                        showToast("Could not use the picture, " + why, false);
+                    }
+
+                    return;
+                }
+
+                userTry("a playlist cover");
+                showToast("Uploading the cover", "wait");
+
+                try {
+
+                    const key = await uploadCover(file);
+
+                    await changePlaylist(pl, { cover: key + coverProcess(crop) }, "The cover of " + pl.name + " changed");
+                } catch (e) {
+                    showToast("Could not upload the cover, " + errText(e), false);
+                }
+            });
+        });
+
+        input.click();
+    }
+
+    // Open a playlist: the list shows its songs in its order and a queue
+    // made from the list follows it. play starts it from the top, or
+    // shuffled with shuffle on
+    async function openPlaylist(pl, play) {
+
+        const key = String(pl.playlist_id);
+        const known = playlistDetails.get(key);
+
+        activePlaylist = { playlist_id: pl.playlist_id, name: pl.name, ids: pl.ids, order: known ? known.order : null };
+
+        // Sorted by Mureka, the queue or the sets, the list would not show
+        // the playlist's order
+        if (listView === "queue" || listView === "sets") {
+            setView("mureka");
+        }
+
+        playlistEditing = null;
         closePlaylists();
+        playlistChanged(false);
+
+        if (!known || Date.now() - known.at > PLAYLIST_FRESH_MS) {
+            await readPlaylist(pl);
+        }
+
+        if (play && activePlaylist && String(activePlaylist.playlist_id) === key) {
+            startPlay();
+        }
     }
 
     // Clear the active playlist so the whole library shows again
     function clearPlaylist() {
 
         activePlaylist = null;
-
-        updatePlaylistButton();
-        queueFollowFilter();
-        renderList();
-        renderPlaylists();
+        playlistEditing = null;
         closePlaylists();
+        playlistChanged(false);
     }
 
-    // Tint the Playlists button while a playlist filter is active
+    // The open playlist or its songs changed: the list, the queue made from
+    // it, the web view and the Playlists page follow. moved: the order
+    // changed, so the songs still to come follow it at once
+    function playlistChanged(moved) {
+
+        playlistOrderStamp += 1;
+        playlistSongsMemo = null;
+        hostListStamp += 1;
+        songDataStamp++;
+
+        updatePlaylistButton();
+        renderPlaylists();
+        renderList();
+        publishHostSoon();
+        queueFollowFilter();
+
+        if (moved) {
+            rebuildUpcoming();
+        }
+    }
+
+    // Tint the Playlists button while a playlist is open
     function updatePlaylistButton() {
 
         if (!playlistButton) {
@@ -55202,6 +56309,1014 @@
 
         playlistButton.style.background = active ? "#48e1eb" : "#444";
         playlistButton.style.color = active ? "#000" : "#fff";
+    }
+
+    // One playlist as kept here, from Mureka's list or its own reading.
+    // The ids as strings, the songs' own ids are numbers
+    function playlistRecord(p, before) {
+
+        const ids = Array.isArray(p.song_ids)
+            ? new Set(p.song_ids.map(String))
+            : (before ? before.ids : new Set());
+
+        return {
+            playlist_id: p.playlist_id,
+            name: String(p.name || "").trim() || "Untitled",
+            description: String(p.description || ""),
+            cover: String(p.cover_url || ""),
+            song_count: Number(p.song_count) >= 0 && p.song_count !== undefined ? Number(p.song_count) : ids.size,
+            liked: p.t === 1,
+            ids: ids
+        };
+    }
+
+    function playlistById(id) {
+
+        const wanted = String(id);
+
+        return playlists.find(function (p) {
+            return String(p.playlist_id) === wanted;
+        }) || null;
+    }
+
+    // Liked Songs follows the hearts, the others are the account's to change
+    function editablePlaylist(pl) {
+        return !!pl && !pl.liked;
+    }
+
+    // The open playlist, when it can be changed here
+    function openEditablePlaylist() {
+
+        const pl = activePlaylist ? playlistById(activePlaylist.playlist_id) : null;
+
+        return editablePlaylist(pl) ? pl : null;
+    }
+
+    // Whether the list follows the open playlist's own order
+    function playlistOrdered() {
+        return !!(activePlaylist && Array.isArray(activePlaylist.order));
+    }
+
+    // The open playlist's songs in its order: the library's own copy of a
+    // song where it has one, Mureka's from the playlist otherwise
+    function playlistOrderedSongs() {
+
+        const memo = playlistSongsMemo;
+
+        if (memo && memo.stamp === playlistOrderStamp && memo.songs === cache.songs && memo.length === cache.songs.length) {
+            return memo.list;
+        }
+
+        const byId = new Map();
+
+        for (const s of cache.songs) {
+            byId.set(String(s.song_id), s);
+        }
+
+        const detail = playlistDetails.get(String(activePlaylist.playlist_id));
+        const list = [];
+
+        for (const id of activePlaylist.order) {
+
+            const song = byId.get(id) || (detail ? detail.songs.get(id) : null);
+
+            if (song) {
+                list.push(song);
+            }
+        }
+
+        playlistSongsMemo = { stamp: playlistOrderStamp, songs: cache.songs, length: cache.songs.length, list: list };
+
+        return list;
+    }
+
+    // A song of a playlist that the library held here does not have
+    function playlistSong(id) {
+
+        const wanted = String(id);
+
+        for (const d of playlistDetails.values()) {
+
+            const song = d.songs.get(wanted);
+
+            if (song) {
+                return song;
+            }
+        }
+
+        return null;
+    }
+
+    // Read one playlist's songs and their order from Mureka. Newest added
+    // first. Asked twice at once, the one reading answers both
+    function readPlaylist(pl) {
+
+        const key = String(pl.playlist_id);
+
+        if (playlistReads.has(key)) {
+            return playlistReads.get(key);
+        }
+
+        const reading = (async function () {
+
+            const res = await timedFetch("/api/pgc/playlist/detail?time=" + Date.now() + "&playlist_id=" + encodeURIComponent(key), {
+                credentials: "include",
+                cache: "no-store"
+            });
+            const json = await res.json().catch(function () {
+                return null;
+            });
+
+            if (!res.ok || !json || json.code !== 0 || !json.data) {
+                throw new Error(json && json.msg ? String(json.msg) : "HTTP " + res.status);
+            }
+
+            const data = json.data;
+            const head = data.playlist && typeof data.playlist === "object" ? data.playlist : {};
+            const entries = Array.isArray(data.list) ? data.list : (Array.isArray(head.list) ? head.list : []);
+            const order = [];
+            const songs = new Map();
+
+            for (const e of entries) {
+
+                const song = e && e.song && typeof e.song === "object" ? e.song : null;
+
+                if (!song || (e.type !== undefined && e.type !== 1)) {
+                    continue;
+                }
+
+                const id = String(song.song_id);
+
+                if (songs.has(id)) {
+                    continue;
+                }
+
+                order.push(id);
+                songs.set(id, song);
+            }
+
+            // Only the first part of a long playlist would leave songs out
+            if (data.more === true || head.more === true) {
+                dbgLog("Mureka", "playlist " + key + " says it has more songs than the " + order.length + " read");
+            }
+
+            const detail = { order: order, songs: songs, at: Date.now() };
+            const before = playlistById(key);
+            const record = playlistRecord(Object.assign({}, head, {
+                playlist_id: head.playlist_id || pl.playlist_id,
+                song_ids: order,
+                song_count: order.length,
+                t: before && before.liked ? 1 : head.t
+            }), before);
+
+            playlistDetails.set(key, detail);
+
+            if (before) {
+                Object.assign(before, record);
+            } else {
+                playlists.unshift(record);
+            }
+
+            if (activePlaylist && String(activePlaylist.playlist_id) === key) {
+
+                activePlaylist.order = order;
+                activePlaylist.ids = (before || record).ids;
+                activePlaylist.name = (before || record).name;
+            }
+
+            playlistChanged(false);
+
+            return detail;
+        })().catch(function (e) {
+
+            dbgLog("Mureka", "playlist " + key + " could not be read: " + errText(e));
+            showToast("Could not read " + (pl.name || "the playlist") + ", " + errText(e), false);
+
+            return null;
+        }).finally(function () {
+            playlistReads.delete(key);
+        });
+
+        playlistReads.set(key, reading);
+
+        return reading;
+    }
+
+    // One of Mureka's playlist requests, a POST with the time, answering
+    // what Mureka gave back or throwing why not
+    async function playlistPost(path, body) {
+
+        const res = await murekaFetch(path, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(Object.assign({ time: Date.now() }, body))
+        });
+        const json = await res.json().catch(function () {
+            return null;
+        });
+
+        dbgLog("Mureka", path.replace("/api/pgc/", "") + ": HTTP " + res.status
+            + (json && json.code !== undefined ? ", code " + json.code : "")
+            + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+
+        if (!res.ok || !json || json.code !== 0) {
+            throw new Error(json && json.msg ? String(json.msg) : "HTTP " + res.status);
+        }
+
+        return json.data || {};
+    }
+
+    // The playlists read once before anything is put in one
+    async function ensurePlaylists() {
+
+        if (!playlistsRead && !playlistsLoading) {
+            await loadPlaylists();
+        }
+
+        while (playlistsLoading) {
+            await new Promise(function (r) {
+                setTimeout(r, 100);
+            });
+        }
+    }
+
+    // Make a new playlist, answering it, or null when Mureka did not
+    async function createPlaylist(name, description) {
+
+        userTry("a new playlist");
+        showToast("Making " + name, "wait");
+
+        try {
+
+            const data = await playlistPost("/api/pgc/playlist/create", { name: name, description: description || "", cover_url: "" });
+            const p = data.playlist || {};
+
+            if (!p.playlist_id) {
+                throw new Error("no playlist came back");
+            }
+
+            const pl = playlistRecord(Object.assign({ song_count: 0, song_ids: [] }, p), null);
+
+            playlists.unshift(pl);
+            playlistDetails.set(String(pl.playlist_id), { order: [], songs: new Map(), at: Date.now() });
+            renderPlaylists();
+            publishHostSoon();
+            showToast("Made " + pl.name, true);
+
+            return pl;
+        } catch (e) {
+
+            showToast("Could not make " + name + ", " + errText(e), false);
+            return null;
+        }
+    }
+
+    // Change a playlist's name, description or cover. Mureka takes every
+    // field each time, so the ones not changed go as they are
+    async function changePlaylist(pl, changes, done) {
+
+        userTry("a playlist change");
+        showToast("Saving " + pl.name, "wait");
+
+        const next = {
+            name: changes.name !== undefined ? changes.name : pl.name,
+            description: changes.description !== undefined ? changes.description : (pl.description || ""),
+            cover: changes.cover !== undefined ? changes.cover : (pl.cover || "")
+        };
+
+        try {
+
+            const data = await playlistPost("/api/pgc/playlist/create", {
+                name: next.name,
+                description: next.description,
+                cover_url: next.cover,
+                playlist_id: pl.playlist_id
+            });
+            const p = data.playlist || {};
+
+            pl.name = String(p.name || next.name).trim() || pl.name;
+            pl.description = String(p.description !== undefined ? p.description : next.description);
+            pl.cover = String(p.cover_url || next.cover);
+
+            if (activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id)) {
+                activePlaylist.name = pl.name;
+            }
+
+            playlistChanged(false);
+            showToast(done, true);
+
+            return true;
+        } catch (e) {
+
+            showToast("Could not save " + pl.name + ", " + errText(e), false);
+            return false;
+        }
+    }
+
+    async function deletePlaylist(pl) {
+
+        userTry("deleting a playlist");
+        showToast("Deleting " + pl.name, "wait");
+
+        try {
+            await playlistPost("/api/pgc/playlist/delete", { playlist_id: pl.playlist_id });
+        } catch (e) {
+
+            showToast("Could not delete " + pl.name + ", " + errText(e), false);
+            return;
+        }
+
+        const key = String(pl.playlist_id);
+
+        playlists = playlists.filter(function (p) {
+            return String(p.playlist_id) !== key;
+        });
+        playlistDetails.delete(key);
+        forgetPlaylistUsed(key);
+        playlistEditing = null;
+
+        if (activePlaylist && String(activePlaylist.playlist_id) === key) {
+            activePlaylist = null;
+        }
+
+        playlistChanged(false);
+        showToast("Deleted " + pl.name, true);
+    }
+
+    // The playlists songs went into, latest first, as { id, name }
+    function loadPlaylistsUsed() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(PLAYLIST_USED_KEY) || "[]");
+
+            return Array.isArray(raw) ? raw.filter(function (x) {
+                return x && x.id;
+            }).slice(0, 20) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function notePlaylistUsed(pl) {
+
+        const key = String(pl.playlist_id);
+        const used = loadPlaylistsUsed().filter(function (x) {
+            return String(x.id) !== key;
+        });
+
+        used.unshift({ id: key, name: pl.name });
+
+        try {
+            localStorage.setItem(PLAYLIST_USED_KEY, JSON.stringify(used.slice(0, 20)));
+        } catch (e) {
+        }
+
+        updatePlaylistCtl();
+    }
+
+    function forgetPlaylistUsed(key) {
+
+        try {
+            localStorage.setItem(PLAYLIST_USED_KEY, JSON.stringify(loadPlaylistsUsed().filter(function (x) {
+                return String(x.id) !== key;
+            })));
+        } catch (e) {
+        }
+
+        updatePlaylistCtl();
+    }
+
+    // The playlist songs went into last, its record when the playlists
+    // have been read, otherwise what is known of it here
+    function lastPlaylist() {
+
+        const last = loadPlaylistsUsed()[0];
+
+        if (!last) {
+            return null;
+        }
+
+        const pl = playlistById(last.id);
+
+        if (pl) {
+            return editablePlaylist(pl) ? pl : null;
+        }
+
+        return playlistsRead ? null : { playlist_id: last.id, name: String(last.name || "Playlist"), ids: new Set(), stub: true };
+    }
+
+    // The playlists to pick from, the latest used first, then Mureka's order
+    function playlistsToPick() {
+
+        const used = loadPlaylistsUsed().map(function (x) {
+            return String(x.id);
+        });
+        const own = playlists.filter(editablePlaylist);
+
+        return own.slice().sort(function (a, b) {
+
+            const ia = used.indexOf(String(a.playlist_id));
+            const ib = used.indexOf(String(b.playlist_id));
+
+            if (ia !== ib) {
+                return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+            }
+
+            return 0;
+        });
+    }
+
+    // Put songs in a playlist. Those in it already are left as they are.
+    // Mureka puts the new ones at the top
+    async function addSongsToPlaylist(pl, songs) {
+
+        await ensurePlaylists();
+
+        const record = playlistById(pl.playlist_id);
+
+        if (!editablePlaylist(record)) {
+
+            showToast("That playlist is no longer there", false);
+            return false;
+        }
+
+        const ids = [];
+
+        for (const s of songs) {
+
+            const id = String(s.song_id);
+
+            if (!record.ids.has(id) && ids.indexOf(id) < 0) {
+                ids.push(id);
+            }
+        }
+
+        notePlaylistUsed(record);
+
+        if (ids.length === 0) {
+
+            showToast((songs.length === 1 ? "Already in " : "Already all in ") + record.name, true);
+            return true;
+        }
+
+        userTry("adding to a playlist");
+        showToast("Adding to " + record.name, "wait");
+
+        try {
+            await playlistPost("/api/pgc/playlist/content/add", { playlist_id: record.playlist_id, song_ids: ids.map(Number) });
+        } catch (e) {
+
+            showToast("Could not add to " + record.name + ", " + errText(e), false);
+            return false;
+        }
+
+        for (const id of ids) {
+            record.ids.add(id);
+        }
+
+        record.song_count = record.ids.size;
+
+        // Read again for the order Mureka gave them, when it is open
+        const detail = playlistDetails.get(String(record.playlist_id));
+
+        if (detail) {
+
+            for (const s of songs) {
+                detail.songs.set(String(s.song_id), s);
+            }
+
+            detail.order = ids.slice().reverse().concat(detail.order.filter(function (id) {
+                return ids.indexOf(id) < 0;
+            }));
+            detail.at = 0;
+
+            if (activePlaylist && String(activePlaylist.playlist_id) === String(record.playlist_id)) {
+                activePlaylist.order = detail.order;
+            }
+        }
+
+        playlistChanged(false);
+        showToast((ids.length === 1 ? "Added to " : ids.length + " songs added to ") + record.name, true);
+
+        return true;
+    }
+
+    // Take songs out of a playlist
+    async function removeSongsFromPlaylist(pl, ids) {
+
+        const wanted = ids.map(String).filter(function (id) {
+            return pl.ids.has(id);
+        });
+
+        if (wanted.length === 0) {
+            return false;
+        }
+
+        userTry("taking out of a playlist");
+        showToast("Taking out of " + pl.name, "wait");
+
+        try {
+            await playlistPost("/api/pgc/playlist/content/remove", { playlist_id: pl.playlist_id, content_ids: wanted.map(Number) });
+        } catch (e) {
+
+            showToast("Could not take out of " + pl.name + ", " + errText(e), false);
+            return false;
+        }
+
+        for (const id of wanted) {
+            pl.ids.delete(id);
+        }
+
+        pl.song_count = pl.ids.size;
+
+        const detail = playlistDetails.get(String(pl.playlist_id));
+
+        if (detail) {
+
+            detail.order = detail.order.filter(function (id) {
+                return wanted.indexOf(id) < 0;
+            });
+
+            if (activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id)) {
+                activePlaylist.order = detail.order;
+            }
+        }
+
+        playlistChanged(true);
+        showToast((wanted.length === 1 ? "Taken out of " : wanted.length + " songs taken out of ") + pl.name, true);
+
+        return true;
+    }
+
+    // Move a song of the open playlist: "top", "up", "down" or "bottom"
+    function movePlaylistSong(pl, id, where) {
+
+        playlistWork = playlistWork.then(function () {
+            return moveInPlaylist(pl, String(id), where);
+        }, function () {
+            return moveInPlaylist(pl, String(id), where);
+        });
+
+        return playlistWork;
+    }
+
+    async function moveInPlaylist(pl, id, where) {
+
+        let detail = playlistDetails.get(String(pl.playlist_id));
+
+        if (!detail || Date.now() - detail.at > 5000) {
+            detail = await readPlaylist(pl);
+        }
+
+        if (!detail) {
+            return false;
+        }
+
+        const now = detail.order.slice();
+        const at = now.indexOf(id);
+
+        if (at < 0) {
+            return false;
+        }
+
+        const to = where === "top" ? 0 : (where === "up" ? at - 1 : (where === "down" ? at + 1 : now.length - 1));
+
+        if (to < 0 || to >= now.length || to === at) {
+            return true;
+        }
+
+        const wanted = now.slice();
+
+        wanted.splice(at, 1);
+        wanted.splice(to, 0, id);
+
+        return applyPlaylistOrder(pl, now, wanted);
+    }
+
+    // Bring a playlist from one order to another. Adding puts a song at the
+    // top, so the songs at the end of the wanted order that already stand
+    // in that order stay, and the rest are taken out and added back from
+    // the bottom up
+    async function applyPlaylistOrder(pl, now, wanted) {
+
+        let k = now.length - 1;
+        let i = wanted.length - 1;
+
+        for (; i >= 0; i -= 1) {
+
+            while (k >= 0 && now[k] !== wanted[i]) {
+                k -= 1;
+            }
+
+            if (k < 0) {
+                break;
+            }
+
+            k -= 1;
+        }
+
+        const redo = wanted.slice(0, i + 1);
+
+        if (redo.length === 0) {
+            return true;
+        }
+
+        userTry("moving in a playlist");
+        showToast(redo.length > 3 ? "Moving, " + redo.length + " songs go out and back in" : "Moving", "wait");
+
+        // Noted first, so songs taken out are put back even if the app closes
+        writePlaylistMend({ id: String(pl.playlist_id), name: pl.name, ids: redo });
+
+        try {
+            await playlistPost("/api/pgc/playlist/content/remove", { playlist_id: pl.playlist_id, content_ids: redo.map(Number) });
+        } catch (e) {
+
+            writePlaylistMend(null);
+            showToast("Could not move in " + pl.name + ", " + errText(e), false);
+            return false;
+        }
+
+        const ok = await addInOrder(pl, redo, wanted);
+
+        if (!ok) {
+
+            showToast("The move did not finish, the songs taken out go back in when Mureka answers", false);
+            setTimeout(mendPlaylist, 10000);
+            return false;
+        }
+
+        writePlaylistMend(null);
+
+        const detail = playlistDetails.get(String(pl.playlist_id));
+
+        if (detail) {
+
+            detail.order = wanted.slice();
+
+            if (activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id)) {
+                activePlaylist.order = detail.order;
+            }
+        }
+
+        playlistChanged(true);
+        showToast("Moved in " + pl.name, true);
+
+        return true;
+    }
+
+    // Add songs back so the first of redo ends on top. In one request when
+    // Mureka is known to keep that order, otherwise one at a time, a second
+    // apart. The first time one request is tried and the order read back
+    async function addInOrder(pl, redo, wanted) {
+
+        const add = function (ids) {
+            return playlistPost("/api/pgc/playlist/content/add", { playlist_id: pl.playlist_id, song_ids: ids.map(Number) });
+        };
+        const bottomUp = redo.slice().reverse();
+
+        try {
+
+            if (redo.length === 1) {
+
+                await add(redo);
+                return true;
+            }
+
+            let mode = "";
+
+            try {
+                mode = localStorage.getItem(PLAYLIST_BATCH_KEY) || "";
+            } catch (e) {
+                mode = "";
+            }
+
+            if (mode === "last" || mode === "first") {
+
+                await add(mode === "last" ? bottomUp : redo);
+                return true;
+            }
+
+            if (mode !== "single") {
+
+                // Learned once: added in one request, read back
+                await add(bottomUp);
+
+                const back = await readPlaylist(pl);
+                const top = back ? back.order.slice(0, redo.length) : [];
+                const same = function (a, b) {
+                    return a.length === b.length && a.every(function (x, n) {
+                        return x === b[n];
+                    });
+                };
+                const learned = same(top, redo) ? "last" : (same(top, bottomUp) ? "first" : "single");
+
+                // Songs whose ids already ran up or down could have come out
+                // that way by their ids alone, nothing is learned from them
+                const byId = redo.slice().sort(function (a, b) {
+                    return Number(a) - Number(b);
+                });
+                const telling = !same(redo, byId) && !same(redo, byId.slice().reverse());
+
+                dbgLog("Mureka", "songs added to a playlist in one request came out "
+                    + (learned === "last" ? "as if added one at a time" : (learned === "first" ? "the first on top" : "in no order kept"))
+                    + (telling ? "" : ", in the order of their ids, so not taken as the rule"));
+
+                if (telling) {
+
+                    try {
+                        localStorage.setItem(PLAYLIST_BATCH_KEY, learned);
+                    } catch (e) {
+                    }
+                }
+
+                if (learned === "last") {
+                    return true;
+                }
+
+                // Out of order, they go out again and back in as learned
+                await playlistPost("/api/pgc/playlist/content/remove", { playlist_id: pl.playlist_id, content_ids: redo.map(Number) });
+
+                if (learned === "first") {
+
+                    await add(redo);
+                    return true;
+                }
+            }
+
+            for (let n = 0; n < bottomUp.length; n += 1) {
+
+                if (n > 0) {
+                    await new Promise(function (r) {
+                        setTimeout(r, PLAYLIST_ADD_GAP_MS);
+                    });
+                }
+
+                await add([bottomUp[n]]);
+            }
+
+            return true;
+        } catch (e) {
+
+            dbgLog("Mureka", "songs could not go back in " + pl.name + ": " + errText(e));
+            return false;
+        }
+    }
+
+    function writePlaylistMend(m) {
+
+        try {
+
+            if (m) {
+                localStorage.setItem(PLAYLIST_MEND_KEY, JSON.stringify(m));
+            } else {
+                localStorage.removeItem(PLAYLIST_MEND_KEY);
+            }
+        } catch (e) {
+        }
+    }
+
+    // Songs a move took out and did not get back in, put back
+    async function mendPlaylist() {
+
+        let m = null;
+
+        try {
+            m = JSON.parse(localStorage.getItem(PLAYLIST_MEND_KEY) || "null");
+        } catch (e) {
+            m = null;
+        }
+
+        if (!m || !m.id || !Array.isArray(m.ids) || m.ids.length === 0) {
+            return;
+        }
+
+        const pl = playlistById(m.id);
+
+        if (!pl) {
+
+            writePlaylistMend(null);
+            return;
+        }
+
+        const detail = await readPlaylist(pl);
+
+        if (!detail) {
+            return;
+        }
+
+        const missing = m.ids.map(String).filter(function (id) {
+            return detail.order.indexOf(id) < 0;
+        });
+
+        if (missing.length === 0) {
+
+            writePlaylistMend(null);
+            return;
+        }
+
+        try {
+
+            await playlistPost("/api/pgc/playlist/content/add", { playlist_id: pl.playlist_id, song_ids: missing.map(Number) });
+            writePlaylistMend(null);
+            dbgLog("Mureka", missing.length + " songs a move had taken out put back in " + pl.name);
+            showToast((missing.length === 1 ? "A song" : missing.length + " songs") + " a move had taken out put back in " + pl.name, true);
+            await readPlaylist(pl);
+        } catch (e) {
+            dbgLog("Mureka", "songs a move had taken out could not go back in yet: " + errText(e));
+        }
+    }
+
+    // Pick a playlist for songs, the latest used first, or make a new one
+    async function pickPlaylistFor(songs, then) {
+
+        if (!playlistsRead) {
+
+            showToast("Reading the playlists", "wait");
+            await ensurePlaylists();
+        }
+
+        const many = songs.length > 1;
+        const options = [{ label: "New playlist", ring: true, fn: function () {
+
+            askText("New playlist", songs.length === 1 ? (songs[0].title || "").trim() : "", "Create", async function (name) {
+
+                const clean = String(name || "").trim().slice(0, 50);
+
+                if (!clean) {
+                    return;
+                }
+
+                const pl = await createPlaylist(clean, "");
+
+                if (pl) {
+
+                    await addSongsToPlaylist(pl, songs);
+
+                    if (then) {
+                        then();
+                    }
+                }
+            });
+        } }];
+
+        for (const pl of playlistsToPick()) {
+
+            options.push({ label: pl.name + "  (" + pl.song_count + ")", fn: async function () {
+
+                await addSongsToPlaylist(pl, songs);
+
+                if (then) {
+                    then();
+                }
+            } });
+        }
+
+        askChoices("Add to playlist\n" + (many ? songs.length + " songs" : (songs[0].title || "").trim() || "Untitled"), options, null, false, true);
+    }
+
+    // The button for the button row: the playing song into the playlist
+    // songs went into last, or the picker when there is none yet
+    function addPlayingToLastPlaylist() {
+
+        if (!currentSong) {
+
+            showToast("Nothing is playing", false);
+            return;
+        }
+
+        const pl = lastPlaylist();
+
+        if (!pl) {
+
+            pickPlaylistFor([currentSong]);
+            return;
+        }
+
+        addSongsToPlaylist(pl, [currentSong]).then(updatePlaylistCtl);
+    }
+
+    // The button's title says where the song would go, and it is lit while
+    // the playing song is in that playlist
+    function updatePlaylistCtl() {
+
+        const btn = controlButtons ? controlButtons.toplaylist : null;
+
+        if (!btn) {
+            return;
+        }
+
+        const pl = lastPlaylist();
+        const has = !!(pl && currentSong && pl.ids.has(String(currentSong.song_id)));
+
+        btn.title = pl ? (has ? "In " + pl.name : "Add the playing song to " + pl.name) : "Add the playing song to a playlist";
+        btn.style.color = has ? "#48e1eb" : "";
+        publishHostSoon();
+    }
+
+    // What the web view's song menu needs: the last playlist, those to pick
+    // from and, with a playlist open, the song's place in it
+    function hostPlaylistsFor(song) {
+
+        // Read the first time a menu asks, for the next one
+        if (!playlistsRead && !playlistsLoading) {
+            loadPlaylists();
+        }
+
+        const id = String(song.song_id);
+        const last = lastPlaylist();
+        const open = openEditablePlaylist();
+        const order = open && activePlaylist && Array.isArray(activePlaylist.order) ? activePlaylist.order : [];
+        const at = open ? order.indexOf(id) : -1;
+
+        return {
+            read: playlistsRead,
+            last: last ? { id: String(last.playlist_id), name: last.name, has: last.ids.has(id) } : null,
+            pick: playlistsToPick().map(function (p) {
+                return { id: String(p.playlist_id), name: p.name, count: p.song_count, has: p.ids.has(id) };
+            }),
+            open: open && open.ids.has(id) ? { id: String(open.playlist_id), name: open.name, at: at, count: order.length } : null
+        };
+    }
+
+    // Songs picked in the web view into a playlist, an old one or one made
+    // now, or out of the playlist open
+    async function hostPlaylistMany(cmd, a) {
+
+        const ids = Array.isArray(a.ids) ? a.ids.map(String).slice(0, 2000) : [];
+
+        if (cmd === "playlistRemove") {
+
+            const open = openEditablePlaylist();
+
+            if (open && ids.length > 0) {
+                await removeSongsFromPlaylist(open, ids);
+            }
+
+            return;
+        }
+
+        const songs = ids.map(hostFindSong).filter(Boolean);
+
+        if (songs.length === 0) {
+            return;
+        }
+
+        const pl = a.name ? await createPlaylist(String(a.name).trim().slice(0, 50), "") : playlistById(a.id);
+
+        if (pl) {
+            await addSongsToPlaylist(pl, songs);
+        }
+    }
+
+    // A playlist action from the web view's song menu
+    function hostPlaylistAction(song, act, value) {
+
+        if (act === "toPlaylist") {
+
+            const v = value && typeof value === "object" ? value : { id: value };
+
+            if (v.name) {
+
+                createPlaylist(String(v.name).trim().slice(0, 50), "").then(function (pl) {
+
+                    if (pl) {
+                        addSongsToPlaylist(pl, [song]);
+                    }
+                });
+                return;
+            }
+
+            const pl = playlistById(v.id) || (lastPlaylist() && String(lastPlaylist().playlist_id) === String(v.id) ? lastPlaylist() : null);
+
+            if (pl) {
+                addSongsToPlaylist(pl, [song]);
+            }
+
+            return;
+        }
+
+        const open = openEditablePlaylist();
+
+        if (!open) {
+            return;
+        }
+
+        if (act === "fromPlaylist") {
+            removeSongsFromPlaylist(open, [song.song_id]);
+        } else if (act === "playlistMove" && ["top", "up", "down", "bottom"].indexOf(String(value)) >= 0) {
+            movePlaylistSong(open, song.song_id, String(value));
+        }
+    }
+
+    // The button for the button row in the web view: the playlist songs
+    // went into last, and whether the playing song is in it
+    function hostToPlaylist() {
+
+        const pl = lastPlaylist();
+
+        return pl ? { name: pl.name, has: !!(currentSong && pl.ids.has(String(currentSong.song_id))) } : null;
     }
 
     // Tint the Creators button while another creator library is being browsed
@@ -56218,6 +58333,22 @@
     // view's song menu shows, so a row is found by its look and not only by
     // reading. Each is a list of shapes for makeSvgIcon
     const MENU_ICONS = {
+        playlists: [
+            ["line", { x1: "8", y1: "6", x2: "21", y2: "6" }],
+            ["line", { x1: "8", y1: "12", x2: "21", y2: "12" }],
+            ["line", { x1: "8", y1: "18", x2: "21", y2: "18" }],
+            ["line", { x1: "3", y1: "6", x2: "3.01", y2: "6" }],
+            ["line", { x1: "3", y1: "12", x2: "3.01", y2: "12" }],
+            ["line", { x1: "3", y1: "18", x2: "3.01", y2: "18" }]
+        ],
+        arrowUp: [
+            ["line", { x1: "12", y1: "19", x2: "12", y2: "5" }],
+            ["polyline", { points: "5 12 12 5 19 12" }]
+        ],
+        arrowDown: [
+            ["line", { x1: "12", y1: "5", x2: "12", y2: "19" }],
+            ["polyline", { points: "19 12 12 19 5 12" }]
+        ],
         cache: [
             ["polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }]
         ],
@@ -56536,6 +58667,61 @@
             addMenuRow(qi === queuePos ? "Remove all before this" : "Remove this and all before", STAR_GOLD, function () {
                 cutQueue(qi, "before");
             }, "close");
+        }
+
+        // Playlists: the last one used, any other, and with a playlist open
+        // taking the song out of it and moving it there
+        menuGroup();
+
+        if (!playlistsRead && !playlistsLoading) {
+            loadPlaylists();
+        }
+
+        const lastPl = lastPlaylist();
+
+        if (lastPl && !lastPl.ids.has(String(song.song_id))) {
+
+            addMenuRow("Add to " + lastPl.name, "#fff", function () {
+                addSongsToPlaylist(lastPl, [song]);
+            }, "listPlus");
+        }
+
+        addMenuRow("Add to playlist", "#fff", function () {
+            pickPlaylistFor([song]);
+        }, "playlists");
+
+        const openPl = openEditablePlaylist();
+
+        if (openPl && openPl.ids.has(String(song.song_id))) {
+
+            const order = Array.isArray(activePlaylist.order) ? activePlaylist.order : [];
+            const at = order.indexOf(String(song.song_id));
+
+            addMenuRow("Remove from " + openPl.name, STAR_GOLD, function () {
+                removeSongsFromPlaylist(openPl, [song.song_id]);
+            }, "close");
+
+            if (at > 0) {
+
+                addMenuRow("Move to top", "#fff", function () {
+                    movePlaylistSong(openPl, song.song_id, "top");
+                }, "arrowUp");
+
+                addMenuRow("Move up", "#fff", function () {
+                    movePlaylistSong(openPl, song.song_id, "up");
+                }, "arrowUp");
+            }
+
+            if (at >= 0 && at < order.length - 1) {
+
+                addMenuRow("Move down", "#fff", function () {
+                    movePlaylistSong(openPl, song.song_id, "down");
+                }, "arrowDown");
+
+                addMenuRow("Move to bottom", "#fff", function () {
+                    movePlaylistSong(openPl, song.song_id, "bottom");
+                }, "arrowDown");
+            }
         }
 
         // The song on Mureka, only the account's own songs. Another creator's
@@ -62305,6 +64491,7 @@
         <button class="ctl" id="nightBtn" type="button" data-label="Night" aria-label="Night mode on or off" data-icon="moon"></button>
         <button class="ctl" id="eqBtn" type="button" data-label="EQ" aria-label="Sound profile" data-icon="eq"></button>
         <button class="ctl" id="filtersBtn" type="button" title="All filters" data-label="Filters" aria-label="All filters" data-icon="filter"></button>
+        <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="Playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -62402,6 +64589,8 @@
     <span id="pickCount"></span>
     <button class="chip" id="pickCopy" type="button">Copy</button>
     <button class="chip" id="pickShare" type="button" style="display:none">Share</button>
+    <button class="chip" id="pickList" type="button">Playlist</button>
+    <button class="chip" id="pickOut" type="button" style="display:none">Remove</button>
     <button class="chip" id="pickDone" type="button">Done</button>
 </div>
 <div id="unplugPop"><span id="unplugText"></span><button id="unplugSkip" type="button">Skip shutdown</button></div>
@@ -63249,10 +65438,11 @@
         night: { label: "Night", icon: "moon", el: "nightBtn" },
         eq: { label: "EQ", icon: "eq", el: "eqBtn" },
         filters: { label: "Filters", icon: "filter", el: "filtersBtn" },
+        toplaylist: { label: "Playlist", icon: "queueAdd", el: "toPlBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "toplaylist", "songs", "minilist"];
 
     function icon(name) {
 
@@ -66810,6 +69000,12 @@
         $("eqBtn").classList.toggle("on", !!(s && (s.soundPicked || s.soundLive)));
         $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
+
+        // Lit while the playing song is in the playlist songs went into last
+        const toPl = s && s.toPlaylist ? s.toPlaylist : null;
+
+        $("toPlBtn").classList.toggle("on", !!(toPl && toPl.has));
+        $("toPlBtn").title = toPl ? (toPl.has ? "In " + toPl.name : "Add the playing song to " + toPl.name) : "Add the playing song to a playlist";
         // Repeat all is filled, repeat one ringed, off is an ordinary button
         $("repeat").classList.toggle("on", !!(s && s.repeat === "all"));
         $("repeat").classList.toggle("ring", !!(s && s.repeat === "one"));
@@ -67027,7 +69223,9 @@
     // the middle only near the start and the end. Dragging moves the play
     // head as before. Past two thirds of the way to an edge with more song
     // beyond it, the play head stays there and the waveform scrolls
-    // instead, faster the nearer the finger is to the edge. Let go, the
+    // instead, faster the nearer the finger is to the edge. With the play
+    // head moving along the song, it goes with the finger right out to the
+    // edge, and the waveform scrolls on much faster out there. Let go, the
     // waveform glides back so the play head is in the middle again. A tap
     // zoomed in seeks a moment later, so a second tap can zoom out instead.
     // hooks: ready() a song to seek in, zoomable() a waveform shown,
@@ -67040,6 +69238,12 @@
         const ZOOM_MAX = 32;
         const EDGE = 2 / 3;
         const EDGE_SPEED = 1.5;
+
+        // With the play head moving along, the finger takes it right out to
+        // the edge, and the waveform scrolls on the faster the further out
+        // it is: from a crawl past two thirds to the whole song in about
+        // this many seconds at the very edge, however far zoomed in
+        const EDGE_SONG_SEC = 3;
         const GLIDE_MS = 350;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
@@ -67234,7 +69438,25 @@
 
             d.at = now;
 
-            if (sp < 1) {
+            if (sp < 1 && travels()) {
+
+                const right = Math.min(1, (d.px - EDGE) / (1 - EDGE));
+                const left = Math.min(1, (1 - EDGE - d.px) / (1 - EDGE));
+                const slow = EDGE_SPEED * sp;
+                const fast = Math.max(slow, 1 / EDGE_SONG_SEC);
+
+                // Rising from nothing, by the same factor for every bit
+                // further out, so the slow end stays fine to aim with
+                const speed = function (k) {
+                    return k * slow * Math.pow(fast / slow, k);
+                };
+
+                if (right > 0 && d.start < 1 - sp) {
+                    d.start = clampStart(d.start + speed(right) * dt);
+                } else if (left > 0 && d.start > 0) {
+                    d.start = clampStart(d.start - speed(left) * dt);
+                }
+            } else if (sp < 1) {
 
                 const right = (d.px - EDGE) / (1 - EDGE);
                 const left = (1 - EDGE - d.px) / (1 - EDGE);
@@ -75528,15 +77750,22 @@
 
         if (on && (!was || relayout)) {
 
-            const main = $("main").getBoundingClientRect();
+            const mainEl = $("main");
+            const main = mainEl.getBoundingClientRect();
             const seek = $("seek").getBoundingClientRect();
+            const space = $("coverSpace").getBoundingClientRect();
+            const gap = parseFloat(getComputedStyle(mainEl).columnGap) || 0;
             const rest = coverAtRest();
+            // Where the list beside it starts, placeMini puts it there
+            const listLeft = Math.max(space.right + gap, rest.right + 3 + 16);
 
-            // As tall as the list beside it, and a little wider than the
-            // cover, so no edge of a bright cover shows round its corners
+            // As tall as the list beside it, a little wider than the cover
+            // on the left, so no edge of a bright cover shows round its
+            // corners, and on the right out to the list, so no strip of
+            // the cover shows between them on a wide screen
             sideBox = {
                 left: rest.left - 3,
-                right: rest.right + 3,
+                right: listLeft - 16,
                 top: main.top,
                 bottom: seek.top - 10
             };
@@ -77993,6 +80222,25 @@
         })));
     });
 
+    // The playing song into the playlist songs went into last, or picked
+    // here when there is none yet
+    $("toPlBtn").addEventListener("click", function () {
+
+        if (!state || !state.id) {
+
+            toast("Nothing is playing", "bad");
+            return;
+        }
+
+        if (!state.toPlaylist) {
+
+            pickPlaylist([state.id], state.title || "");
+            return;
+        }
+
+        send("toPlaylist");
+    });
+
     $("nightBtn").addEventListener("click", function () {
 
         $("nightBtn").classList.toggle("on");
@@ -79599,6 +81847,9 @@
         const n = picked.size;
 
         $("pickBar").style.display = picking ? "flex" : "none";
+
+        // Remove is for the playlist open, when it can be changed
+        $("pickOut").style.display = state && state.playlistOpen ? "" : "none";
         $("pickCount").textContent = n === 0 ? "Tap songs to pick them" : n + (n === 1 ? " song picked" : " songs picked");
     }
 
@@ -79872,12 +82123,149 @@
     }
 
     $("pickCopy").addEventListener("click", copyPicked);
+    $("pickList").addEventListener("click", function () {
+
+        if (picked.size === 0) {
+
+            toast("Pick songs first", "bad");
+            return;
+        }
+
+        pickPlaylist(Array.from(picked.keys()), "");
+    });
+    $("pickOut").addEventListener("click", function () {
+
+        if (picked.size === 0) {
+
+            toast("Pick songs first", "bad");
+            return;
+        }
+
+        send("playlistRemove", { ids: Array.from(picked.keys()) }).then(stopPicking);
+    });
     $("pickDone").addEventListener("click", stopPicking);
 
     if (navigator.share) {
 
         $("pickShare").style.display = "";
         $("pickShare").addEventListener("click", sharePicked);
+    }
+
+    // Playlists in a song's menu: the one songs went into last, any other,
+    // and with a playlist open, the song out of it and moved there
+    function playlistMenuItems(m, box, close) {
+
+        const pl = m.playlists;
+
+        if (!pl) {
+            return;
+        }
+
+        const act = function (action, value) {
+            return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
+        };
+
+        menuLine(box);
+
+        if (pl.last && !pl.last.has) {
+
+            box.appendChild(menuItem("listPlus", "Add to " + pl.last.name, function () {
+
+                close();
+                act("toPlaylist", pl.last.id);
+            }));
+        }
+
+        box.appendChild(menuItem("playlists", "Add to playlist", function () {
+
+            close();
+            pickPlaylist([m.id], m.title);
+        }));
+
+        if (!pl.open) {
+            return;
+        }
+
+        const o = pl.open;
+
+        box.appendChild(menuItem("close", "Remove from " + o.name, function () {
+
+            close();
+            act("fromPlaylist");
+        }, "warn"));
+
+        const move = function (label, where, iconName) {
+
+            box.appendChild(menuItem(iconName, label, function () {
+
+                close();
+                act("playlistMove", where);
+            }));
+        };
+
+        if (o.at > 0) {
+
+            move("Move to top", "top", "arrowUp");
+            move("Move up", "up", "arrowUp");
+        }
+
+        if (o.at >= 0 && o.at < o.count - 1) {
+
+            move("Move down", "down", "arrowDown");
+            move("Move to bottom", "bottom", "arrowDown");
+        }
+    }
+
+    // Which playlist songs go into, the latest used first, or a new one
+    // named here. ids are the songs, title names one of them
+    function pickPlaylist(ids, title) {
+
+        const list = state && Array.isArray(state.playlistsPick) ? state.playlistsPick : [];
+        const one = ids.length === 1;
+        const add = function (value) {
+
+            if (one) {
+                return send("songAction", { id: ids[0], action: "toPlaylist", value: value });
+            }
+
+            return send("playlistAdd", Object.assign({ ids: ids }, value));
+        };
+        const items = [{ icon: "pencil", label: "New playlist", fn: function () {
+
+            closeSongMenu();
+            askText("New playlist", one ? title || "" : "", "Create", function (typed) {
+
+                const name = String(typed || "").trim().slice(0, 50);
+
+                if (name) {
+                    add({ name: name }).then(stopPickingAfter);
+                }
+            });
+        } }];
+
+        for (const p of list) {
+
+            items.push({ icon: "playlists", label: p.name + "  (" + p.count + ")", fn: function () {
+
+                closeSongMenu();
+                add(one ? p.id : { id: p.id }).then(stopPickingAfter);
+            } });
+        }
+
+        // Not read on the phone yet, asked for now, there in a moment
+        if (list.length === 0) {
+            send("readPlaylists");
+        }
+
+        openChoice("Add " + (one ? "\"" + (title || "the song") + "\"" : ids.length + " songs") + " to a playlist", items);
+    }
+
+    // Picked songs that went into a playlist are let go
+    function stopPickingAfter() {
+
+        if (picking) {
+            stopPicking();
+        }
     }
 
     // The choices for one song that do not start it playing, shared by the
@@ -80297,6 +82685,8 @@
         const act = function (action, value) {
             return send("songAction", { id: m.id, action: action, value: value === undefined ? null : value });
         };
+
+        playlistMenuItems(m, box, close);
 
         // Pick songs to share with another player
         if (!fromActions) {
