@@ -32,8 +32,9 @@ In development.
     not sorted or searched. The new order shows at once, and the queue
     follows it. It goes to Mureka by itself eight seconds after the last
     drag, and at once when another playlist, All songs or another view
-    is picked, or the page is put away. Save now and Undo sit in the bar
-    over the mobile player's list and at the top of the web view.
+    is picked, or the page is put away. Undo, ringed in red, and Save now,
+    ringed in cyan on the right, sit in the bar over the mobile player's
+    list and at the top of the web view.
   - Two new buttons for the button row: Playlists opens the Playlists
     page, and is lit while a playlist is open, and To playlist adds the
     playing song to the playlist used last, and is lit while the song is
@@ -42,7 +43,13 @@ In development.
   - Mureka has no way to reorder a playlist, so a move takes the songs
     that have to go above out and adds them back. The songs taken out are
     noted first and put back the next time the playlists are read, should
-    the connection drop in between.
+    the connection drop in between. After every move the playlist is read
+    back from Mureka, and the order shown is Mureka's own. When Mureka did
+    not keep the order asked for, a note says so, and the debug log has
+    both orders and when Mureka says the moved songs were added. Songs
+    added back in one request share a second, and Mureka may put them in
+    another order, so when that is what happened, the move is made once
+    more with one song a second, the way kept from then on.
   - Adding to a playlist, taking out of one and moving in one say so in a
     note with Undo, on the phone and in the web view, which puts the
     playlist back as it was.

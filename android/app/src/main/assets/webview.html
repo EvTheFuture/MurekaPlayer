@@ -4526,6 +4526,23 @@
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
     }
 
+    /* Undo ringed in red, Save now ringed in cyan on the right */
+    #plDraftUndo,
+    #plDraftSave {
+        background: rgba(0, 0, 0, 0.25);
+        border-color: transparent;
+    }
+
+    #plDraftUndo {
+        color: #ff6b6b;
+        box-shadow: inset 0 0 0 2px #ff6b6b;
+    }
+
+    #plDraftSave {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
     #plDraftText {
         flex: 1 1 auto;
         min-width: 0;
@@ -5741,8 +5758,8 @@
 <div id="toast"></div>
 <div id="plDraft">
     <span id="plDraftText"></span>
-    <button class="chip" id="plDraftSave" type="button">Save now</button>
     <button class="chip" id="plDraftUndo" type="button">Undo</button>
+    <button class="chip" id="plDraftSave" type="button">Save now</button>
 </div>
 <div id="pickBar">
     <span id="pickCount"></span>

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.23";
+    const VERSION = "2.0.1.24";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -56634,13 +56634,16 @@
         playlistDraftTextEl.style.cssText = "flex:1 1 auto;min-width:0;font-size:12px;color:#ccc";
         playlistDraftBarEl.appendChild(playlistDraftTextEl);
 
-        const save = makeButton("Save now", "#48e1eb", "#000", savePlaylistDraft);
-        const undo = makeButton("Undo", "#333", "#fff", undoPlaylistDraft);
+        // Undo ringed in red, Save now ringed in cyan on the right
+        const undo = makeButton("Undo", "#1d1d22", "#ff6b6b", undoPlaylistDraft);
+        const save = makeButton("Save now", "#1d1d22", "#48e1eb", savePlaylistDraft);
 
-        save.style.flex = "0 0 auto";
         undo.style.flex = "0 0 auto";
-        playlistDraftBarEl.appendChild(save);
+        undo.style.boxShadow = "inset 0 0 0 2px #ff6b6b";
+        save.style.flex = "0 0 auto";
+        save.style.boxShadow = "inset 0 0 0 2px #48e1eb";
         playlistDraftBarEl.appendChild(undo);
+        playlistDraftBarEl.appendChild(save);
 
         // The page put away, a dragged order is not left waiting
         document.addEventListener("visibilitychange", function () {
@@ -56958,6 +56961,7 @@
             const entries = Array.isArray(data.list) ? data.list : (Array.isArray(head.list) ? head.list : []);
             const order = [];
             const songs = new Map();
+            const added = new Map();
 
             for (const e of entries) {
 
@@ -56975,6 +56979,7 @@
 
                 order.push(id);
                 songs.set(id, song);
+                added.set(id, Number(e.added_playlist_at) || 0);
             }
 
             // Only the first part of a long playlist would leave songs out
@@ -56982,7 +56987,7 @@
                 dbgLog("Mureka", "playlist " + key + " says it has more songs than the " + order.length + " read");
             }
 
-            const detail = { order: order, songs: songs, at: Date.now() };
+            const detail = { order: order, songs: songs, added: added, at: Date.now() };
             const before = playlistById(key);
             const record = playlistRecord(Object.assign({}, head, {
                 playlist_id: head.playlist_id || pl.playlist_id,
@@ -57429,7 +57434,9 @@
     // top, so the songs at the end of the wanted order that already stand
     // in that order stay, and the rest are taken out and added back from
     // the bottom up
-    async function applyPlaylistOrder(pl, now, wanted, noUndo) {
+    // again: the second try, one song at a time, after Mureka did not keep
+    // the order of songs added together
+    async function applyPlaylistOrder(pl, now, wanted, noUndo, again) {
 
         let k = now.length - 1;
         let i = wanted.length - 1;
@@ -57456,6 +57463,15 @@
         userTry("moving in a playlist");
         showToast(redo.length > 3 ? "Moving, " + redo.length + " songs go out and back in" : "Moving", "wait");
 
+        // When Mureka says the songs were added, before, to see whether
+        // adding them again gives them a new time
+        const known = playlistDetails.get(String(pl.playlist_id));
+        const addedBefore = new Map();
+
+        for (const id of redo) {
+            addedBefore.set(id, known && known.added ? known.added.get(id) || 0 : 0);
+        }
+
         // Noted first, so songs taken out are put back even if the app closes
         writePlaylistMend({ id: String(pl.playlist_id), name: pl.name, ids: redo });
 
@@ -57479,14 +57495,68 @@
 
         writePlaylistMend(null);
 
-        const detail = playlistDetails.get(String(pl.playlist_id));
+        // Read back: the order shown is Mureka's own, never only the one
+        // asked for. A moment first, for Mureka to have it all in place
+        await new Promise(function (r) {
+            setTimeout(r, 800);
+        });
 
-        if (detail) {
+        const back = await readPlaylist(pl);
 
-            detail.order = wanted.slice();
+        if (back) {
 
-            if (activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id)) {
-                activePlaylist.order = detail.order;
+            const kept = back.order.length === wanted.length && back.order.every(function (id, n) {
+                return id === wanted[n];
+            });
+            const times = redo.slice(0, 8).map(function (id) {
+                return id.slice(-4) + " " + (addedBefore.get(id) || "?") + " to " + (back.added ? back.added.get(id) || "?" : "?");
+            }).join(", ");
+
+            dbgLog("Mureka", "playlist " + pl.name + " after a move: " + (kept ? "in the order asked for" : "NOT in the order asked for")
+                + ". Added times of the songs moved, before to after: " + times
+                + (kept ? "" : ". Asked " + wanted.map(function (id) {
+                    return id.slice(-4);
+                }).join(" ") + ", Mureka has " + back.order.map(function (id) {
+                    return id.slice(-4);
+                }).join(" ")));
+
+            // Songs added together share a second, and Mureka did not keep
+            // their order: from now on one at a time, a second apart, and
+            // this move once more that way
+            if (!kept && playlistBatchUsed && !again) {
+
+                try {
+                    localStorage.setItem(PLAYLIST_BATCH_KEY, "single");
+                } catch (e) {
+                }
+
+                dbgLog("Mureka", "songs added together did not keep their order, one at a time from now on, the move once more");
+
+                return applyPlaylistOrder(pl, back.order.slice(), wanted, noUndo, true);
+            }
+
+            if (!kept) {
+
+                // A dragged order Mureka did not take is not shown as if it had
+                if (playlistDraft && playlistDraft.id === String(pl.playlist_id)) {
+                    playlistDraft = null;
+                }
+
+                playlistChanged(true);
+                showToast("Mureka did not keep the new order of " + pl.name, false);
+                return false;
+            }
+        } else {
+
+            const detail = playlistDetails.get(String(pl.playlist_id));
+
+            if (detail) {
+
+                detail.order = wanted.slice();
+
+                if (activePlaylist && String(activePlaylist.playlist_id) === String(pl.playlist_id)) {
+                    activePlaylist.order = detail.order;
+                }
             }
         }
 
@@ -57552,9 +57622,19 @@
     // Add songs back so the first of redo ends on top. In one request when
     // Mureka is known to keep that order, otherwise one at a time, a second
     // apart. The first time one request is tried and the order read back
+    // Whether the last adding back put several songs in one request
+    let playlistBatchUsed = false;
+
     async function addInOrder(pl, redo, wanted) {
 
+        playlistBatchUsed = false;
+
         const add = function (ids) {
+
+            if (ids.length > 1) {
+                playlistBatchUsed = true;
+            }
+
             return playlistPost("/api/pgc/playlist/content/add", { playlist_id: pl.playlist_id, song_ids: ids.map(Number) });
         };
         const bottomUp = redo.slice().reverse();
@@ -57627,6 +57707,9 @@
                     return true;
                 }
             }
+
+            // One at a time from here, whatever was tried before
+            playlistBatchUsed = false;
 
             for (let n = 0; n < bottomUp.length; n += 1) {
 
@@ -64040,6 +64123,23 @@
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
     }
 
+    /* Undo ringed in red, Save now ringed in cyan on the right */
+    #plDraftUndo,
+    #plDraftSave {
+        background: rgba(0, 0, 0, 0.25);
+        border-color: transparent;
+    }
+
+    #plDraftUndo {
+        color: #ff6b6b;
+        box-shadow: inset 0 0 0 2px #ff6b6b;
+    }
+
+    #plDraftSave {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
     #plDraftText {
         flex: 1 1 auto;
         min-width: 0;
@@ -65255,8 +65355,8 @@
 <div id="toast"></div>
 <div id="plDraft">
     <span id="plDraftText"></span>
-    <button class="chip" id="plDraftSave" type="button">Save now</button>
     <button class="chip" id="plDraftUndo" type="button">Undo</button>
+    <button class="chip" id="plDraftSave" type="button">Save now</button>
 </div>
 <div id="pickBar">
     <span id="pickCount"></span>
