@@ -1539,6 +1539,73 @@
         user-select: none;
     }
 
+    /* One playlist edited in the popup: its cover with the ways to change
+       it, its name and description, Save, Cancel and Delete */
+    #plEditor {
+        display: none;
+        flex-direction: column;
+        gap: 12px;
+        overflow-y: auto;
+    }
+
+    .plEdCover {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+
+    .plEdCover .thumb {
+        flex: 0 0 auto;
+        width: 7em;
+        height: 7em;
+        border-radius: 12px;
+    }
+
+    .plEdCoverActs {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1 1 12em;
+    }
+
+    .plEdCoverActs .chip {
+        justify-content: center;
+    }
+
+    .plEdLabel {
+        font-size: 0.85em;
+        color: var(--muted);
+        margin-bottom: -6px;
+    }
+
+    .plEdField {
+        min-height: var(--ctl-h);
+        font: inherit;
+        padding: 0 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+        box-sizing: border-box;
+        width: 100%;
+    }
+
+    .plEdActs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .plEdActs .plEdGap {
+        flex: 1 1 auto;
+    }
+
+    .plRow .plRowEdit {
+        flex: 0 0 auto;
+    }
+
     /* Stop beside the line of what the phone works on, ringed in red */
     .workStop {
         margin-left: auto;
@@ -5903,10 +5970,10 @@
             <span id="plTitle">Playlists</span>
             <button class="chip" id="plNew" type="button" data-icon="pencil"><span class="lbl">New playlist</span></button>
             <button class="chip" id="plAll" type="button" data-icon="all"><span class="lbl">All songs</span></button>
-            <button class="chip" id="plEdit" type="button" data-icon="sliders"><span class="lbl">Edit</span></button>
             <button class="chip iconOnly" id="plClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
         <div id="plRows"></div>
+        <div id="plEditor"></div>
     </div>
 </div>
 <div id="btPop">
@@ -24144,16 +24211,29 @@
 
     function openPlPop() {
 
+        plEditId = "";
+        plEditCover = null;
+        $("plEditor").textContent = "";
+        showPlList(true);
         plPopKey = null;
         paintPlPop();
         $("plPop").style.display = "flex";
     }
 
     function closePlPop() {
+
+        plEditId = "";
+        plEditCover = null;
         $("plPop").style.display = "none";
     }
 
     function paintPlPop() {
+
+        if (plEditing()) {
+
+            paintPlEditor();
+            return;
+        }
 
         const list = knownPlaylists();
         const key = JSON.stringify(list);
@@ -24187,6 +24267,23 @@
             });
             const play = document.createElement("button");
 
+            if (p.editable) {
+
+                const edit = document.createElement("button");
+
+                edit.type = "button";
+                edit.className = "chip iconOnly plRowEdit";
+                edit.title = "Edit " + p.name;
+                edit.setAttribute("aria-label", edit.title);
+                edit.appendChild(icon("pencil"));
+                edit.addEventListener("click", function (ev) {
+
+                    ev.stopPropagation();
+                    openPlEditor(p.id);
+                });
+                row.appendChild(edit);
+            }
+
             play.type = "button";
             play.className = "chip";
             play.textContent = "Play";
@@ -24198,7 +24295,291 @@
             });
             row.appendChild(play);
             box.appendChild(row);
+            loadThumbsNow(row);
         }
+    }
+
+    // Covers outside the song lists are not watched as those are, the
+    // few in a popup are loaded straight away
+    function loadThumbsNow(box) {
+
+        for (const thumb of box.querySelectorAll(".thumb")) {
+
+            if (thumbObserver) {
+                thumbObserver.unobserve(thumb);
+            }
+
+            loadThumb(thumb);
+        }
+    }
+
+    // One playlist edited in the popup, in place of the list: the cover
+    // from the song playing or from a picture in this browser, the name and
+    // the description, Save, Cancel, and Delete with a second tap. What is
+    // typed is kept while the phone's state comes and goes
+    let plEditId = "";
+    let plEditCover = null;
+    let plDeleteArmed = 0;
+
+    function plEditing() {
+        return plEditId !== "" && $("plEditor").style.display === "flex";
+    }
+
+    function playlistFor(id) {
+
+        return knownPlaylists().find(function (x) {
+            return x.id === id;
+        }) || null;
+    }
+
+    function showPlList(on) {
+
+        $("plRows").style.display = on ? "" : "none";
+        $("plEditor").style.display = on ? "none" : "flex";
+        $("plNew").style.display = on ? "" : "none";
+        $("plAll").style.display = on ? "" : "none";
+        $("plTitle").textContent = on ? "Playlists" : "Edit playlist";
+    }
+
+    function closePlEditor() {
+
+        plEditId = "";
+        plEditCover = null;
+        plDeleteArmed = 0;
+        $("plEditor").textContent = "";
+        showPlList(true);
+        plPopKey = null;
+        paintPlPop();
+    }
+
+    function openPlEditor(id) {
+
+        const p = playlistFor(id);
+
+        if (!p) {
+            return;
+        }
+
+        plEditId = id;
+        plDeleteArmed = 0;
+        showPlList(false);
+
+        const box = $("plEditor");
+        const cover = document.createElement("div");
+        const acts = document.createElement("div");
+        const fromSong = document.createElement("button");
+        const fromPicture = document.createElement("button");
+        const nameLabel = document.createElement("div");
+        const name = document.createElement("input");
+        const descLabel = document.createElement("div");
+        const desc = document.createElement("input");
+        const buttons = document.createElement("div");
+        const del = document.createElement("button");
+        const gap = document.createElement("span");
+        const cancel = document.createElement("button");
+        const save = document.createElement("button");
+
+        box.textContent = "";
+        cover.className = "plEdCover";
+        plEditCover = makeThumb(p.cover || "");
+        cover.appendChild(plEditCover);
+        acts.className = "plEdCoverActs";
+
+        fromSong.type = "button";
+        fromSong.className = "chip";
+        fromSong.appendChild(icon("image"));
+        fromSong.appendChild(document.createTextNode("Cover from the playing song"));
+        fromSong.addEventListener("click", function () {
+            send("playlistCover", { id: id });
+        });
+
+        fromPicture.type = "button";
+        fromPicture.className = "chip";
+        fromPicture.appendChild(icon("image"));
+        fromPicture.appendChild(document.createTextNode("Cover from a picture"));
+        fromPicture.addEventListener("click", function () {
+            pickPlaylistCover(id);
+        });
+
+        acts.appendChild(fromSong);
+        acts.appendChild(fromPicture);
+        cover.appendChild(acts);
+        box.appendChild(cover);
+        loadThumbsNow(cover);
+
+        nameLabel.className = "plEdLabel";
+        nameLabel.textContent = "Name";
+        name.type = "text";
+        name.className = "plEdField";
+        name.maxLength = 50;
+        name.value = p.name || "";
+        descLabel.className = "plEdLabel";
+        descLabel.textContent = "Description";
+        desc.type = "text";
+        desc.className = "plEdField";
+        desc.maxLength = 200;
+        desc.value = p.description || "";
+        box.appendChild(nameLabel);
+        box.appendChild(name);
+        box.appendChild(descLabel);
+        box.appendChild(desc);
+
+        const saveNow = function () {
+
+            const typed = name.value.trim();
+
+            if (!typed) {
+
+                toast("Give the playlist a name", "bad");
+                name.focus();
+                return;
+            }
+
+            send("playlistSave", { id: id, name: typed, description: desc.value.trim() });
+            closePlEditor();
+        };
+
+        for (const field of [name, desc]) {
+
+            field.addEventListener("keydown", function (ev) {
+
+                if (ev.key === "Enter") {
+
+                    ev.preventDefault();
+                    saveNow();
+                }
+            });
+        }
+
+        buttons.className = "plEdActs";
+        del.type = "button";
+        del.className = "chip fail";
+        del.textContent = "Delete playlist";
+        del.addEventListener("click", function () {
+
+            if (Date.now() - plDeleteArmed > 5000) {
+
+                plDeleteArmed = Date.now();
+                del.textContent = "Tap again to delete";
+                setTimeout(function () {
+
+                    if (plDeleteArmed && Date.now() - plDeleteArmed >= 5000) {
+                        del.textContent = "Delete playlist";
+                    }
+                }, 5100);
+                return;
+            }
+
+            send("playlistDelete", { id: id });
+            closePlEditor();
+        });
+        gap.className = "plEdGap";
+        cancel.type = "button";
+        cancel.className = "chip";
+        cancel.textContent = "Cancel";
+        cancel.addEventListener("click", closePlEditor);
+        save.type = "button";
+        save.className = "chip ring";
+        save.textContent = "Save";
+        save.addEventListener("click", saveNow);
+        buttons.appendChild(del);
+        buttons.appendChild(gap);
+        buttons.appendChild(cancel);
+        buttons.appendChild(save);
+        box.appendChild(buttons);
+        name.focus();
+    }
+
+    // The cover shown while editing follows the phone, once a new one is
+    // set there. Gone from the phone, the editing ends
+    function paintPlEditor() {
+
+        const p = playlistFor(plEditId);
+
+        if (!p) {
+
+            closePlEditor();
+            return;
+        }
+
+        if (plEditCover && (plEditCover.dataset.src || "") !== (p.cover || "")) {
+
+            const fresh = makeThumb(p.cover || "");
+
+            plEditCover.replaceWith(fresh);
+            plEditCover = fresh;
+
+            if (thumbObserver) {
+                thumbObserver.unobserve(fresh);
+            }
+
+            loadThumb(fresh);
+        }
+    }
+
+    // A picture from this browser for the playlist's cover, its square
+    // chosen in the editor, sent to the phone, which uploads it to Mureka
+    function pickPlaylistCover(id) {
+
+        const p = playlistFor(id);
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (!file) {
+                return;
+            }
+
+            if (file.size > 20 * 1024 * 1024) {
+
+                toast("The picture is too large, at most 20 MB", "bad");
+                return;
+            }
+
+            openCoverEditor(file, p ? p.name : "Playlist", document.body, true, function (crop, why) {
+
+                if (crop) {
+                    sendPlaylistCover(id, file, crop);
+                } else if (why) {
+                    toast("Could not use the picture, " + why, "bad");
+                }
+            });
+        });
+
+        input.click();
+    }
+
+    function sendPlaylistCover(id, file, crop) {
+
+        toast("Sending the cover to the phone", "wait");
+
+        fetch("/setCover?playlist=" + encodeURIComponent(id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
+            + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), {
+            method: "POST",
+            headers: { "Content-Type": file.type || "image/jpeg" },
+            body: file,
+            cache: "no-store"
+        }).then(function (res) {
+            return res.json();
+        }).then(function (r) {
+
+            dbgLog("Cover", r && r.ok ? "new cover set for playlist " + id : "playlist cover failed, " + (r && r.why ? r.why : "no reason"));
+
+            if (!r || !r.ok) {
+                toast(r && r.why ? r.why : "The cover could not be changed", "bad");
+            }
+        }).catch(function () {
+            toast("The phone could not be reached", "bad");
+        });
     }
 
     $("plClose").addEventListener("click", closePlPop);
@@ -24212,11 +24593,6 @@
 
         closePlPop();
         send("playlistClose");
-    });
-    $("plEdit").addEventListener("click", function () {
-
-        closePlPop();
-        showPanel("playlists");
     });
     $("plNew").addEventListener("click", function () {
 
@@ -26656,6 +27032,17 @@
         if (isShown("btPop")) {
 
             closeBtPop();
+            return true;
+        }
+
+        if (isShown("plPop")) {
+
+            if (plEditing()) {
+                closePlEditor();
+            } else {
+                closePlPop();
+            }
+
             return true;
         }
 

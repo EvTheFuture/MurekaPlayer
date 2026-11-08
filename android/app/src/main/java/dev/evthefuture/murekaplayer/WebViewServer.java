@@ -2153,7 +2153,10 @@ final class WebViewServer {
         String id = param(query, "id");
         String type = param(query, "type");
 
-        if (id.isEmpty() || body.length == 0) {
+        // A playlist's cover instead of a song's, by the playlist's id
+        String playlist = param(query, "playlist");
+
+        if ((id.isEmpty() && playlist.isEmpty()) || body.length == 0) {
 
             send(out, 400, "application/json", bytes("{\"ok\":false,\"why\":\"No picture\"}"));
             return;
@@ -2164,6 +2167,7 @@ final class WebViewServer {
         try {
 
             ask.put("id", id);
+            ask.put("playlist", playlist.length() <= 40 ? playlist : "");
             ask.put("type", type.startsWith("image/") && type.length() < 40 ? type : "image/jpeg");
 
             for (String k : new String[] { "x", "y", "s", "w", "h" }) {
@@ -2177,7 +2181,8 @@ final class WebViewServer {
             return;
         }
 
-        Hub.note("Command", "From a web view: a new cover for " + id + ", " + (body.length / 1024) + " kB");
+        Hub.note("Command", "From a web view: a new cover for " + (playlist.isEmpty() ? id : "playlist " + playlist)
+            + ", " + (body.length / 1024) + " kB");
 
         String answer = Hub.requestLater("__murekaHostSetCover", ask.toString(), 90000);
 

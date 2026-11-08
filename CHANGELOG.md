@@ -37,8 +37,15 @@ In development.
     Picking a playlist closes the playlists.
   - In the web view the playlists come over the blurred page, each with
     its cover, name and number of songs. Picking one opens it in the
-    lists, Play on its row plays it, and New playlist, All songs and Edit,
-    for the phone's page that changes them, sit at the top.
+    lists, Play on its row plays it, and New playlist and All songs sit
+    at the top. The pencil on a playlist's row edits it right there,
+    without opening it: its cover from the playing song or from a
+    picture on the computer, its square chosen as for a song's cover,
+    its name and description, Save, Cancel, and Delete with a second
+    tap.
+  - An open playlist stays open when the player starts again, as the
+    queue made from it goes on, so Playing from still names it. It is
+    read from Mureka again a moment after the start.
   - The web view's small list has Playlists as a fourth view beside
     Mureka, Queue and Sets, its button going round all four. A playlist
     picked there goes into the queue and plays, and the small list shows
