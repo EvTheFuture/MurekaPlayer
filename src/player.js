@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.19";
+    const VERSION = "2.0.1.21";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -700,6 +700,13 @@
     let playlistsEditEl = null;
     let playlistDeleteArmed = "";
     let playlistDeleteTimer = 0;
+
+    // A new order dragged in the open playlist, shown at once and sent to
+    // Mureka with Save order, { id, order }, null when there is none
+    let playlistDraft = null;
+    let playlistDraftSaving = false;
+    let playlistDraftBarEl = null;
+    let playlistDraftTextEl = null;
 
     // The logged in user id, learned from the account's own feed, used to
     // list the creators the account follows
@@ -37440,6 +37447,7 @@
         // Turned or resized, the counts go where the width wants them
         window.addEventListener("resize", placeCounts);
         bodyEl.appendChild(buildSelBar());
+        bodyEl.appendChild(buildPlaylistDraftBar());
         bodyEl.appendChild(buildProgress());
         bodyEl.appendChild(listWrapEl);
 
@@ -40738,7 +40746,7 @@
     // The handle on a queue row. Dragged with a finger, a pen or the mouse,
     // the row follows, the row it would land on is marked, and the list
     // scrolls along near its edges. Let go, the song moves there
-    function buildQueueGrip(item, from) {
+    function buildQueueGrip(item, from, moved) {
 
         const grip = document.createElement("span");
 
@@ -40768,13 +40776,18 @@
 
             ev.preventDefault();
             ev.stopPropagation();
-            startQueueDrag(ev, grip, item, from);
+            startQueueDrag(ev, grip, item, from, moved);
         });
 
         return grip;
     }
 
-    function startQueueDrag(ev, grip, item, from) {
+    // moved, when given, takes the move instead of the queue: the rows are
+    // then the open playlist's
+    function startQueueDrag(ev, grip, item, from, moved) {
+
+        const key = moved ? "plIndex" : "queueIndex";
+        const rowsOf = moved ? "[data-pl-index]" : "[data-queue-index]";
 
         const startY = ev.clientY;
         const startScroll = listEl.scrollTop;
@@ -40814,7 +40827,7 @@
             item.style.transform = "translateY(" + dy + "px)";
 
             // The row under the pointer, the dragged one left out
-            const rows = Array.from(listEl.querySelectorAll("[data-queue-index]")).filter(function (r) {
+            const rows = Array.from(listEl.querySelectorAll(rowsOf)).filter(function (r) {
                 return r !== item;
             });
 
@@ -40844,7 +40857,7 @@
             }
 
             if (hit) {
-                to = Number(hit.dataset.queueIndex);
+                to = Number(hit.dataset[key]);
             }
 
             mark(hit && to !== from ? hit : null, to > from);
@@ -40890,7 +40903,11 @@
             item.style.boxShadow = item.dataset.setBar || "";
             grip.style.cursor = "grab";
 
-            if (to !== from) {
+            if (to !== from && moved) {
+
+                dbgLog("Press", "playlist song dragged from " + (from + 1) + " to " + (to + 1));
+                moved(from, to);
+            } else if (to !== from) {
 
                 dbgLog("Press", "queue song moved from " + (from + 1) + " to " + (to + 1));
                 moveInQueue(from, to);
@@ -41650,6 +41667,19 @@
 
             if (!searchQuery) {
                 item.insertBefore(buildQueueGrip(item, inQueue), item.firstChild);
+            }
+        }
+
+        // A song of the open playlist: a handle to drag it to a new place,
+        // sent to Mureka with Save order
+        if (inQueue < 0 && playlistDragOn()) {
+
+            const at = shownPlaylistOrder().indexOf(String(song.song_id));
+
+            if (at >= 0) {
+
+                item.dataset.plIndex = String(at);
+                item.insertBefore(buildQueueGrip(item, at, dragInPlaylist), item.firstChild);
             }
         }
 
@@ -56247,6 +56277,10 @@
         const key = String(pl.playlist_id);
         const known = playlistDetails.get(key);
 
+        if (playlistDraft && playlistDraft.id !== key) {
+            playlistDraft = null;
+        }
+
         activePlaylist = { playlist_id: pl.playlist_id, name: pl.name, ids: pl.ids, order: known ? known.order : null };
 
         // Sorted by Mureka, the queue or the sets, the list would not show
@@ -56264,14 +56298,32 @@
         }
 
         if (play && activePlaylist && String(activePlaylist.playlist_id) === key) {
-            startPlay();
+            playPlaylist();
         }
+    }
+
+    // Play the open playlist from its top, or shuffled with shuffle on. A
+    // new queue from it, never the song paused or stopped before, which
+    // Play would go on with
+    function playPlaylist() {
+
+        resumeState = null;
+        buildQueue(null);
+
+        if (queue.length === 0) {
+
+            showToast("No songs in " + (activePlaylist ? activePlaylist.name : "the playlist") + " to play with the filters set", false);
+            return;
+        }
+
+        playCurrent();
     }
 
     // Clear the active playlist so the whole library shows again
     function clearPlaylist() {
 
         activePlaylist = null;
+        playlistDraft = null;
         playlistEditing = null;
         closePlaylists();
         playlistChanged(false);
@@ -56289,12 +56341,154 @@
 
         updatePlaylistButton();
         renderPlaylists();
+        paintPlaylistDraftBar();
         renderList();
         publishHostSoon();
         queueFollowFilter();
 
         if (moved) {
             rebuildUpcoming();
+        }
+    }
+
+    // The order the open playlist is shown in: one dragged here and not
+    // saved yet, or Mureka's
+    function shownPlaylistOrder() {
+
+        if (playlistDraft && activePlaylist && String(activePlaylist.playlist_id) === playlistDraft.id) {
+            return playlistDraft.order;
+        }
+
+        return activePlaylist && Array.isArray(activePlaylist.order) ? activePlaylist.order : [];
+    }
+
+    // Songs of the open playlist are dragged to new places in the list
+    // sorted the playlist's way, not searched, when it can be changed
+    function playlistDragOn() {
+        return listView === "mureka" && !searchQuery && playlistOrdered() && !!openEditablePlaylist() && !playlistDraftSaving;
+    }
+
+    // A song dragged from one place to another, kept here until Save order
+    function dragInPlaylist(from, to) {
+
+        const order = shownPlaylistOrder().slice();
+
+        if (from < 0 || to < 0 || from >= order.length || to >= order.length || from === to) {
+            return;
+        }
+
+        const id = order.splice(from, 1)[0];
+
+        order.splice(to, 0, id);
+        playlistDraft = { id: String(activePlaylist.playlist_id), order: order };
+        playlistDraftChanged();
+    }
+
+    function playlistDraftChanged() {
+
+        playlistOrderStamp += 1;
+        playlistSongsMemo = null;
+        hostListStamp += 1;
+        songDataStamp++;
+
+        paintPlaylistDraftBar();
+        renderList();
+        publishHostSoon();
+        rebuildUpcoming();
+    }
+
+    function undoPlaylistDraft() {
+
+        if (playlistDraftSaving) {
+            return;
+        }
+
+        playlistDraft = null;
+        playlistDraftChanged();
+    }
+
+    // Send the dragged order to Mureka. Read again first: songs added
+    // elsewhere since go on top, songs gone since are left out
+    function savePlaylistDraft() {
+
+        const d = playlistDraft;
+        const pl = openEditablePlaylist();
+
+        if (!d || !pl || String(pl.playlist_id) !== d.id || playlistDraftSaving) {
+            return;
+        }
+
+        const save = async function () {
+
+            playlistDraftSaving = true;
+            paintPlaylistDraftBar();
+            renderList();
+
+            try {
+
+                const detail = await readPlaylist(pl);
+
+                if (!detail) {
+                    return;
+                }
+
+                const now = detail.order.slice();
+                const kept = d.order.filter(function (id) {
+                    return now.indexOf(id) >= 0;
+                });
+                const added = now.filter(function (id) {
+                    return kept.indexOf(id) < 0;
+                });
+
+                if (await applyPlaylistOrder(pl, now, added.concat(kept)) && playlistDraft === d) {
+                    playlistDraft = null;
+                }
+            } finally {
+
+                playlistDraftSaving = false;
+                playlistDraftChanged();
+            }
+        };
+
+        playlistWork = playlistWork.then(save, save);
+    }
+
+    // Over the list while a dragged order waits: Save order and Undo
+    function buildPlaylistDraftBar() {
+
+        playlistDraftBarEl = document.createElement("div");
+        playlistDraftBarEl.style.cssText = "display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 8px;"
+            + "border-radius:8px;background:#26262c;border:1px solid rgba(72,225,235,0.5)";
+
+        playlistDraftTextEl = document.createElement("span");
+        playlistDraftTextEl.style.cssText = "flex:1 1 auto;min-width:0;font-size:12px;color:#ccc";
+        playlistDraftBarEl.appendChild(playlistDraftTextEl);
+
+        const save = makeButton("Save order", "#48e1eb", "#000", savePlaylistDraft);
+        const undo = makeButton("Undo", "#333", "#fff", undoPlaylistDraft);
+
+        save.style.flex = "0 0 auto";
+        undo.style.flex = "0 0 auto";
+        playlistDraftBarEl.appendChild(save);
+        playlistDraftBarEl.appendChild(undo);
+
+        return playlistDraftBarEl;
+    }
+
+    function paintPlaylistDraftBar() {
+
+        if (!playlistDraftBarEl) {
+            return;
+        }
+
+        const on = !!(playlistDraft && activePlaylist && String(activePlaylist.playlist_id) === playlistDraft.id);
+
+        playlistDraftBarEl.style.display = on ? "flex" : "none";
+
+        if (on) {
+            playlistDraftTextEl.textContent = playlistDraftSaving
+                ? "Saving the order of " + activePlaylist.name
+                : "New order in " + activePlaylist.name + ", not saved yet";
         }
     }
 
@@ -56376,7 +56570,7 @@
         const detail = playlistDetails.get(String(activePlaylist.playlist_id));
         const list = [];
 
-        for (const id of activePlaylist.order) {
+        for (const id of shownPlaylistOrder()) {
 
             const song = byId.get(id) || (detail ? detail.songs.get(id) : null);
 
@@ -57228,7 +57422,7 @@
         const last = lastPlaylist();
         const open = openEditablePlaylist();
         const order = open && activePlaylist && Array.isArray(activePlaylist.order) ? activePlaylist.order : [];
-        const at = open ? order.indexOf(id) : -1;
+        const at = open && shownPlaylistOrder() === order ? order.indexOf(id) : -1;
 
         return {
             read: playlistsRead,
@@ -58701,7 +58895,9 @@
                 removeSongsFromPlaylist(openPl, [song.song_id]);
             }, "close");
 
-            if (at > 0) {
+            const drafted = shownPlaylistOrder() !== activePlaylist.order;
+
+            if (at > 0 && !drafted) {
 
                 addMenuRow("Move to top", "#fff", function () {
                     movePlaylistSong(openPl, song.song_id, "top");
@@ -58712,7 +58908,7 @@
                 }, "arrowUp");
             }
 
-            if (at >= 0 && at < order.length - 1) {
+            if (at >= 0 && at < order.length - 1 && !drafted) {
 
                 addMenuRow("Move down", "#fff", function () {
                     movePlaylistSong(openPl, song.song_id, "down");

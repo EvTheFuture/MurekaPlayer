@@ -15,13 +15,17 @@ In development.
   - Opening a playlist shows its songs in the playlist's order, newest
     added first as on Mureka, drafts included, and a queue made from the
     list plays them in that order. Play starts it from the top, shuffled
-    with shuffle on.
+    with shuffle on, never the song paused or stopped before.
   - A song's menu has Add to the playlist used last, by name, and Add to
     playlist, which offers the playlists, the latest used first, and New
     playlist. With a playlist open, it also has Remove from the playlist
     and Move to top, Move up, Move down and Move to bottom.
   - Picked songs go into a playlist with Playlist in the bar for picked
     songs, and out of the open playlist with Remove.
+  - In the mobile player, the songs of an open playlist have a handle to
+    drag them to new places. The new order shows at once, and the queue
+    follows it, but goes to Mureka only with Save order in the bar over the
+    list. Undo there puts Mureka's order back.
   - A new button for the button row, Playlist, adds the playing song to
     the playlist used last, and is lit while the song is in it.
   - Mureka has no way to reorder a playlist, so a move takes the songs
