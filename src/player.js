@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.31";
+    const VERSION = "2.0.1.32";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -61062,11 +61062,16 @@
 
     /* One playlist edited in the popup: its cover with the ways to change
        it, its name and description, Save, Cancel and Delete */
+    /* Room around the fields inside the scrolling box, so the ring of the
+       one being typed in is not cut off at the sides, the same room taken
+       back outside so the fields line up with the rest */
     #plEditor {
         display: none;
         flex-direction: column;
         gap: 12px;
         overflow-y: auto;
+        padding: 4px;
+        margin: -4px;
     }
 
     .plEdCover {
