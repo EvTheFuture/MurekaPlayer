@@ -141,11 +141,21 @@ final class Hotspot {
     // One command to the running helper, its answer, or null when it could
     // not be reached
     private static String ask(IBinder b, int code) {
+        return ask(b, code, null);
+    }
+
+    // The same with a word for the command, a Bluetooth address say. A
+    // helper from before the command knew it does not answer it
+    private static String ask(IBinder b, int code, String arg) {
 
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
 
         try {
+
+            if (arg != null) {
+                data.writeString(arg);
+            }
 
             if (!b.transact(code, data, reply, 0)) {
                 return null;
@@ -603,6 +613,38 @@ final class Hotspot {
         Hub.note("Hotspot", lastResult);
 
         return answer;
+    }
+
+    // A Bluetooth command for a paired device, through the running helper
+    // when there is one, else over wireless debugging: connect, disconnect,
+    // active or on. Not on the main thread, a connect waits for the device
+    static String bluetooth(Context c, String what, String address) {
+
+        int code = "connect".equals(what) ? HotspotHelper.CODE_BT_CONNECT
+            : "disconnect".equals(what) ? HotspotHelper.CODE_BT_DISCONNECT
+            : "active".equals(what) ? HotspotHelper.CODE_BT_ACTIVE : HotspotHelper.CODE_BT_ON;
+        IBinder b = helperBinder;
+        String answer = null;
+
+        if (b != null && b.isBinderAlive()) {
+
+            answer = ask(b, code, address);
+
+            if (answer == null) {
+                Hub.note("Bluetooth", "the running helper did not answer"
+                    + ("old".equals(helper(c)) ? ", it is from an earlier version of the app" : "")
+                    + ", trying over wireless debugging");
+            }
+        }
+
+        if (answer == null) {
+
+            String arg = address == null || address.isEmpty() ? "" : " " + address;
+
+            answer = HelperStart.once(c, "bt" + what + arg);
+        }
+
+        return answer == null || answer.isEmpty() ? "the helper did not answer" : answer;
     }
 
     private static long versionCode(Context c) {

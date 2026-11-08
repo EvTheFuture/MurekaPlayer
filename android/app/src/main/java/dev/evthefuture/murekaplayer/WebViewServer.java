@@ -970,6 +970,11 @@ final class WebViewServer {
                 }
 
                 sendCall(out, "__murekaHostPanel", JSONObject.quote(name));
+            } else if ("GET".equals(method) && "/bt".equals(path)) {
+
+                // The phone's paired Bluetooth devices, read by the app
+                // itself, not the player
+                send(out, 200, "application/json", bytes(BtAudio.devices(context)));
             } else if ("GET".equals(method) && "/export".equals(path)) {
 
                 // The data behind an export, so the browser showing the web
@@ -1988,6 +1993,18 @@ final class WebViewServer {
                 SysVolume.set(arg instanceof Number ? ((Number) arg).intValue()
                     : number(String.valueOf(arg), 0));
                 send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
+            // A paired Bluetooth device connected, disconnected or made
+            // where the music goes, or Bluetooth switched on, by the app
+            // and its helper, never the player
+            if ("bt".equals(cmd)) {
+
+                JSONObject a = arg instanceof JSONObject ? (JSONObject) arg : new JSONObject();
+                boolean taken = BtAudio.act(context, a.optString("what", ""), a.optString("address", ""));
+
+                send(out, taken ? 200 : 400, "application/json", bytes(taken ? "{\"ok\":true}" : "{\"ok\":false}"));
                 return;
             }
 

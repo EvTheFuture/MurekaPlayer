@@ -406,6 +406,16 @@ In development.
   caching songs or the reading of play counts has a Stop, ringed in red,
   in the mobile player, over the web view's list and in its small list.
   A stopped load or rescan keeps the songs read so far.
+- **The phone's Bluetooth devices from the web view.** A long press on
+  the phone's sound choice, or a right click with a mouse, opens the
+  phone's paired devices over a blurred page, each with what it is,
+  whether it is connected and whether the music goes to it. Connect,
+  Disconnect and Play here act on the phone, so a speaker beside the
+  computer can be connected while the phone stays where it is. Android
+  lets only the system connect a device, so the hotspot helper does it,
+  through its Binder while it keeps running, else over wireless
+  debugging. Android 13 or later. With Bluetooth off, Switch on turns it
+  on, and an old or stopped helper can be started from there.
 
 ### Build
 

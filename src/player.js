@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.26";
+    const VERSION = "2.0.1.28";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -60754,8 +60754,10 @@
         pointer-events: none;
     }
 
-    /* The playlists over a blurred page, each with its cover */
-    #plPop {
+    /* The playlists over a blurred page, each with its cover, and the
+       phone's Bluetooth devices the same way */
+    #plPop,
+    #btPop {
         position: fixed;
         inset: 0;
         z-index: 55;
@@ -60767,7 +60769,8 @@
         backdrop-filter: blur(14px);
     }
 
-    #plBox {
+    #plBox,
+    #btBox {
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 18px;
@@ -60780,20 +60783,23 @@
         gap: 10px;
     }
 
-    #plTop {
+    #plTop,
+    #btTop {
         display: flex;
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
     }
 
-    #plTitle {
+    #plTitle,
+    #btTitle {
         flex: 1 1 auto;
         font-weight: 600;
         font-size: 1.15em;
     }
 
-    #plRows {
+    #plRows,
+    #btRows {
         overflow-y: auto;
         display: flex;
         flex-direction: column;
@@ -60838,6 +60844,66 @@
     .plRow .plRowCount {
         font-size: 0.85em;
         color: var(--muted);
+    }
+
+    /* A Bluetooth device: what it is, its name, how it is connected and
+       what can be done with it */
+    .btRow {
+        cursor: default;
+        flex-wrap: wrap;
+    }
+
+    /* The name keeps room to be read, on a narrow screen the buttons go
+       under it */
+    .btRow .plRowText {
+        flex: 1 1 9em;
+    }
+
+    .btActs {
+        display: flex;
+        gap: 8px;
+        margin-left: auto;
+    }
+
+    .btRow > .ico {
+        flex: 0 0 auto;
+        width: 1.6em;
+        height: 1.6em;
+        margin: 0 4px;
+        color: var(--muted);
+    }
+
+    .btRow.linked > .ico {
+        color: var(--accent);
+    }
+
+    .btRow .chip {
+        flex: 0 0 auto;
+    }
+
+    .btRow .chip:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    #btNote {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        color: var(--muted);
+    }
+
+    #btNote.bad {
+        color: #ff8a8a;
+    }
+
+    /* Held for the Bluetooth devices, so the phone's own menu for a long
+       press does not come up */
+    #soundPhone {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
     }
 
     /* Stop beside the line of what the phone works on, ringed in red */
@@ -65103,7 +65169,7 @@
         </div>
         <button class="soundIco" id="volBtn" type="button" data-icon="speaker" aria-label="Volume" title="Volume"></button>
         <div id="sound">
-            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" data-name="Phone / Bluetooth" aria-label="Music on the phone or Bluetooth" title="Music on the phone or Bluetooth"></button>
+            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" data-name="Phone / Bluetooth" aria-label="Music on the phone or Bluetooth, hold or right click for its Bluetooth devices" title="Music on the phone or Bluetooth, hold or right click for its Bluetooth devices"></button>
             <button id="soundCar" type="button" data-icon="browser" data-name="This browser" aria-label="Music in this browser" title="Music in this browser"></button>
             <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
         </div>
@@ -65206,6 +65272,16 @@
             <button class="chip iconOnly" id="plClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
         <div id="plRows"></div>
+    </div>
+</div>
+<div id="btPop">
+    <div id="btBox">
+        <div id="btTop">
+            <span id="btTitle">Bluetooth on the phone</span>
+            <button class="chip iconOnly" id="btClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="btNote"><span id="btNoteText"></span><button class="chip ring" id="btOn" type="button">Switch on</button><button class="chip" id="btHelper" type="button">Start the helper</button></div>
+        <div id="btRows"></div>
     </div>
 </div>
 <div id="songMenu">
@@ -65701,6 +65777,11 @@
         ],
         bluetooth: [
             ["polyline", { points: "6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5" }]
+        ],
+        headphones: [
+            ["path", { d: "M3 18v-6a9 9 0 0 1 18 0v6" }],
+            ["path", { d: "M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z" }],
+            ["path", { d: "M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" }]
         ],
         phone: [
             ["rect", { x: "6", y: "2", width: "12", height: "20", rx: "2" }],
@@ -78917,8 +78998,9 @@
         $("miniView").classList.toggle("on", miniView === "queue");
         $("miniView").classList.toggle("ring", miniView === "sets" || miniView === "playlists");
 
-        // Sorting is not for the playlists
-        $("miniSort").style.display = miniView === "playlists" ? "none" : "";
+        // Sorting is not for the playlists. Its place is kept, so the
+        // buttons beside it stay where they are
+        $("miniSort").style.visibility = miniView === "playlists" ? "hidden" : "";
 
         paintMiniSort();
         paintSetFold();
@@ -81145,7 +81227,8 @@
         phoneSoundKey = key;
         setIcon(btn, bt ? "bluetooth" : "phone");
         btn.dataset.name = bt ? (name ? "Bluetooth, " + name : "Bluetooth") : "Phone";
-        btn.title = bt ? "Music on Bluetooth" + (name ? ", " + name : "") : "Music on the phone";
+        btn.title = (bt ? "Music on Bluetooth" + (name ? ", " + name : "") : "Music on the phone")
+            + ", hold or right click for its Bluetooth devices";
         btn.setAttribute("aria-label", btn.title);
     }
 
@@ -81176,6 +81259,313 @@
             $("sound").classList.remove("open");
         }
     });
+
+    // The phone's paired Bluetooth devices over the blurred page, opened
+    // with a long press on the phone's sound choice, or a right click.
+    // Each shows how it is connected, with Connect, Disconnect or Play
+    // here. The app reads the list, its helper does the connecting, so it
+    // is read again every moment while open
+    const BT_HOLD_MS = 550;
+    const BT_READ_MS = 1500;
+    let btPopKey = null;
+    let btReadTimer = 0;
+    let btHoldTimer = 0;
+    let btHoldAt = null;
+    let btHeld = false;
+
+    function openBtPop() {
+
+        btPopKey = null;
+        $("btRows").textContent = "";
+        btNote("Reading the phone's Bluetooth devices", false, false);
+        $("btPop").style.display = "flex";
+        readBt();
+    }
+
+    function closeBtPop() {
+
+        clearTimeout(btReadTimer);
+        $("btPop").style.display = "none";
+    }
+
+    function readBt() {
+
+        clearTimeout(btReadTimer);
+
+        if (!isShown("btPop")) {
+            return;
+        }
+
+        fetchJson("/bt", 8000).then(function (data) {
+
+            if (isShown("btPop")) {
+                paintBtPop(data || {});
+            }
+        }).catch(function () {
+
+            if (isShown("btPop") && btPopKey === null) {
+                btNote("The phone did not answer", true, false);
+            }
+        }).then(function () {
+
+            if (isShown("btPop")) {
+                btReadTimer = setTimeout(readBt, BT_READ_MS);
+            }
+        });
+    }
+
+    // The line under the title: why nothing can be done, or what the
+    // helper needs, with Switch on when Bluetooth is off and Start the
+    // helper when it can be started
+    function btNote(text, bad, offerOn, offerHelper) {
+
+        $("btNote").style.display = text ? "flex" : "none";
+        $("btNote").classList.toggle("bad", !!bad);
+        $("btNoteText").textContent = text || "";
+        $("btOn").style.display = offerOn ? "" : "none";
+        $("btHelper").style.display = offerHelper ? "" : "none";
+    }
+
+    function btCommand(what, address) {
+
+        send("bt", { what: what, address: address || "" });
+        clearTimeout(btReadTimer);
+        btReadTimer = setTimeout(readBt, 300);
+    }
+
+    const BT_KIND_ICONS = { speaker: "speaker", headphones: "headphones", carAudio: "speaker",
+        phone: "phone", computer: "browser" };
+    const BT_DOING = { connect: "Connecting", disconnect: "Disconnecting", active: "Moving the music", on: "Switching on" };
+
+    function btButton(label, tap, busy) {
+
+        const b = document.createElement("button");
+
+        b.type = "button";
+        b.className = "chip";
+        b.textContent = label;
+        b.disabled = !!busy;
+        b.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            tap();
+        });
+
+        return b;
+    }
+
+    function paintBtPop(data) {
+
+        const key = JSON.stringify(data);
+
+        if (key === btPopKey) {
+            return;
+        }
+
+        btPopKey = key;
+
+        const box = $("btRows");
+        const list = Array.isArray(data.devices) ? data.devices : [];
+
+        box.textContent = "";
+
+        if (data.permission !== true) {
+
+            btNote("The app on the phone may not see Bluetooth devices. Bluetooth access is allowed under Charger and power on the phone", true, false);
+            return;
+        }
+
+        if (data.available !== true) {
+
+            btNote("This phone has no Bluetooth", true, false);
+            return;
+        }
+
+        if (data.enabled !== true) {
+
+            const doing = data.busy ? BT_DOING[data.busy] || "Working" : "";
+
+            btNote(doing ? doing + "..." : "Bluetooth is off on the phone" + (data.last ? ", " + data.last : ""),
+                !doing, !doing);
+            $("btOn").disabled = !!doing;
+            return;
+        }
+
+        // Connecting is done by the helper, which may need starting
+        if (data.helper === "old") {
+            btNote("The helper is from an earlier version of the app and cannot connect, start it again", true, false, data.paired === true);
+        } else if (data.helper !== "running" && data.paired !== true) {
+            btNote("Connecting needs the helper. Pair the player with wireless debugging under Charger and power on the phone first", true, false);
+        } else if (data.helper !== "running") {
+            btNote("The helper is not running, so connecting goes over wireless debugging and needs the phone on a Wi-Fi", false, false, true);
+        } else {
+            btNote("", false, false);
+        }
+
+        if (list.length === 0) {
+
+            const msg = document.createElement("div");
+
+            msg.className = "plRowCount";
+            msg.textContent = "No paired devices";
+            box.appendChild(msg);
+            return;
+        }
+
+        for (const d of list) {
+
+            const row = document.createElement("div");
+            const text = document.createElement("div");
+            const name = document.createElement("div");
+            const how = document.createElement("div");
+            const acts = document.createElement("div");
+            const doing = d.busy ? BT_DOING[d.busy] || "Working" : "";
+            const sound = d.kind === "speaker" || d.kind === "headphones" || d.kind === "carAudio";
+            let said;
+
+            if (doing) {
+                said = doing + "...";
+            } else if (d.state === "connecting") {
+                said = "Connecting...";
+            } else if (d.state === "disconnecting") {
+                said = "Disconnecting...";
+            } else if (d.active) {
+                said = "Connected, the music goes here";
+            } else if (d.connected) {
+                said = d.sound ? "Connected, the music goes elsewhere" : "Connected";
+            } else {
+                said = "Not connected";
+            }
+
+            if (!doing && d.last) {
+                said += " · Last: " + d.last;
+            }
+
+            row.className = "plRow btRow" + (d.active ? " on" : "") + (d.connected ? " linked" : "");
+            row.appendChild(icon(BT_KIND_ICONS[d.kind] || "bluetooth"));
+            text.className = "plRowText";
+            name.className = "plRowName";
+            how.className = "plRowCount";
+            name.textContent = d.name;
+            how.textContent = said;
+            how.title = said;
+            text.appendChild(name);
+            text.appendChild(how);
+            row.appendChild(text);
+            acts.className = "btActs";
+            row.appendChild(acts);
+
+            if (d.connected && d.sound && !d.active) {
+
+                acts.appendChild(btButton("Play here", function () {
+                    btCommand("active", d.address);
+                }, doing));
+            }
+
+            if (d.connected) {
+
+                acts.appendChild(btButton("Disconnect", function () {
+                    btCommand("disconnect", d.address);
+                }, doing));
+            } else {
+
+                const b = btButton("Connect", function () {
+                    btCommand("connect", d.address);
+                }, doing);
+
+                if (sound && !doing) {
+                    b.classList.add("ring");
+                }
+
+                acts.appendChild(b);
+            }
+
+            box.appendChild(row);
+        }
+    }
+
+    $("btClose").addEventListener("click", closeBtPop);
+    $("btOn").addEventListener("click", function () {
+        btCommand("on", "");
+    });
+    $("btHelper").addEventListener("click", function () {
+
+        send("startHotspotHelper");
+        $("btHelper").disabled = true;
+        setTimeout(function () {
+            $("btHelper").disabled = false;
+        }, 15000);
+    });
+    $("btPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("btPop")) {
+            closeBtPop();
+        }
+    });
+
+    // A finger held on the phone's sound choice opens the devices. Moving
+    // away or letting go first is an ordinary tap
+    function stopBtHold() {
+
+        clearTimeout(btHoldTimer);
+        btHoldAt = null;
+    }
+
+    $("soundPhone").addEventListener("pointerdown", function (ev) {
+
+        if (ev.pointerType === "mouse") {
+            return;
+        }
+
+        btHoldAt = { x: ev.clientX, y: ev.clientY };
+        clearTimeout(btHoldTimer);
+        btHoldTimer = setTimeout(function () {
+
+            btHoldAt = null;
+            btHeld = true;
+            $("sound").classList.remove("open");
+            openBtPop();
+        }, BT_HOLD_MS);
+    });
+    $("soundPhone").addEventListener("pointermove", function (ev) {
+
+        if (btHoldAt && (Math.abs(ev.clientX - btHoldAt.x) > 10 || Math.abs(ev.clientY - btHoldAt.y) > 10)) {
+            stopBtHold();
+        }
+    });
+    $("soundPhone").addEventListener("pointerup", stopBtHold);
+    $("soundPhone").addEventListener("pointercancel", stopBtHold);
+    $("soundPhone").addEventListener("pointerleave", stopBtHold);
+
+    // A right click opens them too, and the browser's own menu, which a
+    // long press also asks for, stays away
+    $("soundPhone").addEventListener("contextmenu", function (ev) {
+
+        ev.preventDefault();
+        stopBtHold();
+
+        if (!isShown("btPop")) {
+
+            $("sound").classList.remove("open");
+            openBtPop();
+        }
+    });
+
+    // The tap that ends a hold is not a tap on the choice, nor on the
+    // devices that came up under the finger, caught before anything sees
+    // it. The next finger or click down starts afresh, in case no tap came
+    window.addEventListener("pointerdown", function () {
+        btHeld = false;
+    }, true);
+    window.addEventListener("click", function (ev) {
+
+        if (btHeld) {
+
+            btHeld = false;
+            ev.stopImmediatePropagation();
+            ev.preventDefault();
+        }
+    }, true);
 
     $("soundCar").addEventListener("click", function () {
 
@@ -85625,6 +86015,12 @@
         if (isShown("blackout")) {
 
             $("blackout").click();
+            return true;
+        }
+
+        if (isShown("btPop")) {
+
+            closeBtPop();
             return true;
         }
 

@@ -21,6 +21,11 @@
 
 package dev.evthefuture.murekaplayer;
 
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.AttributionSource;
 import android.content.Context;
 import android.content.ContextWrapper;
@@ -34,8 +39,10 @@ import android.os.Parcel;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -54,6 +61,10 @@ import java.util.function.Supplier;
 // state -> on, off, switching on, switching off, failed or unknown
 // on -> on, or refused <error>, or the state when it did not come on
 // off -> off, or the state when it did not go off
+// btconnect <address> -> how connecting a paired Bluetooth device went
+// btdisconnect <address> -> how disconnecting it went
+// btactive <address> -> how making it where the music goes went
+// bton -> how switching Bluetooth on went
 // serve -> keeps running in a session of its own, so it outlives the adb
 //     session, until the phone restarts. It hands the app a Binder
 //     through the app's helper provider, and the app sends the commands
@@ -62,7 +73,10 @@ import java.util.function.Supplier;
 //     Handed over again whenever the app's process starts anew
 //
 // Every other command is one run: one line with the answer, then exit
-// No lambdas, since it runs from a plain dex without desugaring
+// No lambdas, since it runs from a plain dex without desugaring. The
+// Bluetooth calls run as the shell, which holds every Bluetooth
+// permission, so the lint check for the app's own is turned off here
+@SuppressLint("MissingPermission")
 public final class HotspotHelper {
 
     private static final String SHELL = "com.android.shell";
@@ -79,6 +93,24 @@ public final class HotspotHelper {
     static final int CODE_ON = 3;
     static final int CODE_OFF = 4;
     static final int CODE_QUIT = 5;
+    static final int CODE_BT_CONNECT = 6;
+    static final int CODE_BT_DISCONNECT = 7;
+    static final int CODE_BT_ACTIVE = 8;
+    static final int CODE_BT_ON = 9;
+
+    // A Bluetooth address, the only thing a Bluetooth command takes
+    private static final String BT_ADDRESS = "^[0-9A-F]{2}(:[0-9A-F]{2}){5}$";
+
+    // The A2DP profile and the audio kind of active device, in Android's
+    // Bluetooth classes
+    private static final int BT_A2DP = 2;
+    private static final int BT_ACTIVE_AUDIO = 0;
+
+    // How long a Bluetooth device gets to connect or disconnect, and how
+    // long after its link is up it is made where the music goes, if Android
+    // has not done that by itself
+    private static final long BT_SETTLE_MS = 20000;
+    private static final long BT_ACTIVE_AFTER_MS = 2500;
 
     // The shell's uid, as the provider sees the helper
     static final int SHELL_UID = 2000;
@@ -112,17 +144,40 @@ public final class HotspotHelper {
         }
     }
 
+    // The shell as the caller for Bluetooth, which from Android 12 takes the
+    // caller from the context's attribution. The system context's would
+    // name Android itself, which the shell's uid does not own
+    private static final class BtContext extends ContextWrapper {
+
+        BtContext(Context base) {
+            super(base);
+        }
+
+        @Override
+        public Context getApplicationContext() {
+            return this;
+        }
+
+        // Only asked from Android 12, which has attributions
+        @TargetApi(31)
+        @Override
+        public AttributionSource getAttributionSource() {
+            return new AttributionSource.Builder(SHELL_UID).setPackageName(SHELL).build();
+        }
+    }
+
     public static void main(String[] args) {
 
         // One command, then exit, or serve, which keeps running
         if (args.length < 3) {
 
-            say("usage: HotspotHelper <app uid> <app version code> <ping|state|on|off|serve>");
+            say("usage: HotspotHelper <app uid> <app version code> <ping|state|on|off|serve|bt...> [address]");
             System.exit(2);
         }
 
         String version = args[1];
         String what = args[2];
+        String address = args.length > 3 ? args[3] : "";
         int appUid;
 
         try {
@@ -147,7 +202,7 @@ public final class HotspotHelper {
                 return;
             }
 
-            say(handle(what, version));
+            say(handle(what, version, address));
         } catch (Throwable t) {
 
             Throwable why = t.getCause() != null ? t.getCause() : t;
@@ -168,7 +223,11 @@ public final class HotspotHelper {
         System.out.flush();
     }
 
-    private static String handle(String what, String version) throws Exception {
+    private static String handle(String what, String version, String address) throws Exception {
+
+        if (what.startsWith("bt")) {
+            return bluetooth(what.substring(2), address);
+        }
 
         if ("ping".equals(what)) {
             return "ok " + version;
@@ -217,13 +276,22 @@ public final class HotspotHelper {
                 try {
 
                     if (code == CODE_PING) {
-                        answer = handle("ping", version);
+                        answer = handle("ping", version, "");
                     } else if (code == CODE_STATE) {
-                        answer = handle("state", version);
+                        answer = handle("state", version, "");
                     } else if (code == CODE_ON) {
-                        answer = handle("on", version);
+                        answer = handle("on", version, "");
                     } else if (code == CODE_OFF) {
-                        answer = handle("off", version);
+                        answer = handle("off", version, "");
+                    } else if (code == CODE_BT_CONNECT || code == CODE_BT_DISCONNECT || code == CODE_BT_ACTIVE
+                        || code == CODE_BT_ON) {
+
+                        // The device's address comes with the call
+                        String address = data != null ? data.readString() : null;
+                        String what = code == CODE_BT_CONNECT ? "connect"
+                            : code == CODE_BT_DISCONNECT ? "disconnect" : code == CODE_BT_ACTIVE ? "active" : "on";
+
+                        answer = bluetooth(what, address == null ? "" : address);
                     } else if (code == CODE_QUIT) {
 
                         // A newer helper took over
@@ -438,6 +506,249 @@ public final class HotspotHelper {
                 .invoke(am, PROVIDER, token);
         } catch (Throwable t) {
             // Let go when the helper ends anyway
+        }
+    }
+
+    // Bluetooth for a paired device: connect it, which Android normally
+    // also makes where the music goes, disconnect it, or make it where the
+    // music goes when it is connected already. Or Bluetooth switched on.
+    // The calls are system ones that need the privileged Bluetooth
+    // permission, which the shell has and an app cannot be given
+    private static String bluetooth(String what, String address) throws Exception {
+
+        BluetoothAdapter adapter = btAdapter();
+
+        if (adapter == null) {
+            return "no Bluetooth on this phone";
+        }
+
+        if ("on".equals(what)) {
+
+            if (adapter.isEnabled()) {
+                return "Bluetooth is on";
+            }
+
+            Object sent = BluetoothAdapter.class.getMethod("enable").invoke(adapter);
+
+            if (Boolean.FALSE.equals(sent)) {
+                return "refused to switch Bluetooth on";
+            }
+
+            for (int i = 0; i < 20 && !adapter.isEnabled(); i++) {
+                Thread.sleep(500);
+            }
+
+            return adapter.isEnabled() ? "Bluetooth is on" : "Bluetooth did not come on within 10 s";
+        }
+
+        if (address == null || !address.matches(BT_ADDRESS)) {
+            return "not a Bluetooth address";
+        }
+
+        if (!adapter.isEnabled()) {
+            return "Bluetooth is off";
+        }
+
+        BluetoothDevice device = adapter.getRemoteDevice(address);
+
+        if ("connect".equals(what)) {
+
+            String refused = btCall(device, "connect");
+
+            return refused != null ? refused : btSettleConnected(adapter, device);
+        }
+
+        if ("disconnect".equals(what)) {
+
+            String refused = btCall(device, "disconnect");
+
+            if (refused != null) {
+                return refused;
+            }
+
+            long until = System.currentTimeMillis() + BT_SETTLE_MS;
+
+            while (btConnected(device) && System.currentTimeMillis() < until) {
+                Thread.sleep(500);
+            }
+
+            return btConnected(device) ? "still connected after " + (BT_SETTLE_MS / 1000) + " s" : "disconnected";
+        }
+
+        if ("active".equals(what)) {
+
+            if (!btConnected(device)) {
+                return "not connected";
+            }
+
+            if (!btMakeActive(adapter, device)) {
+                return "refused to make it where the music goes";
+            }
+
+            for (int i = 0; i < 10; i++) {
+
+                if (Boolean.TRUE.equals(btActive(adapter, device))) {
+                    return "the music goes there";
+                }
+
+                Thread.sleep(500);
+            }
+
+            Boolean active = btActive(adapter, device);
+
+            return active == null ? "asked to make it where the music goes" : "the music still goes elsewhere";
+        }
+
+        return "unknown Bluetooth command";
+    }
+
+    // The Bluetooth adapter speaking as the shell. Made the way Android
+    // makes it for a context, here the shell's. The default adapter is
+    // the fallback, which on older Android takes the shell's uid anyway
+    private static BluetoothAdapter btAdapter() {
+
+        try {
+
+            Constructor<BluetoothManager> make = BluetoothManager.class.getDeclaredConstructor(Context.class);
+
+            make.setAccessible(true);
+
+            BluetoothAdapter adapter = make.newInstance(new BtContext(ctx)).getAdapter();
+
+            if (adapter != null) {
+                return adapter;
+            }
+        } catch (Throwable t) {
+            say("Bluetooth manager not made: " + (t.getCause() != null ? t.getCause() : t));
+        }
+
+        return BluetoothAdapter.getDefaultAdapter();
+    }
+
+    // The device's connect or disconnect, every profile it has enabled, a
+    // system call from Android 13. Null when it was sent, else why not
+    private static String btCall(BluetoothDevice device, String name) {
+
+        Object answer;
+
+        try {
+            answer = BluetoothDevice.class.getMethod(name).invoke(device);
+        } catch (NoSuchMethodException e) {
+            return "this Android version has no " + name + " for a device, Android 13 or later is needed";
+        } catch (InvocationTargetException e) {
+            return "refused: " + e.getCause();
+        } catch (Throwable t) {
+            return "refused: " + t;
+        }
+
+        // A status code from Android 13, 0 for sent, before that true
+        if (answer instanceof Integer && (Integer) answer != 0) {
+            return "refused, status " + answer;
+        }
+
+        if (Boolean.FALSE.equals(answer)) {
+            return "refused";
+        }
+
+        return null;
+    }
+
+    // Waits for the device to connect and become where the music goes.
+    // Android makes a newly connected audio device the active one by
+    // itself, if it has not a moment after the link is up, it is asked to
+    private static String btSettleConnected(BluetoothAdapter adapter, BluetoothDevice device)
+        throws InterruptedException {
+
+        long until = System.currentTimeMillis() + BT_SETTLE_MS;
+        long linkedAt = 0;
+        boolean asked = false;
+
+        while (System.currentTimeMillis() < until) {
+
+            Boolean active = btActive(adapter, device);
+
+            if (Boolean.TRUE.equals(active)) {
+                return "connected, the music goes there";
+            }
+
+            if (btConnected(device)) {
+
+                long now = System.currentTimeMillis();
+
+                if (linkedAt == 0) {
+                    linkedAt = now;
+                } else if (!asked && now - linkedAt >= BT_ACTIVE_AFTER_MS) {
+
+                    asked = true;
+                    btMakeActive(adapter, device);
+                }
+
+                // Which device is active cannot be read here, connected
+                // and asked is as far as it can be followed
+                if (active == null && asked) {
+                    return "connected";
+                }
+            }
+
+            Thread.sleep(500);
+        }
+
+        if (!btConnected(device)) {
+            return "not connected within " + (BT_SETTLE_MS / 1000) + " s, is it on and near?";
+        }
+
+        return "connected, but the music does not go there";
+    }
+
+    // Whether the device's link is up, a system call
+    private static boolean btConnected(BluetoothDevice device) {
+
+        try {
+            return Boolean.TRUE.equals(BluetoothDevice.class.getMethod("isConnected").invoke(device));
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // Whether the device is where the music goes, null when that cannot be
+    // read, before Android 13
+    private static Boolean btActive(BluetoothAdapter adapter, BluetoothDevice device) {
+
+        try {
+
+            Object list = BluetoothAdapter.class.getMethod("getActiveDevices", int.class).invoke(adapter, BT_A2DP);
+
+            if (!(list instanceof List)) {
+                return null;
+            }
+
+            for (Object one : (List<?>) list) {
+
+                if (one instanceof BluetoothDevice && device.getAddress().equals(((BluetoothDevice) one).getAddress())) {
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // The device made where the music goes, a system call. Whether the
+    // request was taken
+    private static boolean btMakeActive(BluetoothAdapter adapter, BluetoothDevice device) {
+
+        try {
+
+            Object taken = BluetoothAdapter.class.getMethod("setActiveDevice", BluetoothDevice.class, int.class)
+                .invoke(adapter, device, BT_ACTIVE_AUDIO);
+
+            return !Boolean.FALSE.equals(taken);
+        } catch (Throwable t) {
+
+            say("not made active: " + (t.getCause() != null ? t.getCause() : t));
+            return false;
         }
     }
 
