@@ -16,22 +16,36 @@ In development.
     added first as on Mureka, drafts included, and a queue made from the
     list plays them in that order. Play starts it from the top, shuffled
     with shuffle on, never the song paused or stopped before.
+  - Over the list of an open playlist, in the mobile player and over the
+    web view's big and small lists: its cover, name, number of songs and
+    total time, with Play, Shuffle and a cross back to all songs. Play and
+    Shuffle set shuffle off or on as they start.
   - A song's menu has Add to the playlist used last, by name, and Add to
     playlist, which offers the playlists, the latest used first, and New
     playlist. With a playlist open, it also has Remove from the playlist
     and Move to top, Move up, Move down and Move to bottom.
   - Picked songs go into a playlist with Playlist in the bar for picked
     songs, and out of the open playlist with Remove.
-  - In the mobile player, the songs of an open playlist have a handle to
-    drag them to new places. The new order shows at once, and the queue
-    follows it, but goes to Mureka only with Save order in the bar over the
-    list. Undo there puts Mureka's order back.
-  - A new button for the button row, Playlist, adds the playing song to
-    the playlist used last, and is lit while the song is in it.
+  - The songs of an open playlist have a handle to drag them to new
+    places, in the mobile player's list and in the web view's list and
+    small list, as long as the list stands in the playlist's own order,
+    not sorted or searched. The new order shows at once, and the queue
+    follows it. It goes to Mureka by itself eight seconds after the last
+    drag, and at once when another playlist, All songs or another view
+    is picked, or the page is put away. Save now and Undo sit in the bar
+    over the mobile player's list and at the top of the web view.
+  - Two new buttons for the button row: Playlists opens the Playlists
+    page, and is lit while a playlist is open, and To playlist adds the
+    playing song to the playlist used last, and is lit while the song is
+    in it. Picking a playlist closes the Playlists page, in the web view
+    too.
   - Mureka has no way to reorder a playlist, so a move takes the songs
     that have to go above out and adds them back. The songs taken out are
     noted first and put back the next time the playlists are read, should
     the connection drop in between.
+  - Adding to a playlist, taking out of one and moving in one say so in a
+    note with Undo, on the phone and in the web view, which puts the
+    playlist back as it was.
 - **Song sets.** The versions of a song, made again and again on Mureka,
   can be kept together in a set, to compare them and listen them through.
   A song's menu has Add to a set: a new set with the song, or one of the
