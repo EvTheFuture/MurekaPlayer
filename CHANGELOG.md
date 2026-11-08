@@ -18,8 +18,10 @@ In development.
     with shuffle on, never the song paused or stopped before.
   - Over the list of an open playlist, in the mobile player and over the
     web view's big and small lists: its cover, name, number of songs and
-    total time, with Play, Shuffle and a cross back to all songs. Play and
-    Shuffle set shuffle off or on as they start.
+    total time, with Play, Shuffle, Edit and a cross back to all songs.
+    Play and Shuffle set shuffle off or on as they start. Edit opens the
+    playlist's editor, on the Playlists page on the phone and in the
+    Playlists popup in the web view.
   - A song's menu has Add to the playlist used last, by name, and Add to
     playlist, which offers the playlists, the latest used first, and New
     playlist. With a playlist open, it also has Remove from the playlist

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.32";
+    const VERSION = "2.0.1.33";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -56855,6 +56855,22 @@
         all.title = "All songs again";
         playlistHeadEl.appendChild(play);
         playlistHeadEl.appendChild(mix);
+
+        // Its name, description and cover changed on the Playlists page,
+        // opened on it. Liked Songs follows the hearts and has none
+        if (editablePlaylist(pl)) {
+
+            const edit = makeButton("Edit", "#333", "#fff", function () {
+
+                openPlaylists();
+                startEditPlaylist(pl);
+            });
+
+            edit.style.flex = "0 0 auto";
+            edit.title = "Edit " + pl.name;
+            playlistHeadEl.appendChild(edit);
+        }
+
         playlistHeadEl.appendChild(all);
     }
 
@@ -56887,6 +56903,8 @@
         const songs = openPlaylistSongs();
 
         return {
+            id: String(activePlaylist.playlist_id),
+            editable: editablePlaylist(pl),
             name: activePlaylist.name || "Playlist",
             count: songs.length,
             time: playlistTimeText(playlistSeconds(songs)),
@@ -61081,11 +61099,13 @@
         flex-wrap: wrap;
     }
 
+    /* A grey square stands for a playlist with no cover yet */
     .plEdCover .thumb {
         flex: 0 0 auto;
         width: 7em;
         height: 7em;
         border-radius: 12px;
+        background-color: #333;
     }
 
     .plEdCoverActs {
@@ -72926,6 +72946,23 @@
         button("Shuffle", "Play the playlist shuffled", function () {
             send("playlistPlay", { shuffle: true });
         });
+
+        // The playlist edited in the Playlists popup, opened on it
+        if (h.editable && h.id) {
+
+            const edit = document.createElement("button");
+
+            edit.type = "button";
+            edit.className = "chip iconOnly";
+            edit.title = "Edit " + h.name;
+            edit.setAttribute("aria-label", edit.title);
+            edit.appendChild(icon("pencil"));
+            edit.addEventListener("click", function () {
+                editPlaylistInPop(h.id);
+            });
+            el.appendChild(edit);
+        }
+
         button("\u00D7", "All songs again", function () {
             send("playlistClose");
         });
@@ -83738,6 +83775,7 @@
     function openPlPop() {
 
         plEditId = "";
+        plEditWanted = "";
         plEditCover = null;
         $("plEditor").textContent = "";
         showPlList(true);
@@ -83749,6 +83787,7 @@
     function closePlPop() {
 
         plEditId = "";
+        plEditWanted = "";
         plEditCover = null;
         $("plPop").style.display = "none";
     }
@@ -83758,6 +83797,15 @@
         if (plEditing()) {
 
             paintPlEditor();
+            return;
+        }
+
+        if (plEditWanted && playlistFor(plEditWanted)) {
+
+            const id = plEditWanted;
+
+            plEditWanted = "";
+            openPlEditor(id);
             return;
         }
 
@@ -83846,6 +83894,21 @@
     let plEditId = "";
     let plEditCover = null;
     let plDeleteArmed = 0;
+
+    // A playlist to edit as soon as the phone has sent the playlists, for
+    // the popup opened on it before they came
+    let plEditWanted = "";
+
+    function editPlaylistInPop(id) {
+
+        openPlPop();
+
+        if (playlistFor(id)) {
+            openPlEditor(id);
+        } else {
+            plEditWanted = id;
+        }
+    }
 
     function plEditing() {
         return plEditId !== "" && $("plEditor").style.display === "flex";

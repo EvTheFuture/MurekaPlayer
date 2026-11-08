@@ -1560,11 +1560,13 @@
         flex-wrap: wrap;
     }
 
+    /* A grey square stands for a playlist with no cover yet */
     .plEdCover .thumb {
         flex: 0 0 auto;
         width: 7em;
         height: 7em;
         border-radius: 12px;
+        background-color: #333;
     }
 
     .plEdCoverActs {
@@ -13405,6 +13407,23 @@
         button("Shuffle", "Play the playlist shuffled", function () {
             send("playlistPlay", { shuffle: true });
         });
+
+        // The playlist edited in the Playlists popup, opened on it
+        if (h.editable && h.id) {
+
+            const edit = document.createElement("button");
+
+            edit.type = "button";
+            edit.className = "chip iconOnly";
+            edit.title = "Edit " + h.name;
+            edit.setAttribute("aria-label", edit.title);
+            edit.appendChild(icon("pencil"));
+            edit.addEventListener("click", function () {
+                editPlaylistInPop(h.id);
+            });
+            el.appendChild(edit);
+        }
+
         button("\u00D7", "All songs again", function () {
             send("playlistClose");
         });
@@ -24217,6 +24236,7 @@
     function openPlPop() {
 
         plEditId = "";
+        plEditWanted = "";
         plEditCover = null;
         $("plEditor").textContent = "";
         showPlList(true);
@@ -24228,6 +24248,7 @@
     function closePlPop() {
 
         plEditId = "";
+        plEditWanted = "";
         plEditCover = null;
         $("plPop").style.display = "none";
     }
@@ -24237,6 +24258,15 @@
         if (plEditing()) {
 
             paintPlEditor();
+            return;
+        }
+
+        if (plEditWanted && playlistFor(plEditWanted)) {
+
+            const id = plEditWanted;
+
+            plEditWanted = "";
+            openPlEditor(id);
             return;
         }
 
@@ -24325,6 +24355,21 @@
     let plEditId = "";
     let plEditCover = null;
     let plDeleteArmed = 0;
+
+    // A playlist to edit as soon as the phone has sent the playlists, for
+    // the popup opened on it before they came
+    let plEditWanted = "";
+
+    function editPlaylistInPop(id) {
+
+        openPlPop();
+
+        if (playlistFor(id)) {
+            openPlEditor(id);
+        } else {
+            plEditWanted = id;
+        }
+    }
 
     function plEditing() {
         return plEditId !== "" && $("plEditor").style.display === "flex";
