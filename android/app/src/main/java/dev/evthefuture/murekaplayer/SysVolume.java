@@ -25,6 +25,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Handler;
@@ -53,6 +54,15 @@ final class SysVolume {
     private static Context appContext;
     private static AudioManager audio;
     private static BroadcastReceiver watcher;
+
+    // More steps than Android has: a level in percent, the step at or above
+    // it, and the player turning its own sound down by what lies between,
+    // along the step's curve. Kept over a restart
+    private static final String PREFS = "fine_volume";
+    private static boolean fineOn;
+    private static float finePct = -1;
+    private static int fineStep = -1;
+    private static float fineGain = 1;
 
     private static final Runnable CHECK = new Runnable() {
 
@@ -90,6 +100,17 @@ final class SysVolume {
             watcher = null;
         }
 
+        SharedPreferences prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+
+        fineOn = prefs.getBoolean("on", false);
+        finePct = prefs.getFloat("pct", -1);
+
+        if (fineOn && finePct >= 0) {
+            applyFine();
+        } else {
+            fineOn = false;
+        }
+
         read();
         MAIN.postDelayed(CHECK, CHECK_MS);
     }
@@ -120,11 +141,117 @@ final class SysVolume {
         }
 
         try {
-            Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC),
-                audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+
+            int level = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            // Moved by the phone's buttons, or night mode: more steps go on
+            // from that step, the player at its whole sound
+            if (fineOn && fineStep >= 0 && level != fineStep && max > 0) {
+
+                fineStep = level;
+                finePct = level * 100f / max;
+                fineGain = 1;
+                keepFine();
+                Hub.setFine(finePct);
+                Hub.command("fineGain", 1.0);
+            }
+
+            Hub.setVolume(level, max);
         } catch (RuntimeException e) {
             // No audio service just now, the next check tries again
         }
+    }
+
+    // More steps on or off, at a level in percent. Off, the player plays at
+    // its whole sound again and the step stays as it is
+    static void setFine(boolean on, float pct) {
+
+        if (audio == null) {
+            return;
+        }
+
+        try {
+
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            int cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+
+            fineOn = on;
+
+            if (!on) {
+
+                finePct = -1;
+                fineStep = -1;
+                fineGain = 1;
+                keepFine();
+                Hub.setFine(-1);
+                Hub.command("fineGain", 1.0);
+                return;
+            }
+
+            // Turned on without a level, it starts where the step is
+            finePct = pct >= 0 ? Math.max(0, Math.min(100, pct)) : (max > 0 ? cur * 100f / max : 0);
+            applyFine();
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, so leave it as it was
+        }
+    }
+
+    // The step for the level, and the player's own sound for the rest
+    private static void applyFine() {
+
+        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+        if (max <= 0) {
+            return;
+        }
+
+        float at = finePct / 100f * max;
+        int step = (int) Math.ceil(at - 0.0001f);
+        float gain = 1;
+
+        if (step <= 0) {
+            step = 0;
+        } else if (at < 1) {
+
+            // Below the lowest step only the player can go, by its share of it
+            gain = at;
+        } else {
+
+            int type = outputType();
+            boolean own = hasCurve(type, max);
+            int below = (int) Math.floor(at);
+
+            if (below < step) {
+
+                float low = stepDb(below, max, type, own);
+                float high = stepDb(step, max, type, own);
+                float want = low + (high - low) * (at - below);
+
+                gain = (float) Math.pow(10, (want - high) / 20);
+            }
+        }
+
+        fineStep = step;
+        fineGain = Math.max(0, Math.min(1, gain));
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
+        keepFine();
+        Hub.setFine(finePct);
+        Hub.command("fineGain", (double) fineGain);
+        Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+    }
+
+    private static void keepFine() {
+
+        if (appContext != null) {
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean("on", fineOn).putFloat("pct", finePct).apply();
+        }
+    }
+
+    // The player's own sound under more steps, 1 when they are off
+    static float fineGain() {
+        return fineOn ? fineGain : 1;
     }
 
     // Move the volume to one of the steps Android offers. Over Bluetooth
@@ -139,6 +266,15 @@ final class SysVolume {
 
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             int want = Math.max(0, Math.min(max, level));
+
+            // A whole step asked for, more steps follow it at the player's
+            // whole sound
+            if (fineOn && max > 0) {
+
+                finePct = want * 100f / max;
+                applyFine();
+                return;
+            }
 
             // No system volume panel over the page, the slider is
             // already showing what happens

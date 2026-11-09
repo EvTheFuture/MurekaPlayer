@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.60";
+    const VERSION = "2.0.1.61";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -17854,9 +17854,40 @@
         return iosGain !== null;
     }
 
-    // The level a fade moves, the gain where there is one
+    // The app's more volume steps: the player turns its own sound down by
+    // what lies between two of the phone's steps. 1, its whole sound,
+    // anywhere else and while they are off
+    let fineGain = 1;
+
+    function volScale() {
+        return hostCarAudio ? 1 : fineGain;
+    }
+
+    // A new level from the app, the sound moved to it at once unless a fade
+    // is on its way, which ends there
+    function setFineGain(g) {
+
+        const v = Math.max(0, Math.min(1, Number(g)));
+
+        if (!isFinite(v) || v === fineGain) {
+            return;
+        }
+
+        const level = audio ? fadeLevel() : 1;
+
+        fineGain = v;
+
+        if (audio && !iosGain && !hostCarAudio) {
+            audio.volume = Math.max(0, Math.min(1, level * volScale()));
+        }
+
+        dbgLog("Audio", "more volume steps: the player's own sound at " + Math.round(v * 100) + "%");
+    }
+
+    // The level a fade moves, the gain where there is one. In steps of the
+    // whole sound, the more volume steps' share apart
     function fadeLevel() {
-        return iosGain ? iosGain.gain.value : audio.volume;
+        return iosGain ? iosGain.gain.value : (volScale() > 0 ? Math.min(1, audio.volume / volScale()) : 1);
     }
 
     function setFadeLevel(v) {
@@ -17866,7 +17897,7 @@
             iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
             iosGain.gain.value = v;
         } else {
-            audio.volume = v;
+            audio.volume = Math.max(0, Math.min(1, v * volScale()));
         }
     }
 
@@ -17971,7 +18002,7 @@
 
             const k = Math.max(0, Math.min(1, (Date.now() - t0) / ms));
 
-            audio.volume = target * k;
+            audio.volume = target * k * (hostCarAudio ? 1 : volScale());
 
             if (k >= 1) {
 
@@ -18061,7 +18092,7 @@
 
             const settable = Math.abs(audio.volume - probe) < 0.001;
 
-            audio.volume = start;
+            audio.volume = Math.max(0, Math.min(1, start * volScale()));
 
             if (!settable) {
 
@@ -32861,7 +32892,7 @@
         }
 
         audio.muted = false;
-        audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
+        audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : volScale();
 
         // The gain of a fade on an iPhone back to whole
         if (iosGain) {
@@ -36402,6 +36433,10 @@
             // A web view shows the stats, or closed them
             statsWebUntil = arg === true ? Date.now() + 8000 : 0;
             publishHostSoon();
+        } else if (cmd === "fineGain") {
+
+            // The app's more volume steps, the player's share of the level
+            setFineGain(arg);
         } else if (cmd === "createWatch") {
 
             // A web view shows the form for making songs, or closed it
@@ -36822,6 +36857,11 @@
         }
 
         window.__murekaHostCommand = hostCommand;
+
+        // More volume steps already on from before
+        if (window.MurekaHost && typeof window.MurekaHost.fineVolumeGain === "function") {
+            setFineGain(Number(window.MurekaHost.fineVolumeGain()));
+        }
 
         // The app's own screen came to the front
         window.__murekaAppShown = function () {
@@ -68423,6 +68463,24 @@
         color: var(--accent);
     }
 
+    /* More steps for the phone's volume, a box to tick under its bar */
+    .volFine {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+        color: var(--muted);
+        cursor: pointer;
+    }
+
+    .volFine input {
+        width: 1.3em;
+        height: 1.3em;
+        flex: 0 0 auto;
+        accent-color: var(--accent);
+        cursor: pointer;
+    }
+
     #volPop {
         position: fixed;
         inset: 0;
@@ -80166,14 +80224,21 @@
         return volTarget().kind === "here";
     }
 
-    // The loudest step there is, 100 for a browser's own level
+    // Whether the phone's volume has more steps than its own, a level in
+    // percent the player evens out between them
+    function volFineOn() {
+        return !!state && typeof state.volFine === "number" && state.volFine >= 0 && state.volMax > 0;
+    }
+
+    // The loudest step there is, 100 for a browser's own level and for the
+    // phone with more steps
     function volTopOf(t) {
 
         if (t.kind === "none") {
             return 0;
         }
 
-        if (t.kind !== "phone") {
+        if (t.kind !== "phone" || volFineOn()) {
             return 100;
         }
 
@@ -80206,6 +80271,10 @@
             return t.vol;
         }
 
+        if (volFineOn()) {
+            return Math.round(state.volFine);
+        }
+
         return state && typeof state.vol === "number" ? state.vol : -1;
     }
 
@@ -80231,6 +80300,10 @@
 
         if (max <= 0 || !state || typeof state.vol !== "number" || state.vol < 0) {
             return "The phone did not say what its volume is";
+        }
+
+        if (volFineOn()) {
+            return "The phone's media volume in 100 steps, its own " + state.volMax + " evened out by the player, now step " + state.vol;
         }
 
         return "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
@@ -80303,7 +80376,7 @@
             const level = volLevelOf(x);
 
             if (level >= 0) {
-                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
+                volSetFor(x, level + by * (x.kind === "phone" ? (volFineOn() ? 2 : 1) : 5), true);
             }
         };
 
@@ -80321,6 +80394,29 @@
         bar.appendChild(name);
         bar.appendChild(row);
         bar.appendChild(where);
+
+        // The phone's few steps made 100, the player evening out between
+        if (t.kind === "phone") {
+
+            const fine = document.createElement("label");
+            const box = document.createElement("input");
+            const text = document.createElement("span");
+
+            fine.className = "volFine";
+            box.type = "checkbox";
+            text.textContent = "More steps: 100 instead of the phone's own, the player evens out between them";
+            box.addEventListener("change", function () {
+
+                const on = box.checked;
+                const pct = state && state.volMax > 0 && typeof state.vol === "number" ? Math.round(state.vol / state.volMax * 100) : -1;
+
+                delete volMoves[t.key];
+                send("sysVolumeFine", { on: on, pct: on ? pct : -1 });
+            });
+            fine.appendChild(box);
+            fine.appendChild(text);
+            bar.appendChild(fine);
+        }
 
         return bar;
     }
@@ -80383,12 +80479,24 @@
             bar.querySelector(".volWhere").textContent = volWhereText(t);
             bar.querySelector(".volRow").style.display = known ? "" : "none";
 
+            const fineRow = bar.querySelector(".volFine");
+
+            if (fineRow) {
+                fineRow.style.display = state && state.volMax > 0 ? "" : "none";
+            }
+
             if (!known) {
                 continue;
             }
 
             slider.max = String(top);
             slider.step = t.kind === "phone" ? "1" : "5";
+
+            const fineBox = bar.querySelector(".volFine input");
+
+            if (fineBox && document.activeElement !== fineBox) {
+                fineBox.checked = volFineOn();
+            }
 
             if (force || document.activeElement !== slider || volMoves[t.key] === undefined
                 || Date.now() > volMoves[t.key].until) {
@@ -80438,7 +80546,9 @@
 
         volSending[t.key] = Date.now();
 
-        if (t.kind === "phone") {
+        if (t.kind === "phone" && volFineOn()) {
+            send("sysVolumeFine", { on: true, pct: value });
+        } else if (t.kind === "phone") {
             send("sysVolume", value);
         } else {
             send("browserVol", { cid: t.cid, v: value, last: last === true });
@@ -80492,7 +80602,7 @@
             return;
         }
 
-        const step = volTarget().kind === "phone" ? 1 : 5;
+        const step = volTarget().kind === "phone" ? (volFineOn() ? 2 : 1) : 5;
 
         volSet(now + by * step, true);
         volSay();
@@ -80537,7 +80647,7 @@
             return "Off";
         }
 
-        if (t.kind !== "phone" || !state || state.volUnit !== "steps") {
+        if (t.kind !== "phone" || !state || state.volUnit !== "steps" || volFineOn()) {
             return Math.round(level / top * 100) + "%";
         }
 

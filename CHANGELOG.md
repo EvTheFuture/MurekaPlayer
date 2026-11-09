@@ -524,6 +524,13 @@ In development.
 - **Play when ready can be changed.** Tapping a song still being made
   that was asked to play when ready offers the other way, at once or
   after the playing song, or not to play it, for a tap that went wrong.
+- **More volume steps in the Android app.** More steps, under the
+  phone's bar in the web view's volume popup, makes the phone's volume
+  100 steps instead of its own 15 or so. The phone goes to the step at
+  or above the level and the player turns its own sound down by what
+  lies between that step and the one below, along the step's own curve
+  in dB, so the volume rises smoothly all the way. Kept over a restart,
+  and the phone's own buttons and night mode go on from their step.
 - **The web view's settings in the bookmarklet and the add-on.** The
   Web view page in Settings showed only in the Android app, so the web
   view shown in the page kept its defaults. It shows now wherever the

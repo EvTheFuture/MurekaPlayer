@@ -1125,6 +1125,13 @@ final class PlayerWeb {
             }
         }
 
+        // How far the player turns its own sound down under more volume
+        // steps, 1 while they are off
+        @JavascriptInterface
+        public String fineVolumeGain() {
+            return onMureka ? String.valueOf(SysVolume.fineGain()) : "1";
+        }
+
         // The WireGuard tunnel named in the settings on or off by hand, to
         // try the hand over. "1" for on
         @JavascriptInterface

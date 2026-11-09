@@ -4525,6 +4525,24 @@
         color: var(--accent);
     }
 
+    /* More steps for the phone's volume, a box to tick under its bar */
+    .volFine {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+        color: var(--muted);
+        cursor: pointer;
+    }
+
+    .volFine input {
+        width: 1.3em;
+        height: 1.3em;
+        flex: 0 0 auto;
+        accent-color: var(--accent);
+        cursor: pointer;
+    }
+
     #volPop {
         position: fixed;
         inset: 0;
@@ -16268,14 +16286,21 @@
         return volTarget().kind === "here";
     }
 
-    // The loudest step there is, 100 for a browser's own level
+    // Whether the phone's volume has more steps than its own, a level in
+    // percent the player evens out between them
+    function volFineOn() {
+        return !!state && typeof state.volFine === "number" && state.volFine >= 0 && state.volMax > 0;
+    }
+
+    // The loudest step there is, 100 for a browser's own level and for the
+    // phone with more steps
     function volTopOf(t) {
 
         if (t.kind === "none") {
             return 0;
         }
 
-        if (t.kind !== "phone") {
+        if (t.kind !== "phone" || volFineOn()) {
             return 100;
         }
 
@@ -16308,6 +16333,10 @@
             return t.vol;
         }
 
+        if (volFineOn()) {
+            return Math.round(state.volFine);
+        }
+
         return state && typeof state.vol === "number" ? state.vol : -1;
     }
 
@@ -16333,6 +16362,10 @@
 
         if (max <= 0 || !state || typeof state.vol !== "number" || state.vol < 0) {
             return "The phone did not say what its volume is";
+        }
+
+        if (volFineOn()) {
+            return "The phone's media volume in 100 steps, its own " + state.volMax + " evened out by the player, now step " + state.vol;
         }
 
         return "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
@@ -16405,7 +16438,7 @@
             const level = volLevelOf(x);
 
             if (level >= 0) {
-                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
+                volSetFor(x, level + by * (x.kind === "phone" ? (volFineOn() ? 2 : 1) : 5), true);
             }
         };
 
@@ -16423,6 +16456,29 @@
         bar.appendChild(name);
         bar.appendChild(row);
         bar.appendChild(where);
+
+        // The phone's few steps made 100, the player evening out between
+        if (t.kind === "phone") {
+
+            const fine = document.createElement("label");
+            const box = document.createElement("input");
+            const text = document.createElement("span");
+
+            fine.className = "volFine";
+            box.type = "checkbox";
+            text.textContent = "More steps: 100 instead of the phone's own, the player evens out between them";
+            box.addEventListener("change", function () {
+
+                const on = box.checked;
+                const pct = state && state.volMax > 0 && typeof state.vol === "number" ? Math.round(state.vol / state.volMax * 100) : -1;
+
+                delete volMoves[t.key];
+                send("sysVolumeFine", { on: on, pct: on ? pct : -1 });
+            });
+            fine.appendChild(box);
+            fine.appendChild(text);
+            bar.appendChild(fine);
+        }
 
         return bar;
     }
@@ -16485,12 +16541,24 @@
             bar.querySelector(".volWhere").textContent = volWhereText(t);
             bar.querySelector(".volRow").style.display = known ? "" : "none";
 
+            const fineRow = bar.querySelector(".volFine");
+
+            if (fineRow) {
+                fineRow.style.display = state && state.volMax > 0 ? "" : "none";
+            }
+
             if (!known) {
                 continue;
             }
 
             slider.max = String(top);
             slider.step = t.kind === "phone" ? "1" : "5";
+
+            const fineBox = bar.querySelector(".volFine input");
+
+            if (fineBox && document.activeElement !== fineBox) {
+                fineBox.checked = volFineOn();
+            }
 
             if (force || document.activeElement !== slider || volMoves[t.key] === undefined
                 || Date.now() > volMoves[t.key].until) {
@@ -16540,7 +16608,9 @@
 
         volSending[t.key] = Date.now();
 
-        if (t.kind === "phone") {
+        if (t.kind === "phone" && volFineOn()) {
+            send("sysVolumeFine", { on: true, pct: value });
+        } else if (t.kind === "phone") {
             send("sysVolume", value);
         } else {
             send("browserVol", { cid: t.cid, v: value, last: last === true });
@@ -16594,7 +16664,7 @@
             return;
         }
 
-        const step = volTarget().kind === "phone" ? 1 : 5;
+        const step = volTarget().kind === "phone" ? (volFineOn() ? 2 : 1) : 5;
 
         volSet(now + by * step, true);
         volSay();
@@ -16639,7 +16709,7 @@
             return "Off";
         }
 
-        if (t.kind !== "phone" || !state || state.volUnit !== "steps") {
+        if (t.kind !== "phone" || !state || state.volUnit !== "steps" || volFineOn()) {
             return Math.round(level / top * 100) + "%";
         }
 

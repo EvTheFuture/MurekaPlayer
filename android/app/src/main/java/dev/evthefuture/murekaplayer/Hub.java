@@ -56,6 +56,9 @@ final class Hub {
     private static volatile JSONObject state = new JSONObject();
     private static int volLevel = -1;
     private static int volMax = 0;
+
+    // The level in percent with more steps on, -1 while off
+    private static float volFine = -1;
     private static int clients = 0;
 
     // Whether the music goes out over Bluetooth, and the device's name, so
@@ -184,6 +187,22 @@ final class Hub {
         }
     }
 
+    // More steps' level in percent, or -1 for off. A change is a new state
+    static void setFine(float pct) {
+
+        synchronized (LOCK) {
+
+            if (pct == volFine) {
+                return;
+            }
+
+            volFine = pct;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
     // Where the phone's music goes: out over Bluetooth, to the named
     // device, or the phone itself. A change is a new state
     static void setBluetooth(boolean out, String name) {
@@ -243,6 +262,7 @@ final class Hub {
             o = new JSONObject(playerJson);
             o.put("vol", volLevel);
             o.put("volMax", volMax);
+            o.put("volFine", volFine >= 0 ? Math.round(volFine * 10) / 10.0 : -1);
             o.put("clients", clients);
             o.put("btOut", btOut);
             o.put("btName", btName);

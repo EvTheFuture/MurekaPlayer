@@ -2007,6 +2007,17 @@ final class WebViewServer {
                 return;
             }
 
+            // More steps than the phone has, on or off, and the level in
+            // percent
+            if ("sysVolumeFine".equals(cmd)) {
+
+                JSONObject a = arg instanceof JSONObject ? (JSONObject) arg : new JSONObject();
+
+                SysVolume.setFine(a.optBoolean("on", false), (float) a.optDouble("pct", -1));
+                send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
             // A paired Bluetooth device connected, disconnected or made
             // where the music goes, or Bluetooth switched on, by the app
             // and its helper, never the player
