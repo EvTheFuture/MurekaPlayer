@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.40";
+    const VERSION = "2.0.1.43";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -197,12 +197,16 @@
 
     // localStorage key for tempos worked out from the songs themselves,
     // {v, bpm: {song_id: [bpm, sureness, first found, moved, halfway,
-    // halfway at double the period, how Mureka's tempo leaned it]}},
-    // moved being 1 up, -1 down, 0 kept. All are worked out again when
+    // halfway at double the period, how Mureka's tempo leaned it, halfway
+    // in the deep band, thirds against halfway over two beats, the same in
+    // the deep band, the way it was worked out]}}, moved being 1 up, -1
+    // down, 3 three beats where two were counted, 0 kept. One worked out an
+    // older way is kept and used until the song comes up and is worked out
+    // again, so the BPM filter keeps it meanwhile. All are worked out again when
     // the way of working them out changes (v). A tempo is used only when
     // the beat stood out clearly enough (TEMPO_SURE, 0 to 1)
     const DETECTED_BPM_KEY = "mureka_detected_bpm_v1";
-    const TEMPO_VERSION = 3;
+    const TEMPO_VERSION = 6;
     const TEMPO_SURE = 0.5;
 
     // localStorage key for star ratings, song_id to 0 to 5. A song missing
@@ -4530,7 +4534,7 @@
 
             const raw = JSON.parse(localStorage.getItem(DETECTED_BPM_KEY) || "null");
 
-            if (!raw || raw.v !== TEMPO_VERSION || !raw.bpm || typeof raw.bpm !== "object") {
+            if (!raw || !raw.bpm || typeof raw.bpm !== "object") {
                 return map;
             }
 
@@ -4539,9 +4543,13 @@
                 const e = raw.bpm[key];
 
                 if (Array.isArray(e)) {
+
+                    const v = Number(e[10]) || Number(raw.v) || 0;
+
                     map.set(String(key), { bpm: Number(e[0]) || 0, sure: Number(e[1]) || 0, first: Number(e[2]) || 0,
                         moved: Number(e[3]) || 0, half: Number(e[4]) || 0, halfDouble: Number(e[5]) || 0,
-                        hinted: typeof e[6] === "string" ? e[6] : "" });
+                        hinted: typeof e[6] === "string" ? e[6] : "", deep: Number(e[7]) || 0,
+                        thirds: Number(e[8]) || 0, thirdsDeep: Number(e[9]) || 0, v: v });
                 }
             }
         } catch (e) {
@@ -4565,7 +4573,8 @@
             const out = {};
 
             detectedBpm.forEach(function (t, key) {
-                out[key] = [t.bpm, t.sure, t.first || 0, t.moved || 0, t.half || 0, t.halfDouble || 0, t.hinted || ""];
+                out[key] = [t.bpm, t.sure, t.first || 0, t.moved || 0, t.half || 0, t.halfDouble || 0, t.hinted || "", t.deep || 0,
+                    t.thirds || 0, t.thirdsDeep || 0, t.v || TEMPO_VERSION];
             });
 
             try {
@@ -4574,6 +4583,15 @@
                 // Kept for this visit only
             }
         }, 3000);
+    }
+
+    // Whether a song's tempo was worked out the way used now. One worked
+    // out an older way still counts in the lists until then
+    function tempoDone(id) {
+
+        const t = detectedBpm.get(String(id));
+
+        return !!(t && t.v === TEMPO_VERSION);
     }
 
     // The tempo worked out from the song, whole beats, 0 when not worked
@@ -27863,7 +27881,7 @@
 
             if (t && t.bpm > 0) {
 
-                add("From the song", t.bpm + " BPM");
+                add("From the song", t.bpm + " BPM" + (t.v !== TEMPO_VERSION ? ", worked out an older way, again when it comes up" : ""));
                 sub("Sure", t.sure + (t.sure >= TEMPO_SURE ? ", used" : ", not used, below " + TEMPO_SURE));
                 sub("Half and double", Math.round(t.bpm / 2 * 10) / 10 + " and " + Math.round(t.bpm * 20) / 10 + " BPM");
 
@@ -28533,7 +28551,7 @@
         }
 
         // The tempo from the same decoding, after the waveform
-        if (tempoWanted() && !detectedBpm.has(String(song.song_id))) {
+        if (tempoWanted() && !tempoDone(song.song_id)) {
 
             setTimeout(function () {
 
@@ -28611,12 +28629,24 @@
     const TEMPO_MAX = 215;
 
     // How strong the starts halfway between beats must be, as a share of
-    // the beat's, to take double the tempo: more above TEMPO_UP_HIGH BPM.
-    // Weaker than TEMPO_DOWN_SHARE at double the period, half the tempo
+    // the beat's, to take double the tempo: in all the sound, and in the
+    // deep band alone, the kick and the bass, more so past TEMPO_UP_HIGH
+    // BPM. Real songs around 100 BPM have eighth notes and short sounds
+    // halfway nearly as strong as the beats, and doubled they came out
+    // near 200, while their kick and bass keep to the beat. Weaker than
+    // TEMPO_DOWN_SHARE at double the period, half the tempo
     const TEMPO_UP_SHARE = 0.5;
-    const TEMPO_UP_HIGH = 180;
-    const TEMPO_UP_HIGH_SHARE = 0.75;
+    const TEMPO_UP_DEEP = 0.7;
+    const TEMPO_UP_HIGH = 160;
+    const TEMPO_UP_HIGH_DEEP = 0.85;
     const TEMPO_DOWN_SHARE = 0.35;
+
+    // Three beats where two were counted, the tempo found being 2/3 of the
+    // real one: over two beats the thirds at least this share of halfway,
+    // in all the sound and in the deep band. Real songs at 167 and 172 BPM
+    // came out at 111 and 115
+    const TEMPO_THIRDS_SHARE = 0.85;
+    const TEMPO_THIRDS_DEEP = 0.95;
 
     async function detectTempo(data, rate, hint) {
 
@@ -28743,33 +28773,40 @@
         }
 
         // The starts as they stand out from the level around them, half a
-        // second each way
-        const env = new Float32Array(frames);
+        // second each way: of all the sound, and of the deep band alone
         const reach = Math.round(fps * 0.5);
-        let run = 0;
+        const standOut = function (src) {
 
-        for (let f = 0; f < Math.min(frames, reach); f++) {
-            run += flux[f];
-        }
+            const out = new Float32Array(frames);
+            let run = 0;
 
-        for (let f = 0; f < frames; f++) {
-
-            const lo = f - reach - 1;
-            const hi = f + reach;
-
-            if (hi < frames) {
-                run += flux[hi];
+            for (let f = 0; f < Math.min(frames, reach); f++) {
+                run += src[f];
             }
 
-            if (lo >= 0) {
-                run -= flux[lo];
+            for (let f = 0; f < frames; f++) {
+
+                const lo = f - reach - 1;
+                const hi = f + reach;
+
+                if (hi < frames) {
+                    run += src[hi];
+                }
+
+                if (lo >= 0) {
+                    run -= src[lo];
+                }
+
+                const count = Math.min(frames - 1, hi) - Math.max(0, lo + 1) + 1;
+                const v = src[f] - run / count;
+
+                out[f] = v > 0 ? v : 0;
             }
 
-            const count = Math.min(frames - 1, hi) - Math.max(0, lo + 1) + 1;
-            const v = flux[f] - run / count;
-
-            env[f] = v > 0 ? v : 0;
-        }
+            return out;
+        };
+        const env = standOut(flux);
+        const deepEnv = standOut(bandFlux[0]);
 
         await sleep(0);
 
@@ -28848,18 +28885,20 @@
         }
 
         // How strong the starts are half a period from the strongest ones,
-        // the sound folded at that period, as a share of the strongest
-        const halfway = function (q) {
+        // the sound, or one band of it, folded at that period, as a share
+        // of the strongest
+        const halfway = function (q, e) {
 
             const n = 32;
             const sum = new Float64Array(n);
             const count = new Float64Array(n);
+            const of = e || env;
 
             for (let f = 0; f < frames; f++) {
 
                 const b = Math.floor((f % q) / q * n) % n;
 
-                sum[b] += env[f];
+                sum[b] += of[f];
                 count[b] += 1;
             }
 
@@ -28884,29 +28923,73 @@
             return mean[top] > 0 ? mean[(top + n / 2) % n] / mean[top] : 0;
         };
 
-        // Doubled past 180 BPM, rare in songs, only with starts halfway
-        // nearly as strong. With Mureka's tempo near one of the three, the
-        // way to it takes less and the way away from it more
+        // Folded over q: how strong halfway and the thirds are, as a share
+        // of the strongest place
+        const thirdsOf = function (q, e) {
+
+            const n = 48;
+            const sum = new Float64Array(n);
+            const count = new Float64Array(n);
+            const mean = new Float64Array(n);
+            let top = 0;
+
+            for (let f = 0; f < frames; f++) {
+
+                const b = Math.floor((f % q) / q * n) % n;
+
+                sum[b] += e[f];
+                count[b] += 1;
+            }
+
+            for (let i = 0; i < n; i++) {
+
+                const a = (i + n - 1) % n;
+                const c = (i + 1) % n;
+
+                mean[i] = (sum[a] + sum[i] + sum[c]) / Math.max(1, count[a] + count[i] + count[c]);
+            }
+
+            for (let i = 1; i < n; i++) {
+
+                if (mean[i] > mean[top]) {
+                    top = i;
+                }
+            }
+
+            if (!(mean[top] > 0)) {
+                return { half: 0, thirds: 0 };
+            }
+
+            return { half: mean[(top + 24) % n] / mean[top], thirds: (mean[(top + 16) % n] + mean[(top + 32) % n]) / 2 / mean[top] };
+        };
+
+        // Doubled when the starts halfway are strong enough in all the
+        // sound and in the deep band, which takes more past 160 BPM. With
+        // Mureka's tempo near the one found it is kept, near its half or
+        // double the way there takes less
         const first = Math.round(fps * 60 / best * 10) / 10;
         const half = halfway(best);
+        const deepHalf = halfway(best, deepEnv);
         const halfDouble = halfway(best * 2);
         const upTo = fps * 60 / (best / 2);
         const downTo = fps * 60 / (best * 2);
         const near = function (a) {
             return hint > 0 && Math.abs(a - hint) <= hint * 0.04;
         };
-        let upShare = upTo > TEMPO_UP_HIGH ? TEMPO_UP_HIGH_SHARE : TEMPO_UP_SHARE;
+        let upShare = TEMPO_UP_SHARE;
+        let upDeep = upTo > TEMPO_UP_HIGH ? TEMPO_UP_HIGH_DEEP : TEMPO_UP_DEEP;
         let downShare = TEMPO_DOWN_SHARE;
         let hinted = "";
 
         if (near(first)) {
 
-            upShare = Math.max(upShare, TEMPO_UP_HIGH_SHARE);
-            downShare = Math.min(downShare, 0.2);
+            upShare = Infinity;
+            downShare = 0;
             hinted = "kept";
         } else if (near(upTo)) {
 
             upShare = 0.35;
+            upDeep = 0.5;
             hinted = "up";
         } else if (near(downTo)) {
 
@@ -28916,7 +28999,26 @@
 
         let moved = 0;
 
-        if (upTo <= TEMPO_MAX && half >= upShare) {
+        // Over two beats, the thirds against halfway: as strong, three
+        // beats fit where two were counted
+        const two = thirdsOf(best * 2, env);
+        const twoDeep = thirdsOf(best * 2, deepEnv);
+        const thirds = two.half > 0 ? two.thirds / two.half : 0;
+        const thirdsDeep = twoDeep.half > 0 ? twoDeep.thirds / twoDeep.half : 0;
+        const fasterTo = fps * 60 / (best * 2 / 3);
+        let thirdsShare = TEMPO_THIRDS_SHARE;
+        let thirdsDeepShare = TEMPO_THIRDS_DEEP;
+
+        if (near(first)) {
+            thirdsShare = Infinity;
+        } else if (near(fasterTo)) {
+
+            thirdsShare = 0.6;
+            thirdsDeepShare = 0.7;
+            hinted = "thirds";
+        }
+
+        if (upTo <= TEMPO_MAX && half >= upShare && deepHalf >= upDeep) {
 
             best = best / 2;
             moved = 1;
@@ -28924,6 +29026,10 @@
 
             best = best * 2;
             moved = -1;
+        } else if (fasterTo <= TEMPO_MAX && thirds >= thirdsShare && thirdsDeep >= thirdsDeepShare) {
+
+            best = best * 2 / 3;
+            moved = 3;
         }
 
         // Finer around it, in hundredths of a moment, over as many beats as
@@ -29000,6 +29106,9 @@
             moved: moved,
             half: Math.round(half * 100) / 100,
             halfDouble: Math.round(halfDouble * 100) / 100,
+            deep: Math.round(deepHalf * 100) / 100,
+            thirds: Math.round(thirds * 100) / 100,
+            thirdsDeep: Math.round(thirdsDeep * 100) / 100,
             hinted: hinted
         };
     }
@@ -29013,7 +29122,7 @@
     const tempoInfo = new Map();
     let tempoBusy = false;
     let tempoTimer = 0;
-    let tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0 };
+    let tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0, thirds: 0 };
 
     function tempoWanted() {
         return settings.bpmSource !== "mureka";
@@ -29023,7 +29132,7 @@
 
         const id = String(song.song_id);
 
-        if (!tempoWanted() || detectedBpm.has(id) || !cachedIds.has(song.song_id)) {
+        if (!tempoWanted() || tempoDone(id) || !cachedIds.has(song.song_id)) {
             return;
         }
 
@@ -29120,7 +29229,7 @@
                 tempoWaiting.delete(next[0]);
 
                 // Done meanwhile, or no longer coming up
-                if (detectedBpm.has(next[0]) || !tempoNear(next[1])) {
+                if (tempoDone(next[0]) || !tempoNear(next[1])) {
                     continue;
                 }
 
@@ -29169,7 +29278,7 @@
 
         const id = String(song.song_id);
 
-        if (detectedBpm.has(id)) {
+        if (tempoDone(id)) {
             return;
         }
 
@@ -29197,7 +29306,8 @@
         const r = await detectTempo(data, buffer.sampleRate, murekaBpm(song));
 
         detectedBpm.set(id, r ? { bpm: r.bpm, sure: r.sure, first: r.first, moved: r.moved, half: r.half, halfDouble: r.halfDouble,
-            hinted: r.hinted } : { bpm: 0, sure: 0, first: 0, moved: 0, half: 0, halfDouble: 0, hinted: "" });
+            hinted: r.hinted, deep: r.deep, thirds: r.thirds, thirdsDeep: r.thirdsDeep, v: TEMPO_VERSION }
+            : { bpm: 0, sure: 0, first: 0, moved: 0, half: 0, halfDouble: 0, hinted: "", deep: 0, thirds: 0, thirdsDeep: 0, v: TEMPO_VERSION });
         saveDetectedBpmSoon();
         noteTempo(song, r, Date.now() - t0);
         tempoInfo.set(id, "in " + (Date.now() - t0) + " ms, " + Math.round(buffer.duration) + " s of sound");
@@ -29224,6 +29334,8 @@
             tempoTally.up += 1;
         } else if (r && r.moved === -1) {
             tempoTally.down += 1;
+        } else if (r && r.moved === 3) {
+            tempoTally.thirds += 1;
         }
 
         if (!r) {
@@ -29266,20 +29378,27 @@
         const pct = function (v) {
             return Math.round((Number(v) || 0) * 100) + " %";
         };
-        const lean = t.hinted === "kept" ? ", Mureka's tempo near it, so kept unless very clear"
+        const lean = t.hinted === "kept" ? ", Mureka's tempo near it, so kept"
+            : t.hinted === "thirds" ? ", Mureka's tempo near three beats in two"
             : t.hinted === "up" ? ", Mureka's tempo near its double" : t.hinted === "down" ? ", Mureka's tempo near its half" : "";
 
         if (t.moved === 1) {
             return "first found " + t.first + ", doubled: the starts halfway between beats were " + pct(t.half)
-                + " as strong as the beats" + lean;
+                + " as strong as the beats, in the deep band " + pct(t.deep) + lean;
         }
 
         if (t.moved === -1) {
             return "first found " + t.first + ", halved: every other beat only " + pct(t.halfDouble) + " as strong" + lean;
         }
 
-        return "kept " + t.first + ": halfway " + pct(t.half) + " as strong, every other beat "
-            + pct(t.halfDouble) + lean;
+        if (t.moved === 3) {
+            return "first found " + t.first + ", three beats where two were counted: over two beats the thirds were "
+                + pct(t.thirds) + " as strong as halfway, in the deep band " + pct(t.thirdsDeep) + lean;
+        }
+
+        return "kept " + t.first + ": halfway " + pct(t.half) + " as strong, in the deep band " + pct(t.deep)
+            + ", every other beat " + pct(t.halfDouble) + ", thirds " + pct(t.thirds) + " of halfway, in the deep band "
+            + pct(t.thirdsDeep) + lean;
     }
 
     function tempoSummary() {
@@ -29288,9 +29407,9 @@
 
         dbgLog("Tempo", "worked out for " + t.n + " songs: " + t.agree + " agree with Mureka within 1 BPM, "
             + t.near + " within 3, " + t.double + " half or double Mureka's, " + t.other + " differ, " + t.unsure
-            + " without a clear beat, " + t.none + " too short; " + t.up + " doubled and " + t.down
-            + " halved by the beat check");
-        tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0 };
+            + " without a clear beat, " + t.none + " too short; " + t.up + " doubled, " + t.down
+            + " halved and " + t.thirds + " made three beats in two by the beat check");
+        tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0, thirds: 0 };
     }
 
     // The lists, filters and the playing song's lines drawn again a moment

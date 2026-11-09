@@ -443,9 +443,18 @@ In development.
   is and how long it took, its half and double, the beat check, and the
   choice in the settings. The tempo is measured over up to 32 beats for a
   finer value. The beat check, which decides between a tempo and its half
-  or double, takes double past 180 BPM only when the starts halfway are
-  nearly as strong as the beats, and with Mureka's tempo near one of the
-  three it leans that way unless the sound says otherwise clearly. The
+  or double, also asks the deep band, the kick and the bass: real songs
+  around 100 BPM have eighth notes and other short sounds halfway nearly
+  as strong as the beats, while their kick and bass keep to the beat, so
+  a tempo is doubled only when the deep band is strong halfway too, more
+  so past 160 BPM. It also finds three beats where two were counted, as
+  in songs at 167 and 172 BPM that came out at 111 and 115: over two
+  beats the thirds then are as strong as halfway, in the deep band too.
+  With Mureka's tempo near the one found it is kept, and near one of the
+  others the way there takes less. Tried on real songs with tempos
+  measured by hand. Tempos are kept on the device for the BPM filter,
+  the lists and sorting; one worked out an older way is kept and used
+  until the song comes up and is worked out again. The
   debug log tells how each was settled, and the count how many were
   doubled or halved.
 - **The phone's Bluetooth devices from the web view.** A long press on
