@@ -504,9 +504,12 @@ In development.
   fills an empty style, else it can be taken with a button. Once they
   are ready, the two new songs can play at once, the second after the
   first, or both play next, and Put them in a set puts them in a set
-  chosen beforehand, the sets shown in their own colors with the one the
-  title, lyrics and style look most like chosen, or in a new set named
-  as typed or after the title. Mureka's helpers are ringed in cyan, keeping a prompt in
+  chosen beforehand, shown in its own color, the one the title, lyrics
+  and style look most like chosen at first, Change listing the sets with
+  their colors and song counts, or in a new set named as typed or after
+  the title. In the web view the form is laid out in boxes, a few
+  choices joined in one bar, a switch for the set and the buttons that
+  open a list filled. Mureka's helpers are ringed in cyan, keeping a prompt in
   grey and No remix in red, so they stand apart from the lists. The form is
   kept between visits and shared with the web view, where the same form
   opens from its own Create button, a song file sent through the phone

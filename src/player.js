@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.56";
+    const VERSION = "2.0.1.57";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -58443,7 +58443,7 @@
     function createSetChoices() {
 
         return setsByUse().map(function (e) {
-            return { id: e.set.id, name: e.set.name, color: e.set.color };
+            return { id: e.set.id, name: e.set.name, color: e.set.color, count: e.count };
         });
     }
 
@@ -58992,8 +58992,20 @@
         createEl.appendChild(ui.setRow);
         ui.setBox = document.createElement("div");
         ui.setBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        // The set chosen, in its own color, a list to change it
+        ui.setPick = document.createElement("button");
+        ui.setPick.type = "button";
+        ui.setPick.addEventListener("click", createSetsFromPage);
+        ui.acts.push(ui.setPick);
+
+        const setChange = act("Change", createSetsFromPage);
+
+        setChange.style.flex = "0 0 auto";
+        setChange.style.padding = "6px 14px";
         ui.setChips = document.createElement("div");
-        ui.setChips.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow-y:auto;padding:2px";
+        ui.setChips.style.cssText = "display:flex;align-items:center;gap:8px";
+        ui.setChips.appendChild(ui.setPick);
+        ui.setChips.appendChild(setChange);
         ui.setHint = document.createElement("div");
         ui.setHint.style.cssText = "font-size:12px;color:#aaa";
         ui.setName = createField(false, 1, 80);
@@ -59133,39 +59145,25 @@
         // when something changed
         if (d.setOn) {
 
-            const sets = createSetChoices();
             const suggest = createSuggestSet();
-            const chosen = d.setId === "new" || songSets.has(d.setId) ? d.setId : "new";
-            const key = JSON.stringify([sets, suggest, chosen]);
+            const chosen = songSets.has(d.setId) ? d.setId : "new";
+            const set = chosen === "new" ? null : songSets.get(chosen);
+            const color = set ? set.color : CTRL_ACCENT;
 
-            if (ui.setChips.dataset.key !== key) {
+            ui.setPick.textContent = "";
 
-                ui.setChips.dataset.key = key;
-                ui.setChips.textContent = "";
+            const dot = document.createElement("span");
 
-                for (const c of [{ id: "new", name: "New set", color: "#48e1eb" }].concat(sets)) {
-
-                    const b = document.createElement("button");
-                    const dot = document.createElement("span");
-                    const on = c.id === chosen;
-
-                    b.type = "button";
-                    b.style.cssText = "display:inline-flex;align-items:center;gap:6px;border:none;border-radius:999px;padding:6px 12px;font:inherit;"
-                        + "font-size:13px;font-weight:600;cursor:pointer;background:" + (on ? c.color : "transparent")
-                        + ";color:" + (on ? "#000" : c.color) + ";box-shadow:" + CTRL_RING + c.color;
-                    dot.style.cssText = "width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:" + (on ? "#000" : c.color);
-                    b.appendChild(dot);
-                    b.appendChild(document.createTextNode(c.name));
-                    b.addEventListener("click", function () {
-                        changeCreateDraft({ setId: c.id });
-                    });
-                    ui.setChips.appendChild(b);
-                }
-            }
+            dot.style.cssText = "width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#000";
+            ui.setPick.appendChild(dot);
+            ui.setPick.appendChild(document.createTextNode(set ? set.name : "A new set"));
+            ui.setPick.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:8px;border:none;border-radius:999px;padding:7px 14px;"
+                + "font:inherit;font-size:13px;font-weight:600;cursor:pointer;color:#000;overflow:hidden;white-space:nowrap;background:" + color;
 
             const suggested = suggest ? songSets.get(suggest) : null;
 
-            ui.setHint.textContent = suggested ? "The songs look most like " + suggested.name : "";
+            ui.setHint.textContent = suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
+                : suggested ? "The set the songs look most like" : "";
             ui.setHint.style.display = suggested ? "" : "none";
             ui.setName.style.display = chosen === "new" ? "" : "none";
             put(ui.setName, d.setName);
@@ -59380,6 +59378,16 @@
                     + "cursor:pointer;font:inherit;font-size:13px;line-height:1.4";
                 main.textContent = r.label;
                 main.style.cssText = "overflow-wrap:anywhere";
+
+                // A set's own color as a dot before its name
+                if (r.color) {
+
+                    const dot = document.createElement("span");
+
+                    dot.style.cssText = "display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:0;background:" + r.color;
+                    main.insertBefore(dot, main.firstChild);
+                }
+
                 row.appendChild(main);
 
                 if (r.sub) {
@@ -59442,6 +59450,31 @@
         }
 
         return { add: add, close: close, empty: empty, list: list };
+    }
+
+    // The sets to put the new songs in, each with its color, the one the
+    // form looks most like first, a new set before them all
+    function createSetsFromPage() {
+
+        const suggest = createSuggestSet();
+        const sets = createSetChoices();
+        const ordered = sets.filter(function (x) {
+            return x.id === suggest;
+        }).concat(sets.filter(function (x) {
+            return x.id !== suggest;
+        }));
+
+        createPicker("Put them in", [{ label: "A new set", sub: "Named as typed, or after the title", color: CTRL_ACCENT, value: "new" }].concat(ordered.map(function (x) {
+
+            return {
+                label: x.name,
+                sub: [x.count ? x.count + (x.count === 1 ? " song" : " songs") : "", x.id === suggest ? "the songs look most like it" : ""].filter(Boolean).join(", "),
+                color: x.color,
+                value: x.id
+            };
+        })), function (id) {
+            changeCreateDraft({ setId: id });
+        });
     }
 
     async function createPromptsFromPage() {
@@ -65044,26 +65077,6 @@
         box-shadow: inset 0 0 0 2px #b8b8c0;
     }
 
-    /* A box to tick, with a tick in it while on */
-    .chip.crCheck::before {
-        content: "";
-        width: 1em;
-        height: 1em;
-        box-sizing: border-box;
-        border: 2px solid currentColor;
-        border-radius: 4px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.9em;
-        font-weight: 700;
-        line-height: 1;
-    }
-
-    .chip.crCheck.on::before {
-        content: "\2713";
-    }
-
     .crLabelName {
         flex: 1 1 auto;
     }
@@ -65083,37 +65096,164 @@
         cursor: pointer;
     }
 
-    /* The sets in their own colors, ringed, the chosen one filled */
-    .crSetChips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        max-height: 30vh;
-        overflow-y: auto;
-        padding: 2px;
-    }
-
+    /* The chosen set in its own color, filled */
     .chip.crSet {
-        color: var(--setColor);
-        box-shadow: inset 0 0 0 2px var(--setColor);
-        border-color: transparent;
+        border-color: var(--setColor);
+        background: var(--setColor);
+        color: #000;
+        font-weight: 600;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .chip.crSet::before {
         content: "";
+        flex: 0 0 auto;
         width: 0.7em;
         height: 0.7em;
         border-radius: 50%;
-        background: var(--setColor);
-    }
-
-    .chip.crSet.on {
-        background: var(--setColor);
-        color: #000;
-    }
-
-    .chip.crSet.on::before {
         background: #000;
+    }
+
+    .crDot {
+        flex: 0 0 auto;
+        width: 1em;
+        height: 1em;
+        border-radius: 50%;
+        margin-left: 4px;
+    }
+
+    /* A part of the form in a box of its own */
+    .crCard {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    .crCardHead {
+        font-size: 0.85em;
+        color: var(--muted);
+    }
+
+    /* A name on the left, the choice on the right, under it when narrow */
+    .crLine {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px 16px;
+        flex-wrap: wrap;
+    }
+
+    .crLineName {
+        font-weight: 600;
+    }
+
+    .crValue {
+        flex: 0 1 auto;
+        text-align: right;
+        color: var(--text);
+    }
+
+    /* A few choices joined in one rounded bar */
+    .crSeg {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 2px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--bg);
+    }
+
+    .crSeg.crWide {
+        display: flex;
+    }
+
+    .crSeg.crWide button {
+        flex: 1 1 0;
+    }
+
+    .crSeg button {
+        height: calc(var(--ctl-h) - 8px);
+        padding: 0 18px;
+        border: none;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: clamp(15px, 1.5vw, 22px);
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .crSeg button.on {
+        background: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    .crSeg button:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    /* A switch, its knob to the right and lit while on */
+    .crSwitch {
+        position: relative;
+        flex: 0 0 auto;
+        width: 3.4em;
+        height: 1.9em;
+        border: none;
+        border-radius: 999px;
+        background: #4a4a52;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .crSwitch::after {
+        content: "";
+        position: absolute;
+        top: 0.2em;
+        left: 0.2em;
+        width: 1.5em;
+        height: 1.5em;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.15s;
+    }
+
+    .crSwitch.on {
+        background: var(--accent);
+    }
+
+    .crSwitch.on::after {
+        transform: translateX(1.5em);
+    }
+
+    .crSwitch:disabled {
+        opacity: 0.5;
+    }
+
+    /* A button that opens a list or steps, filled grey so it reads as
+       one, apart from the ringed helpers */
+    .chip.crFill {
+        background: #3a3a44;
+        border-color: #3a3a44;
+        color: var(--text);
+        font-weight: 600;
+    }
+
+    /* The length's step buttons, round */
+    .chip.crStep {
+        width: var(--ctl-h);
+        padding: 0;
+        justify-content: center;
+        flex: 0 0 auto;
     }
 
     /* While the phone asks Mureka: the form dimmed, a large turning ring */
@@ -88674,19 +88814,19 @@
     }
 
     // Chips of which one is on, a choice of the form
+    // A choice of a few, joined in one rounded bar, the chosen one filled
     function crSegments(choices, field) {
 
         const row = document.createElement("div");
         const chips = [];
 
-        row.className = "plEdActs crActs";
+        row.className = "crSeg";
 
         for (const c of choices) {
 
             const b = document.createElement("button");
 
             b.type = "button";
-            b.className = "chip";
             b.textContent = c.label;
             b.addEventListener("click", function () {
 
@@ -88700,6 +88840,7 @@
                 }
             });
             chips.push({ el: b, value: c.value });
+            crUi.acts.push(b);
             row.appendChild(b);
         }
 
@@ -88709,6 +88850,35 @@
                 x.el.classList.toggle("on", x.value === value);
             }
         };
+
+        return row;
+    }
+
+    // A part of the form in a box of its own
+    function crCard(form) {
+
+        const card = document.createElement("div");
+
+        card.className = "crCard";
+        form.appendChild(card);
+
+        return card;
+    }
+
+    // A line with its name on the left and what is chosen on the right
+    function crLine(name, right) {
+
+        const row = document.createElement("div");
+        const label = document.createElement("span");
+
+        row.className = "crLine";
+        label.className = "crLineName";
+        label.textContent = name;
+        row.appendChild(label);
+
+        for (const el of right) {
+            row.appendChild(el);
+        }
 
         return row;
     }
@@ -88753,14 +88923,17 @@
             { label: "With lyrics", value: "song" },
             { label: "Instrumental", value: "instrumental" }
         ], "kind");
+        ui.kind.classList.add("crWide");
         form.appendChild(ui.kind);
+
+        // The title and the lyrics, with Mureka writing them
+        const words = crCard(form);
 
         ui.titleLabel = crLabel("Title", "title");
         ui.title = crField(false, 50, "title");
         ui.title.placeholder = "Left empty, Mureka names it";
-        form.appendChild(ui.titleLabel);
-        form.appendChild(ui.title);
-
+        words.appendChild(ui.titleLabel);
+        words.appendChild(ui.title);
         ui.lyricsBox = document.createElement("div");
         ui.lyricsBox.className = "crBlock";
         ui.lyricsLabel = crLabel("Lyrics", "lyrics");
@@ -88775,15 +88948,18 @@
                 crHelp("polish");
             }, "ring")
         ]));
-        form.appendChild(ui.lyricsBox);
+        words.appendChild(ui.lyricsBox);
+
+        // The style, with Mureka's two ways and the kept prompts
+        const style = crCard(form);
 
         ui.styleLabel = crLabel("Style", "style");
         ui.style = crField(true, 1000, "style");
         ui.style.rows = 6;
         ui.style.placeholder = "Genre, mood, instruments, tempo";
-        form.appendChild(ui.styleLabel);
-        form.appendChild(ui.style);
-        form.appendChild(crRow([
+        style.appendChild(ui.styleLabel);
+        style.appendChild(ui.style);
+        style.appendChild(crRow([
             crChip("Match my vibe", function () {
                 crHelp("match");
             }, "ring"),
@@ -88792,7 +88968,7 @@
             }, "ring"),
             crChip("My prompts", function () {
                 openCrPick("prompts");
-            }),
+            }, "crFill"),
             crChip("Keep as a prompt", function () {
 
                 crFlush().then(function () {
@@ -88801,27 +88977,27 @@
             }, "crGrey")
         ]));
 
-        ui.voiceBox = document.createElement("div");
-        ui.voiceBox.className = "crBlock";
-        ui.voiceBox.appendChild(crLabel("Voice"));
+        // Who sings
+        ui.voiceBox = crCard(form);
         ui.voice = crSegments([
             { label: "Male", value: "male" },
             { label: "Female", value: "female" },
             { label: "Character", value: "character" }
         ], "voice");
-        ui.voiceBox.appendChild(ui.voice);
+        ui.voiceBox.appendChild(crLine("Voice", [ui.voice]));
         ui.characterName = document.createElement("span");
         ui.characterName.className = "crName";
         ui.characterRow = crRow([ui.characterName, crChip("Choose", function () {
             openCrPick("characters");
-        })]);
+        }, "crFill")]);
         ui.voiceBox.appendChild(ui.characterRow);
-        form.appendChild(ui.voiceBox);
 
-        form.appendChild(crLabel("Remix"));
-        ui.remixName = document.createElement("div");
-        ui.remixName.className = "crName";
-        form.appendChild(ui.remixName);
+        // A remix of an uploaded song
+        const remix = crCard(form);
+
+        ui.remixName = document.createElement("span");
+        ui.remixName.className = "crName crValue";
+        remix.appendChild(crLine("Remix", [ui.remixName]));
         ui.remixStyle = crChip("Use the style Mureka heard", function () {
 
             if (crDraft && crDraft.remixStyle) {
@@ -88831,19 +89007,18 @@
         ui.remixClear = crChip("No remix", function () {
             crSet({ remix: null, remixName: "", remixStyle: "" });
         }, "fail");
-        form.appendChild(crRow([
+        remix.appendChild(crRow([
             crChip("Choose a song", function () {
                 openCrPick("resources");
-            }),
-            crChip("Upload a song", crUpload),
+            }, "crFill"),
+            crChip("Upload a song", crUpload, "crFill"),
             ui.remixStyle,
             ui.remixClear
         ]));
 
-        ui.advBox = document.createElement("div");
-        ui.advBox.className = "crBlock";
         // The length on a slider, all the way left automatic, with a step
-        // of ten seconds either way on the buttons
+        // of ten seconds either way on the buttons, and the wildness
+        ui.advBox = crCard(form);
         ui.lengthLabel = crLabel("Length");
         ui.advBox.appendChild(ui.lengthLabel);
 
@@ -88866,11 +89041,11 @@
         ui.advBox.appendChild(crRow([
             crChip("-", function () {
                 stepLength(-1);
-            }),
+            }, "crStep crFill"),
             ui.length,
             crChip("+", function () {
                 stepLength(1);
-            })
+            }, "crStep crFill")
         ]));
         ui.wildLabel = crLabel("Wildness");
         ui.advBox.appendChild(ui.wildLabel);
@@ -88884,36 +89059,50 @@
             crChange("wildness", Number(ui.wild.value) || 0);
         });
         ui.advBox.appendChild(ui.wild);
-        form.appendChild(ui.advBox);
 
-        // What happens to the new songs once they are ready
-        form.appendChild(crLabel("Once they are ready"));
+        // What happens to the new songs once they are ready: played, and
+        // put in a set, the phone choosing the one the form looks most like
+        const ready = crCard(form);
+        const heading = document.createElement("div");
+
+        heading.className = "crCardHead";
+        heading.textContent = "Once they are ready";
+        ready.appendChild(heading);
         ui.playMode = crSegments([
             { label: "Do not play", value: "" },
             { label: "Play when ready", value: "now" },
             { label: "Play next", value: "after" }
         ], "playMode");
-        form.appendChild(ui.playMode);
-
-        // A set for them, the phone choosing the one the form looks most
-        // like when turned on, each set in its own color
-        ui.setOn = crChip("Put them in a set", function () {
+        ready.appendChild(crLine("Play", [ui.playMode]));
+        ui.setOn = document.createElement("button");
+        ui.setOn.type = "button";
+        ui.setOn.className = "crSwitch";
+        ui.setOn.setAttribute("aria-label", "Put them in a set");
+        ui.setOn.addEventListener("click", function () {
             crSet({ setOn: !(crDraft && crDraft.setOn) });
         });
-        ui.setOn.classList.add("crCheck");
-        form.appendChild(crRow([ui.setOn]));
+        ui.acts.push(ui.setOn);
+        ready.appendChild(crLine("Put them in a set", [ui.setOn]));
         ui.setBox = document.createElement("div");
         ui.setBox.className = "crBlock";
-        ui.setChips = document.createElement("div");
-        ui.setChips.className = "crSetChips";
+        ui.setPick = document.createElement("button");
+        ui.setPick.type = "button";
+        ui.setPick.className = "chip crSet on";
+        ui.setPick.addEventListener("click", function () {
+            openCrPick("sets");
+        });
+        ui.acts.push(ui.setPick);
+        ui.setChange = crChip("Change", function () {
+            openCrPick("sets");
+        }, "crFill");
+        ui.setBox.appendChild(crRow([ui.setPick, ui.setChange]));
         ui.setHint = document.createElement("div");
         ui.setHint.className = "plRowCount";
         ui.setName = crField(false, 80, "setName");
         ui.setName.placeholder = "The new set's name, left empty the title";
-        ui.setBox.appendChild(ui.setChips);
         ui.setBox.appendChild(ui.setHint);
         ui.setBox.appendChild(ui.setName);
-        form.appendChild(ui.setBox);
+        ready.appendChild(ui.setBox);
 
         const foot = document.createElement("div");
 
@@ -89009,6 +89198,7 @@
             ui.remixClear.style.display = fresh.remix ? "" : "none";
             ui.playMode.paint(fresh.playMode || "");
             ui.setOn.classList.toggle("on", fresh.setOn === true);
+            ui.setOn.setAttribute("aria-pressed", fresh.setOn === true ? "true" : "false");
             ui.setBox.style.display = fresh.setOn ? "flex" : "none";
 
             if (Array.isArray(c.sets)) {
@@ -89019,41 +89209,23 @@
                 ui.suggest = c.suggest || "";
             }
 
-            // The sets in their own colors, a new one first, drawn again
-            // only when something changed
+            // The set chosen, in its own color
             if (fresh.setOn && ui.sets) {
 
-                const known = ui.sets.some(function (y) {
+                const found = ui.sets.find(function (y) {
                     return y.id === fresh.setId;
                 });
-                const chosen = fresh.setId === "new" || known ? fresh.setId : "new";
-                const key = JSON.stringify([ui.sets, ui.suggest, chosen]);
+                const chosen = found ? found.id : "new";
 
-                if (ui.setChips.dataset.key !== key) {
-
-                    ui.setChips.dataset.key = key;
-                    ui.setChips.textContent = "";
-
-                    for (const x of [{ id: "new", name: "New set", color: "#48e1eb" }].concat(ui.sets)) {
-
-                        const b = document.createElement("button");
-
-                        b.type = "button";
-                        b.className = "chip crSet" + (x.id === chosen ? " on" : "");
-                        b.style.setProperty("--setColor", x.color || "#48e1eb");
-                        b.textContent = x.name;
-                        b.addEventListener("click", function () {
-                            crSet({ setId: x.id });
-                        });
-                        ui.setChips.appendChild(b);
-                    }
-                }
+                ui.setPick.style.setProperty("--setColor", found ? found.color || "#48e1eb" : "#48e1eb");
+                ui.setPick.textContent = found ? found.name : "A new set";
 
                 const suggested = ui.sets.find(function (y) {
                     return y.id === ui.suggest;
                 });
 
-                ui.setHint.textContent = suggested ? "The songs look most like " + suggested.name : "";
+                ui.setHint.textContent = suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
+                    : suggested ? "The set the songs look most like" : "";
                 ui.setHint.style.display = suggested ? "" : "none";
                 ui.setName.style.display = chosen === "new" ? "" : "none";
 
@@ -89207,13 +89379,24 @@
         }
     }
 
-    function crPickRow(label, sub, then) {
+    function crPickRow(label, sub, then, color) {
 
         const row = document.createElement("div");
         const text = document.createElement("div");
         const name = document.createElement("div");
 
         row.className = "plRow crPickRow";
+
+        // A set's own color as a dot before it
+        if (color) {
+
+            const dot = document.createElement("span");
+
+            dot.className = "crDot";
+            dot.style.background = color;
+            row.appendChild(dot);
+        }
+
         text.className = "plRowText";
         name.className = "crPickText";
         name.textContent = label;
@@ -89254,7 +89437,7 @@
 
     function openCrPick(kind) {
 
-        const titles = { prompts: "My prompts", characters: "Characters", resources: "Songs uploaded to Mureka" };
+        const titles = { prompts: "My prompts", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in" };
         let last = "0";
         let more = false;
 
@@ -89264,6 +89447,34 @@
         $("crPickMore").style.display = "none";
         crPickNote("Asking Mureka");
         showCrPick(true);
+
+        // The sets are on the phone already, no need to ask
+        if (kind === "sets") {
+
+            const rows = $("crPickRows");
+            const sets = (crUi && crUi.sets) || [];
+            const suggest = crUi ? crUi.suggest : "";
+            const ordered = sets.filter(function (x) {
+                return x.id === suggest;
+            }).concat(sets.filter(function (x) {
+                return x.id !== suggest;
+            }));
+
+            rows.textContent = "";
+
+            for (const x of [{ id: "new", name: "A new set", color: "#48e1eb", about: "Named as typed, or after the title" }].concat(ordered)) {
+
+                const sub = x.about || [x.count ? x.count + (x.count === 1 ? " song" : " songs") : "", x.id === suggest ? "the songs look most like it" : ""].filter(Boolean).join(", ");
+
+                rows.appendChild(crPickRow(x.name, sub, function () {
+
+                    showCrPick(false);
+                    crSet({ setId: x.id });
+                }, x.color));
+            }
+
+            return;
+        }
 
         const read = function () {
 
