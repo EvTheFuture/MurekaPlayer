@@ -485,39 +485,43 @@ In development.
   debugging. Android 13 or later. With Bluetooth off, Switch on turns it
   on, and an old or stopped helper can be started from there.
 - **Create songs on Mureka from the player.** Create songs, in the
-  Library menu and as a button for the bar, opens a page with what
-  Mureka's own create page has: a song with lyrics or an instrumental,
-  the title, the lyrics and the style with their counts, a male or
-  female voice or one of Mureka's characters, a remix of a song uploaded
-  to Mureka before or of a song file uploaded from here, the length
-  (automatic or two to five minutes, on a slider with a ten second step
-  either way) and the wildness in percent. Title, lyrics and style each
-  have a Clear, and Reset starts the whole form over, both with Undo. Mureka's helpers write lyrics and a title
-  from a theme, write the lyrics better, and write the style out (Match
-  my vibe, and Surprise me, which needs nothing written first), the text
-  filling in as it comes, then Mureka updated the lyrics or the style,
-  with Undo. While Mureka works the page dims under a large turning
-  ring, as in the trimmer. My prompts
-  lists the style prompts kept on Mureka, Keep as a prompt keeps the
-  style written. Lyrics Mureka would rather write better first are asked
-  about before the songs are made. For a remix Mureka's suggested style
-  fills an empty style, else it can be taken with a button. Once they
-  are ready, the two new songs can play at once, the second after the
-  first, or both play next, and Put them in a set puts them in a set
-  chosen beforehand, shown in its own color, the one the title, lyrics
-  and style look most like chosen at first, Change listing the sets with
-  their colors and song counts, or in a new set named as typed or after
-  the title. In the web view the form is laid out in boxes, a few
-  choices joined in one bar, a switch for the set and the buttons that
-  open a list filled. Mureka's helpers are ringed in cyan, keeping a prompt in
-  grey and No remix in red, so they stand apart from the lists. The form is
-  kept between visits and shared with the web view, where the same form
-  opens from its own Create button, a song file sent through the phone
-  up to 16 MB. The two new songs show at the top of the list while they
-  are made.
+  Library menu, as a button for the bar and in the web view's song
+  lists, opens a page with what Mureka's own create page has: a song
+  with lyrics or an instrumental, the title, the lyrics and the style
+  with their counts, a male or female voice or one of Mureka's
+  characters, a remix of a song uploaded to Mureka before or of a song
+  file uploaded from here, the length (automatic or two to five minutes,
+  on a slider with a ten second step either way) and the wildness in
+  percent. Title, lyrics and style each have a Clear, and Reset starts
+  the whole form over, both with Undo. Mureka's helpers write lyrics and
+  a title from a theme, write the lyrics better, and write the style out
+  (Match my vibe, and Surprise me, which needs nothing written first),
+  the text filling in as it comes, then Mureka updated the lyrics or the
+  style, with Undo. While Mureka works the page dims under a large
+  turning ring, blurred behind, as in the trimmer. My styles lists the
+  styles saved on Mureka, Save style saves the style written. Lyrics
+  Mureka would rather write better first are asked about before the
+  songs are made. For a remix Mureka's suggested style fills an empty
+  style, else it can be taken with a button. Once they are ready, the
+  two new songs can play when ready, the one ready first at once and the
+  other after it, or both play next, and Put them in a set puts them in
+  a set chosen beforehand, shown in its own color, the one the title,
+  lyrics and style look most like chosen at first, Change listing the
+  sets with their colors and song counts, or in a new set named as typed
+  or after the title. In the web view the form is laid out in boxes, a
+  few choices joined in one bar whose filled part slides to the one
+  chosen, a switch for the set and the buttons that open a list filled.
+  Mureka's helpers are ringed in cyan, Save style in grey and No remix
+  in red, so they stand apart from the lists. The form is kept between
+  visits and shared with the web view, where the same form opens from
+  its own Create button, a song file sent through the phone up to 16 MB.
+  The two new songs show at the top of the list while they are made.
 - **Play when ready can be changed.** Tapping a song still being made
   that was asked to play when ready offers the other way, at once or
   after the playing song, or not to play it, for a tap that went wrong.
+- **Similar songs: Add greyed out until a song is ticked.** In the web
+  view the button that adds the ticked songs to the set looks inactive
+  while none is ticked.
 - **Questions over the popups in the web view.** A question asked with
   the playlists or the form for making songs open shows on top of them.
 - **A playlist's cover from the web view in the page.** Choosing a

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.57";
+    const VERSION = "2.0.1.58";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -18599,11 +18599,39 @@
                 afters.push(song);
             } else if (how === "now" && wanted === null) {
                 wanted = song;
+            } else if (how === "now") {
+
+                // A second one asked to play at once, ready together with
+                // the first, follows it
+                afters.push(song);
+
+                if (afterChain.indexOf(id) === -1) {
+                    afterChain.push(id);
+                }
             }
         }
 
         if (done.length === 0) {
             return;
+        }
+
+        // The other song of the same generation asked to play at once, not
+        // ready yet, plays after this one rather than cutting it off
+        if (wanted !== null && wanted.feed_id) {
+
+            for (const [id, entry] of pendingSongs.entries()) {
+
+                if (pendingPlay.get(id) === "now" && String(entry.song.feed_id) === String(wanted.feed_id)) {
+
+                    pendingPlay.set(id, "after");
+
+                    if (afterChain.indexOf(id) === -1) {
+                        afterChain.push(id);
+                    }
+
+                    dbgLog("Song", "ready together with " + (wanted.title || "Untitled") + ", the other one plays after it");
+                }
+            }
         }
 
         // New to the library, for the play queue to be offered
@@ -18623,6 +18651,49 @@
             return;
         }
 
+        // The songs asked to play after: put in once the one asked to play at
+        // once plays, so they follow it, else at once
+        const placeAfters = function () {
+
+            if (afters.length === 0) {
+                return;
+            }
+
+            // Asked to wait for the playing song: each goes in after the song
+            // playing now, whichever that is by then, behind the ones asked for
+            // before it, so nothing is cut and nothing goes quiet. Paused, they
+            // wait there too. With nothing in the queue at all the first starts
+            // at once and the others follow it
+            afters.sort(function (a, b) {
+                return afterChain.indexOf(String(a.song_id)) - afterChain.indexOf(String(b.song_id));
+            });
+
+            let started = null;
+
+            for (const song of afters) {
+
+                if (canGoAfter(song)) {
+                    insertAfterInOrder(song);
+                } else if (started === null) {
+
+                    started = song;
+                    playFrom(song.song_id);
+                }
+            }
+
+            saveQueue();
+            publishHostSoon();
+
+            const first = afters[0].title || "Untitled";
+
+            if (wanted === null) {
+
+                showToast(started !== null ? "Ready, playing " + (started.title || "Untitled")
+                    : (afters.length === 1 ? "Ready, plays after this song: " + first
+                        : "Ready, " + afters.length + " new songs play after this song"), true);
+            }
+        };
+
         // As if it was tapped just now: a song playing fades out and stops
         // for it, over the seconds the setting asks
         if (wanted !== null) {
@@ -18634,6 +18705,7 @@
 
                     dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
                     playFrom(wanted.song_id);
+                    placeAfters();
 
                     // A browser that does not let a page start sound by itself
                     // keeps it loaded and paused, then a tap on Play starts it
@@ -18653,7 +18725,9 @@
                         }
                     }, 2500);
                 }, function () {
+
                     showToast("Ready to play: " + (wanted.title || "Untitled"), true);
+                    placeAfters();
                 });
             };
 
@@ -18671,6 +18745,8 @@
 
                 // Started meanwhile, by a tap say
                 if (currentSong && currentSong.song_id === wanted.song_id) {
+
+                    placeAfters();
                     return;
                 }
 
@@ -18678,42 +18754,8 @@
             });
         }
 
-        if (afters.length === 0) {
-            return;
-        }
-
-        // Asked to wait for the playing song: each goes in after the song
-        // playing now, whichever that is by then, behind the ones asked for
-        // before it, so nothing is cut and nothing goes quiet. Paused, they
-        // wait there too. With nothing in the queue at all the first starts
-        // at once and the others follow it
-        afters.sort(function (a, b) {
-            return afterChain.indexOf(String(a.song_id)) - afterChain.indexOf(String(b.song_id));
-        });
-
-        let started = null;
-
-        for (const song of afters) {
-
-            if (canGoAfter(song)) {
-                insertAfterInOrder(song);
-            } else if (started === null) {
-
-                started = song;
-                playFrom(song.song_id);
-            }
-        }
-
-        saveQueue();
-        publishHostSoon();
-
-        const first = afters[0].title || "Untitled";
-
         if (wanted === null) {
-
-            showToast(started !== null ? "Ready, playing " + (started.title || "Untitled")
-                : (afters.length === 1 ? "Ready, plays after this song: " + first
-                    : "Ready, " + afters.length + " new songs play after this song"), true);
+            placeAfters();
         }
 
         dbgLog("Song", "ready, put in to play after the playing song as asked: "
@@ -54232,6 +54274,9 @@
                 paint();
             });
 
+            // The choice fades over, short but not at once
+            el.style.transition = "background-color 0.22s ease-in-out, color 0.22s ease-in-out";
+
             buttons.push({ el: el, value: c.value });
             row.appendChild(el);
         }
@@ -57953,7 +57998,7 @@
         return out;
     }
 
-    // The style prompts kept on Mureka, as My prompts shows them
+    // The style prompts kept on Mureka, as My styles shows them
     async function createPrompts() {
 
         const list = await createPages("/api/pgc/style_prompt/list?size=20&bookmarked_only=true", 5);
@@ -58384,8 +58429,10 @@
                     notePending(s);
                 }
 
+                // Played when ready, both are asked to play at once: the one
+                // ready first plays, the other after it
                 if (w.play) {
-                    playWhenReady(id, w.play === "now" && w.seen.length === 1 ? "now" : "after");
+                    playWhenReady(id, w.play === "now" ? "now" : "after");
                 }
 
                 dbgLog("Create", "new song " + id + " of " + w.feedId + (w.play ? ", plays when ready" : "")
@@ -58846,8 +58893,8 @@
             }), CTRL_ACCENT)
         ]));
         createEl.appendChild(createButtonRow([
-            act("My prompts", createPromptsFromPage),
-            createRing(act("Keep as a prompt", createSavePromptFromPage), "#b8b8c0")
+            act("My styles", createPromptsFromPage),
+            createRing(act("Save style", createSavePromptFromPage), "#b8b8c0")
         ]));
 
         // Who sings: a male or female voice, or one of Mureka's characters
@@ -59030,7 +59077,8 @@
         // in the trimmer, the text still seen filling in
         ui.wait = document.createElement("div");
         ui.wait.style.cssText = "position:absolute;inset:0;z-index:9;display:none;flex-direction:column;align-items:center;"
-            + "justify-content:center;gap:14px;background:rgba(0,0,0,0.5);border-radius:10px;color:#fff;font-size:14px;text-align:center;padding:16px;box-sizing:border-box";
+            + "justify-content:center;gap:14px;background:rgba(0,0,0,0.5);border-radius:10px;color:#fff;font-size:14px;text-align:center;padding:16px;box-sizing:border-box;"
+            + "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)";
 
         const waitRing = document.createElement("span");
 
@@ -59064,7 +59112,7 @@
         ui.titleLabel.count.textContent = d.title.length + "/" + CREATE_TITLE_MAX;
         ui.lyricsLabel.count.textContent = d.lyrics.length + "/" + CREATE_LYRICS_MAX;
         ui.styleLabel.count.textContent = d.style.length + "/" + CREATE_STYLE_MAX
-            + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a kept prompt" : "");
+            + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a saved style" : "");
         ui.wildLabel.count.textContent = d.wildness + "%";
         ui.lengthLabel.count.textContent = createLengthText(d.lengthMs);
     }
@@ -59479,11 +59527,11 @@
 
     async function createPromptsFromPage() {
 
-        const pick = createPicker("My prompts", null, function (p) {
+        const pick = createPicker("My styles", null, function (p) {
             changeCreateDraft({ style: p.text.slice(0, CREATE_STYLE_MAX), stylePromptId: p.id, stylePromptText: p.text.slice(0, CREATE_STYLE_MAX) });
         });
 
-        pick.empty("Reading the prompts kept on Mureka");
+        pick.empty("Reading the styles saved on Mureka");
 
         try {
 
@@ -59492,7 +59540,7 @@
             pick.list.textContent = "";
 
             if (list.length === 0) {
-                pick.empty("No prompts are kept on Mureka yet. Keep as a prompt keeps the style written now.");
+                pick.empty("No styles are saved on Mureka yet. Save style saves the style written now.");
             }
 
             pick.add(list.map(function (p) {
@@ -59509,18 +59557,18 @@
 
         if (!style) {
 
-            setCreateNote("Write a style to keep first", true);
+            setCreateNote("Write a style to save first", true);
             return false;
         }
 
-        const p = await createRun("Keeping the style as a prompt", function () {
+        const p = await createRun("Saving the style", function () {
             return createSavePrompt(style);
         });
 
         if (p) {
 
             changeCreateDraft({ stylePromptId: p.id, stylePromptText: p.text });
-            setCreateNote("Kept among My prompts on Mureka");
+            setCreateNote("Saved among My styles on Mureka");
         }
 
         return !!p;
@@ -65178,7 +65226,23 @@
         flex: 1 1 0;
     }
 
+    .crSeg {
+        position: relative;
+    }
+
+    .crSegKnob {
+        position: absolute;
+        top: 0;
+        left: 0;
+        border-radius: 999px;
+        background: var(--accent);
+        pointer-events: none;
+        transition: transform 0.22s ease-in-out, width 0.22s ease-in-out;
+    }
+
     .crSeg button {
+        position: relative;
+        transition: color 0.22s ease-in-out;
         height: calc(var(--ctl-h) - 8px);
         padding: 0 18px;
         border: none;
@@ -65192,9 +65256,7 @@
     }
 
     .crSeg button.on {
-        background: var(--accent);
         color: #000;
-        font-weight: 600;
     }
 
     .crSeg button:disabled {
@@ -65263,7 +65325,9 @@
 
     #crWait {
         position: absolute;
-        inset: 0;
+        inset: -1px;
+        -webkit-backdrop-filter: blur(4px);
+        backdrop-filter: blur(4px);
         z-index: 2;
         display: none;
         flex-direction: column;
@@ -69747,6 +69811,7 @@
                 <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
                 <button class="chip iconOnly" id="miniFold" type="button" data-icon="sets" aria-label="Fold sets" title="Fold each set into one row, or show every song with its set's color"></button>
                 <button class="chip" id="miniView" type="button" data-icon="mureka" aria-label="Songs, the queue or the sets" title="Songs, the queue or the sets"><span class="lbl">Mureka</span></button>
+                <button class="chip iconOnly" id="miniCreate" type="button" data-icon="create" aria-label="Create songs" title="Create songs"></button>
                 <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
@@ -69854,6 +69919,7 @@
         <span class="chipSep" id="libSep"></span>
         <span class="chipGroup" id="libGroup">Mureka</span>
         <button class="chip" id="libBtn" type="button" data-icon="refresh" aria-label="Load or rescan from Mureka"><span class="lbl">Update</span></button>
+        <button class="chip" id="browseCreate" type="button" data-icon="create" aria-label="Create songs" title="Create songs"><span class="lbl">Create</span></button>
     </div>
     <div class="chipRow" id="filterRow">
         <span class="chipGroup">Songs</span>
@@ -86846,7 +86912,7 @@
                 return c && c !== "tall";
             }).concat(["tall"]).join(" ");
 
-            const el = menuItem(item.icon, item.label, item.fn, cls);
+            const el = menuItem(item.icon, item.label, item.fn, cls, item.disabled === true);
 
             // A set's choices in the set's own color
             if (item.color) {
@@ -88653,6 +88719,7 @@
     let crPending = {};
     let crDraft = null;
     let crPickKind = "";
+    let crSent = {};
 
     function crAsk(body) {
 
@@ -88695,6 +88762,10 @@
             return Promise.resolve(null);
         }
 
+        for (const k of Object.keys(changes)) {
+            crSent[k] = { value: changes[k], at: Date.now() };
+        }
+
         return crAsk({ op: "draft", draft: changes });
     }
 
@@ -88705,7 +88776,7 @@
 
         if (crDraft) {
             Object.assign(crDraft, changes);
-            paintCreatePop({ draft: crDraft }, false);
+            paintCreatePop({ draft: crDraft, local: true }, false);
         }
 
         return crFlush();
@@ -88822,6 +88893,12 @@
 
         row.className = "crSeg";
 
+        // The filled part, sliding to the choice made
+        const knob = document.createElement("span");
+
+        knob.className = "crSegKnob";
+        row.appendChild(knob);
+
         for (const c of choices) {
 
             const b = document.createElement("button");
@@ -88846,8 +88923,42 @@
 
         row.paint = function (value) {
 
+            let on = null;
+
             for (const x of chips) {
+
                 x.el.classList.toggle("on", x.value === value);
+
+                if (x.value === value) {
+                    on = x.el;
+                }
+            }
+
+            // Out of sight it cannot be measured, placed without sliding
+            // once it shows again
+            if (!on || !on.offsetWidth) {
+
+                knob.style.opacity = "0";
+                knob.dataset.placed = "";
+                return;
+            }
+
+            const first = knob.dataset.placed !== "1";
+
+            if (first) {
+                knob.style.transition = "none";
+            }
+
+            knob.style.opacity = "1";
+            knob.style.width = on.offsetWidth + "px";
+            knob.style.height = on.offsetHeight + "px";
+            knob.style.transform = "translate(" + on.offsetLeft + "px, " + on.offsetTop + "px)";
+
+            if (first) {
+
+                void knob.offsetWidth;
+                knob.style.transition = "";
+                knob.dataset.placed = "1";
             }
         };
 
@@ -88966,10 +89077,10 @@
             crChip("Surprise me", function () {
                 crHelp("surprise");
             }, "ring"),
-            crChip("My prompts", function () {
+            crChip("My styles", function () {
                 openCrPick("prompts");
             }, "crFill"),
-            crChip("Keep as a prompt", function () {
+            crChip("Save style", function () {
 
                 crFlush().then(function () {
                     return crAsk({ op: "savePrompt" });
@@ -89134,7 +89245,7 @@
         crUi.titleLabel.count.textContent = String(d.title || "").length + "/50";
         crUi.lyricsLabel.count.textContent = String(d.lyrics || "").length + "/5000";
         crUi.styleLabel.count.textContent = String(d.style || "").length + "/1000"
-            + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a kept prompt" : "");
+            + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a saved style" : "");
         crUi.wildLabel.count.textContent = d.wildness + "%";
         crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
     }
@@ -89151,7 +89262,24 @@
 
         if (c.draft) {
 
-            const fresh = Object.assign({}, c.draft, crPending);
+            // What was sent but the phone does not have yet stays as chosen
+            if (!c.local) {
+
+                for (const k of Object.keys(crSent)) {
+
+                    if (Date.now() - crSent[k].at > 5000 || JSON.stringify(c.draft[k]) === JSON.stringify(crSent[k].value)) {
+                        delete crSent[k];
+                    }
+                }
+            }
+
+            const fresh = Object.assign({}, c.draft);
+
+            for (const k of Object.keys(crSent)) {
+                fresh[k] = crSent[k].value;
+            }
+
+            Object.assign(fresh, crPending);
 
             crDraft = fresh;
 
@@ -89437,7 +89565,7 @@
 
     function openCrPick(kind) {
 
-        const titles = { prompts: "My prompts", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in" };
+        const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in" };
         let last = "0";
         let more = false;
 
@@ -89499,7 +89627,7 @@
 
                 if (last === "0" && list.length === 0) {
 
-                    crPickNote(kind === "prompts" ? "No prompts are kept on Mureka yet. Keep as a prompt keeps the style written now."
+                    crPickNote(kind === "prompts" ? "No styles are saved on Mureka yet. Save style saves the style written now."
                         : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
                             : "No songs uploaded to Mureka yet. Upload a song to remix it.");
                 }
@@ -89549,12 +89677,15 @@
     }
 
     $("createBtn").addEventListener("click", openCreatePop);
+    $("browseCreate").addEventListener("click", openCreatePop);
+    $("miniCreate").addEventListener("click", openCreatePop);
     $("crClose").addEventListener("click", closeCreatePop);
     $("crReset").addEventListener("click", function () {
 
         askConfirm("Start over? The title, lyrics, style and every choice go back to how they start.", "Start over", true, function () {
 
             crPending = {};
+            crSent = {};
             clearTimeout(crSendTimer);
             crAsk({ op: "reset" }).then(function (r) {
 
@@ -90093,6 +90224,9 @@
                 icon: "listPlus",
                 label: picked.length === 0 ? "Tick the songs to add" : "Add " + picked.length + (picked.length === 1 ? " song" : " songs"),
                 cls: picked.length > 0 ? "accent" : "",
+
+                // Greyed out until a song is ticked
+                disabled: picked.length === 0,
                 fn: function () {
 
                     if (picked.length === 0) {
