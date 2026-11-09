@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.55";
+    const VERSION = "2.0.1.56";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -57502,12 +57502,12 @@
     let createNote = { text: "", bad: false, at: 0 };
 
     // The lengths to choose from: automatic, then every ten seconds from
-    // two minutes, the shortest Mureka takes, to eight
+    // two minutes to five, the shortest and longest Mureka takes
     function createLengths() {
 
         const out = [0];
 
-        for (let s = 120; s <= 480; s += 10) {
+        for (let s = 120; s <= 300; s += 10) {
             out.push(s * 1000);
         }
 
@@ -57575,8 +57575,10 @@
             lengthMs: lengths.indexOf(Number(x.lengthMs)) >= 0 ? Number(x.lengthMs) : 0,
             wildness: isFinite(wild) ? Math.max(0, Math.min(100, wild)) : 50,
             theme: createText(x.theme, CREATE_THEME_MAX),
-            playReady: x.playReady === true,
-            setId: createText(x.setId, 40)
+            playMode: x.playMode === "now" || x.playMode === "after" ? x.playMode : (x.playReady === true ? "now" : ""),
+            setOn: x.setOn === true || (x.setOn === undefined && !!x.setId),
+            setId: createText(x.setId, 40),
+            setName: createText(x.setName, 80)
         };
     }
 
@@ -58302,7 +58304,7 @@
         const feed = data.feed || {};
         const wait = Number(feed.wait_num) || 0;
         const feedId = feed.feed_id !== undefined ? String(feed.feed_id) : "";
-        const set = d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
+        const set = d.setOn && d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
 
         createRemember(feedId, d);
         createWatchNew();
@@ -58312,8 +58314,8 @@
             feedId: feedId,
             text: "Making two songs" + (body.title ? " of \"" + body.title + "\"" : "")
                 + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
-                + (d.playReady ? ", played as soon as they are ready" : "")
-                + (d.setId === "new" ? ", in a new set" : set ? ", in the set " + set.name : "")
+                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
+                + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
         };
     }
 
@@ -58323,18 +58325,19 @@
 
     function createRemember(feedId, d) {
 
-        const setId = d.setId === "new" || songSets.has(d.setId) ? d.setId : "";
+        const setId = d.setOn && (d.setId === "new" || songSets.has(d.setId)) ? d.setId : "";
 
-        if (!feedId || (!d.playReady && !setId)) {
+        if (!feedId || (!d.playMode && !setId)) {
             return;
         }
 
-        createWishes.push({ feedId: feedId, play: d.playReady, setId: setId, title: d.title.trim(), seen: [], newSet: "", until: Date.now() + 15 * 60000 });
+        createWishes.push({ feedId: feedId, play: d.playMode, setId: setId, title: (d.setName || d.title).trim(), seen: [], newSet: "", until: Date.now() + 15 * 60000 });
     }
 
     // The new songs found among those of a page, played and put in a set as
-    // the form asked. The first plays as soon as it is ready, the second
-    // after it
+    // the form asked. Played when ready, the first plays as soon as it is
+    // ready and the second after it. Played next, both after the playing
+    // song
     function createGrant(songs) {
 
         for (const w of createWishes.slice()) {
@@ -58382,7 +58385,7 @@
                 }
 
                 if (w.play) {
-                    playWhenReady(id, w.seen.length === 1 ? "now" : "after");
+                    playWhenReady(id, w.play === "now" && w.seen.length === 1 ? "now" : "after");
                 }
 
                 dbgLog("Create", "new song " + id + " of " + w.feedId + (w.play ? ", plays when ready" : "")
@@ -58444,6 +58447,119 @@
         });
     }
 
+    // The set the form looks most like: its title, lyrics and style laid
+    // against the songs of each set. Empty when none is much alike
+    let createSuggestMemo = { key: "", id: "" };
+
+    function createSuggestSet() {
+
+        const d = loadCreateDraft();
+        const key = [d.title, d.style, d.lyrics.length, songSets.size, songSetOf.size].join("|");
+
+        if (createSuggestMemo.key === key) {
+            return createSuggestMemo.id;
+        }
+
+        let print = null;
+
+        if (d.kind === "song" && d.lyrics.trim()) {
+
+            noteLyricPrint("__create", d.lyrics);
+            print = lyricPrints.get("__create") || null;
+            lyricPrints.delete("__create");
+        }
+
+        const styleWords = new Set(textWords(d.style.toLowerCase()));
+        let best = "";
+        let bestScore = 0;
+
+        songSets.forEach(function (set) {
+
+            let score = 0;
+
+            for (const m of setSongs(set.id).slice(0, 24)) {
+
+                let like = d.title.trim() ? titleLikeness(d.title, m.title) : 0;
+                const theirs = print ? lyricPrints.get(String(m.song_id)) : null;
+
+                if (theirs) {
+                    like += printLikeness(print, theirs);
+                }
+
+                // The style's words among the song's genres and moods
+                const tags = textWords([].concat(m.genres || [], m.moods || []).map(String).join(" ").toLowerCase());
+
+                if (styleWords.size > 0 && tags.length > 0) {
+
+                    like += 0.6 * tags.filter(function (w) {
+                        return styleWords.has(w);
+                    }).length / tags.length;
+                }
+
+                score = Math.max(score, like);
+            }
+
+            score += 0.1 * setRecency(set);
+
+            if (score > bestScore) {
+
+                bestScore = score;
+                best = set.id;
+            }
+        });
+
+        createSuggestMemo = { key: key, id: bestScore >= 0.45 ? best : "" };
+
+        return createSuggestMemo.id;
+    }
+
+    // A field emptied, with Undo
+    function createClearField(field, name) {
+
+        const before = loadCreateDraft()[field];
+
+        if (!before) {
+            return;
+        }
+
+        const changes = {};
+
+        changes[field] = "";
+
+        if (field === "style") {
+
+            changes.stylePromptId = "";
+            changes.stylePromptText = "";
+        }
+
+        changeCreateDraft(changes);
+        showToast(name + " cleared", true, function () {
+
+            const back = {};
+
+            back[field] = before;
+            changeCreateDraft(back);
+        });
+    }
+
+    // Everything on the form back to how it starts, with Undo
+    function createReset() {
+
+        const before = Object.assign({}, loadCreateDraft());
+
+        createDraft = createCleanDraft({});
+        saveCreateDraft();
+        createNote = { text: "", bad: false, at: 0 };
+
+        if (isShown(createEl)) {
+            paintCreate(false);
+        }
+
+        showToast("The form starts over", true, function () {
+            changeCreateDraft(before);
+        });
+    }
+
     // A button ringed in a color instead of filled
     function createRing(b, color) {
 
@@ -58492,22 +58608,40 @@
             createEl.style.display = "none";
         }
 
+        if (createUi) {
+            createUi.wait.style.display = "none";
+        }
+
         publishHostSoon();
     }
 
     // A small grey heading over a field, with room on its right for a count
-    function createLabelRow(text) {
+    // and, for a field of text, a Clear
+    function createLabelRow(text, clear) {
 
         const row = document.createElement("div");
         const name = document.createElement("span");
         const count = document.createElement("span");
 
-        row.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;color:#aaa;margin-bottom:-4px";
+        row.style.cssText = "display:flex;align-items:baseline;gap:10px;font-size:12px;color:#aaa;margin-bottom:-4px";
         name.textContent = text;
+        name.style.cssText = "flex:1;min-width:0";
         count.style.cssText = "font-variant-numeric:tabular-nums";
         row.appendChild(name);
         row.appendChild(count);
         row.count = count;
+
+        if (clear) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.textContent = "Clear";
+            b.style.cssText = "border:none;background:transparent;color:#48e1eb;font:inherit;font-size:12px;font-weight:600;padding:2px 0;cursor:pointer";
+            b.addEventListener("click", clear);
+            row.appendChild(b);
+            row.clearBtn = b;
+        }
 
         return row;
     }
@@ -58611,7 +58745,19 @@
 
         closeBtn.style.flex = "0 0 auto";
         closeBtn.style.padding = "6px 14px";
+
+        // Everything back to how it starts, asked first
+        ui.resetBtn = createRing(makeButton("Reset", "#333", "#fff", function () {
+
+            askChoices("Start over?\nThe title, lyrics, style and every choice go back to how they start.", [
+                { label: "Start over", ring: true, color: "#ff6b6b", fn: createReset }
+            ]);
+        }), "#b8b8c0");
+        ui.resetBtn.style.flex = "0 0 auto";
+        ui.resetBtn.style.padding = "6px 12px";
+        ui.acts.push(ui.resetBtn);
         head.appendChild(heading);
+        head.appendChild(ui.resetBtn);
         head.appendChild(ui.makeBtn);
         head.appendChild(closeBtn);
         createEl.appendChild(head);
@@ -58638,7 +58784,9 @@
         createEl.appendChild(ui.kindRow);
 
         // The title, Mureka names the song when left empty
-        ui.titleLabel = createLabelRow("Title");
+        ui.titleLabel = createLabelRow("Title", function () {
+            createClearField("title", "The title");
+        });
         ui.title = createField(false, 1, CREATE_TITLE_MAX);
         ui.title.placeholder = "Left empty, Mureka names it";
         ui.title.addEventListener("input", function () {
@@ -58653,7 +58801,9 @@
         // The lyrics, with Mureka writing them from a theme or better
         ui.lyricsBox = document.createElement("div");
         ui.lyricsBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
-        ui.lyricsLabel = createLabelRow("Lyrics");
+        ui.lyricsLabel = createLabelRow("Lyrics", function () {
+            createClearField("lyrics", "The lyrics");
+        });
         ui.lyrics = createField(true, 9, CREATE_LYRICS_MAX);
         ui.lyrics.placeholder = "[Verse]\n...\n\n[Chorus]\n...";
         ui.lyrics.addEventListener("input", function () {
@@ -58674,8 +58824,10 @@
 
         // The style, with Mureka's two ways of writing it out and the
         // prompts kept on Mureka
-        ui.styleLabel = createLabelRow("Style");
-        ui.style = createField(true, 3, CREATE_STYLE_MAX);
+        ui.styleLabel = createLabelRow("Style", function () {
+            createClearField("style", "The style");
+        });
+        ui.style = createField(true, 6, CREATE_STYLE_MAX);
         ui.style.placeholder = "Genre, mood, instruments, tempo";
         ui.style.addEventListener("input", function () {
 
@@ -58811,18 +58963,50 @@
 
         // What happens to the new songs once they are ready
         createEl.appendChild(createLabelRow("Once they are ready"));
-        ui.playRow = trimSwitch("Play them as soon as they are ready", function () {
-            return loadCreateDraft().playReady;
+        ui.playRow = trimSegments([
+            { label: "Do not play", value: "" },
+            { label: "Play when ready", value: "now" },
+            { label: "Play next", value: "after" }
+        ], function () {
+            return loadCreateDraft().playMode;
         }, function (v) {
-            changeCreateDraft({ playReady: v });
+            changeCreateDraft({ playMode: v });
         });
         createEl.appendChild(ui.playRow);
-        ui.setPick = document.createElement("select");
-        ui.setPick.style.cssText = "width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #3a3a42;border-radius:6px;background:#26262c;color:#fff;font:" + INPUT_FONT;
-        ui.setPick.addEventListener("change", function () {
-            changeCreateDraft({ setId: ui.setPick.value });
+
+        // A set for them, the one the form looks most like chosen when
+        // turned on
+        ui.setRow = trimSwitch("Put them in a set", function () {
+            return loadCreateDraft().setOn;
+        }, function (v) {
+
+            const d = loadCreateDraft();
+            const changes = { setOn: v };
+
+            if (v && d.setId !== "new" && !songSets.has(d.setId)) {
+                changes.setId = createSuggestSet() || "new";
+            }
+
+            changeCreateDraft(changes);
         });
-        createEl.appendChild(ui.setPick);
+        createEl.appendChild(ui.setRow);
+        ui.setBox = document.createElement("div");
+        ui.setBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.setChips = document.createElement("div");
+        ui.setChips.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow-y:auto;padding:2px";
+        ui.setHint = document.createElement("div");
+        ui.setHint.style.cssText = "font-size:12px;color:#aaa";
+        ui.setName = createField(false, 1, 80);
+        ui.setName.placeholder = "The new set's name, left empty the title";
+        ui.setName.addEventListener("input", function () {
+
+            createDraft.setName = ui.setName.value;
+            saveCreateDraft();
+        });
+        ui.setBox.appendChild(ui.setChips);
+        ui.setBox.appendChild(ui.setHint);
+        ui.setBox.appendChild(ui.setName);
+        createEl.appendChild(ui.setBox);
 
         const foot = document.createElement("div");
 
@@ -58830,8 +59014,21 @@
         foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
         createEl.appendChild(foot);
 
+        // While Mureka works the page dims under a large turning ring, as
+        // in the trimmer, the text still seen filling in
+        ui.wait = document.createElement("div");
+        ui.wait.style.cssText = "position:absolute;inset:0;z-index:9;display:none;flex-direction:column;align-items:center;"
+            + "justify-content:center;gap:14px;background:rgba(0,0,0,0.5);border-radius:10px;color:#fff;font-size:14px;text-align:center;padding:16px;box-sizing:border-box";
+
+        const waitRing = document.createElement("span");
+
+        waitRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        ui.waitText = document.createElement("span");
+        ui.wait.appendChild(waitRing);
+        ui.wait.appendChild(ui.waitText);
+
         // Each part keeps its own height, the page scrolls instead
-        for (const box of [createEl, ui.lyricsBox, ui.voiceBox, ui.advBox]) {
+        for (const box of [createEl, ui.lyricsBox, ui.voiceBox, ui.advBox, ui.setBox]) {
 
             for (const child of Array.from(box.children)) {
                 child.style.flexShrink = "0";
@@ -58839,6 +59036,7 @@
         }
 
         panelEl.appendChild(createEl);
+        panelEl.appendChild(ui.wait);
         createUi = ui;
     }
 
@@ -58855,7 +59053,7 @@
         ui.lyricsLabel.count.textContent = d.lyrics.length + "/" + CREATE_LYRICS_MAX;
         ui.styleLabel.count.textContent = d.style.length + "/" + CREATE_STYLE_MAX
             + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a kept prompt" : "");
-        ui.wildLabel.count.textContent = String(d.wildness);
+        ui.wildLabel.count.textContent = d.wildness + "%";
         ui.lengthLabel.count.textContent = createLengthText(d.lengthMs);
     }
 
@@ -58867,12 +59065,14 @@
             return;
         }
 
-        const text = createBusy || createNote.text;
+        const text = createBusy ? "" : createNote.text;
 
         ui.status.style.display = text ? "flex" : "none";
-        ui.statusRing.style.display = createBusy ? "inline-block" : "none";
+        ui.statusRing.style.display = "none";
         ui.statusText.textContent = text;
-        ui.status.style.color = !createBusy && createNote.bad ? "#ffb0b0" : "#ccc";
+        ui.status.style.color = createNote.bad ? "#ffb0b0" : "#ccc";
+        ui.wait.style.display = createBusy && isShown(createEl) ? "flex" : "none";
+        ui.waitText.textContent = createBusy;
 
         for (const b of ui.acts) {
 
@@ -58925,30 +59125,52 @@
         ui.remixName.style.color = d.remix ? "#fff" : "#888";
         ui.remixStyleBtn.parentElement.style.display = d.remix ? "flex" : "none";
         ui.remixStyleBtn.style.display = d.remix && d.remixStyle && d.remixStyle.trim() !== d.style.trim() ? "" : "none";
-        updateToggleButton(ui.playRow.querySelector("button"), d.playReady);
+        ui.playRow.paint();
+        updateToggleButton(ui.setRow.querySelector("button"), d.setOn);
+        ui.setBox.style.display = d.setOn ? "flex" : "none";
 
-        // The sets, drawn again only when they changed
-        const sets = createSetChoices();
-        const setsKey = JSON.stringify(sets);
+        // The sets in their own colors, a new one first, drawn again only
+        // when something changed
+        if (d.setOn) {
 
-        if (ui.setPick.dataset.key !== setsKey) {
+            const sets = createSetChoices();
+            const suggest = createSuggestSet();
+            const chosen = d.setId === "new" || songSets.has(d.setId) ? d.setId : "new";
+            const key = JSON.stringify([sets, suggest, chosen]);
 
-            ui.setPick.dataset.key = setsKey;
-            ui.setPick.textContent = "";
+            if (ui.setChips.dataset.key !== key) {
 
-            for (const c of [{ id: "", name: "In no set" }, { id: "new", name: "In a new set" }].concat(sets.map(function (x) {
-                return { id: x.id, name: "In the set " + x.name };
-            }))) {
+                ui.setChips.dataset.key = key;
+                ui.setChips.textContent = "";
 
-                const o = document.createElement("option");
+                for (const c of [{ id: "new", name: "New set", color: "#48e1eb" }].concat(sets)) {
 
-                o.value = c.id;
-                o.textContent = c.name;
-                ui.setPick.appendChild(o);
+                    const b = document.createElement("button");
+                    const dot = document.createElement("span");
+                    const on = c.id === chosen;
+
+                    b.type = "button";
+                    b.style.cssText = "display:inline-flex;align-items:center;gap:6px;border:none;border-radius:999px;padding:6px 12px;font:inherit;"
+                        + "font-size:13px;font-weight:600;cursor:pointer;background:" + (on ? c.color : "transparent")
+                        + ";color:" + (on ? "#000" : c.color) + ";box-shadow:" + CTRL_RING + c.color;
+                    dot.style.cssText = "width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:" + (on ? "#000" : c.color);
+                    b.appendChild(dot);
+                    b.appendChild(document.createTextNode(c.name));
+                    b.addEventListener("click", function () {
+                        changeCreateDraft({ setId: c.id });
+                    });
+                    ui.setChips.appendChild(b);
+                }
             }
+
+            const suggested = suggest ? songSets.get(suggest) : null;
+
+            ui.setHint.textContent = suggested ? "The songs look most like " + suggested.name : "";
+            ui.setHint.style.display = suggested ? "" : "none";
+            ui.setName.style.display = chosen === "new" ? "" : "none";
+            put(ui.setName, d.setName);
         }
 
-        ui.setPick.value = d.setId === "new" || songSets.has(d.setId) ? d.setId : "";
         paintCreateCounts();
         paintCreateStatus();
     }
@@ -59053,8 +59275,8 @@
             if (got) {
 
                 changeCreateDraft({ lyrics: got.text });
-                setCreateNote("Mureka wrote the lyrics better");
-                showToast("The lyrics are Mureka's now", true, function () {
+                setCreateNote("Mureka updated the lyrics");
+                showToast("Mureka updated the lyrics", true, function () {
                     changeCreateDraft({ lyrics: before });
                 });
             } else if (createDraft.lyrics !== before) {
@@ -59086,8 +59308,8 @@
         if (got) {
 
             changeCreateDraft({ style: got.text.slice(0, CREATE_STYLE_MAX) });
-            setCreateNote("Mureka wrote the style");
-            showToast("The style is Mureka's now", true, function () {
+            setCreateNote("Mureka updated the style");
+            showToast("Mureka updated the style", true, function () {
                 changeCreateDraft({ style: before });
             });
         } else if (createDraft.style !== before) {
@@ -59520,7 +59742,8 @@
             busy: createBusy,
             note: createNote,
             lengths: createLengths(),
-            sets: createSetChoices()
+            sets: createSetChoices(),
+            suggest: loadCreateDraft().setOn ? createSuggestSet() : ""
         };
     }
 
@@ -59539,7 +59762,19 @@
 
         if (op === "draft") {
 
-            changeCreateDraft(a.draft && typeof a.draft === "object" ? a.draft : {});
+            const changes = a.draft && typeof a.draft === "object" ? Object.assign({}, a.draft) : {};
+            const d = loadCreateDraft();
+
+            // A set turned on takes the one the form looks most like
+            if (changes.setOn === true && changes.setId === undefined && d.setId !== "new" && !songSets.has(d.setId)) {
+                changes.setId = createSuggestSet() || "new";
+            }
+
+            changeCreateDraft(changes);
+            reply({ ok: true, state: hostCreateState() });
+        } else if (op === "reset") {
+
+            createReset();
             reply({ ok: true, state: hostCreateState() });
         } else if (op === "state") {
             reply({ ok: true, state: hostCreateState() });
@@ -64721,6 +64956,13 @@
         display: none;
     }
 
+    /* Each part keeps its own height, the form scrolls instead of
+       squeezing the fields */
+    #crForm > *,
+    .crBlock > * {
+        flex-shrink: 0;
+    }
+
     #crStatus {
         display: none;
         color: var(--muted);
@@ -64802,23 +65044,108 @@
         box-shadow: inset 0 0 0 2px #b8b8c0;
     }
 
-    /* A box to tick, filled while on */
+    /* A box to tick, with a tick in it while on */
     .chip.crCheck::before {
         content: "";
-        width: 0.9em;
-        height: 0.9em;
+        width: 1em;
+        height: 1em;
         box-sizing: border-box;
         border: 2px solid currentColor;
         border-radius: 4px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9em;
+        font-weight: 700;
+        line-height: 1;
     }
 
     .chip.crCheck.on::before {
-        background: currentColor;
+        content: "\2713";
     }
 
-    .crSetPick {
-        flex: 1 1 12em;
-        width: auto;
+    .crLabelName {
+        flex: 1 1 auto;
+    }
+
+    .crLabel {
+        align-items: baseline;
+        gap: 12px;
+    }
+
+    .crClear {
+        border: none;
+        background: transparent;
+        color: var(--accent);
+        font: inherit;
+        font-weight: 600;
+        padding: 0;
+        cursor: pointer;
+    }
+
+    /* The sets in their own colors, ringed, the chosen one filled */
+    .crSetChips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        max-height: 30vh;
+        overflow-y: auto;
+        padding: 2px;
+    }
+
+    .chip.crSet {
+        color: var(--setColor);
+        box-shadow: inset 0 0 0 2px var(--setColor);
+        border-color: transparent;
+    }
+
+    .chip.crSet::before {
+        content: "";
+        width: 0.7em;
+        height: 0.7em;
+        border-radius: 50%;
+        background: var(--setColor);
+    }
+
+    .chip.crSet.on {
+        background: var(--setColor);
+        color: #000;
+    }
+
+    .chip.crSet.on::before {
+        background: #000;
+    }
+
+    /* While the phone asks Mureka: the form dimmed, a large turning ring */
+    #crPop #crBox {
+        position: relative;
+    }
+
+    #crWait {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.5);
+        color: var(--text);
+        text-align: center;
+        padding: 24px;
+        box-sizing: border-box;
+    }
+
+    .crWaitRing {
+        width: 72px;
+        height: 72px;
+        box-sizing: border-box;
+        border: 6px solid rgba(72, 225, 235, 0.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spinTurn 0.8s linear infinite;
     }
 
     /* The length slider between its two step buttons */
@@ -69459,6 +69786,7 @@
     <div id="crBox">
         <div id="crTop">
             <span id="crTitle">Create</span>
+            <button class="chip crGrey" id="crReset" type="button">Reset</button>
             <button class="chip crPrimary" id="crMake" type="button">Create</button>
             <button class="chip iconOnly" id="crClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
@@ -69473,6 +69801,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span></div>
     </div>
 </div>
 <div id="songMenu">
@@ -88269,17 +88598,51 @@
         send("createWatch", false);
     }
 
-    function crLabel(text) {
+    // A heading over a field, its count on the right and, for a field of
+    // text, a Clear
+    function crLabel(text, clearField) {
 
         const row = document.createElement("div");
         const name = document.createElement("span");
         const count = document.createElement("span");
 
         row.className = "plEdLabel crLabel";
+        name.className = "crLabelName";
         name.textContent = text;
         row.appendChild(name);
         row.appendChild(count);
         row.count = count;
+
+        if (clearField) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "crClear";
+            b.textContent = "Clear";
+            b.addEventListener("click", function () {
+
+                const before = crDraft ? crDraft[clearField] : "";
+
+                if (!before) {
+                    return;
+                }
+
+                const changes = {};
+
+                changes[clearField] = "";
+
+                if (clearField === "style") {
+
+                    changes.stylePromptId = "";
+                    changes.stylePromptText = "";
+                }
+
+                crSet(changes);
+                toast(text + " cleared", "ok");
+            });
+            row.appendChild(b);
+        }
 
         return row;
     }
@@ -88392,7 +88755,7 @@
         ], "kind");
         form.appendChild(ui.kind);
 
-        ui.titleLabel = crLabel("Title");
+        ui.titleLabel = crLabel("Title", "title");
         ui.title = crField(false, 50, "title");
         ui.title.placeholder = "Left empty, Mureka names it";
         form.appendChild(ui.titleLabel);
@@ -88400,7 +88763,7 @@
 
         ui.lyricsBox = document.createElement("div");
         ui.lyricsBox.className = "crBlock";
-        ui.lyricsLabel = crLabel("Lyrics");
+        ui.lyricsLabel = crLabel("Lyrics", "lyrics");
         ui.lyrics = crField(true, 5000, "lyrics");
         ui.lyrics.rows = 10;
         ui.lyrics.placeholder = "[Verse]\n...\n\n[Chorus]\n...";
@@ -88414,9 +88777,9 @@
         ]));
         form.appendChild(ui.lyricsBox);
 
-        ui.styleLabel = crLabel("Style");
+        ui.styleLabel = crLabel("Style", "style");
         ui.style = crField(true, 1000, "style");
-        ui.style.rows = 3;
+        ui.style.rows = 6;
         ui.style.placeholder = "Genre, mood, instruments, tempo";
         form.appendChild(ui.styleLabel);
         form.appendChild(ui.style);
@@ -88525,16 +88888,32 @@
 
         // What happens to the new songs once they are ready
         form.appendChild(crLabel("Once they are ready"));
-        ui.playReady = crChip("Play them as soon as they are ready", function () {
-            crSet({ playReady: !(crDraft && crDraft.playReady) });
+        ui.playMode = crSegments([
+            { label: "Do not play", value: "" },
+            { label: "Play when ready", value: "now" },
+            { label: "Play next", value: "after" }
+        ], "playMode");
+        form.appendChild(ui.playMode);
+
+        // A set for them, the phone choosing the one the form looks most
+        // like when turned on, each set in its own color
+        ui.setOn = crChip("Put them in a set", function () {
+            crSet({ setOn: !(crDraft && crDraft.setOn) });
         });
-        ui.playReady.classList.add("crCheck");
-        ui.setPick = document.createElement("select");
-        ui.setPick.className = "plEdField crSetPick";
-        ui.setPick.addEventListener("change", function () {
-            crSet({ setId: ui.setPick.value });
-        });
-        form.appendChild(crRow([ui.playReady, ui.setPick]));
+        ui.setOn.classList.add("crCheck");
+        form.appendChild(crRow([ui.setOn]));
+        ui.setBox = document.createElement("div");
+        ui.setBox.className = "crBlock";
+        ui.setChips = document.createElement("div");
+        ui.setChips.className = "crSetChips";
+        ui.setHint = document.createElement("div");
+        ui.setHint.className = "plRowCount";
+        ui.setName = crField(false, 80, "setName");
+        ui.setName.placeholder = "The new set's name, left empty the title";
+        ui.setBox.appendChild(ui.setChips);
+        ui.setBox.appendChild(ui.setHint);
+        ui.setBox.appendChild(ui.setName);
+        form.appendChild(ui.setBox);
 
         const foot = document.createElement("div");
 
@@ -88567,7 +88946,7 @@
         crUi.lyricsLabel.count.textContent = String(d.lyrics || "").length + "/5000";
         crUi.styleLabel.count.textContent = String(d.style || "").length + "/1000"
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a kept prompt" : "");
-        crUi.wildLabel.count.textContent = String(d.wildness);
+        crUi.wildLabel.count.textContent = d.wildness + "%";
         crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
     }
 
@@ -88628,33 +89007,59 @@
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
-            ui.playReady.classList.toggle("on", fresh.playReady === true);
+            ui.playMode.paint(fresh.playMode || "");
+            ui.setOn.classList.toggle("on", fresh.setOn === true);
+            ui.setBox.style.display = fresh.setOn ? "flex" : "none";
 
-            // The sets, drawn again only when they changed
             if (Array.isArray(c.sets)) {
+                ui.sets = c.sets;
+            }
 
-                const key = JSON.stringify(c.sets);
+            if (c.suggest !== undefined) {
+                ui.suggest = c.suggest || "";
+            }
 
-                if (ui.setPick.dataset.key !== key) {
+            // The sets in their own colors, a new one first, drawn again
+            // only when something changed
+            if (fresh.setOn && ui.sets) {
 
-                    ui.setPick.dataset.key = key;
-                    ui.setPick.textContent = "";
+                const known = ui.sets.some(function (y) {
+                    return y.id === fresh.setId;
+                });
+                const chosen = fresh.setId === "new" || known ? fresh.setId : "new";
+                const key = JSON.stringify([ui.sets, ui.suggest, chosen]);
 
-                    for (const x of [{ id: "", name: "In no set" }, { id: "new", name: "In a new set" }].concat(c.sets.map(function (y) {
-                        return { id: y.id, name: "In the set " + y.name };
-                    }))) {
+                if (ui.setChips.dataset.key !== key) {
 
-                        const o = document.createElement("option");
+                    ui.setChips.dataset.key = key;
+                    ui.setChips.textContent = "";
 
-                        o.value = x.id;
-                        o.textContent = x.name;
-                        ui.setPick.appendChild(o);
+                    for (const x of [{ id: "new", name: "New set", color: "#48e1eb" }].concat(ui.sets)) {
+
+                        const b = document.createElement("button");
+
+                        b.type = "button";
+                        b.className = "chip crSet" + (x.id === chosen ? " on" : "");
+                        b.style.setProperty("--setColor", x.color || "#48e1eb");
+                        b.textContent = x.name;
+                        b.addEventListener("click", function () {
+                            crSet({ setId: x.id });
+                        });
+                        ui.setChips.appendChild(b);
                     }
                 }
 
-                ui.setPick.value = fresh.setId === "new" || c.sets.some(function (y) {
-                    return y.id === fresh.setId;
-                }) ? fresh.setId : "";
+                const suggested = ui.sets.find(function (y) {
+                    return y.id === ui.suggest;
+                });
+
+                ui.setHint.textContent = suggested ? "The songs look most like " + suggested.name : "";
+                ui.setHint.style.display = suggested ? "" : "none";
+                ui.setName.style.display = chosen === "new" ? "" : "none";
+
+                if (document.activeElement !== ui.setName && crPending.setName === undefined) {
+                    ui.setName.value = fresh.setName || "";
+                }
             }
 
             paintCrCounts();
@@ -88662,12 +89067,15 @@
 
         if (c.busy !== undefined) {
 
-            const text = c.busy || (c.note && c.note.text) || "";
+            const text = c.busy ? "" : (c.note && c.note.text) || "";
 
             $("crStatus").textContent = text;
             $("crStatus").style.display = text ? "block" : "none";
-            $("crStatus").classList.toggle("bad", !c.busy && !!(c.note && c.note.bad));
-            $("crStatus").classList.toggle("wait", !!c.busy);
+            $("crStatus").classList.toggle("bad", !!(c.note && c.note.bad));
+
+            // While the phone asks Mureka the form dims under a large ring
+            $("crWait").style.display = c.busy ? "flex" : "none";
+            $("crWaitText").textContent = c.busy || "";
 
             for (const b of ui.acts) {
                 b.disabled = !!c.busy;
@@ -88931,6 +89339,20 @@
 
     $("createBtn").addEventListener("click", openCreatePop);
     $("crClose").addEventListener("click", closeCreatePop);
+    $("crReset").addEventListener("click", function () {
+
+        askConfirm("Start over? The title, lyrics, style and every choice go back to how they start.", "Start over", true, function () {
+
+            crPending = {};
+            clearTimeout(crSendTimer);
+            crAsk({ op: "reset" }).then(function (r) {
+
+                if (r && r.ok && r.state) {
+                    paintCreatePop(r.state, true);
+                }
+            });
+        });
+    });
     $("crMake").addEventListener("click", function () {
         crMake(false);
     });
