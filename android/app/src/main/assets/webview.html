@@ -1472,6 +1472,50 @@
         accent-color: var(--accent);
     }
 
+    /* Filled, the button the form is for */
+    .chip.crPrimary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    .chip.crPrimary:disabled {
+        opacity: 0.5;
+    }
+
+    /* Ringed in grey, apart from the ringed helpers beside it */
+    .chip.crGrey {
+        color: #b8b8c0;
+        box-shadow: inset 0 0 0 2px #b8b8c0;
+    }
+
+    /* A box to tick, filled while on */
+    .chip.crCheck::before {
+        content: "";
+        width: 0.9em;
+        height: 0.9em;
+        box-sizing: border-box;
+        border: 2px solid currentColor;
+        border-radius: 4px;
+    }
+
+    .chip.crCheck.on::before {
+        background: currentColor;
+    }
+
+    .crSetPick {
+        flex: 1 1 12em;
+        width: auto;
+    }
+
+    /* The length slider between its two step buttons */
+    .crActs .crRange {
+        flex: 1 1 8em;
+        width: auto;
+        min-width: 0;
+    }
+
     .crFoot {
         white-space: normal;
     }
@@ -6103,7 +6147,7 @@
     <div id="crBox">
         <div id="crTop">
             <span id="crTitle">Create</span>
-            <button class="chip ring" id="crMake" type="button">Create</button>
+            <button class="chip crPrimary" id="crMake" type="button">Create</button>
             <button class="chip iconOnly" id="crClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
         <div id="crStatus"></div>
@@ -14588,10 +14632,35 @@
 
             ev.preventDefault();
 
+            // Asked for already: the other way, or not played at all, for a
+            // tap that went wrong
             if (song.playWhenReady) {
 
-                toast(song.playAfter ? "Not ready yet, it plays after the playing song once it is"
-                    : "Not ready yet, it plays as soon as it is", "ok");
+                openChoice("Still generating: " + song.title + ". " + (song.playAfter ? "Plays after the playing song once it is ready."
+                    : "Plays as soon as it is ready."), [
+                    song.playAfter
+                        ? { icon: "play", label: "Play when ready instead", cls: "tall", fn: function () {
+
+                            closeSongMenu();
+                            send("playWhenReady", { id: song.id, after: false }).then(function () {
+                                toast("Plays as soon as it is ready", "ok");
+                            });
+                        } }
+                        : { icon: "listPlusTop", label: "Play after the playing song instead", cls: "insetGrey tall", fn: function () {
+
+                            closeSongMenu();
+                            send("playWhenReady", { id: song.id, after: true }).then(function () {
+                                toast("Plays after the playing song, once it is ready", "ok");
+                            });
+                        } },
+                    { icon: "close", label: "Do not play it when ready", cls: "danger tall", fn: function () {
+
+                        closeSongMenu();
+                        send("playWhenReady", { id: song.id, cancel: true }).then(function () {
+                            toast("It is not played when it is ready", "ok");
+                        });
+                    } }
+                ]);
                 return;
             }
 
@@ -24903,12 +24972,12 @@
         return row;
     }
 
-    function crChip(text, then) {
+    function crChip(text, then, look) {
 
         const b = document.createElement("button");
 
         b.type = "button";
-        b.className = "chip";
+        b.className = "chip" + (look ? " " + look : "");
         b.textContent = text;
         b.addEventListener("click", then);
         crUi.acts.push(b);
@@ -25006,7 +25075,7 @@
         const form = $("crForm");
 
         ui.kind = crSegments([
-            { label: "Song", value: "song" },
+            { label: "With lyrics", value: "song" },
             { label: "Instrumental", value: "instrumental" }
         ], "kind");
         form.appendChild(ui.kind);
@@ -25026,10 +25095,10 @@
         ui.lyricsBox.appendChild(ui.lyricsLabel);
         ui.lyricsBox.appendChild(ui.lyrics);
         ui.lyricsBox.appendChild(crRow([
-            crChip("Write from a theme", crTheme),
+            crChip("Write from a theme", crTheme, "ring"),
             crChip("Write them better", function () {
                 crHelp("polish");
-            })
+            }, "ring")
         ]));
         form.appendChild(ui.lyricsBox);
 
@@ -25042,10 +25111,10 @@
         form.appendChild(crRow([
             crChip("Match my vibe", function () {
                 crHelp("match");
-            }),
+            }, "ring"),
             crChip("Surprise me", function () {
                 crHelp("surprise");
-            }),
+            }, "ring"),
             crChip("My prompts", function () {
                 openCrPick("prompts");
             }),
@@ -25054,7 +25123,7 @@
                 crFlush().then(function () {
                     return crAsk({ op: "savePrompt" });
                 }).then(crAnswered);
-            })
+            }, "crGrey")
         ]));
 
         ui.voiceBox = document.createElement("div");
@@ -25083,10 +25152,10 @@
             if (crDraft && crDraft.remixStyle) {
                 crSet({ style: crDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
             }
-        });
+        }, "ring");
         ui.remixClear = crChip("No remix", function () {
             crSet({ remix: null, remixName: "", remixStyle: "" });
-        });
+        }, "fail");
         form.appendChild(crRow([
             crChip("Choose a song", function () {
                 openCrPick("resources");
@@ -25098,13 +25167,36 @@
 
         ui.advBox = document.createElement("div");
         ui.advBox.className = "crBlock";
-        ui.advBox.appendChild(crLabel("Length"));
-        ui.length = document.createElement("select");
-        ui.length.className = "plEdField";
-        ui.length.addEventListener("change", function () {
-            crSet({ lengthMs: Number(ui.length.value) || 0 });
+        // The length on a slider, all the way left automatic, with a step
+        // of ten seconds either way on the buttons
+        ui.lengthLabel = crLabel("Length");
+        ui.advBox.appendChild(ui.lengthLabel);
+
+        const stepLength = function (by) {
+
+            const list = ui.lengths || [0];
+            const at = Math.max(0, list.indexOf(crDraft ? crDraft.lengthMs : 0));
+
+            crSet({ lengthMs: list[Math.max(0, Math.min(list.length - 1, at + by))] });
+        };
+
+        ui.length = document.createElement("input");
+        ui.length.type = "range";
+        ui.length.min = "0";
+        ui.length.step = "1";
+        ui.length.className = "crRange";
+        ui.length.addEventListener("input", function () {
+            crChange("lengthMs", (ui.lengths || [0])[Number(ui.length.value) || 0] || 0);
         });
-        ui.advBox.appendChild(ui.length);
+        ui.advBox.appendChild(crRow([
+            crChip("-", function () {
+                stepLength(-1);
+            }),
+            ui.length,
+            crChip("+", function () {
+                stepLength(1);
+            })
+        ]));
         ui.wildLabel = crLabel("Wildness");
         ui.advBox.appendChild(ui.wildLabel);
         ui.wild = document.createElement("input");
@@ -25118,6 +25210,19 @@
         });
         ui.advBox.appendChild(ui.wild);
         form.appendChild(ui.advBox);
+
+        // What happens to the new songs once they are ready
+        form.appendChild(crLabel("Once they are ready"));
+        ui.playReady = crChip("Play them as soon as they are ready", function () {
+            crSet({ playReady: !(crDraft && crDraft.playReady) });
+        });
+        ui.playReady.classList.add("crCheck");
+        ui.setPick = document.createElement("select");
+        ui.setPick.className = "plEdField crSetPick";
+        ui.setPick.addEventListener("change", function () {
+            crSet({ setId: ui.setPick.value });
+        });
+        form.appendChild(crRow([ui.playReady, ui.setPick]));
 
         const foot = document.createElement("div");
 
@@ -25151,6 +25256,7 @@
         crUi.styleLabel.count.textContent = String(d.style || "").length + "/1000"
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a kept prompt" : "");
         crUi.wildLabel.count.textContent = String(d.wildness);
+        crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
     }
 
     // The form as the phone has it. Fields being typed in, or with typing
@@ -25182,19 +25288,15 @@
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
 
-            if (Array.isArray(c.lengths) && ui.length.options.length === 0) {
+            if (Array.isArray(c.lengths) && c.lengths.length > 0) {
 
-                for (const ms of c.lengths) {
-
-                    const o = document.createElement("option");
-
-                    o.value = String(ms);
-                    o.textContent = crLengthText(ms);
-                    ui.length.appendChild(o);
-                }
+                ui.lengths = c.lengths;
+                ui.length.max = String(c.lengths.length - 1);
             }
 
-            ui.length.value = String(fresh.lengthMs || 0);
+            if (document.activeElement !== ui.length) {
+                ui.length.value = String(Math.max(0, (ui.lengths || [0]).indexOf(fresh.lengthMs || 0)));
+            }
 
             if (document.activeElement !== ui.wild) {
                 ui.wild.value = String(fresh.wildness);
@@ -25214,6 +25316,35 @@
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
+            ui.playReady.classList.toggle("on", fresh.playReady === true);
+
+            // The sets, drawn again only when they changed
+            if (Array.isArray(c.sets)) {
+
+                const key = JSON.stringify(c.sets);
+
+                if (ui.setPick.dataset.key !== key) {
+
+                    ui.setPick.dataset.key = key;
+                    ui.setPick.textContent = "";
+
+                    for (const x of [{ id: "", name: "In no set" }, { id: "new", name: "In a new set" }].concat(c.sets.map(function (y) {
+                        return { id: y.id, name: "In the set " + y.name };
+                    }))) {
+
+                        const o = document.createElement("option");
+
+                        o.value = x.id;
+                        o.textContent = x.name;
+                        ui.setPick.appendChild(o);
+                    }
+                }
+
+                ui.setPick.value = fresh.setId === "new" || c.sets.some(function (y) {
+                    return y.id === fresh.setId;
+                }) ? fresh.setId : "";
+            }
+
             paintCrCounts();
         }
 

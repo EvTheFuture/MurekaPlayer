@@ -489,18 +489,27 @@ In development.
   Mureka's own create page has: a song with lyrics or an instrumental,
   the title, the lyrics and the style with their counts, a male or
   female voice or one of Mureka's characters, a remix of a song uploaded
-  to Mureka before or of a song file uploaded from here, and the length
-  and wildness. Mureka's helpers write lyrics and a title from a theme,
-  write the lyrics better, and write the style out (Match my vibe and
-  Surprise me), the text filling in as it comes, with Undo. My prompts
+  to Mureka before or of a song file uploaded from here, the length
+  (automatic or two to eight minutes, on a slider with a ten second step
+  either way) and the wildness. Mureka's helpers write lyrics and a title
+  from a theme, write the lyrics better, and write the style out (Match
+  my vibe, and Surprise me, which needs nothing written first), the text
+  filling in as it comes, with Undo. My prompts
   lists the style prompts kept on Mureka, Keep as a prompt keeps the
   style written. Lyrics Mureka would rather write better first are asked
   about before the songs are made. For a remix Mureka's suggested style
-  fills an empty style, else it can be taken with a button. The form is
+  fills an empty style, else it can be taken with a button. Once they
+  are ready, the two new songs can play at once, the second after the
+  first, and go into a set chosen beforehand or a new one named after
+  the title. Mureka's helpers are ringed in cyan, keeping a prompt in
+  grey and No remix in red, so they stand apart from the lists. The form is
   kept between visits and shared with the web view, where the same form
   opens from its own Create button, a song file sent through the phone
   up to 16 MB. The two new songs show at the top of the list while they
   are made.
+- **Play when ready can be changed.** Tapping a song still being made
+  that was asked to play when ready offers the other way, at once or
+  after the playing song, or not to play it, for a tap that went wrong.
 - **Questions over the popups in the web view.** A question asked with
   the playlists or the form for making songs open shows on top of them.
 - **A playlist's cover from the web view in the page.** Choosing a

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.53";
+    const VERSION = "2.0.1.55";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -18752,6 +18752,10 @@
 
             tagPage(songs, null);
 
+            if (createWishes.length > 0) {
+                createGrant(songs);
+            }
+
             for (const s of songs) {
 
                 const id = String(s.song_id);
@@ -18816,10 +18820,25 @@
         const id = String(song.song_id);
         const title = (song.title || "").trim() || "Untitled";
 
+        // Asked for already: the other way, or not played at all, for a
+        // tap that went wrong
         if (pendingPlay.has(id)) {
 
-            showToast(pendingPlay.get(id) === "after" ? "Not ready yet, it plays after the playing song once it is"
-                : "Not ready yet, it plays as soon as it is", true);
+            const after = pendingPlay.get(id) === "after";
+
+            askChoices("Still generating\n\"" + title + "\" " + (after ? "plays after the playing song once it is ready."
+                : "plays as soon as it is ready."), [
+                after
+                    ? { label: "Play when ready instead", fn: function () {
+                        playWhenReady(id);
+                    } }
+                    : { label: "Play after the playing song instead", ring: true, color: "#b8b8c0", fn: function () {
+                        playWhenReady(id, "after");
+                    } },
+                { label: "Do not play it when ready", ring: true, color: "#ff6b6b", fn: function () {
+                    cancelWhenReady(id);
+                } }
+            ]);
             return;
         }
 
@@ -18928,6 +18947,30 @@
         return !queueIdle() && currentSong && currentSong.song_id !== song.song_id;
     }
 
+    // A song asked to play when ready let be, it only joins the library
+    function cancelWhenReady(id) {
+
+        const key = String(id);
+
+        if (!pendingPlay.has(key)) {
+            return;
+        }
+
+        pendingPlay.delete(key);
+
+        const inChain = afterChain.indexOf(key);
+
+        if (inChain !== -1) {
+            afterChain.splice(inChain, 1);
+        }
+
+        pendingStamp += 1;
+        saveQueue();
+        renderList();
+        publishHostSoon();
+        showToast("It is not played when it is ready", true);
+    }
+
     // Play a song once it is ready, at once when it is already. how:
     // "now", the default, starts it and the queue goes on from it in the
     // list. "after" waits for the playing song to end, put in to play next.
@@ -18952,6 +18995,13 @@
 
             if (!pendingSongs.has(key)) {
                 return;
+            }
+
+            // Asked to play after the playing song before, now at once
+            const inChain = afterChain.indexOf(key);
+
+            if (inChain !== -1) {
+                afterChain.splice(inChain, 1);
             }
 
             pendingPlay.set(key, "now");
@@ -20276,8 +20326,11 @@
 
                         // The browser does not always list a stream the site
                         // stops reading, so what was made before its answer
-                        // came is looked up here
-                        tellMade(path, Date.now(), 10000, 0, "the answer of ");
+                        // came is looked up here. Not for the player's own,
+                        // logged with its body as it went
+                        if (Date.now() - (hooked.get(path) || 0) > 15000) {
+                            tellMade(path, Date.now(), 10000, 0, "the answer of ");
+                        }
 
                         const pump = function () {
 
@@ -36487,7 +36540,9 @@
 
             // An id alone plays at once when ready, with after it waits
             // for the playing song
-            if (arg && typeof arg === "object") {
+            if (arg && typeof arg === "object" && arg.cancel === true) {
+                cancelWhenReady(arg.id);
+            } else if (arg && typeof arg === "object") {
                 playWhenReady(arg.id, arg.all === true ? "all" : (arg.after === true ? "after" : "now"));
             } else {
                 playWhenReady(arg);
@@ -57447,12 +57502,12 @@
     let createNote = { text: "", bad: false, at: 0 };
 
     // The lengths to choose from: automatic, then every ten seconds from
-    // half a minute to eight minutes
+    // two minutes, the shortest Mureka takes, to eight
     function createLengths() {
 
         const out = [0];
 
-        for (let s = 30; s <= 480; s += 10) {
+        for (let s = 120; s <= 480; s += 10) {
             out.push(s * 1000);
         }
 
@@ -57519,7 +57574,9 @@
             remixStyle: createText(x.remixStyle, CREATE_STYLE_MAX),
             lengthMs: lengths.indexOf(Number(x.lengthMs)) >= 0 ? Number(x.lengthMs) : 0,
             wildness: isFinite(wild) ? Math.max(0, Math.min(100, wild)) : 50,
-            theme: createText(x.theme, CREATE_THEME_MAX)
+            theme: createText(x.theme, CREATE_THEME_MAX),
+            playReady: x.playReady === true,
+            setId: createText(x.setId, 40)
         };
     }
 
@@ -58244,15 +58301,101 @@
         const data = await createPost("/api/pgc/feed/generate", body, 60000);
         const feed = data.feed || {};
         const wait = Number(feed.wait_num) || 0;
+        const feedId = feed.feed_id !== undefined ? String(feed.feed_id) : "";
+        const set = d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
 
+        createRemember(feedId, d);
         createWatchNew();
 
         return {
             ok: true,
-            feedId: feed.feed_id !== undefined ? String(feed.feed_id) : "",
+            feedId: feedId,
             text: "Making two songs" + (body.title ? " of \"" + body.title + "\"" : "")
                 + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
+                + (d.playReady ? ", played as soon as they are ready" : "")
+                + (d.setId === "new" ? ", in a new set" : set ? ", in the set " + set.name : "")
         };
+    }
+
+    // What to do with the new songs of a generation once Mureka lists them:
+    // play them when ready, put them in a set. By the generation's id
+    const createWishes = [];
+
+    function createRemember(feedId, d) {
+
+        const setId = d.setId === "new" || songSets.has(d.setId) ? d.setId : "";
+
+        if (!feedId || (!d.playReady && !setId)) {
+            return;
+        }
+
+        createWishes.push({ feedId: feedId, play: d.playReady, setId: setId, title: d.title.trim(), seen: [], newSet: "", until: Date.now() + 15 * 60000 });
+    }
+
+    // The new songs found among those of a page, played and put in a set as
+    // the form asked. The first plays as soon as it is ready, the second
+    // after it
+    function createGrant(songs) {
+
+        for (const w of createWishes.slice()) {
+
+            for (const s of songs) {
+
+                const id = String(s.song_id);
+
+                if (String(s.feed_id) !== w.feedId || w.seen.indexOf(id) !== -1) {
+                    continue;
+                }
+
+                w.seen.push(id);
+
+                const song = cache.songs.find(function (x) {
+                    return String(x.song_id) === id;
+                }) || s;
+
+                if (w.setId === "new" && w.newSet && songSets.has(w.newSet)) {
+                    putInSet(song, w.newSet, "hand");
+                } else if (w.setId === "new") {
+
+                    const set = newSetWith(song, "hand");
+
+                    if (w.title) {
+
+                        set.name = w.title;
+                        saveSets();
+                    }
+
+                    w.newSet = set.id;
+                } else if (w.setId && songSets.has(w.setId)) {
+                    putInSet(song, w.setId, "hand");
+                }
+
+                if (w.setId) {
+                    pendingSetAsked.add(id);
+                }
+
+                // Known as being made first, else it cannot wait to play
+                if (w.play && !isUsableSong(s) && !pendingSongs.has(id)) {
+
+                    addedHere.set(id, Date.now());
+                    notePending(s);
+                }
+
+                if (w.play) {
+                    playWhenReady(id, w.seen.length === 1 ? "now" : "after");
+                }
+
+                dbgLog("Create", "new song " + id + " of " + w.feedId + (w.play ? ", plays when ready" : "")
+                    + (w.setId ? ", into " + (w.setId === "new" ? "a new set" : "its set") : ""));
+            }
+
+            if (w.seen.length >= 2 || Date.now() > w.until) {
+                createWishes.splice(createWishes.indexOf(w), 1);
+            }
+        }
+
+        renderList();
+        publishHostSoon();
     }
 
     // The new songs looked for at the top of the library a few times, so
@@ -58282,16 +58425,33 @@
                     }
                 }
 
-                renderList();
-                publishHostSoon();
+                createGrant(songs);
             } catch (e) {
                 dbgLog("Create", "the new songs could not be looked for, " + errText(e));
             }
         };
 
-        for (const wait of [1500, 6000, 15000]) {
+        for (const wait of [1500, 6000, 15000, 30000, 60000]) {
             setTimeout(look, wait);
         }
+    }
+
+    // The sets the new songs can go in, the most used first
+    function createSetChoices() {
+
+        return setsByUse().map(function (e) {
+            return { id: e.set.id, name: e.set.name, color: e.set.color };
+        });
+    }
+
+    // A button ringed in a color instead of filled
+    function createRing(b, color) {
+
+        b.style.background = "transparent";
+        b.style.color = color;
+        b.style.boxShadow = CTRL_RING + color;
+
+        return b;
     }
 
     // ---- The page on the phone ----
@@ -58468,7 +58628,7 @@
 
         // A song with lyrics or an instrumental
         ui.kindRow = trimSegments([
-            { label: "Song", value: "song" },
+            { label: "With lyrics", value: "song" },
             { label: "Instrumental", value: "instrumental" }
         ], function () {
             return loadCreateDraft().kind;
@@ -58505,10 +58665,10 @@
         ui.lyricsBox.appendChild(ui.lyricsLabel);
         ui.lyricsBox.appendChild(ui.lyrics);
         ui.lyricsBox.appendChild(createButtonRow([
-            act("Write from a theme", createThemeFromPage),
-            act("Write them better", function () {
+            createRing(act("Write from a theme", createThemeFromPage), CTRL_ACCENT),
+            createRing(act("Write them better", function () {
                 createAiFromPage("polish");
-            })
+            }), CTRL_ACCENT)
         ]));
         createEl.appendChild(ui.lyricsBox);
 
@@ -58526,16 +58686,16 @@
         createEl.appendChild(ui.styleLabel);
         createEl.appendChild(ui.style);
         createEl.appendChild(createButtonRow([
-            act("Match my vibe", function () {
+            createRing(act("Match my vibe", function () {
                 createAiFromPage("match");
-            }),
-            act("Surprise me", function () {
+            }), CTRL_ACCENT),
+            createRing(act("Surprise me", function () {
                 createAiFromPage("surprise");
-            })
+            }), CTRL_ACCENT)
         ]));
         createEl.appendChild(createButtonRow([
             act("My prompts", createPromptsFromPage),
-            act("Keep as a prompt", createSavePromptFromPage)
+            createRing(act("Keep as a prompt", createSavePromptFromPage), "#b8b8c0")
         ]));
 
         // Who sings: a male or female voice, or one of Mureka's characters
@@ -58576,14 +58736,14 @@
         ui.remixName = document.createElement("div");
         ui.remixName.style.cssText = "font-size:13px;overflow-wrap:anywhere";
         createEl.appendChild(ui.remixName);
-        ui.remixStyleBtn = act("Use the style Mureka heard", function () {
+        ui.remixStyleBtn = createRing(act("Use the style Mureka heard", function () {
 
             changeCreateDraft({ style: createDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
             setCreateNote("The style is the one Mureka heard in the song");
-        });
-        ui.remixClearBtn = act("No remix", function () {
+        }), CTRL_ACCENT);
+        ui.remixClearBtn = createRing(act("No remix", function () {
             changeCreateDraft({ remix: null, remixName: "", remixStyle: "" });
-        });
+        }), "#ff6b6b");
         createEl.appendChild(createButtonRow([
             act("Choose a song", createRemixFromPage),
             act("Upload a song", createUploadFromPage)
@@ -58593,23 +58753,45 @@
         // Length and wildness, which a character and a remix go without
         ui.advBox = document.createElement("div");
         ui.advBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
-        ui.advBox.appendChild(createLabelRow("Length"));
-        ui.length = document.createElement("select");
-        ui.length.style.cssText = "width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #3a3a42;border-radius:6px;background:#26262c;color:#fff;font:" + INPUT_FONT;
+        // The length on a slider, all the way left automatic, with a step
+        // of ten seconds either way on the buttons
+        ui.lengthLabel = createLabelRow("Length");
+        ui.advBox.appendChild(ui.lengthLabel);
 
-        for (const ms of createLengths()) {
+        const lengthRow = document.createElement("div");
+        const lengths = createLengths();
+        const stepLength = function (by) {
 
-            const o = document.createElement("option");
+            const at = Math.max(0, lengths.indexOf(createDraft.lengthMs));
 
-            o.value = String(ms);
-            o.textContent = createLengthText(ms);
-            ui.length.appendChild(o);
-        }
-
-        ui.length.addEventListener("change", function () {
-            changeCreateDraft({ lengthMs: Number(ui.length.value) || 0 });
+            changeCreateDraft({ lengthMs: lengths[Math.max(0, Math.min(lengths.length - 1, at + by))] });
+        };
+        const shorter = makeButton("-", "#333", "#fff", function () {
+            stepLength(-1);
         });
-        ui.advBox.appendChild(ui.length);
+        const longer = makeButton("+", "#333", "#fff", function () {
+            stepLength(1);
+        });
+
+        lengthRow.style.cssText = "display:flex;align-items:center;gap:8px";
+        shorter.style.flex = "0 0 44px";
+        longer.style.flex = "0 0 44px";
+        ui.length = document.createElement("input");
+        ui.length.type = "range";
+        ui.length.min = "0";
+        ui.length.max = String(lengths.length - 1);
+        ui.length.step = "1";
+        ui.length.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+        ui.length.addEventListener("input", function () {
+
+            createDraft.lengthMs = lengths[Number(ui.length.value) || 0] || 0;
+            saveCreateDraft();
+            paintCreateCounts();
+        });
+        lengthRow.appendChild(shorter);
+        lengthRow.appendChild(ui.length);
+        lengthRow.appendChild(longer);
+        ui.advBox.appendChild(lengthRow);
         ui.wildLabel = createLabelRow("Wildness");
         ui.advBox.appendChild(ui.wildLabel);
         ui.wild = document.createElement("input");
@@ -58626,6 +58808,21 @@
         });
         ui.advBox.appendChild(ui.wild);
         createEl.appendChild(ui.advBox);
+
+        // What happens to the new songs once they are ready
+        createEl.appendChild(createLabelRow("Once they are ready"));
+        ui.playRow = trimSwitch("Play them as soon as they are ready", function () {
+            return loadCreateDraft().playReady;
+        }, function (v) {
+            changeCreateDraft({ playReady: v });
+        });
+        createEl.appendChild(ui.playRow);
+        ui.setPick = document.createElement("select");
+        ui.setPick.style.cssText = "width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #3a3a42;border-radius:6px;background:#26262c;color:#fff;font:" + INPUT_FONT;
+        ui.setPick.addEventListener("change", function () {
+            changeCreateDraft({ setId: ui.setPick.value });
+        });
+        createEl.appendChild(ui.setPick);
 
         const foot = document.createElement("div");
 
@@ -58659,6 +58856,7 @@
         ui.styleLabel.count.textContent = d.style.length + "/" + CREATE_STYLE_MAX
             + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a kept prompt" : "");
         ui.wildLabel.count.textContent = String(d.wildness);
+        ui.lengthLabel.count.textContent = createLengthText(d.lengthMs);
     }
 
     function paintCreateStatus() {
@@ -58707,7 +58905,7 @@
         put(ui.title, d.title);
         put(ui.lyrics, d.lyrics);
         put(ui.style, d.style);
-        ui.length.value = String(d.lengthMs);
+        ui.length.value = String(Math.max(0, createLengths().indexOf(d.lengthMs)));
         ui.wild.value = String(d.wildness);
         ui.kindRow.paint();
         ui.voiceRow.paint();
@@ -58727,6 +58925,30 @@
         ui.remixName.style.color = d.remix ? "#fff" : "#888";
         ui.remixStyleBtn.parentElement.style.display = d.remix ? "flex" : "none";
         ui.remixStyleBtn.style.display = d.remix && d.remixStyle && d.remixStyle.trim() !== d.style.trim() ? "" : "none";
+        updateToggleButton(ui.playRow.querySelector("button"), d.playReady);
+
+        // The sets, drawn again only when they changed
+        const sets = createSetChoices();
+        const setsKey = JSON.stringify(sets);
+
+        if (ui.setPick.dataset.key !== setsKey) {
+
+            ui.setPick.dataset.key = setsKey;
+            ui.setPick.textContent = "";
+
+            for (const c of [{ id: "", name: "In no set" }, { id: "new", name: "In a new set" }].concat(sets.map(function (x) {
+                return { id: x.id, name: "In the set " + x.name };
+            }))) {
+
+                const o = document.createElement("option");
+
+                o.value = c.id;
+                o.textContent = c.name;
+                ui.setPick.appendChild(o);
+            }
+        }
+
+        ui.setPick.value = d.setId === "new" || songSets.has(d.setId) ? d.setId : "";
         paintCreateCounts();
         paintCreateStatus();
     }
@@ -58844,9 +59066,10 @@
 
         const before = d.style;
 
-        if (!before.trim() && !d.lyrics.trim()) {
+        // Surprise me needs nothing to go from, Match my vibe something
+        if (kind === "match" && !before.trim() && !(d.kind === "song" && d.lyrics.trim())) {
 
-            setCreateNote("Write a style or some lyrics first", true);
+            setCreateNote("Write a style or some lyrics first, or let Surprise me think of one", true);
             return false;
         }
 
@@ -59296,7 +59519,8 @@
             draft: loadCreateDraft(),
             busy: createBusy,
             note: createNote,
-            lengths: createLengths()
+            lengths: createLengths(),
+            sets: createSetChoices()
         };
     }
 
@@ -64560,6 +64784,50 @@
         accent-color: var(--accent);
     }
 
+    /* Filled, the button the form is for */
+    .chip.crPrimary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    .chip.crPrimary:disabled {
+        opacity: 0.5;
+    }
+
+    /* Ringed in grey, apart from the ringed helpers beside it */
+    .chip.crGrey {
+        color: #b8b8c0;
+        box-shadow: inset 0 0 0 2px #b8b8c0;
+    }
+
+    /* A box to tick, filled while on */
+    .chip.crCheck::before {
+        content: "";
+        width: 0.9em;
+        height: 0.9em;
+        box-sizing: border-box;
+        border: 2px solid currentColor;
+        border-radius: 4px;
+    }
+
+    .chip.crCheck.on::before {
+        background: currentColor;
+    }
+
+    .crSetPick {
+        flex: 1 1 12em;
+        width: auto;
+    }
+
+    /* The length slider between its two step buttons */
+    .crActs .crRange {
+        flex: 1 1 8em;
+        width: auto;
+        min-width: 0;
+    }
+
     .crFoot {
         white-space: normal;
     }
@@ -69191,7 +69459,7 @@
     <div id="crBox">
         <div id="crTop">
             <span id="crTitle">Create</span>
-            <button class="chip ring" id="crMake" type="button">Create</button>
+            <button class="chip crPrimary" id="crMake" type="button">Create</button>
             <button class="chip iconOnly" id="crClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
         </div>
         <div id="crStatus"></div>
@@ -77676,10 +77944,35 @@
 
             ev.preventDefault();
 
+            // Asked for already: the other way, or not played at all, for a
+            // tap that went wrong
             if (song.playWhenReady) {
 
-                toast(song.playAfter ? "Not ready yet, it plays after the playing song once it is"
-                    : "Not ready yet, it plays as soon as it is", "ok");
+                openChoice("Still generating: " + song.title + ". " + (song.playAfter ? "Plays after the playing song once it is ready."
+                    : "Plays as soon as it is ready."), [
+                    song.playAfter
+                        ? { icon: "play", label: "Play when ready instead", cls: "tall", fn: function () {
+
+                            closeSongMenu();
+                            send("playWhenReady", { id: song.id, after: false }).then(function () {
+                                toast("Plays as soon as it is ready", "ok");
+                            });
+                        } }
+                        : { icon: "listPlusTop", label: "Play after the playing song instead", cls: "insetGrey tall", fn: function () {
+
+                            closeSongMenu();
+                            send("playWhenReady", { id: song.id, after: true }).then(function () {
+                                toast("Plays after the playing song, once it is ready", "ok");
+                            });
+                        } },
+                    { icon: "close", label: "Do not play it when ready", cls: "danger tall", fn: function () {
+
+                        closeSongMenu();
+                        send("playWhenReady", { id: song.id, cancel: true }).then(function () {
+                            toast("It is not played when it is ready", "ok");
+                        });
+                    } }
+                ]);
                 return;
             }
 
@@ -87991,12 +88284,12 @@
         return row;
     }
 
-    function crChip(text, then) {
+    function crChip(text, then, look) {
 
         const b = document.createElement("button");
 
         b.type = "button";
-        b.className = "chip";
+        b.className = "chip" + (look ? " " + look : "");
         b.textContent = text;
         b.addEventListener("click", then);
         crUi.acts.push(b);
@@ -88094,7 +88387,7 @@
         const form = $("crForm");
 
         ui.kind = crSegments([
-            { label: "Song", value: "song" },
+            { label: "With lyrics", value: "song" },
             { label: "Instrumental", value: "instrumental" }
         ], "kind");
         form.appendChild(ui.kind);
@@ -88114,10 +88407,10 @@
         ui.lyricsBox.appendChild(ui.lyricsLabel);
         ui.lyricsBox.appendChild(ui.lyrics);
         ui.lyricsBox.appendChild(crRow([
-            crChip("Write from a theme", crTheme),
+            crChip("Write from a theme", crTheme, "ring"),
             crChip("Write them better", function () {
                 crHelp("polish");
-            })
+            }, "ring")
         ]));
         form.appendChild(ui.lyricsBox);
 
@@ -88130,10 +88423,10 @@
         form.appendChild(crRow([
             crChip("Match my vibe", function () {
                 crHelp("match");
-            }),
+            }, "ring"),
             crChip("Surprise me", function () {
                 crHelp("surprise");
-            }),
+            }, "ring"),
             crChip("My prompts", function () {
                 openCrPick("prompts");
             }),
@@ -88142,7 +88435,7 @@
                 crFlush().then(function () {
                     return crAsk({ op: "savePrompt" });
                 }).then(crAnswered);
-            })
+            }, "crGrey")
         ]));
 
         ui.voiceBox = document.createElement("div");
@@ -88171,10 +88464,10 @@
             if (crDraft && crDraft.remixStyle) {
                 crSet({ style: crDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
             }
-        });
+        }, "ring");
         ui.remixClear = crChip("No remix", function () {
             crSet({ remix: null, remixName: "", remixStyle: "" });
-        });
+        }, "fail");
         form.appendChild(crRow([
             crChip("Choose a song", function () {
                 openCrPick("resources");
@@ -88186,13 +88479,36 @@
 
         ui.advBox = document.createElement("div");
         ui.advBox.className = "crBlock";
-        ui.advBox.appendChild(crLabel("Length"));
-        ui.length = document.createElement("select");
-        ui.length.className = "plEdField";
-        ui.length.addEventListener("change", function () {
-            crSet({ lengthMs: Number(ui.length.value) || 0 });
+        // The length on a slider, all the way left automatic, with a step
+        // of ten seconds either way on the buttons
+        ui.lengthLabel = crLabel("Length");
+        ui.advBox.appendChild(ui.lengthLabel);
+
+        const stepLength = function (by) {
+
+            const list = ui.lengths || [0];
+            const at = Math.max(0, list.indexOf(crDraft ? crDraft.lengthMs : 0));
+
+            crSet({ lengthMs: list[Math.max(0, Math.min(list.length - 1, at + by))] });
+        };
+
+        ui.length = document.createElement("input");
+        ui.length.type = "range";
+        ui.length.min = "0";
+        ui.length.step = "1";
+        ui.length.className = "crRange";
+        ui.length.addEventListener("input", function () {
+            crChange("lengthMs", (ui.lengths || [0])[Number(ui.length.value) || 0] || 0);
         });
-        ui.advBox.appendChild(ui.length);
+        ui.advBox.appendChild(crRow([
+            crChip("-", function () {
+                stepLength(-1);
+            }),
+            ui.length,
+            crChip("+", function () {
+                stepLength(1);
+            })
+        ]));
         ui.wildLabel = crLabel("Wildness");
         ui.advBox.appendChild(ui.wildLabel);
         ui.wild = document.createElement("input");
@@ -88206,6 +88522,19 @@
         });
         ui.advBox.appendChild(ui.wild);
         form.appendChild(ui.advBox);
+
+        // What happens to the new songs once they are ready
+        form.appendChild(crLabel("Once they are ready"));
+        ui.playReady = crChip("Play them as soon as they are ready", function () {
+            crSet({ playReady: !(crDraft && crDraft.playReady) });
+        });
+        ui.playReady.classList.add("crCheck");
+        ui.setPick = document.createElement("select");
+        ui.setPick.className = "plEdField crSetPick";
+        ui.setPick.addEventListener("change", function () {
+            crSet({ setId: ui.setPick.value });
+        });
+        form.appendChild(crRow([ui.playReady, ui.setPick]));
 
         const foot = document.createElement("div");
 
@@ -88239,6 +88568,7 @@
         crUi.styleLabel.count.textContent = String(d.style || "").length + "/1000"
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a kept prompt" : "");
         crUi.wildLabel.count.textContent = String(d.wildness);
+        crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
     }
 
     // The form as the phone has it. Fields being typed in, or with typing
@@ -88270,19 +88600,15 @@
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
 
-            if (Array.isArray(c.lengths) && ui.length.options.length === 0) {
+            if (Array.isArray(c.lengths) && c.lengths.length > 0) {
 
-                for (const ms of c.lengths) {
-
-                    const o = document.createElement("option");
-
-                    o.value = String(ms);
-                    o.textContent = crLengthText(ms);
-                    ui.length.appendChild(o);
-                }
+                ui.lengths = c.lengths;
+                ui.length.max = String(c.lengths.length - 1);
             }
 
-            ui.length.value = String(fresh.lengthMs || 0);
+            if (document.activeElement !== ui.length) {
+                ui.length.value = String(Math.max(0, (ui.lengths || [0]).indexOf(fresh.lengthMs || 0)));
+            }
 
             if (document.activeElement !== ui.wild) {
                 ui.wild.value = String(fresh.wildness);
@@ -88302,6 +88628,35 @@
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
+            ui.playReady.classList.toggle("on", fresh.playReady === true);
+
+            // The sets, drawn again only when they changed
+            if (Array.isArray(c.sets)) {
+
+                const key = JSON.stringify(c.sets);
+
+                if (ui.setPick.dataset.key !== key) {
+
+                    ui.setPick.dataset.key = key;
+                    ui.setPick.textContent = "";
+
+                    for (const x of [{ id: "", name: "In no set" }, { id: "new", name: "In a new set" }].concat(c.sets.map(function (y) {
+                        return { id: y.id, name: "In the set " + y.name };
+                    }))) {
+
+                        const o = document.createElement("option");
+
+                        o.value = x.id;
+                        o.textContent = x.name;
+                        ui.setPick.appendChild(o);
+                    }
+                }
+
+                ui.setPick.value = fresh.setId === "new" || c.sets.some(function (y) {
+                    return y.id === fresh.setId;
+                }) ? fresh.setId : "";
+            }
+
             paintCrCounts();
         }
 
