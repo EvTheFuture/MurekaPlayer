@@ -363,7 +363,16 @@ In development.
   still than one loaded at a place, and the play head allows for that
   too. A song still playing stops before the next one loads, as one that
   ended has, since swapped while it plays the new song is heard later
-  again. The debug log tells how the song's clock, the
+  again. A new song, as from Play when ready after a pause, no longer
+  takes the paused song's place and delay: it had started that far into
+  itself with the play head off until a pause and play. Play now on new
+  songs downloads the first whole before it plays, while the song playing
+  goes on, as a song played as soon as it is ready already did, since one
+  streamed from Mureka is heard out of step with the play head on an
+  iPhone until a pause and play; with nothing playing it still starts at
+  once, for the tap to start the sound. After the sound
+  engine is stopped and started again for a clock that stood still, the
+  play head counts on with the engine from there. The debug log tells how the song's clock, the
   engine's and the play head run the first seconds after a song plays, and
   the delay on the way out whenever it changes.
 - **The web view in the add-on and the bookmarklet.** The web view's
@@ -415,6 +424,30 @@ In development.
   caching songs or the reading of play counts has a Stop, ringed in red,
   in the mobile player, over the web view's list and in its small list.
   A stopped load or rescan keeps the songs read so far.
+- **BPM worked out from the song.** A song's tempo is worked out from the
+  song itself once it is stored on the device: the playing song first,
+  then the songs coming up next, as many as Cache ahead and at least five,
+  one at a time in the background, waiting while the power saving has
+  stopped the background work. Not the whole library: a song gets its
+  tempo as it comes near, and keeps it.
+  Where notes and beats start is measured in a deep, a middle and a
+  bright band, the beat is the spacing at which those starts repeat best,
+  and a check halfway between beats keeps it from landing on half or
+  double the tempo. Only a clear beat is used. Settings, Library, BPM from
+  chooses Mureka's first, the song's first or Mureka's only; a BPM set by
+  hand still comes first. Information says where the BPM came from and
+  shows the other one when they differ, and the debug log compares each
+  worked out tempo with Mureka's, with a count when a run is done. Stats
+  for nerds has a Tempo part: the BPM in use and where it came from,
+  Mureka's, one set by hand, the song's own to a tenth with how sure it
+  is and how long it took, its half and double, the beat check, and the
+  choice in the settings. The tempo is measured over up to 32 beats for a
+  finer value. The beat check, which decides between a tempo and its half
+  or double, takes double past 180 BPM only when the starts halfway are
+  nearly as strong as the beats, and with Mureka's tempo near one of the
+  three it leans that way unless the sound says otherwise clearly. The
+  debug log tells how each was settled, and the count how many were
+  doubled or halved.
 - **The phone's Bluetooth devices from the web view.** A long press on
   the phone's sound choice, or a right click with a mouse, opens the
   phone's paired devices over a blurred page, each with what it is,

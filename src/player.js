@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.33";
+    const VERSION = "2.0.1.40";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -194,6 +194,16 @@
     // some songs, and without it they can only ever be excluded from a tempo
     // filter, so a value can be supplied and is then used like a real one
     const MANUAL_BPM_KEY = "mureka_manual_bpm_v1";
+
+    // localStorage key for tempos worked out from the songs themselves,
+    // {v, bpm: {song_id: [bpm, sureness, first found, moved, halfway,
+    // halfway at double the period, how Mureka's tempo leaned it]}},
+    // moved being 1 up, -1 down, 0 kept. All are worked out again when
+    // the way of working them out changes (v). A tempo is used only when
+    // the beat stood out clearly enough (TEMPO_SURE, 0 to 1)
+    const DETECTED_BPM_KEY = "mureka_detected_bpm_v1";
+    const TEMPO_VERSION = 3;
+    const TEMPO_SURE = 0.5;
 
     // localStorage key for star ratings, song_id to 0 to 5. A song missing
     // from it has never been rated, which is kept apart from zero stars
@@ -3230,6 +3240,7 @@
             prevRestart: 3,
             waveSeek: true,
             waveSource: "mureka",
+            bpmSource: "mureka-song",
             onlineBadge: "fade",
             goneOnMureka: "ask",
             webUpNext: true,
@@ -3493,6 +3504,8 @@
                         ? parsed.prevRestart : 3,
                     waveSeek: parsed.waveSeek !== false,
                     waveSource: parsed.waveSource === "song" ? "song" : "mureka",
+                    bpmSource: (parsed.bpmSource === "song-mureka" || parsed.bpmSource === "mureka")
+                        ? parsed.bpmSource : "mureka-song",
                     onlineBadge: parsed.onlineBadge === "always" ? "always" : "fade",
                     goneOnMureka: (parsed.goneOnMureka === "remove" || parsed.goneOnMureka === "rescan")
                         ? parsed.goneOnMureka : "ask",
@@ -4503,7 +4516,86 @@
         }
     }
 
-    // The tempo to use for a song, the hand entered one when there is one
+    // song_id to {bpm, sure}, tempos worked out from the songs themselves
+    let detectedBpm = loadDetectedBpm();
+    let detectedBpmTimer = 0;
+
+    // Those worked out the way used now, the others are left to be worked
+    // out again
+    function loadDetectedBpm() {
+
+        const map = new Map();
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(DETECTED_BPM_KEY) || "null");
+
+            if (!raw || raw.v !== TEMPO_VERSION || !raw.bpm || typeof raw.bpm !== "object") {
+                return map;
+            }
+
+            for (const key of Object.keys(raw.bpm)) {
+
+                const e = raw.bpm[key];
+
+                if (Array.isArray(e)) {
+                    map.set(String(key), { bpm: Number(e[0]) || 0, sure: Number(e[1]) || 0, first: Number(e[2]) || 0,
+                        moved: Number(e[3]) || 0, half: Number(e[4]) || 0, halfDouble: Number(e[5]) || 0,
+                        hinted: typeof e[6] === "string" ? e[6] : "" });
+                }
+            }
+        } catch (e) {
+            // Worked out again
+        }
+
+        return map;
+    }
+
+    // Kept a moment after the last one, a run of them written at once
+    function saveDetectedBpmSoon() {
+
+        if (detectedBpmTimer) {
+            return;
+        }
+
+        detectedBpmTimer = setTimeout(function () {
+
+            detectedBpmTimer = 0;
+
+            const out = {};
+
+            detectedBpm.forEach(function (t, key) {
+                out[key] = [t.bpm, t.sure, t.first || 0, t.moved || 0, t.half || 0, t.halfDouble || 0, t.hinted || ""];
+            });
+
+            try {
+                localStorage.setItem(DETECTED_BPM_KEY, JSON.stringify({ v: TEMPO_VERSION, bpm: out }));
+            } catch (e) {
+                // Kept for this visit only
+            }
+        }, 3000);
+    }
+
+    // The tempo worked out from the song, whole beats, 0 when not worked
+    // out or the beat did not stand out clearly enough
+    function songTempo(song) {
+
+        const t = detectedBpm.get(String(song.song_id));
+
+        return t && t.sure >= TEMPO_SURE ? Math.round(t.bpm) : 0;
+    }
+
+    // Mureka's tempo for the song, 0 when it gave none
+    function murekaBpm(song) {
+
+        const bpm = Number(song.bpm);
+
+        return isFinite(bpm) && bpm > 0 ? bpm : 0;
+    }
+
+    // The tempo to use for a song, the hand entered one when there is one,
+    // else Mureka's or the one worked out from the song, which first as
+    // chosen in the settings
     function effectiveBpm(song) {
 
         const manual = manualBpm.get(String(song.song_id));
@@ -4512,9 +4604,31 @@
             return manual;
         }
 
-        const bpm = Number(song.bpm);
+        const mureka = murekaBpm(song);
 
-        return isFinite(bpm) && bpm > 0 ? bpm : 0;
+        if (settings.bpmSource === "mureka") {
+            return mureka;
+        }
+
+        const own = songTempo(song);
+
+        return settings.bpmSource === "song-mureka" ? (own || mureka) : (mureka || own);
+    }
+
+    // Where the tempo in use comes from: hand, mureka, song or none
+    function bpmOrigin(song) {
+
+        if (hasManualBpm(song)) {
+            return "hand";
+        }
+
+        const bpm = effectiveBpm(song);
+
+        if (!bpm) {
+            return "none";
+        }
+
+        return bpm === murekaBpm(song) && (settings.bpmSource !== "song-mureka" || !songTempo(song)) ? "mureka" : "song";
     }
 
     // Whether this song's tempo was supplied by hand
@@ -10813,11 +10927,18 @@
 
             publishHostSoon();
 
-            // The playing song fades out first, as for a new song played
-            // as soon as it is ready. Copies after the playing song were
-            // taken out, so the last copy of the first new song is the one
-            // just put in
-            switchSong("ready", function () {
+            // Downloaded whole first while the playing song goes on, so the
+            // new song plays from the device as a song played as soon as it
+            // is ready does: streamed from Mureka, Safari's sound engine
+            // hears it out of step with its clock until a pause and play.
+            // Not when nothing plays, the tap itself must start the sound
+            // then. Not done in time, it streams after all
+            const first = songs[0];
+            const wholeFirst = !idleNow && !cachedIds.has(first.song_id) && !offlineMode();
+
+            // Copies after the playing song were taken out, so the last copy
+            // of the first new song is the one just put in
+            const playNewNow = function () {
 
                 const at = idleNow && heldSong ? queue.indexOf(heldSong) : -1;
 
@@ -10837,7 +10958,23 @@
                 queueMoveDir = 1;
                 playCurrent();
                 publishHostSoon();
-            });
+            };
+
+            // The playing song fades out first, as for a new song played as
+            // soon as it is ready. Without the download at once, within the
+            // tap
+            if (wholeFirst) {
+
+                dbgLog("Song", "played now, downloading it whole before it plays: " + (first.title || "Untitled"));
+                withinTime(fetchToCache(first, false), READY_FETCH_MS).then(function (ok) {
+
+                    dbgLog("Song", ok ? "downloaded, it plays from the device: " + (first.title || "Untitled")
+                        : "not downloaded in time, it streams: " + (first.title || "Untitled"));
+                    switchSong("ready", playNewNow);
+                });
+            } else {
+                switchSong("ready", playNewNow);
+            }
         } else if (mode === "replace") {
 
             // Replaced, the playing song plays on, with the new songs after it
@@ -14225,7 +14362,7 @@
                 + ", the play head at " + dbgNum(shown - lag));
 
             if (Math.abs(offset) >= 0.02 || lag >= 0.02) {
-                pauseHold = { el: audio, offset: offset, lag: lag, fresh: fresh };
+                pauseHold = { el: audio, src: audio.src, offset: offset, lag: lag, fresh: fresh };
             }
 
             readyPlayOnCopy();
@@ -18204,8 +18341,17 @@
             const again = function () {
                 return iosCtx.resume();
             };
+            // Running again, the play head counts on with the engine from
+            // here, not from a clock that stood still meanwhile
             const told = function () {
+
                 dbgLog("Audio", "sound engine " + iosCtx.state + " after the restart, song " + (audio.paused ? "paused" : "playing"));
+
+                if (!audio.paused && iosCtx.state === "running") {
+
+                    engineMark = null;
+                    lateEngineMark();
+                }
             };
 
             Promise.resolve().then(function () {
@@ -20993,6 +21139,7 @@
         prefetchRetryTimer = 0;
 
         wantStubsAhead();
+        queueAheadTempos();
 
         // Needs no network, only the cache, so it happens before the online
         // check and even when there is no signal
@@ -21526,6 +21673,13 @@
         if (url.indexOf("blob:") === 0) {
             currentObjectUrl = url;
         }
+
+        // What was held at the old song's pause is not the new one's. The
+        // emptied event that also lets it go comes only after the new song
+        // may already have been asked to play, which then started that far
+        // into it with the old song's delay
+        pauseHold = null;
+        engineMark = null;
 
         audio.src = url;
         updateSeekDisplay();
@@ -27581,17 +27735,9 @@
 
         if (song) {
 
-            const bpm = effectiveBpm(song);
-
             add("ID", song.song_id);
             add("Model", song.model);
             add("Length", formatTime((song.duration_milliseconds || 0) / 1000));
-            add("Tempo", bpm ? bpm + " BPM" : "Not known");
-
-            if (bpm) {
-                sub("Set by", manualBpm.has(String(song.song_id)) ? "Hand" : "Mureka");
-            }
-
             add("Trimmed", yesNo(isTrimmed(song)));
         }
 
@@ -27700,6 +27846,43 @@
 
         if (song && ownWaveInfo && ownWaveInfo.id === String(song.song_id)) {
             sub("Worked out", ownWaveInfo.text);
+        }
+
+        part("Tempo");
+
+        if (song) {
+
+            const origin = bpmOrigin(song);
+            const t = detectedBpm.get(String(song.song_id));
+            const how = { hand: "set by hand", mureka: "Mureka's", song: "from the song" };
+            const choice = { "mureka-song": "Mureka's, else the song", "song-mureka": "The song, else Mureka's", mureka: "Mureka's only" };
+
+            add("In use", effectiveBpm(song) > 0 ? effectiveBpm(song) + " BPM, " + how[origin] : "None");
+            add("From Mureka", murekaBpm(song) > 0 ? murekaBpm(song) + " BPM" : "None");
+            add("Set by hand", hasManualBpm(song) ? manualBpm.get(String(song.song_id)) + " BPM" : "No");
+
+            if (t && t.bpm > 0) {
+
+                add("From the song", t.bpm + " BPM");
+                sub("Sure", t.sure + (t.sure >= TEMPO_SURE ? ", used" : ", not used, below " + TEMPO_SURE));
+                sub("Half and double", Math.round(t.bpm / 2 * 10) / 10 + " and " + Math.round(t.bpm * 20) / 10 + " BPM");
+
+                if (t.first > 0) {
+                    sub("Beat check", beatCheckText(t));
+                }
+
+                if (tempoInfo.has(String(song.song_id))) {
+                    sub("Worked out", tempoInfo.get(String(song.song_id)));
+                }
+            } else if (t) {
+                add("From the song", "Too short to tell");
+            } else if (!tempoWanted()) {
+                add("From the song", "Not worked out, Mureka's only");
+            } else {
+                add("From the song", cachedIds.has(song.song_id) ? "Waiting its turn" : "Once the song is stored");
+            }
+
+            add("Chosen in the settings", choice[settings.bpmSource] || choice["mureka-song"]);
         }
 
         part("Cover");
@@ -28349,6 +28532,17 @@
             chans.push(buffer.getChannelData(c));
         }
 
+        // The tempo from the same decoding, after the waveform
+        if (tempoWanted() && !detectedBpm.has(String(song.song_id))) {
+
+            setTimeout(function () {
+
+                tempoFromBuffer(song, buffer).catch(function (e) {
+                    dbgLog("Tempo", "could not work out the tempo of " + song.song_id + ", " + errText(e));
+                });
+            }, 1000);
+        }
+
         const n = Math.min(ownWavePoints(buffer.duration), buffer.length);
         const out = { peak: new Array(n), loud: new Array(n) };
 
@@ -28399,6 +28593,728 @@
         const loud = normalizeWave(out.loud);
 
         return peak && loud ? { peak: peak, loud: loud } : null;
+    }
+
+    // The tempo of a song worked out from its sound, decoded mono at a low
+    // rate. How much each of three bands (deep, middle, bright) grows from
+    // one moment to the next marks where notes and beats start, each band
+    // weighed by its own average so a deep kick counts as much as a bright
+    // snare. The beat is the spacing at which those starts repeat best over
+    // one to eight beats, likelier near 115 BPM. Folded at that spacing, a
+    // second start as strong halfway makes it two beats; a beat at double
+    // the spacing with only a weak start halfway makes it half a beat.
+    // Answers {bpm, sure} with sure from 0 to 1, or null for too short a
+    // sound. hint, Mureka's tempo when it gave one, decides between a
+    // tempo and its half or double when the halfway starts do not settle
+    // it clearly. Gives way to the page every so often
+    const TEMPO_MIN = 55;
+    const TEMPO_MAX = 215;
+
+    // How strong the starts halfway between beats must be, as a share of
+    // the beat's, to take double the tempo: more above TEMPO_UP_HIGH BPM.
+    // Weaker than TEMPO_DOWN_SHARE at double the period, half the tempo
+    const TEMPO_UP_SHARE = 0.5;
+    const TEMPO_UP_HIGH = 180;
+    const TEMPO_UP_HIGH_SHARE = 0.75;
+    const TEMPO_DOWN_SHARE = 0.35;
+
+    async function detectTempo(data, rate, hint) {
+
+        const N = 256;
+        const H = Math.max(1, Math.round(rate / 100));
+        const fps = rate / H;
+        const frames = Math.floor((data.length - N) / H);
+
+        if (frames < fps * 10) {
+            return null;
+        }
+
+        const win = new Float32Array(N);
+        const rev = new Uint16Array(N);
+        const cosT = new Float32Array(N / 2);
+        const sinT = new Float32Array(N / 2);
+
+        for (let i = 0; i < N; i++) {
+
+            let r = 0;
+
+            win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
+
+            for (let b = 0; b < 8; b++) {
+                r = (r << 1) | ((i >> b) & 1);
+            }
+
+            rev[i] = r;
+        }
+
+        for (let i = 0; i < N / 2; i++) {
+
+            cosT[i] = Math.cos(2 * Math.PI * i / N);
+            sinT[i] = -Math.sin(2 * Math.PI * i / N);
+        }
+
+        const re = new Float32Array(N);
+        const im = new Float32Array(N);
+        const bins = N / 2;
+        const edges = [1, Math.max(2, Math.round(200 / (rate / N))), Math.round(1000 / (rate / N)), bins + 1];
+        const bandFlux = [new Float32Array(frames), new Float32Array(frames), new Float32Array(frames)];
+        let prev = new Float32Array(bins);
+        let cur = new Float32Array(bins);
+
+        for (let f = 0; f < frames; f++) {
+
+            // A breath for the page every 2000 moments
+            if (f % 2000 === 1999) {
+                await sleep(0);
+            }
+
+            const at = f * H;
+
+            for (let i = 0; i < N; i++) {
+
+                re[rev[i]] = data[at + i] * win[i];
+                im[rev[i]] = 0;
+            }
+
+            for (let size = 2; size <= N; size <<= 1) {
+
+                const half = size >> 1;
+                const step = N / size;
+
+                for (let s = 0; s < N; s += size) {
+
+                    for (let k = 0; k < half; k++) {
+
+                        const c = cosT[k * step];
+                        const d = sinT[k * step];
+                        const a = s + k;
+                        const b = a + half;
+                        const tr = re[b] * c - im[b] * d;
+                        const ti = re[b] * d + im[b] * c;
+
+                        re[b] = re[a] - tr;
+                        im[b] = im[a] - ti;
+                        re[a] += tr;
+                        im[a] += ti;
+                    }
+                }
+            }
+
+            for (let band = 0; band < 3; band++) {
+
+                let sum = 0;
+
+                for (let k = edges[band]; k < edges[band + 1]; k++) {
+
+                    const m = Math.log(1 + 100 * Math.sqrt(re[k] * re[k] + im[k] * im[k]));
+                    const rise = m - prev[k - 1];
+
+                    cur[k - 1] = m;
+
+                    if (rise > 0) {
+                        sum += rise;
+                    }
+                }
+
+                bandFlux[band][f] = f === 0 ? 0 : sum;
+            }
+
+            const t = prev;
+
+            prev = cur;
+            cur = t;
+        }
+
+        const flux = new Float32Array(frames);
+
+        for (const bf of bandFlux) {
+
+            let mean = 0;
+
+            for (let f = 0; f < frames; f++) {
+                mean += bf[f];
+            }
+
+            mean = mean / frames || 1;
+
+            for (let f = 0; f < frames; f++) {
+                flux[f] += bf[f] / mean;
+            }
+        }
+
+        // The starts as they stand out from the level around them, half a
+        // second each way
+        const env = new Float32Array(frames);
+        const reach = Math.round(fps * 0.5);
+        let run = 0;
+
+        for (let f = 0; f < Math.min(frames, reach); f++) {
+            run += flux[f];
+        }
+
+        for (let f = 0; f < frames; f++) {
+
+            const lo = f - reach - 1;
+            const hi = f + reach;
+
+            if (hi < frames) {
+                run += flux[hi];
+            }
+
+            if (lo >= 0) {
+                run -= flux[lo];
+            }
+
+            const count = Math.min(frames - 1, hi) - Math.max(0, lo + 1) + 1;
+            const v = flux[f] - run / count;
+
+            env[f] = v > 0 ? v : 0;
+        }
+
+        await sleep(0);
+
+        // How alike the starts are at each spacing, up to eight beats of
+        // the slowest tempo looked at
+        const beats = 8;
+        const maxLag = Math.min(frames - 1, Math.ceil(fps * 60 / TEMPO_MIN * beats) + 2);
+        const ac = new Float32Array(maxLag + 1);
+
+        for (let lag = 0; lag <= maxLag; lag++) {
+
+            if (lag % 200 === 199) {
+                await sleep(0);
+            }
+
+            let sum = 0;
+
+            for (let f = 0; f + lag < frames; f++) {
+                sum += env[f] * env[f + lag];
+            }
+
+            ac[lag] = sum / (frames - lag);
+        }
+
+        if (!(ac[0] > 0)) {
+            return null;
+        }
+
+        const acAt = function (x) {
+
+            const i = Math.floor(x);
+            const w = x - i;
+
+            return i + 1 > maxLag ? 0 : ac[i] * (1 - w) + ac[i + 1] * w;
+        };
+
+        // A beat length scored by how well the starts repeat at one to
+        // eight beats, the nearer ones counting more
+        const comb = function (p) {
+
+            let sum = 0;
+            let n = 0;
+
+            for (let k = 1; k <= beats && k * p <= maxLag; k++) {
+
+                sum += acAt(k * p) / Math.sqrt(k);
+                n += 1 / Math.sqrt(k);
+            }
+
+            return n > 0 ? sum / n : 0;
+        };
+
+        // Tempos far from the usual ones need clearly better repeats to win
+        const likely = function (bpm) {
+
+            const o = Math.log2(bpm / 115) / 0.9;
+
+            return Math.exp(-0.5 * o * o);
+        };
+
+        let best = 0;
+        let bestScore = -1;
+        const scores = [];
+
+        for (let p = fps * 60 / TEMPO_MAX; p <= fps * 60 / TEMPO_MIN; p += 0.25) {
+
+            const score = comb(p) * likely(fps * 60 / p);
+
+            scores.push(score);
+
+            if (score > bestScore) {
+
+                bestScore = score;
+                best = p;
+            }
+        }
+
+        // How strong the starts are half a period from the strongest ones,
+        // the sound folded at that period, as a share of the strongest
+        const halfway = function (q) {
+
+            const n = 32;
+            const sum = new Float64Array(n);
+            const count = new Float64Array(n);
+
+            for (let f = 0; f < frames; f++) {
+
+                const b = Math.floor((f % q) / q * n) % n;
+
+                sum[b] += env[f];
+                count[b] += 1;
+            }
+
+            const mean = new Float64Array(n);
+            let top = 0;
+
+            for (let i = 0; i < n; i++) {
+
+                const a = (i + n - 1) % n;
+                const c = (i + 1) % n;
+
+                mean[i] = (sum[a] + sum[i] + sum[c]) / Math.max(1, count[a] + count[i] + count[c]);
+            }
+
+            for (let i = 1; i < n; i++) {
+
+                if (mean[i] > mean[top]) {
+                    top = i;
+                }
+            }
+
+            return mean[top] > 0 ? mean[(top + n / 2) % n] / mean[top] : 0;
+        };
+
+        // Doubled past 180 BPM, rare in songs, only with starts halfway
+        // nearly as strong. With Mureka's tempo near one of the three, the
+        // way to it takes less and the way away from it more
+        const first = Math.round(fps * 60 / best * 10) / 10;
+        const half = halfway(best);
+        const halfDouble = halfway(best * 2);
+        const upTo = fps * 60 / (best / 2);
+        const downTo = fps * 60 / (best * 2);
+        const near = function (a) {
+            return hint > 0 && Math.abs(a - hint) <= hint * 0.04;
+        };
+        let upShare = upTo > TEMPO_UP_HIGH ? TEMPO_UP_HIGH_SHARE : TEMPO_UP_SHARE;
+        let downShare = TEMPO_DOWN_SHARE;
+        let hinted = "";
+
+        if (near(first)) {
+
+            upShare = Math.max(upShare, TEMPO_UP_HIGH_SHARE);
+            downShare = Math.min(downShare, 0.2);
+            hinted = "kept";
+        } else if (near(upTo)) {
+
+            upShare = 0.35;
+            hinted = "up";
+        } else if (near(downTo)) {
+
+            downShare = 0.6;
+            hinted = "down";
+        }
+
+        let moved = 0;
+
+        if (upTo <= TEMPO_MAX && half >= upShare) {
+
+            best = best / 2;
+            moved = 1;
+        } else if (downTo >= TEMPO_MIN && halfDouble < downShare) {
+
+            best = best * 2;
+            moved = -1;
+        }
+
+        // Finer around it, in hundredths of a moment, over as many beats as
+        // fit in twenty seconds and at most 32: the further apart the beats
+        // compared, the finer the tempo. Spacings past those worked out
+        // above are worked out as needed. The likelihood plays no part here
+        const further = new Map();
+        const acLong = function (lag) {
+
+            if (lag <= maxLag) {
+                return ac[lag];
+            }
+
+            if (further.has(lag)) {
+                return further.get(lag);
+            }
+
+            let sum = 0;
+
+            for (let f = 0; f + lag < frames; f++) {
+                sum += env[f] * env[f + lag];
+            }
+
+            const v = lag < frames ? sum / (frames - lag) : 0;
+
+            further.set(lag, v);
+            return v;
+        };
+        const span = Math.min(frames / 2, fps * 20);
+        const fineComb = function (p) {
+
+            const many = Math.max(1, Math.min(32, Math.floor(span / p)));
+            let sum = 0;
+
+            for (let k = 1; k <= many; k++) {
+
+                const x = k * p;
+                const i = Math.floor(x);
+                const w = x - i;
+
+                sum += acLong(i) * (1 - w) + acLong(i + 1) * w;
+            }
+
+            return sum / many;
+        };
+        let fine = best;
+        let fineScore = -1;
+
+        await sleep(0);
+
+        for (let p = best - 1.5; p <= best + 1.5; p += 0.01) {
+
+            const score = fineComb(p);
+
+            if (score > fineScore) {
+
+                fineScore = score;
+                fine = p;
+            }
+        }
+
+        // Sure when the winner stands well above the usual score
+        scores.sort(function (a, b) {
+            return a - b;
+        });
+
+        const median = scores[Math.floor(scores.length / 2)];
+        const sure = Math.max(0, Math.min(1, (bestScore - median) / (bestScore + 1e-12)));
+
+        return {
+            bpm: Math.round(fps * 60 / fine * 10) / 10,
+            sure: Math.round(sure * 100) / 100,
+            first: first,
+            moved: moved,
+            half: Math.round(half * 100) / 100,
+            halfDouble: Math.round(halfDouble * 100) / 100,
+            hinted: hinted
+        };
+    }
+
+    // Songs whose tempo is still to be worked out, by id: the playing one
+    // first, then the stored songs coming up next, as many as are cached
+    // ahead and at least five, one at a time and gently. Not the whole
+    // library, a song gets its tempo as it comes near. How they compare
+    // with Mureka's goes to the debug log
+    const tempoWaiting = new Map();
+    const tempoInfo = new Map();
+    let tempoBusy = false;
+    let tempoTimer = 0;
+    let tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0 };
+
+    function tempoWanted() {
+        return settings.bpmSource !== "mureka";
+    }
+
+    function queueTempo(song, first) {
+
+        const id = String(song.song_id);
+
+        if (!tempoWanted() || detectedBpm.has(id) || !cachedIds.has(song.song_id)) {
+            return;
+        }
+
+        // The playing song goes ahead of the others
+        if (first && tempoWaiting.size > 0) {
+
+            const rest = Array.from(tempoWaiting.entries());
+
+            tempoWaiting.clear();
+            tempoWaiting.set(id, song);
+
+            for (const e of rest) {
+                tempoWaiting.set(e[0], e[1]);
+            }
+        } else {
+            tempoWaiting.set(id, song);
+        }
+
+        temposSoon(first ? 8000 : 4000);
+    }
+
+    // The playing song and the songs coming up after it whose tempo is
+    // wanted now
+    const TEMPO_AHEAD_MIN = 5;
+
+    function tempoAhead() {
+
+        if (queuePos < 0 || queue.length === 0) {
+            return currentSong ? [currentSong] : [];
+        }
+
+        return queue.slice(queuePos, queuePos + 1 + Math.max(TEMPO_AHEAD_MIN, settings.prefetchCount || 0));
+    }
+
+    function tempoNear(song) {
+
+        const id = String(song.song_id);
+
+        return tempoAhead().some(function (s) {
+            return s && String(s.song_id) === id;
+        });
+    }
+
+    // The stored ones among them without a tempo worked out, queued as the
+    // songs ahead are fetched, at startup and when chosen in the settings
+    function queueAheadTempos() {
+
+        if (!tempoWanted()) {
+            return;
+        }
+
+        for (const song of tempoAhead()) {
+
+            if (song && !isStubSong(song)) {
+                queueTempo(song, !!(currentSong && currentSong.song_id === song.song_id));
+            }
+        }
+    }
+
+    function temposSoon(ms) {
+
+        if (tempoBusy || tempoTimer || tempoWaiting.size === 0) {
+            return;
+        }
+
+        tempoTimer = setTimeout(runTempos, ms);
+    }
+
+    // One song after the other, waiting while the power saving has stopped
+    // the background work or the player is busy with something the user
+    // waits for
+    async function runTempos() {
+
+        tempoTimer = 0;
+
+        if (tempoBusy) {
+            return;
+        }
+
+        tempoBusy = true;
+
+        try {
+
+            while (tempoWaiting.size > 0 && !playerQuiet && tempoWanted()) {
+
+                if (foregroundWork > 0) {
+
+                    await sleep(1000);
+                    continue;
+                }
+
+                const next = tempoWaiting.entries().next().value;
+
+                tempoWaiting.delete(next[0]);
+
+                // Done meanwhile, or no longer coming up
+                if (detectedBpm.has(next[0]) || !tempoNear(next[1])) {
+                    continue;
+                }
+
+                await tempoOfStored(next[1]);
+                await sleep(1500);
+            }
+        } finally {
+            tempoBusy = false;
+        }
+
+        if (tempoWaiting.size === 0 && tempoTally.n > 0) {
+            tempoSummary();
+        }
+    }
+
+    // The stored copy decoded at a low rate, then its tempo. Songs that
+    // cannot be read are left for another time
+    async function tempoOfStored(song) {
+
+        const url = songUrl(song);
+        const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+
+        if (!url || !Off) {
+            return;
+        }
+
+        try {
+
+            const hit = await (await openStore(AUDIO_CACHE)).match(url, { ignoreVary: true });
+
+            if (!hit) {
+                return;
+            }
+
+            const buffer = await trimDecode(new Off(1, 1, 8000), await hit.arrayBuffer());
+
+            await tempoFromBuffer(song, buffer);
+        } catch (e) {
+            dbgLog("Tempo", "could not work out the tempo of " + (song.title || song.song_id) + ", " + errText(e));
+        }
+    }
+
+    // The tempo of a decoded song, kept, and the lists told when the
+    // tempo in use changed
+    async function tempoFromBuffer(song, buffer) {
+
+        const id = String(song.song_id);
+
+        if (detectedBpm.has(id)) {
+            return;
+        }
+
+        const t0 = Date.now();
+        let data = buffer.getChannelData(0);
+
+        // Several channels mixed down to one
+        if (buffer.numberOfChannels > 1) {
+
+            const mix = new Float32Array(buffer.length);
+
+            for (let c = 0; c < buffer.numberOfChannels; c++) {
+
+                const ch = buffer.getChannelData(c);
+
+                for (let i = 0; i < mix.length; i++) {
+                    mix[i] += ch[i] / buffer.numberOfChannels;
+                }
+            }
+
+            data = mix;
+        }
+
+        const before = effectiveBpm(song);
+        const r = await detectTempo(data, buffer.sampleRate, murekaBpm(song));
+
+        detectedBpm.set(id, r ? { bpm: r.bpm, sure: r.sure, first: r.first, moved: r.moved, half: r.half, halfDouble: r.halfDouble,
+            hinted: r.hinted } : { bpm: 0, sure: 0, first: 0, moved: 0, half: 0, halfDouble: 0, hinted: "" });
+        saveDetectedBpmSoon();
+        noteTempo(song, r, Date.now() - t0);
+        tempoInfo.set(id, "in " + (Date.now() - t0) + " ms, " + Math.round(buffer.duration) + " s of sound");
+
+        // Only the latest few, for Stats for nerds
+        if (tempoInfo.size > 50) {
+            tempoInfo.delete(tempoInfo.keys().next().value);
+        }
+
+        if (effectiveBpm(song) !== before) {
+            tempoChangedSoon(song);
+        }
+    }
+
+    // How a worked out tempo compares with Mureka's, for the debug log
+    function noteTempo(song, r, ms) {
+
+        const mureka = murekaBpm(song);
+        let how = "";
+
+        tempoTally.n += 1;
+
+        if (r && r.moved === 1) {
+            tempoTally.up += 1;
+        } else if (r && r.moved === -1) {
+            tempoTally.down += 1;
+        }
+
+        if (!r) {
+
+            tempoTally.none += 1;
+            how = "too short to tell";
+        } else if (r.sure < TEMPO_SURE) {
+
+            tempoTally.unsure += 1;
+            how = "not used, the beat did not stand out (" + r.sure + ")";
+        } else if (!mureka) {
+            how = "Mureka gives none";
+        } else if (Math.abs(r.bpm - mureka) <= 1) {
+
+            tempoTally.agree += 1;
+            how = "Mureka says " + mureka + ", agrees";
+        } else if (Math.abs(r.bpm - mureka) <= 3) {
+
+            tempoTally.near += 1;
+            how = "Mureka says " + mureka + ", close";
+        } else if (Math.abs(r.bpm - mureka * 2) <= 3 || Math.abs(r.bpm - mureka / 2) <= 2) {
+
+            tempoTally.double += 1;
+            how = "Mureka says " + mureka + ", half or double";
+        } else {
+
+            tempoTally.other += 1;
+            how = "Mureka says " + mureka;
+        }
+
+        dbgLog("Tempo", (song.title || "Untitled") + " (" + song.song_id + "): "
+            + (r ? r.bpm + " BPM, sure " + r.sure : "none") + ", " + how + ", " + ms + " ms"
+            + (r ? ", " + beatCheckText(r) : ""));
+    }
+
+    // How the beat was settled between a tempo and its half or double, in
+    // words: the tempo first found, where it went and why
+    function beatCheckText(t) {
+
+        const pct = function (v) {
+            return Math.round((Number(v) || 0) * 100) + " %";
+        };
+        const lean = t.hinted === "kept" ? ", Mureka's tempo near it, so kept unless very clear"
+            : t.hinted === "up" ? ", Mureka's tempo near its double" : t.hinted === "down" ? ", Mureka's tempo near its half" : "";
+
+        if (t.moved === 1) {
+            return "first found " + t.first + ", doubled: the starts halfway between beats were " + pct(t.half)
+                + " as strong as the beats" + lean;
+        }
+
+        if (t.moved === -1) {
+            return "first found " + t.first + ", halved: every other beat only " + pct(t.halfDouble) + " as strong" + lean;
+        }
+
+        return "kept " + t.first + ": halfway " + pct(t.half) + " as strong, every other beat "
+            + pct(t.halfDouble) + lean;
+    }
+
+    function tempoSummary() {
+
+        const t = tempoTally;
+
+        dbgLog("Tempo", "worked out for " + t.n + " songs: " + t.agree + " agree with Mureka within 1 BPM, "
+            + t.near + " within 3, " + t.double + " half or double Mureka's, " + t.other + " differ, " + t.unsure
+            + " without a clear beat, " + t.none + " too short; " + t.up + " doubled and " + t.down
+            + " halved by the beat check");
+        tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0 };
+    }
+
+    // The lists, filters and the playing song's lines drawn again a moment
+    // after the last tempo that changed
+    let tempoRedrawTimer = 0;
+
+    function tempoChangedSoon(song) {
+
+        if (currentSong && String(currentSong.song_id) === String(song.song_id)) {
+            updatePlayerInfo(currentSong);
+        }
+
+        if (tempoRedrawTimer) {
+            return;
+        }
+
+        tempoRedrawTimer = setTimeout(function () {
+
+            tempoRedrawTimer = 0;
+            songDataStamp++;
+            renderList();
+            queueFollowFilter();
+            publishHostSoon();
+        }, 5000);
     }
 
     // Work out the playing song's own waveform a moment after it starts, so
@@ -28483,6 +29399,10 @@
 
         ownWaveOnStored(song);
         keepCover(song);
+
+        if (tempoNear(song)) {
+            queueTempo(song, !!(currentSong && currentSong.song_id === song.song_id));
+        }
     }
 
     // Stored songs still without a kept cover, by id, filled in one after
@@ -28727,6 +29647,7 @@
 
         waveOwn = own ? own.peak : null;
         waveOwnLoud = own ? own.loud : null;
+        queueTempo(song, true);
 
         // Not worked out yet, or kept from before it had as many points as
         // now, which shows meanwhile: worked out in the background once the
@@ -30143,7 +31064,7 @@
 
     function playOnWhereHeard() {
 
-        const held = pauseHold && pauseHold.el === audio ? pauseHold : null;
+        const held = pauseHold && pauseHold.el === audio && pauseHold.src === audio.src ? pauseHold : null;
         const hold = held ? held.offset : 0;
         const copy = playOnCopy && playOnCopy.el === audio && currentSong && playOnCopy.id === currentSong.song_id
             ? playOnCopy : null;
@@ -33067,7 +33988,9 @@
                 cacheAll();
             }
         } else {
+
             keepCoversSoon(3000);
+            temposSoon(10000);
         }
     }
 
@@ -43984,6 +44907,28 @@
             settings.fadeResumeHushSec = hushSeconds(v);
         }, 0, 5, 0.1);
 
+        // Where a song's tempo comes from, after one set by hand
+        const bpmSourceRow = makeDropRow("BPM from", [
+            { label: "Mureka's, else the song", value: "mureka-song" },
+            { label: "The song, else Mureka's", value: "song-mureka" },
+            { label: "Mureka's only", value: "mureka" }
+        ], function () { return settings.bpmSource || "mureka-song"; }, function (v) {
+
+            settings.bpmSource = v;
+            applySmartFilters();
+            publishHostSoon();
+
+            if (currentSong) {
+                updatePlayerInfo(currentSong);
+            }
+
+            if (tempoWanted()) {
+
+                queueAheadTempos();
+                temposSoon(2000);
+            }
+        });
+
         const lyricLimitRow = makeStepperRow("Instrumental when the lyrics are shorter than, characters",
             function () { return settings.autoInstrumentalChars; },
             function (v) {
@@ -44108,6 +45053,8 @@
         libraryPage.appendChild(withHint(goneRow, "Load and Refresh notice songs missing from Mureka's list and ask Mureka about each one. Only songs Mureka no longer has are removed, with their stored audio and cover. Ratings and tempos are kept. Ask shows which songs first, Remove takes them away at once, except the playing song and when more than " + GONE_ASK_OVER + " go at once. Rescan only leaves it to a full Rescan."));
         libraryPage.appendChild(makeLabel("Song list"));
         libraryPage.appendChild(withHint(showAllRow, "The song list shows every song, those the filters leave out greyed between the others, in every list view and in the web view. Several in a row fold under the first, with how many there are and an arrow that opens them. A tap on one asks whether to play it now, the queue then going on with the songs the filters let through, or to play all of them up to the next song the filters let through. They can be put in the queue as usual. Off, the list shows only the songs the filters let through. A playlist still shows only its own songs."));
+        libraryPage.appendChild(makeLabel("Tempo"));
+        libraryPage.appendChild(withHint(bpmSourceRow, "Where a song's BPM comes from, for the BPM filter, the lists and Information. A BPM set by hand always comes first. The song's own is worked out from the song once it is stored on this device, for the playing song and the songs coming up next, as many as Cache ahead and at least five, a song at a time in the background, and used only when the beat stands out clearly. Once worked out it is kept. Mureka gives some songs none, and now and then half or double. How the two compare goes to the debug log."));
         libraryPage.appendChild(makeLabel("Instrumental songs"));
         libraryPage.appendChild(withHint(lyricLimitRow, "A song whose lyrics have fewer characters than this, spaces not counted, counts as instrumental, for the vocals filter and everywhere else. Mureka's prompt often holds only a short note such as [Instrumental] for one. The lyrics are known for songs played, coming up next, opened in Information or read for the play counts. 0 switches it off."));
         playbackPage.appendChild(withHint(reportRow, "Counts each play on Mureka and takes Mureka's new mark off a song played for the first time, as Mureka's own player does. Off keeps your listening out of the play counts, and new songs stay marked as new."));
@@ -52250,9 +53197,19 @@
         addInfoRow("Mood", (song.moods || []).join(", ") || "-");
         const shownBpm = effectiveBpm(song);
 
-        addInfoRow("BPM", shownBpm > 0
-            ? String(shownBpm) + (hasManualBpm(song) ? " (by hand)" : "")
-            : "-");
+        const bpmFrom = bpmOrigin(song);
+        const ownBpm = songTempo(song);
+        let bpmText = shownBpm > 0 ? String(shownBpm) : "-";
+
+        if (bpmFrom === "hand") {
+            bpmText += " (by hand)";
+        } else if (bpmFrom === "mureka") {
+            bpmText += " (Mureka's" + (ownBpm && Math.abs(ownBpm - shownBpm) > 1 ? ", the song's own " + ownBpm : "") + ")";
+        } else if (bpmFrom === "song") {
+            bpmText += " (from the song" + (murekaBpm(song) && Math.abs(murekaBpm(song) - shownBpm) > 1 ? ", Mureka's " + murekaBpm(song) : "") + ")";
+        }
+
+        addInfoRow("BPM", bpmText);
         addInfoRow("Model", song.model || "-");
         addInfoRow("Rating", ratingText(getRating(song)));
 
@@ -56662,6 +57619,7 @@
 
         all[key] = { order: order.slice(), at: Date.now() };
         storePlaylistOrders(all);
+        dbgLog("Playlists", "order of " + pl.name + " kept here, " + order.length + " songs");
 
         const detail = playlistDetails.get(key);
 
@@ -57212,6 +58170,14 @@
             }
 
             const detail = { order: withOwnOrder(key, order), murekaOrder: order, songs: songs, added: added, at: Date.now() };
+            const own = loadPlaylistOrders()[key];
+
+            // Which order it is shown in, to tell an order kept here from
+            // one gone
+            dbgLog("Mureka", "playlist " + (head.name || pl.name || key) + ", " + order.length + " songs, "
+                + (own && Array.isArray(own.order) && own.order.length > 0
+                    ? "in the order kept here, set " + new Date(own.at || 0).toLocaleString() + " with " + own.order.length + " songs"
+                    : "in Mureka's order, none kept here"));
             const before = playlistById(key);
             const record = playlistRecord(Object.assign({}, head, {
                 playlist_id: head.playlist_id || pl.playlist_id,
@@ -90777,6 +91743,9 @@
         syncWakeLock();
         followOtherTabs();
         setTimeout(readOpenPlaylistAtStart, 5000);
+        setTimeout(queueAheadTempos, 30000);
+        dbgLog("Playlists", "orders kept here for " + Object.keys(loadPlaylistOrders()).length + " playlists"
+            + (activePlaylist ? ", " + activePlaylist.name + " open since before the start" : ""));
 
         if (brokenLibraryNote) {
 
