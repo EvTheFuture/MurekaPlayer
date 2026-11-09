@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.61";
+    const VERSION = "2.0.1.62";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -80376,7 +80376,7 @@
             const level = volLevelOf(x);
 
             if (level >= 0) {
-                volSetFor(x, level + by * (x.kind === "phone" ? (volFineOn() ? 2 : 1) : 5), true);
+                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
             }
         };
 
@@ -80602,7 +80602,7 @@
             return;
         }
 
-        const step = volTarget().kind === "phone" ? (volFineOn() ? 2 : 1) : 5;
+        const step = volTarget().kind === "phone" ? 1 : 5;
 
         volSet(now + by * step, true);
         volSay();

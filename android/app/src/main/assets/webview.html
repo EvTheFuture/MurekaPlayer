@@ -16438,7 +16438,7 @@
             const level = volLevelOf(x);
 
             if (level >= 0) {
-                volSetFor(x, level + by * (x.kind === "phone" ? (volFineOn() ? 2 : 1) : 5), true);
+                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
             }
         };
 
@@ -16664,7 +16664,7 @@
             return;
         }
 
-        const step = volTarget().kind === "phone" ? (volFineOn() ? 2 : 1) : 5;
+        const step = volTarget().kind === "phone" ? 1 : 5;
 
         volSet(now + by * step, true);
         volSay();

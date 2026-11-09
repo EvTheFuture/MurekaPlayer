@@ -526,11 +526,16 @@ In development.
   after the playing song, or not to play it, for a tap that went wrong.
 - **More volume steps in the Android app.** More steps, under the
   phone's bar in the web view's volume popup, makes the phone's volume
-  100 steps instead of its own 15 or so. The phone goes to the step at
-  or above the level and the player turns its own sound down by what
-  lies between that step and the one below, along the step's own curve
-  in dB, so the volume rises smoothly all the way. Kept over a restart,
-  and the phone's own buttons and night mode go on from their step.
+  100 steps instead of its own 15 or so, a percent a press. The phone
+  goes to the step at or above the level and the player turns its own
+  sound down for the part between that step and the one below, evened
+  out by loudness as heard, so a level just under a step is only a
+  little quieter than it, even where the phone's lowest steps lie far
+  apart. Lower the volume as night mode goes off lowers the level by the
+  night profile's dB in percent, the night profile's own gain applies on
+  top as before. Kept over a restart, and the phone's own buttons go on
+  from their step. Each change is in the debug log under Volume, with
+  the step, its dB and the player's share.
 - **The web view's settings in the bookmarklet and the add-on.** The
   Web view page in Settings showed only in the Android app, so the web
   view shown in the page kept its defaults. It shows now wherever the

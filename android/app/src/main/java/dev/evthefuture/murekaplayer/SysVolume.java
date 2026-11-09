@@ -197,6 +197,54 @@ final class SysVolume {
         }
     }
 
+    // The step for a level in percent and the player's own sound for the
+    // rest: the step at or above it, the sound between the step below's
+    // and its own, evened out in loudness as heard, not in dB, so a level
+    // just under a step is only a little quieter than the step even where
+    // the phone's lowest steps lie far apart
+    private static float[] finePlan(float pct, int max, int type, boolean own) {
+
+        float at = pct / 100f * max;
+        int step = (int) Math.ceil(at - 0.0001f);
+
+        if (step <= 0) {
+            return new float[] { 0, 1 };
+        }
+
+        // Below the lowest step only the player can go, by its share of it
+        if (at < 1) {
+            return new float[] { 1, Math.max(0, at) };
+        }
+
+        int below = (int) Math.floor(at);
+
+        if (below >= step) {
+            return new float[] { step, 1 };
+        }
+
+        float low = stepDb(below, max, type, own);
+        float high = stepDb(step, max, type, own);
+
+        // A step that tells no sensible level is taken as a whole step down
+        float ratio = Float.isNaN(low) || Float.isInfinite(low) || low > high ? 0.5f : (float) Math.pow(10, (low - high) / 20);
+        float share = at - below;
+        float gain = ratio + (1 - ratio) * share;
+
+        return new float[] { step, Math.max(0, Math.min(1, gain)) };
+    }
+
+    // The level heard at a level in percent, in dB, as the plan makes it
+    private static float fineDb(float pct, int max, int type, boolean own) {
+
+        float[] plan = finePlan(pct, max, type, own);
+
+        if (plan[0] <= 0 || plan[1] <= 0) {
+            return -200;
+        }
+
+        return stepDb((int) plan[0], max, type, own) + (float) (20 * Math.log10(plan[1]));
+    }
+
     // The step for the level, and the player's own sound for the rest
     private static void applyFine() {
 
@@ -206,39 +254,22 @@ final class SysVolume {
             return;
         }
 
-        float at = finePct / 100f * max;
-        int step = (int) Math.ceil(at - 0.0001f);
-        float gain = 1;
-
-        if (step <= 0) {
-            step = 0;
-        } else if (at < 1) {
-
-            // Below the lowest step only the player can go, by its share of it
-            gain = at;
-        } else {
-
-            int type = outputType();
-            boolean own = hasCurve(type, max);
-            int below = (int) Math.floor(at);
-
-            if (below < step) {
-
-                float low = stepDb(below, max, type, own);
-                float high = stepDb(step, max, type, own);
-                float want = low + (high - low) * (at - below);
-
-                gain = (float) Math.pow(10, (want - high) / 20);
-            }
-        }
+        int type = outputType();
+        boolean own = hasCurve(type, max);
+        float[] plan = finePlan(finePct, max, type, own);
+        int step = (int) plan[0];
 
         fineStep = step;
-        fineGain = Math.max(0, Math.min(1, gain));
+        fineGain = plan[1];
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
         keepFine();
         Hub.setFine(finePct);
         Hub.command("fineGain", (double) fineGain);
         Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+        Hub.note("Volume", "more steps: " + Math.round(finePct * 10) / 10f + "%, step " + step + " of " + max
+            + (step > 0 ? " at " + Math.round(stepDb(step, max, type, own) * 10) / 10f + " dB" : "")
+            + ", the player at " + Math.round(fineGain * 1000) / 10f + "%"
+            + (own ? ", the output's own curve" : ", Android's usual curve"));
     }
 
     private static void keepFine() {
@@ -300,6 +331,27 @@ final class SysVolume {
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             int cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
             int want = cur;
+
+            // With more steps the level goes down by the dB itself, in
+            // percent, to the phone's lowest step at most
+            if (fineOn && finePct > 0 && max > 0) {
+
+                int type = outputType();
+                boolean own = hasCurve(type, max);
+                float from = finePct;
+                float goal = fineDb(from, max, type, own) - db;
+                float lowest = 100f / max;
+                float to = from;
+
+                while (to - 0.5f >= lowest && fineDb(to, max, type, own) > goal) {
+                    to -= 0.5f;
+                }
+
+                finePct = Math.max(lowest, Math.min(from, to));
+                applyFine();
+
+                return "{\"from\":" + Math.round(from) + ",\"to\":" + Math.round(finePct) + ",\"max\":100}";
+            }
 
             if (max > 0 && cur > 1) {
 
