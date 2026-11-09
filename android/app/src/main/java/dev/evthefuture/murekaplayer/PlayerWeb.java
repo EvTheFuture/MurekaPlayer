@@ -1132,6 +1132,23 @@ final class PlayerWeb {
             return onMureka ? String.valueOf(SysVolume.fineGain()) : "1";
         }
 
+        // The size of the phone's steps in dB for more volume steps, set by
+        // hand for each speaker in the sound profiles, as JSON
+        @JavascriptInterface
+        public void volumeStepSizes(String json) {
+
+            if (onMureka) {
+                MAIN.post(() -> SysVolume.setStepSizes(json));
+            }
+        }
+
+        // The gap between two of the phone's steps by its own curve, for a
+        // Bluetooth speaker ("1") or this phone, -1 when it tells none
+        @JavascriptInterface
+        public String volumeCurveStep(String bluetooth) {
+            return onMureka ? String.valueOf(SysVolume.curveStepDb("1".equals(bluetooth))) : "-1";
+        }
+
         // The WireGuard tunnel named in the settings on or off by hand, to
         // try the hand over. "1" for on
         @JavascriptInterface

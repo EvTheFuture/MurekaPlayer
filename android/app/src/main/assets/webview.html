@@ -16478,6 +16478,13 @@
             fine.appendChild(box);
             fine.appendChild(text);
             bar.appendChild(fine);
+
+            // Where to even out a speaker that jumps past the phone's steps
+            const fineHint = document.createElement("div");
+
+            fineHint.className = "ceLabel volFineHint";
+            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings, Sound profiles, Speakers";
+            bar.appendChild(fineHint);
         }
 
         return bar;
@@ -16558,6 +16565,12 @@
 
             if (fineBox && document.activeElement !== fineBox) {
                 fineBox.checked = volFineOn();
+            }
+
+            const fineHint = bar.querySelector(".volFineHint");
+
+            if (fineHint) {
+                fineHint.style.display = volFineOn() ? "" : "none";
             }
 
             if (force || document.activeElement !== slider || volMoves[t.key] === undefined

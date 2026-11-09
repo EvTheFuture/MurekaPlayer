@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.62";
+    const VERSION = "2.0.1.64";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13449,7 +13449,8 @@
                     night: has(d.night) || d.night === "none" ? d.night : "",
                     nightOff: NIGHT_ON_CONNECT.some(function (c) {
                         return c.value === d.nightOff;
-                    }) ? d.nightOff : "keep"
+                    }) ? d.nightOff : "keep",
+                    stepDb: cleanStepDb(d.stepDb)
                 };
             }
         }
@@ -13461,12 +13462,62 @@
             profiles: profiles,
             fallback: {
                 day: has(fb.day) ? fb.day : firstOf(false),
-                night: has(fb.night) ? fb.night : firstOf(true)
+                night: has(fb.night) ? fb.night : firstOf(true),
+                stepDb: cleanStepDb(fb.stepDb)
             },
             devices: devices
         };
 
         return settings.sound;
+    }
+
+    // The size of one of the phone's volume steps in dB set by hand for a
+    // speaker, for the app's more volume steps, 0 for none
+    function cleanStepDb(v) {
+
+        const n = Number(v);
+
+        return isFinite(n) && n > 0 ? Math.round(Math.min(30, Math.max(0.5, n)) * 2) / 2 : 0;
+    }
+
+    // The step sizes set by hand, to the app, which evens out the volume
+    // between the phone's steps by the one of the speaker in use. A
+    // speaker without its own takes this device's
+    function pushStepSizes() {
+
+        if (!isApkHost() || !window.MurekaHost || typeof window.MurekaHost.volumeStepSizes !== "function") {
+            return;
+        }
+
+        const s = sound();
+        const devices = {};
+
+        for (const a of Object.keys(s.devices)) {
+
+            if (s.devices[a].stepDb > 0) {
+                devices[a] = s.devices[a].stepDb;
+            }
+        }
+
+        try {
+            window.MurekaHost.volumeStepSizes(JSON.stringify({ fallback: s.fallback.stepDb || 0, devices: devices }));
+        } catch (e) {
+            dbgLog("Sound", "volume step sizes not taken: " + errText(e));
+        }
+    }
+
+    // A step's size in dB by the phone's own curve, for a Bluetooth
+    // speaker or this device, 4 when the phone tells none
+    function phoneStepDb(bluetooth) {
+
+        try {
+
+            const n = Number(window.MurekaHost && window.MurekaHost.volumeCurveStep ? window.MurekaHost.volumeCurveStep(bluetooth ? "1" : "0") : -1);
+
+            return isFinite(n) && n > 0 ? n : 4;
+        } catch (e) {
+            return 4;
+        }
     }
 
     // What night mode does when a speaker connects while it is on
@@ -36858,10 +36909,13 @@
 
         window.__murekaHostCommand = hostCommand;
 
-        // More volume steps already on from before
+        // More volume steps already on from before, and the step sizes of
+        // the speakers set here
         if (window.MurekaHost && typeof window.MurekaHost.fineVolumeGain === "function") {
             setFineGain(Number(window.MurekaHost.fineVolumeGain()));
         }
+
+        pushStepSizes();
 
         // The app's own screen came to the front
         window.__murekaAppShown = function () {
@@ -48403,6 +48457,12 @@
             soundBox.appendChild(soundHeading("Speakers"));
             soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode. Night mode as it connects says whether night mode stays on, is asked about or goes off when that speaker connects while it is on."));
 
+            const stepsOffered = isApkHost() && !!(window.MurekaHost && window.MurekaHost.volumeStepSizes);
+
+            if (stepsOffered) {
+                soundBox.appendChild(makeHint("Volume step size is for More steps in the web view's volume popup. A Bluetooth speaker turns its sound down by its own curve, not always by what the phone says. If the sound jumps up just past one of the phone's steps, make it bigger, if it drops, smaller."));
+            }
+
             const dayChoices = function (phone) {
 
                 const out = phone ? [] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
@@ -48449,6 +48509,64 @@
                         soundChanged();
                     })));
                 }
+
+                if (stepsOffered) {
+                    stepRow(get, set, phone);
+                }
+            };
+
+            // The size of one of the phone's volume steps for the speaker:
+            // set by hand, else this device's, else what the phone says
+            const stepRow = function (get, set, phone) {
+
+                const own = function () {
+                    return Number(get("stepDb")) || 0;
+                };
+                const shown = function () {
+
+                    if (own() > 0) {
+                        return own();
+                    }
+
+                    if (!phone && sound().fallback.stepDb > 0) {
+                        return sound().fallback.stepDb;
+                    }
+
+                    return phoneStepDb(!phone);
+                };
+                const said = makeHint("");
+                const back = makeButton(phone ? "As the phone says" : "Same as this device", "#333", "#fff", function () {
+
+                    set("stepDb", 0);
+                    saveSettings();
+                    pushStepSizes();
+                    paint();
+                });
+                const stepper = makeStepperRow("Volume step size, dB", shown, function (v) {
+
+                    set("stepDb", cleanStepDb(v));
+                    pushStepSizes();
+                    paint();
+                }, 0.5, 30, 0.5);
+                const field = stepper.querySelector("input");
+                const paint = function () {
+
+                    said.textContent = own() > 0 ? "Set by hand."
+                        : (!phone && sound().fallback.stepDb > 0 ? "Same as this device." : "As the phone says.");
+                    back.style.display = own() > 0 ? "" : "none";
+
+                    if (field && document.activeElement !== field) {
+                        field.value = String(shown());
+                    }
+                };
+
+                soundBox.appendChild(stepper);
+                back.style.alignSelf = "flex-start";
+                back.style.padding = "6px 14px";
+                paint();
+                settingsRefreshers.push(paint);
+                soundBox.appendChild(said);
+                soundBox.appendChild(back);
             };
 
             speaker("This device and others not set up", function (k) {
@@ -48469,7 +48587,7 @@
                     const all = sound().devices;
 
                     if (!all[d.address]) {
-                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep" };
+                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep", stepDb: 0 };
                     }
 
                     all[d.address][k] = v;
@@ -80416,6 +80534,13 @@
             fine.appendChild(box);
             fine.appendChild(text);
             bar.appendChild(fine);
+
+            // Where to even out a speaker that jumps past the phone's steps
+            const fineHint = document.createElement("div");
+
+            fineHint.className = "ceLabel volFineHint";
+            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings, Sound profiles, Speakers";
+            bar.appendChild(fineHint);
         }
 
         return bar;
@@ -80496,6 +80621,12 @@
 
             if (fineBox && document.activeElement !== fineBox) {
                 fineBox.checked = volFineOn();
+            }
+
+            const fineHint = bar.querySelector(".volFineHint");
+
+            if (fineHint) {
+                fineHint.style.display = volFineOn() ? "" : "none";
             }
 
             if (force || document.activeElement !== slider || volMoves[t.key] === undefined

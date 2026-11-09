@@ -535,7 +535,11 @@ In development.
   night profile's dB in percent, the night profile's own gain applies on
   top as before. Kept over a restart, and the phone's own buttons go on
   from their step. Each change is in the debug log under Volume, with
-  the step, its dB and the player's share.
+  the step, its dB and the player's share. A Bluetooth speaker with
+  absolute volume turns its sound down by its own curve, which can show
+  as a jump just past each of the phone's steps, so each speaker in
+  Sound profiles, Speakers has a volume step size in dB, as the phone
+  says until set by hand, and the volume popup points there.
 - **The web view's settings in the bookmarklet and the add-on.** The
   Web view page in Settings showed only in the Android app, so the web
   view shown in the page kept its defaults. It shows now wherever the

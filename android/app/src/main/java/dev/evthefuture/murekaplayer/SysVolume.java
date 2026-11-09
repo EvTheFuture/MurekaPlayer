@@ -31,6 +31,14 @@ import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
 
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.Map;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
 // The media volume of the phone, the one the volume buttons move. Over
 // Bluetooth with absolute volume this is the audio system's own level, so the
 // web view can show and move it like any other control. Android tells us
@@ -63,6 +71,18 @@ final class SysVolume {
     private static float finePct = -1;
     private static int fineStep = -1;
     private static float fineGain = 1;
+
+    // The size of each step in dB set by hand in the player's sound
+    // profiles for each Bluetooth speaker by its address, and for this
+    // phone and the speakers not set up, as the phone's own curve can be
+    // far from what a speaker with absolute volume does with it. 0 or
+    // less goes by the curve. The one for the output in use, and the
+    // output it was looked up for
+    private static final Map<String, Float> HAND_BY_ADDRESS = new HashMap<>();
+    private static float handFallback = 0;
+    private static float handDb = -1;
+    private static String outKey = null;
+    private static final float HAND_MAX_DB = 30;
 
     private static final Runnable CHECK = new Runnable() {
 
@@ -104,6 +124,7 @@ final class SysVolume {
 
         fineOn = prefs.getBoolean("on", false);
         finePct = prefs.getFloat("pct", -1);
+        readStepSizes(prefs.getString("step_sizes", "{}"));
 
         if (fineOn && finePct >= 0) {
             applyFine();
@@ -144,6 +165,7 @@ final class SysVolume {
 
             int level = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            boolean moved = refreshOutput();
 
             // Moved by the phone's buttons, or night mode: more steps go on
             // from that step, the player at its whole sound
@@ -155,6 +177,11 @@ final class SysVolume {
                 keepFine();
                 Hub.setFine(finePct);
                 Hub.command("fineGain", 1.0);
+            }
+
+            // Another output, with a step size of its own perhaps
+            if (moved && fineOn && max > 0) {
+                applyFine();
             }
 
             Hub.setVolume(level, max);
@@ -254,6 +281,8 @@ final class SysVolume {
             return;
         }
 
+        refreshOutput();
+
         int type = outputType();
         boolean own = hasCurve(type, max);
         float[] plan = finePlan(finePct, max, type, own);
@@ -269,7 +298,121 @@ final class SysVolume {
         Hub.note("Volume", "more steps: " + Math.round(finePct * 10) / 10f + "%, step " + step + " of " + max
             + (step > 0 ? " at " + Math.round(stepDb(step, max, type, own) * 10) / 10f + " dB" : "")
             + ", the player at " + Math.round(fineGain * 1000) / 10f + "%"
-            + (own ? ", the output's own curve" : ", Android's usual curve"));
+            + (handDb > 0 ? ", " + handDb + " dB a step set by hand"
+                : (own ? ", the output's own curve" : ", Android's usual curve")));
+    }
+
+    // The step sizes set by hand in the player's sound profiles, as JSON:
+    // the fallback and a dB for each speaker's address. Kept, and the
+    // level in use evened out by them at once
+    static void setStepSizes(String json) {
+
+        if (audio == null) {
+            return;
+        }
+
+        try {
+
+            readStepSizes(json);
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("step_sizes", json).apply();
+            outKey = null;
+
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            if (fineOn && max > 0) {
+                applyFine();
+            } else {
+                refreshOutput();
+            }
+        } catch (RuntimeException e) {
+            // No audio service just now, the sizes apply with the next change
+        }
+    }
+
+    private static void readStepSizes(String json) {
+
+        HAND_BY_ADDRESS.clear();
+        handFallback = 0;
+
+        try {
+
+            JSONObject o = new JSONObject(json == null ? "{}" : json);
+            JSONObject devices = o.optJSONObject("devices");
+
+            handFallback = cleanStep(o.optDouble("fallback", 0));
+
+            if (devices != null) {
+
+                Iterator<String> keys = devices.keys();
+
+                while (keys.hasNext()) {
+
+                    String a = keys.next();
+
+                    HAND_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), cleanStep(devices.optDouble(a, 0)));
+                }
+            }
+        } catch (JSONException e) {
+            // Nothing readable, the curve for every output
+        }
+    }
+
+    private static float cleanStep(double db) {
+        return Double.isNaN(db) || db <= 0 ? 0 : (float) Math.min(HAND_MAX_DB, db);
+    }
+
+    // The gap in dB between two steps by the phone's own curve, for a
+    // Bluetooth speaker or this phone, near the step in use, -1 when the
+    // curve tells none. Shown in the sound profiles as what the phone says
+    static float curveStepDb(boolean bluetooth) {
+
+        if (audio == null) {
+            return -1;
+        }
+
+        try {
+
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            if (max < 2) {
+                return -1;
+            }
+
+            int type = bluetooth ? AudioDeviceInfo.TYPE_BLUETOOTH_A2DP : AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+            boolean own = hasCurve(type, max);
+            int cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            int high = Math.max(2, Math.min(max, cur));
+            float d = curveDb(high, max, type, own) - curveDb(high - 1, max, type, own);
+
+            return Float.isNaN(d) || Float.isInfinite(d) || d <= 0 ? -1 : Math.round(d * 10) / 10f;
+        } catch (RuntimeException e) {
+            return -1;
+        }
+    }
+
+    // The output in use, and its step size set by hand when it changed.
+    // True when it did
+    private static boolean refreshOutput() {
+
+        String key = outputKey();
+
+        if (key.equals(outKey)) {
+            return false;
+        }
+
+        outKey = key;
+
+        // A speaker set up in the player has its own, the others and this
+        // phone the fallback
+        Float own = key.startsWith("bt:") ? HAND_BY_ADDRESS.get(key.substring(3)) : null;
+
+        handDb = own != null ? own : handFallback;
+
+        if (handDb <= 0) {
+            handDb = -1;
+        }
+
+        return true;
     }
 
     private static void keepFine() {
@@ -391,7 +534,36 @@ final class SysVolume {
     // headphones, else the speaker
     private static int outputType() {
 
-        int found = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+        AudioDeviceInfo d = bestOutput();
+
+        return d == null ? AudioDeviceInfo.TYPE_BUILTIN_SPEAKER : d.getType();
+    }
+
+    // The output, a Bluetooth speaker by its address, else its kind, to
+    // look up its step size
+    private static String outputKey() {
+
+        AudioDeviceInfo d = bestOutput();
+
+        if (d == null) {
+            return "here";
+        }
+
+        int t = d.getType();
+        String address = d.getAddress();
+
+        if ((t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLE_HEADSET
+            || t == AudioDeviceInfo.TYPE_BLE_SPEAKER) && address != null && !address.isEmpty()) {
+            return "bt:" + address.toUpperCase(Locale.ROOT);
+        }
+
+        return "here:" + t;
+    }
+
+    // The output the music most likely plays on, none for the speaker
+    private static AudioDeviceInfo bestOutput() {
+
+        AudioDeviceInfo found = null;
         int rank = 0;
 
         for (AudioDeviceInfo d : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
@@ -410,7 +582,7 @@ final class SysVolume {
             if (r > rank) {
 
                 rank = r;
-                found = t;
+                found = d;
             }
         }
 
@@ -432,9 +604,20 @@ final class SysVolume {
         }
     }
 
+    // The level of a step in dB: even steps of the size set by hand, else
+    // the curve
+    private static float stepDb(int index, int max, int type, boolean own) {
+
+        if (handDb > 0) {
+            return -(max - index) * handDb;
+        }
+
+        return curveDb(index, max, type, own);
+    }
+
     // The level of a step in dB, from the output's own curve or Android's
     // usual media curve
-    private static float stepDb(int index, int max, int type, boolean own) {
+    private static float curveDb(int index, int max, int type, boolean own) {
 
         if (own) {
 
