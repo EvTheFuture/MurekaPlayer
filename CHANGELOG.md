@@ -487,19 +487,21 @@ In development.
 - **Create songs on Mureka from the player.** Create songs, in the
   Library menu, as a button for the bar and in the web view's song
   lists, opens a page with what Mureka's own create page has: a song
-  with lyrics or an instrumental, the title, the lyrics and the style
-  with their counts, a male or female voice or one of Mureka's
-  characters, a remix of a song uploaded to Mureka before or of a song
-  file uploaded from here, the length (automatic or two to five minutes,
-  on a slider with a ten second step either way) and the wildness in
-  percent. Title, lyrics and style each have a Clear, and Reset starts
-  the whole form over, both with Undo. Mureka's helpers write lyrics and
-  a title from a theme, write the lyrics better, and write the style out
-  (Match my vibe, and Surprise me, which needs nothing written first),
-  the text filling in as it comes, then Mureka updated the lyrics or the
-  style, with Undo. While Mureka works the page dims under a large
-  turning ring, blurred behind, as in the trimmer. My styles lists the
-  styles saved on Mureka, Save style saves the style written. Lyrics
+  with lyrics or an instrumental, the model (V9.5, V9, V8, O2, V7.6 or
+  V7.5), the title, the lyrics and the style with their counts, a male
+  or female voice or one of Mureka's characters, a remix of a song
+  uploaded to Mureka before or of a song file uploaded from here, the
+  length (automatic or two to five minutes, on a slider with a ten
+  second step either way) and the wildness in percent. Title, lyrics and
+  style each have a Clear, and Reset starts the whole form over, both
+  with Undo. Mureka's helpers write lyrics and a title from a theme,
+  write the lyrics better, and write the style out (Match my vibe, and
+  Surprise me, which needs nothing written first), the text filling in
+  as it comes, then Mureka updated the lyrics or the style, with Undo.
+  While Mureka works the page dims under a large turning ring, blurred
+  behind, as in the trimmer, with Stop to give up when Mureka is slow or
+  does not answer, the heading and Close still in reach. My styles lists
+  the styles saved on Mureka, Save style saves the style written. Lyrics
   Mureka would rather write better first are asked about before the
   songs are made. For a remix Mureka's suggested style fills an empty
   style, else it can be taken with a button. Once they are ready, the
@@ -515,10 +517,18 @@ In development.
   in red, so they stand apart from the lists. The form is kept between
   visits and shared with the web view, where the same form opens from
   its own Create button, a song file sent through the phone up to 16 MB.
-  The two new songs show at the top of the list while they are made.
+  The two new songs show at the top of the list while they are made. Use
+  in Create, in an own song's menu on the phone and in the web view,
+  reads the song from Mureka and puts its title, lyrics with their
+  section tags, style, model and voice in the form, with Undo.
 - **Play when ready can be changed.** Tapping a song still being made
   that was asked to play when ready offers the other way, at once or
   after the playing song, or not to play it, for a tap that went wrong.
+- **The web view's settings in the bookmarklet and the add-on.** The
+  Web view page in Settings showed only in the Android app, so the web
+  view shown in the page kept its defaults. It shows now wherever the
+  web view does, without the phone's own heat, battery, hotspot and
+  WireGuard badges and volume steps.
 - **Similar songs: Add greyed out until a song is ticked.** In the web
   view the button that adds the ticked songs to the set looks inactive
   while none is ticked.

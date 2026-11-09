@@ -1695,6 +1695,11 @@
         position: relative;
     }
 
+    #crPop #crTop {
+        position: relative;
+        z-index: 3;
+    }
+
     #crWait {
         position: absolute;
         inset: -1px;
@@ -6379,7 +6384,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
-        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span></div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><button class="chip fail" id="crStop" type="button">Stop</button></div>
     </div>
 </div>
 <div id="songMenu">
@@ -25409,6 +25414,12 @@
         ui.kind.classList.add("crWide");
         form.appendChild(ui.kind);
 
+        // The model, which a remix with lyrics goes without. Filled in from
+        // the phone's list once it comes
+        ui.modelBox = crCard(form);
+        ui.modelSlot = document.createElement("div");
+        ui.modelBox.appendChild(crLine("Model", [ui.modelSlot]));
+
         // The title and the lyrics, with Mureka writing them
         const words = crCard(form);
 
@@ -25593,6 +25604,7 @@
         foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
         form.appendChild(foot);
         crUi.acts.push($("crMake"));
+        crUi.acts.push($("crReset"));
     }
 
     function crLengthText(ms) {
@@ -25696,6 +25708,17 @@
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
+            if (Array.isArray(c.models) && !ui.model) {
+
+                ui.model = crSegments(c.models, "model");
+                ui.modelSlot.replaceWith(ui.model);
+            }
+
+            if (ui.model) {
+                ui.model.paint(fresh.model);
+            }
+
+            ui.modelBox.style.display = song && fresh.remix ? "none" : "flex";
             ui.playMode.paint(fresh.playMode || "");
             ui.setOn.classList.toggle("on", fresh.setOn === true);
             ui.setOn.setAttribute("aria-pressed", fresh.setOn === true ? "true" : "false");
@@ -25758,7 +25781,8 @@
     // A helper's or a list's answer: a reason shown when it did not work
     function crAnswered(r) {
 
-        if (r && r.ok === false && r.why) {
+        // Stopped by hand, the form's own line says so
+        if (r && r.ok === false && r.why && r.why.indexOf("Stopped") !== 0) {
             toast(r.why, "bad");
         }
 
@@ -26052,6 +26076,9 @@
     $("browseCreate").addEventListener("click", openCreatePop);
     $("miniCreate").addEventListener("click", openCreatePop);
     $("crClose").addEventListener("click", closeCreatePop);
+    $("crStop").addEventListener("click", function () {
+        crAsk({ op: "stop" });
+    });
     $("crReset").addEventListener("click", function () {
 
         askConfirm("Start over? The title, lyrics, style and every choice go back to how they start.", "Start over", true, function () {
@@ -26684,6 +26711,16 @@
 
                     close();
                     openTrimmer(m);
+                }, "accent"));
+            }
+
+            // A new take on it: its lyrics, style and the rest in Create
+            if (m.mine) {
+
+                box.appendChild(menuItem("create", "Use in Create", function () {
+
+                    close();
+                    act("createFrom").then(openCreatePop);
                 }, "accent"));
             }
 

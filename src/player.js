@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.58";
+    const VERSION = "2.0.1.60";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -36129,6 +36129,8 @@
             refreshOne(song);
         } else if (act === "info") {
             openInfo(song);
+        } else if (act === "createFrom") {
+            createFromSong(song);
         } else if (act === "instrumental") {
 
             if (song.generation_method !== 7) {
@@ -46799,6 +46801,344 @@
         backupPage.appendChild(dataChoiceEl);
         backupPage.appendChild(dataMsgEl);
 
+        // How the web view looks, for the app's web view and the one shown
+        // in the page alike
+        if (isApkHost() || inPageOffered()) {
+
+            // How the web view looks. Shown on the web view too, unlike the
+            // network rows above
+            const webLabel = document.createElement("div");
+            webLabel.textContent = "Web view display";
+            webLabel.style.cssText = "color:#bbb";
+
+            const webUpNextRow = makeBoolRow("Show up next",
+                function () { return settings.webUpNext; },
+                function (v) { settings.webUpNext = v; publishHostSoon(); });
+
+            const webWaveRow = makeBoolRow("Waveform seek bar",
+                function () { return settings.webWave; },
+                function (v) { settings.webWave = v; publishHostSoon(); });
+
+            // The web view's own transport bar, names and lyrics
+            const webNamesRow = makeBoolRow("Names under the buttons",
+                function () { return settings.webNames; },
+                function (v) { settings.webNames = v; publishHostSoon(); });
+
+            // How warm the phone is, as a badge on the web view
+            const webHeatRow = makeBoolRow("Heat badge",
+                function () { return settings.webHeatBadge !== false; },
+                function (v) { settings.webHeatBadge = v; publishHostSoon(); });
+
+            // The battery's charge, as a badge on the web view
+            const webBatteryRow = makeBoolRow("Battery badge",
+                function () { return settings.webBatteryBadge !== false; },
+                function (v) { settings.webBatteryBadge = v; publishHostSoon(); });
+
+            // Whether the phone's hotspot is on, as a badge on the web view
+            // The battery temperatures where the heat badge turns warm, hot
+            // and very hot
+            const heatWarmRow = makeStepperRow("Warm from, \u00B0C",
+                function () { return settings.heatWarm; },
+                function (v) { settings.heatWarm = v; publishHostSoon(); }, 20, 70, 1);
+
+            const heatHotRow = makeStepperRow("Hot from, \u00B0C",
+                function () { return settings.heatHot; },
+                function (v) { settings.heatHot = v; publishHostSoon(); }, 20, 70, 1);
+
+            const heatVeryHotRow = makeStepperRow("Very hot from, \u00B0C",
+                function () { return settings.heatVeryHot; },
+                function (v) { settings.heatVeryHot = v; publishHostSoon(); }, 20, 70, 1);
+
+            const webHotspotRow = makeBoolRow("Hotspot badge",
+                function () { return settings.webHotspotBadge === true; },
+                function (v) { settings.webHotspotBadge = v; publishHostSoon(); });
+
+            const webWgRow = makeBoolRow("WireGuard badge",
+                function () { return settings.webWgBadge === true; },
+                function (v) { settings.webWgBadge = v; publishHostSoon(); });
+
+            const webWhoRow = makeBoolRow("Account name",
+                function () { return settings.webWhoName !== false; },
+                function (v) { settings.webWhoName = v; publishHostSoon(); });
+
+            const webControlRow = buildControlEditor("webControlOrder");
+
+            const webLyricRow = makeDropRow("Lyrics", [
+                { label: "Off", value: "off" },
+                { label: "Beside the cover", value: "info" },
+                { label: "On the cover", value: "cover" }
+            ], function () {
+                return settings.webLyrics || "info";
+            }, function (v) {
+
+                settings.webLyrics = v;
+                publishHostSoon();
+            });
+
+            // How the web view writes the volume, as a percentage or as the
+            // step Android counts
+            const webVolumeRow = makeDropRow("Volume shown as", [
+                { label: "Percent", value: "percent" },
+                { label: "Steps", value: "steps" }
+            ], function () {
+                return settings.webVolumeUnit || "percent";
+            }, function (v) {
+
+                settings.webVolumeUnit = v;
+                publishHostSoon();
+            });
+
+            // The web view's lyric roll, laid out like the mobile player's. Side
+            // lines and spacing start out as the mobile player has them
+            const webLyricSizeRow = makeStepperRow("Lyric size",
+                function () { return settings.webLyricSize; },
+                function (v) { settings.webLyricSize = v; publishHostSoon(); }, 10, 60, 1);
+
+            const webLyricSideRow = makeStepperRow("Side line percent",
+                function () { return Math.round((settings.webLyricSideMul || settings.lyricSideMul) * 100); },
+                function (v) { settings.webLyricSideMul = v / 100; publishHostSoon(); }, 50, 100, 5);
+
+            const webLyricSpaceRow = makeStepperRow("Line spacing percent",
+                function () { return Math.round((settings.webLyricLineMul || settings.lyricLineMul) * 100); },
+                function (v) { settings.webLyricLineMul = v / 100; publishHostSoon(); }, 100, 200, 5);
+
+            const webLyricSideShiftRow = makeStepperRow("Side line offset",
+                function () { return hostLyricLayout().sideShift; },
+                function (v) { settings.webLyricSideShift = v; publishHostSoon(); }, -40, 40, 1);
+
+            // Up or down from where the lyrics sit, beside the cover and on it
+            const webLyricShiftRow = makeStepperRow("Lyric position",
+                function () { return settings.webLyricShift || 0; },
+                function (v) { settings.webLyricShift = v; publishHostSoon(); }, -80, 80, 2);
+
+            // The way back and the word on what the page holds are its head
+            const webHead = [makeBackRow("Web view"),
+                makeHint("How the web view looks in a desktop or tablet browser, apart from the mobile player.")];
+
+            for (const el of webHead) {
+
+                el.dataset.pageHead = "1";
+                webPage.appendChild(el);
+            }
+
+            // The password first, the web view shows its own copy of it here.
+            // Only the app's web view has one
+            if (window.MurekaHost && typeof window.MurekaHost.webLoginOn === "function") {
+                buildWebLoginRows(webPage);
+            }
+
+
+            // The web view's own choice of waveform
+            const webWaveSourceRow = makeDropRow("Waveform from", [
+                { label: "Mureka's", value: "mureka" },
+                { label: "From the song", value: "song" }
+            ], function () { return settings.webWaveSource || "mureka"; }, function (v) {
+
+                settings.webWaveSource = v;
+                publishHostSoon();
+            });
+
+
+            const webWaveColorRow = makeColorRow("Color when played",
+                function () { return settings.webWaveColor; },
+                function () { return settings.webWaveAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveColor = color;
+                    settings.webWaveAlpha = alpha;
+                    publishHostSoon();
+                });
+
+            const webWaveRestColorRow = makeColorRow("Color still to play",
+                function () { return settings.webWaveRestColor; },
+                function () { return settings.webWaveRestAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveRestColor = color;
+                    settings.webWaveRestAlpha = alpha;
+                    publishHostSoon();
+                });
+
+            const webPlayHeadColorRow = makeColorRow("Play head color",
+                function () { return settings.webPlayHeadColor; },
+                function () { return settings.webPlayHeadAlpha; },
+                function (color, alpha) {
+
+                    settings.webPlayHeadColor = color;
+                    settings.webPlayHeadAlpha = alpha;
+                    publishHostSoon();
+                });
+
+
+            const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
+                function () { return settings.webWaveZoomKeep === true; },
+                function (v) {
+
+                    settings.webWaveZoomKeep = v;
+                    publishHostSoon();
+                });
+
+
+            const webPlayHeadModeRow = makeDropRow("Play head zoomed in", PLAY_HEAD_MODE_CHOICES,
+                function () { return playHeadMode(settings.webWavePlayHeadMode); },
+                function (v) {
+
+                    settings.webWavePlayHeadMode = v;
+                    publishHostSoon();
+                });
+
+            const webWaveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
+                function () { return progressLook(settings.webWaveProgressLook); },
+                function (v) {
+
+                    settings.webWaveProgressLook = v;
+                    publishHostSoon();
+                });
+
+            const webWaveProgressColorRow = makeColorRow("Progress color up to the play head",
+                function () { return settings.webWaveZoomProgressColor; },
+                function () { return settings.webWaveZoomProgressAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveZoomProgressColor = color;
+                    settings.webWaveZoomProgressAlpha = alpha;
+                    publishHostSoon();
+                });
+
+            const webWaveProgressAheadRow = makeColorRow("Progress color past the play head",
+                function () { return settings.webWaveZoomProgressAheadColor; },
+                function () { return settings.webWaveZoomProgressAheadAlpha; },
+                function (color, alpha) {
+
+                    settings.webWaveZoomProgressAheadColor = color;
+                    settings.webWaveZoomProgressAheadAlpha = alpha;
+                    publishHostSoon();
+                });
+
+
+            const webOnlineBadgeRow = makeDropRow("Online badge", [
+                { label: "Fade away", value: "fade" },
+                { label: "Always", value: "always" }
+            ], function () { return settings.webOnlineBadge || "fade"; }, function (v) {
+
+                settings.webOnlineBadge = v;
+                publishHostSoon();
+            });
+
+            const heatTextRow = makeDropRow("Heat badge shows", [
+                { label: "Cool", value: "word" },
+                { label: "Cool 37 \u00B0C", value: "both" },
+                { label: "37 \u00B0C", value: "temp" }
+            ], function () { return settings.heatText || "word"; }, function (v) {
+
+                settings.heatText = v;
+                publishHostSoon();
+            });
+
+            const batteryTextRow = makeDropRow("Battery badge shows", [
+                { label: "Icon", value: "icon" },
+                { label: "Icon and percent", value: "percent" }
+            ], function () { return settings.batteryText === "percent" ? "percent" : "icon"; }, function (v) {
+
+                settings.batteryText = v;
+                publishHostSoon();
+            });
+
+            webPage.appendChild(makeLabel("Main page"));
+            webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
+
+            // Steps are the phone's, the web view in the page has percent
+            if (isApkHost()) {
+                webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
+            }
+
+            // The waveform: whether it shows and where it comes from, how it
+            // zooms, its colors, then how the song's progress shows on it and
+            // in which colors
+            const webWaveReset = makeWaveColorReset("web", [webWaveColorRow, webWaveRestColorRow, webPlayHeadColorRow,
+                webWaveProgressRow, webWaveProgressColorRow, webWaveProgressAheadRow], publishHostSoon);
+
+            webPage.appendChild(makeLabel("Waveform"));
+            webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
+            webPage.appendChild(withHint(webWaveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
+            webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
+            webPage.appendChild(withHint(webPlayHeadModeRow, PLAY_HEAD_MODE_HINT + " Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
+            webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
+            webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
+            webPage.appendChild(withHint(webWaveProgressRow, PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
+            webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
+            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT + " Not used with the play head moving along."));
+            webPage.appendChild(webWaveReset);
+
+            // Where the small song list opens on a wide screen
+            const webListSideRow = makeDropRow("Song list beside the song", [
+                { value: "auto", label: "When there is room" },
+                { value: "always", label: "Always" },
+                { value: "never", label: "Never" }
+            ], function () {
+                return settings.webListSide === "always" || settings.webListSide === "never" ? settings.webListSide : "auto";
+            }, function (v) {
+
+                settings.webListSide = v;
+                publishHostSoon();
+            });
+
+            webPage.appendChild(withHint(webListSideRow, "With room beside the cover, the small song list takes the whole column beside it, and the title, stars and lyrics move over the cover, so they stay in reach. Never keeps the list under the title. Each browser can have this set for itself."));
+
+            // The synced lyrics and how they are laid out
+            webPage.appendChild(makeLabel("Lyrics"));
+            webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
+            webPage.appendChild(webLyricSizeRow);
+            webPage.appendChild(webLyricSideRow);
+            webPage.appendChild(webLyricSpaceRow);
+            webPage.appendChild(webLyricSideShiftRow);
+            webPage.appendChild(webLyricShiftRow);
+            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
+
+            webPage.appendChild(makeLabel("Control buttons"));
+            webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
+            webPage.appendChild(webControlRow);
+            webPage.appendChild(makeHint("Button groups, made under Button groups on the main page, are put in the bar like any button."));
+
+            // The badges along the top
+            webPage.appendChild(makeLabel("Badges"));
+            webPage.appendChild(makeHint("Hold a badge in the web view and drag it to another place, with a finger or the mouse, as the buttons."));
+            webPage.appendChild(withHint(webOnlineBadgeRow, "A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
+            webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
+
+            // The phone's own heat, battery, hotspot and tunnel, only the
+            // app's web view knows them
+            if (isApkHost()) {
+                webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
+                webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
+                webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
+                webPage.appendChild(withHint(heatTextRow, "The word, the word and the battery's temperature, or the temperature alone. The color follows the limits below either way."));
+                webPage.appendChild(heatWarmRow);
+                webPage.appendChild(heatHotRow);
+                webPage.appendChild(heatVeryHotRow);
+                webPage.appendChild(makeHint("Below the warm temperature the heat badge says cool. Android's own heat level counts from moderate up and can make the badge say more."));
+                webPage.appendChild(withHint(webBatteryRow, "A battery after the heat badge, filled as far as it is charged: green from half, yellow from a fifth, red below. A lightning bolt while it charges, a plug while plugged in but not charging, such as when full. Pointing at it or a tap tells the percent."));
+                webPage.appendChild(withHint(batteryTextRow, "The icon alone, or the percent beside it."));
+            }
+
+            // The web view's own screen off, apart from the mobile player's
+            webPage.appendChild(makeLabel("Screen off"));
+
+            buildScreenOff({
+                on: "webBlackout",
+                after: "webAutoBlack",
+                text: "webMarkText",
+                color: "webMarkColor",
+                size: "webMarkSize",
+                drift: "webMarkDrift"
+            }, publishHostSoon).forEach(function (el) {
+                webPage.appendChild(el);
+            });
+
+            webPageBtn = makePageButton("Web view", "web");
+        }
+
         // Which networks may open the web view, only in the Android app. Kept
         // out of the web view's copy of the settings, so the web view cannot lock
         // itself out
@@ -47234,326 +47574,6 @@
                 el.dataset.hostSkip = "1";
             });
 
-            // How the web view looks. Shown on the web view too, unlike the
-            // network rows above
-            const webLabel = document.createElement("div");
-            webLabel.textContent = "Web view display";
-            webLabel.style.cssText = "color:#bbb";
-
-            const webUpNextRow = makeBoolRow("Show up next",
-                function () { return settings.webUpNext; },
-                function (v) { settings.webUpNext = v; publishHostSoon(); });
-
-            const webWaveRow = makeBoolRow("Waveform seek bar",
-                function () { return settings.webWave; },
-                function (v) { settings.webWave = v; publishHostSoon(); });
-
-            // The web view's own transport bar, names and lyrics
-            const webNamesRow = makeBoolRow("Names under the buttons",
-                function () { return settings.webNames; },
-                function (v) { settings.webNames = v; publishHostSoon(); });
-
-            // How warm the phone is, as a badge on the web view
-            const webHeatRow = makeBoolRow("Heat badge",
-                function () { return settings.webHeatBadge !== false; },
-                function (v) { settings.webHeatBadge = v; publishHostSoon(); });
-
-            // The battery's charge, as a badge on the web view
-            const webBatteryRow = makeBoolRow("Battery badge",
-                function () { return settings.webBatteryBadge !== false; },
-                function (v) { settings.webBatteryBadge = v; publishHostSoon(); });
-
-            // Whether the phone's hotspot is on, as a badge on the web view
-            // The battery temperatures where the heat badge turns warm, hot
-            // and very hot
-            const heatWarmRow = makeStepperRow("Warm from, \u00B0C",
-                function () { return settings.heatWarm; },
-                function (v) { settings.heatWarm = v; publishHostSoon(); }, 20, 70, 1);
-
-            const heatHotRow = makeStepperRow("Hot from, \u00B0C",
-                function () { return settings.heatHot; },
-                function (v) { settings.heatHot = v; publishHostSoon(); }, 20, 70, 1);
-
-            const heatVeryHotRow = makeStepperRow("Very hot from, \u00B0C",
-                function () { return settings.heatVeryHot; },
-                function (v) { settings.heatVeryHot = v; publishHostSoon(); }, 20, 70, 1);
-
-            const webHotspotRow = makeBoolRow("Hotspot badge",
-                function () { return settings.webHotspotBadge === true; },
-                function (v) { settings.webHotspotBadge = v; publishHostSoon(); });
-
-            const webWgRow = makeBoolRow("WireGuard badge",
-                function () { return settings.webWgBadge === true; },
-                function (v) { settings.webWgBadge = v; publishHostSoon(); });
-
-            const webWhoRow = makeBoolRow("Account name",
-                function () { return settings.webWhoName !== false; },
-                function (v) { settings.webWhoName = v; publishHostSoon(); });
-
-            const webControlRow = buildControlEditor("webControlOrder");
-
-            const webLyricRow = makeDropRow("Lyrics", [
-                { label: "Off", value: "off" },
-                { label: "Beside the cover", value: "info" },
-                { label: "On the cover", value: "cover" }
-            ], function () {
-                return settings.webLyrics || "info";
-            }, function (v) {
-
-                settings.webLyrics = v;
-                publishHostSoon();
-            });
-
-            // How the web view writes the volume, as a percentage or as the
-            // step Android counts
-            const webVolumeRow = makeDropRow("Volume shown as", [
-                { label: "Percent", value: "percent" },
-                { label: "Steps", value: "steps" }
-            ], function () {
-                return settings.webVolumeUnit || "percent";
-            }, function (v) {
-
-                settings.webVolumeUnit = v;
-                publishHostSoon();
-            });
-
-            // The web view's lyric roll, laid out like the mobile player's. Side
-            // lines and spacing start out as the mobile player has them
-            const webLyricSizeRow = makeStepperRow("Lyric size",
-                function () { return settings.webLyricSize; },
-                function (v) { settings.webLyricSize = v; publishHostSoon(); }, 10, 60, 1);
-
-            const webLyricSideRow = makeStepperRow("Side line percent",
-                function () { return Math.round((settings.webLyricSideMul || settings.lyricSideMul) * 100); },
-                function (v) { settings.webLyricSideMul = v / 100; publishHostSoon(); }, 50, 100, 5);
-
-            const webLyricSpaceRow = makeStepperRow("Line spacing percent",
-                function () { return Math.round((settings.webLyricLineMul || settings.lyricLineMul) * 100); },
-                function (v) { settings.webLyricLineMul = v / 100; publishHostSoon(); }, 100, 200, 5);
-
-            const webLyricSideShiftRow = makeStepperRow("Side line offset",
-                function () { return hostLyricLayout().sideShift; },
-                function (v) { settings.webLyricSideShift = v; publishHostSoon(); }, -40, 40, 1);
-
-            // Up or down from where the lyrics sit, beside the cover and on it
-            const webLyricShiftRow = makeStepperRow("Lyric position",
-                function () { return settings.webLyricShift || 0; },
-                function (v) { settings.webLyricShift = v; publishHostSoon(); }, -80, 80, 2);
-
-            // The way back and the word on what the page holds are its head
-            const webHead = [makeBackRow("Web view"),
-                makeHint("How the web view looks in a desktop or tablet browser, apart from the mobile player.")];
-
-            for (const el of webHead) {
-
-                el.dataset.pageHead = "1";
-                webPage.appendChild(el);
-            }
-
-            // The password first, the web view shows its own copy of it here
-            if (typeof window.MurekaHost.webLoginOn === "function") {
-                buildWebLoginRows(webPage);
-            }
-
-
-            // The web view's own choice of waveform
-            const webWaveSourceRow = makeDropRow("Waveform from", [
-                { label: "Mureka's", value: "mureka" },
-                { label: "From the song", value: "song" }
-            ], function () { return settings.webWaveSource || "mureka"; }, function (v) {
-
-                settings.webWaveSource = v;
-                publishHostSoon();
-            });
-
-
-            const webWaveColorRow = makeColorRow("Color when played",
-                function () { return settings.webWaveColor; },
-                function () { return settings.webWaveAlpha; },
-                function (color, alpha) {
-
-                    settings.webWaveColor = color;
-                    settings.webWaveAlpha = alpha;
-                    publishHostSoon();
-                });
-
-            const webWaveRestColorRow = makeColorRow("Color still to play",
-                function () { return settings.webWaveRestColor; },
-                function () { return settings.webWaveRestAlpha; },
-                function (color, alpha) {
-
-                    settings.webWaveRestColor = color;
-                    settings.webWaveRestAlpha = alpha;
-                    publishHostSoon();
-                });
-
-            const webPlayHeadColorRow = makeColorRow("Play head color",
-                function () { return settings.webPlayHeadColor; },
-                function () { return settings.webPlayHeadAlpha; },
-                function (color, alpha) {
-
-                    settings.webPlayHeadColor = color;
-                    settings.webPlayHeadAlpha = alpha;
-                    publishHostSoon();
-                });
-
-
-            const webWaveZoomKeepRow = makeBoolRow("Remember the waveform zoom level",
-                function () { return settings.webWaveZoomKeep === true; },
-                function (v) {
-
-                    settings.webWaveZoomKeep = v;
-                    publishHostSoon();
-                });
-
-
-            const webPlayHeadModeRow = makeDropRow("Play head zoomed in", PLAY_HEAD_MODE_CHOICES,
-                function () { return playHeadMode(settings.webWavePlayHeadMode); },
-                function (v) {
-
-                    settings.webWavePlayHeadMode = v;
-                    publishHostSoon();
-                });
-
-            const webWaveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
-                function () { return progressLook(settings.webWaveProgressLook); },
-                function (v) {
-
-                    settings.webWaveProgressLook = v;
-                    publishHostSoon();
-                });
-
-            const webWaveProgressColorRow = makeColorRow("Progress color up to the play head",
-                function () { return settings.webWaveZoomProgressColor; },
-                function () { return settings.webWaveZoomProgressAlpha; },
-                function (color, alpha) {
-
-                    settings.webWaveZoomProgressColor = color;
-                    settings.webWaveZoomProgressAlpha = alpha;
-                    publishHostSoon();
-                });
-
-            const webWaveProgressAheadRow = makeColorRow("Progress color past the play head",
-                function () { return settings.webWaveZoomProgressAheadColor; },
-                function () { return settings.webWaveZoomProgressAheadAlpha; },
-                function (color, alpha) {
-
-                    settings.webWaveZoomProgressAheadColor = color;
-                    settings.webWaveZoomProgressAheadAlpha = alpha;
-                    publishHostSoon();
-                });
-
-
-            const webOnlineBadgeRow = makeDropRow("Online badge", [
-                { label: "Fade away", value: "fade" },
-                { label: "Always", value: "always" }
-            ], function () { return settings.webOnlineBadge || "fade"; }, function (v) {
-
-                settings.webOnlineBadge = v;
-                publishHostSoon();
-            });
-
-            const heatTextRow = makeDropRow("Heat badge shows", [
-                { label: "Cool", value: "word" },
-                { label: "Cool 37 \u00B0C", value: "both" },
-                { label: "37 \u00B0C", value: "temp" }
-            ], function () { return settings.heatText || "word"; }, function (v) {
-
-                settings.heatText = v;
-                publishHostSoon();
-            });
-
-            const batteryTextRow = makeDropRow("Battery badge shows", [
-                { label: "Icon", value: "icon" },
-                { label: "Icon and percent", value: "percent" }
-            ], function () { return settings.batteryText === "percent" ? "percent" : "icon"; }, function (v) {
-
-                settings.batteryText = v;
-                publishHostSoon();
-            });
-
-            webPage.appendChild(makeLabel("Main page"));
-            webPage.appendChild(withHint(webUpNextRow, "The title of the next song under the stars."));
-            webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
-
-            // The waveform: whether it shows and where it comes from, how it
-            // zooms, its colors, then how the song's progress shows on it and
-            // in which colors
-            const webWaveReset = makeWaveColorReset("web", [webWaveColorRow, webWaveRestColorRow, webPlayHeadColorRow,
-                webWaveProgressRow, webWaveProgressColorRow, webWaveProgressAheadRow], publishHostSoon);
-
-            webPage.appendChild(makeLabel("Waveform"));
-            webPage.appendChild(withHint(webWaveRow, "The seek bar shows the song's waveform instead of a plain line."));
-            webPage.appendChild(withHint(webWaveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
-            webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
-            webPage.appendChild(withHint(webPlayHeadModeRow, PLAY_HEAD_MODE_HINT + " Each browser can have this set for itself."));
-            webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
-            webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
-            webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
-            webPage.appendChild(withHint(webWaveProgressRow, PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
-            webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
-            webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT + " Not used with the play head moving along."));
-            webPage.appendChild(webWaveReset);
-
-            // Where the small song list opens on a wide screen
-            const webListSideRow = makeDropRow("Song list beside the song", [
-                { value: "auto", label: "When there is room" },
-                { value: "always", label: "Always" },
-                { value: "never", label: "Never" }
-            ], function () {
-                return settings.webListSide === "always" || settings.webListSide === "never" ? settings.webListSide : "auto";
-            }, function (v) {
-
-                settings.webListSide = v;
-                publishHostSoon();
-            });
-
-            webPage.appendChild(withHint(webListSideRow, "With room beside the cover, the small song list takes the whole column beside it, and the title, stars and lyrics move over the cover, so they stay in reach. Never keeps the list under the title. Each browser can have this set for itself."));
-
-            // The synced lyrics and how they are laid out
-            webPage.appendChild(makeLabel("Lyrics"));
-            webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
-            webPage.appendChild(webLyricSizeRow);
-            webPage.appendChild(webLyricSideRow);
-            webPage.appendChild(webLyricSpaceRow);
-            webPage.appendChild(webLyricSideShiftRow);
-            webPage.appendChild(webLyricShiftRow);
-            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, spacing and side offset work as on the mobile player and start out as it has them."));
-
-            webPage.appendChild(makeLabel("Control buttons"));
-            webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
-            webPage.appendChild(webControlRow);
-            webPage.appendChild(makeHint("Button groups, made under Button groups on the main page, are put in the bar like any button."));
-
-            // The badges along the top
-            webPage.appendChild(makeLabel("Badges"));
-            webPage.appendChild(makeHint("Hold a badge in the web view and drag it to another place, with a finger or the mouse, as the buttons."));
-            webPage.appendChild(withHint(webOnlineBadgeRow, "A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
-            webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
-            webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
-            webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
-            webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
-            webPage.appendChild(withHint(heatTextRow, "The word, the word and the battery's temperature, or the temperature alone. The color follows the limits below either way."));
-            webPage.appendChild(heatWarmRow);
-            webPage.appendChild(heatHotRow);
-            webPage.appendChild(heatVeryHotRow);
-            webPage.appendChild(makeHint("Below the warm temperature the heat badge says cool. Android's own heat level counts from moderate up and can make the badge say more."));
-            webPage.appendChild(withHint(webBatteryRow, "A battery after the heat badge, filled as far as it is charged: green from half, yellow from a fifth, red below. A lightning bolt while it charges, a plug while plugged in but not charging, such as when full. Pointing at it or a tap tells the percent."));
-            webPage.appendChild(withHint(batteryTextRow, "The icon alone, or the percent beside it."));
-
-            // The web view's own screen off, apart from the mobile player's
-            webPage.appendChild(makeLabel("Screen off"));
-
-            buildScreenOff({
-                on: "webBlackout",
-                after: "webAutoBlack",
-                text: "webMarkText",
-                color: "webMarkColor",
-                size: "webMarkSize",
-                drift: "webMarkDrift"
-            }, publishHostSoon).forEach(function (el) {
-                webPage.appendChild(el);
-            });
 
             // The covers the web view shows, kept on the phone and served to
             // the browser from there, the next ones fetched ahead
@@ -47724,7 +47744,6 @@
             bluetoothPlayEls.push(withHint(playBtRow, "Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
             bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the phone's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));
 
-            webPageBtn = makePageButton("Web view", "web");
             connPageBtn = makePageButton("Connections", "connections");
 
         }
@@ -57530,6 +57549,17 @@
     const CREATE_STYLE_MAX = 1000;
     const CREATE_THEME_MAX = 500;
     const CREATE_MODEL = "mureka-9.5";
+
+    // Mureka's models, as its create page names them and as it asks for them,
+    // the newest first
+    const CREATE_MODELS = [
+        { label: "V9.5", value: "mureka-9.5" },
+        { label: "V9", value: "mureka-9" },
+        { label: "V8", value: "mureka-8" },
+        { label: "O2", value: "mureka-o2" },
+        { label: "V7.6", value: "mureka-7.6" },
+        { label: "V7.5", value: "mureka-7.5" }
+    ];
     const CREATE_UPLOAD_MAX = 60 * 1024 * 1024;
     const CREATE_REMIX_FIELDS = ["id", "title", "url", "duration_milliseconds", "source_type", "created_at",
         "origin_control_type", "vocal_start_ms", "vocal_end_ms", "is_subscription_privilege", "trim_start_ms", "trim_end_ms"];
@@ -57623,7 +57653,10 @@
             playMode: x.playMode === "now" || x.playMode === "after" ? x.playMode : (x.playReady === true ? "now" : ""),
             setOn: x.setOn === true || (x.setOn === undefined && !!x.setId),
             setId: createText(x.setId, 40),
-            setName: createText(x.setName, 80)
+            setName: createText(x.setName, 80),
+            model: CREATE_MODELS.some(function (m) {
+                return m.value === x.model;
+            }) ? x.model : CREATE_MODEL
         };
     }
 
@@ -57725,6 +57758,13 @@
         return json.data || {};
     }
 
+    // What is being done for the form stops with this, Stop pressed
+    let createStopper = null;
+
+    function createSignal() {
+        return createStopper ? createStopper.signal : undefined;
+    }
+
     // One of Mureka's requests for making songs, a POST with the time first
     async function createPost(path, body, ms) {
 
@@ -57732,7 +57772,8 @@
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(Object.assign({ time: Date.now() }, body))
+            body: JSON.stringify(Object.assign({ time: Date.now() }, body)),
+            signal: createSignal()
         }, ms || 30000);
 
         return createAnswer(path, res);
@@ -57742,7 +57783,8 @@
 
         const res = await timedFetch(path + (path.indexOf("?") >= 0 ? "&" : "?") + "time=" + Date.now(), {
             credentials: "include",
-            cache: "no-store"
+            cache: "no-store",
+            signal: createSignal()
         }, ms || 20000);
 
         return createAnswer(path, res);
@@ -57759,7 +57801,8 @@
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: createSignal()
         }, 30000);
         const type = res.headers.get("Content-Type") || "";
 
@@ -58247,7 +58290,7 @@
                 b.advanced_options = advanced;
             }
 
-            b.model = CREATE_MODEL;
+            b.model = d.model;
 
             return b;
         }
@@ -58265,7 +58308,7 @@
             b.mode = 0;
             b.parent_song_id = null;
             b.template_id = null;
-            b.model = CREATE_MODEL;
+            b.model = d.model;
             b.character = { id: Number.isSafeInteger(id) ? id : d.characterId };
 
             return b;
@@ -58289,7 +58332,7 @@
         if (!remix) {
 
             b.advanced_options = advanced;
-            b.model = CREATE_MODEL;
+            b.model = d.model;
         }
 
         return b;
@@ -58617,6 +58660,154 @@
         return b;
     }
 
+    // The lyrics as text from Mureka's timed sections, each section's name
+    // as a tag before its lines, as written on the create page
+    function createLyricsText(lyrics) {
+
+        if (typeof lyrics === "string") {
+            return lyrics.slice(0, CREATE_LYRICS_MAX);
+        }
+
+        if (!Array.isArray(lyrics)) {
+            return "";
+        }
+
+        const parts = [];
+
+        for (const seg of lyrics) {
+
+            if (!seg || typeof seg !== "object") {
+                continue;
+            }
+
+            const lines = [];
+            let name = "";
+
+            for (const k of ["section", "section_type", "section_name", "type", "label", "name", "title", "tag"]) {
+
+                if (typeof seg[k] === "string" && seg[k].trim() && !/^\d+$/.test(seg[k].trim())) {
+
+                    name = seg[k].trim().replace(/^\[|\]$/g, "");
+                    break;
+                }
+            }
+
+            if (name) {
+                lines.push("[" + name.charAt(0).toUpperCase() + name.slice(1) + "]");
+            }
+
+            for (const r of Array.isArray(seg.rows) ? seg.rows : []) {
+
+                if (r && typeof r.text === "string" && r.text.trim()) {
+                    lines.push(r.text.trim());
+                }
+            }
+
+            if (lines.length > 0) {
+                parts.push(lines.join("\n"));
+            }
+        }
+
+        return parts.join("\n\n").slice(0, CREATE_LYRICS_MAX);
+    }
+
+    // The style a song was made with, from whichever field holds it, else
+    // its genres and moods
+    function createStyleOf(d, s, song) {
+
+        for (const x of [s.prompt, d.prompt, s.style_prompt, s.style, s.desc, s.description, d.description, song.description]) {
+
+            const text = x && typeof x === "object" ? x.content : x;
+
+            if (typeof text === "string" && text.trim()) {
+                return text.trim().slice(0, CREATE_STYLE_MAX);
+            }
+        }
+
+        const tags = [].concat(s.genres || song.genres || [], s.moods || song.moods || []).map(String).filter(Boolean);
+
+        return tags.join(", ").slice(0, CREATE_STYLE_MAX);
+    }
+
+    // A song's title, lyrics, style, voice and model put in the form, for a
+    // new take on it. Read from Mureka, the form as it was comes back with
+    // Undo
+    async function createFromSong(song) {
+
+        const before = Object.assign({}, loadCreateDraft());
+
+        if (createBusy) {
+
+            showToast("Create is busy, try again in a moment", false);
+            return false;
+        }
+
+        const data = await createRun("Reading the song from Mureka", function () {
+            return createGet("/api/pgc/song/detail?song_id=" + encodeURIComponent(song.song_id));
+        });
+
+        if (!data) {
+            return false;
+        }
+
+        const s = data.song && typeof data.song === "object" ? data.song : data;
+        const lyricsRaw = data.lyrics || s.lyrics;
+        const first = Array.isArray(lyricsRaw) && lyricsRaw[0] && typeof lyricsRaw[0] === "object" ? lyricsRaw[0] : null;
+
+        dbgLog("Create", "song detail fields: " + Object.keys(data).join(", ").slice(0, 300)
+            + (s !== data ? "; song: " + Object.keys(s).join(", ").slice(0, 400) : "")
+            + (first ? "; a lyric section: " + Object.keys(first).join(", ") : ""));
+
+        const lyrics = createLyricsText(lyricsRaw);
+        const style = createStyleOf(data, s, song);
+        const instrumental = Number(song.generation_method) === 7 || Number(s.generation_method) === 7;
+        const modelName = String(s.model || song.model || "").toLowerCase();
+        const model = CREATE_MODELS.find(function (m) {
+            return m.label.toLowerCase() === modelName || m.value === modelName;
+        });
+        const character = s.character && typeof s.character === "object" ? s.character : (song.character && typeof song.character === "object" ? song.character : null);
+        const gender = String(s.vocal_gender || s.gender || (s.prompt && s.prompt.gender) || "").toLowerCase();
+        const changes = {
+            kind: instrumental ? "instrumental" : "song",
+            title: String(song.title || s.title || "").slice(0, CREATE_TITLE_MAX),
+            lyrics: lyrics,
+            style: style,
+            stylePromptId: "",
+            stylePromptText: "",
+            remix: null,
+            remixName: "",
+            remixStyle: ""
+        };
+
+        if (model) {
+            changes.model = model.value;
+        }
+
+        if (character && (character.id || character.character_id)) {
+
+            changes.voice = "character";
+            changes.characterId = String(character.id || character.character_id);
+            changes.characterName = String(character.name || character.title || "");
+        } else if (gender === "male" || gender === "female") {
+            changes.voice = gender;
+        }
+
+        changeCreateDraft(changes);
+        setCreateNote("From \"" + (song.title || "the song") + "\"" + (style ? "" : ", Mureka gave no style") + (instrumental || lyrics ? "" : ", no lyrics"));
+        showToast("The form has the song's title, lyrics and style", true, function () {
+            changeCreateDraft(before);
+        });
+
+        return true;
+    }
+
+    // From a song's menu: the page opened, the song read into it
+    function createFromSongMenu(song) {
+
+        openCreate();
+        createFromSong(song);
+    }
+
     // ---- The page on the phone ----
 
     function openCreate() {
@@ -58829,6 +59020,18 @@
             changeCreateDraft({ kind: v });
         });
         createEl.appendChild(ui.kindRow);
+
+        // The model, which a remix with lyrics goes without
+        ui.modelBox = document.createElement("div");
+        ui.modelBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.modelBox.appendChild(createLabelRow("Model"));
+        ui.modelRow = trimSegments(CREATE_MODELS, function () {
+            return loadCreateDraft().model;
+        }, function (v) {
+            changeCreateDraft({ model: v });
+        });
+        ui.modelBox.appendChild(ui.modelRow);
+        createEl.appendChild(ui.modelBox);
 
         // The title, Mureka names the song when left empty
         ui.titleLabel = createLabelRow("Title", function () {
@@ -59084,11 +59287,17 @@
 
         waitRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.waitText = document.createElement("span");
+
+        const stopBtn = createRing(makeButton("Stop", "#333", "#fff", stopCreate), "#ff6b6b");
+
+        stopBtn.style.flex = "0 0 auto";
+        stopBtn.style.padding = "8px 28px";
         ui.wait.appendChild(waitRing);
         ui.wait.appendChild(ui.waitText);
+        ui.wait.appendChild(stopBtn);
 
         // Each part keeps its own height, the page scrolls instead
-        for (const box of [createEl, ui.lyricsBox, ui.voiceBox, ui.advBox, ui.setBox]) {
+        for (const box of [createEl, ui.lyricsBox, ui.voiceBox, ui.advBox, ui.setBox, ui.modelBox]) {
 
             for (const child of Array.from(box.children)) {
                 child.style.flexShrink = "0";
@@ -59178,6 +59387,8 @@
         ui.characterRow.style.display = character ? "flex" : "none";
         ui.characterName.textContent = d.characterId ? d.characterName || "Character " + d.characterId : "No character chosen yet";
         ui.advBox.style.display = character || d.remix ? "none" : "flex";
+        ui.modelBox.style.display = song && d.remix ? "none" : "flex";
+        ui.modelRow.paint();
         ui.remixName.textContent = d.remix
             ? "Remixing " + (d.remixName || d.remix.title || "an uploaded song")
                 + (d.remix.trim_end_ms ? ", " + trimTimeText((d.remix.trim_end_ms - (d.remix.trim_start_ms || 0)) / 1000) : "")
@@ -59235,15 +59446,49 @@
         paintCreateStatus();
         publishHostSoon();
 
+        // Stop gives up at once, whatever is still on its way is let go
+        const stopper = typeof AbortController === "function" ? new AbortController() : null;
+        const stopped = new Promise(function (resolve) {
+
+            if (stopper) {
+                stopper.signal.addEventListener("abort", resolve);
+            }
+        });
+        const STOPPED = {};
+
+        createStopper = stopper;
+
         try {
-            return await fn();
+
+            const r = await Promise.race([fn(), stopped.then(function () {
+                return STOPPED;
+            })]);
+
+            if (r === STOPPED) {
+
+                dbgLog("Create", what + ": stopped");
+                createNote = { text: "Stopped. " + (what === "Sending to Mureka"
+                    ? "If Mureka got the request, the songs may still come." : "Nothing was changed."), bad: false, at: Date.now() };
+
+                return null;
+            }
+
+            return r;
         } catch (e) {
+
+            if (stopper && stopper.signal.aborted) {
+                return null;
+            }
 
             dbgLog("Create", what + " failed: " + errText(e));
             createNote = { text: what + " did not work, " + (e && e.message ? e.message : "no connection"), bad: true, at: Date.now() };
 
             return null;
         } finally {
+
+            if (createStopper === stopper) {
+                createStopper = null;
+            }
 
             createBusy = "";
 
@@ -59252,6 +59497,14 @@
             }
 
             publishHostSoon();
+        }
+    }
+
+    // Stop what is being done for the form
+    function stopCreate() {
+
+        if (createStopper) {
+            createStopper.abort();
         }
     }
 
@@ -59293,6 +59546,8 @@
 
                 changeCreateDraft({ lyrics: got.text, title: d.title.trim() ? d.title : got.title });
                 setCreateNote("Mureka wrote the lyrics" + (got.title ? ", \"" + got.title + "\"" : ""));
+            } else if (createDraft.lyrics !== d.lyrics || createDraft.title !== d.title) {
+                changeCreateDraft({ lyrics: d.lyrics, title: d.title });
             }
 
             return !!got;
@@ -59824,7 +60079,8 @@
             note: createNote,
             lengths: createLengths(),
             sets: createSetChoices(),
-            suggest: loadCreateDraft().setOn ? createSuggestSet() : ""
+            suggest: loadCreateDraft().setOn ? createSuggestSet() : "",
+            models: CREATE_MODELS
         };
     }
 
@@ -59859,6 +60115,10 @@
             reply({ ok: true, state: hostCreateState() });
         } else if (op === "state") {
             reply({ ok: true, state: hostCreateState() });
+        } else if (op === "stop") {
+
+            stopCreate();
+            reply({ ok: true });
         } else if (op === "prompts") {
 
             createPrompts().then(function (list) {
@@ -63032,6 +63292,11 @@
     // view's song menu shows, so a row is found by its look and not only by
     // reading. Each is a list of shapes for makeSvgIcon
     const MENU_ICONS = {
+        create: [
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["path", { d: "M12 8v8" }],
+            ["path", { d: "M8 12h8" }]
+        ],
         playlists: [
             ["line", { x1: "8", y1: "6", x2: "21", y2: "6" }],
             ["line", { x1: "8", y1: "12", x2: "21", y2: "12" }],
@@ -63435,6 +63700,11 @@
             addMenuRow("Rename", CTRL_ACCENT, function () {
                 promptRename(song);
             }, "pencil");
+
+            // A new take on it: its lyrics, style and the rest in Create
+            addMenuRow("Use in Create", CTRL_ACCENT, function () {
+                createFromSongMenu(song);
+            }, "create");
 
             // Cut the start or the end off, Mureka makes a new song of it
             if (songUrl(song)) {
@@ -65321,6 +65591,11 @@
     /* While the phone asks Mureka: the form dimmed, a large turning ring */
     #crPop #crBox {
         position: relative;
+    }
+
+    #crPop #crTop {
+        position: relative;
+        z-index: 3;
     }
 
     #crWait {
@@ -70007,7 +70282,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
-        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span></div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><button class="chip fail" id="crStop" type="button">Stop</button></div>
     </div>
 </div>
 <div id="songMenu">
@@ -89037,6 +89312,12 @@
         ui.kind.classList.add("crWide");
         form.appendChild(ui.kind);
 
+        // The model, which a remix with lyrics goes without. Filled in from
+        // the phone's list once it comes
+        ui.modelBox = crCard(form);
+        ui.modelSlot = document.createElement("div");
+        ui.modelBox.appendChild(crLine("Model", [ui.modelSlot]));
+
         // The title and the lyrics, with Mureka writing them
         const words = crCard(form);
 
@@ -89221,6 +89502,7 @@
         foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
         form.appendChild(foot);
         crUi.acts.push($("crMake"));
+        crUi.acts.push($("crReset"));
     }
 
     function crLengthText(ms) {
@@ -89324,6 +89606,17 @@
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
+            if (Array.isArray(c.models) && !ui.model) {
+
+                ui.model = crSegments(c.models, "model");
+                ui.modelSlot.replaceWith(ui.model);
+            }
+
+            if (ui.model) {
+                ui.model.paint(fresh.model);
+            }
+
+            ui.modelBox.style.display = song && fresh.remix ? "none" : "flex";
             ui.playMode.paint(fresh.playMode || "");
             ui.setOn.classList.toggle("on", fresh.setOn === true);
             ui.setOn.setAttribute("aria-pressed", fresh.setOn === true ? "true" : "false");
@@ -89386,7 +89679,8 @@
     // A helper's or a list's answer: a reason shown when it did not work
     function crAnswered(r) {
 
-        if (r && r.ok === false && r.why) {
+        // Stopped by hand, the form's own line says so
+        if (r && r.ok === false && r.why && r.why.indexOf("Stopped") !== 0) {
             toast(r.why, "bad");
         }
 
@@ -89680,6 +89974,9 @@
     $("browseCreate").addEventListener("click", openCreatePop);
     $("miniCreate").addEventListener("click", openCreatePop);
     $("crClose").addEventListener("click", closeCreatePop);
+    $("crStop").addEventListener("click", function () {
+        crAsk({ op: "stop" });
+    });
     $("crReset").addEventListener("click", function () {
 
         askConfirm("Start over? The title, lyrics, style and every choice go back to how they start.", "Start over", true, function () {
@@ -90312,6 +90609,16 @@
 
                     close();
                     openTrimmer(m);
+                }, "accent"));
+            }
+
+            // A new take on it: its lyrics, style and the rest in Create
+            if (m.mine) {
+
+                box.appendChild(menuItem("create", "Use in Create", function () {
+
+                    close();
+                    act("createFrom").then(openCreatePop);
                 }, "accent"));
             }
 
