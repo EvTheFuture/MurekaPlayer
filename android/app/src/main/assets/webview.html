@@ -1387,10 +1387,109 @@
         pointer-events: none;
     }
 
+    /* Making songs: the form in the playlists' popup look, wider, and a
+       list to choose from in its place */
+    #crPop #crBox {
+        width: min(860px, 94vw);
+        max-height: 92vh;
+    }
+
+    #crForm,
+    #crPick {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow-y: auto;
+        min-height: 0;
+        padding: 4px;
+        margin: -4px;
+    }
+
+    #crPick {
+        display: none;
+    }
+
+    #crStatus {
+        display: none;
+        color: var(--muted);
+        white-space: pre-line;
+    }
+
+    #crStatus.bad {
+        color: #ff8a8a;
+    }
+
+    /* A turning ring before the words while the phone asks Mureka */
+    #crStatus.wait::before {
+        content: "";
+        display: inline-block;
+        width: 0.9em;
+        height: 0.9em;
+        margin-right: 0.5em;
+        vertical-align: -0.1em;
+        box-sizing: border-box;
+        border: 2px solid rgba(72, 225, 235, 0.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spinTurn 0.8s linear infinite;
+    }
+
+    .crBlock {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .crLabel {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .crArea {
+        padding: 10px 12px;
+        line-height: 1.4;
+        resize: vertical;
+    }
+
+    .crActs .chip:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    .crName {
+        flex: 1 1 10em;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .crName.crNone {
+        color: var(--muted);
+    }
+
+    .crRange {
+        width: 100%;
+        accent-color: var(--accent);
+    }
+
+    .crFoot {
+        white-space: normal;
+    }
+
+    .crPickRow .crPickText {
+        overflow-wrap: anywhere;
+    }
+
+    /* Questions come over every popup, the playlists' and the form's too */
+    #confirmPop {
+        z-index: 80;
+    }
+
     /* The playlists over a blurred page, each with its cover, and the
        phone's Bluetooth devices the same way */
     #plPop,
-    #btPop {
+    #btPop,
+    #crPop {
         position: fixed;
         inset: 0;
         z-index: 55;
@@ -1403,7 +1502,8 @@
     }
 
     #plBox,
-    #btBox {
+    #btBox,
+    #crBox {
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 18px;
@@ -1417,7 +1517,9 @@
     }
 
     #plTop,
-    #btTop {
+    #btTop,
+    #crTop,
+    #crPickTop {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -1425,14 +1527,17 @@
     }
 
     #plTitle,
-    #btTitle {
+    #btTitle,
+    #crTitle,
+    #crPickTitle {
         flex: 1 1 auto;
         font-weight: 600;
         font-size: 1.15em;
     }
 
     #plRows,
-    #btRows {
+    #btRows,
+    #crPickRows {
         overflow-y: auto;
         display: flex;
         flex-direction: column;
@@ -5866,6 +5971,7 @@
         <button class="ctl" id="filtersBtn" type="button" title="All filters" data-label="Filters" aria-label="All filters" data-icon="filter"></button>
         <button class="ctl" id="plOpenBtn" type="button" title="Playlists" data-label="Playlists" aria-label="Playlists" data-icon="playlists"></button>
         <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="To playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
+        <button class="ctl" id="createBtn" type="button" title="Create songs" data-label="Create" aria-label="Create songs" data-icon="create"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -5991,6 +6097,26 @@
         </div>
         <div id="btNote"><span id="btNoteText"></span><button class="chip ring" id="btOn" type="button">Switch on</button><button class="chip" id="btHelper" type="button">Start the helper</button></div>
         <div id="btRows"></div>
+    </div>
+</div>
+<div id="crPop">
+    <div id="crBox">
+        <div id="crTop">
+            <span id="crTitle">Create</span>
+            <button class="chip ring" id="crMake" type="button">Create</button>
+            <button class="chip iconOnly" id="crClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="crStatus"></div>
+        <div id="crForm"></div>
+        <div id="crPick">
+            <div id="crPickTop">
+                <span id="crPickTitle"></span>
+                <button class="chip" id="crPickUpload" type="button">Upload a song</button>
+                <button class="chip" id="crPickMore" type="button">More</button>
+                <button class="chip" id="crPickBack" type="button">Back</button>
+            </div>
+            <div id="crPickRows"></div>
+        </div>
     </div>
 </div>
 <div id="songMenu">
@@ -6467,6 +6593,11 @@
         pencil: [
             ["path", { d: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" }]
         ],
+        create: [
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["path", { d: "M12 8v8" }],
+            ["path", { d: "M8 12h8" }]
+        ],
         speaker: [
             ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }],
             ["path", { d: "M15.54 8.46a5 5 0 0 1 0 7.07" }],
@@ -6843,10 +6974,11 @@
         filters: { label: "Filters", icon: "filter", el: "filtersBtn" },
         playlists: { label: "Playlists", icon: "playlists", el: "plOpenBtn" },
         toplaylist: { label: "To playlist", icon: "queueAdd", el: "toPlBtn" },
+        create: { label: "Create", icon: "create", el: "createBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "songs", "minilist"];
 
     function icon(name) {
 
@@ -10415,6 +10547,10 @@
 
         if ($("plPop").style.display === "flex") {
             paintPlPop();
+        }
+
+        if (isShown("crPop") && s && s.create) {
+            paintCreatePop(s.create, false);
         }
 
         if (miniOpen && miniView === "playlists") {
@@ -24656,6 +24792,716 @@
         });
     });
 
+    // Making songs on Mureka. The phone does the asking and keeps the form,
+    // which it sends with its state while this popup is open. This page
+    // shows the form, sends what is typed and asks the phone for the lists,
+    // Mureka's writing help and the songs
+    const CR_UPLOAD_MAX = 16 * 1024 * 1024;
+    let crUi = null;
+    let crWatchTimer = 0;
+    let crSendTimer = 0;
+    let crPending = {};
+    let crDraft = null;
+    let crPickKind = "";
+
+    function crAsk(body) {
+
+        return fetch("/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            cache: "no-store"
+        }).then(function (res) {
+            return res.json();
+        }).catch(function () {
+            return { ok: false, why: "The phone could not be reached" };
+        });
+    }
+
+    // What was typed sent a moment after the last key
+    function crChange(field, value) {
+
+        crPending[field] = value;
+
+        if (crDraft) {
+            crDraft[field] = value;
+        }
+
+        clearTimeout(crSendTimer);
+        crSendTimer = setTimeout(crFlush, 500);
+        paintCrCounts();
+    }
+
+    function crFlush() {
+
+        clearTimeout(crSendTimer);
+        crSendTimer = 0;
+
+        const changes = crPending;
+
+        crPending = {};
+
+        if (Object.keys(changes).length === 0) {
+            return Promise.resolve(null);
+        }
+
+        return crAsk({ op: "draft", draft: changes });
+    }
+
+    // A change made at once, a choice rather than typing
+    function crSet(changes) {
+
+        Object.assign(crPending, changes);
+
+        if (crDraft) {
+            Object.assign(crDraft, changes);
+            paintCreatePop({ draft: crDraft }, false);
+        }
+
+        return crFlush();
+    }
+
+    function openCreatePop() {
+
+        buildCrPop();
+        showCrPick(false);
+        $("crPop").style.display = "flex";
+        send("createWatch", true);
+        clearInterval(crWatchTimer);
+        crWatchTimer = setInterval(function () {
+            send("createWatch", true);
+        }, 4000);
+        crAsk({ op: "state" }).then(function (r) {
+
+            if (r && r.ok && r.state) {
+                paintCreatePop(r.state, true);
+            }
+        });
+    }
+
+    function closeCreatePop() {
+
+        crFlush();
+        clearInterval(crWatchTimer);
+        crWatchTimer = 0;
+        $("crPop").style.display = "none";
+        send("createWatch", false);
+    }
+
+    function crLabel(text) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const count = document.createElement("span");
+
+        row.className = "plEdLabel crLabel";
+        name.textContent = text;
+        row.appendChild(name);
+        row.appendChild(count);
+        row.count = count;
+
+        return row;
+    }
+
+    function crChip(text, then) {
+
+        const b = document.createElement("button");
+
+        b.type = "button";
+        b.className = "chip";
+        b.textContent = text;
+        b.addEventListener("click", then);
+        crUi.acts.push(b);
+
+        return b;
+    }
+
+    function crRow(buttons) {
+
+        const row = document.createElement("div");
+
+        row.className = "plEdActs crActs";
+
+        for (const b of buttons) {
+            row.appendChild(b);
+        }
+
+        return row;
+    }
+
+    // Chips of which one is on, a choice of the form
+    function crSegments(choices, field) {
+
+        const row = document.createElement("div");
+        const chips = [];
+
+        row.className = "plEdActs crActs";
+
+        for (const c of choices) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip";
+            b.textContent = c.label;
+            b.addEventListener("click", function () {
+
+                const changes = {};
+
+                changes[field] = c.value;
+                crSet(changes);
+
+                if (field === "voice" && c.value === "character" && crDraft && !crDraft.characterId) {
+                    openCrPick("characters");
+                }
+            });
+            chips.push({ el: b, value: c.value });
+            row.appendChild(b);
+        }
+
+        row.paint = function (value) {
+
+            for (const x of chips) {
+                x.el.classList.toggle("on", x.value === value);
+            }
+        };
+
+        return row;
+    }
+
+    // A field whose keys stay in it, the page's own keys never hear them
+    function crField(multi, max, field) {
+
+        const f = document.createElement(multi ? "textarea" : "input");
+
+        if (!multi) {
+            f.type = "text";
+        }
+
+        f.className = "plEdField" + (multi ? " crArea" : "");
+        f.maxLength = max;
+        f.setAttribute("autocomplete", "off");
+        f.addEventListener("keydown", function (ev) {
+
+            if (ev.key !== "Escape") {
+                ev.stopPropagation();
+            }
+        });
+        f.addEventListener("input", function () {
+            crChange(field, f.value);
+        });
+
+        return f;
+    }
+
+    function buildCrPop() {
+
+        if (crUi) {
+            return;
+        }
+
+        crUi = { acts: [] };
+
+        const ui = crUi;
+        const form = $("crForm");
+
+        ui.kind = crSegments([
+            { label: "Song", value: "song" },
+            { label: "Instrumental", value: "instrumental" }
+        ], "kind");
+        form.appendChild(ui.kind);
+
+        ui.titleLabel = crLabel("Title");
+        ui.title = crField(false, 50, "title");
+        ui.title.placeholder = "Left empty, Mureka names it";
+        form.appendChild(ui.titleLabel);
+        form.appendChild(ui.title);
+
+        ui.lyricsBox = document.createElement("div");
+        ui.lyricsBox.className = "crBlock";
+        ui.lyricsLabel = crLabel("Lyrics");
+        ui.lyrics = crField(true, 5000, "lyrics");
+        ui.lyrics.rows = 10;
+        ui.lyrics.placeholder = "[Verse]\n...\n\n[Chorus]\n...";
+        ui.lyricsBox.appendChild(ui.lyricsLabel);
+        ui.lyricsBox.appendChild(ui.lyrics);
+        ui.lyricsBox.appendChild(crRow([
+            crChip("Write from a theme", crTheme),
+            crChip("Write them better", function () {
+                crHelp("polish");
+            })
+        ]));
+        form.appendChild(ui.lyricsBox);
+
+        ui.styleLabel = crLabel("Style");
+        ui.style = crField(true, 1000, "style");
+        ui.style.rows = 3;
+        ui.style.placeholder = "Genre, mood, instruments, tempo";
+        form.appendChild(ui.styleLabel);
+        form.appendChild(ui.style);
+        form.appendChild(crRow([
+            crChip("Match my vibe", function () {
+                crHelp("match");
+            }),
+            crChip("Surprise me", function () {
+                crHelp("surprise");
+            }),
+            crChip("My prompts", function () {
+                openCrPick("prompts");
+            }),
+            crChip("Keep as a prompt", function () {
+
+                crFlush().then(function () {
+                    return crAsk({ op: "savePrompt" });
+                }).then(crAnswered);
+            })
+        ]));
+
+        ui.voiceBox = document.createElement("div");
+        ui.voiceBox.className = "crBlock";
+        ui.voiceBox.appendChild(crLabel("Voice"));
+        ui.voice = crSegments([
+            { label: "Male", value: "male" },
+            { label: "Female", value: "female" },
+            { label: "Character", value: "character" }
+        ], "voice");
+        ui.voiceBox.appendChild(ui.voice);
+        ui.characterName = document.createElement("span");
+        ui.characterName.className = "crName";
+        ui.characterRow = crRow([ui.characterName, crChip("Choose", function () {
+            openCrPick("characters");
+        })]);
+        ui.voiceBox.appendChild(ui.characterRow);
+        form.appendChild(ui.voiceBox);
+
+        form.appendChild(crLabel("Remix"));
+        ui.remixName = document.createElement("div");
+        ui.remixName.className = "crName";
+        form.appendChild(ui.remixName);
+        ui.remixStyle = crChip("Use the style Mureka heard", function () {
+
+            if (crDraft && crDraft.remixStyle) {
+                crSet({ style: crDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
+            }
+        });
+        ui.remixClear = crChip("No remix", function () {
+            crSet({ remix: null, remixName: "", remixStyle: "" });
+        });
+        form.appendChild(crRow([
+            crChip("Choose a song", function () {
+                openCrPick("resources");
+            }),
+            crChip("Upload a song", crUpload),
+            ui.remixStyle,
+            ui.remixClear
+        ]));
+
+        ui.advBox = document.createElement("div");
+        ui.advBox.className = "crBlock";
+        ui.advBox.appendChild(crLabel("Length"));
+        ui.length = document.createElement("select");
+        ui.length.className = "plEdField";
+        ui.length.addEventListener("change", function () {
+            crSet({ lengthMs: Number(ui.length.value) || 0 });
+        });
+        ui.advBox.appendChild(ui.length);
+        ui.wildLabel = crLabel("Wildness");
+        ui.advBox.appendChild(ui.wildLabel);
+        ui.wild = document.createElement("input");
+        ui.wild.type = "range";
+        ui.wild.min = "0";
+        ui.wild.max = "100";
+        ui.wild.step = "1";
+        ui.wild.className = "crRange";
+        ui.wild.addEventListener("input", function () {
+            crChange("wildness", Number(ui.wild.value) || 0);
+        });
+        ui.advBox.appendChild(ui.wild);
+        form.appendChild(ui.advBox);
+
+        const foot = document.createElement("div");
+
+        foot.className = "plRowCount crFoot";
+        foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
+        form.appendChild(foot);
+        crUi.acts.push($("crMake"));
+    }
+
+    function crLengthText(ms) {
+
+        if (!ms) {
+            return "Automatic";
+        }
+
+        const s = Math.round(ms / 1000);
+
+        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    function paintCrCounts() {
+
+        const d = crDraft;
+
+        if (!crUi || !d) {
+            return;
+        }
+
+        crUi.titleLabel.count.textContent = String(d.title || "").length + "/50";
+        crUi.lyricsLabel.count.textContent = String(d.lyrics || "").length + "/5000";
+        crUi.styleLabel.count.textContent = String(d.style || "").length + "/1000"
+            + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a kept prompt" : "");
+        crUi.wildLabel.count.textContent = String(d.wildness);
+    }
+
+    // The form as the phone has it. Fields being typed in, or with typing
+    // not yet sent, are left as they are unless all is to be put in
+    function paintCreatePop(c, all) {
+
+        if (!crUi || !c) {
+            return;
+        }
+
+        const ui = crUi;
+
+        if (c.draft) {
+
+            const fresh = Object.assign({}, c.draft, crPending);
+
+            crDraft = fresh;
+
+            const put = function (el, field) {
+
+                const value = String(fresh[field] === undefined || fresh[field] === null ? "" : fresh[field]);
+
+                if ((all || (document.activeElement !== el && crPending[field] === undefined)) && el.value !== value) {
+                    el.value = value;
+                }
+            };
+
+            put(ui.title, "title");
+            put(ui.lyrics, "lyrics");
+            put(ui.style, "style");
+
+            if (Array.isArray(c.lengths) && ui.length.options.length === 0) {
+
+                for (const ms of c.lengths) {
+
+                    const o = document.createElement("option");
+
+                    o.value = String(ms);
+                    o.textContent = crLengthText(ms);
+                    ui.length.appendChild(o);
+                }
+            }
+
+            ui.length.value = String(fresh.lengthMs || 0);
+
+            if (document.activeElement !== ui.wild) {
+                ui.wild.value = String(fresh.wildness);
+            }
+
+            const song = fresh.kind !== "instrumental";
+            const character = song && fresh.voice === "character";
+
+            ui.kind.paint(fresh.kind);
+            ui.voice.paint(fresh.voice);
+            ui.lyricsBox.style.display = song ? "flex" : "none";
+            ui.voiceBox.style.display = song ? "flex" : "none";
+            ui.characterRow.style.display = character ? "flex" : "none";
+            ui.characterName.textContent = fresh.characterId ? fresh.characterName || "Character " + fresh.characterId : "No character chosen yet";
+            ui.advBox.style.display = character || fresh.remix ? "none" : "flex";
+            ui.remixName.textContent = fresh.remix ? "Remixing " + (fresh.remixName || fresh.remix.title || "an uploaded song") : "None, a new song";
+            ui.remixName.classList.toggle("crNone", !fresh.remix);
+            ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
+            ui.remixClear.style.display = fresh.remix ? "" : "none";
+            paintCrCounts();
+        }
+
+        if (c.busy !== undefined) {
+
+            const text = c.busy || (c.note && c.note.text) || "";
+
+            $("crStatus").textContent = text;
+            $("crStatus").style.display = text ? "block" : "none";
+            $("crStatus").classList.toggle("bad", !c.busy && !!(c.note && c.note.bad));
+            $("crStatus").classList.toggle("wait", !!c.busy);
+
+            for (const b of ui.acts) {
+                b.disabled = !!c.busy;
+            }
+        }
+    }
+
+    // A helper's or a list's answer: a reason shown when it did not work
+    function crAnswered(r) {
+
+        if (r && r.ok === false && r.why) {
+            toast(r.why, "bad");
+        }
+
+        return r;
+    }
+
+    function crHelp(kind, theme) {
+
+        return crFlush().then(function () {
+            return crAsk({ op: "ai", kind: kind, theme: theme || "" });
+        }).then(crAnswered);
+    }
+
+    function crTheme() {
+
+        const ask = function () {
+
+            askText("What is the song about?", crDraft && crDraft.theme ? crDraft.theme : "", "Write", function (typed) {
+
+                if (String(typed || "").trim()) {
+                    crHelp("theme", String(typed).trim());
+                }
+            });
+        };
+
+        if (crDraft && String(crDraft.lyrics || "").trim()) {
+
+            askConfirm("Write new lyrics? The lyrics written now are replaced.", "Write new lyrics", false, ask);
+            return;
+        }
+
+        ask();
+    }
+
+    function crMake(asIs) {
+
+        crFlush().then(function () {
+            return crAsk({ op: "make", asIs: asIs === true });
+        }).then(function (r) {
+
+            if (r && r.ask === "polish") {
+
+                askConfirm("Mureka would rather write these lyrics better before it makes the songs. Make them as they are?",
+                    "Make as they are", false, function () {
+                        crMake(true);
+                    });
+                return;
+            }
+
+            if (r && r.ok) {
+
+                toast(r.why || "Making two songs", "ok");
+                closeCreatePop();
+                return;
+            }
+
+            crAnswered(r);
+        });
+    }
+
+    // A song file sent to the phone, which uploads it to Mureka and makes
+    // it ready to remix
+    function crUpload() {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "audio/*,.mp3,.wav,.m4a,.flac,.ogg";
+        input.style.display = "none";
+        document.body.appendChild(input);
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (!file) {
+                return;
+            }
+
+            if (file.size > CR_UPLOAD_MAX) {
+
+                toast("The song is too large to send through the phone, at most 16 MB", "bad");
+                return;
+            }
+
+            showCrPick(false);
+            toast("Sending the song to the phone", "wait");
+            fetch("/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), {
+                method: "POST",
+                headers: { "Content-Type": file.type || "audio/mpeg" },
+                body: file,
+                cache: "no-store"
+            }).then(function (res) {
+                return res.json();
+            }).then(function (r) {
+
+                if (r && r.ok) {
+                    toast("The song is ready to remix", "ok");
+                } else {
+                    toast(r && r.why ? r.why : "The song could not be uploaded", "bad");
+                }
+            }).catch(function () {
+                toast("The phone could not be reached", "bad");
+            });
+        });
+        input.click();
+    }
+
+    // A list to choose from in place of the form
+    function showCrPick(on) {
+
+        $("crForm").style.display = on ? "none" : "flex";
+        $("crPick").style.display = on ? "flex" : "none";
+
+        if (!on) {
+            crPickKind = "";
+        }
+    }
+
+    function crPickRow(label, sub, then) {
+
+        const row = document.createElement("div");
+        const text = document.createElement("div");
+        const name = document.createElement("div");
+
+        row.className = "plRow crPickRow";
+        text.className = "plRowText";
+        name.className = "crPickText";
+        name.textContent = label;
+        text.appendChild(name);
+
+        if (sub) {
+
+            const more = document.createElement("div");
+
+            more.className = "plRowCount";
+            more.textContent = sub;
+            text.appendChild(more);
+        }
+
+        row.appendChild(text);
+        row.addEventListener("click", then);
+
+        return row;
+    }
+
+    function crPickNote(text) {
+
+        const rows = $("crPickRows");
+        const note = document.createElement("div");
+
+        rows.textContent = "";
+        note.className = "plRowCount";
+        note.textContent = text;
+        rows.appendChild(note);
+    }
+
+    function crTime(ms) {
+
+        const s = Math.round((Number(ms) || 0) / 1000);
+
+        return s > 0 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : "";
+    }
+
+    function openCrPick(kind) {
+
+        const titles = { prompts: "My prompts", characters: "Characters", resources: "Songs uploaded to Mureka" };
+        let last = "0";
+        let more = false;
+
+        crPickKind = kind;
+        $("crPickTitle").textContent = titles[kind] || "";
+        $("crPickUpload").style.display = kind === "resources" ? "" : "none";
+        $("crPickMore").style.display = "none";
+        crPickNote("Asking Mureka");
+        showCrPick(true);
+
+        const read = function () {
+
+            crAsk(kind === "resources" ? { op: "resources", last: last } : { op: kind }).then(function (r) {
+
+                if (crPickKind !== kind) {
+                    return;
+                }
+
+                if (!r || !r.ok) {
+
+                    crPickNote((r && r.why) || "Mureka could not be asked");
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+                const rows = $("crPickRows");
+
+                if (last === "0") {
+                    rows.textContent = "";
+                }
+
+                if (last === "0" && list.length === 0) {
+
+                    crPickNote(kind === "prompts" ? "No prompts are kept on Mureka yet. Keep as a prompt keeps the style written now."
+                        : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
+                            : "No songs uploaded to Mureka yet. Upload a song to remix it.");
+                }
+
+                for (const x of list) {
+
+                    if (kind === "prompts") {
+
+                        rows.appendChild(crPickRow(x.text, "", function () {
+
+                            showCrPick(false);
+                            crSet({ style: x.text, stylePromptId: x.id, stylePromptText: x.text });
+                        }));
+                    } else if (kind === "characters") {
+
+                        rows.appendChild(crPickRow(x.name, x.about, function () {
+
+                            showCrPick(false);
+                            crSet({ voice: "character", characterId: x.id, characterName: x.name });
+                        }));
+                    } else {
+
+                        const when = x.at ? new Date(x.at * 1000).toLocaleDateString() : "";
+
+                        rows.appendChild(crPickRow(x.title, [crTime(x.ms), when].filter(Boolean).join(", "), function () {
+
+                            showCrPick(false);
+                            crAsk({ op: "use", id: x.id, title: x.title, ms: x.ms }).then(crAnswered);
+                        }));
+                    }
+                }
+
+                more = r.more === true;
+                last = String(r.last || "");
+                $("crPickMore").style.display = more ? "" : "none";
+            });
+        };
+
+        $("crPickMore").onclick = function () {
+
+            if (more) {
+                read();
+            }
+        };
+
+        read();
+    }
+
+    $("createBtn").addEventListener("click", openCreatePop);
+    $("crClose").addEventListener("click", closeCreatePop);
+    $("crMake").addEventListener("click", function () {
+        crMake(false);
+    });
+    $("crPickBack").addEventListener("click", function () {
+        showCrPick(false);
+    });
+    $("crPickUpload").addEventListener("click", crUpload);
+    $("crPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("crPop")) {
+            closeCreatePop();
+        }
+    });
+
     // A cover in a list held under the mouse for a moment comes up large
     // beside it, as tooltips do. Mice only, a finger has its long press.
     // Gone as the mouse leaves it, presses, or the list scrolls
@@ -27099,6 +27945,17 @@
         if (isShown("confirmPop")) {
 
             closeConfirm();
+            return true;
+        }
+
+        if (isShown("crPop")) {
+
+            if ($("crPick").style.display === "flex") {
+                showCrPick(false);
+            } else {
+                closeCreatePop();
+            }
+
             return true;
         }
 

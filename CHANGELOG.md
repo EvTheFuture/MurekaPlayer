@@ -415,7 +415,23 @@ In development.
   also logs what Mureka answers when a playlist is opened, and when a
   picture is uploaded: the upload's host and path, and the parts of the
   storage pass that say where it goes. Keys, tokens and the signature
-  are never logged.
+  are never logged. Requests about making songs (generating, lyrics,
+  voices, styles, models, tags and the like) are logged with their whole
+  body and a longer answer, the reads among them too. Answers that come
+  as a stream of events, connections kept open both ways (what is sent
+  and the first messages back), the body of a request handed over whole,
+  and requests the site sends past the watched fetch, named from the
+  browser's own list of what was loaded, are logged as well, Mureka's AI
+  streams for lyrics and styles with what the site made in the ten
+  seconds before each answer came (JSON, form fields or a Request of its
+  own), its analytics left out, and the text that streamed back. A slow
+  request the watched fetch saw is no longer listed a second time. On a
+  connection kept open, the pieces of a reply being written are counted
+  rather than logged one by one, so up to 300 other messages fit, and a
+  list or object under a name that looks secret keeps its shape, only
+  the secret values inside it hidden. The site's session recording,
+  translation lookups and analytics are left out of what it made. Characters, remixes and voice
+  training are logged in full too.
 - **Covers larger under the mouse.** In the web view, a cover in a list
   or among the playlists, held under the mouse for about half a second,
   comes up large beside it, and goes as the mouse leaves, presses or the
@@ -440,8 +456,9 @@ In development.
   worked out tempo with Mureka's, with a count when a run is done. Stats
   for nerds has a Tempo part: the BPM in use and where it came from,
   Mureka's, one set by hand, the song's own to a tenth with how sure it
-  is and how long it took, its half and double, the beat check, and the
-  choice in the settings. The tempo is measured over up to 32 beats for a
+  is in percent (in use, sure enough to use while Mureka's comes first,
+  or too unsure to use) and how long it took, its half and double, the
+  beat check, and the choice in the settings. The tempo is measured over up to 32 beats for a
   finer value. The beat check, which decides between a tempo and its half
   or double, also asks the deep band, the kick and the bass: real songs
   around 100 BPM have eighth notes and other short sounds halfway nearly
@@ -467,6 +484,28 @@ In development.
   through its Binder while it keeps running, else over wireless
   debugging. Android 13 or later. With Bluetooth off, Switch on turns it
   on, and an old or stopped helper can be started from there.
+- **Create songs on Mureka from the player.** Create songs, in the
+  Library menu and as a button for the bar, opens a page with what
+  Mureka's own create page has: a song with lyrics or an instrumental,
+  the title, the lyrics and the style with their counts, a male or
+  female voice or one of Mureka's characters, a remix of a song uploaded
+  to Mureka before or of a song file uploaded from here, and the length
+  and wildness. Mureka's helpers write lyrics and a title from a theme,
+  write the lyrics better, and write the style out (Match my vibe and
+  Surprise me), the text filling in as it comes, with Undo. My prompts
+  lists the style prompts kept on Mureka, Keep as a prompt keeps the
+  style written. Lyrics Mureka would rather write better first are asked
+  about before the songs are made. For a remix Mureka's suggested style
+  fills an empty style, else it can be taken with a button. The form is
+  kept between visits and shared with the web view, where the same form
+  opens from its own Create button, a song file sent through the phone
+  up to 16 MB. The two new songs show at the top of the list while they
+  are made.
+- **Questions over the popups in the web view.** A question asked with
+  the playlists or the form for making songs open shows on top of them.
+- **A playlist's cover from the web view in the page.** Choosing a
+  picture for a playlist from the web view shown inside the page changed
+  nothing, it now sets the playlist's cover.
 
 ### Build
 

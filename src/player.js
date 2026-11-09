@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.43";
+    const VERSION = "2.0.1.53";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -19797,17 +19797,43 @@
 
         const reads = new Map();
 
+        // Addresses the watched fetch and XMLHttpRequest saw lately, so the
+        // browser's own list of what was loaded names only the others
+        const hooked = new Map();
+
+        const seenByHook = function (url) {
+
+            try {
+
+                const u = new URL(String(url), location.href);
+
+                hooked.set(u.pathname, Date.now());
+            } catch (e) {
+                // Not an address
+            }
+        };
+
+        // Requests about making songs, their whole body and a longer answer
+        // logged, lyrics and styles being long: generating, lyrics, voices,
+        // styles, models, tags, references and the like
+        const MAKING = /generate|lyric|vocal|voice|singer|character|style|prompt|model|genre|mood|tag|refer|motif|extend|regenerate|instrumental|inspir|template|create|remix|lora/i;
+
         // What could let someone act as the user is blanked before it is
         // logged: values of keys that look like tokens, passwords or
         // signatures, in JSON and in queries
         const SECRET = "(?:token|auth|passw|pwd|secret|sign|cred|cookie|session|ticket|key|verif|otp|captcha|jwt|email|phone|mobile)";
-        const secretJson = new RegExp("(\"[^\"]*" + SECRET + "[^\"]*\"\\s*:\\s*)(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]\\s]+)", "gi");
+        const secretJson = new RegExp("(\"([^\"]*" + SECRET + "[^\"]*)\"\\s*:\\s*)(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]\\s\\[{]+)", "gi");
+
+        // Names that only look secret: labels, counts and positions
+        const NOT_SECRET = /^(?:message_key|icon_key|session_count|after_message_sequence|replay_through_message_sequence)$/;
 
         // In a query, or a form's body, which has no ? before its first key
         const secretQuery = new RegExp("((?:^|[?&])[^=&?]*" + SECRET + "[^=&]*=)[^&#]*", "gi");
 
         const redact = function (text) {
-            return String(text || "").replace(secretJson, "$1\"***\"").replace(secretQuery, "$1***");
+            return String(text || "").replace(secretJson, function (all, head, name) {
+                return NOT_SECRET.test(name) ? all : head + "\"***\"";
+            }).replace(secretQuery, "$1***");
         };
 
         const note = function (method, url, body) {
@@ -19857,7 +19883,7 @@
             let sent = "";
 
             if (typeof body === "string" && body) {
-                sent = " " + redact(body).slice(0, 300);
+                sent = " " + redact(body).slice(0, MAKING.test(path) ? 8000 : 300);
             } else if (body && typeof body === "object") {
                 sent = " [" + (body.constructor && body.constructor.name ? body.constructor.name : "data") + "]";
             }
@@ -19907,7 +19933,8 @@
                 }
 
                 if ((verb === "GET" || verb === "HEAD")
-                    && READ_ANSWERS.indexOf(u.pathname) < 0) {
+                    && READ_ANSWERS.indexOf(u.pathname) < 0
+                    && !(MAKING.test(u.pathname) && u.pathname !== "/api/pgc/feed/list")) {
                     return "";
                 }
 
@@ -19952,10 +19979,10 @@
         const logAnswer = function (what, status, text) {
 
             const pass = /cos-token/.test(what);
-            const long = /playlist\/detail/.test(what);
+            const long = /playlist\/detail/.test(what) || MAKING.test(what);
 
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
-                + (pass ? passShape(text) : redact(text)).replace(/\s+/g, " ").slice(0, long ? 3000 : 800));
+                + (pass ? passShape(text) : redact(text)).replace(/\s+/g, " ").slice(0, long ? 6000 : 800));
         };
 
         const sumUp = function (kind, json) {
@@ -19964,6 +19991,370 @@
                 dbgLog("Mureka", feedSummary(json, "Mureka's " + kind + " list"));
             }
         };
+
+        // What a stream says, blanked as the rest, the first messages of
+        // each stream only, so a long answer is not the whole log
+        const STREAM_MESSAGES = 60;
+        const SOCKET_MESSAGES = 300;
+        const streamText = function (data) {
+
+            if (typeof data === "string") {
+                return redact(data).replace(/\s+/g, " ").slice(0, 3000);
+            }
+
+            return "[" + (data && data.constructor && data.constructor.name ? data.constructor.name : "data") + "]";
+        };
+        const where = function (url) {
+
+            try {
+
+                const u = new URL(String(url), location.href);
+
+                return u.host + u.pathname + (u.search ? redact(u.search).slice(0, 200) : "");
+            } catch (e) {
+                return String(url).slice(0, 200);
+            }
+        };
+
+        // Answers that come as a stream of events, such as text written by
+        // Mureka's AI as it goes
+        const PlainEventSource = window.EventSource;
+
+        if (typeof PlainEventSource === "function") {
+
+            const Watched = function (url, config) {
+
+                const es = new PlainEventSource(url, config);
+
+                if (loggingOn()) {
+
+                    let n = 0;
+
+                    dbgLog("Mureka", "Event stream from " + where(url));
+
+                    es.addEventListener("message", function (ev) {
+
+                        n += 1;
+
+                        if (n <= STREAM_MESSAGES) {
+                            dbgLog("Mureka", "Event stream " + n + ": " + streamText(ev.data));
+                        }
+                    });
+                    es.addEventListener("error", function () {
+                        dbgLog("Mureka", "Event stream ended or failed after " + n + " messages");
+                    });
+                }
+
+                return es;
+            };
+
+            Watched.prototype = PlainEventSource.prototype;
+            Watched.CONNECTING = PlainEventSource.CONNECTING;
+            Watched.OPEN = PlainEventSource.OPEN;
+            Watched.CLOSED = PlainEventSource.CLOSED;
+            window.EventSource = Watched;
+        }
+
+        // A connection kept open both ways: what is sent on it and the
+        // first messages that come back
+        const PlainWebSocket = window.WebSocket;
+
+        if (typeof PlainWebSocket === "function") {
+
+            const Watched = function (url, protocols) {
+
+                const ws = protocols === undefined ? new PlainWebSocket(url) : new PlainWebSocket(url, protocols);
+
+                if (loggingOn()) {
+
+                    let n = 0;
+                    let pieces = 0;
+                    let shown = 0;
+                    const plainSocketSend = ws.send;
+
+                    dbgLog("Mureka", "Socket to " + where(url));
+
+                    ws.send = function (data) {
+
+                        try {
+
+                            if (loggingOn()) {
+                                dbgLog("Mureka", "Socket sent: " + streamText(data));
+                            }
+                        } catch (e) {
+                            // Never in the way of the message itself
+                        }
+
+                        return plainSocketSend.apply(ws, arguments);
+                    };
+                    ws.addEventListener("message", function (ev) {
+
+                        n += 1;
+
+                        // The pieces of a reply as it is written are only
+                        // counted, the whole reply comes in a later message
+                        if (typeof ev.data === "string" && ev.data.indexOf("\"model.message.delta\"") >= 0) {
+                            pieces += 1;
+                            return;
+                        }
+
+                        shown += 1;
+
+                        if (shown <= SOCKET_MESSAGES && loggingOn()) {
+                            dbgLog("Mureka", "Socket message " + n + (pieces ? " (" + pieces + " reply pieces before)" : "")
+                                + ": " + streamText(ev.data));
+                        }
+
+                        pieces = 0;
+                    });
+                    ws.addEventListener("close", function (ev) {
+                        dbgLog("Mureka", "Socket closed, code " + ev.code + ", after " + n + " messages");
+                    });
+                }
+
+                return ws;
+            };
+
+            Watched.prototype = PlainWebSocket.prototype;
+            Watched.CONNECTING = PlainWebSocket.CONNECTING;
+            Watched.OPEN = PlainWebSocket.OPEN;
+            Watched.CLOSING = PlainWebSocket.CLOSING;
+            Watched.CLOSED = PlainWebSocket.CLOSED;
+            window.WebSocket = Watched;
+        }
+
+        // Mureka's site sends its AI streams through a fetch of its own,
+        // kept before the player came, so neither their body nor their
+        // answer passes the watched fetch. The body is JSON the site makes
+        // just before: every JSON object it makes is kept a moment, apart
+        // from its analytics events, and those made just before a stream
+        // the browser then lists are logged with it
+        const madeJson = [];
+        const ANALYTICS_JSON = /"(distinct_id|\$lib|_track_id|_flush_time|\$identity_[a-z_]+)"\s*:|^\[\d|^\{"type":"track"|^\{"l":"[a-z-]+","k":|"\$latest_|^(?:expv2\[|rqm=)|^\{"trigger_element"|"name":"pixel\.js"/;
+        const plainStringify = JSON.stringify;
+
+        const keepMade = function (kind, text) {
+
+            if (loggingOn() && typeof text === "string" && text.length > 2 && text.length < 20000
+                && !ANALYTICS_JSON.test(text)) {
+
+                madeJson.push({ at: Date.now(), text: kind + " " + text });
+
+                while (madeJson.length > 40) {
+                    madeJson.shift();
+                }
+            }
+        };
+
+        JSON.stringify = function () {
+
+            const text = plainStringify.apply(JSON, arguments);
+
+            try {
+
+                if (typeof text === "string" && (text.charAt(0) === "{" || text.charAt(0) === "[")) {
+                    keepMade("JSON", text);
+                }
+            } catch (e) {
+                // Never in the way of the site
+            }
+
+            return text;
+        };
+
+        // A body sent as form fields, or handed to a Request of its own,
+        // kept the same way
+        if (window.URLSearchParams && URLSearchParams.prototype.toString) {
+
+            const plainParams = URLSearchParams.prototype.toString;
+
+            URLSearchParams.prototype.toString = function () {
+
+                const text = plainParams.apply(this, arguments);
+
+                try {
+
+                    if (text.indexOf("=") > 0) {
+                        keepMade("form", text);
+                    }
+                } catch (e) {
+                    // Never in the way of the site
+                }
+
+                return text;
+            };
+        }
+
+        if (window.FormData && FormData.prototype.append) {
+
+            const plainAppend = FormData.prototype.append;
+
+            FormData.prototype.append = function (name, value) {
+
+                try {
+                    keepMade("form part", String(name) + "=" + (typeof value === "string" ? value : "[file]"));
+                } catch (e) {
+                    // Never in the way of the site
+                }
+
+                return plainAppend.apply(this, arguments);
+            };
+        }
+
+        if (typeof window.Request === "function") {
+
+            const PlainRequest = window.Request;
+            const WatchedRequest = function (input, init) {
+
+                try {
+
+                    if (init && typeof init.body === "string") {
+                        keepMade("Request", init.body);
+                    }
+                } catch (e) {
+                    // Never in the way of the site
+                }
+
+                return init === undefined ? new PlainRequest(input) : new PlainRequest(input, init);
+            };
+
+            WatchedRequest.prototype = PlainRequest.prototype;
+            window.Request = WatchedRequest;
+        }
+
+        // What the site made in a span of time, one of them most likely the
+        // body it sent, the nearest last
+        const tellMade = function (path, started, before, after, what) {
+
+            const made = madeJson.filter(function (m) {
+                return m.at >= started - before && m.at <= started + after;
+            }).slice(-6);
+
+            made.forEach(function (m, i) {
+                dbgLog("Mureka", "Made " + Math.round(started - m.at) + " ms before " + what + path
+                    + " (" + (i + 1) + " of " + made.length + "), " + redact(m.text).slice(0, 8000));
+            });
+
+            if (made.length === 0) {
+                dbgLog("Mureka", "Nothing made in the " + Math.round(before / 1000) + " s before " + what + path
+                    + ", no JSON, form or Request body");
+            }
+        };
+
+        // The answer of a stream read as the site reads it: the body is
+        // split in two, one for the site and one read here, the text logged
+        // once it ends
+        const bodyGetter = window.Response && Object.getOwnPropertyDescriptor(Response.prototype, "body");
+        const split = new WeakMap();
+
+        if (bodyGetter && typeof bodyGetter.get === "function") {
+
+            Object.defineProperty(Response.prototype, "body", {
+                configurable: true,
+                enumerable: bodyGetter.enumerable,
+                get: function () {
+
+                    const plain = bodyGetter.get.call(this);
+
+                    try {
+
+                        if (!plain || !loggingOn() || !/-stream\//.test(this.url || "") || typeof plain.tee !== "function") {
+                            return plain;
+                        }
+
+                        if (split.has(this)) {
+                            return split.get(this);
+                        }
+
+                        const parts = plain.tee();
+                        const path = new URL(this.url, location.href).pathname;
+                        const reader = parts[1].getReader();
+                        const decoder = new TextDecoder();
+                        let got = "";
+
+                        split.set(this, parts[0]);
+
+                        // The browser does not always list a stream the site
+                        // stops reading, so what was made before its answer
+                        // came is looked up here
+                        tellMade(path, Date.now(), 10000, 0, "the answer of ");
+
+                        const pump = function () {
+
+                            reader.read().then(function (r) {
+
+                                if (r.done) {
+
+                                    dbgLog("Mureka", "Stream answer from " + path + ", " + got.length + " characters: "
+                                        + redact(got).replace(/\n+/g, " | ").slice(0, 6000));
+                                    return;
+                                }
+
+                                got += decoder.decode(r.value, { stream: true });
+                                pump();
+                            }).catch(function (e) {
+                                dbgLog("Mureka", "Stream answer from " + path + " cut off after " + got.length + " characters: "
+                                    + redact(got).replace(/\n+/g, " | ").slice(0, 6000));
+                            });
+                        };
+
+                        pump();
+                        return parts[0];
+                    } catch (e) {
+                        return plain;
+                    }
+                }
+            });
+        }
+
+        // The browser's own list of what the page loaded, for requests the
+        // watched fetch never saw, as when the site's code kept the fetch it
+        // found before the player came. The address only, no body
+        if (typeof PerformanceObserver === "function") {
+
+            try {
+
+                new PerformanceObserver(function (list) {
+
+                    if (!loggingOn()) {
+                        return;
+                    }
+
+                    for (const entry of list.getEntries()) {
+
+                        try {
+
+                            const u = new URL(entry.name, location.href);
+
+                            if (u.host !== location.host || u.pathname.indexOf("/api/") !== 0
+                                || /report|exportable\/list/.test(u.pathname)) {
+                                continue;
+                            }
+
+                            const at = hooked.get(u.pathname) || 0;
+                            const started = (performance.timeOrigin || 0) + entry.startTime;
+
+                            // A request the watched fetch or XHR saw start,
+                            // however long it took
+                            if (at >= started - 2000 || Date.now() - at < 15000) {
+                                continue;
+                            }
+
+                            dbgLog("Mureka", "Seen by the browser only (" + entry.initiatorType + "): " + u.pathname
+                                + (u.search ? redact(u.search).slice(0, 200) : "") + ", " + Math.round(entry.duration) + " ms");
+
+                            if (!/-stream\//.test(u.pathname)) {
+                                tellMade(u.pathname, started, 3000, 300, "");
+                            }
+                        } catch (e) {
+                            // Not an address
+                        }
+                    }
+                }).observe({ type: "resource", buffered: false });
+            } catch (e) {
+                // No list of what was loaded here
+            }
+        }
 
         const plainFetch = window.fetch;
 
@@ -19980,8 +20371,22 @@
 
                     const url = typeof input === "string" ? input : (input && input.url) || "";
                     const method = (init && init.method) || (input && input.method) || "GET";
+                    const own = init && init.body !== undefined && init.body !== null;
 
-                    note(method, url, init ? init.body : null);
+                    seenByHook(url);
+
+                    // A Request carrying its own body, read from a copy
+                    if (!own && input && typeof input === "object" && typeof input.clone === "function"
+                        && /^(POST|PUT|PATCH)$/i.test(String(method))) {
+
+                        input.clone().text().then(function (text) {
+                            note(method, url, text);
+                        }).catch(function () {
+                            note(method, url, null);
+                        });
+                    } else {
+                        note(method, url, own ? init.body : null);
+                    }
                 } catch (e) {
                     // Never in the way of the request itself
                 }
@@ -20054,6 +20459,7 @@
             xhr.open = function (method, url) {
 
                 this.__murekaRequest = [method, url];
+                seenByHook(url);
                 return plainOpen.apply(this, arguments);
             };
 
@@ -23042,6 +23448,12 @@
             return true;
         }
 
+        if (isShown(createEl)) {
+
+            closeCreate();
+            return true;
+        }
+
         if (isShown(creatorsEl)) {
 
             closeCreators();
@@ -23066,7 +23478,7 @@
     // Whether anything covers the main player right now
     function dialogOpen() {
 
-        return settingsOpen || tagSheetOpen || isShown(infoEl) || isShown(playlistsEl)
+        return settingsOpen || tagSheetOpen || isShown(infoEl) || isShown(playlistsEl) || isShown(createEl)
             || isShown(creatorsEl) || (!!panelEl && !!panelEl.querySelector("[data-mureka-notice]"));
     }
 
@@ -24019,7 +24431,7 @@
     };
 
     // Every transport button that can be placed, in a fixed reference order
-    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist"];
+    const CONTROL_NAMES = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create"];
 
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
@@ -24213,6 +24625,10 @@
 
         if (name === "playlists") {
             return iconPlaylists();
+        }
+
+        if (name === "create") {
+            return iconCreate();
         }
 
         // The web view's two list buttons, drawn as they are there
@@ -27882,7 +28298,15 @@
             if (t && t.bpm > 0) {
 
                 add("From the song", t.bpm + " BPM" + (t.v !== TEMPO_VERSION ? ", worked out an older way, again when it comes up" : ""));
-                sub("Sure", t.sure + (t.sure >= TEMPO_SURE ? ", used" : ", not used, below " + TEMPO_SURE));
+                // Sure enough is not the same as in use: Mureka's tempo can
+                // come first, as chosen under BPM from
+                let sureText = ", too unsure to use, below " + Math.round(TEMPO_SURE * 100) + " %";
+
+                if (t.sure >= TEMPO_SURE) {
+                    sureText = origin === "song" ? ", in use" : ", sure enough to use";
+                }
+
+                sub("Sure", Math.round(t.sure * 100) + " %" + sureText);
                 sub("Half and double", Math.round(t.bpm / 2 * 10) / 10 + " and " + Math.round(t.bpm * 20) / 10 + " BPM");
 
                 if (t.first > 0) {
@@ -29345,7 +29769,7 @@
         } else if (r.sure < TEMPO_SURE) {
 
             tempoTally.unsure += 1;
-            how = "not used, the beat did not stand out (" + r.sure + ")";
+            how = "not used, the beat did not stand out (" + Math.round(r.sure * 100) + " % sure)";
         } else if (!mureka) {
             how = "Mureka gives none";
         } else if (Math.abs(r.bpm - mureka) <= 1) {
@@ -29367,7 +29791,7 @@
         }
 
         dbgLog("Tempo", (song.title || "Untitled") + " (" + song.song_id + "): "
-            + (r ? r.bpm + " BPM, sure " + r.sure : "none") + ", " + how + ", " + ms + " ms"
+            + (r ? r.bpm + " BPM, " + Math.round(r.sure * 100) + " % sure" : "none") + ", " + how + ", " + ms + " ms"
             + (r ? ", " + beatCheckText(r) : ""));
     }
 
@@ -32520,6 +32944,7 @@
             stats: Date.now() < statsWebUntil ? statsRows() : null,
             exportsKey: hostExportsKey(),
             trimJob: hostTrimJob,
+            create: Date.now() < createWebUntil ? hostCreateState() : null,
             trimFade: settings.trimFade !== false,
             waveOn: settings.webWave !== false,
             webWaveSource: settings.webWaveSource === "song" ? "song" : "mureka",
@@ -35880,6 +36305,11 @@
             // A web view shows the stats, or closed them
             statsWebUntil = arg === true ? Date.now() + 8000 : 0;
             publishHostSoon();
+        } else if (cmd === "createWatch") {
+
+            // A web view shows the form for making songs, or closed it
+            createWebUntil = arg === true ? Date.now() + 8000 : 0;
+            publishHostSoon();
         } else if (cmd === "cameBack") {
 
             // A web view shown again or given focus, with whether its play
@@ -36314,6 +36744,8 @@
         window.__murekaHostKeptCover = hostKeptCover;
         window.__murekaHostStoredInfo = hostStoredInfo;
         window.__murekaHostSetCover = hostSetCover;
+        window.__murekaHostCreate = hostCreate;
+        window.__murekaHostCreateUpload = hostCreateUpload;
 
         ["play", "pause", "playing", "ended", "seeked", "loadedmetadata", "volumechange"].forEach(function (type) {
             document.addEventListener(type, publishHostSoon, true);
@@ -36657,15 +37089,27 @@
 
                     return inPageBase64(body).then(function (data) {
 
-                        const ask = { id: q("id"), type: /^image\/[a-z0-9.+-]{1,30}$/i.test(q("type")) ? q("type") : "image/jpeg", data: data };
+                        const ask = { id: q("id"), playlist: q("playlist").slice(0, 40), type: /^image\/[a-z0-9.+-]{1,30}$/i.test(q("type")) ? q("type") : "image/jpeg", data: data };
 
                         for (const k of ["x", "y", "s", "w", "h"]) {
                             ask[k] = Number(q(k)) || 0;
                         }
 
-                        dbgLog("Command", "From the web view here: a new cover for " + ask.id);
+                        dbgLog("Command", "From the web view here: a new cover for " + (ask.playlist ? "playlist " + ask.playlist : ask.id));
                         return inPageLater(hostSetCover, ask, 90000);
                     });
+                }
+
+                if (path === "/create") {
+                    return inPageLater(hostCreate, JSON.parse(String(body || "{}")), 240000);
+                }
+
+                if (path === "/createUpload") {
+
+                    const blob = body instanceof Blob ? body : new Blob([body || ""]);
+
+                    dbgLog("Command", "From the web view here: a song to remix, " + Math.round(blob.size / 1024) + " kB");
+                    return inPageLater(hostCreateUpload, { blob: blob, name: q("name"), type: q("type") }, 600000);
                 }
             } else if (path === "/state") {
                 return inPageAwaitState(q("since"));
@@ -37335,6 +37779,17 @@
         rowSource.appendChild(playlistButton);
         rowSource.appendChild(creatorButton);
 
+        // Making songs on Mureka
+        const rowCreate = makeActionRow();
+        const createButton = makeActionButton(iconCreate(), "Create songs", "#444", "#fff", function () {
+
+            closeDropdowns();
+            openCreate();
+        });
+
+        createButton.title = "Make songs on Mureka: lyrics, style, voice or a remix";
+        rowCreate.appendChild(createButton);
+
         // Putting the audio on the device, for offline listening or for keeps
         const rowStorage = makeActionRow();
 
@@ -37457,6 +37912,7 @@
         actionsWrapEl.style.cssText = POPUP_CSS;
         actionsWrapEl.appendChild(rowLibrary);
         actionsWrapEl.appendChild(rowSource);
+        actionsWrapEl.appendChild(rowCreate);
         actionsWrapEl.appendChild(rowStorage);
         actionsWrapEl.appendChild(rowDisplay);
         actionsWrapEl.appendChild(rowData);
@@ -38064,7 +38520,10 @@
             // The Playlists page, and the playing song into the playlist
             // songs went into last
             playlists: makeIconButton(iconPlaylists(), "Playlists", openPlaylists),
-            toplaylist: makeIconButton(iconPlaylistAdd(), "Add the playing song to a playlist", addPlayingToLastPlaylist)
+            toplaylist: makeIconButton(iconPlaylistAdd(), "Add the playing song to a playlist", addPlayingToLastPlaylist),
+
+            // The page for making songs
+            create: makeIconButton(iconCreate(), "Create songs", openCreate)
         };
 
         updateFeedButton();
@@ -41085,6 +41544,16 @@
             ["line", { x1: "3", y1: "18", x2: "11", y2: "18" }],
             ["line", { x1: "18", y1: "13", x2: "18", y2: "21" }],
             ["line", { x1: "14", y1: "17", x2: "22", y2: "17" }]
+        ]);
+    }
+
+    // A ring with a plus, for making songs
+    function iconCreate() {
+
+        return makeSvgIcon([
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["path", { d: "M12 8v8" }],
+            ["path", { d: "M8 12h8" }]
         ]);
     }
 
@@ -52952,6 +53421,7 @@
     function openSettings() {
 
         closeDropdowns();
+        closeCreate();
         closePlaylists();
         closeCreators();
         closeInfo();
@@ -53273,6 +53743,7 @@
     async function openInfo(song) {
 
         closeDropdowns();
+        closeCreate();
         closePlaylists();
         closeCreators();
         closeSettings();
@@ -54239,6 +54710,7 @@
     async function openTrimmer(song) {
 
         closeDropdowns();
+        closeCreate();
         closePlaylists();
         closeCreators();
         closeSettings();
@@ -55901,7 +56373,7 @@
                 "authorization": "OSS " + token.tmp_secret_id + ":" + sig
             },
             body: body
-        }, 60000);
+        }, body && body.size ? Math.max(60000, Math.round(body.size / 50)) : 60000);
 
         if (!res.ok) {
 
@@ -55922,9 +56394,17 @@
         return res;
     }
 
-    // The picture into Mureka's storage: a short lived key from Mureka, then
-    // an upload in one part. Answers the file's path
+    // The picture into Mureka's storage. Answers the file's path
     async function uploadCover(blob) {
+
+        const kind = coverFileType(blob);
+
+        return uploadToStorage(blob, kind.type, kind.ext, "a cover");
+    }
+
+    // A file into Mureka's storage: a short lived key from Mureka, then an
+    // upload in one part. Answers the file's path
+    async function uploadToStorage(blob, type, ext, what) {
 
         const res = await timedFetch("/api/misc/cos-token?time=" + Date.now(), {
             credentials: "include",
@@ -55938,12 +56418,11 @@
             throw new Error("Mureka gave no upload key" + (json && json.msg ? ", " + json.msg : ""));
         }
 
-        const kind = coverFileType(blob);
-        const key = token.allow_prefix + randomUuid() + "." + kind.ext;
+        const key = token.allow_prefix + randomUuid() + "." + ext;
 
-        dbgLog("Mureka", "uploading a cover of " + Math.round(blob.size / 1024) + " kB to " + key);
+        dbgLog("Mureka", "uploading " + what + " of " + Math.round(blob.size / 1024) + " kB to " + key);
 
-        const init = await ossRequest(token, "POST", key, "?uploads=", "?uploads", kind.type, null);
+        const init = await ossRequest(token, "POST", key, "?uploads=", "?uploads", type, null);
         const found = (await init.text()).match(/<UploadId>([^<]+)<\/UploadId>/);
 
         if (!found) {
@@ -55952,11 +56431,11 @@
 
         const uploadId = found[1];
         const part = await ossRequest(token, "PUT", key, "?partNumber=1&uploadId=" + uploadId,
-            "?partNumber=1&uploadId=" + uploadId, kind.type, blob);
+            "?partNumber=1&uploadId=" + uploadId, type, blob);
         const etag = part.headers.get("ETag");
 
         if (!etag) {
-            throw new Error("the storage did not confirm the picture");
+            throw new Error("the storage did not confirm the file");
         }
 
         const done = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<CompleteMultipartUpload>\n<Part>\n"
@@ -56940,6 +57419,1989 @@
         publishHostSoon();
     }
 
+    // Making songs on Mureka from the player, with the requests Mureka's own
+    // create page sends: a song with lyrics, an instrumental, a song sung by
+    // one of Mureka's characters, or a remix of a song uploaded to Mureka,
+    // and Mureka's helpers that write lyrics and style. The phone's page and
+    // the web view share all of it, the form is kept on the phone
+    const CREATE_DRAFT_KEY = "mureka_create_draft_v1";
+    const CREATE_TITLE_MAX = 50;
+    const CREATE_LYRICS_MAX = 5000;
+    const CREATE_STYLE_MAX = 1000;
+    const CREATE_THEME_MAX = 500;
+    const CREATE_MODEL = "mureka-9.5";
+    const CREATE_UPLOAD_MAX = 60 * 1024 * 1024;
+    const CREATE_REMIX_FIELDS = ["id", "title", "url", "duration_milliseconds", "source_type", "created_at",
+        "origin_control_type", "vocal_start_ms", "vocal_end_ms", "is_subscription_privilege", "trim_start_ms", "trim_end_ms"];
+
+    let createDraft = null;
+    let createEl = null;
+
+    // Until when a web view shows the form and is sent it with the state
+    let createWebUntil = 0;
+    let createUi = null;
+
+    // What is being done for the form, shown on the page and in the web
+    // view, empty while nothing is
+    let createBusy = "";
+    let createNote = { text: "", bad: false, at: 0 };
+
+    // The lengths to choose from: automatic, then every ten seconds from
+    // half a minute to eight minutes
+    function createLengths() {
+
+        const out = [0];
+
+        for (let s = 30; s <= 480; s += 10) {
+            out.push(s * 1000);
+        }
+
+        return out;
+    }
+
+    function createLengthText(ms) {
+
+        if (!ms) {
+            return "Automatic";
+        }
+
+        const s = Math.round(ms / 1000);
+
+        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    // Text cut to a length, anything else an empty text
+    function createText(value, max) {
+        return typeof value === "string" ? value.slice(0, max) : "";
+    }
+
+    // Only the parts of a remix Mureka sent back, numbers and short texts
+    function createCleanRemix(r) {
+
+        if (!r || typeof r !== "object" || !r.id) {
+            return null;
+        }
+
+        const out = {};
+
+        for (const k of CREATE_REMIX_FIELDS) {
+
+            const v = r[k];
+
+            if (typeof v === "number" || typeof v === "boolean") {
+                out[k] = v;
+            } else if (typeof v === "string") {
+                out[k] = v.slice(0, 400);
+            }
+        }
+
+        return out.id ? out : null;
+    }
+
+    function createCleanDraft(d) {
+
+        const x = d && typeof d === "object" ? d : {};
+        const lengths = createLengths();
+        const wild = Math.round(Number(x.wildness));
+
+        return {
+            kind: x.kind === "instrumental" ? "instrumental" : "song",
+            title: createText(x.title, CREATE_TITLE_MAX),
+            lyrics: createText(x.lyrics, CREATE_LYRICS_MAX),
+            style: createText(x.style, CREATE_STYLE_MAX),
+            stylePromptId: createText(x.stylePromptId, 40),
+            stylePromptText: createText(x.stylePromptText, CREATE_STYLE_MAX),
+            voice: ["male", "female", "character"].indexOf(x.voice) >= 0 ? x.voice : "male",
+            characterId: String(x.characterId || "").replace(/[^0-9]/g, "").slice(0, 24),
+            characterName: createText(x.characterName, 80),
+            remix: createCleanRemix(x.remix),
+            remixName: createText(x.remixName, 120),
+            remixStyle: createText(x.remixStyle, CREATE_STYLE_MAX),
+            lengthMs: lengths.indexOf(Number(x.lengthMs)) >= 0 ? Number(x.lengthMs) : 0,
+            wildness: isFinite(wild) ? Math.max(0, Math.min(100, wild)) : 50,
+            theme: createText(x.theme, CREATE_THEME_MAX)
+        };
+    }
+
+    function loadCreateDraft() {
+
+        if (createDraft) {
+            return createDraft;
+        }
+
+        let raw = null;
+
+        try {
+            raw = JSON.parse(localStorage.getItem(CREATE_DRAFT_KEY) || "null");
+        } catch (e) {
+            raw = null;
+        }
+
+        createDraft = createCleanDraft(raw);
+
+        return createDraft;
+    }
+
+    let createSaveTimer = 0;
+
+    // Kept a moment after the last change, typing does not write each key
+    function saveCreateDraft() {
+
+        clearTimeout(createSaveTimer);
+        createSaveTimer = setTimeout(function () {
+
+            try {
+                localStorage.setItem(CREATE_DRAFT_KEY, JSON.stringify(createDraft));
+            } catch (e) {
+                dbgLog("Create", "the form could not be kept, " + errText(e));
+            }
+        }, 400);
+        publishHostSoon();
+    }
+
+    // A change to the form from anywhere, the phone's page drawn again
+    function changeCreateDraft(changes) {
+
+        createDraft = createCleanDraft(Object.assign({}, loadCreateDraft(), changes || {}));
+        saveCreateDraft();
+
+        if (isShown(createEl)) {
+            paintCreate(true);
+        }
+    }
+
+    // A line about what is going on, shown on the page and in the web view
+    function setCreateNote(text, bad) {
+
+        createNote = { text: String(text || ""), bad: bad === true, at: Date.now() };
+
+        if (createUi) {
+            paintCreateStatus();
+        }
+
+        publishHostSoon();
+    }
+
+    // Why Mureka said no, in words
+    function createWhy(status, json) {
+
+        if (status === 429) {
+            return "Mureka is making as many songs as it takes at once, try again in a little while";
+        }
+
+        if (json && Number(json.code) === 6335) {
+            return "This needs a paid Mureka plan";
+        }
+
+        if (json && json.msg) {
+            return String(json.msg).slice(0, 200);
+        }
+
+        return "Mureka answered " + status;
+    }
+
+    async function createAnswer(path, res) {
+
+        const json = await res.json().catch(function () {
+            return null;
+        });
+
+        dbgLog("Create", path.replace(/^\/api\/pgc\//, "").split("?")[0] + ": HTTP " + res.status
+            + (json && json.code !== undefined ? ", code " + json.code : "")
+            + (json && json.msg ? ", " + String(json.msg).slice(0, 80) : ""));
+
+        if (!res.ok || !json || json.code !== 0) {
+
+            const e = new Error(createWhy(res.status, json));
+
+            e.status = res.status;
+            throw e;
+        }
+
+        return json.data || {};
+    }
+
+    // One of Mureka's requests for making songs, a POST with the time first
+    async function createPost(path, body, ms) {
+
+        const res = await timedFetch(path, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(Object.assign({ time: Date.now() }, body))
+        }, ms || 30000);
+
+        return createAnswer(path, res);
+    }
+
+    async function createGet(path, ms) {
+
+        const res = await timedFetch(path + (path.indexOf("?") >= 0 ? "&" : "?") + "time=" + Date.now(), {
+            credentials: "include",
+            cache: "no-store"
+        }, ms || 20000);
+
+        return createAnswer(path, res);
+    }
+
+    // One of Mureka's writing helpers. The answer comes as a stream of
+    // events, each a piece of the text: a title, lyrics or a style. heard
+    // gets what has come so far, the whole text is the answer
+    async function createStream(path, body, heard) {
+
+        userTry("Mureka's writing help");
+
+        const res = await timedFetch(path, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+            body: JSON.stringify(body)
+        }, 30000);
+        const type = res.headers.get("Content-Type") || "";
+
+        if (!res.ok || type.indexOf("json") >= 0) {
+
+            const json = await res.json().catch(function () {
+                return null;
+            });
+            const e = new Error(createWhy(res.status, json));
+
+            e.early = true;
+            dbgLog("Create", path + " turned down: HTTP " + res.status + (json && json.msg ? ", " + json.msg : ""));
+            throw e;
+        }
+
+        if (!res.body || typeof res.body.getReader !== "function") {
+            throw new Error("This browser cannot read Mureka's answer as it comes");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        const got = { title: "", text: "" };
+        let buffer = "";
+        let event = "message";
+        let ended = false;
+        let lastAt = Date.now();
+
+        // An answer that stops coming is given up after a minute
+        const guard = setInterval(function () {
+
+            if (Date.now() - lastAt > 60000) {
+                reader.cancel().catch(function () {});
+            }
+        }, 5000);
+
+        try {
+
+            while (!ended) {
+
+                const r = await reader.read();
+
+                if (r.done) {
+                    break;
+                }
+
+                lastAt = Date.now();
+                buffer += decoder.decode(r.value, { stream: true });
+
+                let nl = buffer.indexOf("\n");
+
+                while (nl >= 0 && !ended) {
+
+                    const line = buffer.slice(0, nl).replace(/\r$/, "");
+
+                    buffer = buffer.slice(nl + 1);
+                    nl = buffer.indexOf("\n");
+
+                    if (line === "") {
+
+                        event = "message";
+                        continue;
+                    }
+
+                    if (line.indexOf("event:") === 0) {
+
+                        event = line.slice(6).trim();
+                        continue;
+                    }
+
+                    if (line.indexOf("data:") !== 0) {
+                        continue;
+                    }
+
+                    const data = line.slice(5).replace(/^ /, "");
+
+                    if (event === "done" || data === "[DONE]") {
+
+                        ended = true;
+                        break;
+                    }
+
+                    let piece = null;
+
+                    try {
+                        piece = JSON.parse(data);
+                    } catch (e) {
+                        piece = null;
+                    }
+
+                    if (event === "error") {
+
+                        const e = new Error(piece && piece.message ? String(piece.message).slice(0, 200) : "Mureka could not do it");
+
+                        e.early = !got.text;
+                        throw e;
+                    }
+
+                    if (!piece || typeof piece !== "object") {
+                        continue;
+                    }
+
+                    if (event === "title") {
+                        got.title += String(piece.title || "");
+                    } else if (piece.content !== undefined) {
+                        got.text += String(piece.content);
+                    } else if (piece.lyrics !== undefined) {
+                        got.text += String(piece.lyrics);
+                    }
+
+                    if (heard) {
+                        heard(got);
+                    }
+                }
+            }
+        } finally {
+
+            clearInterval(guard);
+            reader.cancel().catch(function () {});
+        }
+
+        if (!got.text.trim()) {
+
+            const e = new Error("Mureka's answer came back empty");
+
+            e.early = true;
+            throw e;
+        }
+
+        got.title = got.title.trim().slice(0, CREATE_TITLE_MAX);
+        got.text = got.text.replace(/^\s+/, "").replace(/\s+$/, "");
+
+        return got;
+    }
+
+    // Lyrics and a title written from a theme
+    function createAiLyrics(theme, heard) {
+
+        return createStream("/api/pgc/lyrics-stream/generate", {
+            lyrics: "",
+            create_title: true,
+            type: 4,
+            prompt: { content: theme }
+        }, heard);
+    }
+
+    // The lyrics written better, as Mureka's Optimize lyrics does
+    function createAiPolish(lyrics, heard) {
+        return createStream("/api/pgc/lyrics-stream/optimize", { lyrics: lyrics }, heard);
+    }
+
+    // A style written out from the one given and the lyrics: "match" keeps to
+    // it, "surprise" goes somewhere new. The remix page says so. Turned down
+    // at once for the song page's own word, the remix page's is tried
+    async function createAiStyle(style, lyrics, mode, remix, heard) {
+
+        const body = { prompt: { content: style }, lyrics: lyrics, mode: mode, scene: remix ? "remix" : "custom" };
+
+        try {
+            return await createStream("/api/pgc/style-stream/enhance", body, heard);
+        } catch (e) {
+
+            if (remix || !e.early) {
+                throw e;
+            }
+
+            dbgLog("Create", "style help turned down for a song, " + errText(e) + ", tried as for a remix");
+            body.scene = "remix";
+
+            return createStream("/api/pgc/style-stream/enhance", body, heard);
+        }
+    }
+
+    // What Mureka makes of the lyrics before a song: 3 when it would rather
+    // write them better first
+    async function createCheckLyrics(lyrics) {
+
+        const data = await createPost("/api/pgc/lyrics/optimize/detect", { lyrics: lyrics }, 20000);
+
+        return Number(data.optimize_type) || 0;
+    }
+
+    // The array in one of Mureka's list answers, whatever it is called
+    function createListOf(data) {
+
+        if (Array.isArray(data)) {
+            return data;
+        }
+
+        for (const k of ["list", "items", "characters", "resources", "prompts", "records", "data"]) {
+
+            if (data && Array.isArray(data[k])) {
+                return data[k];
+            }
+        }
+
+        return [];
+    }
+
+    // A list read page by page, up to a few pages
+    async function createPages(path, pages) {
+
+        const out = [];
+        const seen = new Set();
+        let last = "0";
+
+        for (let i = 0; i < pages; i += 1) {
+
+            const data = await createGet(path + (path.indexOf("?") >= 0 ? "&" : "?") + "last_id=" + encodeURIComponent(last));
+            const list = createListOf(data);
+
+            // A page that comes again adds nothing
+            for (const x of list) {
+
+                const id = x && x.id !== undefined ? String(x.id) : "";
+
+                if (id && seen.has(id)) {
+                    continue;
+                }
+
+                if (id) {
+                    seen.add(id);
+                }
+
+                out.push(x);
+            }
+
+            const next = data && data.last_id !== undefined && data.last_id !== null ? String(data.last_id) : "";
+
+            if (list.length === 0 || !next || next === last || next === "0" || data.has_more === false) {
+                break;
+            }
+
+            last = next;
+        }
+
+        return out;
+    }
+
+    // The style prompts kept on Mureka, as My prompts shows them
+    async function createPrompts() {
+
+        const list = await createPages("/api/pgc/style_prompt/list?size=20&bookmarked_only=true", 5);
+
+        return list.map(function (p) {
+            return { id: String(p && p.id !== undefined ? p.id : ""), text: String(p && p.content || "") };
+        }).filter(function (p) {
+            return p.id && p.text;
+        });
+    }
+
+    async function createSavePrompt(text) {
+
+        const data = await createPost("/api/pgc/style_prompt/save", { content: text });
+        const p = data.prompt || {};
+
+        if (p.id === undefined) {
+            throw new Error("Mureka kept no prompt");
+        }
+
+        return { id: String(p.id), text: String(p.content || text) };
+    }
+
+    // Mureka's characters, the voices that sing as one person
+    async function createCharacters() {
+
+        const list = await createPages("/api/pgc/character/list?size=20", 5);
+
+        if (list[0] && typeof list[0] === "object") {
+            dbgLog("Create", "character fields: " + Object.keys(list[0]).join(", ").slice(0, 300));
+        }
+
+        return list.map(function (c) {
+
+            const x = c && typeof c.character === "object" && c.character ? c.character : (c || {});
+            const id = x.id !== undefined ? x.id : x.character_id;
+
+            return {
+                id: String(id === undefined || id === null ? "" : id).replace(/[^0-9]/g, ""),
+                name: String(x.name || x.title || x.nickname || x.display_name || "Character").slice(0, 80),
+                about: String(x.description || x.desc || x.style || x.prompt || "").slice(0, 200)
+            };
+        }).filter(function (c) {
+            return c.id;
+        });
+    }
+
+    // A song uploaded to Mureka, as a list or an upload hands it back
+    function createResourceOf(r) {
+
+        const x = r && typeof r.resource === "object" && r.resource ? r.resource : (r || {});
+
+        return {
+            id: x.id,
+            title: String(x.title || "Uploaded song").slice(0, 120),
+            ms: Number(x.duration_milliseconds) || 0,
+            at: Number(x.created_at) || 0
+        };
+    }
+
+    // The songs uploaded to Mureka before, a page at a time
+    async function createResources(last) {
+
+        const data = await createGet("/api/pgc/resource/list/mine?last_id=" + encodeURIComponent(last || "0"));
+        const list = createListOf(data);
+
+        if (list[0] && typeof list[0] === "object" && !last) {
+            dbgLog("Create", "uploaded song fields: " + Object.keys(list[0]).join(", ").slice(0, 300));
+        }
+
+        const next = data && data.last_id !== undefined && data.last_id !== null ? String(data.last_id) : "";
+
+        return {
+            list: list.map(createResourceOf).filter(function (r) {
+                return r.id !== undefined && r.id !== null;
+            }),
+            last: next,
+            more: list.length > 0 && !!next && next !== "0" && next !== String(last || "0") && data.has_more !== false
+        };
+    }
+
+    // How long a remix may be, from Mureka
+    let createRemixLimits = null;
+
+    async function createRemixConfig() {
+
+        if (!createRemixLimits) {
+
+            try {
+
+                const data = await createGet("/api/pgc/remix/config");
+
+                createRemixLimits = {
+                    min: (Number(data.min_seconds) || 10) * 1000,
+                    max: (Number(data.max_seconds) || 480) * 1000
+                };
+            } catch (e) {
+                return { min: 10000, max: 480000 };
+            }
+        }
+
+        return createRemixLimits;
+    }
+
+    // How long an audio file plays, read by the browser
+    function createAudioLength(blob) {
+
+        return new Promise(function (resolve, reject) {
+
+            const url = URL.createObjectURL(blob);
+            const probe = new Audio();
+            let timer = 0;
+
+            const end = function (fn, value) {
+
+                clearTimeout(timer);
+                probe.removeAttribute("src");
+                URL.revokeObjectURL(url);
+                fn(value);
+            };
+
+            timer = setTimeout(function () {
+                end(reject, new Error("the file took too long to read"));
+            }, 20000);
+            probe.preload = "metadata";
+            probe.muted = true;
+            probe.addEventListener("loadedmetadata", function () {
+
+                const s = probe.duration;
+
+                end(isFinite(s) && s > 0 ? resolve : reject, isFinite(s) && s > 0 ? s * 1000 : new Error("the file has no length"));
+            });
+            probe.addEventListener("error", function () {
+                end(reject, new Error("the browser cannot play the file"));
+            });
+            probe.src = url;
+        });
+    }
+
+    // A song file into Mureka's storage and kept among the uploaded songs.
+    // said hears what is going on. Answers the uploaded song
+    async function createUpload(blob, name, said) {
+
+        const tell = typeof said === "function" ? said : function () {};
+
+        if (!blob || !blob.size) {
+            throw new Error("the file is empty");
+        }
+
+        if (blob.size > CREATE_UPLOAD_MAX) {
+            throw new Error("the file is too large, at most " + Math.round(CREATE_UPLOAD_MAX / 1048576) + " MB");
+        }
+
+        tell("Reading the song");
+
+        const ms = Math.round(await createAudioLength(blob));
+        const found = /\.([a-z0-9]{2,4})$/i.exec(String(name || ""));
+        const ext = found ? found[1].toLowerCase() : "mp3";
+        const type = blob.type && blob.type.indexOf("audio/") === 0 ? blob.type : (ext === "mp3" ? "audio/mpeg" : "audio/" + ext);
+        const title = String(name || "").replace(/\.[^.]+$/, "").trim().slice(0, 100) || "Uploaded song";
+
+        tell("Uploading the song, " + Math.round(blob.size / 1048576 * 10) / 10 + " MB");
+        userTry("an upload");
+
+        const key = await uploadToStorage(blob, type, ext, "a song");
+
+        tell("Mureka takes the song in");
+
+        const data = await createPost("/api/pgc/resource/save", {
+            url: key,
+            duration_milliseconds: ms,
+            title: title,
+            control_type: 11,
+            source_type: 2
+        }, 120000);
+
+        return createResourceOf(data);
+    }
+
+    // An uploaded song made ready to remix, within Mureka's limits. Mureka
+    // answers with what it heard in it as a style
+    async function createUse(res) {
+
+        const limits = await createRemixConfig();
+        const ms = Number(res.ms) || 0;
+
+        if (ms > 0 && ms < limits.min) {
+            throw new Error("the song is shorter than the " + Math.round(limits.min / 1000) + " seconds a remix needs");
+        }
+
+        const endMs = ms > 0 ? Math.min(ms, limits.max) : limits.max;
+        const data = await createPost("/api/pgc/resource/use", {
+            control_type: 11,
+            resource_id: res.id,
+            trim_start_ms: 0,
+            trim_end_ms: endMs
+        }, 90000);
+        const r = data.remix || {};
+        const o = data.origin_resource || {};
+
+        if (!r.id) {
+            throw new Error("Mureka gave nothing to remix");
+        }
+
+        return {
+            remix: createCleanRemix({
+                id: r.id,
+                title: r.title,
+                url: r.url,
+                duration_milliseconds: r.duration_milliseconds,
+                source_type: r.source_type,
+                created_at: o.created_at,
+                origin_control_type: o.origin_control_type,
+                vocal_start_ms: o.vocal_start_ms,
+                vocal_end_ms: o.vocal_end_ms,
+                is_subscription_privilege: r.is_subscription_privilege,
+                trim_start_ms: 0,
+                trim_end_ms: Number(data.use_end_ms) || endMs
+            }),
+            style: String(data.prompt && data.prompt.content || "").slice(0, CREATE_STYLE_MAX),
+            name: String(o.title || res.title || r.title || "").slice(0, 120),
+            cut: ms > limits.max
+        };
+    }
+
+    // The body Mureka's create page sends for what the form holds
+    function createBody(d) {
+
+        const style = d.style.trim();
+        const title = d.title.trim();
+        const remix = d.remix ? Object.assign({}, d.remix) : null;
+        const advanced = { duration_ms: d.lengthMs, weirdness: d.wildness };
+
+        if (d.kind === "instrumental") {
+
+            const b = { prompt: { content: style }, refer: null, title: title, duration_milliseconds: null, mode: 3 };
+
+            if (remix) {
+                b.remix = remix;
+            }
+
+            b.template_id = null;
+
+            // A remix goes without the advanced choices, as Mureka sends it
+            if (!remix) {
+                b.advanced_options = advanced;
+            }
+
+            b.model = CREATE_MODEL;
+
+            return b;
+        }
+
+        const b = { title: title, lyrics: d.lyrics.trim(), refer: null };
+
+        // A character carries the voice, no singer or advanced choices
+        if (d.voice === "character" && d.characterId) {
+
+            const id = Number(d.characterId);
+
+            b.motif = null;
+            b.remix = remix;
+            b.prompt = { content: style };
+            b.mode = 0;
+            b.parent_song_id = null;
+            b.template_id = null;
+            b.model = CREATE_MODEL;
+            b.character = { id: Number.isSafeInteger(id) ? id : d.characterId };
+
+            return b;
+        }
+
+        const prompt = { content: style, gender: d.voice === "female" ? "female" : "male" };
+
+        // The kept prompt is named only while the style is still its text
+        if (d.stylePromptId && style === d.stylePromptText.trim()) {
+            prompt.style_prompt_id = d.stylePromptId;
+        }
+
+        b.vocal = null;
+        b.motif = null;
+        b.remix = remix;
+        b.prompt = prompt;
+        b.mode = 0;
+        b.parent_song_id = null;
+        b.template_id = null;
+
+        if (!remix) {
+
+            b.advanced_options = advanced;
+            b.model = CREATE_MODEL;
+        }
+
+        return b;
+    }
+
+    // What is missing before the form can go, empty when nothing is
+    function createMissing(d) {
+
+        if (d.kind === "song" && !d.lyrics.trim()) {
+            return "Write some lyrics, or let Mureka write them, or make it an instrumental";
+        }
+
+        if (d.kind === "instrumental" && !d.style.trim() && !d.remix) {
+            return "Describe the style of the instrumental";
+        }
+
+        if (d.kind === "song" && d.voice === "character" && !d.characterId) {
+            return "Choose a character, or a male or female voice";
+        }
+
+        return "";
+    }
+
+    // Songs made from the form. Answers whether they went, the line to
+    // show, and ask "polish" when Mureka would rather have the lyrics
+    // written better first and that was not already turned down
+    async function createSongs(d, asIs) {
+
+        const missing = createMissing(d);
+
+        if (missing) {
+            return { ok: false, text: missing };
+        }
+
+        userTry("making songs");
+
+        if (d.kind === "song" && asIs !== true) {
+
+            try {
+
+                if (await createCheckLyrics(d.lyrics.trim()) === 3) {
+                    return { ok: false, ask: "polish", text: "Mureka would write these lyrics better first" };
+                }
+            } catch (e) {
+                dbgLog("Create", "the lyrics check failed, made as they are: " + errText(e));
+            }
+        }
+
+        const body = createBody(d);
+
+        dbgLog("Create", "making " + (d.kind === "instrumental" ? "an instrumental" : "a song")
+            + (d.remix ? " remix" : "") + (d.voice === "character" && d.kind === "song" ? " with a character" : "")
+            + ": " + (body.title || "untitled") + ", style " + body.prompt.content.length + " characters"
+            + (body.lyrics !== undefined ? ", lyrics " + body.lyrics.length : ""));
+
+        const data = await createPost("/api/pgc/feed/generate", body, 60000);
+        const feed = data.feed || {};
+        const wait = Number(feed.wait_num) || 0;
+
+        createWatchNew();
+
+        return {
+            ok: true,
+            feedId: feed.feed_id !== undefined ? String(feed.feed_id) : "",
+            text: "Making two songs" + (body.title ? " of \"" + body.title + "\"" : "")
+                + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
+        };
+    }
+
+    // The new songs looked for at the top of the library a few times, so
+    // they show as being made at once, and as songs once they are ready
+    function createWatchNew() {
+
+        const look = async function () {
+
+            if (creatorSource) {
+                return;
+            }
+
+            try {
+
+                const songs = extractSongs(await fetchPage(null));
+
+                tagPage(songs, null);
+
+                for (const s of songs) {
+
+                    const id = String(s.song_id);
+
+                    if (!isUsableSong(s) && !pendingSongs.has(id)) {
+
+                        addedHere.set(id, Date.now());
+                        notePending(s);
+                    }
+                }
+
+                renderList();
+                publishHostSoon();
+            } catch (e) {
+                dbgLog("Create", "the new songs could not be looked for, " + errText(e));
+            }
+        };
+
+        for (const wait of [1500, 6000, 15000]) {
+            setTimeout(look, wait);
+        }
+    }
+
+    // ---- The page on the phone ----
+
+    function openCreate() {
+
+        closeDropdowns();
+        closePlaylists();
+        closeCreators();
+        closeSettings();
+        closeInfo();
+        hideContextMenu();
+
+        if (minimized) {
+            setMinimized(false);
+        }
+
+        if (!createEl) {
+            buildCreate();
+        }
+
+        loadCreateDraft();
+
+        // A line about something done a while ago is let go
+        if (!createBusy && Date.now() - createNote.at > 60000) {
+            createNote = { text: "", bad: false, at: 0 };
+        }
+
+        createEl.style.display = "flex";
+        createEl.scrollTop = 0;
+        paintCreate(false);
+        publishHostSoon();
+    }
+
+    function closeCreate() {
+
+        if (createEl) {
+            createEl.style.display = "none";
+        }
+
+        publishHostSoon();
+    }
+
+    // A small grey heading over a field, with room on its right for a count
+    function createLabelRow(text) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const count = document.createElement("span");
+
+        row.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;color:#aaa;margin-bottom:-4px";
+        name.textContent = text;
+        count.style.cssText = "font-variant-numeric:tabular-nums";
+        row.appendChild(name);
+        row.appendChild(count);
+        row.count = count;
+
+        return row;
+    }
+
+    // A field of the form, no key typed in it reaching the player's own
+    // shortcuts
+    function createField(multi, rows, max) {
+
+        const f = document.createElement(multi ? "textarea" : "input");
+
+        if (multi) {
+            f.rows = rows;
+        } else {
+            f.type = "text";
+        }
+
+        f.maxLength = max;
+        f.setAttribute("autocomplete", "off");
+        f.style.cssText = [
+            "width:100%",
+            "box-sizing:border-box",
+            "padding:8px 10px",
+            "border:1px solid #3a3a42",
+            "border-radius:6px",
+            "background:#26262c",
+            "color:#fff",
+            "font:" + INPUT_FONT,
+            "resize:vertical"
+        ].join(";");
+
+        for (const type of ["keydown", "keyup", "keypress"]) {
+
+            f.addEventListener(type, function (ev) {
+
+                if (ev.key !== "Escape") {
+                    ev.stopPropagation();
+                }
+            });
+        }
+
+        return f;
+    }
+
+    function createButtonRow(buttons) {
+
+        const row = document.createElement("div");
+
+        row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+
+        for (const b of buttons) {
+
+            b.style.flex = "1 1 0";
+            b.style.minWidth = "96px";
+            row.appendChild(b);
+        }
+
+        return row;
+    }
+
+    function buildCreate() {
+
+        createEl = document.createElement("div");
+        createEl.style.cssText = [
+            "position:absolute",
+            "inset:0",
+            "background:#1d1d22",
+            "border-radius:10px",
+            "padding:12px",
+            "box-sizing:border-box",
+            "overflow:auto",
+            "display:none",
+            "flex-direction:column",
+            "gap:10px"
+        ].join(";");
+
+        const ui = { acts: [] };
+        const act = function (label, fn) {
+
+            const b = makeButton(label, "#333", "#fff", fn);
+
+            ui.acts.push(b);
+
+            return b;
+        };
+
+        // Heading, Create within reach and Close
+        const head = document.createElement("div");
+        const heading = document.createElement("div");
+
+        head.style.cssText = "display:flex;align-items:center;gap:8px;flex:0 0 auto";
+        heading.textContent = "Create";
+        heading.style.cssText = "flex:1;font-weight:600";
+        ui.makeBtn = makeButton("Create", "#48e1eb", "#000", function () {
+            createFromPage(false);
+        });
+        ui.makeBtn.style.flex = "0 0 auto";
+        ui.makeBtn.style.padding = "6px 18px";
+        ui.acts.push(ui.makeBtn);
+
+        const closeBtn = makeButton("Close", "#333", "#fff", closeCreate);
+
+        closeBtn.style.flex = "0 0 auto";
+        closeBtn.style.padding = "6px 14px";
+        head.appendChild(heading);
+        head.appendChild(ui.makeBtn);
+        head.appendChild(closeBtn);
+        createEl.appendChild(head);
+
+        // What is going on, a turning ring while Mureka works
+        ui.status = document.createElement("div");
+        ui.status.style.cssText = "display:none;align-items:center;gap:8px;font-size:13px;color:#ccc;white-space:pre-line";
+        ui.statusRing = document.createElement("span");
+        ui.statusRing.style.cssText = "flex:0 0 auto;width:14px;height:14px;border:2px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        ui.statusText = document.createElement("span");
+        ui.status.appendChild(ui.statusRing);
+        ui.status.appendChild(ui.statusText);
+        createEl.appendChild(ui.status);
+
+        // A song with lyrics or an instrumental
+        ui.kindRow = trimSegments([
+            { label: "Song", value: "song" },
+            { label: "Instrumental", value: "instrumental" }
+        ], function () {
+            return loadCreateDraft().kind;
+        }, function (v) {
+            changeCreateDraft({ kind: v });
+        });
+        createEl.appendChild(ui.kindRow);
+
+        // The title, Mureka names the song when left empty
+        ui.titleLabel = createLabelRow("Title");
+        ui.title = createField(false, 1, CREATE_TITLE_MAX);
+        ui.title.placeholder = "Left empty, Mureka names it";
+        ui.title.addEventListener("input", function () {
+
+            createDraft.title = ui.title.value;
+            saveCreateDraft();
+            paintCreateCounts();
+        });
+        createEl.appendChild(ui.titleLabel);
+        createEl.appendChild(ui.title);
+
+        // The lyrics, with Mureka writing them from a theme or better
+        ui.lyricsBox = document.createElement("div");
+        ui.lyricsBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.lyricsLabel = createLabelRow("Lyrics");
+        ui.lyrics = createField(true, 9, CREATE_LYRICS_MAX);
+        ui.lyrics.placeholder = "[Verse]\n...\n\n[Chorus]\n...";
+        ui.lyrics.addEventListener("input", function () {
+
+            createDraft.lyrics = ui.lyrics.value;
+            saveCreateDraft();
+            paintCreateCounts();
+        });
+        ui.lyricsBox.appendChild(ui.lyricsLabel);
+        ui.lyricsBox.appendChild(ui.lyrics);
+        ui.lyricsBox.appendChild(createButtonRow([
+            act("Write from a theme", createThemeFromPage),
+            act("Write them better", function () {
+                createAiFromPage("polish");
+            })
+        ]));
+        createEl.appendChild(ui.lyricsBox);
+
+        // The style, with Mureka's two ways of writing it out and the
+        // prompts kept on Mureka
+        ui.styleLabel = createLabelRow("Style");
+        ui.style = createField(true, 3, CREATE_STYLE_MAX);
+        ui.style.placeholder = "Genre, mood, instruments, tempo";
+        ui.style.addEventListener("input", function () {
+
+            createDraft.style = ui.style.value;
+            saveCreateDraft();
+            paintCreateCounts();
+        });
+        createEl.appendChild(ui.styleLabel);
+        createEl.appendChild(ui.style);
+        createEl.appendChild(createButtonRow([
+            act("Match my vibe", function () {
+                createAiFromPage("match");
+            }),
+            act("Surprise me", function () {
+                createAiFromPage("surprise");
+            })
+        ]));
+        createEl.appendChild(createButtonRow([
+            act("My prompts", createPromptsFromPage),
+            act("Keep as a prompt", createSavePromptFromPage)
+        ]));
+
+        // Who sings: a male or female voice, or one of Mureka's characters
+        ui.voiceBox = document.createElement("div");
+        ui.voiceBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.voiceBox.appendChild(createLabelRow("Voice"));
+        ui.voiceRow = trimSegments([
+            { label: "Male", value: "male" },
+            { label: "Female", value: "female" },
+            { label: "Character", value: "character" }
+        ], function () {
+            return loadCreateDraft().voice;
+        }, function (v) {
+
+            changeCreateDraft({ voice: v });
+
+            if (v === "character" && !createDraft.characterId) {
+                createCharactersFromPage();
+            }
+        });
+        ui.voiceBox.appendChild(ui.voiceRow);
+        ui.characterRow = document.createElement("div");
+        ui.characterRow.style.cssText = "display:flex;align-items:center;gap:8px";
+        ui.characterName = document.createElement("span");
+        ui.characterName.style.cssText = "flex:1;min-width:0;font-size:13px;overflow-wrap:anywhere";
+
+        const pickCharacter = act("Choose", createCharactersFromPage);
+
+        pickCharacter.style.flex = "0 0 auto";
+        pickCharacter.style.padding = "6px 14px";
+        ui.characterRow.appendChild(ui.characterName);
+        ui.characterRow.appendChild(pickCharacter);
+        ui.voiceBox.appendChild(ui.characterRow);
+        createEl.appendChild(ui.voiceBox);
+
+        // A remix of a song uploaded to Mureka
+        createEl.appendChild(createLabelRow("Remix"));
+        ui.remixName = document.createElement("div");
+        ui.remixName.style.cssText = "font-size:13px;overflow-wrap:anywhere";
+        createEl.appendChild(ui.remixName);
+        ui.remixStyleBtn = act("Use the style Mureka heard", function () {
+
+            changeCreateDraft({ style: createDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
+            setCreateNote("The style is the one Mureka heard in the song");
+        });
+        ui.remixClearBtn = act("No remix", function () {
+            changeCreateDraft({ remix: null, remixName: "", remixStyle: "" });
+        });
+        createEl.appendChild(createButtonRow([
+            act("Choose a song", createRemixFromPage),
+            act("Upload a song", createUploadFromPage)
+        ]));
+        createEl.appendChild(createButtonRow([ui.remixStyleBtn, ui.remixClearBtn]));
+
+        // Length and wildness, which a character and a remix go without
+        ui.advBox = document.createElement("div");
+        ui.advBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.advBox.appendChild(createLabelRow("Length"));
+        ui.length = document.createElement("select");
+        ui.length.style.cssText = "width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #3a3a42;border-radius:6px;background:#26262c;color:#fff;font:" + INPUT_FONT;
+
+        for (const ms of createLengths()) {
+
+            const o = document.createElement("option");
+
+            o.value = String(ms);
+            o.textContent = createLengthText(ms);
+            ui.length.appendChild(o);
+        }
+
+        ui.length.addEventListener("change", function () {
+            changeCreateDraft({ lengthMs: Number(ui.length.value) || 0 });
+        });
+        ui.advBox.appendChild(ui.length);
+        ui.wildLabel = createLabelRow("Wildness");
+        ui.advBox.appendChild(ui.wildLabel);
+        ui.wild = document.createElement("input");
+        ui.wild.type = "range";
+        ui.wild.min = "0";
+        ui.wild.max = "100";
+        ui.wild.step = "1";
+        ui.wild.style.cssText = "width:100%;accent-color:#48e1eb";
+        ui.wild.addEventListener("input", function () {
+
+            createDraft.wildness = Number(ui.wild.value) || 0;
+            saveCreateDraft();
+            paintCreateCounts();
+        });
+        ui.advBox.appendChild(ui.wild);
+        createEl.appendChild(ui.advBox);
+
+        const foot = document.createElement("div");
+
+        foot.style.cssText = "font-size:12px;color:#888;line-height:1.5";
+        foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
+        createEl.appendChild(foot);
+
+        // Each part keeps its own height, the page scrolls instead
+        for (const box of [createEl, ui.lyricsBox, ui.voiceBox, ui.advBox]) {
+
+            for (const child of Array.from(box.children)) {
+                child.style.flexShrink = "0";
+            }
+        }
+
+        panelEl.appendChild(createEl);
+        createUi = ui;
+    }
+
+    function paintCreateCounts() {
+
+        const ui = createUi;
+        const d = loadCreateDraft();
+
+        if (!ui) {
+            return;
+        }
+
+        ui.titleLabel.count.textContent = d.title.length + "/" + CREATE_TITLE_MAX;
+        ui.lyricsLabel.count.textContent = d.lyrics.length + "/" + CREATE_LYRICS_MAX;
+        ui.styleLabel.count.textContent = d.style.length + "/" + CREATE_STYLE_MAX
+            + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a kept prompt" : "");
+        ui.wildLabel.count.textContent = String(d.wildness);
+    }
+
+    function paintCreateStatus() {
+
+        const ui = createUi;
+
+        if (!ui) {
+            return;
+        }
+
+        const text = createBusy || createNote.text;
+
+        ui.status.style.display = text ? "flex" : "none";
+        ui.statusRing.style.display = createBusy ? "inline-block" : "none";
+        ui.statusText.textContent = text;
+        ui.status.style.color = !createBusy && createNote.bad ? "#ffb0b0" : "#ccc";
+
+        for (const b of ui.acts) {
+
+            b.disabled = !!createBusy;
+            b.style.opacity = createBusy ? "0.5" : "1";
+        }
+    }
+
+    // The page drawn from the form. fields: the text fields too, which are
+    // left alone while typed in
+    function paintCreate(fields) {
+
+        const ui = createUi;
+        const d = loadCreateDraft();
+
+        if (!ui) {
+            return;
+        }
+
+        const put = function (el, value) {
+
+            if (document.activeElement !== el || fields === false) {
+
+                if (el.value !== value) {
+                    el.value = value;
+                }
+            }
+        };
+
+        put(ui.title, d.title);
+        put(ui.lyrics, d.lyrics);
+        put(ui.style, d.style);
+        ui.length.value = String(d.lengthMs);
+        ui.wild.value = String(d.wildness);
+        ui.kindRow.paint();
+        ui.voiceRow.paint();
+
+        const song = d.kind === "song";
+        const character = song && d.voice === "character";
+
+        ui.lyricsBox.style.display = song ? "flex" : "none";
+        ui.voiceBox.style.display = song ? "flex" : "none";
+        ui.characterRow.style.display = character ? "flex" : "none";
+        ui.characterName.textContent = d.characterId ? d.characterName || "Character " + d.characterId : "No character chosen yet";
+        ui.advBox.style.display = character || d.remix ? "none" : "flex";
+        ui.remixName.textContent = d.remix
+            ? "Remixing " + (d.remixName || d.remix.title || "an uploaded song")
+                + (d.remix.trim_end_ms ? ", " + trimTimeText((d.remix.trim_end_ms - (d.remix.trim_start_ms || 0)) / 1000) : "")
+            : "None, a new song";
+        ui.remixName.style.color = d.remix ? "#fff" : "#888";
+        ui.remixStyleBtn.parentElement.style.display = d.remix ? "flex" : "none";
+        ui.remixStyleBtn.style.display = d.remix && d.remixStyle && d.remixStyle.trim() !== d.style.trim() ? "" : "none";
+        paintCreateCounts();
+        paintCreateStatus();
+    }
+
+    // Something done for the form, one at a time, the page and the web
+    // view told what is going on. Answers what fn answered, or null when
+    // it failed or something else was being done
+    async function createRun(what, fn) {
+
+        if (createBusy) {
+            return null;
+        }
+
+        createBusy = what;
+        createNote = { text: "", bad: false, at: Date.now() };
+        paintCreateStatus();
+        publishHostSoon();
+
+        try {
+            return await fn();
+        } catch (e) {
+
+            dbgLog("Create", what + " failed: " + errText(e));
+            createNote = { text: what + " did not work, " + (e && e.message ? e.message : "no connection"), bad: true, at: Date.now() };
+
+            return null;
+        } finally {
+
+            createBusy = "";
+
+            if (createUi) {
+                paintCreate(true);
+            }
+
+            publishHostSoon();
+        }
+    }
+
+    // The writing helpers, for the page and the web view alike. kind:
+    // "theme" with the theme, "polish", "match" or "surprise". The text
+    // fills in as it comes
+    async function createAi(kind, theme) {
+
+        const d = loadCreateDraft();
+
+        if (kind === "theme") {
+
+            const about = String(theme || "").trim().slice(0, CREATE_THEME_MAX);
+
+            if (!about) {
+
+                setCreateNote("Say what the song is about", true);
+                return false;
+            }
+
+            changeCreateDraft({ theme: about });
+
+            const got = await createRun("Mureka writes lyrics", function () {
+
+                return createAiLyrics(about, function (part) {
+
+                    createDraft.lyrics = part.text.replace(/^\s+/, "").slice(0, CREATE_LYRICS_MAX);
+
+                    if (part.title && !d.title.trim()) {
+                        createDraft.title = part.title.slice(0, CREATE_TITLE_MAX);
+                    }
+
+                    saveCreateDraft();
+                    paintCreate(false);
+                });
+            });
+
+            if (got) {
+
+                changeCreateDraft({ lyrics: got.text, title: d.title.trim() ? d.title : got.title });
+                setCreateNote("Mureka wrote the lyrics" + (got.title ? ", \"" + got.title + "\"" : ""));
+            }
+
+            return !!got;
+        }
+
+        if (kind === "polish") {
+
+            const before = d.lyrics;
+
+            if (!before.trim()) {
+
+                setCreateNote("Write some lyrics first, or let Mureka write them from a theme", true);
+                return false;
+            }
+
+            const got = await createRun("Mureka writes the lyrics better", function () {
+
+                return createAiPolish(before.trim(), function (part) {
+
+                    createDraft.lyrics = part.text.replace(/^\s+/, "").slice(0, CREATE_LYRICS_MAX);
+                    saveCreateDraft();
+                    paintCreate(false);
+                });
+            });
+
+            if (got) {
+
+                changeCreateDraft({ lyrics: got.text });
+                setCreateNote("Mureka wrote the lyrics better");
+                showToast("The lyrics are Mureka's now", true, function () {
+                    changeCreateDraft({ lyrics: before });
+                });
+            } else if (createDraft.lyrics !== before) {
+                changeCreateDraft({ lyrics: before });
+            }
+
+            return !!got;
+        }
+
+        const before = d.style;
+
+        if (!before.trim() && !d.lyrics.trim()) {
+
+            setCreateNote("Write a style or some lyrics first", true);
+            return false;
+        }
+
+        const got = await createRun(kind === "surprise" ? "Mureka thinks of a style" : "Mureka writes the style out", function () {
+
+            return createAiStyle(before.trim(), d.kind === "song" ? d.lyrics.trim() : "", kind === "surprise" ? "surprise" : "match", !!d.remix, function (part) {
+
+                createDraft.style = part.text.replace(/^\s+/, "").slice(0, CREATE_STYLE_MAX);
+                saveCreateDraft();
+                paintCreate(false);
+            });
+        });
+
+        if (got) {
+
+            changeCreateDraft({ style: got.text.slice(0, CREATE_STYLE_MAX) });
+            setCreateNote("Mureka wrote the style");
+            showToast("The style is Mureka's now", true, function () {
+                changeCreateDraft({ style: before });
+            });
+        } else if (createDraft.style !== before) {
+            changeCreateDraft({ style: before });
+        }
+
+        return !!got;
+    }
+
+    function createThemeFromPage() {
+
+        const d = loadCreateDraft();
+        const go = function () {
+
+            askText("What is the song about?", d.theme, "Write", function (typed) {
+                createAi("theme", typed);
+            });
+        };
+
+        if (d.lyrics.trim()) {
+
+            askChoices("Write new lyrics?\nThe lyrics written now are replaced.", [
+                { label: "Write new lyrics", fn: go }
+            ]);
+            return;
+        }
+
+        go();
+    }
+
+    function createAiFromPage(kind) {
+        createAi(kind);
+    }
+
+    // A list to choose from over the page, a row for each, with buttons of
+    // its own under it. Answers a way to put new rows in and to close it
+    function createPicker(title, rows, onPick, extra) {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const list = document.createElement("div");
+        const foot = document.createElement("div");
+
+        back.setAttribute("data-mureka-notice", "1");
+        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+            + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        head.textContent = title;
+        head.style.cssText = "font-weight:600";
+        list.style.cssText = "overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:40px";
+        foot.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+
+        const close = function () {
+            back.remove();
+        };
+
+        const add = function (items) {
+
+            for (const r of items) {
+
+                const row = document.createElement("button");
+                const main = document.createElement("div");
+
+                row.type = "button";
+                row.style.cssText = "text-align:left;border:none;border-radius:8px;background:#1d1d22;color:#fff;padding:8px 10px;"
+                    + "cursor:pointer;font:inherit;font-size:13px;line-height:1.4";
+                main.textContent = r.label;
+                main.style.cssText = "overflow-wrap:anywhere";
+                row.appendChild(main);
+
+                if (r.sub) {
+
+                    const sub = document.createElement("div");
+
+                    sub.textContent = r.sub;
+                    sub.style.cssText = "color:#999;font-size:12px;overflow-wrap:anywhere";
+                    row.appendChild(sub);
+                }
+
+                row.addEventListener("click", function () {
+
+                    close();
+                    onPick(r.value);
+                });
+                list.appendChild(row);
+            }
+        };
+
+        const empty = function (text) {
+
+            list.textContent = "";
+
+            const note = document.createElement("div");
+
+            note.textContent = text;
+            note.style.cssText = "color:#aaa;font-size:13px;padding:6px 2px";
+            list.appendChild(note);
+        };
+
+        for (const x of extra || []) {
+
+            const b = makeButton(x.label, "#333", "#fff", function () {
+                x.fn(close, b);
+            });
+
+            b.style.flex = "1 1 0";
+            foot.appendChild(b);
+        }
+
+        const cancel = makeButton("Cancel", "#444", "#fff", close);
+
+        cancel.style.flex = "1 1 0";
+        foot.appendChild(cancel);
+        card.appendChild(head);
+        card.appendChild(list);
+        card.appendChild(foot);
+        back.appendChild(card);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+        panelEl.appendChild(back);
+
+        if (rows) {
+            add(rows);
+        }
+
+        return { add: add, close: close, empty: empty, list: list };
+    }
+
+    async function createPromptsFromPage() {
+
+        const pick = createPicker("My prompts", null, function (p) {
+            changeCreateDraft({ style: p.text.slice(0, CREATE_STYLE_MAX), stylePromptId: p.id, stylePromptText: p.text.slice(0, CREATE_STYLE_MAX) });
+        });
+
+        pick.empty("Reading the prompts kept on Mureka");
+
+        try {
+
+            const list = await createPrompts();
+
+            pick.list.textContent = "";
+
+            if (list.length === 0) {
+                pick.empty("No prompts are kept on Mureka yet. Keep as a prompt keeps the style written now.");
+            }
+
+            pick.add(list.map(function (p) {
+                return { label: p.text, value: p };
+            }));
+        } catch (e) {
+            pick.empty("The prompts could not be read, " + (e && e.message ? e.message : "no connection"));
+        }
+    }
+
+    async function createSavePromptOf(text) {
+
+        const style = String(text || "").trim().slice(0, CREATE_STYLE_MAX);
+
+        if (!style) {
+
+            setCreateNote("Write a style to keep first", true);
+            return false;
+        }
+
+        const p = await createRun("Keeping the style as a prompt", function () {
+            return createSavePrompt(style);
+        });
+
+        if (p) {
+
+            changeCreateDraft({ stylePromptId: p.id, stylePromptText: p.text });
+            setCreateNote("Kept among My prompts on Mureka");
+        }
+
+        return !!p;
+    }
+
+    function createSavePromptFromPage() {
+        createSavePromptOf(loadCreateDraft().style);
+    }
+
+    async function createCharactersFromPage() {
+
+        const pick = createPicker("Characters", null, function (c) {
+            changeCreateDraft({ voice: "character", characterId: c.id, characterName: c.name });
+        });
+
+        pick.empty("Reading the characters on Mureka");
+
+        try {
+
+            const list = await createCharacters();
+
+            pick.list.textContent = "";
+
+            if (list.length === 0) {
+                pick.empty("No characters on Mureka yet. They are made on Mureka's own page.");
+            }
+
+            pick.add(list.map(function (c) {
+                return { label: c.name, sub: c.about, value: c };
+            }));
+        } catch (e) {
+            pick.empty("The characters could not be read, " + (e && e.message ? e.message : "no connection"));
+        }
+    }
+
+    // The song to remix made ready, its style taken when none is written
+    async function createUseResource(res) {
+
+        const used = await createRun("Mureka gets the song ready to remix", function () {
+            return createUse(res);
+        });
+
+        if (!used) {
+            return false;
+        }
+
+        const d = loadCreateDraft();
+        const changes = { remix: used.remix, remixName: used.name, remixStyle: used.style };
+
+        if (!d.style.trim() && used.style) {
+
+            changes.style = used.style;
+            changes.stylePromptId = "";
+            changes.stylePromptText = "";
+        }
+
+        changeCreateDraft(changes);
+        setCreateNote("Remixing " + (used.name || "the song")
+            + (used.cut ? ", its first " + Math.round(used.remix.trim_end_ms / 60000) + " minutes, as far as Mureka goes" : "")
+            + (used.style ? "\nMureka hears: " + used.style : ""));
+
+        return true;
+    }
+
+    function createResourceRow(r) {
+
+        const when = r.at ? new Date(r.at * 1000).toLocaleDateString() : "";
+
+        return {
+            label: r.title,
+            sub: [r.ms ? trimTimeText(r.ms / 1000) : "", when].filter(Boolean).join(", "),
+            value: r
+        };
+    }
+
+    async function createRemixFromPage() {
+
+        let last = "0";
+        let more = false;
+        let moreBtn = null;
+
+        const pick = createPicker("Songs uploaded to Mureka", null, function (r) {
+            createUseResource(r);
+        }, [
+            {
+                label: "Upload a song",
+                fn: function (close) {
+
+                    close();
+                    createUploadFromPage();
+                }
+            },
+            {
+                label: "More",
+                fn: function (close, b) {
+
+                    moreBtn = b;
+
+                    if (more) {
+                        readMore();
+                    }
+                }
+            }
+        ]);
+
+        const readMore = async function () {
+
+            try {
+
+                const page = await createResources(last);
+
+                if (last === "0") {
+                    pick.list.textContent = "";
+                }
+
+                if (last === "0" && page.list.length === 0) {
+                    pick.empty("No songs uploaded to Mureka yet. Upload a song to remix it.");
+                }
+
+                pick.add(page.list.map(createResourceRow));
+                last = page.last;
+                more = page.more;
+            } catch (e) {
+
+                if (last === "0") {
+                    pick.empty("The uploaded songs could not be read, " + (e && e.message ? e.message : "no connection"));
+                }
+
+                more = false;
+            }
+
+            if (moreBtn) {
+                moreBtn.style.opacity = more ? "1" : "0.5";
+            }
+        };
+
+        pick.empty("Reading the songs uploaded to Mureka");
+        await readMore();
+    }
+
+    // A song file uploaded to Mureka and made ready to remix
+    async function createUploadFile(file) {
+
+        const res = await createRun("Uploading the song", function () {
+
+            return createUpload(file, file.name, function (text) {
+
+                createBusy = text;
+                paintCreateStatus();
+                publishHostSoon();
+            });
+        });
+
+        if (res) {
+            return createUseResource(res);
+        }
+
+        return false;
+    }
+
+    function createUploadFromPage() {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "audio/*,.mp3,.wav,.m4a,.flac,.ogg";
+        input.style.display = "none";
+        document.body.appendChild(input);
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (file) {
+                createUploadFile(file);
+            }
+        });
+        input.click();
+    }
+
+    // The form sent to Mureka. asIs: made with the lyrics as they are, when
+    // Mureka would rather write them better first
+    async function createMake(asIs) {
+
+        const d = loadCreateDraft();
+        const missing = createMissing(d);
+
+        if (missing) {
+
+            setCreateNote(missing, true);
+            return { ok: false, text: missing };
+        }
+
+        const r = await createRun("Sending to Mureka", function () {
+            return createSongs(d, asIs);
+        });
+
+        if (!r) {
+            return { ok: false, text: createNote.text };
+        }
+
+        if (r.ask) {
+
+            setCreateNote(r.text);
+            return r;
+        }
+
+        setCreateNote(r.text, !r.ok);
+
+        if (r.ok) {
+            showToast(r.text, true);
+        }
+
+        return r;
+    }
+
+    async function createFromPage(asIs) {
+
+        const r = await createMake(asIs);
+
+        if (r && r.ask === "polish") {
+
+            askChoices("Write the lyrics better first?\nMureka would rather write these lyrics better before it makes the songs.", [
+                {
+                    label: "Write them better",
+                    fn: function () {
+                        createAi("polish");
+                    }
+                },
+                {
+                    label: "Make the songs as they are",
+                    ring: true,
+                    fn: function () {
+                        createFromPage(true);
+                    }
+                }
+            ]);
+        } else if (r && r.ok) {
+            closeCreate();
+        }
+    }
+
+    // ---- The web view's way in ----
+
+    // What the web view shows of the form, sent with the state while it is
+    // open there or something is being done
+    function hostCreateState() {
+
+        return {
+            draft: loadCreateDraft(),
+            busy: createBusy,
+            note: createNote,
+            lengths: createLengths()
+        };
+    }
+
+    // A request from the web view, answered when done: a list to choose
+    // from, a writing helper, a change to the form or the songs made
+    function hostCreate(id, ask) {
+
+        const a = ask && typeof ask === "object" ? ask : {};
+        const reply = function (value) {
+            hostReply(id, JSON.stringify(value));
+        };
+        const failed = function (e) {
+            reply({ ok: false, why: e && e.message ? e.message : "no connection" });
+        };
+        const op = String(a.op || "");
+
+        if (op === "draft") {
+
+            changeCreateDraft(a.draft && typeof a.draft === "object" ? a.draft : {});
+            reply({ ok: true, state: hostCreateState() });
+        } else if (op === "state") {
+            reply({ ok: true, state: hostCreateState() });
+        } else if (op === "prompts") {
+
+            createPrompts().then(function (list) {
+                reply({ ok: true, list: list });
+            }, failed);
+        } else if (op === "savePrompt") {
+
+            createSavePromptOf(loadCreateDraft().style).then(function (ok) {
+                reply({ ok: ok, why: createNote.text });
+            }, failed);
+        } else if (op === "characters") {
+
+            createCharacters().then(function (list) {
+                reply({ ok: true, list: list });
+            }, failed);
+        } else if (op === "resources") {
+
+            createResources(String(a.last || "0").replace(/[^0-9]/g, "") || "0").then(function (page) {
+                reply({ ok: true, list: page.list, last: page.last, more: page.more });
+            }, failed);
+        } else if (op === "use") {
+
+            const res = { id: Number(a.id) || String(a.id || ""), title: createText(a.title, 120), ms: Number(a.ms) || 0 };
+
+            createUseResource(res).then(function (ok) {
+                reply({ ok: ok, why: createNote.text });
+            }, failed);
+        } else if (op === "ai") {
+
+            const kind = ["theme", "polish", "match", "surprise"].indexOf(a.kind) >= 0 ? a.kind : "";
+
+            if (!kind) {
+
+                reply({ ok: false, why: "Not a helper" });
+                return;
+            }
+
+            createAi(kind, a.theme).then(function (ok) {
+                reply({ ok: ok, why: createNote.text });
+            }, failed);
+        } else if (op === "make") {
+
+            createMake(a.asIs === true).then(function (r) {
+                reply({ ok: r.ok === true, ask: r.ask || "", why: r.text || "" });
+            }, failed);
+        } else {
+            reply({ ok: false, why: "Not known" });
+        }
+    }
+
+    // A song file from the web view to upload and remix
+    function hostCreateUpload(id, ask) {
+
+        let blob = ask && ask.blob instanceof Blob ? ask.blob : null;
+
+        if (!blob) {
+
+            try {
+
+                const bin = atob(String(ask && ask.data || ""));
+                const bytes = new Uint8Array(bin.length);
+
+                for (let i = 0; i < bin.length; i += 1) {
+                    bytes[i] = bin.charCodeAt(i);
+                }
+
+                blob = new Blob([bytes], { type: String(ask && ask.type || "audio/mpeg") });
+            } catch (e) {
+
+                hostReply(id, JSON.stringify({ ok: false, why: "The song did not arrive whole" }));
+                return;
+            }
+        }
+
+        const name = createText(ask && ask.name, 200) || "Uploaded song.mp3";
+
+        createUploadFile(new File([blob], name, { type: blob.type || "audio/mpeg" })).then(function (ok) {
+            hostReply(id, JSON.stringify({ ok: ok, why: createNote.text }));
+        }, function () {
+            hostReply(id, JSON.stringify({ ok: false, why: "Something went wrong" }));
+        });
+    }
+
     // Build the Playlists page once, it covers the panel until closed. The
     // web view shows the same page as its Playlists panel
     function buildPlaylists() {
@@ -57009,6 +59471,7 @@
     function openPlaylists() {
 
         closeDropdowns();
+        closeCreate();
         closeSettings();
         closeCreators();
         closeInfo();
@@ -59274,6 +61737,7 @@
     function openCreators() {
 
         closeDropdowns();
+        closeCreate();
         closeSettings();
         closePlaylists();
         closeInfo();
@@ -62011,10 +64475,109 @@
         pointer-events: none;
     }
 
+    /* Making songs: the form in the playlists' popup look, wider, and a
+       list to choose from in its place */
+    #crPop #crBox {
+        width: min(860px, 94vw);
+        max-height: 92vh;
+    }
+
+    #crForm,
+    #crPick {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow-y: auto;
+        min-height: 0;
+        padding: 4px;
+        margin: -4px;
+    }
+
+    #crPick {
+        display: none;
+    }
+
+    #crStatus {
+        display: none;
+        color: var(--muted);
+        white-space: pre-line;
+    }
+
+    #crStatus.bad {
+        color: #ff8a8a;
+    }
+
+    /* A turning ring before the words while the phone asks Mureka */
+    #crStatus.wait::before {
+        content: "";
+        display: inline-block;
+        width: 0.9em;
+        height: 0.9em;
+        margin-right: 0.5em;
+        vertical-align: -0.1em;
+        box-sizing: border-box;
+        border: 2px solid rgba(72, 225, 235, 0.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spinTurn 0.8s linear infinite;
+    }
+
+    .crBlock {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .crLabel {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .crArea {
+        padding: 10px 12px;
+        line-height: 1.4;
+        resize: vertical;
+    }
+
+    .crActs .chip:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    .crName {
+        flex: 1 1 10em;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .crName.crNone {
+        color: var(--muted);
+    }
+
+    .crRange {
+        width: 100%;
+        accent-color: var(--accent);
+    }
+
+    .crFoot {
+        white-space: normal;
+    }
+
+    .crPickRow .crPickText {
+        overflow-wrap: anywhere;
+    }
+
+    /* Questions come over every popup, the playlists' and the form's too */
+    #confirmPop {
+        z-index: 80;
+    }
+
     /* The playlists over a blurred page, each with its cover, and the
        phone's Bluetooth devices the same way */
     #plPop,
-    #btPop {
+    #btPop,
+    #crPop {
         position: fixed;
         inset: 0;
         z-index: 55;
@@ -62027,7 +64590,8 @@
     }
 
     #plBox,
-    #btBox {
+    #btBox,
+    #crBox {
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 18px;
@@ -62041,7 +64605,9 @@
     }
 
     #plTop,
-    #btTop {
+    #btTop,
+    #crTop,
+    #crPickTop {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -62049,14 +64615,17 @@
     }
 
     #plTitle,
-    #btTitle {
+    #btTitle,
+    #crTitle,
+    #crPickTitle {
         flex: 1 1 auto;
         font-weight: 600;
         font-size: 1.15em;
     }
 
     #plRows,
-    #btRows {
+    #btRows,
+    #crPickRows {
         overflow-y: auto;
         display: flex;
         flex-direction: column;
@@ -66490,6 +69059,7 @@
         <button class="ctl" id="filtersBtn" type="button" title="All filters" data-label="Filters" aria-label="All filters" data-icon="filter"></button>
         <button class="ctl" id="plOpenBtn" type="button" title="Playlists" data-label="Playlists" aria-label="Playlists" data-icon="playlists"></button>
         <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="To playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
+        <button class="ctl" id="createBtn" type="button" title="Create songs" data-label="Create" aria-label="Create songs" data-icon="create"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -66615,6 +69185,26 @@
         </div>
         <div id="btNote"><span id="btNoteText"></span><button class="chip ring" id="btOn" type="button">Switch on</button><button class="chip" id="btHelper" type="button">Start the helper</button></div>
         <div id="btRows"></div>
+    </div>
+</div>
+<div id="crPop">
+    <div id="crBox">
+        <div id="crTop">
+            <span id="crTitle">Create</span>
+            <button class="chip ring" id="crMake" type="button">Create</button>
+            <button class="chip iconOnly" id="crClose" type="button" data-icon="close" aria-label="Close" title="Close"></button>
+        </div>
+        <div id="crStatus"></div>
+        <div id="crForm"></div>
+        <div id="crPick">
+            <div id="crPickTop">
+                <span id="crPickTitle"></span>
+                <button class="chip" id="crPickUpload" type="button">Upload a song</button>
+                <button class="chip" id="crPickMore" type="button">More</button>
+                <button class="chip" id="crPickBack" type="button">Back</button>
+            </div>
+            <div id="crPickRows"></div>
+        </div>
     </div>
 </div>
 <div id="songMenu">
@@ -67091,6 +69681,11 @@
         pencil: [
             ["path", { d: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" }]
         ],
+        create: [
+            ["circle", { cx: "12", cy: "12", r: "9" }],
+            ["path", { d: "M12 8v8" }],
+            ["path", { d: "M8 12h8" }]
+        ],
         speaker: [
             ["polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }],
             ["path", { d: "M15.54 8.46a5 5 0 0 1 0 7.07" }],
@@ -67467,10 +70062,11 @@
         filters: { label: "Filters", icon: "filter", el: "filtersBtn" },
         playlists: { label: "Playlists", icon: "playlists", el: "plOpenBtn" },
         toplaylist: { label: "To playlist", icon: "queueAdd", el: "toPlBtn" },
+        create: { label: "Create", icon: "create", el: "createBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "songs", "minilist"];
 
     function icon(name) {
 
@@ -71039,6 +73635,10 @@
 
         if ($("plPop").style.display === "flex") {
             paintPlPop();
+        }
+
+        if (isShown("crPop") && s && s.create) {
+            paintCreatePop(s.create, false);
         }
 
         if (miniOpen && miniView === "playlists") {
@@ -85280,6 +87880,716 @@
         });
     });
 
+    // Making songs on Mureka. The phone does the asking and keeps the form,
+    // which it sends with its state while this popup is open. This page
+    // shows the form, sends what is typed and asks the phone for the lists,
+    // Mureka's writing help and the songs
+    const CR_UPLOAD_MAX = 16 * 1024 * 1024;
+    let crUi = null;
+    let crWatchTimer = 0;
+    let crSendTimer = 0;
+    let crPending = {};
+    let crDraft = null;
+    let crPickKind = "";
+
+    function crAsk(body) {
+
+        return fetch("/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            cache: "no-store"
+        }).then(function (res) {
+            return res.json();
+        }).catch(function () {
+            return { ok: false, why: "The phone could not be reached" };
+        });
+    }
+
+    // What was typed sent a moment after the last key
+    function crChange(field, value) {
+
+        crPending[field] = value;
+
+        if (crDraft) {
+            crDraft[field] = value;
+        }
+
+        clearTimeout(crSendTimer);
+        crSendTimer = setTimeout(crFlush, 500);
+        paintCrCounts();
+    }
+
+    function crFlush() {
+
+        clearTimeout(crSendTimer);
+        crSendTimer = 0;
+
+        const changes = crPending;
+
+        crPending = {};
+
+        if (Object.keys(changes).length === 0) {
+            return Promise.resolve(null);
+        }
+
+        return crAsk({ op: "draft", draft: changes });
+    }
+
+    // A change made at once, a choice rather than typing
+    function crSet(changes) {
+
+        Object.assign(crPending, changes);
+
+        if (crDraft) {
+            Object.assign(crDraft, changes);
+            paintCreatePop({ draft: crDraft }, false);
+        }
+
+        return crFlush();
+    }
+
+    function openCreatePop() {
+
+        buildCrPop();
+        showCrPick(false);
+        $("crPop").style.display = "flex";
+        send("createWatch", true);
+        clearInterval(crWatchTimer);
+        crWatchTimer = setInterval(function () {
+            send("createWatch", true);
+        }, 4000);
+        crAsk({ op: "state" }).then(function (r) {
+
+            if (r && r.ok && r.state) {
+                paintCreatePop(r.state, true);
+            }
+        });
+    }
+
+    function closeCreatePop() {
+
+        crFlush();
+        clearInterval(crWatchTimer);
+        crWatchTimer = 0;
+        $("crPop").style.display = "none";
+        send("createWatch", false);
+    }
+
+    function crLabel(text) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const count = document.createElement("span");
+
+        row.className = "plEdLabel crLabel";
+        name.textContent = text;
+        row.appendChild(name);
+        row.appendChild(count);
+        row.count = count;
+
+        return row;
+    }
+
+    function crChip(text, then) {
+
+        const b = document.createElement("button");
+
+        b.type = "button";
+        b.className = "chip";
+        b.textContent = text;
+        b.addEventListener("click", then);
+        crUi.acts.push(b);
+
+        return b;
+    }
+
+    function crRow(buttons) {
+
+        const row = document.createElement("div");
+
+        row.className = "plEdActs crActs";
+
+        for (const b of buttons) {
+            row.appendChild(b);
+        }
+
+        return row;
+    }
+
+    // Chips of which one is on, a choice of the form
+    function crSegments(choices, field) {
+
+        const row = document.createElement("div");
+        const chips = [];
+
+        row.className = "plEdActs crActs";
+
+        for (const c of choices) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip";
+            b.textContent = c.label;
+            b.addEventListener("click", function () {
+
+                const changes = {};
+
+                changes[field] = c.value;
+                crSet(changes);
+
+                if (field === "voice" && c.value === "character" && crDraft && !crDraft.characterId) {
+                    openCrPick("characters");
+                }
+            });
+            chips.push({ el: b, value: c.value });
+            row.appendChild(b);
+        }
+
+        row.paint = function (value) {
+
+            for (const x of chips) {
+                x.el.classList.toggle("on", x.value === value);
+            }
+        };
+
+        return row;
+    }
+
+    // A field whose keys stay in it, the page's own keys never hear them
+    function crField(multi, max, field) {
+
+        const f = document.createElement(multi ? "textarea" : "input");
+
+        if (!multi) {
+            f.type = "text";
+        }
+
+        f.className = "plEdField" + (multi ? " crArea" : "");
+        f.maxLength = max;
+        f.setAttribute("autocomplete", "off");
+        f.addEventListener("keydown", function (ev) {
+
+            if (ev.key !== "Escape") {
+                ev.stopPropagation();
+            }
+        });
+        f.addEventListener("input", function () {
+            crChange(field, f.value);
+        });
+
+        return f;
+    }
+
+    function buildCrPop() {
+
+        if (crUi) {
+            return;
+        }
+
+        crUi = { acts: [] };
+
+        const ui = crUi;
+        const form = $("crForm");
+
+        ui.kind = crSegments([
+            { label: "Song", value: "song" },
+            { label: "Instrumental", value: "instrumental" }
+        ], "kind");
+        form.appendChild(ui.kind);
+
+        ui.titleLabel = crLabel("Title");
+        ui.title = crField(false, 50, "title");
+        ui.title.placeholder = "Left empty, Mureka names it";
+        form.appendChild(ui.titleLabel);
+        form.appendChild(ui.title);
+
+        ui.lyricsBox = document.createElement("div");
+        ui.lyricsBox.className = "crBlock";
+        ui.lyricsLabel = crLabel("Lyrics");
+        ui.lyrics = crField(true, 5000, "lyrics");
+        ui.lyrics.rows = 10;
+        ui.lyrics.placeholder = "[Verse]\n...\n\n[Chorus]\n...";
+        ui.lyricsBox.appendChild(ui.lyricsLabel);
+        ui.lyricsBox.appendChild(ui.lyrics);
+        ui.lyricsBox.appendChild(crRow([
+            crChip("Write from a theme", crTheme),
+            crChip("Write them better", function () {
+                crHelp("polish");
+            })
+        ]));
+        form.appendChild(ui.lyricsBox);
+
+        ui.styleLabel = crLabel("Style");
+        ui.style = crField(true, 1000, "style");
+        ui.style.rows = 3;
+        ui.style.placeholder = "Genre, mood, instruments, tempo";
+        form.appendChild(ui.styleLabel);
+        form.appendChild(ui.style);
+        form.appendChild(crRow([
+            crChip("Match my vibe", function () {
+                crHelp("match");
+            }),
+            crChip("Surprise me", function () {
+                crHelp("surprise");
+            }),
+            crChip("My prompts", function () {
+                openCrPick("prompts");
+            }),
+            crChip("Keep as a prompt", function () {
+
+                crFlush().then(function () {
+                    return crAsk({ op: "savePrompt" });
+                }).then(crAnswered);
+            })
+        ]));
+
+        ui.voiceBox = document.createElement("div");
+        ui.voiceBox.className = "crBlock";
+        ui.voiceBox.appendChild(crLabel("Voice"));
+        ui.voice = crSegments([
+            { label: "Male", value: "male" },
+            { label: "Female", value: "female" },
+            { label: "Character", value: "character" }
+        ], "voice");
+        ui.voiceBox.appendChild(ui.voice);
+        ui.characterName = document.createElement("span");
+        ui.characterName.className = "crName";
+        ui.characterRow = crRow([ui.characterName, crChip("Choose", function () {
+            openCrPick("characters");
+        })]);
+        ui.voiceBox.appendChild(ui.characterRow);
+        form.appendChild(ui.voiceBox);
+
+        form.appendChild(crLabel("Remix"));
+        ui.remixName = document.createElement("div");
+        ui.remixName.className = "crName";
+        form.appendChild(ui.remixName);
+        ui.remixStyle = crChip("Use the style Mureka heard", function () {
+
+            if (crDraft && crDraft.remixStyle) {
+                crSet({ style: crDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
+            }
+        });
+        ui.remixClear = crChip("No remix", function () {
+            crSet({ remix: null, remixName: "", remixStyle: "" });
+        });
+        form.appendChild(crRow([
+            crChip("Choose a song", function () {
+                openCrPick("resources");
+            }),
+            crChip("Upload a song", crUpload),
+            ui.remixStyle,
+            ui.remixClear
+        ]));
+
+        ui.advBox = document.createElement("div");
+        ui.advBox.className = "crBlock";
+        ui.advBox.appendChild(crLabel("Length"));
+        ui.length = document.createElement("select");
+        ui.length.className = "plEdField";
+        ui.length.addEventListener("change", function () {
+            crSet({ lengthMs: Number(ui.length.value) || 0 });
+        });
+        ui.advBox.appendChild(ui.length);
+        ui.wildLabel = crLabel("Wildness");
+        ui.advBox.appendChild(ui.wildLabel);
+        ui.wild = document.createElement("input");
+        ui.wild.type = "range";
+        ui.wild.min = "0";
+        ui.wild.max = "100";
+        ui.wild.step = "1";
+        ui.wild.className = "crRange";
+        ui.wild.addEventListener("input", function () {
+            crChange("wildness", Number(ui.wild.value) || 0);
+        });
+        ui.advBox.appendChild(ui.wild);
+        form.appendChild(ui.advBox);
+
+        const foot = document.createElement("div");
+
+        foot.className = "plRowCount crFoot";
+        foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
+        form.appendChild(foot);
+        crUi.acts.push($("crMake"));
+    }
+
+    function crLengthText(ms) {
+
+        if (!ms) {
+            return "Automatic";
+        }
+
+        const s = Math.round(ms / 1000);
+
+        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    function paintCrCounts() {
+
+        const d = crDraft;
+
+        if (!crUi || !d) {
+            return;
+        }
+
+        crUi.titleLabel.count.textContent = String(d.title || "").length + "/50";
+        crUi.lyricsLabel.count.textContent = String(d.lyrics || "").length + "/5000";
+        crUi.styleLabel.count.textContent = String(d.style || "").length + "/1000"
+            + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a kept prompt" : "");
+        crUi.wildLabel.count.textContent = String(d.wildness);
+    }
+
+    // The form as the phone has it. Fields being typed in, or with typing
+    // not yet sent, are left as they are unless all is to be put in
+    function paintCreatePop(c, all) {
+
+        if (!crUi || !c) {
+            return;
+        }
+
+        const ui = crUi;
+
+        if (c.draft) {
+
+            const fresh = Object.assign({}, c.draft, crPending);
+
+            crDraft = fresh;
+
+            const put = function (el, field) {
+
+                const value = String(fresh[field] === undefined || fresh[field] === null ? "" : fresh[field]);
+
+                if ((all || (document.activeElement !== el && crPending[field] === undefined)) && el.value !== value) {
+                    el.value = value;
+                }
+            };
+
+            put(ui.title, "title");
+            put(ui.lyrics, "lyrics");
+            put(ui.style, "style");
+
+            if (Array.isArray(c.lengths) && ui.length.options.length === 0) {
+
+                for (const ms of c.lengths) {
+
+                    const o = document.createElement("option");
+
+                    o.value = String(ms);
+                    o.textContent = crLengthText(ms);
+                    ui.length.appendChild(o);
+                }
+            }
+
+            ui.length.value = String(fresh.lengthMs || 0);
+
+            if (document.activeElement !== ui.wild) {
+                ui.wild.value = String(fresh.wildness);
+            }
+
+            const song = fresh.kind !== "instrumental";
+            const character = song && fresh.voice === "character";
+
+            ui.kind.paint(fresh.kind);
+            ui.voice.paint(fresh.voice);
+            ui.lyricsBox.style.display = song ? "flex" : "none";
+            ui.voiceBox.style.display = song ? "flex" : "none";
+            ui.characterRow.style.display = character ? "flex" : "none";
+            ui.characterName.textContent = fresh.characterId ? fresh.characterName || "Character " + fresh.characterId : "No character chosen yet";
+            ui.advBox.style.display = character || fresh.remix ? "none" : "flex";
+            ui.remixName.textContent = fresh.remix ? "Remixing " + (fresh.remixName || fresh.remix.title || "an uploaded song") : "None, a new song";
+            ui.remixName.classList.toggle("crNone", !fresh.remix);
+            ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
+            ui.remixClear.style.display = fresh.remix ? "" : "none";
+            paintCrCounts();
+        }
+
+        if (c.busy !== undefined) {
+
+            const text = c.busy || (c.note && c.note.text) || "";
+
+            $("crStatus").textContent = text;
+            $("crStatus").style.display = text ? "block" : "none";
+            $("crStatus").classList.toggle("bad", !c.busy && !!(c.note && c.note.bad));
+            $("crStatus").classList.toggle("wait", !!c.busy);
+
+            for (const b of ui.acts) {
+                b.disabled = !!c.busy;
+            }
+        }
+    }
+
+    // A helper's or a list's answer: a reason shown when it did not work
+    function crAnswered(r) {
+
+        if (r && r.ok === false && r.why) {
+            toast(r.why, "bad");
+        }
+
+        return r;
+    }
+
+    function crHelp(kind, theme) {
+
+        return crFlush().then(function () {
+            return crAsk({ op: "ai", kind: kind, theme: theme || "" });
+        }).then(crAnswered);
+    }
+
+    function crTheme() {
+
+        const ask = function () {
+
+            askText("What is the song about?", crDraft && crDraft.theme ? crDraft.theme : "", "Write", function (typed) {
+
+                if (String(typed || "").trim()) {
+                    crHelp("theme", String(typed).trim());
+                }
+            });
+        };
+
+        if (crDraft && String(crDraft.lyrics || "").trim()) {
+
+            askConfirm("Write new lyrics? The lyrics written now are replaced.", "Write new lyrics", false, ask);
+            return;
+        }
+
+        ask();
+    }
+
+    function crMake(asIs) {
+
+        crFlush().then(function () {
+            return crAsk({ op: "make", asIs: asIs === true });
+        }).then(function (r) {
+
+            if (r && r.ask === "polish") {
+
+                askConfirm("Mureka would rather write these lyrics better before it makes the songs. Make them as they are?",
+                    "Make as they are", false, function () {
+                        crMake(true);
+                    });
+                return;
+            }
+
+            if (r && r.ok) {
+
+                toast(r.why || "Making two songs", "ok");
+                closeCreatePop();
+                return;
+            }
+
+            crAnswered(r);
+        });
+    }
+
+    // A song file sent to the phone, which uploads it to Mureka and makes
+    // it ready to remix
+    function crUpload() {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "audio/*,.mp3,.wav,.m4a,.flac,.ogg";
+        input.style.display = "none";
+        document.body.appendChild(input);
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+
+            if (!file) {
+                return;
+            }
+
+            if (file.size > CR_UPLOAD_MAX) {
+
+                toast("The song is too large to send through the phone, at most 16 MB", "bad");
+                return;
+            }
+
+            showCrPick(false);
+            toast("Sending the song to the phone", "wait");
+            fetch("/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), {
+                method: "POST",
+                headers: { "Content-Type": file.type || "audio/mpeg" },
+                body: file,
+                cache: "no-store"
+            }).then(function (res) {
+                return res.json();
+            }).then(function (r) {
+
+                if (r && r.ok) {
+                    toast("The song is ready to remix", "ok");
+                } else {
+                    toast(r && r.why ? r.why : "The song could not be uploaded", "bad");
+                }
+            }).catch(function () {
+                toast("The phone could not be reached", "bad");
+            });
+        });
+        input.click();
+    }
+
+    // A list to choose from in place of the form
+    function showCrPick(on) {
+
+        $("crForm").style.display = on ? "none" : "flex";
+        $("crPick").style.display = on ? "flex" : "none";
+
+        if (!on) {
+            crPickKind = "";
+        }
+    }
+
+    function crPickRow(label, sub, then) {
+
+        const row = document.createElement("div");
+        const text = document.createElement("div");
+        const name = document.createElement("div");
+
+        row.className = "plRow crPickRow";
+        text.className = "plRowText";
+        name.className = "crPickText";
+        name.textContent = label;
+        text.appendChild(name);
+
+        if (sub) {
+
+            const more = document.createElement("div");
+
+            more.className = "plRowCount";
+            more.textContent = sub;
+            text.appendChild(more);
+        }
+
+        row.appendChild(text);
+        row.addEventListener("click", then);
+
+        return row;
+    }
+
+    function crPickNote(text) {
+
+        const rows = $("crPickRows");
+        const note = document.createElement("div");
+
+        rows.textContent = "";
+        note.className = "plRowCount";
+        note.textContent = text;
+        rows.appendChild(note);
+    }
+
+    function crTime(ms) {
+
+        const s = Math.round((Number(ms) || 0) / 1000);
+
+        return s > 0 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : "";
+    }
+
+    function openCrPick(kind) {
+
+        const titles = { prompts: "My prompts", characters: "Characters", resources: "Songs uploaded to Mureka" };
+        let last = "0";
+        let more = false;
+
+        crPickKind = kind;
+        $("crPickTitle").textContent = titles[kind] || "";
+        $("crPickUpload").style.display = kind === "resources" ? "" : "none";
+        $("crPickMore").style.display = "none";
+        crPickNote("Asking Mureka");
+        showCrPick(true);
+
+        const read = function () {
+
+            crAsk(kind === "resources" ? { op: "resources", last: last } : { op: kind }).then(function (r) {
+
+                if (crPickKind !== kind) {
+                    return;
+                }
+
+                if (!r || !r.ok) {
+
+                    crPickNote((r && r.why) || "Mureka could not be asked");
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+                const rows = $("crPickRows");
+
+                if (last === "0") {
+                    rows.textContent = "";
+                }
+
+                if (last === "0" && list.length === 0) {
+
+                    crPickNote(kind === "prompts" ? "No prompts are kept on Mureka yet. Keep as a prompt keeps the style written now."
+                        : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
+                            : "No songs uploaded to Mureka yet. Upload a song to remix it.");
+                }
+
+                for (const x of list) {
+
+                    if (kind === "prompts") {
+
+                        rows.appendChild(crPickRow(x.text, "", function () {
+
+                            showCrPick(false);
+                            crSet({ style: x.text, stylePromptId: x.id, stylePromptText: x.text });
+                        }));
+                    } else if (kind === "characters") {
+
+                        rows.appendChild(crPickRow(x.name, x.about, function () {
+
+                            showCrPick(false);
+                            crSet({ voice: "character", characterId: x.id, characterName: x.name });
+                        }));
+                    } else {
+
+                        const when = x.at ? new Date(x.at * 1000).toLocaleDateString() : "";
+
+                        rows.appendChild(crPickRow(x.title, [crTime(x.ms), when].filter(Boolean).join(", "), function () {
+
+                            showCrPick(false);
+                            crAsk({ op: "use", id: x.id, title: x.title, ms: x.ms }).then(crAnswered);
+                        }));
+                    }
+                }
+
+                more = r.more === true;
+                last = String(r.last || "");
+                $("crPickMore").style.display = more ? "" : "none";
+            });
+        };
+
+        $("crPickMore").onclick = function () {
+
+            if (more) {
+                read();
+            }
+        };
+
+        read();
+    }
+
+    $("createBtn").addEventListener("click", openCreatePop);
+    $("crClose").addEventListener("click", closeCreatePop);
+    $("crMake").addEventListener("click", function () {
+        crMake(false);
+    });
+    $("crPickBack").addEventListener("click", function () {
+        showCrPick(false);
+    });
+    $("crPickUpload").addEventListener("click", crUpload);
+    $("crPop").addEventListener("click", function (ev) {
+
+        if (ev.target === $("crPop")) {
+            closeCreatePop();
+        }
+    });
+
     // A cover in a list held under the mouse for a moment comes up large
     // beside it, as tooltips do. Mice only, a finger has its long press.
     // Gone as the mouse leaves it, presses, or the list scrolls
@@ -87723,6 +91033,17 @@
         if (isShown("confirmPop")) {
 
             closeConfirm();
+            return true;
+        }
+
+        if (isShown("crPop")) {
+
+            if ($("crPick").style.display === "flex") {
+                showCrPick(false);
+            } else {
+                closeCreatePop();
+            }
+
             return true;
         }
 

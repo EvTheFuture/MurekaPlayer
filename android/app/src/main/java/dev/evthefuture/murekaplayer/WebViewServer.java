@@ -93,6 +93,11 @@ final class WebViewServer {
     private static final int MAX_COVER = 8 * 1024 * 1024;
     private static final int MAX_IMPORT = 12 * 1024 * 1024;
 
+    // A song file to remix, sent on to the player as text, which makes it a
+    // third larger, and the form for making songs, its lyrics written out
+    private static final int MAX_SONG = 16 * 1024 * 1024;
+    private static final int MAX_CREATE = 256 * 1024;
+
     // One large upload at a time, the room the others need in memory
     private static final java.util.concurrent.Semaphore BIG_ONE = new java.util.concurrent.Semaphore(1);
 
@@ -820,9 +825,10 @@ final class WebViewServer {
             APP_REQUEST.set(appScreen);
 
             big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path)
-                || "/shareLine".equals(path);
+                || "/shareLine".equals(path) || "/create".equals(path) || "/createUpload".equals(path);
 
-            int most = !big ? MAX_BODY : "/setCover".equals(path) ? MAX_COVER : MAX_IMPORT;
+            int most = !big ? MAX_BODY : "/setCover".equals(path) ? MAX_COVER : "/createUpload".equals(path) ? MAX_SONG
+                : "/create".equals(path) ? MAX_CREATE : MAX_IMPORT;
 
             if (length < 0 || length > most) {
 
@@ -873,8 +879,9 @@ final class WebViewServer {
 
             byte[] body = readBody(in, length, System.currentTimeMillis() + BODY_MS);
 
-            // A cover is a picture, not JSON, every other body is read as JSON
-            if (!"/setCover".equals(path) && tooDeep(body)) {
+            // A cover is a picture and a song a sound, not JSON, every other
+            // body is read as JSON
+            if (!"/setCover".equals(path) && !"/createUpload".equals(path) && tooDeep(body)) {
 
                 send(out, 400, "text/plain", bytes("Nested too deep"));
                 return;
@@ -1034,6 +1041,10 @@ final class WebViewServer {
                 shareLine(out, body);
             } else if ("POST".equals(method) && "/setCover".equals(path)) {
                 setCover(out, query, body);
+            } else if ("POST".equals(method) && "/create".equals(path)) {
+                createAsk(out, body);
+            } else if ("POST".equals(method) && "/createUpload".equals(path)) {
+                createUpload(out, query, body);
             } else {
                 send(out, 404, "text/plain", bytes("Not found"));
             }
@@ -2185,6 +2196,65 @@ final class WebViewServer {
             + ", " + (body.length / 1024) + " kB");
 
         String answer = Hub.requestLater("__murekaHostSetCover", ask.toString(), 90000);
+
+        send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
+    }
+
+    // A request about making songs from a web view: a list to choose from,
+    // Mureka's writing help, a change to the form or the songs made. Mureka
+    // can take a while, getting a song ready to remix most of all
+    private void createAsk(OutputStream out, byte[] body) throws IOException {
+
+        markPoll();
+
+        String clean;
+
+        // Written out again from what was parsed, never passed on as it came,
+        // the text goes into the player as script
+        try {
+            clean = new JSONObject(new String(body, StandardCharsets.UTF_8)).toString();
+        } catch (JSONException e) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false}"));
+            return;
+        }
+
+        String answer = Hub.requestLater("__murekaHostCreate", clean, 240000);
+
+        send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
+    }
+
+    // A song file from a web view, which the player uploads to Mureka and
+    // makes ready to remix. Uploading and Mureka's reading take minutes at
+    // most
+    private void createUpload(OutputStream out, String query, byte[] body) throws IOException {
+
+        markPoll();
+
+        if (body.length == 0) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false,\"why\":\"No song\"}"));
+            return;
+        }
+
+        String name = param(query, "name");
+        String type = param(query, "type");
+        JSONObject ask = new JSONObject();
+
+        try {
+
+            ask.put("name", name.length() <= 200 ? name : name.substring(0, 200));
+            ask.put("type", type.startsWith("audio/") && type.length() < 40 ? type : "audio/mpeg");
+            ask.put("data", java.util.Base64.getEncoder().encodeToString(body));
+        } catch (JSONException e) {
+
+            send(out, 400, "application/json", bytes("{\"ok\":false}"));
+            return;
+        }
+
+        Hub.note("Command", "From a web view: a song to remix, " + (body.length / 1024) + " kB");
+
+        String answer = Hub.requestLater("__murekaHostCreateUpload", ask.toString(), 600000);
 
         send(out, 200, "application/json", bytes(answer.isEmpty() ? "{\"ok\":false,\"why\":\"The phone did not answer\"}" : answer));
     }
