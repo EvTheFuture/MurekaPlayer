@@ -59,6 +59,14 @@ final class Hub {
 
     // The level in percent with more steps on, -1 while off
     private static float volFine = -1;
+
+    // The volume buttons moving more steps, the step's level and the
+    // player's share in dB, and a count of button presses with the app on
+    // screen, for the web view shown there to open its volume popup
+    private static boolean volButtons = false;
+    private static float volStepDb = Float.NaN;
+    private static float volGainDb = 0;
+    private static int volKeys = 0;
     private static int clients = 0;
 
     // Whether the music goes out over Bluetooth, and the device's name, so
@@ -203,6 +211,54 @@ final class Hub {
         }
     }
 
+    static void setVolButtons(boolean on) {
+
+        synchronized (LOCK) {
+
+            if (on == volButtons) {
+                return;
+            }
+
+            volButtons = on;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
+    static void setFineInfo(float stepDb, float gainDb) {
+
+        synchronized (LOCK) {
+
+            boolean same = (Float.isNaN(stepDb) ? Float.isNaN(volStepDb) : stepDb == volStepDb) && gainDb == volGainDb;
+
+            if (same) {
+                return;
+            }
+
+            volStepDb = stepDb;
+            volGainDb = gainDb;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
+    // A volume button pressed with the app on screen: the player and the
+    // web view shown there open their volume popup a moment
+    static void volKey() {
+
+        synchronized (LOCK) {
+
+            volKeys += 1;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+
+        command("volKey", volKeys);
+    }
+
     // Where the phone's music goes: out over Bluetooth, to the named
     // device, or the phone itself. A change is a new state
     static void setBluetooth(boolean out, String name) {
@@ -263,6 +319,17 @@ final class Hub {
             o.put("vol", volLevel);
             o.put("volMax", volMax);
             o.put("volFine", volFine >= 0 ? Math.round(volFine * 10) / 10.0 : -1);
+            o.put("volButtons", volButtons);
+            o.put("volKey", volKeys);
+
+            if (volFine >= 0) {
+
+                if (!Float.isNaN(volStepDb) && !Float.isInfinite(volStepDb)) {
+                    o.put("volStepDb", Math.round(volStepDb * 10) / 10.0);
+                }
+
+                o.put("volGainDb", Math.round(Math.max(-200, volGainDb) * 10) / 10.0);
+            }
             o.put("clients", clients);
             o.put("btOut", btOut);
             o.put("btName", btName);

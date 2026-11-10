@@ -1142,6 +1142,30 @@ final class PlayerWeb {
             }
         }
 
+        // More steps as they are, for the stats, as JSON
+        @JavascriptInterface
+        public String fineVolumeInfo() {
+            return onMureka ? SysVolume.fineInfo() : "{}";
+        }
+
+        // More steps, or the volume buttons moving them, on or off from the
+        // player's settings ("1" for on)
+        @JavascriptInterface
+        public void fineVolume(String on) {
+
+            if (onMureka) {
+                MAIN.post(() -> SysVolume.setFine("1".equals(on), -1));
+            }
+        }
+
+        @JavascriptInterface
+        public void volumeButtons(String on) {
+
+            if (onMureka) {
+                MAIN.post(() -> SysVolume.setButtons("1".equals(on)));
+            }
+        }
+
         // The gap between two of the phone's steps by its own curve, for a
         // Bluetooth speaker ("1") or this phone, -1 when it tells none
         @JavascriptInterface

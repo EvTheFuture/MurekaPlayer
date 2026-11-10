@@ -539,7 +539,13 @@ In development.
   absolute volume turns its sound down by its own curve, which can show
   as a jump just past each of the phone's steps, so each speaker in
   Sound profiles, Speakers has a volume step size in dB, as the phone
-  says until set by hand, and the volume popup points there.
+  says until set by hand, and the volume popup points there. The phone's
+  volume buttons can move the 100 steps by 1%, with a box in the volume
+  popup and in Sound profiles: with the app on screen a small volume
+  popup shows for 1.5 s, and outside the app, while its music plays,
+  Android shows its own slider. Stats for nerds shows the real volume,
+  the phone's step and its dB and the mixer's share, and a web view
+  setting shows the same small in the volume popup.
 - **The web view's settings in the bookmarklet and the add-on.** The
   Web view page in Settings showed only in the Android app, so the web
   view shown in the page kept its defaults. It shows now wherever the
@@ -558,6 +564,12 @@ In development.
   of the screen really seen, so on an iPhone in Safari the top with
   Create is no longer hidden behind the browser's bars, and the models
   stay in one row.
+- **Both new songs play when ready with shuffle on.** Of two songs asked
+  to play as soon as they are ready, the second could be woven into the
+  queue at random, or offered and put elsewhere, while the first faded
+  in; it now waits for its place right after the first. Shuffle switched
+  on with a queue put together by hand also keeps the songs put in with
+  Play next right after the playing one.
 
 ### Build
 

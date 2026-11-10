@@ -33,6 +33,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
+import android.view.KeyEvent;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.window.OnBackInvokedDispatcher;
@@ -56,6 +57,26 @@ import java.nio.charset.StandardCharsets;
 // running when this screen closes, so leaving the app never stops the music
 // or the web view. Quit in the notification ends everything
 public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.Owner {
+
+    // The phone's volume buttons with the app on screen move more steps by
+    // 1% when that is chosen, and the volume popup shows a moment
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+
+        int code = event.getKeyCode();
+
+        if ((code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) && SysVolume.buttonsOn()) {
+
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                SysVolume.nudge(code == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1, true);
+            }
+
+            return true;
+        }
+
+        return super.dispatchKeyEvent(event);
+    }
+
 
     private static final int PICK_FILE = 7;
     private static final int ASK_VPN = 8;

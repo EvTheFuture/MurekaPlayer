@@ -4547,6 +4547,14 @@
     }
 
     /* More steps for the phone's volume, a box to tick under its bar */
+    /* The phone's real level and the player's share, small and quiet */
+    .volNums {
+        margin-top: 8px;
+        font-size: 0.85em;
+        opacity: 0.75;
+        font-variant-numeric: tabular-nums;
+    }
+
     .volFine {
         display: flex;
         align-items: center;
@@ -16178,6 +16186,8 @@
     }
 
     function closeVol() {
+
+        volKeyOpened = false;
         $("volPop").style.display = "none";
     }
 
@@ -16305,6 +16315,76 @@
     // Whether the volume of this browser is the one changed
     function volHere() {
         return volTarget().kind === "here";
+    }
+
+    // The phone's real level and the player's share of it, small under the
+    // phone's bar when that is chosen in the settings
+    function volNumbersText() {
+
+        if (!state || state.volNumbers !== true || !(state.volMax > 0) || typeof state.vol !== "number") {
+            return "";
+        }
+
+        const parts = [];
+
+        if (volFineOn()) {
+
+            parts.push(Math.round(state.volFine * 10) / 10 + "% real volume");
+            parts.push("step " + state.vol + " of " + state.volMax
+                + (typeof state.volStepDb === "number" ? " at " + state.volStepDb.toFixed(1) + " dB" : ""));
+            parts.push("mixer " + (typeof state.volGainDb === "number" ? state.volGainDb.toFixed(1) : "0.0") + " dB");
+        } else {
+
+            parts.push(Math.round(state.vol / state.volMax * 100) + "% real volume");
+            parts.push("step " + state.vol + " of " + state.volMax);
+            parts.push("mixer 0.0 dB");
+        }
+
+        return parts.join(" \u00b7 ");
+    }
+
+    // A volume button pressed on the phone with this page as the app's
+    // screen: the popup opens a moment, and closes 1.5 s after the last
+    // press unless it was already open
+    let volKeySeen = -1;
+    let volKeyTimer = 0;
+    let volKeyOpened = false;
+
+    function noteVolKey(s) {
+
+        if (!s || typeof s.volKey !== "number") {
+            return;
+        }
+
+        const fresh = volKeySeen >= 0 && s.volKey > volKeySeen;
+
+        volKeySeen = s.volKey;
+
+        if (!fresh || !appScreen) {
+            return;
+        }
+
+        if (!volOpen()) {
+
+            volKeyOpened = true;
+            openVol();
+        } else {
+            paintVol(false);
+        }
+
+        clearTimeout(volKeyTimer);
+
+        if (volKeyOpened) {
+
+            volKeyTimer = setTimeout(function () {
+
+                if (volKeyOpened && volOpen()) {
+                    closeVol();
+                }
+
+                volKeyOpened = false;
+            }, 1500);
+        }
     }
 
     // Whether the phone's volume has more steps than its own, a level in
@@ -16500,11 +16580,32 @@
             fine.appendChild(text);
             bar.appendChild(fine);
 
+            // The phone's own volume buttons moving the 100 steps by 1%
+            const keys = document.createElement("label");
+            const keysBox = document.createElement("input");
+            const keysText = document.createElement("span");
+
+            keys.className = "volFine volKeys";
+            keysBox.type = "checkbox";
+            keysText.textContent = "The phone's volume buttons move them by 1%, outside the app too while its music plays";
+            keysBox.addEventListener("change", function () {
+                send("sysVolumeButtons", keysBox.checked);
+            });
+            keys.appendChild(keysBox);
+            keys.appendChild(keysText);
+            bar.appendChild(keys);
+
+            // The real level and the player's share, when asked for
+            const nums = document.createElement("div");
+
+            nums.className = "ceLabel volNums";
+            bar.appendChild(nums);
+
             // Where to even out a speaker that jumps past the phone's steps
             const fineHint = document.createElement("div");
 
             fineHint.className = "ceLabel volFineHint";
-            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings, Sound profiles, Speakers";
+            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings \u2192 Sound profiles \u2192 Speakers";
             bar.appendChild(fineHint);
         }
 
@@ -16592,6 +16693,29 @@
 
             if (fineHint) {
                 fineHint.style.display = volFineOn() ? "" : "none";
+            }
+
+            const keysRow = bar.querySelector(".volKeys");
+
+            if (keysRow) {
+
+                const keysBox = keysRow.querySelector("input");
+
+                keysRow.style.display = volFineOn() ? "" : "none";
+
+                if (document.activeElement !== keysBox) {
+                    keysBox.checked = state.volButtons === true;
+                }
+            }
+
+            const nums = bar.querySelector(".volNums");
+
+            if (nums) {
+
+                const text = volNumbersText();
+
+                nums.textContent = text;
+                nums.style.display = text ? "" : "none";
             }
 
             if (force || document.activeElement !== slider || volMoves[t.key] === undefined
@@ -16818,6 +16942,12 @@
     $("volBtn").addEventListener("click", openVol);
     $("closeVol").addEventListener("click", closeVol);
 
+    // Touched while opened by a volume button, it stays open
+    $("volPop").addEventListener("pointerdown", function () {
+
+        clearTimeout(volKeyTimer);
+        volKeyOpened = false;
+    });
     $("volPop").addEventListener("click", function (ev) {
 
         if (ev.target === $("volPop")) {
@@ -21316,6 +21446,7 @@
         stateAt = Date.now();
         online = true;
         phoneSeen = true;
+        noteVolKey(s);
         paintPlayingRating(s);
 
         // The exports changed on the phone while the actions are open, so

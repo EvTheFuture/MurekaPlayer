@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.65";
+    const VERSION = "2.0.1.66";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1033,6 +1033,13 @@
     // published songs are shown. A Load with the queue in view offers them
     // all, however they came in, and a queue made from the list has them
     const unofferedNew = new Set();
+
+    // Songs done generating that were asked to play, until they are in the
+    // queue: they are neither offered nor woven into it at random with
+    // shuffle on meanwhile, or the second of two asked to play at once
+    // ended up somewhere else in the queue
+    const readyPlacing = new Map();
+
     const UNOFFERED_MAX = 200;
 
     // The question about where new songs go, open on the phone and in the
@@ -3300,6 +3307,7 @@
             lyricSideShift: 0,
             lyricNoSemicolon: false,
             webVolumeUnit: "percent",
+            webVolumeNumbers: false,
             webLyricSize: 26,
             webLyricSideMul: 0,
             webLyricLineMul: WEB_LYRIC_LINE,
@@ -3572,6 +3580,7 @@
                         ? parsed.lyricSideShift : 0,
                     lyricNoSemicolon: parsed.lyricNoSemicolon === true,
                     webVolumeUnit: parsed.webVolumeUnit === "steps" ? "steps" : "percent",
+                    webVolumeNumbers: parsed.webVolumeNumbers === true,
                     webLyricSize: (typeof parsed.webLyricSize === "number" && parsed.webLyricSize >= 10 && parsed.webLyricSize <= 60)
                         ? parsed.webLyricSize : 26,
 
@@ -10632,7 +10641,7 @@
             // setting on, every new song is asked about, an ignored one aside
             const wanted = settings.offerAllNew === true ? !isIgnored(song) : queueable(song);
 
-            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song) || !wanted) {
+            if (!song || seen.has(key) || upcoming.has(key) || isPendingSong(song) || !wanted || placingSoon(key)) {
                 continue;
             }
 
@@ -13506,6 +13515,101 @@
         }
     }
 
+    // More steps as the app has them now, for the stats and the settings
+    function fineInfo() {
+
+        try {
+            return window.MurekaHost && window.MurekaHost.fineVolumeInfo ? JSON.parse(window.MurekaHost.fineVolumeInfo()) || {} : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    // A volume button pressed with the app on screen: a small popup with
+    // the level a moment, closed 1.5 s after the last press
+    let volKeyEl = null;
+    let volKeyHide = 0;
+
+    function showVolKey() {
+
+        const fine = fineInfo();
+
+        if (fine.on !== true) {
+            return;
+        }
+
+        if (!volKeyEl) {
+
+            volKeyEl = document.createElement("div");
+            volKeyEl.style.cssText = "position:fixed;top:calc(env(safe-area-inset-top, 0px) + 16px);left:50%;transform:translateX(-50%);"
+                + "z-index:2147483646;min-width:240px;max-width:90vw;box-sizing:border-box;padding:12px 16px;border-radius:16px;"
+                + "background:rgba(28,28,32,0.96);border:1px solid #444;color:#fff;font:14px system-ui,sans-serif;"
+                + "box-shadow:0 8px 24px rgba(0,0,0,0.5);pointer-events:none;transition:opacity 0.2s ease-in-out";
+
+            const top = document.createElement("div");
+            const name = document.createElement("span");
+            const now = document.createElement("span");
+            const track = document.createElement("div");
+            const fill = document.createElement("div");
+            const nums = document.createElement("div");
+
+            top.style.cssText = "display:flex;justify-content:space-between;gap:12px;margin-bottom:8px";
+            name.textContent = "Volume";
+            now.style.cssText = "font-variant-numeric:tabular-nums;font-weight:600";
+            track.style.cssText = "height:6px;border-radius:3px;background:#444;overflow:hidden";
+            fill.style.cssText = "height:100%;background:#47e0eb;width:0";
+            nums.style.cssText = "margin-top:8px;font-size:12px;color:#aaa;font-variant-numeric:tabular-nums";
+            top.appendChild(name);
+            top.appendChild(now);
+            track.appendChild(fill);
+            volKeyEl.appendChild(top);
+            volKeyEl.appendChild(track);
+            volKeyEl.appendChild(nums);
+            document.body.appendChild(volKeyEl);
+            volKeyEl._now = now;
+            volKeyEl._fill = fill;
+            volKeyEl._nums = nums;
+        }
+
+        const pct = Math.max(0, Math.min(100, Number(fine.pct) || 0));
+
+        volKeyEl._now.textContent = Math.round(pct) + " %";
+        volKeyEl._fill.style.width = pct + "%";
+        volKeyEl._nums.textContent = settings.webVolumeNumbers === true
+            ? "Step " + fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
+                + " \u00b7 mixer " + (typeof fine.gainDb === "number" ? fine.gainDb.toFixed(1) : "0.0") + " dB"
+            : "";
+        volKeyEl._nums.style.display = settings.webVolumeNumbers === true ? "" : "none";
+        volKeyEl.style.display = "";
+        volKeyEl.style.opacity = "1";
+        clearTimeout(volKeyHide);
+        volKeyHide = setTimeout(function () {
+
+            volKeyEl.style.opacity = "0";
+            volKeyHide = setTimeout(function () {
+                volKeyEl.style.display = "none";
+            }, 220);
+        }, 1500);
+    }
+
+    // A switch just set here, shown as set until the app has taken it
+    const fineAsks = {};
+
+    function fineAsk(key, v) {
+        fineAsks[key] = { v: v === true, until: Date.now() + 2000 };
+    }
+
+    function fineAsked(key) {
+
+        const a = fineAsks[key];
+
+        if (a && Date.now() < a.until) {
+            return a.v;
+        }
+
+        return fineInfo()[key] === true;
+    }
+
     // A step's size in dB by the phone's own curve, for a Bluetooth
     // speaker or this device, 4 when the phone tells none
     function phoneStepDb(bluetooth) {
@@ -15955,7 +16059,7 @@
 
             const added = queueOrder().filter(function (s) {
 
-                return queueable(s) && !inQueue.has(s.song_id) && !queueSkipIds.has(String(s.song_id));
+                return queueable(s) && !inQueue.has(s.song_id) && !queueSkipIds.has(String(s.song_id)) && !placingSoon(s.song_id);
             });
 
             if (added.length === 0) {
@@ -16005,8 +16109,18 @@
 
             if (fromShuffle === true && shuffleMode && queuePos >= 0 && queuePos < queue.length) {
 
+                // Songs put in with Play next, or asked to play after this
+                // one, stay right after it in their order
+                const rest = queue.slice(queuePos + 1);
+                const next = rest.filter(function (x) {
+                    return playNextMarks.has(String(x.song_id));
+                });
+                const others = rest.filter(function (x) {
+                    return !playNextMarks.has(String(x.song_id));
+                });
+
                 dropNextReady();
-                queue = queue.slice(0, queuePos + 1).concat(shuffleCopy(queue.slice(queuePos + 1)));
+                queue = queue.slice(0, queuePos + 1).concat(next, shuffleCopy(others));
                 renderList();
                 saveQueue();
                 setArtTransition("none");
@@ -18646,6 +18760,24 @@
     // it streams instead
     const READY_FETCH_MS = 20000;
 
+    function placingSoon(id) {
+
+        const at = readyPlacing.get(String(id));
+
+        if (at === undefined) {
+            return false;
+        }
+
+        // Never placed after all, a fade cut short, let go after a while
+        if (Date.now() - at > 120000) {
+
+            readyPlacing.delete(String(id));
+            return false;
+        }
+
+        return true;
+    }
+
     function settlePending() {
 
         adoptRestoredPending();
@@ -18676,6 +18808,10 @@
             const how = pendingPlay.get(id);
 
             pendingPlay.delete(id);
+
+            if (how === "after" || how === "now") {
+                readyPlacing.set(id, Date.now());
+            }
 
             if (how === "after") {
                 afters.push(song);
@@ -18716,8 +18852,11 @@
             }
         }
 
-        // New to the library, for the play queue to be offered
-        noteUnoffered(done.map(function (s) {
+        // New to the library, for the play queue to be offered, the ones
+        // asked to play aside, as they get their own place in it
+        noteUnoffered(done.filter(function (s) {
+            return !placingSoon(s.song_id);
+        }).map(function (s) {
             return s.song_id;
         }));
 
@@ -18754,6 +18893,8 @@
 
             for (const song of afters) {
 
+                readyPlacing.delete(String(song.song_id));
+
                 if (canGoAfter(song)) {
                     insertAfterInOrder(song);
                 } else if (started === null) {
@@ -18786,6 +18927,7 @@
                 fadeThen(fadeMs("ready"), function () {
 
                     dbgLog("Song", "ready, played as asked: " + (wanted.title || "Untitled"));
+                    readyPlacing.delete(String(wanted.song_id));
                     playFrom(wanted.song_id);
                     placeAfters();
 
@@ -28389,6 +28531,19 @@
                 sub("Muted", "Yes");
             }
 
+            // The app's more volume steps: the real level, the phone's step
+            // and its dB, and the player's own share of it
+            const fine = isApkHost() ? fineInfo() : {};
+
+            if (fine.on === true) {
+
+                sub("Real volume", fine.pct + " %, more steps");
+                sub("Phone step", fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
+                    + (fine.handDb > 0 ? ", " + fine.handDb + " dB steps set by hand" : ""));
+                sub("Mixer", (typeof fine.gainDb === "number" ? fine.gainDb.toFixed(1) : "0.0") + " dB, " + Math.round((fine.gain || 0) * 1000) / 10 + " %");
+                sub("Volume buttons", fine.buttons === true ? "1% steps" : "The phone's own steps");
+            }
+
             // How late the sound is heard against the song's clock, and
             // what the playhead allows for
             const engine = iosGain && iosCtx ? iosCtx : (fxCtx && fxEl === audio ? fxCtx : null);
@@ -32990,6 +33145,7 @@
                 && typeof nowPlayingCounts.play_count === "number" ? nowPlayingCounts.play_count : null,
             playFrom: hostPlayFrom(),
             volUnit: settings.webVolumeUnit === "steps" ? "steps" : "percent",
+            volNumbers: settings.webVolumeNumbers === true,
             debugOverlay: settings.webDebugOverlay === true,
             debugHide: debugHiddenKinds(),
             debugClear: debugClearedAt,
@@ -36488,6 +36644,10 @@
 
             // The app's more volume steps, the player's share of the level
             setFineGain(arg);
+        } else if (cmd === "volKey") {
+
+            // A volume button pressed with the app on screen
+            showVolKey();
         } else if (cmd === "createWatch") {
 
             // A web view shows the form for making songs, or closed it
@@ -46982,6 +47142,16 @@
                 publishHostSoon();
             });
 
+            // The phone's real level and the player's share, small in the
+            // volume popup
+            const webVolumeNumbersRow = makeBoolRow("Volume numbers in the volume popup", function () {
+                return settings.webVolumeNumbers === true;
+            }, function (v) {
+
+                settings.webVolumeNumbers = v === true;
+                publishHostSoon();
+            });
+
             // The web view's lyric roll, laid out like the mobile player's. Side
             // lines and spacing start out as the mobile player has them
             const webLyricSizeRow = makeStepperRow("Lyric size",
@@ -47144,6 +47314,10 @@
             // Steps are the phone's, the web view in the page has percent
             if (isApkHost()) {
                 webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
+
+                if (isApkHost()) {
+                    webPage.appendChild(withHint(webVolumeNumbersRow, "Shows the real volume in percent, the phone's step and its dB, and how far the player's own mixer turns the sound down, small under the phone's volume bar."));
+                }
             }
 
             // The waveform: whether it shows and where it comes from, how it
@@ -48452,6 +48626,28 @@
 
             newBtn.style.alignSelf = "flex-start";
             soundBox.appendChild(newBtn);
+
+            // The app's more volume steps and the volume buttons, the same
+            // as the boxes in the web view's volume popup
+            if (isApkHost() && window.MurekaHost && typeof window.MurekaHost.fineVolume === "function") {
+
+                soundBox.appendChild(soundHeading("Phone volume"));
+                soundBox.appendChild(makeBoolRow("More volume steps, 100", function () {
+                    return fineAsked("on");
+                }, function (v) {
+
+                    fineAsk("on", v);
+                    window.MurekaHost.fineVolume(v ? "1" : "0");
+                }));
+                soundBox.appendChild(makeBoolRow("Volume buttons move them by 1%", function () {
+                    return fineAsked("buttons");
+                }, function (v) {
+
+                    fineAsk("buttons", v);
+                    window.MurekaHost.volumeButtons(v ? "1" : "0");
+                }));
+                soundBox.appendChild(makeHint("More volume steps turns the phone's few media volume steps into 100, the player's own sound evening out between them. With the volume buttons on as well, they move it by 1%, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+            }
 
             // Which profiles each speaker takes
             soundBox.appendChild(soundHeading("Speakers"));
@@ -68603,6 +68799,14 @@
     }
 
     /* More steps for the phone's volume, a box to tick under its bar */
+    /* The phone's real level and the player's share, small and quiet */
+    .volNums {
+        margin-top: 8px;
+        font-size: 0.85em;
+        opacity: 0.75;
+        font-variant-numeric: tabular-nums;
+    }
+
     .volFine {
         display: flex;
         align-items: center;
@@ -80234,6 +80438,8 @@
     }
 
     function closeVol() {
+
+        volKeyOpened = false;
         $("volPop").style.display = "none";
     }
 
@@ -80361,6 +80567,76 @@
     // Whether the volume of this browser is the one changed
     function volHere() {
         return volTarget().kind === "here";
+    }
+
+    // The phone's real level and the player's share of it, small under the
+    // phone's bar when that is chosen in the settings
+    function volNumbersText() {
+
+        if (!state || state.volNumbers !== true || !(state.volMax > 0) || typeof state.vol !== "number") {
+            return "";
+        }
+
+        const parts = [];
+
+        if (volFineOn()) {
+
+            parts.push(Math.round(state.volFine * 10) / 10 + "% real volume");
+            parts.push("step " + state.vol + " of " + state.volMax
+                + (typeof state.volStepDb === "number" ? " at " + state.volStepDb.toFixed(1) + " dB" : ""));
+            parts.push("mixer " + (typeof state.volGainDb === "number" ? state.volGainDb.toFixed(1) : "0.0") + " dB");
+        } else {
+
+            parts.push(Math.round(state.vol / state.volMax * 100) + "% real volume");
+            parts.push("step " + state.vol + " of " + state.volMax);
+            parts.push("mixer 0.0 dB");
+        }
+
+        return parts.join(" \u00b7 ");
+    }
+
+    // A volume button pressed on the phone with this page as the app's
+    // screen: the popup opens a moment, and closes 1.5 s after the last
+    // press unless it was already open
+    let volKeySeen = -1;
+    let volKeyTimer = 0;
+    let volKeyOpened = false;
+
+    function noteVolKey(s) {
+
+        if (!s || typeof s.volKey !== "number") {
+            return;
+        }
+
+        const fresh = volKeySeen >= 0 && s.volKey > volKeySeen;
+
+        volKeySeen = s.volKey;
+
+        if (!fresh || !appScreen) {
+            return;
+        }
+
+        if (!volOpen()) {
+
+            volKeyOpened = true;
+            openVol();
+        } else {
+            paintVol(false);
+        }
+
+        clearTimeout(volKeyTimer);
+
+        if (volKeyOpened) {
+
+            volKeyTimer = setTimeout(function () {
+
+                if (volKeyOpened && volOpen()) {
+                    closeVol();
+                }
+
+                volKeyOpened = false;
+            }, 1500);
+        }
     }
 
     // Whether the phone's volume has more steps than its own, a level in
@@ -80556,11 +80832,32 @@
             fine.appendChild(text);
             bar.appendChild(fine);
 
+            // The phone's own volume buttons moving the 100 steps by 1%
+            const keys = document.createElement("label");
+            const keysBox = document.createElement("input");
+            const keysText = document.createElement("span");
+
+            keys.className = "volFine volKeys";
+            keysBox.type = "checkbox";
+            keysText.textContent = "The phone's volume buttons move them by 1%, outside the app too while its music plays";
+            keysBox.addEventListener("change", function () {
+                send("sysVolumeButtons", keysBox.checked);
+            });
+            keys.appendChild(keysBox);
+            keys.appendChild(keysText);
+            bar.appendChild(keys);
+
+            // The real level and the player's share, when asked for
+            const nums = document.createElement("div");
+
+            nums.className = "ceLabel volNums";
+            bar.appendChild(nums);
+
             // Where to even out a speaker that jumps past the phone's steps
             const fineHint = document.createElement("div");
 
             fineHint.className = "ceLabel volFineHint";
-            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings, Sound profiles, Speakers";
+            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings \u2192 Sound profiles \u2192 Speakers";
             bar.appendChild(fineHint);
         }
 
@@ -80648,6 +80945,29 @@
 
             if (fineHint) {
                 fineHint.style.display = volFineOn() ? "" : "none";
+            }
+
+            const keysRow = bar.querySelector(".volKeys");
+
+            if (keysRow) {
+
+                const keysBox = keysRow.querySelector("input");
+
+                keysRow.style.display = volFineOn() ? "" : "none";
+
+                if (document.activeElement !== keysBox) {
+                    keysBox.checked = state.volButtons === true;
+                }
+            }
+
+            const nums = bar.querySelector(".volNums");
+
+            if (nums) {
+
+                const text = volNumbersText();
+
+                nums.textContent = text;
+                nums.style.display = text ? "" : "none";
             }
 
             if (force || document.activeElement !== slider || volMoves[t.key] === undefined
@@ -80874,6 +81194,12 @@
     $("volBtn").addEventListener("click", openVol);
     $("closeVol").addEventListener("click", closeVol);
 
+    // Touched while opened by a volume button, it stays open
+    $("volPop").addEventListener("pointerdown", function () {
+
+        clearTimeout(volKeyTimer);
+        volKeyOpened = false;
+    });
     $("volPop").addEventListener("click", function (ev) {
 
         if (ev.target === $("volPop")) {
@@ -85372,6 +85698,7 @@
         stateAt = Date.now();
         online = true;
         phoneSeen = true;
+        noteVolKey(s);
         paintPlayingRating(s);
 
         // The exports changed on the phone while the actions are open, so

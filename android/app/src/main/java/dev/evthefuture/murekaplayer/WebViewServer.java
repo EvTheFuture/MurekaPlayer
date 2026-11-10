@@ -2018,6 +2018,14 @@ final class WebViewServer {
                 return;
             }
 
+            // The phone's volume buttons moving more steps by 1%, on or off
+            if ("sysVolumeButtons".equals(cmd)) {
+
+                SysVolume.setButtons(Boolean.TRUE.equals(arg));
+                send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
             // A paired Bluetooth device connected, disconnected or made
             // where the music goes, or Bluetooth switched on, by the app
             // and its helper, never the player

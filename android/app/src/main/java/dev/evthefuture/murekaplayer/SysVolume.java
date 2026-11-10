@@ -72,6 +72,11 @@ final class SysVolume {
     private static int fineStep = -1;
     private static float fineGain = 1;
 
+    // The phone's volume buttons moving more steps by 1%, and the level
+    // in dB of the step in use, for the stats and the volume popup
+    private static boolean buttons;
+    private static float fineStepDb = Float.NaN;
+
     // The size of each step in dB set by hand in the player's sound
     // profiles for each Bluetooth speaker by its address, and for this
     // phone and the speakers not set up, as the phone's own curve can be
@@ -124,6 +129,8 @@ final class SysVolume {
 
         fineOn = prefs.getBoolean("on", false);
         finePct = prefs.getFloat("pct", -1);
+        buttons = prefs.getBoolean("buttons", false);
+        Hub.setVolButtons(buttons);
         readStepSizes(prefs.getString("step_sizes", "{}"));
 
         if (fineOn && finePct >= 0) {
@@ -212,7 +219,9 @@ final class SysVolume {
                 fineGain = 1;
                 keepFine();
                 Hub.setFine(-1);
+                Hub.setFineInfo(Float.NaN, 0);
                 Hub.command("fineGain", 1.0);
+                PlayerService.volumeKeys();
                 return;
             }
 
@@ -290,9 +299,12 @@ final class SysVolume {
 
         fineStep = step;
         fineGain = plan[1];
+        fineStepDb = step > 0 ? stepDb(step, max, type, own) : Float.NaN;
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
         keepFine();
         Hub.setFine(finePct);
+        Hub.setFineInfo(fineStepDb, fineGain > 0 ? (float) (20 * Math.log10(fineGain)) : -200);
+        PlayerService.volumeKeys();
         Hub.command("fineGain", (double) fineGain);
         Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
         Hub.note("Volume", "more steps: " + Math.round(finePct * 10) / 10f + "%, step " + step + " of " + max
@@ -426,6 +438,83 @@ final class SysVolume {
     // The player's own sound under more steps, 1 when they are off
     static float fineGain() {
         return fineOn ? fineGain : 1;
+    }
+
+    // Whether the phone's volume buttons move more steps by 1%: set, and
+    // more steps on
+    static boolean buttonsOn() {
+        return buttons && fineOn && audio != null;
+    }
+
+    static void setButtons(boolean on) {
+
+        buttons = on;
+
+        if (appContext != null) {
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("buttons", on).apply();
+        }
+
+        Hub.setVolButtons(on);
+        Hub.note("Volume", on ? "the volume buttons move more steps by 1%" : "the volume buttons move the phone's own steps");
+        PlayerService.volumeKeys();
+    }
+
+    // More steps' level now in percent, -1 while off
+    static float finePct() {
+        return fineOn ? finePct : -1;
+    }
+
+    // A press of a volume button: more steps 1% up or down from the whole
+    // percent nearest. Shown in the app's volume popup when the press came
+    // with the app on screen
+    static void nudge(int dir, boolean shown) {
+
+        if (!fineOn || audio == null) {
+            return;
+        }
+
+        float pct = Math.max(0, Math.min(100, Math.round(finePct) + dir));
+
+        if (pct != finePct) {
+            setFine(true, pct);
+        }
+
+        if (shown) {
+            Hub.volKey();
+        }
+    }
+
+    // More steps as they are, for the stats: on, the level, the step and
+    // its dB, the player's share in dB and the step size set by hand
+    static String fineInfo() {
+
+        try {
+
+            JSONObject o = new JSONObject();
+            int max = audio == null ? 0 : audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            o.put("on", fineOn);
+            o.put("buttons", buttons);
+            o.put("max", max);
+
+            if (fineOn) {
+
+                o.put("pct", Math.round(finePct * 10) / 10.0);
+                o.put("step", fineStep);
+                o.put("gain", Math.round(fineGain * 1000) / 1000.0);
+                o.put("gainDb", fineGain > 0 ? Math.round(200 * Math.log10(fineGain)) / 10.0 : -200);
+
+                if (!Float.isNaN(fineStepDb) && !Float.isInfinite(fineStepDb)) {
+                    o.put("stepDb", Math.round(fineStepDb * 10) / 10.0);
+                }
+
+                o.put("handDb", handDb > 0 ? handDb : 0);
+            }
+
+            return o.toString();
+        } catch (JSONException | RuntimeException e) {
+            return "{}";
+        }
     }
 
     // Move the volume to one of the steps Android offers. Over Bluetooth

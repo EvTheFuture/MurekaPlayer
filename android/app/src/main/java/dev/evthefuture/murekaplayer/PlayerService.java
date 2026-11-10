@@ -50,6 +50,7 @@ import android.media.AudioManager;
 import android.media.AudioPlaybackConfiguration;
 import android.media.AudioTrack;
 import android.media.MediaMetadata;
+import android.media.VolumeProvider;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.net.VpnService;
@@ -108,6 +109,11 @@ public class PlayerService extends Service implements Hub.Listener {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
     private MediaSession session;
+
+    // The volume buttons outside the app: while more steps and the
+    // buttons are on, the session takes the volume itself, 0 to 100, so
+    // Android sends the buttons here even with the screen off
+    private VolumeProvider keysProvider;
     private WebViewServer server;
 
     // Android's word on each hotspot change, for the public address that
@@ -318,6 +324,9 @@ public class PlayerService extends Service implements Hub.Listener {
         });
         session.setSessionActivity(openAppIntent());
         session.setActive(true);
+
+        // The volume buttons already moving more steps from before
+        applyVolumeKeys();
 
         PowerManager pm = getSystemService(PowerManager.class);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MurekaPlayer:playback");
@@ -541,6 +550,66 @@ public class PlayerService extends Service implements Hub.Listener {
     // the page and sleeps again before the page gets to run it. It then ran
     // only once the screen was unlocked. Held for a while, the page gets the
     // time to start the music, and playing holds the phone awake by itself
+    // The session's volume as more steps and the buttons are now
+    static void volumeKeys() {
+
+        MAIN.post(() -> {
+
+            PlayerService s = instance;
+
+            if (s != null && s.session != null) {
+                s.applyVolumeKeys();
+            }
+        });
+    }
+
+    private void applyVolumeKeys() {
+
+        if (!SysVolume.buttonsOn()) {
+
+            if (keysProvider != null) {
+
+                keysProvider = null;
+                session.setPlaybackToLocal(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build());
+                Hub.note("Volume", "the volume buttons outside the app go back to Android");
+            }
+
+            return;
+        }
+
+        int pct = Math.max(0, Math.min(100, Math.round(SysVolume.finePct())));
+
+        if (keysProvider != null) {
+
+            if (keysProvider.getCurrentVolume() != pct) {
+                keysProvider.setCurrentVolume(pct);
+            }
+
+            return;
+        }
+
+        keysProvider = new VolumeProvider(VolumeProvider.VOLUME_CONTROL_ABSOLUTE, 100, pct) {
+
+            @Override
+            public void onAdjustVolume(int direction) {
+
+                if (direction == AudioManager.ADJUST_RAISE || direction == AudioManager.ADJUST_LOWER) {
+                    SysVolume.nudge(direction == AudioManager.ADJUST_RAISE ? 1 : -1, false);
+                }
+            }
+
+            @Override
+            public void onSetVolumeTo(int volume) {
+                SysVolume.setFine(true, Math.max(0, Math.min(100, volume)));
+            }
+        };
+        session.setPlaybackToRemote(keysProvider);
+        Hub.note("Volume", "the volume buttons outside the app move more steps, at " + pct + "%");
+    }
+
     static void commandArrived() {
 
         PlayerService s = instance;
