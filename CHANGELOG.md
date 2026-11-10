@@ -545,7 +545,12 @@ In development.
   popup shows for 1.5 s, and outside the app, while its music plays,
   Android shows its own slider. Stats for nerds shows the real volume,
   the phone's step and its dB and the mixer's share, and a web view
-  setting shows the same small in the volume popup.
+  setting shows the same small in the volume popup. Passing one of the
+  phone's steps going up, the player's share changes first and the step
+  a moment later, 250 ms over Bluetooth and 80 ms otherwise, so the step
+  no longer reaches the speaker before the share is heard and gives a
+  short burst; going down, the step changes at once, as one put in later
+  gave a short rise.
 - **The web view's settings in the bookmarklet and the add-on.** The
   Web view page in Settings showed only in the Android app, so the web
   view shown in the page kept its defaults. It shows now wherever the

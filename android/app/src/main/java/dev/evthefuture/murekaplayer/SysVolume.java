@@ -77,6 +77,22 @@ final class SysVolume {
     private static boolean buttons;
     private static float fineStepDb = Float.NaN;
 
+    // Passing a step, the player's share changes first and the step a
+    // moment later: the share is heard only once the sound already on its
+    // way has played out, Bluetooth's buffer most of all, while a step
+    // over Bluetooth with absolute volume reaches the speaker at once. The
+    // step going up before the share went down was heard as a short burst.
+    // The step waiting, and the wait for each kind of output
+    private static volatile int stepWaiting = -1;
+    private static final long STEP_WAIT_BT_MS = 250;
+    private static final long STEP_WAIT_MS = 80;
+    private static final Runnable STEP_LATER = new Runnable() {
+        @Override
+        public void run() {
+            takeWaitingStep();
+        }
+    };
+
     // The size of each step in dB set by hand in the player's sound
     // profiles for each Bluetooth speaker by its address, and for this
     // phone and the speakers not set up, as the phone's own curve can be
@@ -175,8 +191,9 @@ final class SysVolume {
             boolean moved = refreshOutput();
 
             // Moved by the phone's buttons, or night mode: more steps go on
-            // from that step, the player at its whole sound
-            if (fineOn && fineStep >= 0 && level != fineStep && max > 0) {
+            // from that step, the player at its whole sound. Not while a
+            // step of its own is still waiting to be put in
+            if (fineOn && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
 
                 fineStep = level;
                 finePct = level * 100f / max;
@@ -214,6 +231,7 @@ final class SysVolume {
 
             if (!on) {
 
+                takeWaitingStep();
                 finePct = -1;
                 fineStep = -1;
                 fineGain = 1;
@@ -297,21 +315,72 @@ final class SysVolume {
         float[] plan = finePlan(finePct, max, type, own);
         int step = (int) plan[0];
 
+        int was = stepWaiting >= 0 ? stepWaiting : audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        long wait = 0;
+
         fineStep = step;
         fineGain = plan[1];
         fineStepDb = step > 0 ? stepDb(step, max, type, own) : Float.NaN;
-        audio.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
+
+        // Going up, the share first, then the step once the share is
+        // heard, as a step too early is a burst. Going down, the step at
+        // once with the share, as the share rising is heard late anyway: a
+        // step put in after it was a short rise, at once it can only be a
+        // short dip
+        MAIN.removeCallbacks(STEP_LATER);
+
+        if (step > was) {
+
+            boolean bluetooth = type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                || type == AudioDeviceInfo.TYPE_BLE_SPEAKER;
+
+            wait = bluetooth ? STEP_WAIT_BT_MS : STEP_WAIT_MS;
+            Hub.command("fineGain", (double) fineGain);
+            stepWaiting = step;
+            MAIN.postDelayed(STEP_LATER, wait);
+        } else if (step < was) {
+
+            stepWaiting = step;
+            takeWaitingStep();
+            Hub.command("fineGain", (double) fineGain);
+        } else {
+
+            stepWaiting = -1;
+            Hub.command("fineGain", (double) fineGain);
+        }
+
         keepFine();
         Hub.setFine(finePct);
         Hub.setFineInfo(fineStepDb, fineGain > 0 ? (float) (20 * Math.log10(fineGain)) : -200);
         PlayerService.volumeKeys();
-        Hub.command("fineGain", (double) fineGain);
-        Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
         Hub.note("Volume", "more steps: " + Math.round(finePct * 10) / 10f + "%, step " + step + " of " + max
+            + (step != was ? " from " + was + (wait > 0 ? " after " + wait + " ms" : " at once") : "")
             + (step > 0 ? " at " + Math.round(stepDb(step, max, type, own) * 10) / 10f + " dB" : "")
             + ", the player at " + Math.round(fineGain * 1000) / 10f + "%"
             + (handDb > 0 ? ", " + handDb + " dB a step set by hand"
                 : (own ? ", the output's own curve" : ", Android's usual curve")));
+    }
+
+    // The step waiting for the player's share to be heard put in, now
+    private static void takeWaitingStep() {
+
+        MAIN.removeCallbacks(STEP_LATER);
+
+        int step = stepWaiting;
+
+        stepWaiting = -1;
+
+        if (step < 0 || audio == null) {
+            return;
+        }
+
+        try {
+
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
+            Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, the next check sees it
+        }
     }
 
     // The step sizes set by hand in the player's sound profiles, as JSON:
