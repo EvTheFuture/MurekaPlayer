@@ -553,6 +553,11 @@ In development.
 - **A playlist's cover from the web view in the page.** Choosing a
   picture for a playlist from the web view shown inside the page changed
   nothing, it now sets the playlist's cover.
+- **Popups fit what a phone's browser shows.** The playlists', the
+  Bluetooth devices' and the Create popups size themselves to the part
+  of the screen really seen, so on an iPhone in Safari the top with
+  Create is no longer hidden behind the browser's bars, and the models
+  stay in one row.
 
 ### Build
 

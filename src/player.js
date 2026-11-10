@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.64";
+    const VERSION = "2.0.1.65";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -65447,7 +65447,25 @@
        list to choose from in its place */
     #crPop #crBox {
         width: min(860px, 94vw);
-        max-height: 92vh;
+        max-height: min(92vh, calc(100% - 16px));
+    }
+
+    /* The models in one row, each as wide as it needs on a narrow screen,
+       the row scrolling sideways when they still don't fit */
+    .crSeg.crModels {
+        width: 100%;
+        box-sizing: border-box;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .crSeg.crModels::-webkit-scrollbar {
+        display: none;
+    }
+
+    .crSeg.crModels button {
+        padding: 0 clamp(6px, 1.8vw, 18px);
     }
 
     #crForm,
@@ -65812,6 +65830,9 @@
     #crPop {
         position: fixed;
         inset: 0;
+        top: var(--seenTop, 0px);
+        bottom: auto;
+        height: var(--seenH, 100%);
         z-index: 55;
         display: none;
         align-items: center;
@@ -65829,7 +65850,7 @@
         border-radius: 18px;
         padding: 2vh 2vw;
         width: min(720px, 92vw);
-        max-height: 88vh;
+        max-height: min(88vh, calc(100% - 16px));
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
@@ -89302,6 +89323,7 @@
 
         buildCrPop();
         showCrPick(false);
+        fitSeenRoom();
         $("crPop").style.display = "flex";
         send("createWatch", true);
         clearInterval(crWatchTimer);
@@ -89850,6 +89872,7 @@
             if (Array.isArray(c.models) && !ui.model) {
 
                 ui.model = crSegments(c.models, "model");
+                ui.model.classList.add("crWide", "crModels");
                 ui.modelSlot.replaceWith(ui.model);
             }
 
@@ -93215,6 +93238,33 @@
 
     if (window.visualViewport) {
         window.visualViewport.addEventListener("resize", fitTypingRoom);
+    }
+
+    // The part of the screen really seen, for the popups that fill it:
+    // on a phone's browser the bars and the keyboard cover parts of what
+    // the page believes is its height, so a popup centred in that hid
+    // its top behind them
+    function fitSeenRoom() {
+
+        const vv = window.visualViewport;
+        const root = document.documentElement.style;
+
+        if (!vv) {
+            return;
+        }
+
+        root.setProperty("--seenTop", Math.round(vv.offsetTop) + "px");
+        root.setProperty("--seenH", Math.round(vv.height) + "px");
+    }
+
+    if (window.visualViewport) {
+
+        window.visualViewport.addEventListener("resize", fitSeenRoom);
+        window.visualViewport.addEventListener("scroll", fitSeenRoom);
+        window.addEventListener("orientationchange", function () {
+            setTimeout(fitSeenRoom, 300);
+        });
+        fitSeenRoom();
     }
 
     // A page of the settings goes back one level, the main page closes
