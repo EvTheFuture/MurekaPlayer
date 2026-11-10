@@ -575,6 +575,18 @@ In development.
   in; it now waits for its place right after the first. Shuffle switched
   on with a queue put together by hand also keeps the songs put in with
   Play next right after the playing one.
+- **Each song of a set numbered in the web view.** A set's songs in the
+  list had one number between them, on the first, so the next set's
+  first song took the number after it. Each song the filters let through
+  now has its own, and a folded set leaves out the numbers of the songs
+  it hides.
+- **The way back to the playing song shows when it should in the web
+  view.** When the song changed on its own to one further down than the
+  rows read so far, the button went by where the last song was and
+  stayed hidden; it now shows whenever the playing song is not in sight,
+  and asks the phone where the song is before reading the list down to
+  it. Rows are measured on the screen, it is looked at again now and
+  then, and as the page comes back after the phone's browser slept.
 
 ### Build
 

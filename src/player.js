@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.68";
+    const VERSION = "2.0.1.70";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -35557,10 +35557,23 @@
 
         const pageEnd = runOf || setOf ? rows.length : offset + limit;
 
-        // Each row's place among the songs the filters let through, the
-        // number the web view shows. A greyed row has none and does not
-        // count, so the song after it takes the next number
-        let place = 0;
+        // Each song's place among the songs the filters let through, the
+        // number the web view shows, counted in the list's order before
+        // sets are folded: each song of a set has its own, a folded set
+        // leaves out the numbers of the songs it hides, and its songs asked
+        // for alone keep theirs. A greyed song has none and does not count,
+        // so the song after it takes the next number
+        const placeOf = new Map();
+        let counted = 0;
+
+        for (const e of searched) {
+
+            if (!e.greyed) {
+
+                counted += 1;
+                placeOf.set(String(e.song.song_id), counted);
+            }
+        }
 
         for (const e of rows) {
 
@@ -35580,12 +35593,6 @@
             const title = (song.title || "").trim() || "Untitled";
 
             total += 1;
-
-            // A song of a set under its first has no number of its own
-            if (!e.greyed && !e.setMember) {
-                place += 1;
-            }
-
 
             if (playingId && String(song.song_id) === playingId) {
                 playingAt = total - 1;
@@ -35632,7 +35639,7 @@
                 queued: queuedTurns.get(String(song.song_id)) || 0,
                 plays: songPlays(song),
                 greyed: e.greyed === true,
-                place: e.greyed || e.setMember ? 0 : place,
+                place: e.greyed ? 0 : (placeOf.get(String(song.song_id)) || 0),
 
                 // Its set: the color, and on the first of several how many
                 // and whether opened, the others marked as under it
@@ -85164,16 +85171,15 @@
         let show = false;
 
         if (miniOpen && miniPlaying && row) {
-
-            const top = row.offsetTop - box.offsetTop - box.scrollTop;
-
-            show = !(top + row.offsetHeight > 8 && top < box.clientHeight - 8);
+            show = !rowInSight(box, row);
         } else if (miniOpen && miniPlaying) {
 
-            // Not in this list at all the last time the phone was asked
+            // Not in this list at all the last time the phone was asked. A
+            // song not read in yet, or in a set folded since, is out of
+            // sight too, and the button reads the list down to it
             const missing = miniPlayingAtId === miniPlaying && miniPlayingAt < 0;
 
-            show = !missing && miniLoaded < miniTotal;
+            show = !missing;
         }
 
         btn.style.opacity = show ? "1" : "0";
@@ -85181,6 +85187,19 @@
     }
 
     // Eased to the playing song, the pages down to it loaded first
+    // Looked at again now and then as well: rows change height as covers
+    // come in and sets open, and a phone browser asleep a while misses the
+    // moment the song changed
+    setInterval(updateMiniLocate, 700);
+    document.addEventListener("visibilitychange", function () {
+
+        if (!document.hidden) {
+
+            updateMiniLocate();
+            updateRowsLocate();
+        }
+    });
+
     $("miniLocate").addEventListener("click", function () {
 
         hideMiniEdge();
@@ -85421,11 +85440,19 @@
     const HAND_SCROLL_MS = 1500;
 
     // Whether a row is at least partly in sight in its list
+    // Measured on the screen, as a row's offsets count from whichever box
+    // around it is placed, not always the list. A row not drawn, in a set
+    // folded away, has no size and is out of sight
     function rowInSight(box, row) {
 
-        const top = row.offsetTop - box.offsetTop - box.scrollTop;
+        const b = box.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
 
-        return top + row.offsetHeight > 8 && top < box.clientHeight - 8;
+        if (r.height <= 0) {
+            return false;
+        }
+
+        return r.bottom > b.top + 8 && r.top < b.bottom - 8;
     }
 
     function setFollow(on) {
@@ -85477,9 +85504,9 @@
             return;
         }
 
-        ensureLoaded(listPlayingAt, function () {
-            scrollToCurrent(true);
-        });
+        // Where it is now, asked of the phone, as the place last heard may
+        // be from a song ago
+        followCurrent();
     });
 
     // Scrolled by hand: the wheel, a finger, the keys or the scroll bar.
@@ -85542,7 +85569,7 @@
         let show = false;
 
         if ($("browse").style.display === "flex" && state && state.id) {
-            show = row ? !rowInSight(box, row) : listView !== "queue" && listPlayingAt >= listLoaded;
+            show = row ? !rowInSight(box, row) : listView !== "queue";
         }
 
         $("rowsLocate").style.opacity = show ? "1" : "0";
