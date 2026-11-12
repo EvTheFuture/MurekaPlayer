@@ -34,12 +34,11 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    deploy:
+    # The site is packed in a job of its own. The deploy waits for it to
+    # finish, so the artifact is listed by the time it is asked for; in the
+    # same job the deploy sometimes asked too early and found none
+    build:
         runs-on: ubuntu-latest
-
-        environment:
-            name: github-pages
-            url: ${{ steps.deployment.outputs.page_url }}
 
         steps:
             - name: Check out the repository
@@ -54,6 +53,15 @@ jobs:
               with:
                   path: .
 
+    deploy:
+        needs: build
+        runs-on: ubuntu-latest
+
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+
+        steps:
             - name: Deploy to Pages
               id: deployment
               uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
