@@ -25708,6 +25708,12 @@
         return row;
     }
 
+    // How long the Easy wish can be, an instrumental one starts with
+    // "Instrumental " and leaves room for it
+    function crEasyMax(d) {
+        return d && d.easyInstrumental === true ? 1987 : 2000;
+    }
+
     // A field whose keys stay in it, the page's own keys never hear them
     function crField(multi, max, field) {
 
@@ -25788,6 +25794,17 @@
         ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
+
+        // Instrumental: the wish starts with the word, the box holds less
+        ui.easyInstr = document.createElement("button");
+        ui.easyInstr.type = "button";
+        ui.easyInstr.className = "crSwitch";
+        ui.easyInstr.setAttribute("aria-label", "Instrumental");
+        ui.easyInstr.addEventListener("click", function () {
+            crSet({ easyInstrumental: !(crDraft && crDraft.easyInstrumental === true) });
+        });
+        ui.acts.push(ui.easyInstr);
+        ui.easyBox.appendChild(crLine("Instrumental", [ui.easyInstr]));
 
         const easyHint = document.createElement("div");
 
@@ -26016,7 +26033,7 @@
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a saved style" : "");
         crUi.wildLabel.count.textContent = d.wildness + "%";
         crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
-        crUi.easyLabel.count.textContent = String(d.easyText || "").length + "/2000";
+        crUi.easyLabel.count.textContent = String(d.easyText || "").length + "/" + crEasyMax(d);
     }
 
     // The form as the phone has it. Fields being typed in, or with typing
@@ -26065,6 +26082,9 @@
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
             put(ui.easy, "easyText");
+            ui.easy.maxLength = crEasyMax(fresh);
+            ui.easyInstr.classList.toggle("on", fresh.easyInstrumental === true);
+            ui.easyInstr.setAttribute("aria-pressed", fresh.easyInstrumental === true ? "true" : "false");
 
             const chat = fresh.easyChat && typeof fresh.easyChat === "object" ? fresh.easyChat : null;
 

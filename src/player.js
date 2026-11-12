@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.82";
+    const VERSION = "2.0.1.83";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -58195,6 +58195,9 @@
     const CREATE_LYRICS_MAX = 5000;
     const CREATE_STYLE_MAX = 1000;
     const CREATE_EASY_MAX = 2000;
+
+    // What an instrumental wish starts with, the box holds that much less
+    const CREATE_EASY_INSTRUMENTAL = "Instrumental ";
     const CREATE_THEME_MAX = 500;
     const CREATE_MODEL = "mureka-9.5";
 
@@ -58300,7 +58303,8 @@
 
         return {
             kind: x.kind === "instrumental" || x.kind === "easy" ? x.kind : "song",
-            easyText: createText(x.easyText, CREATE_EASY_MAX),
+            easyText: createText(x.easyText, createEasyMax(x)),
+            easyInstrumental: x.easyInstrumental === true,
             easyChat: createCleanEasyChat(x.easyChat),
             title: createText(x.title, CREATE_TITLE_MAX),
             lyrics: createText(x.lyrics, CREATE_LYRICS_MAX),
@@ -58327,6 +58331,12 @@
                 return m.value === x.model;
             }) ? x.model : CREATE_MODEL
         };
+    }
+
+    // How long the wish can be, an instrumental one leaves room for the
+    // word it starts with
+    function createEasyMax(d) {
+        return CREATE_EASY_MAX - (d && d.easyInstrumental === true ? CREATE_EASY_INSTRUMENTAL.length : 0);
     }
 
     function loadCreateDraft() {
@@ -59463,6 +59473,9 @@
 
         const text = d.easyText.trim();
 
+        // An instrumental wish starts with the word, within Mureka's length
+        const asked = ((d.easyInstrumental ? CREATE_EASY_INSTRUMENTAL : "") + text).slice(0, CREATE_EASY_MAX);
+
         if (createEasyLive) {
             return { ok: false, text: "Mureka's agent is still at work on the last wish" };
         }
@@ -59476,8 +59489,8 @@
 
             try {
 
-                dbgLog("Create", "easy: going on in the chat about " + (chat.title || "the last wish") + ", " + text.length + " characters asked");
-                await createEasyRun(chat, text, d);
+                dbgLog("Create", "easy: going on in the chat about " + (chat.title || "the last wish") + ", " + asked.length + " characters asked" + (d.easyInstrumental ? ", instrumental" : ""));
+                await createEasyRun(chat, asked, d);
             } catch (e) {
 
                 if (createStopped()) {
@@ -59491,7 +59504,7 @@
 
         if (!chat) {
 
-            const data = await createPost("/api/agent/chat/create", { title: text.slice(0, 40) }, 30000);
+            const data = await createPost("/api/agent/chat/create", { title: asked.slice(0, 40) }, 30000);
             const made = data.chat || {};
             const first = Array.isArray(data.sessions) && data.sessions[0] ? data.sessions[0] : {};
             const sessionId = String(made.current_session_id || first.session_id || first.id || "");
@@ -59500,9 +59513,9 @@
                 throw new Error("Mureka started no chat");
             }
 
-            dbgLog("Create", "easy: chat " + (made.chat_id || "?") + " started, " + text.length + " characters asked");
+            dbgLog("Create", "easy: chat " + (made.chat_id || "?") + " started, " + asked.length + " characters asked" + (d.easyInstrumental ? ", instrumental" : ""));
             chat = { chat: String(made.chat_id || ""), session: sessionId, title: "", wish: text };
-            await createEasyRun(chat, text, d);
+            await createEasyRun(chat, asked, d);
         }
 
         // Kept with the form, so the next wish goes on in it, even after
@@ -60513,6 +60526,21 @@
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
 
+        // Instrumental: the wish starts with the word, the box holds less
+        ui.easyInstrRow = trimSwitch("Instrumental", function () {
+            return loadCreateDraft().easyInstrumental;
+        }, function (v) {
+
+            const long = v && loadCreateDraft().easyText.length > CREATE_EASY_MAX - CREATE_EASY_INSTRUMENTAL.length;
+
+            changeCreateDraft({ easyInstrumental: v });
+
+            if (long) {
+                setCreateNote("The wish was cut to " + createEasyMax(loadCreateDraft()) + " characters, to make room for Instrumental");
+            }
+        });
+        ui.easyBox.appendChild(ui.easyInstrRow);
+
         const easyHint = document.createElement("div");
 
         easyHint.textContent = "Mureka's agent writes the lyrics and the style itself and makes two songs, as Mureka's easy mode does. What it says shows at the top.";
@@ -60815,7 +60843,7 @@
             + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a saved style" : "");
         ui.wildLabel.count.textContent = d.wildness + "%";
         ui.lengthLabel.count.textContent = createLengthText(d.lengthMs);
-        ui.easyLabel.count.textContent = d.easyText.length + "/" + CREATE_EASY_MAX;
+        ui.easyLabel.count.textContent = d.easyText.length + "/" + createEasyMax(d);
     }
 
     function paintCreateStatus() {
@@ -60867,6 +60895,8 @@
         put(ui.lyrics, d.lyrics);
         put(ui.style, d.style);
         put(ui.easy, d.easyText);
+        ui.easy.maxLength = createEasyMax(d);
+        updateToggleButton(ui.easyInstrRow.querySelector("button"), d.easyInstrumental);
         ui.easyChatRow.style.display = d.easyChat ? "flex" : "none";
         ui.easySame.style.display = d.easyChat && d.easyChat.wish ? "" : "none";
         ui.easyChatText.textContent = d.easyChat ? "Goes on in the chat about " + (d.easyChat.title ? "\"" + d.easyChat.title + "\"" : "the last wish")
@@ -91297,6 +91327,12 @@
         return row;
     }
 
+    // How long the Easy wish can be, an instrumental one starts with
+    // "Instrumental " and leaves room for it
+    function crEasyMax(d) {
+        return d && d.easyInstrumental === true ? 1987 : 2000;
+    }
+
     // A field whose keys stay in it, the page's own keys never hear them
     function crField(multi, max, field) {
 
@@ -91377,6 +91413,17 @@
         ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
+
+        // Instrumental: the wish starts with the word, the box holds less
+        ui.easyInstr = document.createElement("button");
+        ui.easyInstr.type = "button";
+        ui.easyInstr.className = "crSwitch";
+        ui.easyInstr.setAttribute("aria-label", "Instrumental");
+        ui.easyInstr.addEventListener("click", function () {
+            crSet({ easyInstrumental: !(crDraft && crDraft.easyInstrumental === true) });
+        });
+        ui.acts.push(ui.easyInstr);
+        ui.easyBox.appendChild(crLine("Instrumental", [ui.easyInstr]));
 
         const easyHint = document.createElement("div");
 
@@ -91605,7 +91652,7 @@
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a saved style" : "");
         crUi.wildLabel.count.textContent = d.wildness + "%";
         crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
-        crUi.easyLabel.count.textContent = String(d.easyText || "").length + "/2000";
+        crUi.easyLabel.count.textContent = String(d.easyText || "").length + "/" + crEasyMax(d);
     }
 
     // The form as the phone has it. Fields being typed in, or with typing
@@ -91654,6 +91701,9 @@
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
             put(ui.easy, "easyText");
+            ui.easy.maxLength = crEasyMax(fresh);
+            ui.easyInstr.classList.toggle("on", fresh.easyInstrumental === true);
+            ui.easyInstr.setAttribute("aria-pressed", fresh.easyInstrumental === true ? "true" : "false");
 
             const chat = fresh.easyChat && typeof fresh.easyChat === "object" ? fresh.easyChat : null;
 

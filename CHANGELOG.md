@@ -678,6 +678,10 @@ In development.
   box, to change or to make again as it is, on the phone and in the web
   view. On a narrow phone the line about the chat sits above the two
   buttons.
+- **Instrumental in Easy mode.** A switch below the wish, on the phone
+  and in the web view, sends the wish starting with "Instrumental ". The
+  box then holds 13 characters less, 1987, so the message stays within
+  Mureka's 2000; a longer wish is cut when the switch is turned on.
 
 ### Build
 
