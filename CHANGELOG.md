@@ -646,6 +646,12 @@ In development.
   Mureka. The real songs take their place as Mureka lists them; the rows
   go if the request fails, and after six minutes at most. A tap on one
   says Mureka has not listed the songs yet.
+- **The next song in step on an iPhone.** A song from its beginning, as
+  the next one after a song ends, was heard a good while after the play
+  head and the waveform until a pause and play, more than the way out's
+  delay allowed for. Through the sound engine on an iPhone or iPad such
+  a song now starts 50 ms in, so Safari plays it as one loaded at a
+  place, the way a pause and play does, in step with the play head.
 
 ### Build
 

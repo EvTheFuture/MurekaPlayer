@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.77";
+    const VERSION = "2.0.1.78";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1210,6 +1210,9 @@
 
     // A one-shot seek applied once the next song has loaded, used when resuming
     let pendingSeek = 0;
+
+    // Where a song from its beginning starts on an iPhone or iPad
+    const FRESH_START_AT = 0.05;
 
     // The place a move by loading the song again goes to, shown until the
     // song is there, null otherwise
@@ -14736,6 +14739,23 @@
                 try {
                     audio.currentTime = Math.min(pendingSeek, audio.duration - 0.5);
                 } catch (e) {
+                }
+            } else if (isIosLike() && (iosGain || anyFadeOn()) && (audio.currentTime || 0) < 0.01 && isFinite(audio.duration)
+                && audio.duration > 2) {
+
+                // A song from its beginning on an iPhone or iPad, through
+                // the sound engine, starts a moment in: Safari plays a song
+                // loaded at a place in step with the play head, as after a
+                // pause and play, while one started from its very
+                // beginning, as the next song after one ends, was heard a
+                // good while after the play head, more than its way out's
+                // delay allowed for
+                try {
+
+                    audio.currentTime = FRESH_START_AT;
+                    dbgLog("Audio", "started " + Math.round(FRESH_START_AT * 1000) + " ms in, as Safari plays a song loaded at a place in step");
+                } catch (e) {
+                    // Played from the beginning, the delay allowed for as before
                 }
             }
 
