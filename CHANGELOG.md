@@ -743,6 +743,14 @@ In development.
   mixer under Volume now among it, until something else was tapped. A
   slider no longer holds the drawing back once let go, and the page is
   read again half a second after, when the phone has the result.
+- **More volume steps no longer fall back a step after going up past
+  one.** Going up past one of the phone's steps, the step is put in a
+  moment after the player's own sound. The same level asked for again in
+  that moment, as a slider sends its last place twice, dropped the step
+  still waiting, so the phone stayed on the step below, and a second
+  later the app took that for the volume buttons and moved the level
+  down to it: below 6% to Off, and from 7% back to 6%. A step waiting
+  now goes in as planned, and Volume now sends each place once.
 
 ### Build
 

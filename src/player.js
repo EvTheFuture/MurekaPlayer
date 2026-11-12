@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.90";
+    const VERSION = "2.0.1.91";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -49069,6 +49069,7 @@
                 const nums = makeHint("");
                 const off = makeHint("Turn on More volume steps to try the volume here.");
                 let sentAt = 0;
+                let sentValue = -1;
                 let later = 0;
 
                 // Whether the music plays on this speaker now: a speaker by
@@ -49109,13 +49110,21 @@
                 };
 
                 // Sent to the app a few times a second while moved, and
-                // always where it stops
+                // where it stops, once: a slider let go tells its place
+                // again, and a web view's move comes as two as well
                 const tell = function () {
 
+                    const v = Math.round(Number(slider.value) || 0);
+
+                    if (v === sentValue && Date.now() - sentAt < 1500) {
+                        return;
+                    }
+
                     sentAt = Date.now();
+                    sentValue = v;
 
                     try {
-                        window.MurekaHost.fineVolumeAt(String(Math.round(Number(slider.value) || 0)));
+                        window.MurekaHost.fineVolumeAt(String(v));
                     } catch (e) {
                         dbgLog("Sound", "volume to try not taken: " + errText(e));
                     }

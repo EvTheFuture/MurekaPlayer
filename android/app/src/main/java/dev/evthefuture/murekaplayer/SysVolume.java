@@ -363,8 +363,13 @@ final class SysVolume {
         // heard, as a step too early is a burst. Going down, the step at
         // once with the share, as the share rising is heard late anyway: a
         // step put in after it was a short rise, at once it can only be a
-        // short dip
-        MAIN.removeCallbacks(STEP_LATER);
+        // short dip. The same step asked for again, as a slider sends its
+        // last place twice, leaves one still waiting to go in as planned:
+        // dropped, the phone stayed on the step below, and the next check
+        // took that for the volume buttons and moved the level down to it
+        if (step != was) {
+            MAIN.removeCallbacks(STEP_LATER);
+        }
 
         if (step > was) {
 
@@ -381,8 +386,6 @@ final class SysVolume {
             takeWaitingStep();
             Hub.command("fineGain", (double) fineGain);
         } else {
-
-            stepWaiting = -1;
             Hub.command("fineGain", (double) fineGain);
         }
 
