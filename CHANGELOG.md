@@ -802,6 +802,14 @@ In development.
   speaker no longer takes this device's steps: without its own it goes
   by the phone's curve. The steps are kept with the settings, go along
   in a copy of them, and reach the app at once when a copy is put back.
+- **Volume steps for speakers not set up, with the dB shown.** A speaker
+  without volume steps of its own takes this device's again, as the
+  heading This device and others not set up says, and without those the
+  phone's curve. The line under Volume steps always says what is in use
+  with its dB, such as As the phone says, about 4.0 dB a step, or Same
+  as this device: 3.5 dB a step, and the empty fields of Edit by hand
+  show the values in use. A speaker with nothing kept no longer shows a
+  switch delay of 0 ms.
 
 ### Build
 

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.94";
+    const VERSION = "2.0.1.95";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13771,14 +13771,13 @@
             return Math.round(drawn * 2) / 2;
         }
 
-        const rec = volTrainRecord(false);
+        if (!volTrain.phone) {
 
-        if (rec && rec.stepDb > 0) {
-            return rec.stepDb;
-        }
+            const fb = volGapFrom(sound().fallback.gaps || {}, step);
 
-        if (!volTrain.phone && sound().fallback.stepDb > 0) {
-            return sound().fallback.stepDb;
+            if (fb > 0) {
+                return Math.round(fb * 2) / 2;
+            }
         }
 
         return Math.round(phoneStepDb(!volTrain.phone) * 2) / 2;
@@ -49698,7 +49697,7 @@
             if (stepsOffered) {
                 soundBox.appendChild(makeHint("Volume steps are for More volume steps: how much louder a speaker gets at each of the phone's steps, as a Bluetooth speaker turns its sound down by its own curve, not by what the phone says. "
                     + "Train by ear, while the speaker plays, finds them one step against the step below. Edit by hand takes them typed in, a step left empty drawn from those set. "
-                    + "A speaker without any goes by the phone's own curve. They are kept with the settings, and in a copy of them."
+                    + "A speaker without any takes this device's, and without those the phone's own curve. They are kept with the settings, and in a copy of them."
                     + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under them, to hear the result." : "")));
             }
 
@@ -49845,9 +49844,11 @@
                 };
                 const delay = function () {
 
-                    const v = Number(get("delayMs"));
+                    const raw = get("delayMs");
+                    const v = Number(raw);
 
-                    return isFinite(v) && v >= 0 ? v : -1;
+                    // A speaker with nothing kept yet has none
+                    return raw !== "" && raw !== null && raw !== undefined && isFinite(v) && v >= 0 ? v : -1;
                 };
                 const kept = function () {
 
@@ -49960,12 +49961,30 @@
                     const fine = fineInfo();
                     const here = typeof fine.output === "string" && playsOn(fine, phone, address);
 
-                    said.textContent = at.length
-                        ? "Volume steps set at " + at.map(function (k) {
-                            return k + ": " + g[k] + " dB";
-                        }).join(", ") + (at.length > 1 ? ", those between drawn from them." : ", the same for every step.")
-                            + (delay() >= 0 ? " Switch delay " + delay() + " ms." : "")
-                        : "Volume steps as the phone says." + (delay() >= 0 ? " Switch delay " + delay() + " ms." : "");
+                    // What is in use: its own, else this device's for a
+                    // speaker, else the phone's curve, always with its dB
+                    const fb = phone ? {} : (sound().fallback.gaps || {});
+                    const fbAt = Object.keys(fb).map(Number).sort(function (a, b) {
+                        return a - b;
+                    });
+                    const listed = function (set, keys) {
+
+                        return keys.length > 1
+                            ? keys.map(function (k) {
+                                return k + ": " + set[k] + " dB";
+                            }).join(", ") + ", those between drawn from them."
+                            : set[keys[0]] + " dB a step.";
+                    };
+
+                    if (at.length) {
+                        said.textContent = "Volume steps set by hand or trained: " + listed(g, at);
+                    } else if (fbAt.length) {
+                        said.textContent = "Same as this device: " + listed(fb, fbAt);
+                    } else {
+                        said.textContent = "As the phone says, about " + phoneStepDb(!phone).toFixed(1) + " dB a step.";
+                    }
+
+                    said.textContent += delay() >= 0 ? " Switch delay " + delay() + " ms." : "";
                     forget.style.display = at.length || delay() >= 0 ? "" : "none";
                     train.style.display = here && !volTrain ? "" : "none";
                     editBtn.textContent = editing ? "Done editing" : "Edit by hand";
@@ -49981,7 +50000,7 @@
                             input.value = g[k] > 0 ? String(g[k]) : "";
                         }
 
-                        const drawn = volGapFrom(g, k);
+                        const drawn = at.length ? volGapFrom(g, k) : (fbAt.length ? volGapFrom(fb, k) : phoneStepDb(!phone));
 
                         input.placeholder = drawn > 0 ? drawn.toFixed(1) : "";
                     }
