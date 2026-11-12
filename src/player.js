@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.98";
+    const VERSION = "2.0.1.99";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -36880,6 +36880,7 @@
                     unit: el.dataset.hostUnit || "",
                     off: el.dataset.hostOff === "1",
                     warn: el.dataset.hostWarn === "1",
+                    live: el.dataset.hostLive || "",
                     shown: hostText(el.children[el.children.length - 1])
                 });
             }
@@ -50148,6 +50149,11 @@
                 box.style.cssText = "display:none;flex-direction:column;gap:6px";
                 row.dataset.hostSlider = "1";
                 row.dataset.hostUnit = "%";
+
+                // The web view draws the numbers under it from the state,
+                // so they follow while a finger is still on its slider
+                row.dataset.hostLive = "fineVol";
+                nums.dataset.hostSkip = "1";
                 row.style.cssText = "display:flex;align-items:center;gap:10px";
                 name.textContent = "Volume now";
                 name.style.cssText = "flex:0 0 auto";
@@ -71483,6 +71489,13 @@
         accent-color: var(--accent);
     }
 
+    .pSliderSub {
+        padding: 0 4px;
+        color: var(--muted);
+        font-size: 0.85em;
+        font-variant-numeric: tabular-nums;
+    }
+
     .pSliderVal {
         flex: 0 0 auto;
         text-align: right;
@@ -85273,6 +85286,49 @@
 
     // A slider beside its name, its words beside it. Heard on the phone
     // while it moves, a few times a second, kept once let go
+    // The lines under the volume to try in the settings, drawn from the
+    // phone's state at each reading rather than with the page
+    let liveFineLines = [];
+
+    function liveFineText() {
+
+        if (!state || !(state.volMax > 0) || typeof state.vol !== "number") {
+            return "";
+        }
+
+        if (!volFineOn()) {
+            return "Step " + state.vol + " of " + state.volMax + " \u00b7 mixer 0.0 dB";
+        }
+
+        return Math.round(state.volFine * 10) / 10 + "% \u00b7 step " + state.vol + " of " + state.volMax
+            + (typeof state.volStepDb === "number" ? " at " + state.volStepDb.toFixed(1) + " dB" : "")
+            + " \u00b7 mixer " + (typeof state.volGainDb === "number" ? state.volGainDb.toFixed(1) : "0.0") + " dB";
+    }
+
+    function paintLiveLines() {
+
+        // A line once shown and since drawn over is let go, one just made
+        // and not yet in the page is kept
+        liveFineLines = liveFineLines.filter(function (el) {
+
+            el.wasShown = el.wasShown || el.isConnected;
+
+            return el.isConnected || !el.wasShown;
+        }).slice(-8);
+
+        if (!liveFineLines.length) {
+            return;
+        }
+
+        const text = liveFineText();
+
+        for (const el of liveFineLines) {
+
+            el.textContent = text;
+            el.style.display = text ? "" : "none";
+        }
+    }
+
     function panelSlider(node) {
 
         const row = document.createElement("div");
@@ -85342,6 +85398,18 @@
         head.appendChild(shown);
         row.appendChild(head);
         row.appendChild(slider);
+
+        // The phone's step and mixer under the volume to try, from the
+        // state, so they follow while the finger is still on the slider
+        if (node.live === "fineVol") {
+
+            const sub = document.createElement("div");
+
+            sub.className = "pSliderSub";
+            row.appendChild(sub);
+            liveFineLines.push(sub);
+            paintLiveLines();
+        }
 
         return row;
     }
@@ -88837,6 +88905,7 @@
         paintNewAsk();
         paintSetAsk();
         paintTrainPop();
+        paintLiveLines();
         paintFollowAsk();
         followWaveZoomKeep(state);
         theaterSound();

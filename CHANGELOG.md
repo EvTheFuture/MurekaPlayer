@@ -831,6 +831,13 @@ In development.
   and the web view now shows that value greyed instead of a dash, - and
   + going on from it. A small cross beside a step set takes it back to
   the value filled in.
+- **Volume now follows under the finger in the web view.** The line
+  under Volume now, the real volume, the phone's step with its dB and
+  the mixer, came with the copy of the settings page, which is not drawn
+  again while a finger is on a slider, so it only changed once the
+  slider was let go. The web view now draws that line itself from the
+  phone's state, as the volume popup does, so it follows while the
+  slider is moved back and forth.
 
 ### Build
 
