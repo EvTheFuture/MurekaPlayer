@@ -2153,6 +2153,15 @@
     }
 
     /* At the top instead, where it would cover a button of a box open */
+    /* The phone's real volume, step and mixer, small under the level */
+    #toast .toastSub {
+        margin-top: 4px;
+        font-size: 0.72em;
+        color: inherit;
+        opacity: 0.75;
+        font-variant-numeric: tabular-nums;
+    }
+
     #toast.atTop {
         bottom: auto;
         top: 6vh;
@@ -17001,10 +17010,47 @@
         if (value === 0) {
 
             toast("Sound off", "ok");
+            volSaidAt = Date.now();
+            volSayNumbers();
             return;
         }
 
         toast("Volume " + volText(value), "ok");
+        volSaidAt = Date.now();
+        volSayNumbers();
+    }
+
+    // Under the level in the toast, the phone's real volume, its step and
+    // the player's mixer, as under the phone's bar in the volume popup.
+    // Put in again as the phone's answer comes, while the toast is fresh
+    let volSaidAt = 0;
+
+    function volSayNumbers() {
+
+        if (Date.now() - volSaidAt > 2500 || volTarget().kind !== "phone") {
+            return;
+        }
+
+        const el = $("toast");
+        const text = volNumbersText();
+        let sub = el.querySelector(".toastSub");
+
+        if (!el.classList.contains("shown") || !/^Volume|^Sound off/.test(el.textContent)) {
+            return;
+        }
+
+        if (!sub && text) {
+
+            sub = document.createElement("div");
+            sub.className = "toastSub";
+            el.appendChild(sub);
+        }
+
+        if (sub) {
+
+            sub.textContent = text;
+            sub.style.display = text ? "" : "none";
+        }
     }
 
     function volStep(by) {
@@ -18114,6 +18160,11 @@
         const words = function () {
 
             const v = Number(slider.value) || 0;
+
+            // A slider with a unit of its own, off at the left end when so
+            if (node.unit) {
+                return node.off && v <= 0 ? "Off" : v + node.unit;
+            }
 
             // Hz below 20 is off, as the phone has it
             return /Hz$/.test(node.shown || "") || node.shown === "Off" ? (v < 20 ? "Off" : v + " Hz") : String(v);
@@ -21578,6 +21629,7 @@
         online = true;
         phoneSeen = true;
         noteVolKey(s);
+        volSayNumbers();
         paintPlayingRating(s);
 
         // The exports changed on the phone while the actions are open, so

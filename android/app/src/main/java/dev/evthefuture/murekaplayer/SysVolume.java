@@ -217,7 +217,7 @@ final class SysVolume {
             if (fineOn && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
 
                 fineStep = level;
-                finePct = level * 100f / max;
+                finePct = stepPct(level, max);
                 fineGain = 1;
                 keepFine();
                 Hub.setFine(finePct);
@@ -265,45 +265,61 @@ final class SysVolume {
             }
 
             // Turned on without a level, it starts where the step is
-            finePct = pct >= 0 ? Math.max(0, Math.min(100, pct)) : (max > 0 ? cur * 100f / max : 0);
+            finePct = pct >= 0 ? Math.max(0, Math.min(100, pct)) : stepPct(cur, max);
             applyFine();
         } catch (RuntimeException e) {
             // Do not disturb can refuse the change, so leave it as it was
         }
     }
 
+    // Where one of the phone's steps sits in percent, on a whole percent,
+    // so each step is reached exactly by going a percent at a time
+    static float stepPct(int step, int max) {
+        return max > 0 ? Math.round(100f * Math.max(0, Math.min(max, step)) / max) : 0;
+    }
+
     // The step for a level in percent and the player's own sound for the
-    // rest: the step at or above it, the sound between the step below's
-    // and its own, evened out in loudness as heard, not in dB, so a level
-    // just under a step is only a little quieter than the step even where
-    // the phone's lowest steps lie far apart
+    // rest. On a step the player plays at its whole sound. Going down from
+    // it the player lowers the sound by the same dB for each percent, the
+    // percent just above the step below lowered the most, and one more
+    // down is that step at its whole sound again. So every step has the
+    // same cuts under it, whatever the percent it falls on
     private static float[] finePlan(float pct, int max, int type, boolean own) {
 
-        float at = pct / 100f * max;
-        int step = (int) Math.ceil(at - 0.0001f);
+        float p = Math.max(0, Math.min(100, pct));
 
-        if (step <= 0) {
+        if (p <= 0 || max <= 0) {
             return new float[] { 0, 1 };
         }
 
-        // Below the lowest step only the player can go, by its share of it
-        if (at < 1) {
-            return new float[] { 1, Math.max(0, at) };
+        int step = 1;
+
+        while (step < max && stepPct(step, max) < p - 0.0001f) {
+            step++;
         }
 
-        int below = (int) Math.floor(at);
+        float high = stepPct(step, max);
+        float low = stepPct(step - 1, max);
 
-        if (below >= step) {
+        if (p >= high - 0.0001f || high <= low) {
             return new float[] { step, 1 };
         }
 
-        float low = stepDb(below, max, type, own);
-        float high = stepDb(step, max, type, own);
+        // Below the lowest step only the player can go, by its share of it
+        if (step == 1) {
+            return new float[] { 1, Math.max(0, p / high) };
+        }
 
-        // A step that tells no sensible level is taken as a whole step down
-        float ratio = Float.isNaN(low) || Float.isInfinite(low) || low > high ? 0.5f : (float) Math.pow(10, (low - high) / 20);
-        float share = at - below;
-        float gain = ratio + (1 - ratio) * share;
+        // The gap between the step and the one below, a step that tells no
+        // sensible level taken as 6 dB
+        float gap = stepDb(step, max, type, own) - stepDb(step - 1, max, type, own);
+
+        if (Float.isNaN(gap) || Float.isInfinite(gap) || gap <= 0) {
+            gap = 6;
+        }
+
+        float down = gap * (high - p) / (high - low);
+        float gain = (float) Math.pow(10, -down / 20);
 
         return new float[] { step, Math.max(0, Math.min(1, gain)) };
     }
@@ -678,6 +694,12 @@ final class SysVolume {
             o.put("buttons", buttons);
             o.put("max", max);
 
+            // The output in use, a Bluetooth speaker by its address, for
+            // the volume to try under that speaker in the sound profiles
+            if (audio != null) {
+                o.put("output", outputKey());
+            }
+
             if (fineOn) {
 
                 o.put("pct", Math.round(finePct * 10) / 10.0);
@@ -715,7 +737,7 @@ final class SysVolume {
             // whole sound
             if (fineOn && max > 0) {
 
-                finePct = want * 100f / max;
+                finePct = stepPct(want, max);
                 applyFine();
                 return;
             }
@@ -753,7 +775,7 @@ final class SysVolume {
                 boolean own = hasCurve(type, max);
                 float from = finePct;
                 float goal = fineDb(from, max, type, own) - db;
-                float lowest = 100f / max;
+                float lowest = stepPct(1, max);
                 float to = from;
 
                 while (to - 0.5f >= lowest && fineDb(to, max, type, own) > goal) {

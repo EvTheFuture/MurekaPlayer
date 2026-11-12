@@ -1165,6 +1165,28 @@ final class PlayerWeb {
             }
         }
 
+        // More steps at a level in percent, from the volume to try in the
+        // sound profiles
+        @JavascriptInterface
+        public void fineVolumeAt(String pct) {
+
+            if (!onMureka) {
+                return;
+            }
+
+            float p;
+
+            try {
+                p = Float.parseFloat(pct);
+            } catch (NumberFormatException e) {
+                return;
+            }
+
+            if (!Float.isNaN(p)) {
+                MAIN.post(() -> SysVolume.setFine(true, Math.max(0, Math.min(100, p))));
+            }
+        }
+
         @JavascriptInterface
         public void volumeButtons(String on) {
 

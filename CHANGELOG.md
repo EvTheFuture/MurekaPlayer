@@ -710,6 +710,27 @@ In development.
   connects, and it works with More volume steps too. A speaker already
   playing when the app starts keeps its volume. It needs this version of
   the app.
+- **Max volume as a speaker connects is one slider.** The switch and the
+  level are a single slider from 0 to 100%, off at the left end, as Bass
+  cut is, on the phone and in the web view. A speaker set in 2.0.1.87
+  keeps its level, or is off when its switch was.
+- **Volume now, to try a step size.** Under the volume step size of the
+  speaker the music plays on now, or of this device, a slider with 100
+  steps sets the volume at once, with the phone's real step, its dB and
+  the player's mixer under it, as in the web view's volume popup. It
+  follows the volume buttons and the speaker in use, and needs More
+  volume steps on and this version of the app.
+- **The volume note in the web view shows the real volume.** Moving the
+  volume with the keys or arrows, the note with the level has the real
+  volume, the phone's step with its dB and the mixer small under it,
+  when Volume numbers in the volume popup is on.
+- **More volume steps lower evenly between the phone's steps.** Each of
+  the phone's steps now falls on a whole percent with the mixer at 0 dB,
+  and every percent below it lowers the sound by the same dB, the most
+  just above the step below. Before, the percents fell differently in
+  each step, so one percent down could lower 0.7 dB in one place and
+  nearly a whole step in another, and the cuts were even in loudness,
+  not in dB.
 
 ### Build
 

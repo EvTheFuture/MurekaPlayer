@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.87";
+    const VERSION = "2.0.1.88";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13508,8 +13508,7 @@
                         return c.value === d.nightOff;
                     }) ? d.nightOff : "keep",
                     stepDb: cleanStepDb(d.stepDb),
-                    capOn: d.capOn === true,
-                    capPct: cleanCapPct(d.capPct)
+                    capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct)
                 };
             }
         }
@@ -13539,13 +13538,12 @@
         return isFinite(n) && n > 0 ? Math.round(Math.min(30, Math.max(0.5, n)) * 2) / 2 : 0;
     }
 
-    // The highest volume in percent a speaker may start at, 50 when not
-    // set yet
+    // The highest volume in percent a speaker may start at, 0 for none
     function cleanCapPct(v) {
 
         const n = Math.round(Number(v));
 
-        return isFinite(n) && n >= 5 ? Math.min(100, n) : 50;
+        return isFinite(n) && n > 0 ? Math.max(5, Math.min(100, n)) : 0;
     }
 
     // The step sizes set by hand, to the app, which evens out the volume
@@ -13568,7 +13566,7 @@
             }
 
             // The highest volume as it connects, for the speakers it is on for
-            if (s.devices[a].capOn) {
+            if (s.devices[a].capPct > 0) {
                 caps[a] = s.devices[a].capPct;
             }
         }
@@ -13588,6 +13586,15 @@
         } catch (e) {
             return {};
         }
+    }
+
+    // The phone's real step with its dB and the player's mixer under more
+    // steps, as one short line
+    function fineNumbersText(fine) {
+
+        return "Step " + fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
+            + " \u00b7 mixer " + (typeof fine.gainDb === "number" ? fine.gainDb.toFixed(1) : "0.0") + " dB"
+            + (fine.handDb > 0 ? " \u00b7 " + fine.handDb + " dB a step set by hand" : "");
     }
 
     // A volume button pressed with the app on screen: a small popup with
@@ -13640,10 +13647,7 @@
 
         volKeyEl._now.textContent = Math.round(pct) + " %";
         volKeyEl._fill.style.width = pct + "%";
-        volKeyEl._nums.textContent = settings.webVolumeNumbers === true
-            ? "Step " + fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
-                + " \u00b7 mixer " + (typeof fine.gainDb === "number" ? fine.gainDb.toFixed(1) : "0.0") + " dB"
-            : "";
+        volKeyEl._nums.textContent = settings.webVolumeNumbers === true ? fineNumbersText(fine) : "";
         volKeyEl._nums.style.display = settings.webVolumeNumbers === true ? "" : "none";
         volKeyEl.style.display = "";
         volKeyEl.style.opacity = "1";
@@ -36151,6 +36155,8 @@
                     min: input.min,
                     max: input.max,
                     step: input.step,
+                    unit: el.dataset.hostUnit || "",
+                    off: el.dataset.hostOff === "1",
                     shown: hostText(el.children[el.children.length - 1])
                 });
             }
@@ -47579,7 +47585,7 @@
                 webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
 
                 if (isApkHost()) {
-                    webPage.appendChild(withHint(webVolumeNumbersRow, "Shows the real volume in percent, the phone's step and its dB, and how far the player's own mixer turns the sound down, small under the phone's volume bar."));
+                    webPage.appendChild(withHint(webVolumeNumbersRow, "Shows the real volume in percent, the phone's step and its dB, and how far the player's own mixer turns the sound down, small under the phone's volume bar, and under the volume shown as the keys or arrows move it."));
                 }
             }
 
@@ -48649,6 +48655,7 @@
         // speakers come and go, the drop-downs list them
         const soundBox = document.createElement("div");
         let soundEditId = "";
+        let soundTryTimer = 0;
         let soundKey = "";
 
         soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
@@ -48919,13 +48926,16 @@
             const stepsOffered = isApkHost() && !!(window.MurekaHost && window.MurekaHost.volumeStepSizes);
 
             const capsOffered = stepsOffered && typeof window.MurekaHost.connectMaxOffered === "function";
+            const tryOffered = stepsOffered && typeof window.MurekaHost.fineVolumeAt === "function";
+            const tryPaints = [];
 
             if (capsOffered) {
-                soundBox.appendChild(makeHint("Max volume as it connects lowers a speaker's volume to the level set when it connects, if it is higher. A lower volume is left as it is."));
+                soundBox.appendChild(makeHint("Max volume as it connects lowers a speaker's volume to the level set when it connects, if it is higher. A lower volume is left as it is. Off at the left end."));
             }
 
             if (stepsOffered) {
-                soundBox.appendChild(makeHint("Volume step size is for More steps in the web view's volume popup. A Bluetooth speaker turns its sound down by its own curve, not always by what the phone says. If the sound jumps up just past one of the phone's steps, make it bigger, if it drops, smaller."));
+                soundBox.appendChild(makeHint("Volume step size is for More steps in the web view's volume popup. A Bluetooth speaker turns its sound down by its own curve, not always by what the phone says. If the sound jumps up just past one of the phone's steps, make it bigger, if it drops, smaller."
+                    + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under its step size, to hear it while the size is changed." : "")));
             }
 
             const dayChoices = function (phone) {
@@ -48949,7 +48959,7 @@
                 }));
             };
             const even = evenDrop;
-            const speaker = function (title, get, set, phone) {
+            const speaker = function (title, get, set, phone, address) {
 
                 soundBox.appendChild(soundHeading(title, false, true));
                 soundBox.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
@@ -48976,39 +48986,32 @@
                 }
 
                 if (!phone && capsOffered) {
-                    capRows(get, set);
+                    capRow(get, set);
                 }
 
                 if (stepsOffered) {
-                    stepRow(get, set, phone);
+                    stepRow(get, set, phone, address);
                 }
             };
 
-            // The highest volume a speaker starts at as it connects: a
-            // switch, off at first, and a slider shown while it is on
-            const capRows = function (get, set) {
+            // The highest volume a speaker starts at as it connects, as a
+            // slider off at the left end. The web view draws its own
+            const capRow = function (get, set) {
 
+                const row = document.createElement("div");
+                const name = document.createElement("span");
+                const slider = document.createElement("input");
+                const shown = document.createElement("span");
                 const pct = function () {
                     return cleanCapPct(get("capPct"));
                 };
-                const row = document.createElement("div");
-                const top = document.createElement("div");
-                const name = document.createElement("span");
-                const value = document.createElement("span");
-                const slider = document.createElement("input");
-                const paint = function () {
-
-                    row.style.display = get("capOn") === true ? "flex" : "none";
-                    value.textContent = pct() + "%";
-
-                    if (document.activeElement !== slider) {
-                        slider.value = String(pct());
-                    }
+                const show = function () {
+                    shown.textContent = pct() > 0 ? pct() + "%" : "Off";
                 };
                 const take = function (keep) {
 
                     set("capPct", cleanCapPct(slider.value));
-                    value.textContent = pct() + "%";
+                    show();
 
                     if (keep) {
 
@@ -49017,49 +49020,154 @@
                     }
                 };
 
-                soundBox.appendChild(makeBoolRow("Max volume as it connects", function () {
-                    return get("capOn") === true;
-                }, function (v) {
-
-                    set("capOn", v);
-
-                    // Turned on, the level shown is the one used
-                    if (v) {
-                        set("capPct", pct());
-                    }
-
-                    pushStepSizes();
-                    paint();
-                }));
-
-                row.style.cssText = "flex-direction:column;gap:6px";
-                top.style.cssText = "display:flex;justify-content:space-between;gap:8px";
-                name.textContent = "Max volume when connecting";
-                value.style.cssText = "font-variant-numeric:tabular-nums;color:#48e1eb";
+                row.dataset.hostSlider = "1";
+                row.dataset.hostUnit = "%";
+                row.dataset.hostOff = "1";
+                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                name.textContent = "Max volume as it connects";
+                name.style.cssText = "flex:0 1 auto;min-width:0";
                 slider.type = "range";
-                slider.min = "5";
+                slider.min = "0";
                 slider.max = "100";
                 slider.step = "5";
-                slider.setAttribute("aria-label", "Max volume when connecting, %");
-                slider.style.cssText = "width:100%;margin:0;accent-color:#48e1eb";
+                slider.value = String(pct());
+                slider.setAttribute("aria-label", "Max volume as it connects, %");
+                slider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+                shown.style.cssText = "flex:0 0 3.5em;text-align:right;font-variant-numeric:tabular-nums";
                 slider.addEventListener("input", function () {
                     take(false);
                 });
                 slider.addEventListener("change", function () {
                     take(true);
                 });
-                top.appendChild(name);
-                top.appendChild(value);
-                row.appendChild(top);
+                settingsRefreshers.push(function () {
+
+                    if (document.activeElement !== slider) {
+                        slider.value = String(pct());
+                    }
+
+                    show();
+                });
+                show();
+                row.appendChild(name);
                 row.appendChild(slider);
+                row.appendChild(shown);
                 soundBox.appendChild(row);
+            };
+
+            // The volume of the speaker playing now in 100 steps, under its
+            // step size, to hear the size while it is changed: the level,
+            // and the phone's real step with its dB and the player's mixer
+            // under it, as in the web view's volume popup
+            const tryRow = function (phone, address) {
+
+                const box = document.createElement("div");
+                const row = document.createElement("div");
+                const name = document.createElement("span");
+                const slider = document.createElement("input");
+                const shown = document.createElement("span");
+                const nums = makeHint("");
+                const off = makeHint("Turn on More volume steps to try the volume here.");
+                let sentAt = 0;
+                let later = 0;
+
+                // Whether the music plays on this speaker now: a speaker by
+                // its address, this device for every other output
+                const mine = function (fine) {
+
+                    const out = String(fine.output || "");
+
+                    if (!phone) {
+                        return out === "bt:" + String(address || "").toUpperCase();
+                    }
+
+                    return !devs.some(function (d) {
+                        return out === "bt:" + String(d.address || "").toUpperCase();
+                    });
+                };
+                const paint = function () {
+
+                    const fine = fineInfo();
+
+                    box.style.display = typeof fine.output === "string" && mine(fine) ? "flex" : "none";
+                    row.style.display = fine.on === true ? "flex" : "none";
+                    nums.style.display = fine.on === true ? "" : "none";
+                    off.style.display = fine.on === true ? "none" : "";
+
+                    if (fine.on !== true) {
+                        return;
+                    }
+
+                    const pct = Math.max(0, Math.min(100, Number(fine.pct) || 0));
+
+                    if (document.activeElement !== slider && Date.now() - sentAt > 600) {
+                        slider.value = String(Math.round(pct));
+                    }
+
+                    shown.textContent = Math.round(Number(slider.value)) + "%";
+                    nums.textContent = fineNumbersText(fine);
+                };
+
+                // Sent to the app a few times a second while moved, and
+                // always where it stops
+                const tell = function () {
+
+                    sentAt = Date.now();
+
+                    try {
+                        window.MurekaHost.fineVolumeAt(String(Math.round(Number(slider.value) || 0)));
+                    } catch (e) {
+                        dbgLog("Sound", "volume to try not taken: " + errText(e));
+                    }
+
+                    setTimeout(paint, 250);
+                };
+
+                box.style.cssText = "display:none;flex-direction:column;gap:6px";
+                row.dataset.hostSlider = "1";
+                row.dataset.hostUnit = "%";
+                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                name.textContent = "Volume now";
+                name.style.cssText = "flex:0 0 auto";
+                slider.type = "range";
+                slider.min = "0";
+                slider.max = "100";
+                slider.step = "1";
+                slider.setAttribute("aria-label", "Volume now, %");
+                slider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+                shown.style.cssText = "flex:0 0 3.5em;text-align:right;font-variant-numeric:tabular-nums";
+                nums.style.fontVariantNumeric = "tabular-nums";
+                slider.addEventListener("input", function () {
+
+                    shown.textContent = Math.round(Number(slider.value)) + "%";
+                    clearTimeout(later);
+
+                    if (Date.now() - sentAt >= 150) {
+                        tell();
+                    } else {
+                        later = setTimeout(tell, 150);
+                    }
+                });
+                slider.addEventListener("change", function () {
+
+                    clearTimeout(later);
+                    tell();
+                });
+                row.appendChild(name);
+                row.appendChild(slider);
+                row.appendChild(shown);
+                box.appendChild(row);
+                box.appendChild(nums);
+                box.appendChild(off);
+                soundBox.appendChild(box);
                 paint();
                 settingsRefreshers.push(paint);
+                tryPaints.push(paint);
             };
 
             // The size of one of the phone's volume steps for the speaker:
             // set by hand, else this device's, else what the phone says
-            const stepRow = function (get, set, phone) {
+            const stepRow = function (get, set, phone, address) {
 
                 const own = function () {
                     return Number(get("stepDb")) || 0;
@@ -49109,6 +49217,10 @@
                 settingsRefreshers.push(paint);
                 soundBox.appendChild(said);
                 soundBox.appendChild(back);
+
+                if (tryOffered) {
+                    tryRow(phone, address);
+                }
             };
 
             speaker("This device and others not set up", function (k) {
@@ -49129,12 +49241,30 @@
                     const all = sound().devices;
 
                     if (!all[d.address]) {
-                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep", stepDb: 0, capOn: false, capPct: 50 };
+                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep", stepDb: 0, capPct: 0 };
                     }
 
                     all[d.address][k] = v;
                     all[d.address].name = String(d.name || d.address);
-                }, false);
+                }, false, d.address);
+            }
+
+            // The volume to try follows the volume buttons and the speaker
+            // in use while the sound page shows
+            clearInterval(soundTryTimer);
+
+            if (tryPaints.length) {
+
+                soundTryTimer = setInterval(function () {
+
+                    if (!soundBox.isConnected || soundBox.offsetParent === null) {
+                        return;
+                    }
+
+                    for (const fn of tryPaints) {
+                        fn();
+                    }
+                }, 1000);
             }
 
             if (isApkHost() && devs.length === 0) {
@@ -67978,6 +68108,15 @@
     }
 
     /* At the top instead, where it would cover a button of a box open */
+    /* The phone's real volume, step and mixer, small under the level */
+    #toast .toastSub {
+        margin-top: 4px;
+        font-size: 0.72em;
+        color: inherit;
+        opacity: 0.75;
+        font-variant-numeric: tabular-nums;
+    }
+
     #toast.atTop {
         bottom: auto;
         top: 6vh;
@@ -82826,10 +82965,47 @@
         if (value === 0) {
 
             toast("Sound off", "ok");
+            volSaidAt = Date.now();
+            volSayNumbers();
             return;
         }
 
         toast("Volume " + volText(value), "ok");
+        volSaidAt = Date.now();
+        volSayNumbers();
+    }
+
+    // Under the level in the toast, the phone's real volume, its step and
+    // the player's mixer, as under the phone's bar in the volume popup.
+    // Put in again as the phone's answer comes, while the toast is fresh
+    let volSaidAt = 0;
+
+    function volSayNumbers() {
+
+        if (Date.now() - volSaidAt > 2500 || volTarget().kind !== "phone") {
+            return;
+        }
+
+        const el = $("toast");
+        const text = volNumbersText();
+        let sub = el.querySelector(".toastSub");
+
+        if (!el.classList.contains("shown") || !/^Volume|^Sound off/.test(el.textContent)) {
+            return;
+        }
+
+        if (!sub && text) {
+
+            sub = document.createElement("div");
+            sub.className = "toastSub";
+            el.appendChild(sub);
+        }
+
+        if (sub) {
+
+            sub.textContent = text;
+            sub.style.display = text ? "" : "none";
+        }
     }
 
     function volStep(by) {
@@ -83939,6 +84115,11 @@
         const words = function () {
 
             const v = Number(slider.value) || 0;
+
+            // A slider with a unit of its own, off at the left end when so
+            if (node.unit) {
+                return node.off && v <= 0 ? "Off" : v + node.unit;
+            }
 
             // Hz below 20 is off, as the phone has it
             return /Hz$/.test(node.shown || "") || node.shown === "Off" ? (v < 20 ? "Off" : v + " Hz") : String(v);
@@ -87403,6 +87584,7 @@
         online = true;
         phoneSeen = true;
         noteVolKey(s);
+        volSayNumbers();
         paintPlayingRating(s);
 
         // The exports changed on the phone while the actions are open, so
