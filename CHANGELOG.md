@@ -695,6 +695,12 @@ In development.
   song's many choices no longer fill the bottom of Actions: its title is
   one row that opens the song's own menu, with its stars. On a phone
   Actions keeps two columns.
+- **Use in Create on an Easy mode song brings its style.** When the
+  agent's own style and lyrics were not kept, as for songs made before
+  2.0.1.84, the song is read from Mureka as other songs are, and its
+  title, lyrics and style go in the form. New song in the line about the
+  chat then goes to the form with them, to make a new song from the
+  style by hand, instead of a blank wish.
 
 ### Build
 

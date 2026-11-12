@@ -25817,7 +25817,10 @@
         ui.easyChatText = document.createElement("span");
         ui.easyChatRow.appendChild(ui.easyChatText);
         ui.easyChatRow.appendChild(crChip("New song", function () {
-            crSet({ easyChat: null });
+            const from = crDraft && crDraft.easyFrom;
+
+            // From a song: its style and lyrics in the form, made by hand
+            crSet(from ? { easyChat: null, kind: from, easyFrom: "" } : { easyChat: null });
         }, "crFill"));
 
         // A new chat with the wish the old one started with, to change or
@@ -25827,7 +25830,7 @@
             const chat = crDraft && crDraft.easyChat;
 
             if (chat && chat.wish) {
-                crSet({ easyChat: null, easyText: chat.wish });
+                crSet({ easyChat: null, easyText: chat.wish, easyFrom: "" });
             }
         });
         ui.easyChatRow.appendChild(ui.easySame);

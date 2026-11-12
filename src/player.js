@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.85";
+    const VERSION = "2.0.1.86";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -58306,6 +58306,7 @@
             easyText: createText(x.easyText, createEasyMax(x)),
             easyInstrumental: x.easyInstrumental === true,
             easyChat: createCleanEasyChat(x.easyChat),
+            easyFrom: x.easyFrom === "song" || x.easyFrom === "instrumental" ? x.easyFrom : "",
             title: createText(x.title, CREATE_TITLE_MAX),
             lyrics: createText(x.lyrics, CREATE_LYRICS_MAX),
             style: createText(x.style, CREATE_STYLE_MAX),
@@ -59520,7 +59521,7 @@
 
         // Kept with the form, so the next wish goes on in it, even after
         // a restart. The wish sent is out of the box
-        changeCreateDraft({ easyChat: chat, easyText: "" });
+        changeCreateDraft({ easyChat: chat, easyText: "", easyFrom: "" });
 
         return {
             ok: true,
@@ -60206,67 +60207,16 @@
     // A song's title, lyrics, style, voice and model put in the form, for a
     // new take on it. Read from Mureka, the form as it was comes back with
     // Undo
-    async function createFromSong(song) {
-
-        const before = Object.assign({}, loadCreateDraft());
-
-        if (createBusy) {
-
-            showToast("Create is busy, try again in a moment", false);
-            return false;
-        }
-
-        // A song made in Easy mode goes on in its chat: the next wish is
-        // what the agent should change
-        const chat = easyChatOf(song);
-
-        if (chat) {
-
-            if (!chat.title) {
-                chat.title = String(song.title || "").slice(0, 120);
-            }
-
-            // What the agent made it from fills the other tabs, to make
-            // another song from it by hand
-            const made = easyArgsOf(song);
-            const changes = { kind: "easy", easyChat: chat, easyText: "" };
-
-            if (made) {
-
-                Object.assign(changes, {
-                    title: made.title || String(song.title || "").slice(0, CREATE_TITLE_MAX),
-                    lyrics: made.lyrics,
-                    style: made.style,
-                    stylePromptId: "",
-                    stylePromptText: "",
-                    remix: null,
-                    remixName: "",
-                    remixStyle: ""
-                });
-
-                if (made.voice) {
-                    changes.voice = made.voice;
-                }
-            }
-
-            dbgLog("Create", "easy: from generation " + song.feed_id + ", going on in the chat about " + (chat.title || "the last wish")
-                + (made ? ", the agent's style and lyrics in the form" : ", what the agent made it from is not known"));
-            changeCreateDraft(changes);
-            setCreateNote("From \"" + (song.title || "the song") + "\", made in Easy mode: the next wish goes on in its chat"
-                + (made ? ". The agent's style" + (made.lyrics ? " and lyrics are" : " is") + " under " + (made.instrumental ? "Instrumental" : "With lyrics") : ""));
-            showToast("Easy mode goes on in the song's chat", true, function () {
-                changeCreateDraft(before);
-            });
-
-            return true;
-        }
+    // A song as Mureka has it, read into the form's fields: title, lyrics,
+    // style, model and voice. Null when it could not be read
+    async function createSongForm(song) {
 
         const data = await createRun("Reading the song from Mureka", function () {
             return createGet("/api/pgc/song/detail?song_id=" + encodeURIComponent(song.song_id));
         });
 
         if (!data) {
-            return false;
+            return null;
         }
 
         const s = data.song && typeof data.song === "object" ? data.song : data;
@@ -60311,8 +60261,80 @@
             changes.voice = gender;
         }
 
-        changeCreateDraft(changes);
-        setCreateNote("From \"" + (song.title || "the song") + "\"" + (style ? "" : ", Mureka gave no style") + (instrumental || lyrics ? "" : ", no lyrics"));
+        return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental };
+    }
+
+    async function createFromSong(song) {
+
+        const before = Object.assign({}, loadCreateDraft());
+
+        if (createBusy) {
+
+            showToast("Create is busy, try again in a moment", false);
+            return false;
+        }
+
+        // A song made in Easy mode goes on in its chat: the next wish is
+        // what the agent should change
+        const chat = easyChatOf(song);
+
+        if (chat) {
+
+            if (!chat.title) {
+                chat.title = String(song.title || "").slice(0, 120);
+            }
+
+            // What the agent made it from fills the other tabs, to make
+            // another song from it by hand
+            const made = easyArgsOf(song);
+            const read = made ? null : await createSongForm(song);
+            const changes = { kind: "easy", easyChat: chat, easyText: "", easyFrom: "" };
+
+            // Without the agent's own words, the song as Mureka has it
+            if (read) {
+                Object.assign(changes, read.changes, { kind: "easy", easyFrom: read.changes.kind });
+            }
+
+            if (made) {
+
+                changes.easyFrom = made.instrumental ? "instrumental" : "song";
+
+                Object.assign(changes, {
+                    title: made.title || String(song.title || "").slice(0, CREATE_TITLE_MAX),
+                    lyrics: made.lyrics,
+                    style: made.style,
+                    stylePromptId: "",
+                    stylePromptText: "",
+                    remix: null,
+                    remixName: "",
+                    remixStyle: ""
+                });
+
+                if (made.voice) {
+                    changes.voice = made.voice;
+                }
+            }
+
+            dbgLog("Create", "easy: from generation " + song.feed_id + ", going on in the chat about " + (chat.title || "the last wish")
+                + (made ? ", the agent's style and lyrics in the form" : (read ? ", the song's style and lyrics from Mureka in the form" : ", the song could not be read")));
+            changeCreateDraft(changes);
+            setCreateNote("From \"" + (song.title || "the song") + "\", made in Easy mode: the next wish goes on in its chat"
+                + (changes.easyFrom ? ". New song makes one from its style" + (changes.lyrics ? " and lyrics" : "") + " instead" : ""));
+            showToast("Easy mode goes on in the song's chat", true, function () {
+                changeCreateDraft(before);
+            });
+
+            return true;
+        }
+
+        const read = await createSongForm(song);
+
+        if (!read) {
+            return false;
+        }
+
+        changeCreateDraft(read.changes);
+        setCreateNote("From \"" + (song.title || "the song") + "\"" + (read.style ? "" : ", Mureka gave no style") + (read.instrumental || read.lyrics ? "" : ", no lyrics"));
         showToast("The form has the song's title, lyrics and style", true, function () {
             changeCreateDraft(before);
         });
@@ -60575,6 +60597,16 @@
         ui.easyChatText.style.cssText = "flex:1 1 100%;font-size:13px;line-height:1.4;color:#dff";
         ui.easyNew = makeButton("New song", "#333", "#fff", function () {
 
+            const d = loadCreateDraft();
+
+            // From a song: its style and lyrics in the form, made by hand
+            if (d.easyFrom) {
+
+                changeCreateDraft({ easyChat: null, kind: d.easyFrom, easyFrom: "" });
+                setCreateNote("The form has the song's title, lyrics and style");
+                return;
+            }
+
             changeCreateDraft({ easyChat: null });
             setCreateNote("The next wish starts a new chat");
         });
@@ -60588,7 +60620,7 @@
 
             if (chat && chat.wish) {
 
-                changeCreateDraft({ easyChat: null, easyText: chat.wish });
+                changeCreateDraft({ easyChat: null, easyText: chat.wish, easyFrom: "" });
                 setCreateNote("A new chat with the same wish, change it or make it as it is");
             }
         });
@@ -91510,7 +91542,10 @@
         ui.easyChatText = document.createElement("span");
         ui.easyChatRow.appendChild(ui.easyChatText);
         ui.easyChatRow.appendChild(crChip("New song", function () {
-            crSet({ easyChat: null });
+            const from = crDraft && crDraft.easyFrom;
+
+            // From a song: its style and lyrics in the form, made by hand
+            crSet(from ? { easyChat: null, kind: from, easyFrom: "" } : { easyChat: null });
         }, "crFill"));
 
         // A new chat with the wish the old one started with, to change or
@@ -91520,7 +91555,7 @@
             const chat = crDraft && crDraft.easyChat;
 
             if (chat && chat.wish) {
-                crSet({ easyChat: null, easyText: chat.wish });
+                crSet({ easyChat: null, easyText: chat.wish, easyFrom: "" });
             }
         });
         ui.easyChatRow.appendChild(ui.easySame);
