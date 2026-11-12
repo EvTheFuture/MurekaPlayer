@@ -4653,6 +4653,17 @@
         gap: 10px;
     }
 
+    /* A value the phone fills in, not set: greyed */
+    .pStep span.drawn {
+        color: var(--muted);
+        font-style: italic;
+    }
+
+    .pStep .pClear {
+        padding: 8px 12px;
+        color: var(--muted);
+    }
+
     .pStep span {
         min-width: 3.5em;
         text-align: center;
@@ -18015,6 +18026,7 @@
             field.className = "pText pNum pNumIn";
             field.style.flex = "0 0 auto";
             field.value = was;
+            field.disabled = node.off === true;
             field.setAttribute("aria-label", "Value");
             stepperLimits(field, node);
 
@@ -19136,17 +19148,27 @@
             plus.className = "pBtn";
             minus.textContent = "-";
             plus.textContent = "+";
-            shown.textContent = node.value === "" ? "-" : node.value;
+            minus.disabled = node.off === true;
+            plus.disabled = node.off === true;
+
+            // Empty, the value the phone fills in for it, greyed, and moved
+            // on from there
+            const filled = node.value === "" && node.placeholder !== "" && isFinite(parseFloat(node.placeholder));
+
+            shown.textContent = node.value === "" ? (filled ? node.placeholder : "-") : node.value;
+            shown.classList.toggle("drawn", filled);
 
             const nudge = function (dir) {
 
-                const now = parseFloat(node.value);
+                const base = node.value === "" && filled ? node.placeholder : node.value;
+                const now = parseFloat(base);
                 let next = isNaN(now) ? (min > -Infinity ? min : 0) : now + dir * step;
 
                 next = Math.max(min, Math.min(max, next));
                 next = Math.round(next / step) * step;
                 node.value = String(Number(next.toFixed(4)));
                 shown.textContent = node.value;
+                shown.classList.remove("drawn");
                 panelAction("hset", { id: node.id, value: node.value });
             };
 
@@ -19161,6 +19183,24 @@
             box.appendChild(minus);
             box.appendChild(shown);
             box.appendChild(plus);
+
+            // A value of its own where the phone would fill one in can be
+            // taken away again, back to the one filled in. Its room is kept
+            // when there is nothing to take away, so the rows line up
+            if (node.placeholder !== "" && node.off !== true) {
+
+                const clear = document.createElement("button");
+
+                clear.type = "button";
+                clear.className = "pBtn pClear";
+                clear.textContent = "\u00d7";
+                clear.setAttribute("aria-label", "Back to the value filled in");
+                clear.style.visibility = node.value !== "" ? "" : "hidden";
+                clear.addEventListener("click", function () {
+                    panelAction("hset", { id: node.id, value: "" });
+                });
+                box.appendChild(clear);
+            }
 
             return box;
         }

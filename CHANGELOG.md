@@ -819,6 +819,18 @@ In development.
   view.** The web view gives the action buttons of a settings page the
   width of the widest of them, which made these three too wide to sit
   side by side. A row of buttons spread out keeps their own widths.
+- **The volume step size is back, greyed while steps are set.** Under
+  Volume steps, Volume step size, dB always shows the step used for
+  every step while none is trained or typed in: the speaker's own, else
+  this device's, else what the phone says. While trained or typed steps
+  are in use it is greyed and cannot be changed, and Forget brings it
+  back into use. A step size is no longer turned into a volume step of
+  its own.
+- **Steps filled in shown in the web view.** A step left empty under
+  Edit by hand is drawn on a straight line from the steps set around it,
+  and the web view now shows that value greyed instead of a dash, - and
+  + going on from it. A small cross beside a step set takes it back to
+  the value filled in.
 
 ### Build
 

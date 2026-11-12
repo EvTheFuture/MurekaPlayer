@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.97";
+    const VERSION = "2.0.1.98";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13511,9 +13511,9 @@
                     nightOff: NIGHT_ON_CONNECT.some(function (c) {
                         return c.value === d.nightOff;
                     }) ? d.nightOff : "keep",
-                    stepDb: 0,
+                    stepDb: cleanStepDb(d.stepDb),
                     capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct),
-                    gaps: gapsWithStep(d.gaps, d.stepDb),
+                    gaps: cleanGaps(d.gaps),
                     delayMs: cleanDelayMs(d.delayMs)
                 };
             }
@@ -13527,8 +13527,8 @@
             fallback: {
                 day: has(fb.day) ? fb.day : firstOf(false),
                 night: has(fb.night) ? fb.night : firstOf(true),
-                stepDb: 0,
-                gaps: gapsWithStep(fb.gaps, fb.stepDb),
+                stepDb: cleanStepDb(fb.stepDb),
+                gaps: cleanGaps(fb.gaps),
                 delayMs: cleanDelayMs(fb.delayMs)
             },
             devices: devices
@@ -13564,20 +13564,6 @@
             if (step >= 1 && step <= 200 && db > 0) {
                 out[String(step)] = db;
             }
-        }
-
-        return out;
-    }
-
-    // A step size set by hand before, the same for every step, becomes a
-    // volume step of its own when no steps are set
-    function gapsWithStep(g, stepDb) {
-
-        const out = cleanGaps(g);
-        const one = cleanStepDb(stepDb);
-
-        if (!Object.keys(out).length && one > 0) {
-            out["2"] = one;
         }
 
         return out;
@@ -36972,7 +36958,8 @@
                 max: el.max || "",
                 step: el.step || "",
                 placeholder: el.placeholder || "",
-                inputMode: el.inputMode || ""
+                inputMode: el.inputMode || "",
+                off: el.disabled === true
             });
             return;
         }
@@ -49696,8 +49683,8 @@
 
             if (stepsOffered) {
                 soundBox.appendChild(makeHint("Volume steps are for More volume steps: how much louder a speaker gets at each of the phone's steps, as a Bluetooth speaker turns its sound down by its own curve, not by what the phone says. "
-                    + "Train by ear, while the speaker plays, finds them one step against the step below. Edit by hand takes them typed in, a step left empty drawn from those set. "
-                    + "A speaker without any takes this device's, and without those the phone's own curve. They are kept with the settings, and in a copy of them."
+                    + "Train by ear, while the speaker plays, finds them one step against the step below. Edit by hand takes them typed in, a step left empty drawn on a straight line from the steps set around it. "
+                    + "Without any, the volume step size counts for every step: the speaker's own, else this device's, else what the phone says. A speaker without either takes this device's volume steps. They are kept with the settings, and in a copy of them."
                     + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under them, to hear the result." : "")));
             }
 
@@ -49876,6 +49863,35 @@
                 const editor = document.createElement("div");
                 const fields = [];
                 let editing = false;
+
+                // The step size for every step, used while no step is set:
+                // its own, else this device's for a speaker, else what the
+                // phone says. Greyed while trained or typed steps are used
+                const own = function () {
+                    return Number(get("stepDb")) || 0;
+                };
+                const sizeShown = function () {
+
+                    if (own() > 0) {
+                        return own();
+                    }
+
+                    if (!phone && sound().fallback.stepDb > 0) {
+                        return sound().fallback.stepDb;
+                    }
+
+                    return Math.round(phoneStepDb(!phone) * 2) / 2;
+                };
+                const size = makeStepperRow("Volume step size, dB", sizeShown, function (v) {
+
+                    if (Object.keys(gaps()).length) {
+                        return;
+                    }
+
+                    set("stepDb", cleanStepDb(v));
+                    pushStepSizes();
+                    paint();
+                }, 0.5, 30, 0.5);
                 let delayField = null;
 
                 // A field for each step, and the delay, made once the
@@ -49977,11 +49993,28 @@
                     };
 
                     if (at.length) {
-                        said.textContent = "Volume steps set by hand or trained: " + listed(g, at);
-                    } else if (fbAt.length) {
+                        said.textContent = "Volume steps set by hand or trained: " + listed(g, at) + " The step size is not used meanwhile.";
+                    } else if (fbAt.length && !(own() > 0)) {
                         said.textContent = "Same as this device: " + listed(fb, fbAt);
+                    } else if (own() > 0) {
+                        said.textContent = "The step size set here, for every step.";
+                    } else if (!phone && sound().fallback.stepDb > 0) {
+                        said.textContent = "The step size of this device, for every step.";
                     } else {
-                        said.textContent = "As the phone says, about " + phoneStepDb(!phone).toFixed(1) + " dB a step.";
+                        said.textContent = "The step size the phone says, for every step.";
+                    }
+
+                    // The step size greyed and still while steps are set
+                    const sizeField = size.querySelector("input");
+
+                    size.style.opacity = at.length ? "0.4" : "";
+
+                    for (const el of size.querySelectorAll("button, input")) {
+                        el.disabled = at.length > 0;
+                    }
+
+                    if (sizeField && document.activeElement !== sizeField) {
+                        sizeField.value = String(sizeShown());
                     }
 
                     said.textContent += delay() >= 0 ? " Switch delay " + delay() + " ms." : "";
@@ -50000,7 +50033,8 @@
                             input.value = g[k] > 0 ? String(g[k]) : "";
                         }
 
-                        const drawn = at.length ? volGapFrom(g, k) : (fbAt.length ? volGapFrom(fb, k) : phoneStepDb(!phone));
+                        const drawn = at.length ? volGapFrom(g, k)
+                            : (fbAt.length && !(own() > 0) ? volGapFrom(fb, k) : sizeShown());
 
                         input.placeholder = drawn > 0 ? drawn.toFixed(1) : "";
                     }
@@ -50030,6 +50064,7 @@
 
                 editor.style.cssText = "display:none;flex-direction:column;gap:6px";
                 soundBox.appendChild(makeLabel("Volume steps"));
+                soundBox.appendChild(size);
                 soundBox.appendChild(said);
                 soundBox.appendChild(buttons);
                 soundBox.appendChild(editor);
@@ -71542,6 +71577,17 @@
         gap: 10px;
     }
 
+    /* A value the phone fills in, not set: greyed */
+    .pStep span.drawn {
+        color: var(--muted);
+        font-style: italic;
+    }
+
+    .pStep .pClear {
+        padding: 8px 12px;
+        color: var(--muted);
+    }
+
     .pStep span {
         min-width: 3.5em;
         text-align: center;
@@ -84904,6 +84950,7 @@
             field.className = "pText pNum pNumIn";
             field.style.flex = "0 0 auto";
             field.value = was;
+            field.disabled = node.off === true;
             field.setAttribute("aria-label", "Value");
             stepperLimits(field, node);
 
@@ -86025,17 +86072,27 @@
             plus.className = "pBtn";
             minus.textContent = "-";
             plus.textContent = "+";
-            shown.textContent = node.value === "" ? "-" : node.value;
+            minus.disabled = node.off === true;
+            plus.disabled = node.off === true;
+
+            // Empty, the value the phone fills in for it, greyed, and moved
+            // on from there
+            const filled = node.value === "" && node.placeholder !== "" && isFinite(parseFloat(node.placeholder));
+
+            shown.textContent = node.value === "" ? (filled ? node.placeholder : "-") : node.value;
+            shown.classList.toggle("drawn", filled);
 
             const nudge = function (dir) {
 
-                const now = parseFloat(node.value);
+                const base = node.value === "" && filled ? node.placeholder : node.value;
+                const now = parseFloat(base);
                 let next = isNaN(now) ? (min > -Infinity ? min : 0) : now + dir * step;
 
                 next = Math.max(min, Math.min(max, next));
                 next = Math.round(next / step) * step;
                 node.value = String(Number(next.toFixed(4)));
                 shown.textContent = node.value;
+                shown.classList.remove("drawn");
                 panelAction("hset", { id: node.id, value: node.value });
             };
 
@@ -86050,6 +86107,24 @@
             box.appendChild(minus);
             box.appendChild(shown);
             box.appendChild(plus);
+
+            // A value of its own where the phone would fill one in can be
+            // taken away again, back to the one filled in. Its room is kept
+            // when there is nothing to take away, so the rows line up
+            if (node.placeholder !== "" && node.off !== true) {
+
+                const clear = document.createElement("button");
+
+                clear.type = "button";
+                clear.className = "pBtn pClear";
+                clear.textContent = "\u00d7";
+                clear.setAttribute("aria-label", "Back to the value filled in");
+                clear.style.visibility = node.value !== "" ? "" : "hidden";
+                clear.addEventListener("click", function () {
+                    panelAction("hset", { id: node.id, value: "" });
+                });
+                box.appendChild(clear);
+            }
 
             return box;
         }
