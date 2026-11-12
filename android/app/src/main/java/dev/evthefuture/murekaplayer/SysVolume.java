@@ -118,38 +118,46 @@ final class SysVolume {
     private static TreeMap<Integer, Float> gapsFallback = new TreeMap<>();
     private static TreeMap<Integer, Float> gaps = null;
 
+    // How long a speaker takes to play what the player sends, found in the
+    // same training, by the address and for this phone and the speakers
+    // not trained, in ms. With it the player's share and the step reach
+    // the speaker at the same moment, going up and going down. -1 for the
+    // output in use when there is none, the waits below used instead
+    private static final Map<String, Integer> DELAY_BY_ADDRESS = new HashMap<>();
+    private static int delayFallback = -1;
+    private static int stepDelay = -1;
+
     // The training: the step trained and the one below it in turn, the
     // step turned down by the player by the gap being tried, so the two
     // sound the same once the gap is right. Both turned down alike by the
-    // quieter amount for training at night. A short fade at each change,
-    // the step put in while the sound is away, as the player's share is
-    // heard only once Bluetooth's buffer has played out
+    // quieter amount for training at night. Three seconds each, and no
+    // break in the sound between them
     private static boolean training = false;
     private static int trainStep = 2;
     private static float trainGap = 3;
     private static float trainQuiet = 0;
+    private static long trainDelay = 250;
     private static boolean trainUpper = false;
     private static int trainBefore = -1;
     private static long trainAskedAt = 0;
     private static String trainKey = null;
-    private static final long TRAIN_HOLD_MS = 1200;
-    private static final long TRAIN_FADE_MS = 100;
-    private static final long TRAIN_WAIT_BT_MS = 300;
-    private static final long TRAIN_WAIT_MS = 80;
+    private static final long TRAIN_HOLD_MS = 3000;
+    private static final long TRAIN_FADE_MS = 30;
+    private static final long TRAIN_DELAY_MAX_MS = 1000;
 
     // Left on with nothing asked for a while, as a closed page cannot say
     // so, the training ends by itself
     private static final long TRAIN_IDLE_MS = 15 * 60 * 1000;
-    private static final Runnable TRAIN_OUT = new Runnable() {
+    private static final Runnable TRAIN_SWITCH = new Runnable() {
         @Override
         public void run() {
-            trainOut();
+            trainSwitch();
         }
     };
-    private static final Runnable TRAIN_IN = new Runnable() {
+    private static final Runnable TRAIN_STEP = new Runnable() {
         @Override
         public void run() {
-            trainIn();
+            putTrainStep();
         }
     };
 
@@ -230,8 +238,8 @@ final class SysVolume {
 
         MAIN.removeCallbacks(CHECK);
         MAIN.removeCallbacks(CAP_CHECK);
-        MAIN.removeCallbacks(TRAIN_OUT);
-        MAIN.removeCallbacks(TRAIN_IN);
+        MAIN.removeCallbacks(TRAIN_SWITCH);
+        MAIN.removeCallbacks(TRAIN_STEP);
         training = false;
         seenKey = null;
 
@@ -431,7 +439,20 @@ final class SysVolume {
             MAIN.removeCallbacks(STEP_LATER);
         }
 
-        if (step > was) {
+        // The speaker's delay found by ear: the share at once and the step
+        // after it, either way, so both are heard at the same moment
+        if (step != was && stepDelay >= 0) {
+
+            wait = stepDelay;
+            Hub.command("fineGain", (double) fineGain);
+            stepWaiting = step;
+
+            if (wait > 0) {
+                MAIN.postDelayed(STEP_LATER, wait);
+            } else {
+                takeWaitingStep();
+            }
+        } else if (step > was) {
 
             boolean bluetooth = type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || type == AudioDeviceInfo.TYPE_BLE_HEADSET
                 || type == AudioDeviceInfo.TYPE_BLE_SPEAKER;
@@ -515,6 +536,8 @@ final class SysVolume {
         HAND_BY_ADDRESS.clear();
         CAP_BY_ADDRESS.clear();
         GAPS_BY_ADDRESS.clear();
+        DELAY_BY_ADDRESS.clear();
+        delayFallback = -1;
         gapsFallback = new TreeMap<>();
         handFallback = 0;
 
@@ -555,6 +578,27 @@ final class SysVolume {
             }
 
             gapsFallback = readGaps(o.optJSONObject("fallbackGaps"));
+
+            JSONObject delays = o.optJSONObject("delays");
+
+            if (delays != null) {
+
+                Iterator<String> keys = delays.keys();
+
+                while (keys.hasNext()) {
+
+                    String a = keys.next();
+                    int ms = delays.optInt(a, -1);
+
+                    if (ms >= 0 && ms <= TRAIN_DELAY_MAX_MS) {
+                        DELAY_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), ms);
+                    }
+                }
+            }
+
+            int fbDelay = o.optInt("fallbackDelay", -1);
+
+            delayFallback = fbDelay >= 0 && fbDelay <= TRAIN_DELAY_MAX_MS ? fbDelay : -1;
 
             JSONObject caps = o.optJSONObject("caps");
 
@@ -690,6 +734,10 @@ final class SysVolume {
         gaps = null;
         handDb = -1;
 
+        Integer ownDelay = address.isEmpty() ? null : DELAY_BY_ADDRESS.get(address);
+
+        stepDelay = ownDelay != null ? ownDelay : (address.isEmpty() ? delayFallback : -1);
+
         if (ownGaps != null && !ownGaps.isEmpty()) {
             gaps = ownGaps;
         } else if (own != null && own > 0) {
@@ -796,6 +844,8 @@ final class SysVolume {
             int step = Math.max(2, Math.min(max, a.optInt("step", 2)));
             float gap = (float) Math.max(0, Math.min(HAND_MAX_DB, a.optDouble("gap", 3)));
             float quiet = (float) Math.max(0, Math.min(40, a.optDouble("quiet", 0)));
+
+            trainDelay = Math.max(0, Math.min(TRAIN_DELAY_MAX_MS, a.optLong("delay", 250)));
             boolean fresh = !training || step != trainStep;
 
             trainGap = gap;
@@ -818,11 +868,12 @@ final class SysVolume {
             // amount is heard at once in the side playing
             if (fresh) {
 
-                MAIN.removeCallbacks(TRAIN_OUT);
-                MAIN.removeCallbacks(TRAIN_IN);
+                MAIN.removeCallbacks(TRAIN_SWITCH);
+                MAIN.removeCallbacks(TRAIN_STEP);
                 trainUpper = false;
-                Hub.note("Volume", "training step " + step + " against " + (step - 1) + ", the gap " + gap + " dB, " + quiet + " dB quieter");
-                trainOut();
+                Hub.note("Volume", "training step " + step + " against " + (step - 1) + ", the gap " + gap + " dB, "
+                    + quiet + " dB quieter, the step " + trainDelay + " ms after the player");
+                trainSwitch();
             } else {
                 Hub.command("fineGainFade", trainFadeArg(trainUpper ? trainGain(true) : trainGain(false)));
             }
@@ -852,8 +903,12 @@ final class SysVolume {
         return o;
     }
 
-    // The sound faded away, the other side put in once it is gone
-    private static void trainOut() {
+    // The other side, without a break in the sound: the player's share
+    // first and the step after the speaker's delay, as the share is heard
+    // only once Bluetooth's buffer has played out while the step reaches
+    // the speaker at once. With the delay right nothing is heard at the
+    // change but the change itself, a delay off is a short dip or bump
+    private static void trainSwitch() {
 
         if (!training || audio == null) {
             return;
@@ -865,17 +920,24 @@ final class SysVolume {
             return;
         }
 
-        int type = outputType();
-        boolean bluetooth = type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || type == AudioDeviceInfo.TYPE_BLE_HEADSET
-            || type == AudioDeviceInfo.TYPE_BLE_SPEAKER;
+        trainUpper = !trainUpper;
+        MAIN.removeCallbacks(TRAIN_STEP);
 
-        Hub.command("fineGainFade", trainFadeArg(0));
-        MAIN.postDelayed(TRAIN_IN, TRAIN_FADE_MS + (bluetooth ? TRAIN_WAIT_BT_MS : TRAIN_WAIT_MS));
+        // The side playing, for the training's popup to show at once
+        Hub.command("volTrainSide", trainUpper);
+        Hub.command("fineGainFade", trainFadeArg(trainGain(trainUpper)));
+
+        if (trainDelay > 0) {
+            MAIN.postDelayed(TRAIN_STEP, trainDelay);
+        } else {
+            putTrainStep();
+        }
+
+        MAIN.postDelayed(TRAIN_SWITCH, TRAIN_HOLD_MS);
     }
 
-    // The other side: its step put in while nothing is heard, the sound
-    // faded back in at its share, and the next change after a while
-    private static void trainIn() {
+    // The phone's step for the side playing
+    private static void putTrainStep() {
 
         if (!training || audio == null) {
             return;
@@ -883,23 +945,19 @@ final class SysVolume {
 
         try {
 
-            trainUpper = !trainUpper;
             audio.setStreamVolume(AudioManager.STREAM_MUSIC, trainUpper ? trainStep : trainStep - 1, 0);
-            Hub.command("fineGainFade", trainFadeArg(trainGain(trainUpper)));
             Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
         } catch (RuntimeException e) {
             // Do not disturb can refuse the change, tried again next time
         }
-
-        MAIN.postDelayed(TRAIN_OUT, TRAIN_HOLD_MS);
     }
 
     // The training over: the level as asked for put back, with more steps
     // as they were, or the step from before it and the whole sound
     static void stopTrain() {
 
-        MAIN.removeCallbacks(TRAIN_OUT);
-        MAIN.removeCallbacks(TRAIN_IN);
+        MAIN.removeCallbacks(TRAIN_SWITCH);
+        MAIN.removeCallbacks(TRAIN_STEP);
 
         if (!training) {
             return;
@@ -1026,6 +1084,7 @@ final class SysVolume {
             }
 
             o.put("trained", gaps != null && !gaps.isEmpty());
+            o.put("delay", stepDelay);
 
             if (training) {
 

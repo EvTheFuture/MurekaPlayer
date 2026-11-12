@@ -770,6 +770,26 @@ In development.
   the sound down in the player only, on both sides of the comparison
   alike, so the gaps found stay the same. It is apart from the volume
   and gone once the training ends.
+- **The training of the volume steps in a popup of its own, without
+  breaks in the sound.** Train the step sizes opens a popup on the phone
+  and in the web view, the web view's drawn from the state, so the side
+  playing shows the moment it changes. Each side plays three seconds,
+  and the switch no longer fades the sound out: the player's share
+  changes first and the step a moment later, as the share reaches the
+  speaker only after Bluetooth's delay. Before, each switch left about a
+  third of a second of silence, often heard as two dips, which made the
+  comparison hard to hear.
+- **Switch delay, found in the same training.** The popup has the
+  speaker's delay in ms, set 25 ms at a time until a switch has no dip
+  or bump. It is kept with the trained steps and used by More volume
+  steps too, which then put the step in after that delay going up and
+  going down, so the player's share and the step reach the speaker
+  together.
+- **Clearer buttons in the training.** Leave out drops the step, to be
+  drawn from the others. Keep, next keeps the gap and goes on, Keep,
+  done keeps it and leaves the steps still to come to be drawn, and the
+  last step has Keep, finish. In the settings, Forget the training is
+  red on the left and Train the step sizes on the right.
 
 ### Build
 

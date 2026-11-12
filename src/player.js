@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.92";
+    const VERSION = "2.0.1.93";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -766,10 +766,8 @@
     // all of them back in step with what is actually stored
     const settingsRefreshers = [];
 
-    // The gaps between the phone's volume steps being trained by ear, and
-    // how the settings end a training left open
+    // The gaps between the phone's volume steps being trained by ear
     let volTraining = false;
-    let volTrainStop = null;
 
     let viewMenuOpen = false;
 
@@ -13515,7 +13513,8 @@
                     }) ? d.nightOff : "keep",
                     stepDb: cleanStepDb(d.stepDb),
                     capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct),
-                    gaps: cleanGaps(d.gaps)
+                    gaps: cleanGaps(d.gaps),
+                    delayMs: cleanDelayMs(d.delayMs)
                 };
             }
         }
@@ -13529,7 +13528,8 @@
                 day: has(fb.day) ? fb.day : firstOf(false),
                 night: has(fb.night) ? fb.night : firstOf(true),
                 stepDb: cleanStepDb(fb.stepDb),
-                gaps: cleanGaps(fb.gaps)
+                gaps: cleanGaps(fb.gaps),
+                delayMs: cleanDelayMs(fb.delayMs)
             },
             devices: devices
         };
@@ -13569,6 +13569,15 @@
         return out;
     }
 
+    // How long a speaker takes to play what the player sends, in ms, found
+    // by ear in the training, -1 for not known
+    function cleanDelayMs(v) {
+
+        const n = Math.round(Number(v));
+
+        return isFinite(n) && n >= 0 ? Math.min(1000, n) : -1;
+    }
+
     // The highest volume in percent a speaker may start at, 0 for none
     function cleanCapPct(v) {
 
@@ -13590,6 +13599,7 @@
         const devices = {};
         const caps = {};
         const gaps = {};
+        const delays = {};
 
         for (const a of Object.keys(s.devices)) {
 
@@ -13600,6 +13610,10 @@
             // The gaps trained by ear, before the step size
             if (Object.keys(s.devices[a].gaps || {}).length) {
                 gaps[a] = s.devices[a].gaps;
+            }
+
+            if (s.devices[a].delayMs >= 0) {
+                delays[a] = s.devices[a].delayMs;
             }
 
             // The highest volume as it connects, for the speakers it is on for
@@ -13614,11 +13628,627 @@
                 devices: devices,
                 caps: caps,
                 gaps: gaps,
-                fallbackGaps: s.fallback.gaps || {}
+                fallbackGaps: s.fallback.gaps || {},
+                delays: delays,
+                fallbackDelay: s.fallback.delayMs >= 0 ? s.fallback.delayMs : -1
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
         }
+    }
+
+    // ---- Training the volume steps by ear ----
+
+    // A speaker does not get louder by the same amount at each of the
+    // phone's steps. Here each step is set by ear in a popup of its own:
+    // the song playing heard at a step turned down by a gap and at the step
+    // below in turn, the app switching between them, until the two sound
+    // the same. The phone's popup and the web view's are drawn from the
+    // same view of it, the web view's through the state
+    let volTrain = null;
+    let volTrainQuiet = 0;
+    let volTrainEl = null;
+    let volTrainUi = null;
+    let volTrainTimer = 0;
+
+    // The steps the training goes through, quiet to loud: the two lowest,
+    // where speakers differ the most, and a few spread up to the top
+    function volTrainSteps(max) {
+
+        const out = [];
+
+        for (const k of [2, 3, Math.round(max * 0.3), Math.round(max * 0.5), Math.round(max * 0.75), max]) {
+
+            const step = Math.max(2, Math.min(max, k));
+
+            if (out.indexOf(step) < 0) {
+                out.push(step);
+            }
+        }
+
+        return out.sort(function (a, b) {
+            return a - b;
+        });
+    }
+
+    // The gap of a step from the steps trained, on a straight line between
+    // them and the nearest beyond them, as the app draws it
+    function volGapFrom(gaps, step) {
+
+        const keys = Object.keys(gaps || {}).map(Number).filter(function (k) {
+            return gaps[k] > 0;
+        }).sort(function (a, b) {
+            return a - b;
+        });
+
+        if (!keys.length) {
+            return 0;
+        }
+
+        if (step <= keys[0]) {
+            return gaps[keys[0]];
+        }
+
+        if (step >= keys[keys.length - 1]) {
+            return gaps[keys[keys.length - 1]];
+        }
+
+        for (let i = 1; i < keys.length; i++) {
+
+            if (step <= keys[i]) {
+
+                const t = (step - keys[i - 1]) / (keys[i] - keys[i - 1]);
+
+                return gaps[keys[i - 1]] + (gaps[keys[i]] - gaps[keys[i - 1]]) * t;
+            }
+        }
+
+        return gaps[keys[keys.length - 1]];
+    }
+
+    // The settings of the speaker trained, this device's for the phone
+    function volTrainRecord(make) {
+
+        if (!volTrain) {
+            return null;
+        }
+
+        if (volTrain.phone) {
+            return sound().fallback;
+        }
+
+        const all = sound().devices;
+
+        if (!all[volTrain.address] && make) {
+            all[volTrain.address] = { name: volTrain.name, day: "", night: "", nightOff: "keep", stepDb: 0, capPct: 0, gaps: {}, delayMs: -1 };
+        }
+
+        return all[volTrain.address] || null;
+    }
+
+    function volTrainScreen() {
+
+        if (!volTrain) {
+            return "";
+        }
+
+        if (volTrain.i < 0) {
+            return "intro";
+        }
+
+        return volTrain.i >= volTrain.steps.length ? "done" : "step";
+    }
+
+    function volTrainStep() {
+        return volTrain.steps[volTrain.i];
+    }
+
+    // The gap shown for a step: tried already, else drawn from the steps
+    // trained, else the step size in use
+    function volTrainGap(step) {
+
+        if (volTrain.gaps[step] > 0) {
+            return volTrain.gaps[step];
+        }
+
+        const drawn = volGapFrom(volTrain.gaps, step);
+
+        if (drawn > 0) {
+            return Math.round(drawn * 2) / 2;
+        }
+
+        const rec = volTrainRecord(false);
+
+        if (rec && rec.stepDb > 0) {
+            return rec.stepDb;
+        }
+
+        if (!volTrain.phone && sound().fallback.stepDb > 0) {
+            return sound().fallback.stepDb;
+        }
+
+        return Math.round(phoneStepDb(!volTrain.phone) * 2) / 2;
+    }
+
+    // The app told what to play: the step against the one below on a
+    // step's page, otherwise nothing
+    function volTrainSend() {
+
+        const on = volTrainScreen() === "step";
+
+        volTraining = on;
+        applySound();
+
+        if (!on && volTrain) {
+            volTrain.upper = null;
+        }
+
+        try {
+            window.MurekaHost.volumeTrain(JSON.stringify(on
+                ? { on: true, step: volTrainStep(), gap: volTrainGap(volTrainStep()), quiet: volTrain.quiet, delay: volTrain.delay }
+                : { on: false }));
+        } catch (e) {
+            dbgLog("Sound", "volume training not taken: " + errText(e));
+        }
+    }
+
+    // The popup opened for the speaker the music plays on now
+    function volTrainOpen(phone, address, name) {
+
+        const fine = fineInfo();
+        const max = Number(fine.max) || 0;
+
+        if (max < 2 || !window.MurekaHost || typeof window.MurekaHost.volumeTrain !== "function") {
+            return;
+        }
+
+        if (volTrain) {
+            volTrainEnd();
+        }
+
+        volTrain = {
+            phone: phone === true,
+            address: String(address || ""),
+            name: String(name || ""),
+            key: phone === true ? "" : String(address || ""),
+            output: String(fine.output || ""),
+            max: max,
+            steps: volTrainSteps(max),
+            i: -1,
+            gaps: {},
+            quiet: volTrainQuiet,
+            upper: null
+        };
+
+        const rec = volTrainRecord(false);
+
+        volTrain.gaps = Object.assign({}, rec && rec.gaps ? rec.gaps : {});
+
+        // The speaker's delay found before, else a usual one for Bluetooth
+        // or for this phone
+        volTrain.delay = rec && rec.delayMs >= 0 ? rec.delayMs : (volTrain.phone ? 80 : 250);
+        dbgLog("Sound", "volume training of " + (volTrain.phone ? "this device" : volTrain.name) + " opened");
+        clearInterval(volTrainTimer);
+
+        // The music gone to another output ends the training, as the app
+        // has already ended its part
+        volTrainTimer = setInterval(function () {
+
+            if (!volTrain) {
+
+                clearInterval(volTrainTimer);
+                return;
+            }
+
+            const now = fineInfo();
+
+            if (typeof now.output === "string" && volTrain.output && now.output !== volTrain.output) {
+
+                showToast("The music went to another speaker, the training ended", false);
+                volTrainEnd();
+                return;
+            }
+
+            paintVolTrain();
+        }, 1000);
+
+        paintVolTrain();
+        publishHostSoon();
+    }
+
+    function volTrainGo(i) {
+
+        if (!volTrain) {
+            return;
+        }
+
+        volTrain.i = Math.max(-1, Math.min(volTrain.steps.length, i));
+        volTrainSend();
+        paintVolTrain();
+        publishHostSoon();
+    }
+
+    // The popup closed, the app's switching ended and the level put back
+    function volTrainEnd() {
+
+        const was = volTrain;
+
+        volTrain = null;
+        clearInterval(volTrainTimer);
+        volTraining = false;
+        applySound();
+
+        if (was) {
+
+            try {
+                window.MurekaHost.volumeTrain(JSON.stringify({ on: false }));
+            } catch (e) {
+                dbgLog("Sound", "volume training not ended: " + errText(e));
+            }
+        }
+
+        paintVolTrain();
+        settingsRefreshers.forEach(function (fn) {
+            fn();
+        });
+        publishHostSoon();
+    }
+
+    function volTrainSave() {
+
+        const rec = volTrainRecord(true);
+
+        if (!rec) {
+            return;
+        }
+
+        rec.gaps = cleanGaps(volTrain.gaps);
+        rec.delayMs = cleanDelayMs(volTrain.delay);
+
+        if (!volTrain.phone) {
+            rec.name = volTrain.name || rec.name;
+        }
+
+        dbgLog("Sound", "volume training saved: " + JSON.stringify(rec.gaps) + ", the delay " + rec.delayMs + " ms");
+        saveSettings();
+        pushStepSizes();
+        volTrainEnd();
+        showToast("The trained steps are in use", true);
+    }
+
+    // What the popup asks for, from here or from a web view
+    function volTrainAct(op, value) {
+
+        if (!volTrain) {
+            return;
+        }
+
+        const at = volTrainScreen();
+
+        if (op === "start" || op === "again") {
+            volTrainGo(0);
+        } else if (op === "back" && at === "step") {
+            volTrainGo(volTrain.i - 1);
+        } else if (op === "skip" && at === "step") {
+
+            // Left out: drawn from the others
+            delete volTrain.gaps[volTrainStep()];
+            volTrainGo(volTrain.i + 1);
+        } else if (op === "next" && at === "step") {
+
+            volTrain.gaps[volTrainStep()] = volTrainGap(volTrainStep());
+            volTrainGo(volTrain.i + 1);
+        } else if (op === "done" && at === "step") {
+
+            // Kept, and the steps still to come drawn from those kept
+            volTrain.gaps[volTrainStep()] = volTrainGap(volTrainStep());
+            volTrainGo(volTrain.steps.length);
+        } else if (op === "gapBy" && at === "step") {
+
+            const v = cleanStepDb(volTrainGap(volTrainStep()) + (Number(value) || 0));
+
+            if (v > 0) {
+
+                volTrain.gaps[volTrainStep()] = v;
+                volTrainSend();
+            }
+        } else if (op === "delayBy" && at === "step") {
+
+            volTrain.delay = Math.max(0, Math.min(1000, volTrain.delay + Math.round(Number(value) || 0)));
+            volTrainSend();
+        } else if (op === "quiet") {
+
+            volTrain.quiet = Math.max(0, Math.min(30, Math.round(Number(value) || 0)));
+            volTrainQuiet = volTrain.quiet;
+
+            if (at === "step") {
+                volTrainSend();
+            }
+        } else if (op === "save" && at === "done") {
+
+            volTrainSave();
+            return;
+        } else if (op === "cancel") {
+
+            volTrainEnd();
+            return;
+        }
+
+        paintVolTrain();
+        publishHostSoon();
+    }
+
+    // The side playing, as the app switches
+    function volTrainSide(upper) {
+
+        if (!volTrain || volTrainScreen() !== "step") {
+            return;
+        }
+
+        volTrain.upper = upper === true;
+        paintVolTrain();
+        publishHostSoon();
+    }
+
+    // The popup as words and buttons, drawn here and in a web view
+    function volTrainView() {
+
+        if (!volTrain) {
+            return null;
+        }
+
+        const at = volTrainScreen();
+        const max = volTrain.max;
+        const who = volTrain.phone ? "this device" : volTrain.name;
+        const view = { at: at, quiet: volTrain.quiet, gap: 0, delay: volTrain.delay, now: "", lines: [], buttons: [] };
+
+        if (at === "intro") {
+
+            view.title = "Train the volume steps of " + who;
+            view.text = "A speaker does not get louder by the same amount at each of the phone's steps. Here each step is set by ear. "
+                + "The song playing is heard at a step and at the step below in turn, three seconds each, the step turned down by the player by a gap. "
+                + "Press - or + until the change can no longer be heard, then Keep. The steps go from quiet to loud: "
+                + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
+                + "Set Quieter first when others are asleep. While training, the compressor of the sound profile is off. "
+                + "If the sound dips or bumps for a moment at each switch, change the switch delay until it is smooth, as the player's share reaches the speaker later than the step.";
+            view.buttons = [{ op: "start", label: "Start", strong: true }, { op: "cancel", label: "Cancel" }];
+        } else if (at === "step") {
+
+            const k = volTrainStep();
+            const playing = !!(audio && !audio.paused);
+
+            view.title = "Step " + k + " of " + max + " (" + (volTrain.i + 1) + " of " + volTrain.steps.length + ")";
+            const last = volTrain.i === volTrain.steps.length - 1;
+
+            view.text = "Step " + k + " turned down by the gap, and step " + (k - 1) + " as it is, in turn. "
+                + "Louder on step " + k + ": press +. Quieter: press -. "
+                + (last ? "Keep, finish once they sound the same. " : "Keep, next once they sound the same, or Keep, done to keep it and leave the steps still to come to be drawn from those kept. ")
+                + "Leave out drops this step, to be drawn from the others."
+                + (playing ? "" : " Play a song to hear them.");
+            view.gap = volTrainGap(k);
+            view.now = volTrain.upper === null ? "Starting"
+                : (volTrain.upper ? "Now: step " + k + ", turned down " + view.gap + " dB" : "Now: step " + (k - 1));
+            view.upper = volTrain.upper;
+            view.buttons = [{ op: "back", label: "Back" }, { op: "skip", label: "Leave out" }]
+                .concat(last ? [] : [{ op: "done", label: "Keep, done" }])
+                .concat([{ op: "next", label: last ? "Keep, finish" : "Keep, next", strong: true }, { op: "cancel", label: "Cancel" }]);
+        } else {
+
+            const any = Object.keys(volTrain.gaps).length > 0;
+
+            view.title = "Trained";
+            view.text = any
+                ? "The gap to the step below for each step, set by ear or drawn from those set. Save puts them to use."
+                : "No step was set. Train again, or Cancel to keep things as they were.";
+
+            for (let k = 2; any && k <= max; k++) {
+
+                const own = volTrain.gaps[k] > 0;
+                const v = own ? volTrain.gaps[k] : volGapFrom(volTrain.gaps, k);
+
+                view.lines.push("Step " + k + ": " + v.toFixed(1) + " dB" + (own ? "" : ", drawn"));
+            }
+
+            if (any) {
+                view.lines.push("Switch delay: " + volTrain.delay + " ms");
+            }
+
+            view.buttons = (any ? [{ op: "save", label: "Save", strong: true }] : []).concat([
+                { op: "again", label: "Train again" },
+                { op: "cancel", label: "Cancel" }
+            ]);
+        }
+
+        return view;
+    }
+
+    // The phone's popup: built once, drawn from the view
+    function paintVolTrain() {
+
+        const view = volTrainView();
+
+        if (!view) {
+
+            if (volTrainEl) {
+                volTrainEl.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!volTrainEl) {
+            buildVolTrain();
+        }
+
+        const ui = volTrainUi;
+
+        ui.title.textContent = view.title;
+        ui.text.textContent = view.text;
+        ui.now.textContent = view.now;
+        ui.now.style.display = view.at === "step" ? "" : "none";
+        ui.now.style.color = view.upper === true ? "#48e1eb" : "#dff";
+        ui.gapRow.style.display = view.at === "step" ? "flex" : "none";
+        ui.gapValue.textContent = view.gap.toFixed(1) + " dB";
+        ui.delayRow.style.display = view.at === "step" ? "flex" : "none";
+        ui.delayHint.style.display = view.at === "step" ? "" : "none";
+        ui.delayValue.textContent = view.delay + " ms";
+        ui.quietRow.style.display = view.at === "done" ? "none" : "flex";
+        ui.quietHint.style.display = view.at === "done" ? "none" : "";
+
+        if (document.activeElement !== ui.quiet) {
+            ui.quiet.value = String(view.quiet);
+        }
+
+        ui.quietShown.textContent = view.quiet > 0 ? view.quiet + " dB" : "Off";
+        ui.list.textContent = "";
+
+        for (const line of view.lines) {
+
+            const el = document.createElement("div");
+
+            el.textContent = line;
+            ui.list.appendChild(el);
+        }
+
+        ui.list.style.display = view.lines.length ? "flex" : "none";
+        ui.buttons.textContent = "";
+
+        for (const b of view.buttons) {
+
+            const el = makeButton(b.label, b.strong ? "#48e1eb" : "#333", b.strong ? "#000" : "#fff", function () {
+                volTrainAct(b.op);
+            });
+
+            el.style.padding = "8px 16px";
+            ui.buttons.appendChild(el);
+        }
+
+        volTrainEl.style.display = "flex";
+    }
+
+    function buildVolTrain() {
+
+        const ui = {};
+        const box = document.createElement("div");
+        const top = document.createElement("div");
+        const close = makeButton("\u00d7", "#333", "#fff", function () {
+            volTrainAct("cancel");
+        });
+        const minus = makeButton("-", "#333", "#fff", function () {
+            volTrainAct("gapBy", -0.5);
+        });
+        const plus = makeButton("+", "#333", "#fff", function () {
+            volTrainAct("gapBy", 0.5);
+        });
+        const gapName = document.createElement("span");
+        const quietName = document.createElement("span");
+
+        volTrainEl = document.createElement("div");
+        volTrainEl.dataset.murekaNotice = "1";
+        volTrainEl.style.cssText = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
+            + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
+        box.style.cssText = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
+            + "background:#1c1c22;border:1px solid rgba(72,225,235,0.45);display:flex;flex-direction:column;gap:12px";
+        top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
+        ui.title = document.createElement("div");
+        ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:#48e1eb";
+        close.style.flex = "0 0 auto";
+        close.style.padding = "4px 12px";
+        close.setAttribute("aria-label", "Close");
+        top.appendChild(ui.title);
+        top.appendChild(close);
+
+        ui.text = document.createElement("div");
+        ui.text.style.cssText = "font-size:13px;line-height:1.45;color:#bbb";
+        ui.now = document.createElement("div");
+        ui.now.style.cssText = "font-weight:600;font-variant-numeric:tabular-nums";
+
+        ui.gapRow = document.createElement("div");
+        ui.gapRow.style.cssText = "display:flex;align-items:center;gap:10px";
+        gapName.textContent = "Gap to the step below";
+        gapName.style.cssText = "flex:1;min-width:0";
+        ui.gapValue = document.createElement("span");
+        ui.gapValue.style.cssText = "min-width:4.5em;text-align:center;font-variant-numeric:tabular-nums;font-weight:600";
+        minus.style.cssText += ";flex:0 0 44px;padding:8px 0";
+        plus.style.cssText += ";flex:0 0 44px;padding:8px 0";
+        ui.gapRow.appendChild(gapName);
+        ui.gapRow.appendChild(minus);
+        ui.gapRow.appendChild(ui.gapValue);
+        ui.gapRow.appendChild(plus);
+
+        // The speaker's delay, for a switch without a dip or a bump
+        const delayName = document.createElement("span");
+        const later = makeButton("+", "#333", "#fff", function () {
+            volTrainAct("delayBy", 25);
+        });
+        const sooner = makeButton("-", "#333", "#fff", function () {
+            volTrainAct("delayBy", -25);
+        });
+
+        ui.delayRow = document.createElement("div");
+        ui.delayRow.style.cssText = "display:flex;align-items:center;gap:10px";
+        delayName.textContent = "Switch delay";
+        delayName.style.cssText = "flex:1;min-width:0";
+        ui.delayValue = document.createElement("span");
+        ui.delayValue.style.cssText = "min-width:4.5em;text-align:center;font-variant-numeric:tabular-nums;font-weight:600";
+        sooner.style.cssText += ";flex:0 0 44px;padding:8px 0";
+        later.style.cssText += ";flex:0 0 44px;padding:8px 0";
+        ui.delayRow.appendChild(delayName);
+        ui.delayRow.appendChild(sooner);
+        ui.delayRow.appendChild(ui.delayValue);
+        ui.delayRow.appendChild(later);
+        ui.delayHint = document.createElement("div");
+        ui.delayHint.textContent = "How long the speaker takes to play what the player sends. Right, a switch has no dip or bump. "
+            + "Change it 25 ms at a time until the switches are smooth. It is kept for the speaker and used by More volume steps too.";
+        ui.delayHint.style.cssText = "font-size:12px;line-height:1.4;color:#999";
+
+        // Quieter: the player alone turns both sides down alike, for
+        // training at night. Red, as it is not the volume
+        ui.quietRow = document.createElement("div");
+        ui.quietRow.style.cssText = "display:flex;align-items:center;gap:10px";
+        quietName.textContent = "Quieter";
+        quietName.style.cssText = "flex:0 0 auto;color:#ff6b6b;font-weight:600";
+        ui.quiet = document.createElement("input");
+        ui.quiet.type = "range";
+        ui.quiet.min = "0";
+        ui.quiet.max = "30";
+        ui.quiet.step = "1";
+        ui.quiet.setAttribute("aria-label", "Quieter, dB");
+        ui.quiet.style.cssText = "flex:1;min-width:0;accent-color:#ff6b6b";
+        ui.quietShown = document.createElement("span");
+        ui.quietShown.style.cssText = "flex:0 0 4em;text-align:right;font-variant-numeric:tabular-nums;color:#ff6b6b";
+        ui.quiet.addEventListener("input", function () {
+            ui.quietShown.textContent = Number(ui.quiet.value) > 0 ? ui.quiet.value + " dB" : "Off";
+        });
+        ui.quiet.addEventListener("change", function () {
+            volTrainAct("quiet", ui.quiet.value);
+        });
+        ui.quietRow.appendChild(quietName);
+        ui.quietRow.appendChild(ui.quiet);
+        ui.quietRow.appendChild(ui.quietShown);
+        ui.quietHint = document.createElement("div");
+        ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
+            + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
+        ui.quietHint.style.cssText = "font-size:12px;line-height:1.4;color:#e8a0a0";
+
+        ui.list = document.createElement("div");
+        ui.list.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:13px;color:#ccc;font-variant-numeric:tabular-nums";
+        ui.buttons = document.createElement("div");
+        ui.buttons.style.cssText = "display:flex;flex-wrap:wrap;gap:8px";
+
+        box.appendChild(top);
+        box.appendChild(ui.text);
+        box.appendChild(ui.now);
+        box.appendChild(ui.gapRow);
+        box.appendChild(ui.delayRow);
+        box.appendChild(ui.delayHint);
+        box.appendChild(ui.quietRow);
+        box.appendChild(ui.quietHint);
+        box.appendChild(ui.list);
+        box.appendChild(ui.buttons);
+        volTrainEl.appendChild(box);
+        document.body.appendChild(volTrainEl);
+        volTrainUi = ui;
     }
 
     // More steps as the app has them now, for the stats and the settings
@@ -33541,6 +34171,9 @@
             goneAsk: goneAsk ? { n: goneAsk.n, title: goneAsk.title, text: goneAsk.text } : null,
             newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text, making: newAsk.making || 0, sets: newAsk.sets || [] } : null,
             setAsk: setAsk ? { n: setAsk.n, title: setAsk.title, text: setAsk.text, options: setAsk.options } : null,
+
+            // The training of the volume steps, drawn as a popup there too
+            volTrain: volTrainView(),
             followAsk: followAsk ? { n: followAsk.n, title: followAsk.title, text: followAsk.text } : null,
             pendingCount: pendingCount(),
             retryAsk: retryAsk ? {
@@ -36302,6 +36935,7 @@
                 now: el.dataset.hostNow === "1",
                 exp: el.dataset.hostExport || "",
                 web: el.dataset.hostWeb || "",
+                danger: el.dataset.hostDanger === "1",
                 imp: el.dataset.hostImport === "1",
                 wide: el.style.textAlign === "left",
                 copy: typeof el.__copyText === "function" ? String(el.__copyText() || "") : undefined
@@ -36794,10 +37428,16 @@
         }
 
         // The player's share faded for the training of the volume steps,
-        // too often for the log
+        // too often for the log, and the side playing as it switches
         if (cmd === "fineGainFade") {
 
             fadeFineGain(arg);
+            return;
+        }
+
+        if (cmd === "volTrainSide") {
+
+            volTrainSide(arg === true);
             return;
         }
 
@@ -37008,6 +37648,13 @@
             // A web view shows the stats, or closed them
             statsWebUntil = arg === true ? Date.now() + 8000 : 0;
             publishHostSoon();
+        } else if (cmd === "volTrain") {
+
+            // The training's popup in a web view: a button, - or +, or
+            // the quieter amount
+            const a = arg && typeof arg === "object" ? arg : {};
+
+            volTrainAct(String(a.op || ""), a.value);
         } else if (cmd === "fineGain") {
 
             // The app's more volume steps, the player's share of the level
@@ -48755,11 +49402,6 @@
         const soundBox = document.createElement("div");
         let soundEditId = "";
         let soundTryTimer = 0;
-
-        // The training of the volume steps going on, and the quieter amount
-        // last used for it
-        let volTrain = null;
-        let volTrainQuiet = 0;
         let soundKey = "";
 
         soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
@@ -49170,434 +49812,39 @@
                 soundBox.appendChild(row);
             };
 
-            // The steps the training goes through, quiet to loud: the two
-            // lowest, where speakers differ the most, and a few spread up
-            // to the top
-            const trainSteps = function (max) {
+            // The training of the volume steps by ear, in a popup of its
+            // own, and the training kept forgotten
+            const trainRows = function (box, phone, address, get, set, name) {
 
-                const out = [];
-
-                for (const k of [2, 3, Math.round(max * 0.3), Math.round(max * 0.5), Math.round(max * 0.75), max]) {
-
-                    const step = Math.max(2, Math.min(max, k));
-
-                    if (out.indexOf(step) < 0) {
-                        out.push(step);
-                    }
-                }
-
-                return out.sort(function (a, b) {
-                    return a - b;
+                const row = document.createElement("div");
+                const start = makeButton("Train the step sizes", "#333", "#fff", function () {
+                    volTrainOpen(phone, address, name);
                 });
-            };
-
-            // The gap of a step from the steps trained, on a straight line
-            // between them and the nearest beyond them, as the app draws it
-            const gapFrom = function (gaps, step) {
-
-                const keys = Object.keys(gaps || {}).map(Number).filter(function (k) {
-                    return gaps[k] > 0;
-                }).sort(function (a, b) {
-                    return a - b;
-                });
-
-                if (!keys.length) {
-                    return 0;
-                }
-
-                if (step <= keys[0]) {
-                    return gaps[keys[0]];
-                }
-
-                if (step >= keys[keys.length - 1]) {
-                    return gaps[keys[keys.length - 1]];
-                }
-
-                for (let i = 1; i < keys.length; i++) {
-
-                    if (step <= keys[i]) {
-
-                        const t = (step - keys[i - 1]) / (keys[i] - keys[i - 1]);
-
-                        return gaps[keys[i - 1]] + (gaps[keys[i]] - gaps[keys[i - 1]]) * t;
-                    }
-                }
-
-                return gaps[keys[keys.length - 1]];
-            };
-
-            // The training of the gaps between the phone's steps by ear, a
-            // page at a time under the volume to try: what it is, then each
-            // step against the one below it, then what came out, to keep
-            const trainRows = function (box, phone, address, get, set) {
-
-                const key = phone ? "" : String(address || "");
-                const ui = {};
-                const mineNow = function () {
-                    return volTrain && volTrain.key === key;
-                };
-                const screen = function () {
-
-                    if (!mineNow()) {
-                        return "";
-                    }
-
-                    if (volTrain.i < 0) {
-                        return "intro";
-                    }
-
-                    return volTrain.i >= volTrain.steps.length ? "done" : "step";
-                };
-                const stepNow = function () {
-                    return volTrain.steps[volTrain.i];
-                };
-
-                // The gap shown for a step: tried already, else drawn from
-                // the steps trained, else the step size in use
-                const gapShown = function (step) {
-
-                    if (volTrain.gaps[step] > 0) {
-                        return volTrain.gaps[step];
-                    }
-
-                    const drawn = gapFrom(volTrain.gaps, step);
-
-                    if (drawn > 0) {
-                        return Math.round(drawn * 2) / 2;
-                    }
-
-                    const own = Number(get("stepDb")) || 0;
-
-                    if (own > 0) {
-                        return own;
-                    }
-
-                    if (!phone && sound().fallback.stepDb > 0) {
-                        return sound().fallback.stepDb;
-                    }
-
-                    return Math.round(phoneStepDb(!phone) * 2) / 2;
-                };
-
-                // The app told what to play: the step against the one
-                // below on a step's page, otherwise nothing
-                const send = function () {
-
-                    const on = screen() === "step";
-
-                    volTraining = on;
-                    applySound();
-
-                    try {
-                        window.MurekaHost.volumeTrain(JSON.stringify(on
-                            ? { on: true, step: stepNow(), gap: gapShown(stepNow()), quiet: volTrain.quiet }
-                            : { on: false }));
-                    } catch (e) {
-                        dbgLog("Sound", "volume training not taken: " + errText(e));
-                    }
-                };
-                const go = function (i) {
-
-                    volTrain.i = i;
-                    send();
-                    paintTrainAll();
-                };
-
-                ui.start = makeButton("Train the step sizes", "#333", "#fff", function () {
-
-                    const max = Number(fineInfo().max) || 0;
-
-                    if (max < 2) {
-                        return;
-                    }
-
-                    if (volTrainStop) {
-                        volTrainStop();
-                    }
-
-                    volTrain = {
-                        key: key,
-                        max: max,
-                        steps: trainSteps(max),
-                        i: -1,
-                        gaps: Object.assign({}, get("gaps") || {}),
-                        quiet: volTrainQuiet
-                    };
-                    volTrainStop = function () {
-
-                        const was = volTrain;
-
-                        volTrain = null;
-                        volTrainStop = null;
-                        volTraining = false;
-                        applySound();
-
-                        if (was) {
-
-                            try {
-                                window.MurekaHost.volumeTrain(JSON.stringify({ on: false }));
-                            } catch (e) {
-                                dbgLog("Sound", "volume training not ended: " + errText(e));
-                            }
-                        }
-
-                        paintTrainAll();
-                    };
-                    paintTrainAll();
-                });
-                ui.forget = makeButton("Forget the training", "#333", "#fff", function () {
+                const forget = makeButton("Forget the training", "#b03a3a", "#fff", function () {
 
                     set("gaps", {});
                     saveSettings();
                     pushStepSizes();
                     paintTrainAll();
                 });
-                ui.wiz = document.createElement("div");
-                ui.title = document.createElement("div");
-                ui.text = makeHint("");
-                ui.now = document.createElement("div");
-                ui.list = document.createElement("div");
-                ui.list.style.cssText = "display:flex;flex-direction:column;gap:2px";
-                ui.gap = makeStepperRow("Gap to the step below, dB", function () {
-                    return screen() === "step" ? gapShown(stepNow()) : 0;
-                }, function (v) {
-
-                    if (screen() !== "step") {
-                        return;
-                    }
-
-                    volTrain.gaps[stepNow()] = cleanStepDb(v);
-                    send();
-                    paintTrain();
-                }, 0.5, 30, 0.5);
-
-                // Quieter: the player alone turns both sides down alike,
-                // for training at night. Red, as it is not the volume
-                ui.quiet = document.createElement("div");
-                ui.quietName = document.createElement("span");
-                ui.quietSlider = document.createElement("input");
-                ui.quietShown = document.createElement("span");
-                ui.quietHint = makeHint("Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.");
-                ui.quiet.dataset.hostSlider = "1";
-                ui.quiet.dataset.hostUnit = " dB";
-                ui.quiet.dataset.hostOff = "1";
-                ui.quiet.dataset.hostWarn = "1";
-                ui.quiet.style.cssText = "display:flex;align-items:center;gap:10px";
-                ui.quietName.textContent = "Quieter";
-                ui.quietName.style.cssText = "flex:0 0 auto;color:#ff6b6b;font-weight:600";
-                ui.quietSlider.type = "range";
-                ui.quietSlider.min = "0";
-                ui.quietSlider.max = "30";
-                ui.quietSlider.step = "1";
-                ui.quietSlider.setAttribute("aria-label", "Quieter, dB");
-                ui.quietSlider.style.cssText = "flex:1;min-width:0;accent-color:#ff6b6b";
-                ui.quietShown.style.cssText = "flex:0 0 4em;text-align:right;font-variant-numeric:tabular-nums;color:#ff6b6b";
-                ui.quietHint.style.color = "#e8a0a0";
-
-                const takeQuiet = function (now) {
-
-                    if (!mineNow()) {
-                        return;
-                    }
-
-                    volTrain.quiet = Math.max(0, Math.min(30, Math.round(Number(ui.quietSlider.value) || 0)));
-                    volTrainQuiet = volTrain.quiet;
-                    ui.quietShown.textContent = volTrain.quiet > 0 ? volTrain.quiet + " dB" : "Off";
-
-                    if (now) {
-                        send();
-                    }
-                };
-
-                ui.quietSlider.addEventListener("input", function () {
-                    takeQuiet(false);
-                });
-                ui.quietSlider.addEventListener("change", function () {
-                    takeQuiet(true);
-                });
-                ui.quiet.appendChild(ui.quietName);
-                ui.quiet.appendChild(ui.quietSlider);
-                ui.quiet.appendChild(ui.quietShown);
-
-                ui.buttons = document.createElement("div");
-                ui.buttons.style.cssText = "display:flex;flex-wrap:wrap;gap:8px";
-
-                const button = function (label, fn, strong) {
-
-                    const b = makeButton(label, strong ? "#48e1eb" : "#333", strong ? "#000" : "#fff", fn);
-
-                    b.style.padding = "6px 14px";
-                    ui.buttons.appendChild(b);
-
-                    return b;
-                };
-
-                ui.go = button("Start", function () {
-                    go(0);
-                }, true);
-                ui.back = button("Back", function () {
-                    go(volTrain.i - 1);
-                });
-                ui.skip = button("Skip", function () {
-
-                    delete volTrain.gaps[stepNow()];
-                    go(volTrain.i + 1);
-                });
-                ui.next = button("Next", function () {
-
-                    volTrain.gaps[stepNow()] = gapShown(stepNow());
-                    go(volTrain.i + 1);
-                }, true);
-                ui.save = button("Save", function () {
-
-                    set("gaps", cleanGaps(volTrain.gaps));
-                    saveSettings();
-                    pushStepSizes();
-
-                    if (volTrainStop) {
-                        volTrainStop();
-                    }
-
-                    setTimeout(function () {
-
-                        if (typeof publishHostSoon === "function") {
-                            publishHostSoon();
-                        }
-                    }, 0);
-                }, true);
-                ui.again = button("Train again", function () {
-                    go(0);
-                });
-                ui.cancel = button("Cancel", function () {
-
-                    if (volTrainStop) {
-                        volTrainStop();
-                    }
-                });
-
-                ui.wiz.style.cssText = "display:none;flex-direction:column;gap:10px;padding:12px;border-radius:10px;"
-                    + "background:rgba(72,225,235,0.07);border:1px solid rgba(72,225,235,0.35)";
-                ui.title.style.cssText = "font-weight:600;color:#48e1eb";
-                ui.now.style.cssText = "font-variant-numeric:tabular-nums;color:#dff";
-                ui.wiz.appendChild(ui.title);
-                ui.wiz.appendChild(ui.text);
-                ui.wiz.appendChild(ui.now);
-                ui.wiz.appendChild(ui.list);
-                ui.wiz.appendChild(ui.gap);
-                ui.wiz.appendChild(ui.quiet);
-                ui.wiz.appendChild(ui.quietHint);
-                ui.wiz.appendChild(ui.buttons);
-                ui.start.style.alignSelf = "flex-start";
-                ui.start.style.padding = "6px 14px";
-                ui.forget.style.alignSelf = "flex-start";
-                ui.forget.style.padding = "6px 14px";
-                box.appendChild(ui.start);
-                box.appendChild(ui.forget);
-                box.appendChild(ui.wiz);
-
-                // Shown as it was laid out, a row as a row
-                const show = function (el, on) {
-                    el.style.display = on ? (el.dataset.shownAs || "") : "none";
-                };
-
-                ui.gap.dataset.shownAs = "flex";
-                ui.quiet.dataset.shownAs = "flex";
-                ui.list.dataset.shownAs = "flex";
-
                 const paintTrain = function () {
 
-                    const at = screen();
-                    const trained = Object.keys(get("gaps") || {}).length > 0;
+                    const busy = !!volTrain;
 
-                    show(ui.start, !at);
-                    show(ui.forget, !at && trained);
-                    ui.wiz.style.display = at ? "flex" : "none";
-
-                    if (!at) {
-                        return;
-                    }
-
-                    const fine = fineInfo();
-                    const max = volTrain.max;
-
-                    show(ui.go, at === "intro");
-                    show(ui.back, at === "step");
-                    show(ui.skip, at === "step");
-                    show(ui.next, at === "step");
-                    show(ui.save, at === "done");
-                    show(ui.again, at === "done");
-                    show(ui.cancel, true);
-                    show(ui.gap, at === "step");
-                    show(ui.now, at === "step");
-                    show(ui.quiet, at !== "done");
-                    show(ui.quietHint, at !== "done");
-
-                    if (document.activeElement !== ui.quietSlider) {
-                        ui.quietSlider.value = String(volTrain.quiet);
-                    }
-
-                    // The gap of the step on its page, not typed in just now
-                    const gapField = ui.gap.querySelector("input");
-
-                    if (at === "step" && gapField && document.activeElement !== gapField) {
-                        gapField.value = String(gapShown(stepNow()));
-                    }
-
-                    ui.quietShown.textContent = volTrain.quiet > 0 ? volTrain.quiet + " dB" : "Off";
-                    show(ui.list, at === "done");
-
-                    if (at === "intro") {
-
-                        ui.title.textContent = "Train the volume steps";
-                        ui.text.textContent = "A speaker does not get louder by the same amount at each of the phone's steps. Here each step is set by ear. "
-                            + "The song playing is heard at a step and at the step below in turn, a second each, the step turned down by the player by a gap. "
-                            + "Press - or + until the change can no longer be heard, then Next. The steps go from quiet to loud: "
-                            + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
-                            + "Set Quieter first when others are asleep. While training, the compressor of the sound profile is off.";
-                    } else if (at === "step") {
-
-                        const k = stepNow();
-                        const t = fine.train;
-                        const playing = !!(audio && !audio.paused);
-
-                        ui.title.textContent = "Step " + k + " of " + max + " (" + (volTrain.i + 1) + " of " + volTrain.steps.length + ")";
-                        ui.text.textContent = "Step " + k + " turned down by the gap, and step " + (k - 1) + " as it is, in turn. "
-                            + "Too loud on step " + k + ": press +. Too quiet: press -. Next once they sound the same."
-                            + (playing ? "" : " Play a song to hear them.");
-                        ui.now.textContent = t && t.step === k
-                            ? (t.upper ? "Now: step " + k + ", turned down " + gapShown(k) + " dB" : "Now: step " + (k - 1))
-                            : "Not playing in turn now, - or + starts it again";
-                        ui.next.textContent = volTrain.i === volTrain.steps.length - 1 ? "Finish" : "Next";
-                    } else {
-
-                        const lines = [];
-
-                        for (let k = 2; k <= max; k++) {
-
-                            const own = volTrain.gaps[k] > 0;
-                            const v = own ? volTrain.gaps[k] : gapFrom(volTrain.gaps, k);
-
-                            lines.push("Step " + k + ": " + (v > 0 ? v.toFixed(1) + " dB" : "not set") + (own ? "" : ", drawn"));
-                        }
-
-                        ui.title.textContent = "Trained";
-                        ui.text.textContent = Object.keys(volTrain.gaps).length
-                            ? "The gap to the step below for each step, set by ear or drawn from those set. Save puts them to use."
-                            : "No step was set. Train again, or Cancel to keep things as they were.";
-                        ui.list.textContent = "";
-
-                        for (const line of Object.keys(volTrain.gaps).length ? lines : []) {
-
-                            const el = makeHint(line);
-
-                            el.style.fontVariantNumeric = "tabular-nums";
-                            ui.list.appendChild(el);
-                        }
-
-                        show(ui.save, Object.keys(volTrain.gaps).length > 0);
-                    }
+                    start.style.display = busy ? "none" : "";
+                    forget.style.display = !busy && Object.keys(get("gaps") || {}).length ? "" : "none";
                 };
 
+                // Forget on the left in red, Train on the right
+                row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+                row.dataset.hostSpread = "1";
+                start.style.padding = "6px 14px";
+                start.style.marginLeft = "auto";
+                forget.style.padding = "6px 14px";
+                forget.dataset.hostDanger = "1";
+                row.appendChild(forget);
+                row.appendChild(start);
+                box.appendChild(row);
                 trainPaints.push(paintTrain);
 
                 return paintTrain;
@@ -49639,12 +49886,6 @@
 
                     const fine = fineInfo();
                     const here = typeof fine.output === "string" && mine(fine);
-
-                    // The music gone to another output: a training of this
-                    // one is over
-                    if (!here && volTrain && volTrain.key === (phone ? "" : String(address || "")) && volTrainStop) {
-                        volTrainStop();
-                    }
 
                     // The volume to try out of the way while training
                     const training = !!(volTrain && volTrain.key === (phone ? "" : String(address || "")));
@@ -49733,7 +49974,12 @@
                 box.appendChild(nums);
                 box.appendChild(off);
 
-                paintTrain = trainRows(box, phone, address, get, set);
+                // The speaker's name for the training's popup
+                const dev = devs.find(function (d) {
+                    return d.address === address;
+                });
+
+                paintTrain = trainRows(box, phone, address, get, set, dev ? String(dev.name || address) : String(address || ""));
 
                 soundBox.appendChild(box);
                 paint();
@@ -55009,11 +55255,6 @@
 
     // Hide the settings overlay
     function closeSettings() {
-
-        // A training left open ends with the settings
-        if (volTrainStop) {
-            volTrainStop();
-        }
 
         if (settingsEl) {
             settingsOpen = false;
@@ -68386,6 +68627,117 @@
         backdrop-filter: blur(14px);
     }
 
+    /* The training of the volume steps, over the settings */
+    #trainPop {
+        position: fixed;
+        inset: 0;
+        top: var(--seenTop, 0px);
+        bottom: auto;
+        height: var(--seenH, 100%);
+        z-index: 58;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    #trainBox {
+        background: var(--card);
+        border: 1px solid rgba(72, 225, 235, 0.45);
+        border-radius: 18px;
+        padding: 2.4vh 2.4vw;
+        width: min(640px, 92vw);
+        max-height: min(88vh, calc(100% - 16px));
+        overflow-y: auto;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .trainTop {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .trainTitle {
+        flex: 1 1 auto;
+        font-weight: 600;
+        font-size: 1.15em;
+        color: var(--accent);
+    }
+
+    .trainText {
+        color: var(--muted);
+        font-size: 0.9em;
+        line-height: 1.45;
+    }
+
+    .trainNow {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainNow.upper {
+        color: var(--accent);
+    }
+
+    .trainRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .trainName {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .trainGap {
+        min-width: 4.5em;
+        text-align: center;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainQuietRow .trainName,
+    .trainQuietVal {
+        flex: 0 0 auto;
+        color: #ff6b6b;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainQuietRow input {
+        flex: 1 1 auto;
+        min-width: 0;
+        accent-color: #ff6b6b;
+    }
+
+    .trainQuietHint {
+        color: #e8a0a0;
+        font-size: 0.85em;
+        line-height: 1.4;
+    }
+
+    .trainList {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 0.9em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainActs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
     #plBox,
     #btBox,
     #crBox {
@@ -70585,6 +70937,13 @@
         /* A layer of its own, or the part outside the name's box is left
            unpainted in some browsers when the settings are drawn again */
         will-change: transform;
+    }
+
+    /* A button that takes something away, in red */
+    .pBtn.danger {
+        background: #b03a3a;
+        border-color: #b03a3a;
+        color: #fff;
     }
 
     .pBtn.on,
@@ -84446,7 +84805,7 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
-                + (node.wide ? " wide" : "");
+                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "");
             btn.disabled = node.off === true;
 
             // Still being switched, also when the settings are drawn again
@@ -88253,6 +88612,7 @@
         paintGoneAsk();
         paintNewAsk();
         paintSetAsk();
+        paintTrainPop();
         paintFollowAsk();
         followWaveZoomKeep(state);
         theaterSound();
@@ -96811,6 +97171,212 @@
     // everywhere
     let setAskShown = 0;
     let setAsking = "";
+
+    // The training of the volume steps, a popup of its own drawn from the
+    // phone's state, so the side playing shows as it switches. Its
+    // buttons, - and + and the quieter amount go back to the phone
+    let trainUi = null;
+    let trainQuietAt = 0;
+
+    function buildTrainPop() {
+
+        const ui = {};
+        const top = document.createElement("div");
+        const gapName = document.createElement("span");
+        const quietName = document.createElement("span");
+        const chip = function (text, then, look) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip" + (look ? " " + look : "");
+            b.textContent = text;
+            b.addEventListener("click", then);
+
+            return b;
+        };
+
+        ui.pop = document.createElement("div");
+        ui.pop.id = "trainPop";
+        ui.box = document.createElement("div");
+        ui.box.id = "trainBox";
+        top.className = "trainTop";
+        ui.title = document.createElement("span");
+        ui.title.className = "trainTitle";
+        ui.close = chip("", function () {
+            send("volTrain", { op: "cancel" });
+        }, "iconOnly");
+        ui.close.dataset.icon = "close";
+        ui.close.setAttribute("aria-label", "Close");
+        ui.close.appendChild(icon("close"));
+        top.appendChild(ui.title);
+        top.appendChild(ui.close);
+
+        ui.text = document.createElement("div");
+        ui.text.className = "trainText";
+        ui.now = document.createElement("div");
+        ui.now.className = "trainNow";
+
+        ui.gapRow = document.createElement("div");
+        ui.gapRow.className = "trainRow";
+        gapName.className = "trainName";
+        gapName.textContent = "Gap to the step below";
+        ui.gap = document.createElement("span");
+        ui.gap.className = "trainGap";
+        ui.gapRow.appendChild(gapName);
+        ui.gapRow.appendChild(chip("-", function () {
+            send("volTrain", { op: "gapBy", value: -0.5 });
+        }));
+        ui.gapRow.appendChild(ui.gap);
+        ui.gapRow.appendChild(chip("+", function () {
+            send("volTrain", { op: "gapBy", value: 0.5 });
+        }));
+
+        // The speaker's delay, for a switch without a dip or a bump
+        const delayName = document.createElement("span");
+
+        ui.delayRow = document.createElement("div");
+        ui.delayRow.className = "trainRow";
+        delayName.className = "trainName";
+        delayName.textContent = "Switch delay";
+        ui.delay = document.createElement("span");
+        ui.delay.className = "trainGap";
+        ui.delayRow.appendChild(delayName);
+        ui.delayRow.appendChild(chip("-", function () {
+            send("volTrain", { op: "delayBy", value: -25 });
+        }));
+        ui.delayRow.appendChild(ui.delay);
+        ui.delayRow.appendChild(chip("+", function () {
+            send("volTrain", { op: "delayBy", value: 25 });
+        }));
+        ui.delayHint = document.createElement("div");
+        ui.delayHint.className = "trainText";
+        ui.delayHint.textContent = "How long the speaker takes to play what the player sends. Right, a switch has no dip or bump. "
+            + "Change it 25 ms at a time until the switches are smooth. It is kept for the speaker and used by More volume steps too.";
+
+        // Quieter: the player alone turns both sides down alike, for
+        // training at night. Red, as it is not the volume
+        ui.quietRow = document.createElement("div");
+        ui.quietRow.className = "trainRow trainQuietRow";
+        quietName.className = "trainName";
+        quietName.textContent = "Quieter";
+        ui.quiet = document.createElement("input");
+        ui.quiet.type = "range";
+        ui.quiet.min = "0";
+        ui.quiet.max = "30";
+        ui.quiet.step = "1";
+        ui.quiet.setAttribute("aria-label", "Quieter, dB");
+        ui.quietShown = document.createElement("span");
+        ui.quietShown.className = "trainQuietVal";
+        ui.quiet.addEventListener("input", function () {
+
+            trainQuietAt = Date.now();
+            ui.quietShown.textContent = Number(ui.quiet.value) > 0 ? ui.quiet.value + " dB" : "Off";
+        });
+        ui.quiet.addEventListener("change", function () {
+
+            trainQuietAt = Date.now();
+            send("volTrain", { op: "quiet", value: Number(ui.quiet.value) || 0 });
+        });
+        ui.quietRow.appendChild(quietName);
+        ui.quietRow.appendChild(ui.quiet);
+        ui.quietRow.appendChild(ui.quietShown);
+        ui.quietHint = document.createElement("div");
+        ui.quietHint.className = "trainQuietHint";
+        ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
+            + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
+
+        ui.list = document.createElement("div");
+        ui.list.className = "trainList";
+        ui.acts = document.createElement("div");
+        ui.acts.className = "trainActs";
+        ui.actsKey = "";
+        ui.chip = chip;
+
+        ui.box.appendChild(top);
+        ui.box.appendChild(ui.text);
+        ui.box.appendChild(ui.now);
+        ui.box.appendChild(ui.gapRow);
+        ui.box.appendChild(ui.delayRow);
+        ui.box.appendChild(ui.delayHint);
+        ui.box.appendChild(ui.quietRow);
+        ui.box.appendChild(ui.quietHint);
+        ui.box.appendChild(ui.list);
+        ui.box.appendChild(ui.acts);
+        ui.pop.appendChild(ui.box);
+        document.body.appendChild(ui.pop);
+        trainUi = ui;
+    }
+
+    function paintTrainPop() {
+
+        const v = state && state.volTrain ? state.volTrain : null;
+
+        if (!v) {
+
+            if (trainUi) {
+                trainUi.pop.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!trainUi) {
+            buildTrainPop();
+        }
+
+        const ui = trainUi;
+        const step = v.at === "step";
+
+        ui.title.textContent = v.title || "";
+        ui.text.textContent = v.text || "";
+        ui.now.textContent = v.now || "";
+        ui.now.style.display = step ? "" : "none";
+        ui.now.classList.toggle("upper", v.upper === true);
+        ui.gapRow.style.display = step ? "" : "none";
+        ui.gap.textContent = (Number(v.gap) || 0).toFixed(1) + " dB";
+        ui.delayRow.style.display = step ? "" : "none";
+        ui.delayHint.style.display = step ? "" : "none";
+        ui.delay.textContent = (Number(v.delay) || 0) + " ms";
+        ui.quietRow.style.display = v.at === "done" ? "none" : "";
+        ui.quietHint.style.display = v.at === "done" ? "none" : "";
+
+        // Not moved back under a finger, nor before the phone has it
+        if (Date.now() - trainQuietAt > 1500) {
+
+            ui.quiet.value = String(Number(v.quiet) || 0);
+            ui.quietShown.textContent = Number(v.quiet) > 0 ? v.quiet + " dB" : "Off";
+        }
+
+        ui.list.textContent = "";
+
+        for (const line of v.lines || []) {
+
+            const el = document.createElement("div");
+
+            el.textContent = line;
+            ui.list.appendChild(el);
+        }
+
+        ui.list.style.display = (v.lines || []).length ? "" : "none";
+
+        // The buttons made again only when they change, so a tap is not lost
+        const key = JSON.stringify(v.buttons || []);
+
+        if (key !== ui.actsKey) {
+
+            ui.actsKey = key;
+            ui.acts.textContent = "";
+
+            for (const b of v.buttons || []) {
+                ui.acts.appendChild(ui.chip(b.label, function () {
+                    send("volTrain", { op: b.op });
+                }, b.strong ? "crPrimary" : ""));
+            }
+        }
+
+        ui.pop.style.display = "flex";
+    }
 
     function paintSetAsk() {
 

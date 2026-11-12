@@ -1845,6 +1845,117 @@
         backdrop-filter: blur(14px);
     }
 
+    /* The training of the volume steps, over the settings */
+    #trainPop {
+        position: fixed;
+        inset: 0;
+        top: var(--seenTop, 0px);
+        bottom: auto;
+        height: var(--seenH, 100%);
+        z-index: 58;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    #trainBox {
+        background: var(--card);
+        border: 1px solid rgba(72, 225, 235, 0.45);
+        border-radius: 18px;
+        padding: 2.4vh 2.4vw;
+        width: min(640px, 92vw);
+        max-height: min(88vh, calc(100% - 16px));
+        overflow-y: auto;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .trainTop {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .trainTitle {
+        flex: 1 1 auto;
+        font-weight: 600;
+        font-size: 1.15em;
+        color: var(--accent);
+    }
+
+    .trainText {
+        color: var(--muted);
+        font-size: 0.9em;
+        line-height: 1.45;
+    }
+
+    .trainNow {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainNow.upper {
+        color: var(--accent);
+    }
+
+    .trainRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .trainName {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .trainGap {
+        min-width: 4.5em;
+        text-align: center;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainQuietRow .trainName,
+    .trainQuietVal {
+        flex: 0 0 auto;
+        color: #ff6b6b;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainQuietRow input {
+        flex: 1 1 auto;
+        min-width: 0;
+        accent-color: #ff6b6b;
+    }
+
+    .trainQuietHint {
+        color: #e8a0a0;
+        font-size: 0.85em;
+        line-height: 1.4;
+    }
+
+    .trainList {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 0.9em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainActs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
     #plBox,
     #btBox,
     #crBox {
@@ -4044,6 +4155,13 @@
         /* A layer of its own, or the part outside the name's box is left
            unpainted in some browsers when the settings are drawn again */
         will-change: transform;
+    }
+
+    /* A button that takes something away, in red */
+    .pBtn.danger {
+        background: #b03a3a;
+        border-color: #b03a3a;
+        color: #fff;
     }
 
     .pBtn.on,
@@ -17905,7 +18023,7 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
-                + (node.wide ? " wide" : "");
+                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "");
             btn.disabled = node.off === true;
 
             // Still being switched, also when the settings are drawn again
@@ -21712,6 +21830,7 @@
         paintGoneAsk();
         paintNewAsk();
         paintSetAsk();
+        paintTrainPop();
         paintFollowAsk();
         followWaveZoomKeep(state);
         theaterSound();
@@ -30270,6 +30389,212 @@
     // everywhere
     let setAskShown = 0;
     let setAsking = "";
+
+    // The training of the volume steps, a popup of its own drawn from the
+    // phone's state, so the side playing shows as it switches. Its
+    // buttons, - and + and the quieter amount go back to the phone
+    let trainUi = null;
+    let trainQuietAt = 0;
+
+    function buildTrainPop() {
+
+        const ui = {};
+        const top = document.createElement("div");
+        const gapName = document.createElement("span");
+        const quietName = document.createElement("span");
+        const chip = function (text, then, look) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip" + (look ? " " + look : "");
+            b.textContent = text;
+            b.addEventListener("click", then);
+
+            return b;
+        };
+
+        ui.pop = document.createElement("div");
+        ui.pop.id = "trainPop";
+        ui.box = document.createElement("div");
+        ui.box.id = "trainBox";
+        top.className = "trainTop";
+        ui.title = document.createElement("span");
+        ui.title.className = "trainTitle";
+        ui.close = chip("", function () {
+            send("volTrain", { op: "cancel" });
+        }, "iconOnly");
+        ui.close.dataset.icon = "close";
+        ui.close.setAttribute("aria-label", "Close");
+        ui.close.appendChild(icon("close"));
+        top.appendChild(ui.title);
+        top.appendChild(ui.close);
+
+        ui.text = document.createElement("div");
+        ui.text.className = "trainText";
+        ui.now = document.createElement("div");
+        ui.now.className = "trainNow";
+
+        ui.gapRow = document.createElement("div");
+        ui.gapRow.className = "trainRow";
+        gapName.className = "trainName";
+        gapName.textContent = "Gap to the step below";
+        ui.gap = document.createElement("span");
+        ui.gap.className = "trainGap";
+        ui.gapRow.appendChild(gapName);
+        ui.gapRow.appendChild(chip("-", function () {
+            send("volTrain", { op: "gapBy", value: -0.5 });
+        }));
+        ui.gapRow.appendChild(ui.gap);
+        ui.gapRow.appendChild(chip("+", function () {
+            send("volTrain", { op: "gapBy", value: 0.5 });
+        }));
+
+        // The speaker's delay, for a switch without a dip or a bump
+        const delayName = document.createElement("span");
+
+        ui.delayRow = document.createElement("div");
+        ui.delayRow.className = "trainRow";
+        delayName.className = "trainName";
+        delayName.textContent = "Switch delay";
+        ui.delay = document.createElement("span");
+        ui.delay.className = "trainGap";
+        ui.delayRow.appendChild(delayName);
+        ui.delayRow.appendChild(chip("-", function () {
+            send("volTrain", { op: "delayBy", value: -25 });
+        }));
+        ui.delayRow.appendChild(ui.delay);
+        ui.delayRow.appendChild(chip("+", function () {
+            send("volTrain", { op: "delayBy", value: 25 });
+        }));
+        ui.delayHint = document.createElement("div");
+        ui.delayHint.className = "trainText";
+        ui.delayHint.textContent = "How long the speaker takes to play what the player sends. Right, a switch has no dip or bump. "
+            + "Change it 25 ms at a time until the switches are smooth. It is kept for the speaker and used by More volume steps too.";
+
+        // Quieter: the player alone turns both sides down alike, for
+        // training at night. Red, as it is not the volume
+        ui.quietRow = document.createElement("div");
+        ui.quietRow.className = "trainRow trainQuietRow";
+        quietName.className = "trainName";
+        quietName.textContent = "Quieter";
+        ui.quiet = document.createElement("input");
+        ui.quiet.type = "range";
+        ui.quiet.min = "0";
+        ui.quiet.max = "30";
+        ui.quiet.step = "1";
+        ui.quiet.setAttribute("aria-label", "Quieter, dB");
+        ui.quietShown = document.createElement("span");
+        ui.quietShown.className = "trainQuietVal";
+        ui.quiet.addEventListener("input", function () {
+
+            trainQuietAt = Date.now();
+            ui.quietShown.textContent = Number(ui.quiet.value) > 0 ? ui.quiet.value + " dB" : "Off";
+        });
+        ui.quiet.addEventListener("change", function () {
+
+            trainQuietAt = Date.now();
+            send("volTrain", { op: "quiet", value: Number(ui.quiet.value) || 0 });
+        });
+        ui.quietRow.appendChild(quietName);
+        ui.quietRow.appendChild(ui.quiet);
+        ui.quietRow.appendChild(ui.quietShown);
+        ui.quietHint = document.createElement("div");
+        ui.quietHint.className = "trainQuietHint";
+        ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
+            + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
+
+        ui.list = document.createElement("div");
+        ui.list.className = "trainList";
+        ui.acts = document.createElement("div");
+        ui.acts.className = "trainActs";
+        ui.actsKey = "";
+        ui.chip = chip;
+
+        ui.box.appendChild(top);
+        ui.box.appendChild(ui.text);
+        ui.box.appendChild(ui.now);
+        ui.box.appendChild(ui.gapRow);
+        ui.box.appendChild(ui.delayRow);
+        ui.box.appendChild(ui.delayHint);
+        ui.box.appendChild(ui.quietRow);
+        ui.box.appendChild(ui.quietHint);
+        ui.box.appendChild(ui.list);
+        ui.box.appendChild(ui.acts);
+        ui.pop.appendChild(ui.box);
+        document.body.appendChild(ui.pop);
+        trainUi = ui;
+    }
+
+    function paintTrainPop() {
+
+        const v = state && state.volTrain ? state.volTrain : null;
+
+        if (!v) {
+
+            if (trainUi) {
+                trainUi.pop.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!trainUi) {
+            buildTrainPop();
+        }
+
+        const ui = trainUi;
+        const step = v.at === "step";
+
+        ui.title.textContent = v.title || "";
+        ui.text.textContent = v.text || "";
+        ui.now.textContent = v.now || "";
+        ui.now.style.display = step ? "" : "none";
+        ui.now.classList.toggle("upper", v.upper === true);
+        ui.gapRow.style.display = step ? "" : "none";
+        ui.gap.textContent = (Number(v.gap) || 0).toFixed(1) + " dB";
+        ui.delayRow.style.display = step ? "" : "none";
+        ui.delayHint.style.display = step ? "" : "none";
+        ui.delay.textContent = (Number(v.delay) || 0) + " ms";
+        ui.quietRow.style.display = v.at === "done" ? "none" : "";
+        ui.quietHint.style.display = v.at === "done" ? "none" : "";
+
+        // Not moved back under a finger, nor before the phone has it
+        if (Date.now() - trainQuietAt > 1500) {
+
+            ui.quiet.value = String(Number(v.quiet) || 0);
+            ui.quietShown.textContent = Number(v.quiet) > 0 ? v.quiet + " dB" : "Off";
+        }
+
+        ui.list.textContent = "";
+
+        for (const line of v.lines || []) {
+
+            const el = document.createElement("div");
+
+            el.textContent = line;
+            ui.list.appendChild(el);
+        }
+
+        ui.list.style.display = (v.lines || []).length ? "" : "none";
+
+        // The buttons made again only when they change, so a tap is not lost
+        const key = JSON.stringify(v.buttons || []);
+
+        if (key !== ui.actsKey) {
+
+            ui.actsKey = key;
+            ui.acts.textContent = "";
+
+            for (const b of v.buttons || []) {
+                ui.acts.appendChild(ui.chip(b.label, function () {
+                    send("volTrain", { op: b.op });
+                }, b.strong ? "crPrimary" : ""));
+            }
+        }
+
+        ui.pop.style.display = "flex";
+    }
 
     function paintSetAsk() {
 
