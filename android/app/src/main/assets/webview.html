@@ -25773,6 +25773,18 @@
         ui.easyChatRow.appendChild(crChip("New song", function () {
             crSet({ easyChat: null });
         }, "crFill"));
+
+        // A new chat with the wish the old one started with, to change or
+        // to make again as it is
+        ui.easySame = crChip("New chat, same wish", function () {
+
+            const chat = crDraft && crDraft.easyChat;
+
+            if (chat && chat.wish) {
+                crSet({ easyChat: null, easyText: chat.wish });
+            }
+        });
+        ui.easyChatRow.appendChild(ui.easySame);
         ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
@@ -26057,6 +26069,7 @@
             const chat = fresh.easyChat && typeof fresh.easyChat === "object" ? fresh.easyChat : null;
 
             ui.easyChatRow.style.display = chat ? "flex" : "none";
+            ui.easySame.style.display = chat && chat.wish ? "" : "none";
             ui.easyChatText.textContent = chat ? "Goes on in the chat about " + (chat.title ? "\u201c" + chat.title + "\u201d" : "the last wish")
                 + ": tell the agent what to change" : "";
             ui.easyLabel.firstChild.textContent = chat ? "What to change" : "What to make";

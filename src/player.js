@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.81";
+    const VERSION = "2.0.1.82";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -60485,15 +60485,30 @@
         ui.easyChatRow = document.createElement("div");
         ui.easyChatRow.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:rgba(72,225,235,0.1);border:1px solid rgba(72,225,235,0.35)";
         ui.easyChatText = document.createElement("span");
-        ui.easyChatText.style.cssText = "flex:1 1 12em;font-size:13px;line-height:1.4;color:#dff";
+        ui.easyChatText.style.cssText = "flex:1 1 100%;font-size:13px;line-height:1.4;color:#dff";
         ui.easyNew = makeButton("New song", "#333", "#fff", function () {
 
             changeCreateDraft({ easyChat: null });
             setCreateNote("The next wish starts a new chat");
         });
         ui.easyNew.style.padding = "6px 12px";
+
+        // A new chat with the wish the old one started with, to change or
+        // to make again as it is
+        ui.easySame = makeButton("New chat, same wish", "#333", "#fff", function () {
+
+            const chat = loadCreateDraft().easyChat;
+
+            if (chat && chat.wish) {
+
+                changeCreateDraft({ easyChat: null, easyText: chat.wish });
+                setCreateNote("A new chat with the same wish, change it or make it as it is");
+            }
+        });
+        ui.easySame.style.padding = "6px 12px";
         ui.easyChatRow.appendChild(ui.easyChatText);
         ui.easyChatRow.appendChild(ui.easyNew);
+        ui.easyChatRow.appendChild(ui.easySame);
         ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
@@ -60853,6 +60868,7 @@
         put(ui.style, d.style);
         put(ui.easy, d.easyText);
         ui.easyChatRow.style.display = d.easyChat ? "flex" : "none";
+        ui.easySame.style.display = d.easyChat && d.easyChat.wish ? "" : "none";
         ui.easyChatText.textContent = d.easyChat ? "Goes on in the chat about " + (d.easyChat.title ? "\"" + d.easyChat.title + "\"" : "the last wish")
             + ": tell the agent what to change" : "";
         ui.easyLabel.firstChild.textContent = d.easyChat ? "What to change" : "What to make";
@@ -91346,6 +91362,18 @@
         ui.easyChatRow.appendChild(crChip("New song", function () {
             crSet({ easyChat: null });
         }, "crFill"));
+
+        // A new chat with the wish the old one started with, to change or
+        // to make again as it is
+        ui.easySame = crChip("New chat, same wish", function () {
+
+            const chat = crDraft && crDraft.easyChat;
+
+            if (chat && chat.wish) {
+                crSet({ easyChat: null, easyText: chat.wish });
+            }
+        });
+        ui.easyChatRow.appendChild(ui.easySame);
         ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
@@ -91630,6 +91658,7 @@
             const chat = fresh.easyChat && typeof fresh.easyChat === "object" ? fresh.easyChat : null;
 
             ui.easyChatRow.style.display = chat ? "flex" : "none";
+            ui.easySame.style.display = chat && chat.wish ? "" : "none";
             ui.easyChatText.textContent = chat ? "Goes on in the chat about " + (chat.title ? "\u201c" + chat.title + "\u201d" : "the last wish")
                 + ": tell the agent what to change" : "";
             ui.easyLabel.firstChild.textContent = chat ? "What to change" : "What to make";

@@ -673,6 +673,11 @@ In development.
   Create on such a song opens Easy mode in that chat, marked as going on
   in it, so the next wish tells the agent what to change. Other songs
   fill in the form as before.
+- **A new chat with the same wish.** Next to New song, New chat, same
+  wish forgets the chat and puts the wish it started with back in the
+  box, to change or to make again as it is, on the phone and in the web
+  view. On a narrow phone the line about the chat sits above the two
+  buttons.
 
 ### Build
 
