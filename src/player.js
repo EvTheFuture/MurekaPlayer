@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.93";
+    const VERSION = "2.0.1.94";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13511,9 +13511,9 @@
                     nightOff: NIGHT_ON_CONNECT.some(function (c) {
                         return c.value === d.nightOff;
                     }) ? d.nightOff : "keep",
-                    stepDb: cleanStepDb(d.stepDb),
+                    stepDb: 0,
                     capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct),
-                    gaps: cleanGaps(d.gaps),
+                    gaps: gapsWithStep(d.gaps, d.stepDb),
                     delayMs: cleanDelayMs(d.delayMs)
                 };
             }
@@ -13527,8 +13527,8 @@
             fallback: {
                 day: has(fb.day) ? fb.day : firstOf(false),
                 night: has(fb.night) ? fb.night : firstOf(true),
-                stepDb: cleanStepDb(fb.stepDb),
-                gaps: cleanGaps(fb.gaps),
+                stepDb: 0,
+                gaps: gapsWithStep(fb.gaps, fb.stepDb),
                 delayMs: cleanDelayMs(fb.delayMs)
             },
             devices: devices
@@ -13564,6 +13564,20 @@
             if (step >= 1 && step <= 200 && db > 0) {
                 out[String(step)] = db;
             }
+        }
+
+        return out;
+    }
+
+    // A step size set by hand before, the same for every step, becomes a
+    // volume step of its own when no steps are set
+    function gapsWithStep(g, stepDb) {
+
+        const out = cleanGaps(g);
+        const one = cleanStepDb(stepDb);
+
+        if (!Object.keys(out).length && one > 0) {
+            out["2"] = one;
         }
 
         return out;
@@ -36936,6 +36950,7 @@
                 exp: el.dataset.hostExport || "",
                 web: el.dataset.hostWeb || "",
                 danger: el.dataset.hostDanger === "1",
+                ring: el.dataset.hostRing === "1",
                 imp: el.dataset.hostImport === "1",
                 wide: el.style.textAlign === "left",
                 copy: typeof el.__copyText === "function" ? String(el.__copyText() || "") : undefined
@@ -49674,25 +49689,17 @@
             const capsOffered = stepsOffered && typeof window.MurekaHost.connectMaxOffered === "function";
             const tryOffered = stepsOffered && typeof window.MurekaHost.fineVolumeAt === "function";
             const tryPaints = [];
-            const trainPaints = [];
-            const paintTrainAll = function () {
 
-                // Each speaker's volume to try with its training, so the
-                // volume to try steps aside at once
-                for (const fn of tryPaints.length ? tryPaints : trainPaints) {
-                    fn();
-                }
-
-                publishHostSoon();
-            };
 
             if (capsOffered) {
                 soundBox.appendChild(makeHint("Max volume as it connects lowers a speaker's volume to the level set when it connects, if it is higher. A lower volume is left as it is. Off at the left end."));
             }
 
             if (stepsOffered) {
-                soundBox.appendChild(makeHint("Volume step size is for More steps in the web view's volume popup. A Bluetooth speaker turns its sound down by its own curve, not always by what the phone says. If the sound jumps up just past one of the phone's steps, make it bigger, if it drops, smaller."
-                    + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under its step size, to hear it while the size is changed." : "")));
+                soundBox.appendChild(makeHint("Volume steps are for More volume steps: how much louder a speaker gets at each of the phone's steps, as a Bluetooth speaker turns its sound down by its own curve, not by what the phone says. "
+                    + "Train by ear, while the speaker plays, finds them one step against the step below. Edit by hand takes them typed in, a step left empty drawn from those set. "
+                    + "A speaker without any goes by the phone's own curve. They are kept with the settings, and in a copy of them."
+                    + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under them, to hear the result." : "")));
             }
 
             const dayChoices = function (phone) {
@@ -49747,7 +49754,7 @@
                 }
 
                 if (stepsOffered) {
-                    stepRow(get, set, phone, address);
+                    stepsRows(get, set, phone, address, title.replace(/, connected$/, ""));
                 }
             };
 
@@ -49812,49 +49819,215 @@
                 soundBox.appendChild(row);
             };
 
-            // The training of the volume steps by ear, in a popup of its
-            // own, and the training kept forgotten
-            const trainRows = function (box, phone, address, get, set, name) {
+            // Whether the music plays on a speaker now: a speaker by its
+            // address, this device for every other output
+            const playsOn = function (fine, phone, address) {
 
-                const row = document.createElement("div");
-                const start = makeButton("Train the step sizes", "#333", "#fff", function () {
-                    volTrainOpen(phone, address, name);
+                const out = String(fine.output || "");
+
+                if (!phone) {
+                    return out === "bt:" + String(address || "").toUpperCase();
+                }
+
+                return !devs.some(function (d) {
+                    return out === "bt:" + String(d.address || "").toUpperCase();
                 });
-                const forget = makeButton("Forget the training", "#b03a3a", "#fff", function () {
+            };
 
-                    set("gaps", {});
+            // How much louder the speaker gets at each of the phone's steps,
+            // for More volume steps: trained by ear in a popup of its own
+            // while it plays, or entered by hand, each step left empty drawn
+            // from those set. Without any, the phone's own curve
+            const stepsRows = function (get, set, phone, address, name) {
+
+                const gaps = function () {
+                    return get("gaps") || {};
+                };
+                const delay = function () {
+
+                    const v = Number(get("delayMs"));
+
+                    return isFinite(v) && v >= 0 ? v : -1;
+                };
+                const kept = function () {
+
                     saveSettings();
                     pushStepSizes();
-                    paintTrainAll();
+                    paint();
+                };
+                const said = makeHint("");
+                const buttons = document.createElement("div");
+                const forget = makeButton("Forget", "#b03a3a", "#fff", function () {
+
+                    set("gaps", {});
+                    set("delayMs", -1);
+                    kept();
                 });
-                const paintTrain = function () {
+                const train = makeButton("Train by ear", "transparent", "#48e1eb", function () {
+                    volTrainOpen(phone, address, name);
+                });
+                const editBtn = makeButton("Edit by hand", "#333", "#fff", function () {
 
-                    const busy = !!volTrain;
+                    editing = !editing;
+                    buildEditor();
+                    paint();
+                });
+                const editor = document.createElement("div");
+                const fields = [];
+                let editing = false;
+                let delayField = null;
 
-                    start.style.display = busy ? "none" : "";
-                    forget.style.display = !busy && Object.keys(get("gaps") || {}).length ? "" : "none";
+                // A field for each step, and the delay, made once the
+                // number of the phone's steps is known
+                const buildEditor = function () {
+
+                    const max = Number(fineInfo().max) || 0;
+
+                    if (!editing || fields.length || max < 2) {
+                        return;
+                    }
+
+                    const field = function (label, min, maxValue, step, take) {
+
+                        const row = document.createElement("div");
+                        const text = document.createElement("span");
+                        const input = document.createElement("input");
+
+                        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+                        text.textContent = label;
+                        input.type = "number";
+                        input.min = String(min);
+                        input.max = String(maxValue);
+                        input.step = String(step);
+                        input.inputMode = "decimal";
+                        input.style.cssText = "width:84px;height:30px;box-sizing:border-box;flex:0 0 auto;text-align:center;"
+                            + "font-variant-numeric:tabular-nums;padding:6px 4px;border:1px solid #3a3a42;border-radius:6px;"
+                            + "background:#26262c;color:#fff;font-size:13px";
+                        input.addEventListener("keydown", function (ev) {
+
+                            ev.stopPropagation();
+
+                            if (ev.key === "Enter") {
+
+                                ev.preventDefault();
+                                input.blur();
+                            }
+                        });
+                        input.addEventListener("change", function () {
+                            take(input.value.trim());
+                        });
+                        row.appendChild(text);
+                        row.appendChild(input);
+                        editor.appendChild(row);
+
+                        return input;
+                    };
+
+                    for (let k = 2; k <= max; k++) {
+
+                        const input = field("Step " + k + ", dB louder than " + (k - 1), 0, 30, 0.5, function (v) {
+
+                            const all = Object.assign({}, gaps());
+                            const db = cleanStepDb(v);
+
+                            if (v === "" || !(db > 0)) {
+                                delete all[k];
+                            } else {
+                                all[k] = db;
+                            }
+
+                            set("gaps", all);
+                            kept();
+                        });
+
+                        input.dataset.step = String(k);
+                        fields.push(input);
+                    }
+
+                    delayField = field("Switch delay, ms", 0, 1000, 25, function (v) {
+
+                        set("delayMs", v === "" ? -1 : cleanDelayMs(v));
+                        kept();
+                    });
                 };
 
-                // Forget on the left in red, Train on the right
-                row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
-                row.dataset.hostSpread = "1";
-                start.style.padding = "6px 14px";
-                start.style.marginLeft = "auto";
-                forget.style.padding = "6px 14px";
-                forget.dataset.hostDanger = "1";
-                row.appendChild(forget);
-                row.appendChild(start);
-                box.appendChild(row);
-                trainPaints.push(paintTrain);
+                const paint = function () {
 
-                return paintTrain;
+                    const g = gaps();
+                    const at = Object.keys(g).map(Number).sort(function (a, b) {
+                        return a - b;
+                    });
+                    const fine = fineInfo();
+                    const here = typeof fine.output === "string" && playsOn(fine, phone, address);
+
+                    said.textContent = at.length
+                        ? "Volume steps set at " + at.map(function (k) {
+                            return k + ": " + g[k] + " dB";
+                        }).join(", ") + (at.length > 1 ? ", those between drawn from them." : ", the same for every step.")
+                            + (delay() >= 0 ? " Switch delay " + delay() + " ms." : "")
+                        : "Volume steps as the phone says." + (delay() >= 0 ? " Switch delay " + delay() + " ms." : "");
+                    forget.style.display = at.length || delay() >= 0 ? "" : "none";
+                    train.style.display = here && !volTrain ? "" : "none";
+                    editBtn.textContent = editing ? "Done editing" : "Edit by hand";
+                    editor.style.display = editing ? "flex" : "none";
+
+                    // The fields as kept, not under a finger, the steps left
+                    // empty showing what is drawn for them
+                    for (const input of fields) {
+
+                        const k = Number(input.dataset.step);
+
+                        if (document.activeElement !== input) {
+                            input.value = g[k] > 0 ? String(g[k]) : "";
+                        }
+
+                        const drawn = volGapFrom(g, k);
+
+                        input.placeholder = drawn > 0 ? drawn.toFixed(1) : "";
+                    }
+
+                    if (delayField && document.activeElement !== delayField) {
+
+                        delayField.value = delay() >= 0 ? String(delay()) : "";
+                        delayField.placeholder = phone ? "80" : "250";
+                    }
+                };
+
+                // Forget on the left in red, Train by ear on the right in a
+                // cyan ring
+                buttons.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap";
+                buttons.dataset.hostSpread = "1";
+                forget.dataset.hostDanger = "1";
+                train.dataset.hostRing = "1";
+                train.style.boxShadow = "inset 0 0 0 2px #48e1eb";
+                train.style.marginLeft = "auto";
+
+                for (const b of [forget, editBtn, train]) {
+
+                    b.style.flex = "0 0 auto";
+                    b.style.padding = "6px 14px";
+                    buttons.appendChild(b);
+                }
+
+                editor.style.cssText = "display:none;flex-direction:column;gap:6px";
+                soundBox.appendChild(makeLabel("Volume steps"));
+                soundBox.appendChild(said);
+                soundBox.appendChild(buttons);
+                soundBox.appendChild(editor);
+                paint();
+                settingsRefreshers.push(paint);
+                tryPaints.push(paint);
+
+                if (tryOffered) {
+                    tryRow(phone, address);
+                }
             };
 
             // The volume of the speaker playing now in 100 steps, under its
             // step size, to hear the size while it is changed: the level,
             // and the phone's real step with its dB and the player's mixer
             // under it, as in the web view's volume popup
-            const tryRow = function (phone, address, get, set) {
+            const tryRow = function (phone, address) {
 
                 const box = document.createElement("div");
                 const row = document.createElement("div");
@@ -49863,39 +50036,20 @@
                 const shown = document.createElement("span");
                 const nums = makeHint("");
                 const off = makeHint("Turn on More volume steps to try the volume here.");
-                let paintTrain = null;
                 let sentAt = 0;
                 let sentValue = -1;
                 let later = 0;
 
-                // Whether the music plays on this speaker now: a speaker by
-                // its address, this device for every other output
-                const mine = function (fine) {
-
-                    const out = String(fine.output || "");
-
-                    if (!phone) {
-                        return out === "bt:" + String(address || "").toUpperCase();
-                    }
-
-                    return !devs.some(function (d) {
-                        return out === "bt:" + String(d.address || "").toUpperCase();
-                    });
-                };
                 const paint = function () {
 
                     const fine = fineInfo();
-                    const here = typeof fine.output === "string" && mine(fine);
+                    const here = typeof fine.output === "string" && playsOn(fine, phone, address);
 
                     // The volume to try out of the way while training
                     const training = !!(volTrain && volTrain.key === (phone ? "" : String(address || "")));
 
                     box.style.display = here ? "flex" : "none";
                     row.style.display = fine.on === true && !training ? "flex" : "none";
-
-                    if (paintTrain) {
-                        paintTrain();
-                    }
 
                     nums.style.display = fine.on === true && !training ? "" : "none";
                     off.style.display = fine.on === true ? "none" : "";
@@ -49974,80 +50128,11 @@
                 box.appendChild(nums);
                 box.appendChild(off);
 
-                // The speaker's name for the training's popup
-                const dev = devs.find(function (d) {
-                    return d.address === address;
-                });
-
-                paintTrain = trainRows(box, phone, address, get, set, dev ? String(dev.name || address) : String(address || ""));
 
                 soundBox.appendChild(box);
                 paint();
                 settingsRefreshers.push(paint);
                 tryPaints.push(paint);
-            };
-
-            // The size of one of the phone's volume steps for the speaker:
-            // set by hand, else this device's, else what the phone says
-            const stepRow = function (get, set, phone, address) {
-
-                const own = function () {
-                    return Number(get("stepDb")) || 0;
-                };
-                const shown = function () {
-
-                    if (own() > 0) {
-                        return own();
-                    }
-
-                    if (!phone && sound().fallback.stepDb > 0) {
-                        return sound().fallback.stepDb;
-                    }
-
-                    return phoneStepDb(!phone);
-                };
-                const said = makeHint("");
-                const back = makeButton(phone ? "As the phone says" : "Same as this device", "#333", "#fff", function () {
-
-                    set("stepDb", 0);
-                    saveSettings();
-                    pushStepSizes();
-                    paint();
-                });
-                const stepper = makeStepperRow("Volume step size, dB", shown, function (v) {
-
-                    set("stepDb", cleanStepDb(v));
-                    pushStepSizes();
-                    paint();
-                }, 0.5, 30, 0.5);
-                const field = stepper.querySelector("input");
-                const paint = function () {
-
-                    const trainedAt = Object.keys(get("gaps") || {}).map(Number).sort(function (a, b) {
-                        return a - b;
-                    });
-
-                    said.textContent = (own() > 0 ? "Set by hand."
-                        : (!phone && sound().fallback.stepDb > 0 ? "Same as this device." : "As the phone says."))
-                        + (trainedAt.length ? " Trained by ear at steps " + trainedAt.join(", ") + ", which goes before the step size." : "");
-                    back.style.display = own() > 0 ? "" : "none";
-
-                    if (field && document.activeElement !== field) {
-                        field.value = String(shown());
-                    }
-                };
-
-                soundBox.appendChild(stepper);
-                back.style.alignSelf = "flex-start";
-                back.style.padding = "6px 14px";
-                paint();
-                settingsRefreshers.push(paint);
-                soundBox.appendChild(said);
-                soundBox.appendChild(back);
-
-                if (tryOffered) {
-                    tryRow(phone, address, get, set);
-                }
             };
 
             speaker("This device and others not set up", function (k) {
@@ -51373,6 +51458,9 @@
         settingsRefreshers.forEach(function (fn) {
             fn();
         });
+
+        // The speakers' volume steps and highest volumes to the app at once
+        pushStepSizes();
 
         // The imported screen mode applies at once
         syncWakeLock();
@@ -70939,6 +71027,12 @@
         will-change: transform;
     }
 
+    /* A button that starts something of its own, ringed in cyan */
+    .pBtn.ring {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
     /* A button that takes something away, in red */
     .pBtn.danger {
         background: #b03a3a;
@@ -84805,7 +84899,7 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
-                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "");
+                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "") + (node.ring ? " ring" : "");
             btn.disabled = node.off === true;
 
             // Still being switched, also when the settings are drawn again

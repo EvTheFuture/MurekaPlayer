@@ -724,9 +724,10 @@ final class SysVolume {
 
         outKey = key;
 
-        // A speaker set up in the player has its own, the others and this
-        // phone the fallback. Trained gaps go first, then a step size set
-        // by hand, each the speaker's own before the fallback's
+        // A Bluetooth speaker has its own steps or goes by the curve, as
+        // this phone's say nothing of another speaker. This phone and the
+        // outputs that are not Bluetooth take the fallback. Trained or typed
+        // gaps go first, then a step size from before
         String address = key.startsWith("bt:") ? key.substring(3) : "";
         Float own = address.isEmpty() ? null : HAND_BY_ADDRESS.get(address);
         TreeMap<Integer, Float> ownGaps = address.isEmpty() ? null : GAPS_BY_ADDRESS.get(address);
@@ -742,9 +743,9 @@ final class SysVolume {
             gaps = ownGaps;
         } else if (own != null && own > 0) {
             handDb = own;
-        } else if (!gapsFallback.isEmpty()) {
+        } else if (address.isEmpty() && !gapsFallback.isEmpty()) {
             gaps = gapsFallback;
-        } else if (handFallback > 0) {
+        } else if (address.isEmpty() && handFallback > 0) {
             handDb = handFallback;
         }
 

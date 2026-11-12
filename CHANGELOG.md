@@ -790,6 +790,18 @@ In development.
   done keeps it and leaves the steps still to come to be drawn, and the
   last step has Keep, finish. In the settings, Forget the training is
   red on the left and Train the step sizes on the right.
+- **Volume steps for each speaker, trained or typed in.** The volume
+  step size is gone, with its Same as this device: each speaker and this
+  device have Volume steps instead, with what is in use in a line,
+  Forget in red on the left, Edit by hand, and Train by ear in a cyan
+  ring on the right while the speaker plays. Edit by hand has a field
+  for each of the phone's steps, the dB it is louder than the step
+  below, and the switch delay, a step left empty showing what is drawn
+  for it from those set. One value alone counts for every step, as the
+  step size did, and a step size set before becomes that. A Bluetooth
+  speaker no longer takes this device's steps: without its own it goes
+  by the phone's curve. The steps are kept with the settings, go along
+  in a copy of them, and reach the app at once when a copy is put back.
 
 ### Build
 

@@ -4157,6 +4157,12 @@
         will-change: transform;
     }
 
+    /* A button that starts something of its own, ringed in cyan */
+    .pBtn.ring {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
     /* A button that takes something away, in red */
     .pBtn.danger {
         background: #b03a3a;
@@ -18023,7 +18029,7 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
-                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "");
+                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "") + (node.ring ? " ring" : "");
             btn.disabled = node.off === true;
 
             // Still being switched, also when the settings are drawn again
