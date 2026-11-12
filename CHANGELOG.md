@@ -587,6 +587,40 @@ In development.
   and asks the phone where the song is before reading the list down to
   it. Rows are measured on the screen, it is looked at again now and
   then, and as the page comes back after the phone's browser slept.
+- **Import data from a set question.** A question about new songs and
+  their set has Import data, here and in the web view, which opens the
+  box to paste an export in, for sets already made on another device.
+  The set questions wait for the import, at most three minutes, and then
+  ask only about the songs it left out of a set; a box closed without an
+  import lets them go on at once.
+- **Memory in the debug log.** Every five minutes, and a minute after
+  the start, a Memory line counts what could pile up: the page's
+  elements and the player's, audio elements, links to files held in
+  memory, the song list and the player's caches, the log and the tab's
+  storage, and the heap where the browser tells it. As the lines from
+  before a reload survive into the new page's log, a page a phone's
+  browser reloaded for lack of memory shows what grew.
+- **Mureka's templates in Create.** Templates beside My styles, on the
+  phone and in the web view, lists Mureka's templates by kind of music,
+  a page at a time, each with its kinds, what it is and how often it was
+  used. A template picked is told to Mureka as used, as its page does,
+  and gives the style; the songs made name the template while the style
+  is still its text. Each template shows its cover and has Listen, which
+  plays its song, the player's own song paused meanwhile and going on
+  after; in the web view it plays in the browser, the phone paused
+  meanwhile.
+- **Lists to pick from fit a phone.** In the lists of saved styles,
+  templates and the others, a short list in a phone's browser squeezed
+  the rows until their text ran over each other; each row now takes its
+  own height, long text showing its first lines.
+- **Easy in Create.** Beside With lyrics and Instrumental, Easy takes a
+  wish in words and the model, and Mureka's agent writes the lyrics and
+  the style and makes two songs, as Mureka's easy mode does: a chat is
+  started, the wish sent over the agent's socket, and once Mureka has
+  taken it the form closes while the agent works. What it is doing and
+  what it says show in the form's line, its songs are played and put in
+  a set as chosen, and the socket closes when the agent is done or after
+  twenty minutes.
 
 ### Build
 

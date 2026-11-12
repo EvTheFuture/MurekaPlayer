@@ -1760,6 +1760,47 @@
 
     .crPickRow .crPickText {
         overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        overflow: hidden;
+    }
+
+    /* Each row as tall as its text, never squeezed by a short list */
+    .crPickRow {
+        flex-shrink: 0;
+    }
+
+    .crPickRow .crPickPic {
+        width: 52px;
+        height: 52px;
+        border-radius: 8px;
+        object-fit: cover;
+        flex: 0 0 auto;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .crPickRow .crHear {
+        flex: 0 0 auto;
+    }
+
+    /* A row's second line may run to a few lines in the lists to pick from */
+    .crPickRow .plRowCount {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+    }
+
+    #crPickTag {
+        flex: 1 1 8em;
+        min-width: 0;
+        font: inherit;
+        padding: 6px 8px;
+        border-radius: 10px;
+        background: var(--panel2, #1d1d22);
+        color: inherit;
+        border: 1px solid rgba(255, 255, 255, 0.15);
     }
 
     /* Questions come over every popup, the playlists' and the form's too */
@@ -6425,6 +6466,7 @@
         <div id="crPick">
             <div id="crPickTop">
                 <span id="crPickTitle"></span>
+                <select id="crPickTag" aria-label="Kind of music"></select>
                 <button class="chip" id="crPickUpload" type="button">Upload a song</button>
                 <button class="chip" id="crPickMore" type="button">More</button>
                 <button class="chip" id="crPickBack" type="button">Back</button>
@@ -23664,7 +23706,8 @@
 
     // A box to paste an export into, the browser's own Paste works there.
     // Reading the clipboard straight needs a secure page, which this is not
-    function pasteImportHere() {
+    // closed is told when the box goes away without an import
+    function pasteImportHere(closed) {
 
         const back = document.createElement("div");
         const card = document.createElement("div");
@@ -23708,8 +23751,16 @@
                 offBack();
             }
         };
+        const cancel = function () {
 
-        offBack = onBack(close);
+            close();
+
+            if (closed) {
+                closed();
+            }
+        };
+
+        offBack = onBack(cancel);
 
         // The page's own keys never hear what is typed here
         for (const kind of ["keydown", "keyup", "keypress"]) {
@@ -23719,7 +23770,7 @@
             });
         }
 
-        row.appendChild(button("Cancel", "", close));
+        row.appendChild(button("Cancel", "", cancel));
         row.appendChild(button("Import", "on", function () {
 
             const text = area.value;
@@ -23734,7 +23785,7 @@
         back.addEventListener("click", function (ev) {
 
             if (ev.target === back) {
-                close();
+                cancel();
             }
         });
         document.body.appendChild(back);
@@ -25435,6 +25486,7 @@
 
     function closeCreatePop() {
 
+        crStopHear();
         crFlush();
         clearInterval(crWatchTimer);
         crWatchTimer = 0;
@@ -25665,7 +25717,8 @@
 
         ui.kind = crSegments([
             { label: "With lyrics", value: "song" },
-            { label: "Instrumental", value: "instrumental" }
+            { label: "Instrumental", value: "instrumental" },
+            { label: "Easy", value: "easy" }
         ], "kind");
         ui.kind.classList.add("crWide");
         form.appendChild(ui.kind);
@@ -25676,8 +25729,25 @@
         ui.modelSlot = document.createElement("div");
         ui.modelBox.appendChild(crLine("Model", [ui.modelSlot]));
 
+        // Easy: a wish in words, Mureka's agent writes and makes the songs
+        ui.easyBox = crCard(form);
+        ui.easyLabel = crLabel("What to make", "easyText");
+        ui.easy = crField(true, 2000, "easyText");
+        ui.easy.rows = 5;
+        ui.easy.placeholder = "A workout song with didgeridoo drones and tribal drums";
+        ui.easyBox.appendChild(ui.easyLabel);
+        ui.easyBox.appendChild(ui.easy);
+
+        const easyHint = document.createElement("div");
+
+        easyHint.className = "ceLabel";
+        easyHint.textContent = "Mureka's agent writes the lyrics and the style itself and makes two songs, as Mureka's easy mode does. What it says shows at the top.";
+        ui.easyBox.appendChild(easyHint);
+
         // The title and the lyrics, with Mureka writing them
         const words = crCard(form);
+
+        ui.wordsCard = words;
 
         ui.titleLabel = crLabel("Title", "title");
         ui.title = crField(false, 50, "title");
@@ -25703,6 +25773,8 @@
         // The style, with Mureka's two ways and the kept prompts
         const style = crCard(form);
 
+        ui.styleCard = style;
+
         ui.styleLabel = crLabel("Style", "style");
         ui.style = crField(true, 1000, "style");
         ui.style.rows = 6;
@@ -25718,6 +25790,9 @@
             }, "ring"),
             crChip("My styles", function () {
                 openCrPick("prompts");
+            }, "crFill"),
+            crChip("Templates", function () {
+                openCrPick("templates");
             }, "crFill"),
             crChip("Save style", function () {
 
@@ -25744,6 +25819,8 @@
 
         // A remix of an uploaded song
         const remix = crCard(form);
+
+        ui.remixCard = remix;
 
         ui.remixName = document.createElement("span");
         ui.remixName.className = "crName crValue";
@@ -25888,6 +25965,7 @@
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a saved style" : "");
         crUi.wildLabel.count.textContent = d.wildness + "%";
         crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
+        crUi.easyLabel.count.textContent = String(d.easyText || "").length + "/2000";
     }
 
     // The form as the phone has it. Fields being typed in, or with typing
@@ -25935,6 +26013,7 @@
             put(ui.title, "title");
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
+            put(ui.easy, "easyText");
 
             if (Array.isArray(c.lengths) && c.lengths.length > 0) {
 
@@ -25975,7 +26054,21 @@
                 ui.model.paint(fresh.model);
             }
 
-            ui.modelBox.style.display = song && fresh.remix ? "none" : "flex";
+            ui.modelBox.style.display = song && fresh.remix && fresh.kind !== "easy" ? "none" : "flex";
+
+            // Easy shows the wish in place of everything the agent writes
+            const easy = fresh.kind === "easy";
+
+            ui.easyBox.style.display = easy ? "flex" : "none";
+            ui.wordsCard.style.display = easy ? "none" : "";
+            ui.styleCard.style.display = easy ? "none" : "";
+            ui.remixCard.style.display = easy ? "none" : "";
+
+            if (easy) {
+
+                ui.voiceBox.style.display = "none";
+                ui.advBox.style.display = "none";
+            }
             ui.playMode.paint(fresh.playMode || "");
             ui.setOn.classList.toggle("on", fresh.setOn === true);
             ui.setOn.setAttribute("aria-pressed", fresh.setOn === true ? "true" : "false");
@@ -26156,17 +26249,34 @@
         $("crPick").style.display = on ? "flex" : "none";
 
         if (!on) {
+
             crPickKind = "";
+            crStopHear();
         }
     }
 
-    function crPickRow(label, sub, then, color) {
+    function crPickRow(label, sub, then, color, cover, listen) {
 
         const row = document.createElement("div");
         const text = document.createElement("div");
         const name = document.createElement("div");
 
         row.className = "plRow crPickRow";
+
+        // A picture before it
+        if (cover) {
+
+            const pic = document.createElement("img");
+
+            pic.alt = "";
+            pic.loading = "lazy";
+            pic.src = cover;
+            pic.className = "crPickPic";
+            pic.addEventListener("error", function () {
+                pic.style.visibility = "hidden";
+            });
+            row.appendChild(pic);
+        }
 
         // A set's own color as a dot before it
         if (color) {
@@ -26195,7 +26305,81 @@
         row.appendChild(text);
         row.addEventListener("click", then);
 
+        // A button to listen first, which leaves the row where it is
+        if (listen) {
+
+            const hear = document.createElement("button");
+
+            hear.type = "button";
+            hear.className = "chip crFill crHear";
+            hear.textContent = "Listen";
+            hear.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                listen(hear);
+            });
+            row.appendChild(hear);
+        }
+
         return row;
+    }
+
+    // A template's song heard here before it is taken, the phone's song
+    // paused meanwhile and going on after
+    let crHearing = null;
+
+    function crHear(x, btn) {
+
+        const again = crHearing && crHearing.id === x.id;
+
+        crStopHear();
+
+        if (again || !x.audio) {
+            return;
+        }
+
+        const el = new Audio();
+        const resume = !!(state && state.playing);
+
+        if (resume) {
+            send("pause");
+        }
+
+        crHearing = { el: el, id: x.id, resume: resume, btn: btn };
+        el.src = x.audio;
+        el.addEventListener("ended", crStopHear);
+        el.play().catch(function () {
+
+            toast("The template's song could not play", "bad");
+            crStopHear();
+        });
+        btn.textContent = "Stop";
+    }
+
+    function crStopHear() {
+
+        const h = crHearing;
+
+        if (!h) {
+            return;
+        }
+
+        crHearing = null;
+
+        try {
+
+            h.el.pause();
+            h.el.removeAttribute("src");
+            h.el.load();
+        } catch (e) {
+            // Gone already
+        }
+
+        h.btn.textContent = "Listen";
+
+        if (h.resume) {
+            send("play");
+        }
     }
 
     function crPickNote(text) {
@@ -26218,13 +26402,17 @@
 
     function openCrPick(kind) {
 
-        const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in" };
+        const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in",
+            templates: "Mureka's templates" };
         let last = "0";
         let more = false;
+        let tag = "";
+        let reading = 0;
 
         crPickKind = kind;
         $("crPickTitle").textContent = titles[kind] || "";
         $("crPickUpload").style.display = kind === "resources" ? "" : "none";
+        $("crPickTag").style.display = kind === "templates" ? "" : "none";
         $("crPickMore").style.display = "none";
         crPickNote("Asking Mureka");
         showCrPick(true);
@@ -26259,9 +26447,13 @@
 
         const read = function () {
 
-            crAsk(kind === "resources" ? { op: "resources", last: last } : { op: kind }).then(function (r) {
+            const mine = ++reading;
+            const ask = kind === "resources" ? { op: "resources", last: last }
+                : kind === "templates" ? { op: "templates", tag: tag, last: last } : { op: kind };
 
-                if (crPickKind !== kind) {
+            crAsk(ask).then(function (r) {
+
+                if (crPickKind !== kind || mine !== reading) {
                     return;
                 }
 
@@ -26282,12 +26474,24 @@
 
                     crPickNote(kind === "prompts" ? "No styles are saved on Mureka yet. Save style saves the style written now."
                         : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
-                            : "No songs uploaded to Mureka yet. Upload a song to remix it.");
+                            : kind === "templates" ? "No templates of this kind"
+                                : "No songs uploaded to Mureka yet. Upload a song to remix it.");
                 }
 
                 for (const x of list) {
 
-                    if (kind === "prompts") {
+                    if (kind === "templates") {
+
+                        const sub = [x.genres, x.about, x.made ? "used " + Number(x.made).toLocaleString() + " times" : ""].filter(Boolean).join(" \u00b7 ");
+
+                        rows.appendChild(crPickRow(x.title, sub, function () {
+
+                            showCrPick(false);
+                            crAsk({ op: "template", id: x.id }).then(crAnswered);
+                        }, "", x.cover, x.audio ? function (btn) {
+                            crHear(x, btn);
+                        } : null));
+                    } else if (kind === "prompts") {
 
                         rows.appendChild(crPickRow(x.text, "", function () {
 
@@ -26325,6 +26529,35 @@
                 read();
             }
         };
+
+        // The kinds of music to pick templates by, asked once a time
+        if (kind === "templates") {
+
+            const select = $("crPickTag");
+
+            select.textContent = "";
+            select.appendChild(new Option("All kinds", ""));
+            select.onchange = function () {
+
+                tag = select.value;
+                last = "0";
+                crPickNote("Asking Mureka");
+                read();
+            };
+            crAsk({ op: "templateTags" }).then(function (r) {
+
+                if (crPickKind !== "templates" || !r || !r.ok || !Array.isArray(r.list)) {
+                    return;
+                }
+
+                for (const t of r.list) {
+
+                    if (t.value !== "") {
+                        select.appendChild(new Option(t.label, t.value));
+                    }
+                }
+            });
+        }
 
         read();
     }
@@ -29861,6 +30094,18 @@
 
                     setAsking = "";
                     closeSongMenu();
+
+                    // Data pasted here instead: the phone's questions wait
+                    // for it, and go on if the box is closed without one
+                    if (o.key === "import") {
+
+                        send("setAskAnswer", { n: n, key: "importThere" });
+                        pasteImportHere(function () {
+                            send("setAskResume", null);
+                        });
+                        return;
+                    }
+
                     send("setAskAnswer", { n: n, key: o.key });
                 }
             };

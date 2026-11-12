@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.70";
+    const VERSION = "2.0.1.74";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6895,6 +6895,21 @@
     let setAskSeq = 0;
     const setAskQueue = [];
 
+    // Import data chosen in a set question: the questions wait for the
+    // import, as the sets in it may answer most of them, at most so long
+    let setAskHeldUntil = 0;
+    const SET_ASK_IMPORT_HOLD_MS = 180000;
+
+    function releaseSetAsks() {
+
+        if (setAskHeldUntil === 0) {
+            return;
+        }
+
+        setAskHeldUntil = 0;
+        setTimeout(nextSetAsk, 800);
+    }
+
     // Only songs made lately are asked about, and only so many at a time,
     // a first load of the whole library asks about none
     const SET_SUGGEST_AGE_MS = 2 * 86400000;
@@ -7092,11 +7107,13 @@
             return;
         }
 
-        if (newAsk) {
+        if (newAsk || Date.now() < setAskHeldUntil) {
 
             setTimeout(nextSetAsk, 1500);
             return;
         }
+
+        setAskHeldUntil = 0;
 
         const g = setAskQueue.shift();
         const songs = g.songs.filter(function (x) {
@@ -7138,6 +7155,10 @@
         }
 
         options.push({ key: "new", label: one ? "New set with it" : "New set with them", color: "" });
+
+        // Sets made elsewhere, on another device, brought in instead, which
+        // answers this question and most of the ones after it
+        options.push({ key: "import", label: "Import data", color: "", icon: "paste" });
         options.push({ key: "no", label: "Not now", color: "" });
 
         // More groups waiting their turn: all of them let go at once
@@ -7157,7 +7178,7 @@
             return {
                 label: o.label,
                 ring: i > 0 && o.key !== "new",
-                color: o.key === "no" || o.key === "noall" ? "#b8b8c0" : (o.color || undefined),
+                color: o.key === "no" || o.key === "noall" || o.key === "import" ? "#b8b8c0" : (o.color || undefined),
                 fn: function () {
                     finishSetAsk(ask.n, o.key);
                 }
@@ -7236,6 +7257,23 @@
         // The groups waiting let go as well
         if (String(key || "") === "noall") {
             setAskQueue.length = 0;
+        }
+
+        // Data to import, here or pasted in a web view: the question waits
+        // with the others until the import is done, then whatever its sets
+        // left open is asked
+        if (ask.group && (key === "import" || key === "importThere")) {
+
+            setAskQueue.unshift(ask.group);
+            setAskHeldUntil = Date.now() + SET_ASK_IMPORT_HOLD_MS;
+            dbgLog("Sets", "set questions wait for an import" + (key === "importThere" ? " from a web view" : ""));
+            publishHostSoon();
+
+            if (key === "import") {
+                pasteImport(releaseSetAsks);
+            }
+
+            return;
         }
 
         // Not about sets
@@ -36633,6 +36671,10 @@
 
             // Which set the new songs go in, from a web view
             finishSetAsk(Number(arg && arg.n), arg && typeof arg.key === "string" ? arg.key : "");
+        } else if (cmd === "setAskResume") {
+
+            // The import box in a web view closed without an import
+            releaseSetAsks();
         } else if (cmd === "newAnswer") {
 
             // Where the new songs go, from a web view, for the question it
@@ -51661,6 +51703,9 @@
 
         dataStatus(text);
 
+        // Set questions waiting for this import go on with what is left
+        releaseSetAsks();
+
         if (asked) {
             return;
         }
@@ -52327,9 +52372,15 @@
     // An export pasted as text, for when the file only got as far as the
     // clipboard. The browser's own Paste works in the box, and where the
     // page may read the clipboard a Paste button fills it in one tap
-    function pasteImport() {
+    // closed is told when the box goes away without an import
+    function pasteImport(closed) {
 
         if (!panelEl) {
+
+            if (closed) {
+                closed();
+            }
+
             return;
         }
 
@@ -52358,6 +52409,14 @@
         const close = function () {
             back.remove();
         };
+        const cancel = function () {
+
+            close();
+
+            if (closed) {
+                closed();
+            }
+        };
 
         // The page's own keys never hear what is typed here
         for (const kind of ["keydown", "keyup", "keypress"]) {
@@ -52367,13 +52426,17 @@
             });
         }
 
-        const cancelBtn = makeButton("Cancel", "#444", "#fff", close);
+        const cancelBtn = makeButton("Cancel", "#444", "#fff", cancel);
         const importBtn = makeButton("Import", "#48e1eb", "#000", function () {
 
             const text = area.value;
 
             close();
-            importText(text, "pasted text", false);
+
+            // Nothing that could be read: the questions waiting go on
+            if (importText(text, "pasted text", false) && closed) {
+                closed();
+            }
         });
 
         cancelBtn.style.flex = "1";
@@ -52403,7 +52466,7 @@
         back.addEventListener("click", function (ev) {
 
             if (ev.target === back) {
-                close();
+                cancel();
             }
         });
 
@@ -57908,6 +57971,7 @@
     const CREATE_TITLE_MAX = 50;
     const CREATE_LYRICS_MAX = 5000;
     const CREATE_STYLE_MAX = 1000;
+    const CREATE_EASY_MAX = 2000;
     const CREATE_THEME_MAX = 500;
     const CREATE_MODEL = "mureka-9.5";
 
@@ -57996,12 +58060,16 @@
         const wild = Math.round(Number(x.wildness));
 
         return {
-            kind: x.kind === "instrumental" ? "instrumental" : "song",
+            kind: x.kind === "instrumental" || x.kind === "easy" ? x.kind : "song",
+            easyText: createText(x.easyText, CREATE_EASY_MAX),
             title: createText(x.title, CREATE_TITLE_MAX),
             lyrics: createText(x.lyrics, CREATE_LYRICS_MAX),
             style: createText(x.style, CREATE_STYLE_MAX),
             stylePromptId: createText(x.stylePromptId, 40),
             stylePromptText: createText(x.stylePromptText, CREATE_STYLE_MAX),
+            templateId: String(x.templateId || "").replace(/[^0-9]/g, "").slice(0, 24),
+            templateText: createText(x.templateText, CREATE_STYLE_MAX),
+            templateName: createText(x.templateName, 120),
             voice: ["male", "female", "character"].indexOf(x.voice) >= 0 ? x.voice : "male",
             characterId: String(x.characterId || "").replace(/[^0-9]/g, "").slice(0, 24),
             characterName: createText(x.characterName, 80),
@@ -58414,6 +58482,169 @@
         });
     }
 
+    // Mureka's templates: a style written out by Mureka with a song to
+    // hear, by kind of music. Their kinds, and a page of them
+    async function createTemplateTags() {
+
+        const data = await createGet("/api/pgc/explore/template/tags");
+
+        return createListOf(data).map(function (t) {
+            return { value: String(t && t.value !== undefined ? t.value : ""), label: String(t && (t.label || t.value) || "") };
+        }).filter(function (t) {
+            return t.label;
+        });
+    }
+
+    async function createTemplates(tag, last) {
+
+        const data = await createGet("/api/pgc/explore/template/list?scene=2&view=2&tag=" + encodeURIComponent(tag || "")
+            + "&size=20&last_id=" + encodeURIComponent(last || "0"));
+        const list = createListOf(data);
+        const next = data && data.last_id !== undefined && data.last_id !== null ? String(data.last_id) : "";
+
+        return {
+            list: list.map(function (t) {
+
+                const genres = Array.isArray(t.genres) ? t.genres : (Array.isArray(t.tags) ? t.tags : []);
+
+                return {
+                    id: String(t.id !== undefined ? t.id : ""),
+                    title: String(t.title || "Template").slice(0, 120),
+                    about: String(t.description || "").slice(0, 300),
+                    genres: genres.map(String).slice(0, 4).join(", "),
+                    made: Number(t.creation_count) || 0,
+                    ms: Number(t.duration_milliseconds) || 0,
+                    cover: createFileUrl(t.cover, "?x-oss-process=image/resize,h_160/format,webp"),
+                    audio: createFileUrl(t.audio_url, "")
+                };
+            }).filter(function (t) {
+                return t.id;
+            }),
+            last: next,
+            more: list.length > 0 && !!next && next !== "0" && next !== String(last || "0") && data.has_more !== false
+        };
+    }
+
+    // A path on Mureka's file host as a whole address, a picture made small
+    function createFileUrl(path, small) {
+
+        const p = String(path || "");
+
+        if (!p) {
+            return "";
+        }
+
+        const whole = /^https?:\/\//i.test(p) ? p : AUDIO_BASE + p.replace(/^\//, "");
+
+        return small && whole.indexOf("?") < 0 ? whole + small : whole;
+    }
+
+    // A template's song heard before it is taken, the player's own song
+    // paused meanwhile and going on after
+    let templateHear = null;
+
+    function hearTemplate(t, btn) {
+
+        const again = templateHear && templateHear.id === t.id;
+
+        stopTemplateHear();
+
+        if (again || !t.audio) {
+            return;
+        }
+
+        const el = new Audio();
+        const resume = !!(audio && audio.src && !audio.paused);
+
+        if (resume) {
+            togglePlayPause();
+        }
+
+        templateHear = { el: el, id: t.id, resume: resume, btn: btn };
+        el.src = t.audio;
+        el.addEventListener("ended", stopTemplateHear);
+        el.play().catch(function (e) {
+
+            dbgLog("Create", "the template's song could not play, " + errText(e));
+            stopTemplateHear();
+        });
+
+        if (btn) {
+            btn.textContent = "Stop";
+        }
+
+        dbgLog("Create", "listening to the template " + t.title);
+    }
+
+    function stopTemplateHear() {
+
+        const h = templateHear;
+
+        if (!h) {
+            return;
+        }
+
+        templateHear = null;
+
+        try {
+
+            h.el.pause();
+            h.el.removeAttribute("src");
+            h.el.load();
+        } catch (e) {
+            // Gone already
+        }
+
+        if (h.btn) {
+            h.btn.textContent = "Listen";
+        }
+
+        if (h.resume && audio && audio.paused) {
+            togglePlayPause();
+        }
+    }
+
+    // A template's style read and taken, Mureka told it was used as its
+    // page tells it, and the form given its style
+    async function createTakeTemplate(id) {
+
+        const data = await createGet("/api/pgc/creation-template/detail?id=" + encodeURIComponent(id));
+        const text = String(data && data.prompt && data.prompt.content || "").trim().slice(0, CREATE_STYLE_MAX);
+        const title = String(data && data.title || "").slice(0, 120);
+
+        if (!text) {
+            throw new Error("the template has no style");
+        }
+
+        try {
+            await createPost("/api/pgc/creation-template/use", { template_id: Number.isSafeInteger(Number(id)) ? Number(id) : id });
+        } catch (e) {
+            dbgLog("Create", "template " + id + " not told as used, " + errText(e));
+        }
+
+        changeCreateDraft({ style: text, stylePromptId: "", stylePromptText: "", templateId: String(id), templateText: text, templateName: title });
+        setCreateNote("The style of the template " + (title || id) + " is in place");
+        dbgLog("Create", "template " + id + " taken: " + title + ", style " + text.length + " characters");
+
+        return { title: title, text: text };
+    }
+
+    function createTemplateRow(t) {
+
+        const sub = [t.genres, t.about, t.made ? "used " + t.made.toLocaleString() + " times" : ""].filter(Boolean).join(" \u00b7 ");
+
+        return {
+            label: t.title,
+            sub: sub,
+            value: t,
+            lines: 2,
+            cover: t.cover,
+            listen: t.audio ? function (btn) {
+                hearTemplate(t, btn);
+            } : null
+        };
+    }
+
     async function createSavePrompt(text) {
 
         const data = await createPost("/api/pgc/style_prompt/save", { content: text });
@@ -58628,6 +58859,19 @@
         };
     }
 
+    // The template the style came from, named while the style is still its
+    // text, as Mureka's page does, else none
+    function createTemplateOf(d, style) {
+
+        if (!d.templateId || style !== String(d.templateText || "").trim()) {
+            return null;
+        }
+
+        const id = Number(d.templateId);
+
+        return Number.isSafeInteger(id) ? id : d.templateId;
+    }
+
     // The body Mureka's create page sends for what the form holds
     function createBody(d) {
 
@@ -58644,7 +58888,7 @@
                 b.remix = remix;
             }
 
-            b.template_id = null;
+            b.template_id = createTemplateOf(d, style);
 
             // A remix goes without the advanced choices, as Mureka sends it
             if (!remix) {
@@ -58668,7 +58912,7 @@
             b.prompt = { content: style };
             b.mode = 0;
             b.parent_song_id = null;
-            b.template_id = null;
+            b.template_id = createTemplateOf(d, style);
             b.model = d.model;
             b.character = { id: Number.isSafeInteger(id) ? id : d.characterId };
 
@@ -58688,7 +58932,7 @@
         b.prompt = prompt;
         b.mode = 0;
         b.parent_song_id = null;
-        b.template_id = null;
+        b.template_id = createTemplateOf(d, style);
 
         if (!remix) {
 
@@ -58701,6 +58945,10 @@
 
     // What is missing before the form can go, empty when nothing is
     function createMissing(d) {
+
+        if (d.kind === "easy") {
+            return d.easyText.trim() ? "" : "Tell Mureka's agent what to make";
+        }
 
         if (d.kind === "song" && !d.lyrics.trim()) {
             return "Write some lyrics, or let Mureka write them, or make it an instrumental";
@@ -58729,6 +58977,11 @@
         }
 
         userTry("making songs");
+
+        // Easy: Mureka's agent writes and makes them
+        if (d.kind === "easy") {
+            return createEasy(d);
+        }
 
         if (d.kind === "song" && asIs !== true) {
 
@@ -58766,6 +59019,253 @@
                 + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
                 + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
         };
+    }
+
+    // ---- Easy: Mureka's agent ----
+
+    // A chat with Mureka's agent, as Mureka's easy mode starts one, the
+    // wish sent over its socket. Answers once Mureka took it; the socket
+    // stays open after that for the agent's work and its songs, which
+    // come with a generation's id like any others
+    let createEasyLive = null;
+    const CREATE_EASY_WAIT_MS = 20000;
+    const CREATE_EASY_LONGEST_MS = 20 * 60000;
+
+    function createEasyKey() {
+
+        try {
+
+            if (crypto && typeof crypto.randomUUID === "function") {
+                return crypto.randomUUID();
+            }
+        } catch (e) {
+            // Made by hand below
+        }
+
+        return "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, function () {
+            return Math.floor(Math.random() * 16).toString(16);
+        });
+    }
+
+    async function createEasy(d) {
+
+        const text = d.easyText.trim();
+
+        if (createEasyLive) {
+            return { ok: false, text: "Mureka's agent is still at work on the last wish" };
+        }
+
+        const data = await createPost("/api/agent/chat/create", { title: text.slice(0, 40) }, 30000);
+        const chat = data.chat || {};
+        const first = Array.isArray(data.sessions) && data.sessions[0] ? data.sessions[0] : {};
+        const sessionId = String(chat.current_session_id || first.session_id || first.id || "");
+
+        if (!sessionId) {
+            throw new Error("Mureka started no chat");
+        }
+
+        dbgLog("Create", "easy: chat " + (chat.chat_id || "?") + " started, " + text.length + " characters asked");
+
+        await createEasyRun(sessionId, text, d);
+
+        return {
+            ok: true,
+            feedId: "",
+            text: "Mureka's agent is on it, the songs come in a minute or two"
+                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
+        };
+    }
+
+    function createEasyRun(sessionId, text, d) {
+
+        return new Promise(function (resolve, reject) {
+
+            const url = (location.protocol === "http:" ? "ws://" : "wss://") + location.host + "/api/saas/agent/ws";
+            const signal = createSignal();
+            const stamp = Date.now();
+            let ws = null;
+            let accepted = false;
+            let done = false;
+            let reply = "";
+            let seq = 0;
+            const feeds = new Set();
+
+            try {
+                ws = new WebSocket(url);
+            } catch (e) {
+
+                reject(e);
+                return;
+            }
+
+            const live = { ws: ws, at: stamp };
+
+            createEasyLive = live;
+
+            const finish = function (why, bad) {
+
+                if (done) {
+                    return;
+                }
+
+                done = true;
+                clearTimeout(waitTimer);
+                clearTimeout(longest);
+
+                if (createEasyLive === live) {
+                    createEasyLive = null;
+                }
+
+                try {
+                    ws.close();
+                } catch (e) {
+                    // Closed already
+                }
+
+                if (!accepted) {
+
+                    reject(new Error(why));
+                    return;
+                }
+
+                dbgLog("Create", "easy: " + why);
+
+                if (!createBusy) {
+
+                    setCreateNote(reply ? "Mureka's agent: " + reply : why, bad === true);
+                    publishHostSoon();
+                }
+
+                if (bad) {
+                    showToast(why, false);
+                }
+            };
+            const send = function (o) {
+
+                seq += 1;
+                ws.send(JSON.stringify(o));
+            };
+            const waitTimer = setTimeout(function () {
+                finish("Mureka's agent did not answer", true);
+            }, CREATE_EASY_WAIT_MS);
+            const longest = setTimeout(function () {
+                finish("Mureka's agent took too long, the songs may still come", true);
+            }, CREATE_EASY_LONGEST_MS);
+
+            if (signal) {
+
+                signal.addEventListener("abort", function () {
+
+                    if (!accepted) {
+                        finish("Stopped");
+                    }
+                });
+            }
+
+            ws.addEventListener("open", function () {
+                send({ type: "subscribe_session", request_id: "subscribe_session_" + Date.now() + "_1", session_id: sessionId, after_message_sequence: 0 });
+            });
+            ws.addEventListener("error", function () {
+                finish(accepted ? "The connection to Mureka's agent broke, the songs may still come" : "Mureka's agent could not be reached", true);
+            });
+            ws.addEventListener("close", function () {
+                finish(accepted ? "The connection to Mureka's agent closed, the songs may still come" : "Mureka's agent closed the connection", accepted ? false : true);
+            });
+            ws.addEventListener("message", function (ev) {
+
+                let m = null;
+
+                try {
+                    m = JSON.parse(ev.data);
+                } catch (e) {
+                    return;
+                }
+
+                if (!m || typeof m !== "object") {
+                    return;
+                }
+
+                const type = String(m.type || "");
+                const kind = String(m.event_type || "");
+                const pay = m.payload && typeof m.payload === "object" ? m.payload : {};
+
+                if (type === "session_subscribed") {
+
+                    send({
+                        type: "send_message",
+                        template_id: null,
+                        request_id: "send_message_" + Date.now() + "_2",
+                        idempotency_key: createEasyKey(),
+                        session_id: sessionId,
+                        message: text,
+                        structured_input: {
+                            version: "agent.user_input.v1",
+                            tool_type: "",
+                            selected_model: d.model || CREATE_MODELS[0].value,
+                            references: [],
+                            vocals: [],
+                            audios: [],
+                            photos: [],
+                            videos: [],
+                            skills: []
+                        }
+                    });
+                    return;
+                }
+
+                if (type === "message_accepted") {
+
+                    accepted = true;
+                    clearTimeout(waitTimer);
+                    dbgLog("Create", "easy: taken, number " + (m.queue_position || "?") + " in the agent's line");
+                    resolve();
+                    return;
+                }
+
+                if (type === "error" || kind === "run.failed" || kind === "run.cancelled") {
+
+                    finish("Mureka's agent: " + String(pay.message || m.message || m.error || kind || "something went wrong").slice(0, 200), true);
+                    return;
+                }
+
+                // What the agent is doing, shown while nothing else is
+                const act = m.activity && m.activity.visibility === "user" ? String(m.activity.message || "") : "";
+
+                if (act && accepted && !createBusy && act !== createNote.text.replace(/^Mureka's agent: /, "")) {
+
+                    setCreateNote("Mureka's agent: " + act);
+                    publishHostSoon();
+                }
+
+                if (kind === "model.message.completed" && pay.message) {
+
+                    reply = String(pay.message).slice(0, 1500);
+                    dbgLog("Create", "easy: the agent says " + reply.slice(0, 300));
+                }
+
+                // The songs being made, by their generation, so the play
+                // and set wishes find them
+                const choices = Array.isArray(pay.choices) ? pay.choices
+                    : (pay.data && Array.isArray(pay.data.choices) ? pay.data.choices : []);
+
+                for (const c of choices) {
+
+                    const feedId = c && c.feed && c.feed.feed_id !== undefined ? String(c.feed.feed_id) : "";
+
+                    if (feedId && !feeds.has(feedId)) {
+
+                        feeds.add(feedId);
+                        dbgLog("Create", "easy: songs being made, generation " + feedId);
+                        createRemember(feedId, d);
+                        createWatchNew();
+                    }
+                }
+
+                if (kind === "run.completed") {
+                    finish("Mureka's agent is done" + (feeds.size ? "" : ", it made no songs this time"));
+                }
+            });
+        });
     }
 
     // What to do with the new songs of a generation once Mureka lists them:
@@ -59374,7 +59874,8 @@
         // A song with lyrics or an instrumental
         ui.kindRow = trimSegments([
             { label: "With lyrics", value: "song" },
-            { label: "Instrumental", value: "instrumental" }
+            { label: "Instrumental", value: "instrumental" },
+            { label: "Easy", value: "easy" }
         ], function () {
             return loadCreateDraft().kind;
         }, function (v) {
@@ -59393,6 +59894,31 @@
         });
         ui.modelBox.appendChild(ui.modelRow);
         createEl.appendChild(ui.modelBox);
+
+        // Easy: a wish in words, Mureka's agent writes and makes the songs
+        ui.easyBox = document.createElement("div");
+        ui.easyBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.easyLabel = createLabelRow("What to make", function () {
+            createClearField("easyText", "The wish");
+        });
+        ui.easy = createField(true, 5, CREATE_EASY_MAX);
+        ui.easy.placeholder = "A workout song with didgeridoo drones and tribal drums";
+        ui.easy.addEventListener("input", function () {
+
+            createDraft.easyText = ui.easy.value;
+            saveCreateDraft();
+            paintCreateCounts();
+        });
+        ui.easyBox.appendChild(ui.easyLabel);
+        ui.easyBox.appendChild(ui.easy);
+
+        const easyHint = document.createElement("div");
+
+        easyHint.textContent = "Mureka's agent writes the lyrics and the style itself and makes two songs, as Mureka's easy mode does. What it says shows at the top.";
+        easyHint.style.cssText = "font-size:12px;color:#999;line-height:1.4";
+        ui.easyBox.appendChild(easyHint);
+        createEl.appendChild(ui.easyBox);
+        ui.easyFrom = createEl.children.length;
 
         // The title, Mureka names the song when left empty
         ui.titleLabel = createLabelRow("Title", function () {
@@ -59458,6 +59984,7 @@
         ]));
         createEl.appendChild(createButtonRow([
             act("My styles", createPromptsFromPage),
+            act("Templates", createTemplatesFromPage),
             createRing(act("Save style", createSavePromptFromPage), "#b8b8c0")
         ]));
 
@@ -59512,6 +60039,8 @@
             act("Upload a song", createUploadFromPage)
         ]));
         createEl.appendChild(createButtonRow([ui.remixStyleBtn, ui.remixClearBtn]));
+
+        ui.easyTo = createEl.children.length;
 
         // Length and wildness, which a character and a remix go without
         ui.advBox = document.createElement("div");
@@ -59685,6 +60214,7 @@
             + (d.stylePromptId && d.style.trim() === d.stylePromptText.trim() ? ", a saved style" : "");
         ui.wildLabel.count.textContent = d.wildness + "%";
         ui.lengthLabel.count.textContent = createLengthText(d.lengthMs);
+        ui.easyLabel.count.textContent = d.easyText.length + "/" + CREATE_EASY_MAX;
     }
 
     function paintCreateStatus() {
@@ -59735,6 +60265,7 @@
         put(ui.title, d.title);
         put(ui.lyrics, d.lyrics);
         put(ui.style, d.style);
+        put(ui.easy, d.easyText);
         ui.length.value = String(Math.max(0, createLengths().indexOf(d.lengthMs)));
         ui.wild.value = String(d.wildness);
         ui.kindRow.paint();
@@ -59757,6 +60288,33 @@
         ui.remixName.style.color = d.remix ? "#fff" : "#888";
         ui.remixStyleBtn.parentElement.style.display = d.remix ? "flex" : "none";
         ui.remixStyleBtn.style.display = d.remix && d.remixStyle && d.remixStyle.trim() !== d.style.trim() ? "" : "none";
+        // Easy shows the wish in place of the title, lyrics, style, voice,
+        // remix and the advanced choices
+        const easy = d.kind === "easy";
+        const ruled = [ui.lyricsBox, ui.voiceBox, ui.remixStyleBtn.parentElement];
+
+        ui.easyBox.style.display = easy ? "flex" : "none";
+
+        for (let i = ui.easyFrom; i < ui.easyTo; i++) {
+
+            const el = createEl.children[i];
+
+            // How it shows, as built, kept the first time round
+            if (el.easyShown === undefined) {
+                el.easyShown = el.style.display;
+            }
+
+            if (easy) {
+                el.style.display = "none";
+            } else if (ruled.indexOf(el) < 0) {
+                el.style.display = el.easyShown === "none" ? "" : el.easyShown;
+            }
+        }
+
+        if (easy) {
+            ui.advBox.style.display = "none";
+        }
+
         ui.playRow.paint();
         updateToggleButton(ui.setRow.querySelector("button"), d.setOn);
         ui.setBox.style.display = d.setOn ? "flex" : "none";
@@ -60023,11 +60581,17 @@
             + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = title;
         head.style.cssText = "font-weight:600";
-        list.style.cssText = "overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:40px";
+        list.style.cssText = "overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:40px;flex:1 1 auto;-webkit-overflow-scrolling:touch";
         foot.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
 
+        const api = { onClose: null };
         const close = function () {
+
             back.remove();
+
+            if (api.onClose) {
+                api.onClose();
+            }
         };
 
         const add = function (items) {
@@ -60036,12 +60600,53 @@
 
                 const row = document.createElement("button");
                 const main = document.createElement("div");
+                let holder = row;
 
+                // A picture before it and a button to listen after it, the
+                // row between them
+                if (r.cover || r.listen) {
+
+                    holder = document.createElement("div");
+                    holder.style.cssText = "display:flex;align-items:center;gap:8px;flex-shrink:0";
+
+                    if (r.cover) {
+
+                        const pic = document.createElement("img");
+
+                        pic.alt = "";
+                        pic.loading = "lazy";
+                        pic.src = r.cover;
+                        pic.style.cssText = "width:52px;height:52px;border-radius:8px;object-fit:cover;flex:0 0 auto;background:#333";
+                        pic.addEventListener("error", function () {
+                            pic.style.visibility = "hidden";
+                        });
+                        holder.appendChild(pic);
+                    }
+
+                    holder.appendChild(row);
+
+                    if (r.listen) {
+
+                        const hear = makeButton("Listen", "#333", "#fff", function () {
+                            r.listen(hear);
+                        });
+
+                        hear.style.flex = "0 0 auto";
+                        hear.style.padding = "8px 12px";
+                        holder.appendChild(hear);
+                    }
+                }
+
+                // Each row as tall as its text, which a short list in a
+                // phone's browser squeezed until the rows overlapped. Long
+                // text shows its first lines
                 row.type = "button";
                 row.style.cssText = "text-align:left;border:none;border-radius:8px;background:#1d1d22;color:#fff;padding:8px 10px;"
-                    + "cursor:pointer;font:inherit;font-size:13px;line-height:1.4";
+                    + "cursor:pointer;font:inherit;font-size:13px;line-height:1.4;flex-shrink:0;display:block;box-sizing:border-box;"
+                    + (holder === row ? "width:100%" : "flex:1 1 auto;min-width:0");
                 main.textContent = r.label;
-                main.style.cssText = "overflow-wrap:anywhere";
+                main.style.cssText = "overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:"
+                    + (r.lines || 4) + ";overflow:hidden";
 
                 // A set's own color as a dot before its name
                 if (r.color) {
@@ -60059,7 +60664,8 @@
                     const sub = document.createElement("div");
 
                     sub.textContent = r.sub;
-                    sub.style.cssText = "color:#999;font-size:12px;overflow-wrap:anywhere";
+                    sub.style.cssText = "color:#999;font-size:12px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;"
+                        + "-webkit-line-clamp:3;overflow:hidden";
                     row.appendChild(sub);
                 }
 
@@ -60068,7 +60674,7 @@
                     close();
                     onPick(r.value);
                 });
-                list.appendChild(row);
+                list.appendChild(holder);
             }
         };
 
@@ -60113,7 +60719,13 @@
             add(rows);
         }
 
-        return { add: add, close: close, empty: empty, list: list };
+        api.add = add;
+        api.close = close;
+        api.empty = empty;
+        api.list = list;
+        api.card = card;
+
+        return api;
     }
 
     // The sets to put the new songs in, each with its color, the one the
@@ -60165,6 +60777,100 @@
         } catch (e) {
             pick.empty("The prompts could not be read, " + (e && e.message ? e.message : "no connection"));
         }
+    }
+
+    // Mureka's templates to pick from, by kind of music, a page at a time
+    async function createTemplatesFromPage() {
+
+        let last = "0";
+        let more = false;
+        let moreBtn = null;
+        let tag = "";
+        let reading = 0;
+
+        const pick = createPicker("Mureka's templates", null, function (t) {
+
+            stopTemplateHear();
+            createRun("Reading the template", function () {
+                return createTakeTemplate(t.id);
+            });
+        }, [
+            {
+                label: "More",
+                fn: function (close, b) {
+
+                    moreBtn = b;
+
+                    if (more) {
+                        readMore();
+                    }
+                }
+            }
+        ]);
+        const kinds = document.createElement("select");
+
+        pick.onClose = stopTemplateHear;
+        kinds.style.cssText = "font:inherit;font-size:14px;padding:8px;border-radius:8px;background:#1d1d22;color:#fff;border:1px solid #3a3a42;flex-shrink:0";
+        kinds.appendChild(new Option("All kinds", ""));
+        pick.card.insertBefore(kinds, pick.list);
+        kinds.addEventListener("change", function () {
+
+            tag = kinds.value;
+            last = "0";
+            pick.empty("Reading the templates");
+            readMore();
+        });
+
+        const readMore = async function () {
+
+            const mine = ++reading;
+
+            try {
+
+                const page = await createTemplates(tag, last);
+
+                if (mine !== reading) {
+                    return;
+                }
+
+                if (last === "0") {
+                    pick.list.textContent = "";
+                }
+
+                if (last === "0" && page.list.length === 0) {
+                    pick.empty("No templates of this kind");
+                }
+
+                pick.add(page.list.map(createTemplateRow));
+                last = page.last;
+                more = page.more;
+            } catch (e) {
+
+                if (last === "0") {
+                    pick.empty("The templates could not be read, " + (e && e.message ? e.message : "no connection"));
+                }
+
+                more = false;
+            }
+
+            if (moreBtn) {
+                moreBtn.style.opacity = more ? "1" : "0.5";
+            }
+        };
+
+        pick.empty("Reading the templates");
+        createTemplateTags().then(function (tags) {
+
+            for (const t of tags) {
+
+                if (t.value !== "") {
+                    kinds.appendChild(new Option(t.label, t.value));
+                }
+            }
+        }, function () {
+            kinds.style.display = "none";
+        });
+        await readMore();
     }
 
     async function createSavePromptOf(text) {
@@ -60484,6 +61190,23 @@
 
             createPrompts().then(function (list) {
                 reply({ ok: true, list: list });
+            }, failed);
+        } else if (op === "templateTags") {
+
+            createTemplateTags().then(function (list) {
+                reply({ ok: true, list: list });
+            }, failed);
+        } else if (op === "templates") {
+
+            createTemplates(String(a.tag || "").slice(0, 40), String(a.last || "0").replace(/[^0-9]/g, "") || "0").then(function (page) {
+                reply({ ok: true, list: page.list, last: page.last, more: page.more });
+            }, failed);
+        } else if (op === "template") {
+
+            createRun("Reading the template", function () {
+                return createTakeTemplate(String(a.id || "").replace(/[^0-9]/g, ""));
+            }).then(function (r) {
+                reply({ ok: !!r, why: createNote.text, state: hostCreateState() });
             }, failed);
         } else if (op === "savePrompt") {
 
@@ -66019,6 +66742,47 @@
 
     .crPickRow .crPickText {
         overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        overflow: hidden;
+    }
+
+    /* Each row as tall as its text, never squeezed by a short list */
+    .crPickRow {
+        flex-shrink: 0;
+    }
+
+    .crPickRow .crPickPic {
+        width: 52px;
+        height: 52px;
+        border-radius: 8px;
+        object-fit: cover;
+        flex: 0 0 auto;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .crPickRow .crHear {
+        flex: 0 0 auto;
+    }
+
+    /* A row's second line may run to a few lines in the lists to pick from */
+    .crPickRow .plRowCount {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+    }
+
+    #crPickTag {
+        flex: 1 1 8em;
+        min-width: 0;
+        font: inherit;
+        padding: 6px 8px;
+        border-radius: 10px;
+        background: var(--panel2, #1d1d22);
+        color: inherit;
+        border: 1px solid rgba(255, 255, 255, 0.15);
     }
 
     /* Questions come over every popup, the playlists' and the form's too */
@@ -70684,6 +71448,7 @@
         <div id="crPick">
             <div id="crPickTop">
                 <span id="crPickTitle"></span>
+                <select id="crPickTag" aria-label="Kind of music"></select>
                 <button class="chip" id="crPickUpload" type="button">Upload a song</button>
                 <button class="chip" id="crPickMore" type="button">More</button>
                 <button class="chip" id="crPickBack" type="button">Back</button>
@@ -87923,7 +88688,8 @@
 
     // A box to paste an export into, the browser's own Paste works there.
     // Reading the clipboard straight needs a secure page, which this is not
-    function pasteImportHere() {
+    // closed is told when the box goes away without an import
+    function pasteImportHere(closed) {
 
         const back = document.createElement("div");
         const card = document.createElement("div");
@@ -87967,8 +88733,16 @@
                 offBack();
             }
         };
+        const cancel = function () {
 
-        offBack = onBack(close);
+            close();
+
+            if (closed) {
+                closed();
+            }
+        };
+
+        offBack = onBack(cancel);
 
         // The page's own keys never hear what is typed here
         for (const kind of ["keydown", "keyup", "keypress"]) {
@@ -87978,7 +88752,7 @@
             });
         }
 
-        row.appendChild(button("Cancel", "", close));
+        row.appendChild(button("Cancel", "", cancel));
         row.appendChild(button("Import", "on", function () {
 
             const text = area.value;
@@ -87993,7 +88767,7 @@
         back.addEventListener("click", function (ev) {
 
             if (ev.target === back) {
-                close();
+                cancel();
             }
         });
         document.body.appendChild(back);
@@ -89694,6 +90468,7 @@
 
     function closeCreatePop() {
 
+        crStopHear();
         crFlush();
         clearInterval(crWatchTimer);
         crWatchTimer = 0;
@@ -89924,7 +90699,8 @@
 
         ui.kind = crSegments([
             { label: "With lyrics", value: "song" },
-            { label: "Instrumental", value: "instrumental" }
+            { label: "Instrumental", value: "instrumental" },
+            { label: "Easy", value: "easy" }
         ], "kind");
         ui.kind.classList.add("crWide");
         form.appendChild(ui.kind);
@@ -89935,8 +90711,25 @@
         ui.modelSlot = document.createElement("div");
         ui.modelBox.appendChild(crLine("Model", [ui.modelSlot]));
 
+        // Easy: a wish in words, Mureka's agent writes and makes the songs
+        ui.easyBox = crCard(form);
+        ui.easyLabel = crLabel("What to make", "easyText");
+        ui.easy = crField(true, 2000, "easyText");
+        ui.easy.rows = 5;
+        ui.easy.placeholder = "A workout song with didgeridoo drones and tribal drums";
+        ui.easyBox.appendChild(ui.easyLabel);
+        ui.easyBox.appendChild(ui.easy);
+
+        const easyHint = document.createElement("div");
+
+        easyHint.className = "ceLabel";
+        easyHint.textContent = "Mureka's agent writes the lyrics and the style itself and makes two songs, as Mureka's easy mode does. What it says shows at the top.";
+        ui.easyBox.appendChild(easyHint);
+
         // The title and the lyrics, with Mureka writing them
         const words = crCard(form);
+
+        ui.wordsCard = words;
 
         ui.titleLabel = crLabel("Title", "title");
         ui.title = crField(false, 50, "title");
@@ -89962,6 +90755,8 @@
         // The style, with Mureka's two ways and the kept prompts
         const style = crCard(form);
 
+        ui.styleCard = style;
+
         ui.styleLabel = crLabel("Style", "style");
         ui.style = crField(true, 1000, "style");
         ui.style.rows = 6;
@@ -89977,6 +90772,9 @@
             }, "ring"),
             crChip("My styles", function () {
                 openCrPick("prompts");
+            }, "crFill"),
+            crChip("Templates", function () {
+                openCrPick("templates");
             }, "crFill"),
             crChip("Save style", function () {
 
@@ -90003,6 +90801,8 @@
 
         // A remix of an uploaded song
         const remix = crCard(form);
+
+        ui.remixCard = remix;
 
         ui.remixName = document.createElement("span");
         ui.remixName.className = "crName crValue";
@@ -90147,6 +90947,7 @@
             + (d.stylePromptId && String(d.style || "").trim() === String(d.stylePromptText || "").trim() ? ", a saved style" : "");
         crUi.wildLabel.count.textContent = d.wildness + "%";
         crUi.lengthLabel.count.textContent = crLengthText(d.lengthMs);
+        crUi.easyLabel.count.textContent = String(d.easyText || "").length + "/2000";
     }
 
     // The form as the phone has it. Fields being typed in, or with typing
@@ -90194,6 +90995,7 @@
             put(ui.title, "title");
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
+            put(ui.easy, "easyText");
 
             if (Array.isArray(c.lengths) && c.lengths.length > 0) {
 
@@ -90234,7 +91036,21 @@
                 ui.model.paint(fresh.model);
             }
 
-            ui.modelBox.style.display = song && fresh.remix ? "none" : "flex";
+            ui.modelBox.style.display = song && fresh.remix && fresh.kind !== "easy" ? "none" : "flex";
+
+            // Easy shows the wish in place of everything the agent writes
+            const easy = fresh.kind === "easy";
+
+            ui.easyBox.style.display = easy ? "flex" : "none";
+            ui.wordsCard.style.display = easy ? "none" : "";
+            ui.styleCard.style.display = easy ? "none" : "";
+            ui.remixCard.style.display = easy ? "none" : "";
+
+            if (easy) {
+
+                ui.voiceBox.style.display = "none";
+                ui.advBox.style.display = "none";
+            }
             ui.playMode.paint(fresh.playMode || "");
             ui.setOn.classList.toggle("on", fresh.setOn === true);
             ui.setOn.setAttribute("aria-pressed", fresh.setOn === true ? "true" : "false");
@@ -90415,17 +91231,34 @@
         $("crPick").style.display = on ? "flex" : "none";
 
         if (!on) {
+
             crPickKind = "";
+            crStopHear();
         }
     }
 
-    function crPickRow(label, sub, then, color) {
+    function crPickRow(label, sub, then, color, cover, listen) {
 
         const row = document.createElement("div");
         const text = document.createElement("div");
         const name = document.createElement("div");
 
         row.className = "plRow crPickRow";
+
+        // A picture before it
+        if (cover) {
+
+            const pic = document.createElement("img");
+
+            pic.alt = "";
+            pic.loading = "lazy";
+            pic.src = cover;
+            pic.className = "crPickPic";
+            pic.addEventListener("error", function () {
+                pic.style.visibility = "hidden";
+            });
+            row.appendChild(pic);
+        }
 
         // A set's own color as a dot before it
         if (color) {
@@ -90454,7 +91287,81 @@
         row.appendChild(text);
         row.addEventListener("click", then);
 
+        // A button to listen first, which leaves the row where it is
+        if (listen) {
+
+            const hear = document.createElement("button");
+
+            hear.type = "button";
+            hear.className = "chip crFill crHear";
+            hear.textContent = "Listen";
+            hear.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                listen(hear);
+            });
+            row.appendChild(hear);
+        }
+
         return row;
+    }
+
+    // A template's song heard here before it is taken, the phone's song
+    // paused meanwhile and going on after
+    let crHearing = null;
+
+    function crHear(x, btn) {
+
+        const again = crHearing && crHearing.id === x.id;
+
+        crStopHear();
+
+        if (again || !x.audio) {
+            return;
+        }
+
+        const el = new Audio();
+        const resume = !!(state && state.playing);
+
+        if (resume) {
+            send("pause");
+        }
+
+        crHearing = { el: el, id: x.id, resume: resume, btn: btn };
+        el.src = x.audio;
+        el.addEventListener("ended", crStopHear);
+        el.play().catch(function () {
+
+            toast("The template's song could not play", "bad");
+            crStopHear();
+        });
+        btn.textContent = "Stop";
+    }
+
+    function crStopHear() {
+
+        const h = crHearing;
+
+        if (!h) {
+            return;
+        }
+
+        crHearing = null;
+
+        try {
+
+            h.el.pause();
+            h.el.removeAttribute("src");
+            h.el.load();
+        } catch (e) {
+            // Gone already
+        }
+
+        h.btn.textContent = "Listen";
+
+        if (h.resume) {
+            send("play");
+        }
     }
 
     function crPickNote(text) {
@@ -90477,13 +91384,17 @@
 
     function openCrPick(kind) {
 
-        const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in" };
+        const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in",
+            templates: "Mureka's templates" };
         let last = "0";
         let more = false;
+        let tag = "";
+        let reading = 0;
 
         crPickKind = kind;
         $("crPickTitle").textContent = titles[kind] || "";
         $("crPickUpload").style.display = kind === "resources" ? "" : "none";
+        $("crPickTag").style.display = kind === "templates" ? "" : "none";
         $("crPickMore").style.display = "none";
         crPickNote("Asking Mureka");
         showCrPick(true);
@@ -90518,9 +91429,13 @@
 
         const read = function () {
 
-            crAsk(kind === "resources" ? { op: "resources", last: last } : { op: kind }).then(function (r) {
+            const mine = ++reading;
+            const ask = kind === "resources" ? { op: "resources", last: last }
+                : kind === "templates" ? { op: "templates", tag: tag, last: last } : { op: kind };
 
-                if (crPickKind !== kind) {
+            crAsk(ask).then(function (r) {
+
+                if (crPickKind !== kind || mine !== reading) {
                     return;
                 }
 
@@ -90541,12 +91456,24 @@
 
                     crPickNote(kind === "prompts" ? "No styles are saved on Mureka yet. Save style saves the style written now."
                         : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
-                            : "No songs uploaded to Mureka yet. Upload a song to remix it.");
+                            : kind === "templates" ? "No templates of this kind"
+                                : "No songs uploaded to Mureka yet. Upload a song to remix it.");
                 }
 
                 for (const x of list) {
 
-                    if (kind === "prompts") {
+                    if (kind === "templates") {
+
+                        const sub = [x.genres, x.about, x.made ? "used " + Number(x.made).toLocaleString() + " times" : ""].filter(Boolean).join(" \u00b7 ");
+
+                        rows.appendChild(crPickRow(x.title, sub, function () {
+
+                            showCrPick(false);
+                            crAsk({ op: "template", id: x.id }).then(crAnswered);
+                        }, "", x.cover, x.audio ? function (btn) {
+                            crHear(x, btn);
+                        } : null));
+                    } else if (kind === "prompts") {
 
                         rows.appendChild(crPickRow(x.text, "", function () {
 
@@ -90584,6 +91511,35 @@
                 read();
             }
         };
+
+        // The kinds of music to pick templates by, asked once a time
+        if (kind === "templates") {
+
+            const select = $("crPickTag");
+
+            select.textContent = "";
+            select.appendChild(new Option("All kinds", ""));
+            select.onchange = function () {
+
+                tag = select.value;
+                last = "0";
+                crPickNote("Asking Mureka");
+                read();
+            };
+            crAsk({ op: "templateTags" }).then(function (r) {
+
+                if (crPickKind !== "templates" || !r || !r.ok || !Array.isArray(r.list)) {
+                    return;
+                }
+
+                for (const t of r.list) {
+
+                    if (t.value !== "") {
+                        select.appendChild(new Option(t.label, t.value));
+                    }
+                }
+            });
+        }
 
         read();
     }
@@ -94120,6 +95076,18 @@
 
                     setAsking = "";
                     closeSongMenu();
+
+                    // Data pasted here instead: the phone's questions wait
+                    // for it, and go on if the box is closed without one
+                    if (o.key === "import") {
+
+                        send("setAskAnswer", { n: n, key: "importThere" });
+                        pasteImportHere(function () {
+                            send("setAskResume", null);
+                        });
+                        return;
+                    }
+
                     send("setAskAnswer", { n: n, key: o.key });
                 }
             };
@@ -97258,6 +98226,7 @@
         followOtherTabs();
         setTimeout(readOpenPlaylistAtStart, 5000);
         setTimeout(queueAheadTempos, 30000);
+        watchMemory();
         dbgLog("Playlists", "orders kept here for " + Object.keys(loadPlaylistOrders()).length + " playlists"
             + (activePlaylist ? ", " + activePlaylist.name + " open since before the start" : ""));
 
@@ -97266,6 +98235,93 @@
             setStatus(brokenLibraryNote);
             showToast("The stored song list could not be read", false);
         }
+    }
+
+    // What could pile up in the page, in the debug log now and then: a
+    // browser that runs out of memory reloads the page without a word, and
+    // the lines from before that survive into the new page's log. A phone's
+    // browser tells a page nothing of its own memory, so these are counts.
+    // Object links to files in memory are counted as they are made and let
+    // go, all of them in the page
+    const blobUrlsLive = new Set();
+    let blobUrlsMade = 0;
+    const MEMORY_LOG_MS = 300000;
+
+    function watchMemory() {
+
+        try {
+
+            const make = URL.createObjectURL;
+            const drop = URL.revokeObjectURL;
+
+            if (typeof make === "function" && typeof drop === "function" && !make.__murekaCounted) {
+
+                const counted = function (obj) {
+
+                    const url = make.call(URL, obj);
+
+                    blobUrlsMade += 1;
+                    blobUrlsLive.add(url);
+
+                    return url;
+                };
+
+                counted.__murekaCounted = true;
+                URL.createObjectURL = counted;
+                URL.revokeObjectURL = function (url) {
+
+                    blobUrlsLive.delete(url);
+
+                    return drop.call(URL, url);
+                };
+            }
+        } catch (e) {
+            // Not countable here, the other numbers still come
+        }
+
+        setTimeout(logMemory, 60000);
+        setInterval(logMemory, MEMORY_LOG_MS);
+    }
+
+    function logMemory() {
+
+        const parts = [];
+
+        try {
+
+            const all = document.getElementsByTagName("*").length;
+            const ours = panelEl ? panelEl.getElementsByTagName("*").length : 0;
+
+            parts.push("page elements " + all + ", the player's " + ours);
+            parts.push("audio and video elements " + document.querySelectorAll("audio,video").length);
+            parts.push("file links in memory " + blobUrlsLive.size + " (" + blobUrlsMade + " made)");
+            parts.push("songs " + cache.songs.length + ", covers held " + artCache.size + ", lyric prints " + lyricPrints.size
+                + ", tempos " + tempoInfo.size + ", plays " + playCounts.size + ", stubs " + stubSongs.size
+                + ", playlist details " + playlistDetails.size);
+            parts.push("log lines " + debugLog.length);
+
+            let stored = 0;
+
+            for (let i = 0; i < sessionStorage.length; i++) {
+
+                const k = sessionStorage.key(i);
+
+                stored += k.length + (sessionStorage.getItem(k) || "").length;
+            }
+
+            parts.push("tab storage " + Math.round(stored / 1024) + " kB");
+
+            // Only Chrome tells its heap
+            const mem = performance && performance.memory;
+
+            if (mem && mem.usedJSHeapSize) {
+                parts.push("heap " + Math.round(mem.usedJSHeapSize / 1048576) + " of " + Math.round(mem.jsHeapSizeLimit / 1048576) + " MB");
+            }
+        } catch (e) {
+            parts.push("not all counted, " + errText(e));
+        }
+
+        dbgLog("Memory", parts.join(", "));
     }
 
     // The bookmarklet runs after load, so build now, otherwise wait for the body
