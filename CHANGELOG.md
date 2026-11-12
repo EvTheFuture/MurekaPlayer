@@ -652,6 +652,15 @@ In development.
   delay allowed for. Through the sound engine on an iPhone or iPad such
   a song now starts 50 ms in, so Safari plays it as one loaded at a
   place, the way a pause and play does, in step with the play head.
+- **A trimmed song in step on an iPhone.** The new song that plays on
+  after a trim was streamed from Mureka, which Safari's sound engine for
+  the fades plays out of step with the play head and the waveform until
+  a pause and play. It is now downloaded whole first, as a new song
+  played at once is, and plays on from the device; not downloaded in
+  time, it streams as before.
+- **The trimmer's waiting ring as in Create.** While Mureka trims, the
+  trimmer behind the ring is dimmed and blurred, on the phone and in the
+  web view, with the larger ring Create has.
 
 ### Build
 

@@ -6189,9 +6189,12 @@
         padding: 16px;
     }
 
+    /* Dimmed and blurred behind the ring, as in Create */
     .trimWorking {
         z-index: 72;
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.5);
+        -webkit-backdrop-filter: blur(4px);
+        backdrop-filter: blur(4px);
         flex-direction: column;
         gap: 16px;
         color: #fff;

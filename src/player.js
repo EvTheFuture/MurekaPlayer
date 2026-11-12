@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.78";
+    const VERSION = "2.0.1.79";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -55341,11 +55341,12 @@
         // While Mureka works: a turning ring and what is going on, over
         // everything, so it cannot be missed nor anything pressed meanwhile
         ui.working = document.createElement("div");
-        ui.working.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.65);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:3;color:#fff;font-size:15px";
+        ui.working.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.5);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:3;color:#fff;font-size:15px;"
+            + "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)";
 
         const workingRing = document.createElement("span");
 
-        workingRing.style.cssText = "width:40px;height:40px;border:4px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        workingRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.workingText = document.createElement("span");
         ui.working.appendChild(workingRing);
         ui.working.appendChild(ui.workingText);
@@ -55695,10 +55696,35 @@
             }
 
             dropNextReady();
-            pendingSeek = at;
-            dbgLog("Trim", "the new song plays on at " + Math.round(at) + " s, where the trimmed one was");
 
-            playCurrent();
+            const song = made.song;
+            const start = function () {
+
+                // Moved on meanwhile, by a tap say: the new song waits its turn
+                if (queue[queuePos] !== song) {
+                    return;
+                }
+
+                pendingSeek = at;
+                dbgLog("Trim", "the new song plays on at " + Math.round(at) + " s, where the trimmed one was");
+                playCurrent();
+            };
+
+            // Downloaded whole first, as a new song played at once is, so it
+            // plays from the device: streamed from Mureka, Safari's sound
+            // engine for the fades on an iPhone plays it out of step with
+            // the play head until a pause and play
+            if (!cachedIds.has(song.song_id) && !offlineMode()) {
+
+                dbgLog("Trim", "downloading the new song whole before it plays on");
+                withinTime(fetchToCache(song, false), READY_FETCH_MS).then(function (ok) {
+
+                    dbgLog("Trim", ok ? "the new song is downloaded, it plays from the device" : "the new song was not downloaded in time, it streams");
+                    start();
+                });
+            } else {
+                start();
+            }
 
             // The covers show the queue as it is now, the new song in the
             // middle, without a slide from the old one
@@ -71548,9 +71574,12 @@
         padding: 16px;
     }
 
+    /* Dimmed and blurred behind the ring, as in Create */
     .trimWorking {
         z-index: 72;
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.5);
+        -webkit-backdrop-filter: blur(4px);
+        backdrop-filter: blur(4px);
         flex-direction: column;
         gap: 16px;
         color: #fff;
