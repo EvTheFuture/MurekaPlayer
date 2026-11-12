@@ -1792,6 +1792,24 @@
         -webkit-line-clamp: 3;
     }
 
+    /* The chat easy mode goes on in */
+    .crEasyChat {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(72, 225, 235, 0.1);
+        border: 1px solid rgba(72, 225, 235, 0.35);
+    }
+
+    .crEasyChat span {
+        flex: 1 1 12em;
+        font-size: 0.9em;
+        line-height: 1.4;
+    }
+
     #crPickTag {
         flex: 1 1 8em;
         min-width: 0;
@@ -25746,6 +25764,16 @@
         ui.easy = crField(true, 2000, "easyText");
         ui.easy.rows = 5;
         ui.easy.placeholder = "A workout song with didgeridoo drones and tribal drums";
+
+        // The chat it goes on in, and a way to start a new song
+        ui.easyChatRow = document.createElement("div");
+        ui.easyChatRow.className = "crEasyChat";
+        ui.easyChatText = document.createElement("span");
+        ui.easyChatRow.appendChild(ui.easyChatText);
+        ui.easyChatRow.appendChild(crChip("New song", function () {
+            crSet({ easyChat: null });
+        }, "crFill"));
+        ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
 
@@ -26025,6 +26053,14 @@
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
             put(ui.easy, "easyText");
+
+            const chat = fresh.easyChat && typeof fresh.easyChat === "object" ? fresh.easyChat : null;
+
+            ui.easyChatRow.style.display = chat ? "flex" : "none";
+            ui.easyChatText.textContent = chat ? "Goes on in the chat about " + (chat.title ? "\u201c" + chat.title + "\u201d" : "the last wish")
+                + ": tell the agent what to change" : "";
+            ui.easyLabel.firstChild.textContent = chat ? "What to change" : "What to make";
+            ui.easy.placeholder = chat ? "More rhythm, a faster tempo, softer vocals" : "A workout song with didgeridoo drones and tribal drums";
 
             if (Array.isArray(c.lengths) && c.lengths.length > 0) {
 

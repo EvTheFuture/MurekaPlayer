@@ -661,6 +661,13 @@ In development.
 - **The trimmer's waiting ring as in Create.** While Mureka trims, the
   trimmer behind the ring is dimmed and blurred, on the phone and in the
   web view, with the larger ring Create has.
+- **Easy mode goes on in the same chat.** After a song is made in Easy
+  mode, the next wish is sent to the same chat with Mureka's agent, so
+  it can be a change such as "more rhythm" or "a faster tempo". A line
+  above the wish shows which song the chat is about, and New song
+  forgets the chat so the next wish starts a new one. The chat is kept
+  with the draft, so it is still there after a reload or a restart, on
+  the phone and in the web view.
 
 ### Build
 

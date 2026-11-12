@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.79";
+    const VERSION = "2.0.1.80";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -58276,6 +58276,22 @@
         return out.id ? out : null;
     }
 
+    // The chat with Mureka's agent that easy mode goes on in: its ids, the
+    // title of the songs it made and the first wish. None for a new chat
+    function createCleanEasyChat(c) {
+
+        if (!c || typeof c !== "object" || !c.session) {
+            return null;
+        }
+
+        return {
+            chat: String(c.chat || "").slice(0, 80),
+            session: String(c.session).slice(0, 80),
+            title: createText(c.title, 120),
+            wish: createText(c.wish, CREATE_EASY_MAX)
+        };
+    }
+
     function createCleanDraft(d) {
 
         const x = d && typeof d === "object" ? d : {};
@@ -58285,6 +58301,7 @@
         return {
             kind: x.kind === "instrumental" || x.kind === "easy" ? x.kind : "song",
             easyText: createText(x.easyText, CREATE_EASY_MAX),
+            easyChat: createCleanEasyChat(x.easyChat),
             title: createText(x.title, CREATE_TITLE_MAX),
             lyrics: createText(x.lyrics, CREATE_LYRICS_MAX),
             style: createText(x.style, CREATE_STYLE_MAX),
@@ -59450,18 +59467,47 @@
             return { ok: false, text: "Mureka's agent is still at work on the last wish" };
         }
 
-        const data = await createPost("/api/agent/chat/create", { title: text.slice(0, 40) }, 30000);
-        const chat = data.chat || {};
-        const first = Array.isArray(data.sessions) && data.sessions[0] ? data.sessions[0] : {};
-        const sessionId = String(chat.current_session_id || first.session_id || first.id || "");
+        // The chat kept from before goes on: the agent hears the wish as
+        // the next message, after what it made. One it no longer takes
+        // starts a new chat
+        let chat = d.easyChat;
 
-        if (!sessionId) {
-            throw new Error("Mureka started no chat");
+        if (chat) {
+
+            try {
+
+                dbgLog("Create", "easy: going on in the chat about " + (chat.title || "the last wish") + ", " + text.length + " characters asked");
+                await createEasyRun(chat.session, text, d);
+            } catch (e) {
+
+                if (createStopped()) {
+                    throw e;
+                }
+
+                dbgLog("Create", "easy: the chat could not go on, " + errText(e) + ", a new one starts");
+                chat = null;
+            }
         }
 
-        dbgLog("Create", "easy: chat " + (chat.chat_id || "?") + " started, " + text.length + " characters asked");
+        if (!chat) {
 
-        await createEasyRun(sessionId, text, d);
+            const data = await createPost("/api/agent/chat/create", { title: text.slice(0, 40) }, 30000);
+            const made = data.chat || {};
+            const first = Array.isArray(data.sessions) && data.sessions[0] ? data.sessions[0] : {};
+            const sessionId = String(made.current_session_id || first.session_id || first.id || "");
+
+            if (!sessionId) {
+                throw new Error("Mureka started no chat");
+            }
+
+            dbgLog("Create", "easy: chat " + (made.chat_id || "?") + " started, " + text.length + " characters asked");
+            chat = { chat: String(made.chat_id || ""), session: sessionId, title: "", wish: text };
+            await createEasyRun(sessionId, text, d);
+        }
+
+        // Kept with the form, so the next wish goes on in it, even after
+        // a restart. The wish sent is out of the box
+        changeCreateDraft({ easyChat: chat, easyText: "" });
 
         return {
             ok: true,
@@ -59469,6 +59515,25 @@
             text: "Mureka's agent is on it, the songs come in a minute or two"
                 + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
         };
+    }
+
+    // Whether Stop was pressed on what Create is doing now
+    function createStopped() {
+
+        const sig = createSignal();
+
+        return !!(sig && sig.aborted);
+    }
+
+    // The title of the songs a chat made, kept with the form while it
+    // still goes on in that chat
+    function createEasyTitled(sessionId, title) {
+
+        const d = loadCreateDraft();
+
+        if (title && d.easyChat && d.easyChat.session === sessionId && !d.easyChat.title) {
+            changeCreateDraft({ easyChat: Object.assign({}, d.easyChat, { title: title }) });
+        }
     }
 
     function createEasyRun(sessionId, text, d) {
@@ -59483,6 +59548,7 @@
             let done = false;
             let reply = "";
             let seq = 0;
+            let runId = "";
             const feeds = new Set();
 
             try {
@@ -59611,15 +59677,28 @@
                 if (type === "message_accepted") {
 
                     accepted = true;
+                    runId = String(m.run_id || "");
                     clearTimeout(waitTimer);
                     dbgLog("Create", "easy: taken, number " + (m.queue_position || "?") + " in the agent's line");
                     resolve();
                     return;
                 }
 
-                if (type === "error" || kind === "run.failed" || kind === "run.cancelled") {
+                if (type === "error") {
 
-                    finish("Mureka's agent: " + String(pay.message || m.message || m.error || kind || "something went wrong").slice(0, 200), true);
+                    finish("Mureka's agent: " + String(pay.message || m.message || m.error || "something went wrong").slice(0, 200), true);
+                    return;
+                }
+
+                // In a chat that goes on, what came before is not this
+                // wish's: only events once the wish is taken, of its run
+                if (!accepted || (runId && m.run_id && String(m.run_id) !== runId)) {
+                    return;
+                }
+
+                if (kind === "run.failed" || kind === "run.cancelled") {
+
+                    finish("Mureka's agent: " + String(pay.message || m.message || kind).slice(0, 200), true);
                     return;
                 }
 
@@ -59649,8 +59728,12 @@
 
                     if (feedId && !feeds.has(feedId)) {
 
+                        const songs = Array.isArray(c.feed.songs) ? c.feed.songs : (Array.isArray(c.songs) ? c.songs : []);
+                        const title = String(songs[0] && songs[0].title || c.feed.title || "").trim();
+
                         feeds.add(feedId);
-                        dbgLog("Create", "easy: songs being made, generation " + feedId);
+                        dbgLog("Create", "easy: songs being made, generation " + feedId + (title ? ", " + title : ""));
+                        createEasyTitled(sessionId, title);
                         createRemember(feedId, d);
                         createWatchNew();
                     }
@@ -60312,6 +60395,21 @@
             saveCreateDraft();
             paintCreateCounts();
         });
+
+        // The chat it goes on in, and a way to start a new song
+        ui.easyChatRow = document.createElement("div");
+        ui.easyChatRow.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:rgba(72,225,235,0.1);border:1px solid rgba(72,225,235,0.35)";
+        ui.easyChatText = document.createElement("span");
+        ui.easyChatText.style.cssText = "flex:1 1 12em;font-size:13px;line-height:1.4;color:#dff";
+        ui.easyNew = makeButton("New song", "#333", "#fff", function () {
+
+            changeCreateDraft({ easyChat: null });
+            setCreateNote("The next wish starts a new chat");
+        });
+        ui.easyNew.style.padding = "6px 12px";
+        ui.easyChatRow.appendChild(ui.easyChatText);
+        ui.easyChatRow.appendChild(ui.easyNew);
+        ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
 
@@ -60669,6 +60767,11 @@
         put(ui.lyrics, d.lyrics);
         put(ui.style, d.style);
         put(ui.easy, d.easyText);
+        ui.easyChatRow.style.display = d.easyChat ? "flex" : "none";
+        ui.easyChatText.textContent = d.easyChat ? "Goes on in the chat about " + (d.easyChat.title ? "\"" + d.easyChat.title + "\"" : "the last wish")
+            + ": tell the agent what to change" : "";
+        ui.easyLabel.firstChild.textContent = d.easyChat ? "What to change" : "What to make";
+        ui.easy.placeholder = d.easyChat ? "More rhythm, a faster tempo, softer vocals" : "A workout song with didgeridoo drones and tribal drums";
         ui.length.value = String(Math.max(0, createLengths().indexOf(d.lengthMs)));
         ui.wild.value = String(d.wildness);
         ui.kindRow.paint();
@@ -67175,6 +67278,24 @@
         display: -webkit-box;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 3;
+    }
+
+    /* The chat easy mode goes on in */
+    .crEasyChat {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(72, 225, 235, 0.1);
+        border: 1px solid rgba(72, 225, 235, 0.35);
+    }
+
+    .crEasyChat span {
+        flex: 1 1 12em;
+        font-size: 0.9em;
+        line-height: 1.4;
     }
 
     #crPickTag {
@@ -91131,6 +91252,16 @@
         ui.easy = crField(true, 2000, "easyText");
         ui.easy.rows = 5;
         ui.easy.placeholder = "A workout song with didgeridoo drones and tribal drums";
+
+        // The chat it goes on in, and a way to start a new song
+        ui.easyChatRow = document.createElement("div");
+        ui.easyChatRow.className = "crEasyChat";
+        ui.easyChatText = document.createElement("span");
+        ui.easyChatRow.appendChild(ui.easyChatText);
+        ui.easyChatRow.appendChild(crChip("New song", function () {
+            crSet({ easyChat: null });
+        }, "crFill"));
+        ui.easyBox.appendChild(ui.easyChatRow);
         ui.easyBox.appendChild(ui.easyLabel);
         ui.easyBox.appendChild(ui.easy);
 
@@ -91410,6 +91541,14 @@
             put(ui.lyrics, "lyrics");
             put(ui.style, "style");
             put(ui.easy, "easyText");
+
+            const chat = fresh.easyChat && typeof fresh.easyChat === "object" ? fresh.easyChat : null;
+
+            ui.easyChatRow.style.display = chat ? "flex" : "none";
+            ui.easyChatText.textContent = chat ? "Goes on in the chat about " + (chat.title ? "\u201c" + chat.title + "\u201d" : "the last wish")
+                + ": tell the agent what to change" : "";
+            ui.easyLabel.firstChild.textContent = chat ? "What to change" : "What to make";
+            ui.easy.placeholder = chat ? "More rhythm, a faster tempo, softer vocals" : "A workout song with didgeridoo drones and tribal drums";
 
             if (Array.isArray(c.lengths) && c.lengths.length > 0) {
 
