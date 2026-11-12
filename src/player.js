@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.95";
+    const VERSION = "2.0.1.96";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -71046,6 +71046,23 @@
         will-change: transform;
     }
 
+    /* Buttons spread out, onto another line when they do not fit */
+    #panelBody .pRow.spread.btns {
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-start;
+        column-gap: 10px;
+    }
+
+    #panelBody .pRow.spread.btns > .pBtn {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+    #panelBody .pRow.spread.btns > .pBtn:last-child {
+        margin-left: auto;
+    }
+
     /* A button that starts something of its own, ringed in cyan */
     .pBtn.ring {
         color: var(--accent);
@@ -84840,6 +84857,14 @@
             // addresses under About with their networks
             if (node.spread) {
                 row.classList.add("spread");
+            }
+
+            // Buttons alone, spread out, go onto another line when the
+            // page is too narrow for them, the last one kept at the right
+            if (node.spread && node.c.every(function (child) {
+                return child.t === "button";
+            })) {
+                row.classList.add("btns");
             }
 
             // A name with an explanation lines up with its switch at the top

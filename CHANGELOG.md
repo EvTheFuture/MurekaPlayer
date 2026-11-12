@@ -810,6 +810,11 @@ In development.
   as this device: 3.5 dB a step, and the empty fields of Edit by hand
   show the values in use. A speaker with nothing kept no longer shows a
   switch delay of 0 ms.
+- **Buttons spread out in the web view's settings stay inside it.** A
+  row of buttons laid out apart, as Forget, Edit by hand and Train by
+  ear under Volume steps, ran past the right edge of the settings when
+  they did not fit. They now go onto another line, side by side from the
+  left, the last one kept at the right.
 
 ### Build
 
