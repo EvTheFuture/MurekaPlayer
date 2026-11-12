@@ -17546,6 +17546,17 @@
                 continue;
             }
 
+            // Buttons spread out on a line of their own keep their own
+            // width, so they fit side by side
+            if (row.classList.contains("btns")) {
+
+                for (const b of buttons) {
+                    b.style.minWidth = "";
+                }
+
+                continue;
+            }
+
             // Beside a name: its own, or the row of controls beside one
             const inner = row.parentElement && row.parentElement.classList.contains("pRow")
                 && row.parentElement.classList.contains("top");

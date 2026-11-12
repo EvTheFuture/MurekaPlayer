@@ -815,6 +815,10 @@ In development.
   ear under Volume steps, ran past the right edge of the settings when
   they did not fit. They now go onto another line, side by side from the
   left, the last one kept at the right.
+- **Forget, Edit by hand and Train by ear fit on one line in the web
+  view.** The web view gives the action buttons of a settings page the
+  width of the widest of them, which made these three too wide to sit
+  side by side. A row of buttons spread out keeps their own widths.
 
 ### Build
 
