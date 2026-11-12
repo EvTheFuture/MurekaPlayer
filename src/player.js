@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.88";
+    const VERSION = "2.0.1.89";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70348,23 +70348,36 @@
     }
 
     /* A slider beside its name, its value at the end */
+    /* A slider under its name, the value at the right of the name, the
+       name in line with the other settings' names */
     .pSlider {
         display: flex;
-        align-items: center;
-        gap: 12px;
+        flex-direction: column;
+        gap: 8px;
         width: 100%;
+        padding: 6px 0;
+    }
+
+    .pSliderHead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 4px;
     }
 
     .pSlider input {
-        flex: 1;
+        width: 100%;
         min-width: 0;
+        margin: 0;
         accent-color: var(--accent);
     }
 
     .pSliderVal {
-        flex: 0 0 4.5em;
+        flex: 0 0 auto;
         text-align: right;
         font-variant-numeric: tabular-nums;
+        color: var(--accent);
     }
 
     /* Turned on its side, top up, so it works the same in every browser */
@@ -84106,6 +84119,7 @@
     function panelSlider(node) {
 
         const row = document.createElement("div");
+        const head = document.createElement("div");
         const name = document.createElement("span");
         const slider = document.createElement("input");
         const shown = document.createElement("span");
@@ -84163,9 +84177,11 @@
             panelAction("hset", { id: node.id, value: slider.value });
         });
 
-        row.appendChild(name);
+        head.className = "pSliderHead";
+        head.appendChild(name);
+        head.appendChild(shown);
+        row.appendChild(head);
         row.appendChild(slider);
-        row.appendChild(shown);
 
         return row;
     }

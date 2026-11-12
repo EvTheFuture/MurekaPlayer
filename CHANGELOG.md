@@ -731,6 +731,11 @@ In development.
   each step, so one percent down could lower 0.7 dB in one place and
   nearly a whole step in another, and the cuts were even in loudness,
   not in dB.
+- **Sliders in the web view's settings under their names.** Max volume
+  as it connects, Volume now and Bass cut have the name on a line of its
+  own, in line with the other settings' names, the value at the right of
+  it, and the slider the whole width under it. Before, the name sat
+  further left than the others.
 
 ### Build
 
