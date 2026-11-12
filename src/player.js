@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.74";
+    const VERSION = "2.0.1.77";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -206,7 +206,7 @@
     // the way of working them out changes (v). A tempo is used only when
     // the beat stood out clearly enough (TEMPO_SURE, 0 to 1)
     const DETECTED_BPM_KEY = "mureka_detected_bpm_v1";
-    const TEMPO_VERSION = 6;
+    const TEMPO_VERSION = 7;
     const TEMPO_SURE = 0.5;
 
     // localStorage key for star ratings, song_id to 0 to 5. A song missing
@@ -1189,6 +1189,13 @@
     let pendingTimer = 0;
     let pendingBusy = false;
     let pendingStamp = 0;
+
+    // Two rows for songs asked of Mureka and not listed by it yet, as
+    // Mureka's own page shows them, by the send they belong to. Gone once
+    // the real songs are listed, the request fails, or after a while
+    const sendingSongs = [];
+    let sendingSeq = 0;
+    const SENDING_LONGEST_MS = 6 * 60000;
 
     // When true the queue is built and rebuilt in random order
     // Starts from the default play mode chosen in settings
@@ -17733,7 +17740,7 @@
 
         const ordered = placeSets(orderedSongs(), setsFolded());
 
-        return pendingSongs.size > 0 ? withPendingPlaced(shownPending(), ordered, function (x) {
+        return pendingSongs.size > 0 || sendingSongs.length > 0 ? withPendingPlaced(shownPending(), ordered, function (x) {
             return x;
         }) : ordered;
     }
@@ -17799,7 +17806,84 @@
     }
 
     function shownPending() {
-        return creatorSource || publishFilter === "published" ? [] : pendingList();
+        return creatorSource || publishFilter === "published" ? [] : sendingSongs.concat(pendingList());
+    }
+
+    // Two rows for a send to Mureka, named as asked, until its songs are
+    // listed. Answers the send's own number
+    function addSending(title) {
+
+        sendingSeq += 1;
+
+        const send = sendingSeq;
+        const at = Math.floor(Date.now() / 1000);
+
+        for (let k = 1; k <= 2; k++) {
+
+            sendingSongs.unshift({
+                song_id: "sending-" + send + "-" + k,
+                title: title || "New song",
+                generate_at: at,
+                __pending: true,
+                __sending: send,
+                __feed: "",
+                __until: Date.now() + SENDING_LONGEST_MS
+            });
+        }
+
+        sendingChanged();
+
+        return send;
+    }
+
+    // The send's rows told which generation they are, so the real songs
+    // take their place as they are listed
+    function sendingIs(send, feedId) {
+
+        for (const x of sendingSongs) {
+
+            if (x.__sending === send) {
+                x.__feed = String(feedId || "");
+            }
+        }
+    }
+
+    // Rows let go: of one send, of a generation now listed, or past their time
+    function dropSending(send, feedId) {
+
+        const now = Date.now();
+        let gone = false;
+
+        for (let i = sendingSongs.length - 1; i >= 0; i--) {
+
+            const x = sendingSongs[i];
+
+            if ((send && x.__sending === send) || (feedId && x.__feed === String(feedId)) || now > x.__until) {
+
+                sendingSongs.splice(i, 1);
+                gone = true;
+            }
+        }
+
+        if (gone) {
+            sendingChanged();
+        }
+    }
+
+    function sendingChanged() {
+
+        pendingStamp += 1;
+        renderList();
+        publishHostSoon();
+
+        // Looked at again later, to let rows go that outlived their time
+        if (sendingSongs.length > 0) {
+            setTimeout(dropSending, SENDING_LONGEST_MS + 1000);
+        }
+    }
+
+    function isSendingSong(song) {
+        return !!(song && song.__sending);
     }
 
     // Whether a song is one Mureka is still generating
@@ -17850,6 +17934,11 @@
             pendingSongs.set(id, { song: copy, misses: 0 });
             pendingStamp += 1;
             dbgLog("Feed", "still generating: " + (copy.title || "Untitled") + " (" + id + ")");
+
+            // The rows shown while Mureka had not listed them make way
+            if (s.feed_id !== undefined && sendingSongs.length > 0) {
+                dropSending(0, String(s.feed_id));
+            }
 
             // Its lyrics, when the feed has them already, count in finding
             // a set it belongs in
@@ -19121,6 +19210,13 @@
     // it as soon as it is ready
     function pendingTap(song) {
 
+        // Not listed by Mureka yet, nothing to ask for until it is
+        if (isSendingSong(song)) {
+
+            showToast("Mureka has not listed these songs yet, they show here as soon as it does", true);
+            return;
+        }
+
         const id = String(song.song_id);
         const title = (song.title || "").trim() || "Untitled";
 
@@ -19283,6 +19379,11 @@
     function playWhenReady(id, how) {
 
         const key = String(id);
+
+        if (/^sending-/.test(key)) {
+            return;
+        }
+
         const mode = how === "after" || how === "all" ? how : "now";
 
         if (mode === "now") {
@@ -29442,6 +29543,17 @@
     const TEMPO_THIRDS_SHARE = 0.85;
     const TEMPO_THIRDS_DEEP = 0.95;
 
+    // The bar: the shortest spacing between 1.2 and 4.4 s at which the
+    // starts repeat about as well as at the best, which a beat divides
+    // into 2, 3, 4, 6 or 8. A syncopated rhythm,
+    // hits three and five sixteenths apart, repeats almost as well at five
+    // sixteenths as at the beat: a song at 130 BPM came out at 103. Another
+    // beat length that divides the bar and scores nearly as well, at least
+    // TEMPO_BAR_SHARE of the best, takes over from one that does not
+    const TEMPO_BAR_SHARE = 0.9;
+    const TEMPO_BAR_FIT = 0.03;
+    const TEMPO_BAR_PARTS = [2, 3, 4, 6, 8];
+
     async function detectTempo(data, rate, hint) {
 
         const N = 256;
@@ -29664,17 +29776,75 @@
         let best = 0;
         let bestScore = -1;
         const scores = [];
+        const tried = [];
 
         for (let p = fps * 60 / TEMPO_MAX; p <= fps * 60 / TEMPO_MIN; p += 0.25) {
 
             const score = comb(p) * likely(fps * 60 / p);
 
             scores.push(score);
+            tried.push(p);
 
             if (score > bestScore) {
 
                 bestScore = score;
                 best = p;
+            }
+        }
+
+        // The bar, and whether a beat length divides it
+        const barFrom = Math.round(fps * 1.2);
+        const barTo = Math.min(maxLag - 1, Math.round(fps * 4.4));
+        let bar = 0;
+        let barTop = 0;
+
+        for (let lag = barFrom; lag <= barTo; lag++) {
+            barTop = Math.max(barTop, ac[lag]);
+        }
+
+        // The shortest that repeats about as well as the best, as two or
+        // three bars repeat as well as one
+        for (let lag = barFrom; lag <= barTo && bar === 0; lag++) {
+
+            if (ac[lag] >= ac[lag - 1] && ac[lag] >= ac[lag + 1] && ac[lag] >= barTop * 0.95) {
+                bar = lag;
+            }
+        }
+
+        const fitsBar = function (p, ways) {
+
+            if (!(bar > 0)) {
+                return false;
+            }
+
+            const parts = bar / p;
+
+            return (ways || TEMPO_BAR_PARTS).some(function (n) {
+                return Math.abs(parts - n) <= n * TEMPO_BAR_FIT;
+            });
+        };
+        let barred = 0;
+
+        if (bar > 0 && ac[bar] > acAt(best) && !fitsBar(best)) {
+
+            let other = 0;
+            let otherScore = -1;
+
+            for (let i = 1; i + 1 < tried.length; i++) {
+
+                const sc = scores[i];
+
+                if (sc >= scores[i - 1] && sc >= scores[i + 1] && sc > otherScore && sc >= bestScore * TEMPO_BAR_SHARE && fitsBar(tried[i])) {
+
+                    other = tried[i];
+                    otherScore = sc;
+                }
+            }
+
+            if (other > 0) {
+
+                barred = Math.round(fps * 60 / best * 10) / 10;
+                best = other;
             }
         }
 
@@ -29794,7 +29964,9 @@
         let moved = 0;
 
         // Over two beats, the thirds against halfway: as strong, three
-        // beats fit where two were counted
+        // beats fit where two were counted. Not when the beat found splits
+        // the bar evenly into two, four or eight, as a syncopated rhythm's
+        // hits three sixteenths apart look like thirds
         const two = thirdsOf(best * 2, env);
         const twoDeep = thirdsOf(best * 2, deepEnv);
         const thirds = two.half > 0 ? two.thirds / two.half : 0;
@@ -29820,7 +29992,7 @@
 
             best = best * 2;
             moved = -1;
-        } else if (fasterTo <= TEMPO_MAX && thirds >= thirdsShare && thirdsDeep >= thirdsDeepShare) {
+        } else if (fasterTo <= TEMPO_MAX && thirds >= thirdsShare && thirdsDeep >= thirdsDeepShare && !fitsBar(best, [2, 4, 8])) {
 
             best = best * 2 / 3;
             moved = 3;
@@ -29903,7 +30075,9 @@
             deep: Math.round(deepHalf * 100) / 100,
             thirds: Math.round(thirds * 100) / 100,
             thirdsDeep: Math.round(thirdsDeep * 100) / 100,
-            hinted: hinted
+            hinted: hinted,
+            barred: barred,
+            bar: bar > 0 ? Math.round(bar / fps * 100) / 100 : 0
         };
     }
 
@@ -30100,7 +30274,7 @@
         const r = await detectTempo(data, buffer.sampleRate, murekaBpm(song));
 
         detectedBpm.set(id, r ? { bpm: r.bpm, sure: r.sure, first: r.first, moved: r.moved, half: r.half, halfDouble: r.halfDouble,
-            hinted: r.hinted, deep: r.deep, thirds: r.thirds, thirdsDeep: r.thirdsDeep, v: TEMPO_VERSION }
+            hinted: r.hinted, deep: r.deep, thirds: r.thirds, thirdsDeep: r.thirdsDeep, barred: r.barred || 0, bar: r.bar || 0, v: TEMPO_VERSION }
             : { bpm: 0, sure: 0, first: 0, moved: 0, half: 0, halfDouble: 0, hinted: "", deep: 0, thirds: 0, thirdsDeep: 0, v: TEMPO_VERSION });
         saveDetectedBpmSoon();
         noteTempo(song, r, Date.now() - t0);
@@ -30172,9 +30346,11 @@
         const pct = function (v) {
             return Math.round((Number(v) || 0) * 100) + " %";
         };
-        const lean = t.hinted === "kept" ? ", Mureka's tempo near it, so kept"
+        const barText = t.barred > 0 ? ", " + t.barred + " BPM scored a little better but does not divide the bar of "
+            + t.bar + " s" : "";
+        const lean = barText + (t.hinted === "kept" ? ", Mureka's tempo near it, so kept"
             : t.hinted === "thirds" ? ", Mureka's tempo near three beats in two"
-            : t.hinted === "up" ? ", Mureka's tempo near its double" : t.hinted === "down" ? ", Mureka's tempo near its half" : "";
+            : t.hinted === "up" ? ", Mureka's tempo near its double" : t.hinted === "down" ? ", Mureka's tempo near its half" : "");
 
         if (t.moved === 1) {
             return "first found " + t.first + ", doubled: the starts halfway between beats were " + pct(t.half)
@@ -35646,6 +35822,7 @@
                     id: String(song.song_id),
                     title: title,
                     pending: true,
+                    sending: isSendingSong(song),
                     setId: e.setId || "",
                     setColor: e.setColor || "",
                     setSong: e.setUnder === true,
@@ -43033,7 +43210,7 @@
         numEl.appendChild(ring);
         titleEl.textContent = (song.title || "").trim() || "Untitled";
         titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.45";
-        stateEl.textContent = pendingPlay.has(String(song.song_id))
+        stateEl.textContent = isSendingSong(song) ? "Asked of Mureka" : pendingPlay.has(String(song.song_id))
             ? (pendingPlay.get(String(song.song_id)) === "after" ? "Plays next when ready" : "Plays when ready") : "Generating";
         stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap;opacity:0.7";
 
@@ -59002,11 +59179,89 @@
             + ": " + (body.title || "untitled") + ", style " + body.prompt.content.length + " characters"
             + (body.lyrics !== undefined ? ", lyrics " + body.lyrics.length : ""));
 
-        const data = await createPost("/api/pgc/feed/generate", body, 60000);
-        const feed = data.feed || {};
-        const wait = Number(feed.wait_num) || 0;
-        const feedId = feed.feed_id !== undefined ? String(feed.feed_id) : "";
+        // Mureka may hold its answer a minute or more while the songs are
+        // already being made, so the first page of the library is watched
+        // meanwhile: a generation new since the request went out, of the
+        // title asked for, is taken as the answer, and Mureka's own comes
+        // in the background
+        const before = await createFeedIds();
+        const t0 = Date.now();
+        const sending = addSending(body.title || "");
+        const sent = createPost("/api/pgc/feed/generate", body, CREATE_GENERATE_WAIT_MS);
+        const watch = createWatchStarted(before, body.title || "", t0);
+        let feedId = "";
+        let wait = 0;
+        let early = false;
+
+        try {
+
+            const first = await Promise.race([
+                sent.then(function (data) {
+                    return { data: data };
+                }),
+                watch.promise.then(function (id) {
+                    return { feedId: id };
+                })
+            ]);
+
+            if (first.data) {
+
+                const feed = first.data.feed || {};
+
+                wait = Number(feed.wait_num) || 0;
+                feedId = feed.feed_id !== undefined ? String(feed.feed_id) : "";
+                dbgLog("Create", "Mureka answered after " + Math.round((Date.now() - t0) / 100) / 10 + " s" + (wait > 0 ? ", number " + wait + " in its line" : ""));
+            } else {
+
+                early = true;
+                feedId = first.feedId;
+                dbgLog("Create", "the songs showed in the library after " + Math.round((Date.now() - t0) / 100) / 10 + " s, generation " + feedId
+                    + ", before Mureka answered");
+                sent.then(function (data) {
+
+                    const feed = data.feed || {};
+
+                    dbgLog("Create", "Mureka answered after " + Math.round((Date.now() - t0) / 100) / 10 + " s"
+                        + (feed.wait_num ? ", number " + feed.wait_num + " in its line" : ""));
+                }, function (e) {
+                    dbgLog("Create", "Mureka's answer did not come, the songs are being made anyway: " + errText(e));
+                });
+            }
+        } catch (e) {
+
+            // No answer in time, but the songs may have come all the same
+            feedId = watch.found;
+
+            if (!feedId) {
+
+                watch.stop();
+                dropSending(sending);
+                throw e;
+            }
+
+            early = true;
+            dbgLog("Create", "Mureka did not answer, " + errText(e) + ", but the songs are being made, generation " + feedId);
+        } finally {
+            watch.stop();
+        }
+
         const set = d.setOn && d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
+
+        // The rows wait for the songs of this generation, or go now when
+        // Mureka named none
+        if (feedId) {
+
+            sendingIs(sending, feedId);
+
+            // Listed already
+            if (Array.from(pendingSongs.values()).some(function (e) {
+                return String(e.song.feed_id) === feedId;
+            })) {
+                dropSending(sending);
+            }
+        } else {
+            dropSending(sending);
+        }
 
         createRemember(feedId, d);
         createWatchNew();
@@ -59014,11 +59269,105 @@
         return {
             ok: true,
             feedId: feedId,
-            text: "Making two songs" + (body.title ? " of \"" + body.title + "\"" : "")
+            text: (early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? " of \"" + body.title + "\"" : "")
                 + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
                 + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
                 + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
         };
+    }
+
+    // How long Mureka's answer to making songs is waited for, and how
+    // often the library is looked at meanwhile
+    const CREATE_GENERATE_WAIT_MS = 180000;
+    const CREATE_GENERATE_LOOK_MS = 4000;
+
+    // The generations on the first page of the library now, by id, none
+    // when it cannot be read or another creator's songs are shown
+    async function createFeedIds() {
+
+        const ids = new Set();
+
+        if (creatorSource) {
+            return null;
+        }
+
+        try {
+
+            for (const s of extractSongs(await fetchPage(null))) {
+
+                if (s && s.feed_id !== undefined) {
+                    ids.add(String(s.feed_id));
+                }
+            }
+        } catch (e) {
+            return null;
+        }
+
+        return ids;
+    }
+
+    // The first page of the library looked at every few seconds for a
+    // generation not there before, of the title asked for when there is
+    // one. Its promise gives the generation's id; found keeps it too
+    function createWatchStarted(before, title, t0) {
+
+        const out = { found: "", stop: null, promise: null };
+        let timer = 0;
+        let stopped = !before;
+
+        out.stop = function () {
+
+            stopped = true;
+            clearTimeout(timer);
+        };
+        out.promise = new Promise(function (resolve) {
+
+            if (stopped) {
+                return;
+            }
+
+            const look = async function () {
+
+                if (stopped) {
+                    return;
+                }
+
+                try {
+
+                    for (const s of extractSongs(await fetchPage(null))) {
+
+                        const id = s && s.feed_id !== undefined ? String(s.feed_id) : "";
+
+                        if (!id || before.has(id) || (title && String(s.title || "").trim() !== title.trim())) {
+                            continue;
+                        }
+
+                        out.found = id;
+
+                        if (!stopped) {
+                            resolve(id);
+                        }
+
+                        // Shown as being made at once, in place of the rows
+                        if (!isUsableSong(s)) {
+                            notePending(s);
+                        }
+
+                        return;
+                    }
+                } catch (e) {
+                    // Looked at again in a moment
+                }
+
+                if (!stopped && Date.now() - t0 < CREATE_GENERATE_WAIT_MS) {
+                    timer = setTimeout(look, CREATE_GENERATE_LOOK_MS);
+                }
+            };
+
+            timer = setTimeout(look, CREATE_GENERATE_LOOK_MS);
+        });
+
+        return out;
     }
 
     // ---- Easy: Mureka's agent ----
@@ -59288,6 +59637,14 @@
     // ready and the second after it. Played next, both after the playing
     // song
     function createGrant(songs) {
+
+        // Rows shown for a generation give way once its songs are listed
+        for (const s of songs) {
+
+            if (sendingSongs.length > 0 && s && s.feed_id !== undefined) {
+                dropSending(0, String(s.feed_id));
+            }
+        }
 
         for (const w of createWishes.slice()) {
 
@@ -79915,7 +80272,8 @@
         }
 
         if (time) {
-            time.textContent = song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
+            time.textContent = song.sending ? "Asked of Mureka"
+                : song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
         }
 
         // Nothing to like before it exists
@@ -79926,6 +80284,13 @@
         const tap = function (ev) {
 
             ev.preventDefault();
+
+            // Not listed by Mureka yet, nothing to ask for until it is
+            if (song.sending) {
+
+                toast("Mureka has not listed these songs yet, they show here as soon as it does", "ok");
+                return;
+            }
 
             // Asked for already: the other way, or not played at all, for a
             // tap that went wrong

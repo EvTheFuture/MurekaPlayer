@@ -14933,7 +14933,8 @@
         }
 
         if (time) {
-            time.textContent = song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
+            time.textContent = song.sending ? "Asked of Mureka"
+                : song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
         }
 
         // Nothing to like before it exists
@@ -14944,6 +14945,13 @@
         const tap = function (ev) {
 
             ev.preventDefault();
+
+            // Not listed by Mureka yet, nothing to ask for until it is
+            if (song.sending) {
+
+                toast("Mureka has not listed these songs yet, they show here as soon as it does", "ok");
+                return;
+            }
 
             // Asked for already: the other way, or not played at all, for a
             // tap that went wrong

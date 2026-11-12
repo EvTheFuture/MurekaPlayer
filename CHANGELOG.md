@@ -621,6 +621,31 @@ In development.
   what it says show in the form's line, its songs are played and put in
   a set as chosen, and the socket closes when the agent is done or after
   twenty minutes.
+- **The tempo of syncopated songs.** A rhythm with hits three and five
+  sixteenths apart repeats almost as well at five sixteenths as at the
+  beat, and a song at 130 BPM came out at 103. The tempo worked out now
+  looks at the bar, the shortest spacing between 1.2 and 4.4 s at which
+  the song repeats about as well as at its best: another beat that
+  divides it into 2, 3, 4, 6 or 8 and scores nearly as well takes over
+  from one that does not, and three beats are not taken where two were
+  counted when the beat splits the bar into 2, 4 or 8. The debug log
+  says when the bar decided it, and every song's tempo is worked out
+  again as it comes up.
+- **Songs made while Mureka keeps its answer.** Mureka can hold its
+  answer to making songs for a minute or more while the songs are
+  already being made, and after 60 s the player gave up and said it
+  failed. The first page of the library is now looked at every 4 s
+  meanwhile: a generation new since the request went out, of the title
+  asked for, counts as the answer, the form closes and the play and set
+  choices follow it, while Mureka's own answer, waited for up to three
+  minutes, comes in the background. The debug log says how long each
+  took and Mureka's place in line.
+- **Rows for songs asked of Mureka.** As Mureka's own page does, two
+  rows named as asked show at the top of the list, on the phone and in
+  the web view, as soon as Create sends the request, marked Asked of
+  Mureka. The real songs take their place as Mureka lists them; the rows
+  go if the request fails, and after six minutes at most. A tap on one
+  says Mureka has not listed the songs yet.
 
 ### Build
 
