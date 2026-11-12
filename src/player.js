@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.89";
+    const VERSION = "2.0.1.90";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -83474,8 +83474,12 @@
 
         const active = document.activeElement;
 
-        // An open drop-down, or a field being typed in, is not drawn over
-        if (active && /^(SELECT|INPUT|TEXTAREA)$/.test(active.tagName) && $("panelBody").contains(active)) {
+        // An open drop-down, or a field being typed in, is not drawn over. A
+        // slider keeps the focus once let go, and is not typed in: one under
+        // the finger holds the drawing back by itself
+        const typed = active && /^(SELECT|INPUT|TEXTAREA)$/.test(active.tagName) && active.type !== "range";
+
+        if (typed && $("panelBody").contains(active)) {
 
             selectHeldItems = items;
             return;
@@ -84175,6 +84179,9 @@
             eqMoving = false;
             shown.textContent = words();
             panelAction("hset", { id: node.id, value: slider.value });
+
+            // What the phone made of it, a volume for one, takes it a moment
+            setTimeout(loadPanel, 500);
         });
 
         head.className = "pSliderHead";

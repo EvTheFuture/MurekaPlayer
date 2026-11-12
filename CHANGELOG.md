@@ -736,6 +736,13 @@ In development.
   own, in line with the other settings' names, the value at the right of
   it, and the slider the whole width under it. Before, the name sat
   further left than the others.
+- **The web view's settings follow the phone after a slider is moved.**
+  A slider keeps the focus once let go, and the page was not drawn again
+  while a field in it had the focus, so after Volume now or Bass cut was
+  moved nothing on the page followed the phone any more, the step and
+  mixer under Volume now among it, until something else was tapped. A
+  slider no longer holds the drawing back once let go, and the page is
+  read again half a second after, when the phone has the result.
 
 ### Build
 
