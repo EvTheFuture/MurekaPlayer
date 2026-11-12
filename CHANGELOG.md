@@ -701,6 +701,15 @@ In development.
   title, lyrics and style go in the form. New song in the line about the
   chat then goes to the form with them, to make a new song from the
   style by hand, instead of a blank wish.
+- **Max volume as a speaker connects.** Each Bluetooth speaker under
+  Sound, Speakers has a switch, off at first, and a slider from 5 to
+  100%. With the switch on, the app lowers the volume to that level when
+  the speaker connects, if it is higher; a lower volume is left as it
+  is. It checks 1.5 and 4 seconds after the speaker becomes the output,
+  as Android puts back the speaker's own volume a moment after it
+  connects, and it works with More volume steps too. A speaker already
+  playing when the app starts keeps its volume. It needs this version of
+  the app.
 
 ### Build
 

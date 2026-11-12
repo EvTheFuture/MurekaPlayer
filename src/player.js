@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.86";
+    const VERSION = "2.0.1.87";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13507,7 +13507,9 @@
                     nightOff: NIGHT_ON_CONNECT.some(function (c) {
                         return c.value === d.nightOff;
                     }) ? d.nightOff : "keep",
-                    stepDb: cleanStepDb(d.stepDb)
+                    stepDb: cleanStepDb(d.stepDb),
+                    capOn: d.capOn === true,
+                    capPct: cleanCapPct(d.capPct)
                 };
             }
         }
@@ -13537,6 +13539,15 @@
         return isFinite(n) && n > 0 ? Math.round(Math.min(30, Math.max(0.5, n)) * 2) / 2 : 0;
     }
 
+    // The highest volume in percent a speaker may start at, 50 when not
+    // set yet
+    function cleanCapPct(v) {
+
+        const n = Math.round(Number(v));
+
+        return isFinite(n) && n >= 5 ? Math.min(100, n) : 50;
+    }
+
     // The step sizes set by hand, to the app, which evens out the volume
     // between the phone's steps by the one of the speaker in use. A
     // speaker without its own takes this device's
@@ -13548,16 +13559,22 @@
 
         const s = sound();
         const devices = {};
+        const caps = {};
 
         for (const a of Object.keys(s.devices)) {
 
             if (s.devices[a].stepDb > 0) {
                 devices[a] = s.devices[a].stepDb;
             }
+
+            // The highest volume as it connects, for the speakers it is on for
+            if (s.devices[a].capOn) {
+                caps[a] = s.devices[a].capPct;
+            }
         }
 
         try {
-            window.MurekaHost.volumeStepSizes(JSON.stringify({ fallback: s.fallback.stepDb || 0, devices: devices }));
+            window.MurekaHost.volumeStepSizes(JSON.stringify({ fallback: s.fallback.stepDb || 0, devices: devices, caps: caps }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
         }
@@ -48901,6 +48918,12 @@
 
             const stepsOffered = isApkHost() && !!(window.MurekaHost && window.MurekaHost.volumeStepSizes);
 
+            const capsOffered = stepsOffered && typeof window.MurekaHost.connectMaxOffered === "function";
+
+            if (capsOffered) {
+                soundBox.appendChild(makeHint("Max volume as it connects lowers a speaker's volume to the level set when it connects, if it is higher. A lower volume is left as it is."));
+            }
+
             if (stepsOffered) {
                 soundBox.appendChild(makeHint("Volume step size is for More steps in the web view's volume popup. A Bluetooth speaker turns its sound down by its own curve, not always by what the phone says. If the sound jumps up just past one of the phone's steps, make it bigger, if it drops, smaller."));
             }
@@ -48952,9 +48975,86 @@
                     })));
                 }
 
+                if (!phone && capsOffered) {
+                    capRows(get, set);
+                }
+
                 if (stepsOffered) {
                     stepRow(get, set, phone);
                 }
+            };
+
+            // The highest volume a speaker starts at as it connects: a
+            // switch, off at first, and a slider shown while it is on
+            const capRows = function (get, set) {
+
+                const pct = function () {
+                    return cleanCapPct(get("capPct"));
+                };
+                const row = document.createElement("div");
+                const top = document.createElement("div");
+                const name = document.createElement("span");
+                const value = document.createElement("span");
+                const slider = document.createElement("input");
+                const paint = function () {
+
+                    row.style.display = get("capOn") === true ? "flex" : "none";
+                    value.textContent = pct() + "%";
+
+                    if (document.activeElement !== slider) {
+                        slider.value = String(pct());
+                    }
+                };
+                const take = function (keep) {
+
+                    set("capPct", cleanCapPct(slider.value));
+                    value.textContent = pct() + "%";
+
+                    if (keep) {
+
+                        saveSettings();
+                        pushStepSizes();
+                    }
+                };
+
+                soundBox.appendChild(makeBoolRow("Max volume as it connects", function () {
+                    return get("capOn") === true;
+                }, function (v) {
+
+                    set("capOn", v);
+
+                    // Turned on, the level shown is the one used
+                    if (v) {
+                        set("capPct", pct());
+                    }
+
+                    pushStepSizes();
+                    paint();
+                }));
+
+                row.style.cssText = "flex-direction:column;gap:6px";
+                top.style.cssText = "display:flex;justify-content:space-between;gap:8px";
+                name.textContent = "Max volume when connecting";
+                value.style.cssText = "font-variant-numeric:tabular-nums;color:#48e1eb";
+                slider.type = "range";
+                slider.min = "5";
+                slider.max = "100";
+                slider.step = "5";
+                slider.setAttribute("aria-label", "Max volume when connecting, %");
+                slider.style.cssText = "width:100%;margin:0;accent-color:#48e1eb";
+                slider.addEventListener("input", function () {
+                    take(false);
+                });
+                slider.addEventListener("change", function () {
+                    take(true);
+                });
+                top.appendChild(name);
+                top.appendChild(value);
+                row.appendChild(top);
+                row.appendChild(slider);
+                soundBox.appendChild(row);
+                paint();
+                settingsRefreshers.push(paint);
             };
 
             // The size of one of the phone's volume steps for the speaker:
@@ -49029,7 +49129,7 @@
                     const all = sound().devices;
 
                     if (!all[d.address]) {
-                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep", stepDb: 0 };
+                        all[d.address] = { name: String(d.name || d.address), day: "", night: "", nightOff: "keep", stepDb: 0, capOn: false, capPct: 50 };
                     }
 
                     all[d.address][k] = v;

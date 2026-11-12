@@ -105,6 +105,25 @@ final class SysVolume {
     private static String outKey = null;
     private static final float HAND_MAX_DB = 30;
 
+    // The highest volume in percent a Bluetooth speaker may start at, set
+    // for each speaker by its address in the player's sound profiles. As
+    // it connects a volume above it is lowered to it, one below is left
+    // alone. The output last seen, null before the first look, so a
+    // speaker already playing when the app starts keeps its volume
+    private static final Map<String, Integer> CAP_BY_ADDRESS = new HashMap<>();
+    private static String seenKey = null;
+
+    // Android puts back the volume a speaker had a moment after it
+    // connects, so the volume is checked a little later, and once more
+    private static final long CAP_FIRST_MS = 1500;
+    private static final long CAP_AGAIN_MS = 4000;
+    private static final Runnable CAP_CHECK = new Runnable() {
+        @Override
+        public void run() {
+            capVolume();
+        }
+    };
+
     private static final Runnable CHECK = new Runnable() {
 
         @Override
@@ -162,6 +181,8 @@ final class SysVolume {
     static void stop() {
 
         MAIN.removeCallbacks(CHECK);
+        MAIN.removeCallbacks(CAP_CHECK);
+        seenKey = null;
 
         if (appContext != null && watcher != null) {
 
@@ -413,6 +434,7 @@ final class SysVolume {
     private static void readStepSizes(String json) {
 
         HAND_BY_ADDRESS.clear();
+        CAP_BY_ADDRESS.clear();
         handFallback = 0;
 
         try {
@@ -431,6 +453,23 @@ final class SysVolume {
                     String a = keys.next();
 
                     HAND_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), cleanStep(devices.optDouble(a, 0)));
+                }
+            }
+
+            JSONObject caps = o.optJSONObject("caps");
+
+            if (caps != null) {
+
+                Iterator<String> keys = caps.keys();
+
+                while (keys.hasNext()) {
+
+                    String a = keys.next();
+                    int pct = caps.optInt(a, 0);
+
+                    if (pct > 0 && pct <= 100) {
+                        CAP_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), pct);
+                    }
                 }
             }
         } catch (JSONException e) {
@@ -477,6 +516,8 @@ final class SysVolume {
 
         String key = outputKey();
 
+        watchConnect(key);
+
         if (key.equals(outKey)) {
             return false;
         }
@@ -494,6 +535,77 @@ final class SysVolume {
         }
 
         return true;
+    }
+
+    // A speaker with a highest volume set has just become the output: its
+    // volume checked once Android has put it back
+    private static void watchConnect(String key) {
+
+        if (key.equals(seenKey)) {
+            return;
+        }
+
+        String was = seenKey;
+
+        seenKey = key;
+        MAIN.removeCallbacks(CAP_CHECK);
+
+        if (was == null || !key.startsWith("bt:") || !CAP_BY_ADDRESS.containsKey(key.substring(3))) {
+            return;
+        }
+
+        Hub.note("Volume", "a speaker with a highest volume of " + CAP_BY_ADDRESS.get(key.substring(3)) + "% connected");
+        MAIN.postDelayed(CAP_CHECK, CAP_FIRST_MS);
+        MAIN.postDelayed(CAP_CHECK, CAP_AGAIN_MS);
+    }
+
+    // The volume of the speaker in use lowered to its highest, when above
+    private static void capVolume() {
+
+        if (audio == null) {
+            return;
+        }
+
+        try {
+
+            // What the volume is now, with more steps following a step
+            // Android put back
+            read();
+
+            String key = outputKey();
+            Integer cap = key.startsWith("bt:") ? CAP_BY_ADDRESS.get(key.substring(3)) : null;
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            if (cap == null || max <= 0) {
+                return;
+            }
+
+            if (fineOn && finePct >= 0) {
+
+                if (finePct > cap) {
+
+                    Hub.note("Volume", "lowered from " + Math.round(finePct) + "% to " + cap + "%, the speaker's highest as it connects");
+                    finePct = cap;
+                    applyFine();
+                }
+
+                return;
+            }
+
+            int cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+
+            // The step at or under the highest, never silent
+            int want = Math.max(1, (int) Math.floor(cap * max / 100f + 0.0001f));
+
+            if (cur > want) {
+
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, want, 0);
+                Hub.note("Volume", "lowered from step " + cur + " to " + want + " of " + max + ", the speaker's highest of " + cap + "% as it connects");
+                Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+            }
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, so leave it as it was
+        }
     }
 
     private static void keepFine() {

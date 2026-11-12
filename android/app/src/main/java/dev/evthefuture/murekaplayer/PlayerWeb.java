@@ -1142,6 +1142,13 @@ final class PlayerWeb {
             }
         }
 
+        // Whether the app lowers a speaker's volume to the highest set for
+        // it as it connects, the highest sent with the step sizes
+        @JavascriptInterface
+        public boolean connectMaxOffered() {
+            return onMureka;
+        }
+
         // More steps as they are, for the stats, as JSON
         @JavascriptInterface
         public String fineVolumeInfo() {
