@@ -3266,14 +3266,30 @@
 
     @media (max-width: 700px) {
 
-        #menuItems,
-        #actionItems {
+        #menuItems {
             grid-template-columns: 1fr;
         }
 
         /* One column has no row to finish */
         .menuSpacer {
             display: none;
+        }
+    }
+
+    /* The actions keep two columns on a phone, their names are short */
+    @media (max-width: 700px) {
+
+        #actionItems .menuItem {
+            gap: 0.6em;
+            padding: 0 8px;
+            font-size: 16px;
+        }
+    }
+
+    @media (max-width: 360px) {
+
+        #actionItems {
+            grid-template-columns: 1fr;
         }
     }
 
@@ -3301,13 +3317,39 @@
         text-overflow: ellipsis;
     }
 
-    .actionsSong {
-        margin-top: 22px;
+    /* The heading of a group in the actions, small over its choices with
+       a thin line under it, across both columns */
+    .actionsGroup {
+        grid-column: 1 / -1;
+        margin: 14px 0 2px;
+        padding: 0 6px 6px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.8em;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
     }
 
-    .actionsSong .loadRow {
-        justify-content: flex-start;
-        padding: 0;
+    .actionsGroup:first-child {
+        margin-top: 0;
+    }
+
+    /* The playing song, one wide row into its own menu */
+    .menuItem.actionsSong {
+        grid-column: 1 / -1;
+        margin: 0;
+        padding: 0 14px;
+        border-bottom: none;
+        color: var(--accent);
+    }
+
+    .menuItem.actionsSong span {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
     }
 
     /* Copy and paste at the foot of the actions, buttons side by side */
@@ -3315,9 +3357,7 @@
         grid-column: 1 / -1;
         display: flex;
         gap: 8px;
-        margin-top: 14px;
-        padding-top: 12px;
-        border-top: 1px solid var(--line);
+        margin-top: 4px;
     }
 
     .copyTile {
@@ -30399,38 +30439,59 @@
         }
     });
 
-    // The phone's action menu, the parts that make sense from here: load,
-    // rescan, clear, cache all, and a screen off cover for this screen
+    // The phone's action menu in groups: the playing song first, as one
+    // way into its own menu, then the library, the songs and Create, the
+    // screen, and copy and paste
     function drawActions() {
 
         const box = $("actionItems");
         const s = state || {};
+        const close = function () {
+            $("actionsPop").style.display = "none";
+        };
+        const group = function (name) {
+
+            const h = document.createElement("div");
+
+            h.className = "actionsGroup";
+            h.textContent = name;
+            box.appendChild(h);
+        };
 
         box.textContent = "";
+
+        // The playing song's own menu, with its stars and choices
+        if (s.id) {
+
+            group("Playing song");
+
+            const song = menuItem("play", s.title || "The playing song", function () {
+
+                close();
+                openSongMenu(s.id);
+            }, "actionsSong");
+
+            song.appendChild(icon("chevronRight"));
+            box.appendChild(song);
+        }
+
+        group("Library");
 
         box.appendChild(menuItem("refresh", s.loading ? "Loading" : "Load", function () {
 
             send("refresh", { queue: queueInView() });
-            $("actionsPop").style.display = "none";
+            close();
         }));
 
         box.appendChild(menuItem("refresh", "Rescan", function () {
 
             send("rescan");
-            $("actionsPop").style.display = "none";
+            close();
         }));
-
-        box.appendChild(menuItem("trash", "Clear", function () {
-
-            $("actionsPop").style.display = "none";
-            askConfirm("Clear the song list on the phone? It is loaded again on the next Load.", "Clear", true, function () {
-                send("clearCache");
-            });
-        }, "danger"));
 
         box.appendChild(menuItem("cache", s.caching ? "Stop caching" : "Cache all", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
 
             if (s.caching) {
 
@@ -30443,39 +30504,57 @@
             });
         }, "accent"));
 
+        box.appendChild(menuItem("trash", "Clear", function () {
+
+            close();
+            askConfirm("Clear the song list on the phone? It is loaded again on the next Load.", "Clear", true, function () {
+                send("clearCache");
+            });
+        }, "danger"));
+
+        group("Songs");
+
         box.appendChild(menuItem("filter", "Playing from", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
             openFrom();
         }));
 
         box.appendChild(menuItem("playlists", "Playlists", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
             openPlPop();
         }));
 
         box.appendChild(menuItem("person", "Creators", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
             showPanel("creators");
         }));
 
+        box.appendChild(menuItem("create", "Create songs", function () {
+
+            close();
+            openCreatePop();
+        }, "accent"));
+
+        group("Screen");
+
         box.appendChild(menuItem("moon", s.nightOn ? "Night mode off" : "Night mode", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
             send("night");
         }, s.nightOn ? "accent" : ""));
 
         box.appendChild(menuItem("moon", "Screen off", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
             showBlackout();
         }));
 
         box.appendChild(menuItem("settings", "Screen off in this browser", function () {
 
-            $("actionsPop").style.display = "none";
+            close();
             openScreenSaver();
         }));
 
@@ -30483,7 +30562,7 @@
 
             box.appendChild(menuItem("fullscreen", fullscreenOn() ? "Leave fullscreen" : "Fullscreen", function () {
 
-                $("actionsPop").style.display = "none";
+                close();
                 $("fullBtn").click();
             }));
         }
@@ -30494,7 +30573,7 @@
 
             box.appendChild(menuItem(inPage ? "phone" : "mureka", inPage ? "Mobile player" : "Mureka page", function () {
 
-                $("actionsPop").style.display = "none";
+                close();
                 window.MurekaApp.showMureka();
             }));
         }
@@ -30503,20 +30582,22 @@
         // itself, so its copy and send live here
         if (debugOn) {
 
+            group("Debug");
+
             box.appendChild(menuItem("info", "Copy debug log", function () {
 
-                $("actionsPop").style.display = "none";
+                close();
                 copyDebugLog();
             }));
 
             box.appendChild(menuItem("download", "Send debug log to the phone", function () {
 
-                $("actionsPop").style.display = "none";
+                close();
                 sendDebugLog();
             }));
         }
 
-        // Copy and paste at the very foot, below the playing song's choices
+        // Copy and paste at the very foot
         const tiles = document.createElement("div");
         const tile = function (iconName, label, fn) {
 
@@ -30530,12 +30611,14 @@
             b.appendChild(text);
             b.addEventListener("click", function () {
 
-                $("actionsPop").style.display = "none";
+                close();
                 fn();
             });
 
             return b;
         };
+
+        group("Copy and import");
 
         // Song tweaks and the play queue as the short line, with what goes
         // along chosen first, as in the player. The library as its file
@@ -30552,37 +30635,6 @@
         tiles.appendChild(tile("paste", "Import", pasteImportHere));
         box.appendChild(tiles);
         fetchExports();
-
-        // The long press choices for the playing song, under its title
-        if (!s.id) {
-            return;
-        }
-
-        const song = document.createElement("div");
-
-        song.className = "actionsSong";
-        song.appendChild(loadingNode("Loading"));
-        box.insertBefore(song, tiles);
-
-        fetchJson("/menu?id=" + esc(s.id)).then(function (m) {
-
-            if (!m || !m.id || !song.isConnected) {
-                return;
-            }
-
-            song.textContent = m.title;
-
-            // The copy row waits outside while the song's choices go in under
-            // its title, then goes back to the foot after them
-            tiles.remove();
-            songMenuItems(m, box, function () {
-                $("actionsPop").style.display = "none";
-            }, true);
-            box.appendChild(tiles);
-            tidyMenuLines(box);
-        }).catch(function () {
-            song.remove();
-        });
     }
 
     // The exports fetched as the actions open, so a tap on Copy copies at

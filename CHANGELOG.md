@@ -688,6 +688,13 @@ In development.
   such a song puts them in the form as well, under With lyrics or
   Instrumental, while Easy mode goes on in its chat, so another song can
   be made from them by hand.
+- **The web view's Actions in groups.** Actions is laid out as the
+  phone's menu, under small headings: the playing song, Library (Load,
+  Rescan, Cache all, Clear), Songs (Playing from, Playlists, Creators
+  and Create songs, new here), Screen, and Copy and import. The playing
+  song's many choices no longer fill the bottom of Actions: its title is
+  one row that opens the song's own menu, with its stars. On a phone
+  Actions keeps two columns.
 
 ### Build
 
