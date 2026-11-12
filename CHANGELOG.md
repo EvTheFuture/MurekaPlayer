@@ -682,6 +682,12 @@ In development.
   and in the web view, sends the wish starting with "Instrumental ". The
   box then holds 13 characters less, 1987, so the message stays within
   Mureka's 2000; a longer wish is cut when the switch is turned on.
+- **The agent's style and lyrics to start from.** When Mureka's agent
+  makes songs, the style, lyrics, title and voice it asks Mureka for are
+  kept with the songs, for the latest 100 generations. Use in Create on
+  such a song puts them in the form as well, under With lyrics or
+  Instrumental, while Easy mode goes on in its chat, so another song can
+  be made from them by hand.
 
 ### Build
 

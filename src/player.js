@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.83";
+    const VERSION = "2.0.1.84";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -59533,14 +59533,19 @@
     const CREATE_EASY_CHATS_KEY = "mureka_easy_chats_v1";
     const CREATE_EASY_CHATS_MAX = 200;
 
-    // The chats Easy mode songs were made in, by generation, the newest
-    // last. Songs made on Mureka's own page are not in it
-    function loadEasyChats() {
+    // What the agent asked for, by generation. Lyrics take room, so
+    // fewer are kept
+    const CREATE_EASY_ARGS_KEY = "mureka_easy_made_v1";
+    const CREATE_EASY_ARGS_MAX = 100;
+
+    // What Easy mode keeps by generation, the newest last. Songs made on
+    // Mureka's own page are not in it
+    function loadEasy(key) {
 
         let raw = null;
 
         try {
-            raw = JSON.parse(localStorage.getItem(CREATE_EASY_CHATS_KEY) || "null");
+            raw = JSON.parse(localStorage.getItem(key) || "null");
         } catch (e) {
             raw = null;
         }
@@ -59548,42 +59553,71 @@
         return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     }
 
-    function rememberEasyChat(feedId, chat) {
+    function keepEasy(key, max, feedId, value) {
 
-        const clean = createCleanEasyChat(chat);
-
-        if (!feedId || !clean) {
+        if (!feedId || !value) {
             return;
         }
 
-        const all = loadEasyChats();
+        const all = loadEasy(key);
 
         delete all[feedId];
-        all[feedId] = clean;
+        all[feedId] = value;
 
         const ids = Object.keys(all);
 
         // Only the latest are kept, the oldest go first
-        for (let i = 0; i < ids.length - CREATE_EASY_CHATS_MAX; i++) {
+        for (let i = 0; i < ids.length - max; i++) {
             delete all[ids[i]];
         }
 
         try {
-            localStorage.setItem(CREATE_EASY_CHATS_KEY, JSON.stringify(all));
+            localStorage.setItem(key, JSON.stringify(all));
         } catch (e) {
-            dbgLog("Create", "easy: the chat of generation " + feedId + " could not be kept, " + errText(e));
+            dbgLog("Create", "easy: what generation " + feedId + " was made from could not be kept, " + errText(e));
         }
+    }
+
+    function rememberEasyChat(feedId, chat) {
+        keepEasy(CREATE_EASY_CHATS_KEY, CREATE_EASY_CHATS_MAX, feedId, createCleanEasyChat(chat));
+    }
+
+    function easyFeedOf(song) {
+        return song && song.feed_id !== undefined && song.feed_id !== null ? String(song.feed_id) : "";
     }
 
     // The chat a song was made in, null when it was not made in Easy
     // mode here
     function easyChatOf(song) {
 
-        if (!song || song.feed_id === undefined || song.feed_id === null) {
-            return null;
-        }
+        const id = easyFeedOf(song);
 
-        return createCleanEasyChat(loadEasyChats()[String(song.feed_id)]);
+        return id ? createCleanEasyChat(loadEasy(CREATE_EASY_CHATS_KEY)[id]) : null;
+    }
+
+    // The style, lyrics and title the agent made a song from
+    function createCleanEasyArgs(a, tool) {
+
+        const x = a && typeof a === "object" ? a : {};
+        const gender = String(x.gender || "").toLowerCase();
+
+        return {
+            instrumental: /instrumental/.test(String(tool || "")) || x.instrumental === true,
+            title: createText(x.title, CREATE_TITLE_MAX),
+            style: createText(x.prompt !== undefined ? x.prompt : x.style, CREATE_STYLE_MAX),
+            lyrics: createText(x.lyrics, CREATE_LYRICS_MAX),
+            voice: gender === "male" || gender === "female" ? gender : ""
+        };
+    }
+
+    function easyArgsOf(song) {
+
+        const id = easyFeedOf(song);
+        const raw = id ? loadEasy(CREATE_EASY_ARGS_KEY)[id] : null;
+
+        return raw && typeof raw === "object" ? createCleanEasyArgs({
+            title: raw.title, prompt: raw.style, lyrics: raw.lyrics, gender: raw.voice, instrumental: raw.instrumental === true
+        }, "") : null;
     }
 
     // Whether Stop was pressed on what Create is doing now
@@ -59618,6 +59652,7 @@
             let accepted = false;
             let done = false;
             let reply = "";
+            let made = null;
             let seq = 0;
             let runId = "";
             const feeds = new Set();
@@ -59788,6 +59823,16 @@
                     dbgLog("Create", "easy: the agent says " + reply.slice(0, 300));
                 }
 
+                // What the agent asks Mureka to make, its style, lyrics and
+                // title, kept with the songs to start another song from
+                if (kind === "tool_call.started" && /^music\.generate/.test(String(pay.tool || "")) && pay.arguments && typeof pay.arguments === "object") {
+
+                    made = createCleanEasyArgs(pay.arguments, String(pay.tool));
+                    dbgLog("Create", "easy: the agent asks " + pay.tool + " for \"" + made.title + "\", style "
+                        + String(pay.arguments.prompt || "").length + " characters, lyrics " + made.lyrics.length
+                        + (made.voice ? ", " + made.voice + " voice" : "") + ", fields: " + Object.keys(pay.arguments).join(", ").slice(0, 200));
+                }
+
                 // The songs being made, by their generation, so the play
                 // and set wishes find them
                 const choices = Array.isArray(pay.choices) ? pay.choices
@@ -59812,6 +59857,10 @@
 
                         createEasyTitled(sessionId, title);
                         rememberEasyChat(feedId, chat);
+
+                        if (made) {
+                            keepEasy(CREATE_EASY_ARGS_KEY, CREATE_EASY_ARGS_MAX, feedId, made);
+                        }
                         createRemember(feedId, d);
                         createWatchNew();
                     }
@@ -60177,9 +60226,34 @@
                 chat.title = String(song.title || "").slice(0, 120);
             }
 
-            dbgLog("Create", "easy: from generation " + song.feed_id + ", going on in the chat about " + (chat.title || "the last wish"));
-            changeCreateDraft({ kind: "easy", easyChat: chat, easyText: "" });
-            setCreateNote("From \"" + (song.title || "the song") + "\", made in Easy mode: the next wish goes on in its chat");
+            // What the agent made it from fills the other tabs, to make
+            // another song from it by hand
+            const made = easyArgsOf(song);
+            const changes = { kind: "easy", easyChat: chat, easyText: "" };
+
+            if (made) {
+
+                Object.assign(changes, {
+                    title: made.title || String(song.title || "").slice(0, CREATE_TITLE_MAX),
+                    lyrics: made.lyrics,
+                    style: made.style,
+                    stylePromptId: "",
+                    stylePromptText: "",
+                    remix: null,
+                    remixName: "",
+                    remixStyle: ""
+                });
+
+                if (made.voice) {
+                    changes.voice = made.voice;
+                }
+            }
+
+            dbgLog("Create", "easy: from generation " + song.feed_id + ", going on in the chat about " + (chat.title || "the last wish")
+                + (made ? ", the agent's style and lyrics in the form" : ", what the agent made it from is not known"));
+            changeCreateDraft(changes);
+            setCreateNote("From \"" + (song.title || "the song") + "\", made in Easy mode: the next wish goes on in its chat"
+                + (made ? ". The agent's style" + (made.lyrics ? " and lyrics are" : " is") + " under " + (made.instrumental ? "Instrumental" : "With lyrics") : ""));
             showToast("Easy mode goes on in the song's chat", true, function () {
                 changeCreateDraft(before);
             });
