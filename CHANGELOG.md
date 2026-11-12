@@ -668,6 +668,11 @@ In development.
   forgets the chat so the next wish starts a new one. The chat is kept
   with the draft, so it is still there after a reload or a restart, on
   the phone and in the web view.
+- **An Easy mode song remembers its chat.** Each song made in Easy mode
+  keeps the chat it was made in, for the latest 200 generations. Use in
+  Create on such a song opens Easy mode in that chat, marked as going on
+  in it, so the next wish tells the agent what to change. Other songs
+  fill in the form as before.
 
 ### Build
 
