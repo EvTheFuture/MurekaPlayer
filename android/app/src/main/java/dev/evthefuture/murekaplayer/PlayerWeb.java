@@ -1165,6 +1165,16 @@ final class PlayerWeb {
             }
         }
 
+        // The training of the gaps between the phone's steps, on with its
+        // step, gap and quieter amount, or off, as JSON
+        @JavascriptInterface
+        public void volumeTrain(String json) {
+
+            if (onMureka) {
+                MAIN.post(() -> SysVolume.train(json));
+            }
+        }
+
         // More steps at a level in percent, from the volume to try in the
         // sound profiles
         @JavascriptInterface

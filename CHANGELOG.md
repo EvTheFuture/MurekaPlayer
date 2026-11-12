@@ -751,6 +751,25 @@ In development.
   later the app took that for the volume buttons and moved the level
   down to it: below 6% to Off, and from 7% back to 6%. A step waiting
   now goes in as planned, and Volume now sends each place once.
+- **Train the volume steps by ear.** A speaker does not get louder by
+  the same amount at each of the phone's steps, so one step size made
+  More volume steps dip or jump at some steps. Under Volume now, Train
+  the step sizes is a guide, on the phone and in the web view: the song
+  playing is heard at a step, turned down by a gap, and at the step
+  below in turn, a second each, with a short fade at each change, and -
+  or + sets the gap until the change can no longer be heard. It goes
+  through a few steps from quiet to loud, the two lowest and some spread
+  up to the top, with Back, Skip and Next, and ends with every step's
+  gap, set or drawn on a straight line from those set, to save. Each
+  speaker and this device keep their own, and a training goes before the
+  step size set by hand. Between two steps the player lowers the sound
+  by the trained gap of that step, evenly in dB. While training, the
+  compressor of the sound profile is off, as it would make the gap heard
+  too small.
+- **Quieter, for training at night.** A red slider in the guide turns
+  the sound down in the player only, on both sides of the comparison
+  alike, so the gaps found stay the same. It is apart from the volume
+  and gone once the training ends.
 
 ### Build
 

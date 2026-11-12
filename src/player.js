@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.91";
+    const VERSION = "2.0.1.92";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -765,6 +765,12 @@
     // Every settings row registers a redraw here, so opening the panel can put
     // all of them back in step with what is actually stored
     const settingsRefreshers = [];
+
+    // The gaps between the phone's volume steps being trained by ear, and
+    // how the settings end a training left open
+    let volTraining = false;
+    let volTrainStop = null;
+
     let viewMenuOpen = false;
 
     // True while a load run is in progress
@@ -13508,7 +13514,8 @@
                         return c.value === d.nightOff;
                     }) ? d.nightOff : "keep",
                     stepDb: cleanStepDb(d.stepDb),
-                    capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct)
+                    capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct),
+                    gaps: cleanGaps(d.gaps)
                 };
             }
         }
@@ -13521,7 +13528,8 @@
             fallback: {
                 day: has(fb.day) ? fb.day : firstOf(false),
                 night: has(fb.night) ? fb.night : firstOf(true),
-                stepDb: cleanStepDb(fb.stepDb)
+                stepDb: cleanStepDb(fb.stepDb),
+                gaps: cleanGaps(fb.gaps)
             },
             devices: devices
         };
@@ -13536,6 +13544,29 @@
         const n = Number(v);
 
         return isFinite(n) && n > 0 ? Math.round(Math.min(30, Math.max(0.5, n)) * 2) / 2 : 0;
+    }
+
+    // The gaps in dB to the step below, trained by ear, by the phone's
+    // step: only the steps trained, the app draws those between
+    function cleanGaps(g) {
+
+        const out = {};
+
+        if (!g || typeof g !== "object") {
+            return out;
+        }
+
+        for (const k of Object.keys(g)) {
+
+            const step = Math.round(Number(k));
+            const db = cleanStepDb(g[k]);
+
+            if (step >= 1 && step <= 200 && db > 0) {
+                out[String(step)] = db;
+            }
+        }
+
+        return out;
     }
 
     // The highest volume in percent a speaker may start at, 0 for none
@@ -13558,11 +13589,17 @@
         const s = sound();
         const devices = {};
         const caps = {};
+        const gaps = {};
 
         for (const a of Object.keys(s.devices)) {
 
             if (s.devices[a].stepDb > 0) {
                 devices[a] = s.devices[a].stepDb;
+            }
+
+            // The gaps trained by ear, before the step size
+            if (Object.keys(s.devices[a].gaps || {}).length) {
+                gaps[a] = s.devices[a].gaps;
             }
 
             // The highest volume as it connects, for the speakers it is on for
@@ -13572,7 +13609,13 @@
         }
 
         try {
-            window.MurekaHost.volumeStepSizes(JSON.stringify({ fallback: s.fallback.stepDb || 0, devices: devices, caps: caps }));
+            window.MurekaHost.volumeStepSizes(JSON.stringify({
+                fallback: s.fallback.stepDb || 0,
+                devices: devices,
+                caps: caps,
+                gaps: gaps,
+                fallbackGaps: s.fallback.gaps || {}
+            }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
         }
@@ -14184,7 +14227,10 @@
 
         const a = activeSound();
         const p = sound().on && a.profile ? a.profile : cleanProfile({}, 0);
-        const c = p.comp ? SOUND_COMP.find(function (x) {
+
+        // No compressor while the volume steps are trained: it turns the
+        // louder of the two down more, and the gap heard would be too small
+        const c = p.comp && !volTraining ? SOUND_COMP.find(function (x) {
             return x.value === p.compLevel;
         }) : null;
         const t = fxCtx.currentTime;
@@ -18192,6 +18238,7 @@
     // anywhere else and while they are off
     let fineGain = 1;
 
+
     function volScale() {
         return hostCarAudio ? 1 : fineGain;
     }
@@ -18202,9 +18249,17 @@
 
         const v = Math.max(0, Math.min(1, Number(g)));
 
+        clearInterval(fineFadeTimer);
+
         if (!isFinite(v) || v === fineGain) {
             return;
         }
+
+        putFineGain(v);
+        dbgLog("Audio", "more volume steps: the player's own sound at " + Math.round(v * 100) + "%");
+    }
+
+    function putFineGain(v) {
 
         const level = audio ? fadeLevel() : 1;
 
@@ -18213,8 +18268,43 @@
         if (audio && !iosGain && !hostCarAudio) {
             audio.volume = Math.max(0, Math.min(1, level * volScale()));
         }
+    }
 
-        dbgLog("Audio", "more volume steps: the player's own sound at " + Math.round(v * 100) + "%");
+    // The player's share moved over a moment, for the training of the
+    // volume steps, so a step changed while the sound is away is not heard
+    // as a click. Not written to the log, it comes every second
+    let fineFadeTimer = 0;
+
+    function fadeFineGain(arg) {
+
+        const a = arg && typeof arg === "object" ? arg : {};
+        const to = Math.max(0, Math.min(1, Number(a.g)));
+        const ms = Math.max(0, Math.min(2000, Number(a.ms) || 0));
+        const from = fineGain;
+        const ticks = Math.max(1, Math.round(ms / 20));
+        let i = 0;
+
+        clearInterval(fineFadeTimer);
+
+        if (!isFinite(to)) {
+            return;
+        }
+
+        if (ticks <= 1) {
+
+            putFineGain(to);
+            return;
+        }
+
+        fineFadeTimer = setInterval(function () {
+
+            i++;
+            putFineGain(from + (to - from) * Math.min(1, i / ticks));
+
+            if (i >= ticks) {
+                clearInterval(fineFadeTimer);
+            }
+        }, 20);
     }
 
     // The level a fade moves, the gain where there is one. In steps of the
@@ -36157,6 +36247,7 @@
                     step: input.step,
                     unit: el.dataset.hostUnit || "",
                     off: el.dataset.hostOff === "1",
+                    warn: el.dataset.hostWarn === "1",
                     shown: hostText(el.children[el.children.length - 1])
                 });
             }
@@ -36699,6 +36790,14 @@
         if (cmd === "startHotspotHelper") {
 
             startHotspotHelper(true);
+            return;
+        }
+
+        // The player's share faded for the training of the volume steps,
+        // too often for the log
+        if (cmd === "fineGainFade") {
+
+            fadeFineGain(arg);
             return;
         }
 
@@ -48656,6 +48755,11 @@
         const soundBox = document.createElement("div");
         let soundEditId = "";
         let soundTryTimer = 0;
+
+        // The training of the volume steps going on, and the quieter amount
+        // last used for it
+        let volTrain = null;
+        let volTrainQuiet = 0;
         let soundKey = "";
 
         soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
@@ -48928,6 +49032,17 @@
             const capsOffered = stepsOffered && typeof window.MurekaHost.connectMaxOffered === "function";
             const tryOffered = stepsOffered && typeof window.MurekaHost.fineVolumeAt === "function";
             const tryPaints = [];
+            const trainPaints = [];
+            const paintTrainAll = function () {
+
+                // Each speaker's volume to try with its training, so the
+                // volume to try steps aside at once
+                for (const fn of tryPaints.length ? tryPaints : trainPaints) {
+                    fn();
+                }
+
+                publishHostSoon();
+            };
 
             if (capsOffered) {
                 soundBox.appendChild(makeHint("Max volume as it connects lowers a speaker's volume to the level set when it connects, if it is higher. A lower volume is left as it is. Off at the left end."));
@@ -49055,11 +49170,444 @@
                 soundBox.appendChild(row);
             };
 
+            // The steps the training goes through, quiet to loud: the two
+            // lowest, where speakers differ the most, and a few spread up
+            // to the top
+            const trainSteps = function (max) {
+
+                const out = [];
+
+                for (const k of [2, 3, Math.round(max * 0.3), Math.round(max * 0.5), Math.round(max * 0.75), max]) {
+
+                    const step = Math.max(2, Math.min(max, k));
+
+                    if (out.indexOf(step) < 0) {
+                        out.push(step);
+                    }
+                }
+
+                return out.sort(function (a, b) {
+                    return a - b;
+                });
+            };
+
+            // The gap of a step from the steps trained, on a straight line
+            // between them and the nearest beyond them, as the app draws it
+            const gapFrom = function (gaps, step) {
+
+                const keys = Object.keys(gaps || {}).map(Number).filter(function (k) {
+                    return gaps[k] > 0;
+                }).sort(function (a, b) {
+                    return a - b;
+                });
+
+                if (!keys.length) {
+                    return 0;
+                }
+
+                if (step <= keys[0]) {
+                    return gaps[keys[0]];
+                }
+
+                if (step >= keys[keys.length - 1]) {
+                    return gaps[keys[keys.length - 1]];
+                }
+
+                for (let i = 1; i < keys.length; i++) {
+
+                    if (step <= keys[i]) {
+
+                        const t = (step - keys[i - 1]) / (keys[i] - keys[i - 1]);
+
+                        return gaps[keys[i - 1]] + (gaps[keys[i]] - gaps[keys[i - 1]]) * t;
+                    }
+                }
+
+                return gaps[keys[keys.length - 1]];
+            };
+
+            // The training of the gaps between the phone's steps by ear, a
+            // page at a time under the volume to try: what it is, then each
+            // step against the one below it, then what came out, to keep
+            const trainRows = function (box, phone, address, get, set) {
+
+                const key = phone ? "" : String(address || "");
+                const ui = {};
+                const mineNow = function () {
+                    return volTrain && volTrain.key === key;
+                };
+                const screen = function () {
+
+                    if (!mineNow()) {
+                        return "";
+                    }
+
+                    if (volTrain.i < 0) {
+                        return "intro";
+                    }
+
+                    return volTrain.i >= volTrain.steps.length ? "done" : "step";
+                };
+                const stepNow = function () {
+                    return volTrain.steps[volTrain.i];
+                };
+
+                // The gap shown for a step: tried already, else drawn from
+                // the steps trained, else the step size in use
+                const gapShown = function (step) {
+
+                    if (volTrain.gaps[step] > 0) {
+                        return volTrain.gaps[step];
+                    }
+
+                    const drawn = gapFrom(volTrain.gaps, step);
+
+                    if (drawn > 0) {
+                        return Math.round(drawn * 2) / 2;
+                    }
+
+                    const own = Number(get("stepDb")) || 0;
+
+                    if (own > 0) {
+                        return own;
+                    }
+
+                    if (!phone && sound().fallback.stepDb > 0) {
+                        return sound().fallback.stepDb;
+                    }
+
+                    return Math.round(phoneStepDb(!phone) * 2) / 2;
+                };
+
+                // The app told what to play: the step against the one
+                // below on a step's page, otherwise nothing
+                const send = function () {
+
+                    const on = screen() === "step";
+
+                    volTraining = on;
+                    applySound();
+
+                    try {
+                        window.MurekaHost.volumeTrain(JSON.stringify(on
+                            ? { on: true, step: stepNow(), gap: gapShown(stepNow()), quiet: volTrain.quiet }
+                            : { on: false }));
+                    } catch (e) {
+                        dbgLog("Sound", "volume training not taken: " + errText(e));
+                    }
+                };
+                const go = function (i) {
+
+                    volTrain.i = i;
+                    send();
+                    paintTrainAll();
+                };
+
+                ui.start = makeButton("Train the step sizes", "#333", "#fff", function () {
+
+                    const max = Number(fineInfo().max) || 0;
+
+                    if (max < 2) {
+                        return;
+                    }
+
+                    if (volTrainStop) {
+                        volTrainStop();
+                    }
+
+                    volTrain = {
+                        key: key,
+                        max: max,
+                        steps: trainSteps(max),
+                        i: -1,
+                        gaps: Object.assign({}, get("gaps") || {}),
+                        quiet: volTrainQuiet
+                    };
+                    volTrainStop = function () {
+
+                        const was = volTrain;
+
+                        volTrain = null;
+                        volTrainStop = null;
+                        volTraining = false;
+                        applySound();
+
+                        if (was) {
+
+                            try {
+                                window.MurekaHost.volumeTrain(JSON.stringify({ on: false }));
+                            } catch (e) {
+                                dbgLog("Sound", "volume training not ended: " + errText(e));
+                            }
+                        }
+
+                        paintTrainAll();
+                    };
+                    paintTrainAll();
+                });
+                ui.forget = makeButton("Forget the training", "#333", "#fff", function () {
+
+                    set("gaps", {});
+                    saveSettings();
+                    pushStepSizes();
+                    paintTrainAll();
+                });
+                ui.wiz = document.createElement("div");
+                ui.title = document.createElement("div");
+                ui.text = makeHint("");
+                ui.now = document.createElement("div");
+                ui.list = document.createElement("div");
+                ui.list.style.cssText = "display:flex;flex-direction:column;gap:2px";
+                ui.gap = makeStepperRow("Gap to the step below, dB", function () {
+                    return screen() === "step" ? gapShown(stepNow()) : 0;
+                }, function (v) {
+
+                    if (screen() !== "step") {
+                        return;
+                    }
+
+                    volTrain.gaps[stepNow()] = cleanStepDb(v);
+                    send();
+                    paintTrain();
+                }, 0.5, 30, 0.5);
+
+                // Quieter: the player alone turns both sides down alike,
+                // for training at night. Red, as it is not the volume
+                ui.quiet = document.createElement("div");
+                ui.quietName = document.createElement("span");
+                ui.quietSlider = document.createElement("input");
+                ui.quietShown = document.createElement("span");
+                ui.quietHint = makeHint("Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.");
+                ui.quiet.dataset.hostSlider = "1";
+                ui.quiet.dataset.hostUnit = " dB";
+                ui.quiet.dataset.hostOff = "1";
+                ui.quiet.dataset.hostWarn = "1";
+                ui.quiet.style.cssText = "display:flex;align-items:center;gap:10px";
+                ui.quietName.textContent = "Quieter";
+                ui.quietName.style.cssText = "flex:0 0 auto;color:#ff6b6b;font-weight:600";
+                ui.quietSlider.type = "range";
+                ui.quietSlider.min = "0";
+                ui.quietSlider.max = "30";
+                ui.quietSlider.step = "1";
+                ui.quietSlider.setAttribute("aria-label", "Quieter, dB");
+                ui.quietSlider.style.cssText = "flex:1;min-width:0;accent-color:#ff6b6b";
+                ui.quietShown.style.cssText = "flex:0 0 4em;text-align:right;font-variant-numeric:tabular-nums;color:#ff6b6b";
+                ui.quietHint.style.color = "#e8a0a0";
+
+                const takeQuiet = function (now) {
+
+                    if (!mineNow()) {
+                        return;
+                    }
+
+                    volTrain.quiet = Math.max(0, Math.min(30, Math.round(Number(ui.quietSlider.value) || 0)));
+                    volTrainQuiet = volTrain.quiet;
+                    ui.quietShown.textContent = volTrain.quiet > 0 ? volTrain.quiet + " dB" : "Off";
+
+                    if (now) {
+                        send();
+                    }
+                };
+
+                ui.quietSlider.addEventListener("input", function () {
+                    takeQuiet(false);
+                });
+                ui.quietSlider.addEventListener("change", function () {
+                    takeQuiet(true);
+                });
+                ui.quiet.appendChild(ui.quietName);
+                ui.quiet.appendChild(ui.quietSlider);
+                ui.quiet.appendChild(ui.quietShown);
+
+                ui.buttons = document.createElement("div");
+                ui.buttons.style.cssText = "display:flex;flex-wrap:wrap;gap:8px";
+
+                const button = function (label, fn, strong) {
+
+                    const b = makeButton(label, strong ? "#48e1eb" : "#333", strong ? "#000" : "#fff", fn);
+
+                    b.style.padding = "6px 14px";
+                    ui.buttons.appendChild(b);
+
+                    return b;
+                };
+
+                ui.go = button("Start", function () {
+                    go(0);
+                }, true);
+                ui.back = button("Back", function () {
+                    go(volTrain.i - 1);
+                });
+                ui.skip = button("Skip", function () {
+
+                    delete volTrain.gaps[stepNow()];
+                    go(volTrain.i + 1);
+                });
+                ui.next = button("Next", function () {
+
+                    volTrain.gaps[stepNow()] = gapShown(stepNow());
+                    go(volTrain.i + 1);
+                }, true);
+                ui.save = button("Save", function () {
+
+                    set("gaps", cleanGaps(volTrain.gaps));
+                    saveSettings();
+                    pushStepSizes();
+
+                    if (volTrainStop) {
+                        volTrainStop();
+                    }
+
+                    setTimeout(function () {
+
+                        if (typeof publishHostSoon === "function") {
+                            publishHostSoon();
+                        }
+                    }, 0);
+                }, true);
+                ui.again = button("Train again", function () {
+                    go(0);
+                });
+                ui.cancel = button("Cancel", function () {
+
+                    if (volTrainStop) {
+                        volTrainStop();
+                    }
+                });
+
+                ui.wiz.style.cssText = "display:none;flex-direction:column;gap:10px;padding:12px;border-radius:10px;"
+                    + "background:rgba(72,225,235,0.07);border:1px solid rgba(72,225,235,0.35)";
+                ui.title.style.cssText = "font-weight:600;color:#48e1eb";
+                ui.now.style.cssText = "font-variant-numeric:tabular-nums;color:#dff";
+                ui.wiz.appendChild(ui.title);
+                ui.wiz.appendChild(ui.text);
+                ui.wiz.appendChild(ui.now);
+                ui.wiz.appendChild(ui.list);
+                ui.wiz.appendChild(ui.gap);
+                ui.wiz.appendChild(ui.quiet);
+                ui.wiz.appendChild(ui.quietHint);
+                ui.wiz.appendChild(ui.buttons);
+                ui.start.style.alignSelf = "flex-start";
+                ui.start.style.padding = "6px 14px";
+                ui.forget.style.alignSelf = "flex-start";
+                ui.forget.style.padding = "6px 14px";
+                box.appendChild(ui.start);
+                box.appendChild(ui.forget);
+                box.appendChild(ui.wiz);
+
+                // Shown as it was laid out, a row as a row
+                const show = function (el, on) {
+                    el.style.display = on ? (el.dataset.shownAs || "") : "none";
+                };
+
+                ui.gap.dataset.shownAs = "flex";
+                ui.quiet.dataset.shownAs = "flex";
+                ui.list.dataset.shownAs = "flex";
+
+                const paintTrain = function () {
+
+                    const at = screen();
+                    const trained = Object.keys(get("gaps") || {}).length > 0;
+
+                    show(ui.start, !at);
+                    show(ui.forget, !at && trained);
+                    ui.wiz.style.display = at ? "flex" : "none";
+
+                    if (!at) {
+                        return;
+                    }
+
+                    const fine = fineInfo();
+                    const max = volTrain.max;
+
+                    show(ui.go, at === "intro");
+                    show(ui.back, at === "step");
+                    show(ui.skip, at === "step");
+                    show(ui.next, at === "step");
+                    show(ui.save, at === "done");
+                    show(ui.again, at === "done");
+                    show(ui.cancel, true);
+                    show(ui.gap, at === "step");
+                    show(ui.now, at === "step");
+                    show(ui.quiet, at !== "done");
+                    show(ui.quietHint, at !== "done");
+
+                    if (document.activeElement !== ui.quietSlider) {
+                        ui.quietSlider.value = String(volTrain.quiet);
+                    }
+
+                    // The gap of the step on its page, not typed in just now
+                    const gapField = ui.gap.querySelector("input");
+
+                    if (at === "step" && gapField && document.activeElement !== gapField) {
+                        gapField.value = String(gapShown(stepNow()));
+                    }
+
+                    ui.quietShown.textContent = volTrain.quiet > 0 ? volTrain.quiet + " dB" : "Off";
+                    show(ui.list, at === "done");
+
+                    if (at === "intro") {
+
+                        ui.title.textContent = "Train the volume steps";
+                        ui.text.textContent = "A speaker does not get louder by the same amount at each of the phone's steps. Here each step is set by ear. "
+                            + "The song playing is heard at a step and at the step below in turn, a second each, the step turned down by the player by a gap. "
+                            + "Press - or + until the change can no longer be heard, then Next. The steps go from quiet to loud: "
+                            + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
+                            + "Set Quieter first when others are asleep. While training, the compressor of the sound profile is off.";
+                    } else if (at === "step") {
+
+                        const k = stepNow();
+                        const t = fine.train;
+                        const playing = !!(audio && !audio.paused);
+
+                        ui.title.textContent = "Step " + k + " of " + max + " (" + (volTrain.i + 1) + " of " + volTrain.steps.length + ")";
+                        ui.text.textContent = "Step " + k + " turned down by the gap, and step " + (k - 1) + " as it is, in turn. "
+                            + "Too loud on step " + k + ": press +. Too quiet: press -. Next once they sound the same."
+                            + (playing ? "" : " Play a song to hear them.");
+                        ui.now.textContent = t && t.step === k
+                            ? (t.upper ? "Now: step " + k + ", turned down " + gapShown(k) + " dB" : "Now: step " + (k - 1))
+                            : "Not playing in turn now, - or + starts it again";
+                        ui.next.textContent = volTrain.i === volTrain.steps.length - 1 ? "Finish" : "Next";
+                    } else {
+
+                        const lines = [];
+
+                        for (let k = 2; k <= max; k++) {
+
+                            const own = volTrain.gaps[k] > 0;
+                            const v = own ? volTrain.gaps[k] : gapFrom(volTrain.gaps, k);
+
+                            lines.push("Step " + k + ": " + (v > 0 ? v.toFixed(1) + " dB" : "not set") + (own ? "" : ", drawn"));
+                        }
+
+                        ui.title.textContent = "Trained";
+                        ui.text.textContent = Object.keys(volTrain.gaps).length
+                            ? "The gap to the step below for each step, set by ear or drawn from those set. Save puts them to use."
+                            : "No step was set. Train again, or Cancel to keep things as they were.";
+                        ui.list.textContent = "";
+
+                        for (const line of Object.keys(volTrain.gaps).length ? lines : []) {
+
+                            const el = makeHint(line);
+
+                            el.style.fontVariantNumeric = "tabular-nums";
+                            ui.list.appendChild(el);
+                        }
+
+                        show(ui.save, Object.keys(volTrain.gaps).length > 0);
+                    }
+                };
+
+                trainPaints.push(paintTrain);
+
+                return paintTrain;
+            };
+
             // The volume of the speaker playing now in 100 steps, under its
             // step size, to hear the size while it is changed: the level,
             // and the phone's real step with its dB and the player's mixer
             // under it, as in the web view's volume popup
-            const tryRow = function (phone, address) {
+            const tryRow = function (phone, address, get, set) {
 
                 const box = document.createElement("div");
                 const row = document.createElement("div");
@@ -49068,6 +49616,7 @@
                 const shown = document.createElement("span");
                 const nums = makeHint("");
                 const off = makeHint("Turn on More volume steps to try the volume here.");
+                let paintTrain = null;
                 let sentAt = 0;
                 let sentValue = -1;
                 let later = 0;
@@ -49089,10 +49638,25 @@
                 const paint = function () {
 
                     const fine = fineInfo();
+                    const here = typeof fine.output === "string" && mine(fine);
 
-                    box.style.display = typeof fine.output === "string" && mine(fine) ? "flex" : "none";
-                    row.style.display = fine.on === true ? "flex" : "none";
-                    nums.style.display = fine.on === true ? "" : "none";
+                    // The music gone to another output: a training of this
+                    // one is over
+                    if (!here && volTrain && volTrain.key === (phone ? "" : String(address || "")) && volTrainStop) {
+                        volTrainStop();
+                    }
+
+                    // The volume to try out of the way while training
+                    const training = !!(volTrain && volTrain.key === (phone ? "" : String(address || "")));
+
+                    box.style.display = here ? "flex" : "none";
+                    row.style.display = fine.on === true && !training ? "flex" : "none";
+
+                    if (paintTrain) {
+                        paintTrain();
+                    }
+
+                    nums.style.display = fine.on === true && !training ? "" : "none";
                     off.style.display = fine.on === true ? "none" : "";
 
                     if (fine.on !== true) {
@@ -49168,6 +49732,9 @@
                 box.appendChild(row);
                 box.appendChild(nums);
                 box.appendChild(off);
+
+                paintTrain = trainRows(box, phone, address, get, set);
+
                 soundBox.appendChild(box);
                 paint();
                 settingsRefreshers.push(paint);
@@ -49210,8 +49777,13 @@
                 const field = stepper.querySelector("input");
                 const paint = function () {
 
-                    said.textContent = own() > 0 ? "Set by hand."
-                        : (!phone && sound().fallback.stepDb > 0 ? "Same as this device." : "As the phone says.");
+                    const trainedAt = Object.keys(get("gaps") || {}).map(Number).sort(function (a, b) {
+                        return a - b;
+                    });
+
+                    said.textContent = (own() > 0 ? "Set by hand."
+                        : (!phone && sound().fallback.stepDb > 0 ? "Same as this device." : "As the phone says."))
+                        + (trainedAt.length ? " Trained by ear at steps " + trainedAt.join(", ") + ", which goes before the step size." : "");
                     back.style.display = own() > 0 ? "" : "none";
 
                     if (field && document.activeElement !== field) {
@@ -49228,7 +49800,7 @@
                 soundBox.appendChild(back);
 
                 if (tryOffered) {
-                    tryRow(phone, address);
+                    tryRow(phone, address, get, set);
                 }
             };
 
@@ -54437,6 +55009,11 @@
 
     // Hide the settings overlay
     function closeSettings() {
+
+        // A training left open ends with the settings
+        if (volTrainStop) {
+            volTrainStop();
+        }
 
         if (settingsEl) {
             settingsOpen = false;
@@ -70389,6 +70966,18 @@
         color: var(--accent);
     }
 
+    /* A slider that is not what it looks like, the training's quieter
+       amount: red, its name too */
+    .pSlider.warn input {
+        accent-color: #ff6b6b;
+    }
+
+    .pSlider.warn .pSliderHead,
+    .pSlider.warn .pSliderVal {
+        color: #ff6b6b;
+        font-weight: 600;
+    }
+
     /* Turned on its side, top up, so it works the same in every browser */
     .pEqSlider {
         position: absolute;
@@ -84157,7 +84746,7 @@
             send("hset", { id: node.id, value: slider.value });
         };
 
-        row.className = "pSlider";
+        row.className = "pSlider" + (node.warn ? " warn" : "");
         name.textContent = node.label || "";
         slider.type = "range";
         slider.min = String(node.min);

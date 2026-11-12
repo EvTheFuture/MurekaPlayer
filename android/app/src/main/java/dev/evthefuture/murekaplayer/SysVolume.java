@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -104,6 +105,53 @@ final class SysVolume {
     private static float handDb = -1;
     private static String outKey = null;
     private static final float HAND_MAX_DB = 30;
+
+    // The gap in dB to the step below for each of the phone's steps, found
+    // by ear in the player's training, for each speaker by its address and
+    // for this phone and the speakers not trained. Only the steps trained
+    // are kept, those between drawn on a straight line from them, and
+    // beyond the first and the last the nearest is used. A speaker's own
+    // training goes before its step size set by hand, and this phone's
+    // before the step size for the speakers not set up. The ones for the
+    // output in use, null when it has none
+    private static final Map<String, TreeMap<Integer, Float>> GAPS_BY_ADDRESS = new HashMap<>();
+    private static TreeMap<Integer, Float> gapsFallback = new TreeMap<>();
+    private static TreeMap<Integer, Float> gaps = null;
+
+    // The training: the step trained and the one below it in turn, the
+    // step turned down by the player by the gap being tried, so the two
+    // sound the same once the gap is right. Both turned down alike by the
+    // quieter amount for training at night. A short fade at each change,
+    // the step put in while the sound is away, as the player's share is
+    // heard only once Bluetooth's buffer has played out
+    private static boolean training = false;
+    private static int trainStep = 2;
+    private static float trainGap = 3;
+    private static float trainQuiet = 0;
+    private static boolean trainUpper = false;
+    private static int trainBefore = -1;
+    private static long trainAskedAt = 0;
+    private static String trainKey = null;
+    private static final long TRAIN_HOLD_MS = 1200;
+    private static final long TRAIN_FADE_MS = 100;
+    private static final long TRAIN_WAIT_BT_MS = 300;
+    private static final long TRAIN_WAIT_MS = 80;
+
+    // Left on with nothing asked for a while, as a closed page cannot say
+    // so, the training ends by itself
+    private static final long TRAIN_IDLE_MS = 15 * 60 * 1000;
+    private static final Runnable TRAIN_OUT = new Runnable() {
+        @Override
+        public void run() {
+            trainOut();
+        }
+    };
+    private static final Runnable TRAIN_IN = new Runnable() {
+        @Override
+        public void run() {
+            trainIn();
+        }
+    };
 
     // The highest volume in percent a Bluetooth speaker may start at, set
     // for each speaker by its address in the player's sound profiles. As
@@ -182,6 +230,9 @@ final class SysVolume {
 
         MAIN.removeCallbacks(CHECK);
         MAIN.removeCallbacks(CAP_CHECK);
+        MAIN.removeCallbacks(TRAIN_OUT);
+        MAIN.removeCallbacks(TRAIN_IN);
+        training = false;
         seenKey = null;
 
         if (appContext != null && watcher != null) {
@@ -214,7 +265,7 @@ final class SysVolume {
             // Moved by the phone's buttons, or night mode: more steps go on
             // from that step, the player at its whole sound. Not while a
             // step of its own is still waiting to be put in
-            if (fineOn && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
+            if (fineOn && !training && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
 
                 fineStep = level;
                 finePct = stepPct(level, max);
@@ -225,7 +276,7 @@ final class SysVolume {
             }
 
             // Another output, with a step size of its own perhaps
-            if (moved && fineOn && max > 0) {
+            if (moved && fineOn && !training && max > 0) {
                 applyFine();
             }
 
@@ -338,6 +389,15 @@ final class SysVolume {
 
     // The step for the level, and the player's own sound for the rest
     private static void applyFine() {
+
+        // The training has the steps and the player's share to itself, the
+        // level asked for meanwhile goes in once it ends
+        if (training) {
+
+            keepFine();
+            Hub.setFine(finePct);
+            return;
+        }
 
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
 
@@ -454,6 +514,8 @@ final class SysVolume {
 
         HAND_BY_ADDRESS.clear();
         CAP_BY_ADDRESS.clear();
+        GAPS_BY_ADDRESS.clear();
+        gapsFallback = new TreeMap<>();
         handFallback = 0;
 
         try {
@@ -475,6 +537,25 @@ final class SysVolume {
                 }
             }
 
+            JSONObject trained = o.optJSONObject("gaps");
+
+            if (trained != null) {
+
+                Iterator<String> keys = trained.keys();
+
+                while (keys.hasNext()) {
+
+                    String a = keys.next();
+                    TreeMap<Integer, Float> one = readGaps(trained.optJSONObject(a));
+
+                    if (!one.isEmpty()) {
+                        GAPS_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), one);
+                    }
+                }
+            }
+
+            gapsFallback = readGaps(o.optJSONObject("fallbackGaps"));
+
             JSONObject caps = o.optJSONObject("caps");
 
             if (caps != null) {
@@ -494,6 +575,56 @@ final class SysVolume {
         } catch (JSONException e) {
             // Nothing readable, the curve for every output
         }
+    }
+
+    // The gaps of one output, by the step, as sent: each a step and its dB
+    private static TreeMap<Integer, Float> readGaps(JSONObject o) {
+
+        TreeMap<Integer, Float> out = new TreeMap<>();
+
+        if (o == null) {
+            return out;
+        }
+
+        Iterator<String> keys = o.keys();
+
+        while (keys.hasNext()) {
+
+            String k = keys.next();
+            float db = cleanStep(o.optDouble(k, 0));
+
+            try {
+
+                int step = Integer.parseInt(k);
+
+                if (step >= 1 && step <= 200 && db > 0) {
+                    out.put(step, db);
+                }
+            } catch (NumberFormatException e) {
+                // Not a step, left out
+            }
+        }
+
+        return out;
+    }
+
+    // The gap to the step below of a step, from the steps trained
+    private static float gapAt(int step) {
+
+        Map.Entry<Integer, Float> low = gaps.floorEntry(step);
+        Map.Entry<Integer, Float> high = gaps.ceilingEntry(step);
+
+        if (low == null) {
+            return high.getValue();
+        }
+
+        if (high == null || low.getKey().equals(high.getKey())) {
+            return low.getValue();
+        }
+
+        float t = (step - low.getKey()) / (float) (high.getKey() - low.getKey());
+
+        return low.getValue() + (high.getValue() - low.getValue()) * t;
     }
 
     private static float cleanStep(double db) {
@@ -541,16 +672,32 @@ final class SysVolume {
             return false;
         }
 
+        // Another output in the middle of training: the training is over.
+        // The step sizes sent again only make the output looked up anew
+        if (training && trainKey != null && !key.equals(trainKey)) {
+            MAIN.post(SysVolume::stopTrain);
+        }
+
         outKey = key;
 
         // A speaker set up in the player has its own, the others and this
-        // phone the fallback
-        Float own = key.startsWith("bt:") ? HAND_BY_ADDRESS.get(key.substring(3)) : null;
+        // phone the fallback. Trained gaps go first, then a step size set
+        // by hand, each the speaker's own before the fallback's
+        String address = key.startsWith("bt:") ? key.substring(3) : "";
+        Float own = address.isEmpty() ? null : HAND_BY_ADDRESS.get(address);
+        TreeMap<Integer, Float> ownGaps = address.isEmpty() ? null : GAPS_BY_ADDRESS.get(address);
 
-        handDb = own != null ? own : handFallback;
+        gaps = null;
+        handDb = -1;
 
-        if (handDb <= 0) {
-            handDb = -1;
+        if (ownGaps != null && !ownGaps.isEmpty()) {
+            gaps = ownGaps;
+        } else if (own != null && own > 0) {
+            handDb = own;
+        } else if (!gapsFallback.isEmpty()) {
+            gaps = gapsFallback;
+        } else if (handFallback > 0) {
+            handDb = handFallback;
         }
 
         return true;
@@ -592,7 +739,7 @@ final class SysVolume {
             read();
 
             String key = outputKey();
-            Integer cap = key.startsWith("bt:") ? CAP_BY_ADDRESS.get(key.substring(3)) : null;
+            Integer cap = key.startsWith("bt:") && !training ? CAP_BY_ADDRESS.get(key.substring(3)) : null;
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
 
             if (cap == null || max <= 0) {
@@ -622,6 +769,167 @@ final class SysVolume {
                 Hub.note("Volume", "lowered from step " + cur + " to " + want + " of " + max + ", the speaker's highest of " + cap + "% as it connects");
                 Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
             }
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, so leave it as it was
+        }
+    }
+
+    // The training on, its step, gap and quieter amount changed, or off,
+    // as JSON from the player: on, step, gap and quiet, in dB
+    static void train(String json) {
+
+        if (audio == null) {
+            return;
+        }
+
+        try {
+
+            JSONObject a = new JSONObject(json == null ? "{}" : json);
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            if (!a.optBoolean("on", false) || max < 2) {
+
+                stopTrain();
+                return;
+            }
+
+            int step = Math.max(2, Math.min(max, a.optInt("step", 2)));
+            float gap = (float) Math.max(0, Math.min(HAND_MAX_DB, a.optDouble("gap", 3)));
+            float quiet = (float) Math.max(0, Math.min(40, a.optDouble("quiet", 0)));
+            boolean fresh = !training || step != trainStep;
+
+            trainGap = gap;
+            trainQuiet = quiet;
+            trainAskedAt = System.currentTimeMillis();
+
+            if (!training) {
+
+                MAIN.removeCallbacks(STEP_LATER);
+                stepWaiting = -1;
+                trainBefore = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+                trainKey = outputKey();
+                training = true;
+                Hub.note("Volume", "training on, from step " + trainBefore + " of " + max);
+            }
+
+            trainStep = step;
+
+            // A new step starts with the step itself, a new gap or quieter
+            // amount is heard at once in the side playing
+            if (fresh) {
+
+                MAIN.removeCallbacks(TRAIN_OUT);
+                MAIN.removeCallbacks(TRAIN_IN);
+                trainUpper = false;
+                Hub.note("Volume", "training step " + step + " against " + (step - 1) + ", the gap " + gap + " dB, " + quiet + " dB quieter");
+                trainOut();
+            } else {
+                Hub.command("fineGainFade", trainFadeArg(trainUpper ? trainGain(true) : trainGain(false)));
+            }
+        } catch (JSONException | RuntimeException e) {
+            stopTrain();
+        }
+    }
+
+    // The player's share for a side: the step trained turned down by the
+    // gap, the one below as it is, both by the quieter amount
+    private static double trainGain(boolean upper) {
+        return Math.pow(10, -((upper ? trainGap : 0) + trainQuiet) / 20.0);
+    }
+
+    private static JSONObject trainFadeArg(double gain) {
+
+        JSONObject o = new JSONObject();
+
+        try {
+
+            o.put("g", gain);
+            o.put("ms", TRAIN_FADE_MS);
+        } catch (JSONException e) {
+            // Plain numbers always go in
+        }
+
+        return o;
+    }
+
+    // The sound faded away, the other side put in once it is gone
+    private static void trainOut() {
+
+        if (!training || audio == null) {
+            return;
+        }
+
+        if (System.currentTimeMillis() - trainAskedAt > TRAIN_IDLE_MS) {
+
+            stopTrain();
+            return;
+        }
+
+        int type = outputType();
+        boolean bluetooth = type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || type == AudioDeviceInfo.TYPE_BLE_HEADSET
+            || type == AudioDeviceInfo.TYPE_BLE_SPEAKER;
+
+        Hub.command("fineGainFade", trainFadeArg(0));
+        MAIN.postDelayed(TRAIN_IN, TRAIN_FADE_MS + (bluetooth ? TRAIN_WAIT_BT_MS : TRAIN_WAIT_MS));
+    }
+
+    // The other side: its step put in while nothing is heard, the sound
+    // faded back in at its share, and the next change after a while
+    private static void trainIn() {
+
+        if (!training || audio == null) {
+            return;
+        }
+
+        try {
+
+            trainUpper = !trainUpper;
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, trainUpper ? trainStep : trainStep - 1, 0);
+            Hub.command("fineGainFade", trainFadeArg(trainGain(trainUpper)));
+            Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, tried again next time
+        }
+
+        MAIN.postDelayed(TRAIN_OUT, TRAIN_HOLD_MS);
+    }
+
+    // The training over: the level as asked for put back, with more steps
+    // as they were, or the step from before it and the whole sound
+    static void stopTrain() {
+
+        MAIN.removeCallbacks(TRAIN_OUT);
+        MAIN.removeCallbacks(TRAIN_IN);
+
+        if (!training) {
+            return;
+        }
+
+        training = false;
+        Hub.note("Volume", "training off");
+
+        if (audio == null) {
+            return;
+        }
+
+        try {
+
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            if (fineOn && max > 0) {
+
+                // Put back from wherever the training left it
+                fineStep = -1;
+                applyFine();
+                return;
+            }
+
+            if (trainBefore >= 0) {
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, trainBefore, 0);
+            }
+
+            Hub.command("fineGain", 1.0);
+            Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
         } catch (RuntimeException e) {
             // Do not disturb can refuse the change, so leave it as it was
         }
@@ -715,6 +1023,19 @@ final class SysVolume {
                 }
 
                 o.put("handDb", handDb > 0 ? handDb : 0);
+            }
+
+            o.put("trained", gaps != null && !gaps.isEmpty());
+
+            if (training) {
+
+                JSONObject t = new JSONObject();
+
+                t.put("step", trainStep);
+                t.put("upper", trainUpper);
+                t.put("gap", trainGap);
+                t.put("quiet", trainQuiet);
+                o.put("train", t);
             }
 
             return o.toString();
@@ -902,6 +1223,18 @@ final class SysVolume {
     // The level of a step in dB: even steps of the size set by hand, else
     // the curve
     private static float stepDb(int index, int max, int type, boolean own) {
+
+        // Trained: the gaps of the steps above it, added up from the top
+        if (gaps != null && !gaps.isEmpty()) {
+
+            float db = 0;
+
+            for (int i = Math.max(1, index + 1); i <= max; i++) {
+                db -= gapAt(i);
+            }
+
+            return db;
+        }
 
         if (handDb > 0) {
             return -(max - index) * handDb;

@@ -4425,6 +4425,18 @@
         color: var(--accent);
     }
 
+    /* A slider that is not what it looks like, the training's quieter
+       amount: red, its name too */
+    .pSlider.warn input {
+        accent-color: #ff6b6b;
+    }
+
+    .pSlider.warn .pSliderHead,
+    .pSlider.warn .pSliderVal {
+        color: #ff6b6b;
+        font-weight: 600;
+    }
+
     /* Turned on its side, top up, so it works the same in every browser */
     .pEqSlider {
         position: absolute;
@@ -18193,7 +18205,7 @@
             send("hset", { id: node.id, value: slider.value });
         };
 
-        row.className = "pSlider";
+        row.className = "pSlider" + (node.warn ? " warn" : "");
         name.textContent = node.label || "";
         slider.type = "range";
         slider.min = String(node.min);
