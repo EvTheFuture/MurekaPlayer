@@ -1009,6 +1009,21 @@ In development.
   request, the state asked for each second among them. The head and the
   body now come through one buffer. Each header's name is read once and
   picked in one switch instead of up to nine comparisons per line.
+- **The song list is saved once for a burst of changes.** Each change,
+  such as a song marked played, made the whole list into text at once,
+  and a large list again a second later to pack it. Now a change only
+  marks the list, and it is written a second after the first change of a
+  burst, made into text once. Changes coming all the time are still
+  written every second. Hiding or closing the page, reading a list back
+  and switching to another feed's list write it at once.
+- **Packing a large list off the page's thread.** A list over 250 KB is
+  packed in a worker, made from the same packing code, so the player
+  does not stall while it packs. Where the page's rules refuse a worker
+  it is packed on the page as before, and when the page is hidden or
+  closed always at once on the page, as a worker may not finish then.
+- **Another tab's save is no longer written over.** Taking over a list
+  another tab saved first wrote this tab's waiting list over it. Now
+  the other tab's list is read as it arrived.
 
 ### Build
 

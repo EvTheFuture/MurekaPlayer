@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.114";
+    const VERSION = "2.0.1.115";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1429,7 +1429,10 @@
     // stay plain text
     const PACK_FROM = 250000;
     const PACK_MARK = "\u0001W1";
-    const PACK_DELAY_MS = 1000;
+
+    // A change to the song list is written this long after the first of a
+    // burst, so many changes close together are written once
+    const SAVE_DELAY_MS = 1000;
 
     // LZW over the text's UTF-8 bytes, 15 bit codes kept as one character
     // each. The codes are moved up past the control characters and stay
@@ -1439,9 +1442,20 @@
     const LZW_RESET = 256;
     const LZW_BASE = 0x20;
 
-    // A large list waiting to be packed and stored, see flushPackedSave
+    // A song list waiting to be written, its key and the list, see
+    // flushPackedSave
     let packedSave = null;
     let packedSaveTimer = 0;
+
+    // The worker that packs a large list away from the page's own thread,
+    // made the first time one is packed: undefined until then, null when
+    // the page may not make one. The lists given to it by key, the newest
+    // of each, and the number of the last written of each, so an answer
+    // that comes after a newer list was written is dropped
+    let packWorker = undefined;
+    let packSeq = 0;
+    const packWaiting = new Map();
+    const packWritten = new Map();
 
     let cache = loadCache();
 
@@ -3281,15 +3295,19 @@
         }), opts.signal);
     }
 
-    // Read the cache from localStorage, return an empty cache on failure
-    function loadCache() {
+    // Read the cache from localStorage, return an empty cache on failure.
+    // Given the stored text, as another tab wrote it, that is read instead,
+    // and nothing waiting here is written over it first
+    function loadCache(given) {
 
         let raw = null;
 
-        flushPackedSave();
+        if (typeof given !== "string") {
+            flushPackedSave(true);
+        }
 
         try {
-            raw = localStorage.getItem(feed().cacheKey);
+            raw = typeof given === "string" ? given : localStorage.getItem(feed().cacheKey);
 
             if (raw) {
 
@@ -3572,63 +3590,182 @@
         return new TextDecoder().decode(out.subarray(0, pos));
     }
 
-    // A large list waiting to be packed and stored, written when the page
-    // is hidden or closed too, and before any list is read back. Declared
-    // with the list itself
-    function flushPackedSave() {
+    // Write the song list waiting, made into text once. A large one is
+    // packed by the worker when there is one, else here. Asked to be done
+    // at once, as when the page is hidden or closed or a list is read back,
+    // it is packed here, and a list the worker still has is written too, as
+    // the page may be gone before the worker answers
+    function flushPackedSave(now) {
 
         clearTimeout(packedSaveTimer);
         packedSaveTimer = 0;
+
+        if (now === true) {
+            writeWaitingPacks();
+        }
 
         if (!packedSave) {
             return;
         }
 
         const job = packedSave;
+        const text = JSON.stringify(job.list);
+        const seq = ++packSeq;
 
         packedSave = null;
-        writeLibrary(job.key, packStored(JSON.stringify(job.list)));
-    }
 
-    // A save of the list as it is replaces one still waiting to be packed
-    function dropPackedSave(key) {
+        if (text.length < PACK_FROM) {
 
-        if (packedSave && packedSave.key === key) {
+            writeLibraryAt(job.key, seq, text);
+            return;
+        }
 
-            packedSave = null;
-            clearTimeout(packedSaveTimer);
-            packedSaveTimer = 0;
+        const worker = now === true ? null : packingWorker();
+
+        if (!worker) {
+
+            writeLibraryAt(job.key, seq, packStored(text));
+            return;
+        }
+
+        packWaiting.set(job.key, { seq: seq, text: text });
+
+        try {
+            worker.postMessage({ seq: seq, key: job.key, text: text });
+        } catch (e) {
+            packWorkerFailed();
         }
     }
 
-    window.addEventListener("pagehide", flushPackedSave);
+    // A list written unless a newer one of the same key was written already
+    function writeLibraryAt(key, seq, payload) {
+
+        if ((packWritten.get(key) || 0) > seq) {
+            return;
+        }
+
+        packWritten.set(key, seq);
+        writeLibrary(key, payload);
+    }
+
+    // The lists the worker has not answered for, packed and written here
+    function writeWaitingPacks() {
+
+        for (const [key, job] of Array.from(packWaiting.entries())) {
+
+            packWaiting.delete(key);
+            writeLibraryAt(key, job.seq, packStored(job.text));
+        }
+    }
+
+    // The worker, made from packStored itself and the constants it uses.
+    // A page whose rules refuse a worker made this way gets none, and the
+    // lists are packed on the page as before
+    function packingWorker() {
+
+        if (packWorker !== undefined) {
+            return packWorker;
+        }
+
+        packWorker = null;
+
+        if (typeof Worker !== "function" || typeof Blob !== "function") {
+            return null;
+        }
+
+        try {
+
+            const src = "\"use strict\";\n"
+                + "const PACK_FROM = " + PACK_FROM + ";\n"
+                + "const PACK_MARK = " + JSON.stringify(PACK_MARK) + ";\n"
+                + "const LZW_MAX = " + LZW_MAX + ";\n"
+                + "const LZW_RESET = " + LZW_RESET + ";\n"
+                + "const LZW_BASE = " + LZW_BASE + ";\n"
+                + packStored.toString() + "\n"
+                + "self.onmessage = function (ev) {\n"
+                + "    self.postMessage({ seq: ev.data.seq, key: ev.data.key, packed: packStored(ev.data.text) });\n"
+                + "};\n";
+            const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+            const worker = new Worker(url);
+
+            URL.revokeObjectURL(url);
+            worker.onmessage = function (ev) {
+
+                const d = ev.data || {};
+                const job = packWaiting.get(d.key);
+
+                // Only the answer for the newest list of that key
+                if (!job || job.seq !== d.seq || typeof d.packed !== "string") {
+                    return;
+                }
+
+                packWaiting.delete(d.key);
+                writeLibraryAt(d.key, d.seq, d.packed);
+            };
+            worker.onerror = function () {
+                packWorkerFailed();
+            };
+            packWorker = worker;
+            dbgLog("Storage", "large song lists are packed in a worker");
+        } catch (e) {
+
+            packWorker = null;
+            dbgLog("Storage", "no worker for packing here, packed on the page");
+        }
+
+        return packWorker;
+    }
+
+    // The worker could not be made or stopped: none from now on, and what
+    // it had is packed here
+    function packWorkerFailed() {
+
+        if (packWorker) {
+
+            try {
+                packWorker.terminate();
+            } catch (e) {
+                // Gone already
+            }
+        }
+
+        packWorker = null;
+        dbgLog("Storage", "the packing worker failed, packed on the page");
+        writeWaitingPacks();
+    }
+
+    window.addEventListener("pagehide", function () {
+        flushPackedSave(true);
+    });
     document.addEventListener("visibilitychange", function () {
 
         if (document.visibilityState === "hidden") {
-            flushPackedSave();
+            flushPackedSave(true);
         }
     });
 
-
-    // Persist the cache to localStorage. A large list is stored packed, a
-    // moment later so changes coming close together are packed once
+    // Persist the cache to localStorage, a moment later, once for a burst
+    // of changes. The wait is not pushed back by every change, so a list
+    // changing all the time is still written every SAVE_DELAY_MS. A change
+    // to another feed's list first writes the one waiting
     function saveCache() {
 
         exportsVersion += 1;
 
         const key = feed().cacheKey;
-        const text = JSON.stringify(cache);
 
-        if (text.length < PACK_FROM) {
-
-            dropPackedSave(key);
-            writeLibrary(key, text);
-            return;
+        if (packedSave && packedSave.key !== key) {
+            flushPackedSave(false);
         }
 
         packedSave = { key: key, list: cache };
-        clearTimeout(packedSaveTimer);
-        packedSaveTimer = setTimeout(flushPackedSave, PACK_DELAY_MS);
+
+        if (!packedSaveTimer) {
+
+            packedSaveTimer = setTimeout(function () {
+                flushPackedSave(false);
+            }, SAVE_DELAY_MS);
+        }
     }
 
     // Store a song list, as it is or packed. If storage is full, drop other
@@ -3716,7 +3853,7 @@
                 return;
             }
 
-            const other = loadCache();
+            const other = loadCache(ev.newValue);
 
             cache.songs = keepSongCopies(other.songs, cache.songs);
             cache.updated = other.updated;
@@ -51786,7 +51923,7 @@
 
         try {
 
-            flushPackedSave();
+            flushPackedSave(true);
 
             const raw = localStorage.getItem(OWN_FEED.cacheKey);
             const kept = raw ? JSON.parse(unpackStored(raw)) : null;
@@ -51843,6 +51980,11 @@
 
             return added.length;
         }
+
+        // Written now, and newer than anything the packing worker still has
+        // for that list, so a late answer of it does not come after
+        packWaiting.delete(OWN_FEED.cacheKey);
+        packWritten.set(OWN_FEED.cacheKey, ++packSeq);
 
         try {
             localStorage.setItem(OWN_FEED.cacheKey, packStored(JSON.stringify(merged)));
