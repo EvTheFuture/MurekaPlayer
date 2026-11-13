@@ -125,7 +125,7 @@
             input.max = String(max);
             input.step = "1";
             input.value = String(value);
-            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:#48e1eb";
+            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:" + ACCENT;
             shown.style.cssText = "flex:0 0 3.6em;text-align:right;font-variant-numeric:tabular-nums";
             shown.textContent = value + unit;
             input.addEventListener("input", function () {
@@ -208,7 +208,7 @@
             b.type = "button";
             b.textContent = label;
             b.style.cssText = "min-height:2.9em;padding:0 1.2em;border-radius:10px;border:none;cursor:pointer;font:inherit;"
-                + (accent ? "background:#48e1eb;color:#000" : "background:#3a3a42;color:#fff");
+                + (accent ? "background:" + ACCENT + ";color:#000" : "background:#3a3a42;color:#fff");
             b.addEventListener("click", function () {
                 close(keep);
             });

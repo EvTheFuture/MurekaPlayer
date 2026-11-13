@@ -589,13 +589,7 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
 
                         if (out != null) {
 
-                            byte[] buf = new byte[65536];
-                            int n;
-
-                            while ((n = in.read(buf)) > 0) {
-                                out.write(buf, 0, n);
-                            }
-
+                            Io.copy(in, out, -1);
                             ok = true;
                         }
                     }

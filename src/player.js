@@ -22,6 +22,20 @@
 (function () {
     "use strict";
 
+    // BEGIN SHARED palette
+    // Written by embed-webview.sh from src/shared/palette.js. Change that
+    // file and run make embed, never the lines up to END SHARED palette
+    // The player's colours, each in one place. ACCENT is the cyan of what
+    // is on, picked or in focus, ACCENT_RGB the same as numbers for
+    // rgba(), and DANGER the red of what deletes or warns. First in both
+    // files, so every part of them may use these from the start.
+    // Shared by the player and the web view's page, src/shared/palette.js,
+    // inlined into both by embed-webview.sh
+    const ACCENT = "#48e1eb";
+    const ACCENT_RGB = "72,225,235";
+    const DANGER = "#ff6b6b";
+    // END SHARED palette
+
     // Guard against the bookmarklet being tapped twice
     // If the player is already on the page, toggle it instead of building another
     if (window.__murekaPlayerLoaded) {
@@ -58,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.111";
+    const VERSION = "2.0.1.112";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -360,7 +374,7 @@
 
     // The song's progress on the waveform: a color as #rrggbb and how much
     // it shows, in percent. One up to the play head, and one past it
-    const PROGRESS_COLOR = "#47e0eb";
+    const PROGRESS_COLOR = ACCENT;
     const PROGRESS_ALPHA_DEFAULT = 100;
 
     // The progress past the play head once had a grey of its own. Now it
@@ -1638,13 +1652,13 @@
     function buildProgress() {
 
         progressEl = document.createElement("div");
-        progressEl.style.cssText = "display:none;margin-top:6px;color:#48e1eb;font-size:12px";
+        progressEl.style.cssText = "display:none;margin-top:6px;color:" + ACCENT + ";font-size:12px";
 
         const line = document.createElement("div");
         line.style.cssText = "display:flex;align-items:center;gap:7px;min-width:0";
 
         const ring = document.createElement("span");
-        ring.style.cssText = "flex:0 0 auto;width:10px;height:10px;border:2px solid rgba(72,225,235,0.3);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.9s linear infinite";
+        ring.style.cssText = "flex:0 0 auto;width:10px;height:10px;border:2px solid rgba(" + ACCENT_RGB + ",0.3);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.9s linear infinite";
 
         progressTextEl = document.createElement("span");
         progressTextEl.style.cssText = "flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
@@ -1659,7 +1673,7 @@
         progressStopEl.textContent = "Stop";
         progressStopEl.title = "Stop";
         progressStopEl.style.cssText = "flex:0 0 auto;padding:2px 10px;border:0;border-radius:10px;background:transparent;"
-            + "box-shadow:inset 0 0 0 1.5px #ff6b6b;color:#ff6b6b;font-size:12px;cursor:pointer";
+            + "box-shadow:inset 0 0 0 1.5px " + DANGER + ";color:" + DANGER + ";font-size:12px;cursor:pointer";
         progressStopEl.addEventListener("click", stopProgressJob);
         line.appendChild(progressStopEl);
 
@@ -1667,7 +1681,7 @@
         progressBarEl.style.cssText = "margin-top:5px;height:4px;border-radius:2px;background:#333;overflow:hidden";
 
         progressFillEl = document.createElement("div");
-        progressFillEl.style.cssText = "height:100%;width:0;background:#48e1eb;border-radius:2px;transition:width 0.3s ease";
+        progressFillEl.style.cssText = "height:100%;width:0;background:" + ACCENT + ";border-radius:2px;transition:width 0.3s ease";
 
         progressBarEl.appendChild(progressFillEl);
         progressEl.appendChild(line);
@@ -5876,7 +5890,7 @@
 
             clearBtn = document.createElement("span");
             clearBtn.textContent = "Remove rating";
-            clearBtn.style.cssText = "color:#48e1eb;cursor:pointer;text-decoration:underline";
+            clearBtn.style.cssText = "color:" + ACCENT + ";cursor:pointer;text-decoration:underline";
 
             clearBtn.addEventListener("click", function (ev) {
 
@@ -8230,7 +8244,7 @@
             });
         };
 
-        const linksBtn = makeButton("Links", "#48e1eb", "#000", function () {
+        const linksBtn = makeButton("Links", ACCENT, "#000", function () {
 
             const got = linksText(picked());
 
@@ -8406,7 +8420,7 @@
             back.remove();
         };
 
-        const addBtn = makeButton("Add", "#48e1eb", "#000", function () {
+        const addBtn = makeButton("Add", ACCENT, "#000", function () {
 
             const picked = ticks.filter(function (t) {
                 return t.box.get();
@@ -8736,13 +8750,13 @@
             tick.textContent = on ? "\u2713" : "";
             tick.style.cssText = "flex:0 0 auto;width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;font:700 13px/1 sans-serif;"
                 + (on
-                    ? "background:#48e1eb;color:#000;border:1px solid #48e1eb"
+                    ? "background:" + ACCENT + ";color:#000;border:1px solid " + ACCENT
                     : "background:transparent;color:transparent;border:1px solid #4a4a54");
 
             const text = document.createElement("span");
             text.textContent = name;
             text.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                + (on ? "color:#48e1eb" : "color:#fff");
+                + (on ? "color:" + ACCENT : "color:#fff");
 
             const num = document.createElement("span");
             num.textContent = String(total);
@@ -8836,7 +8850,7 @@
         heading.textContent = "Filters";
         heading.style.cssText = "font-weight:600";
 
-        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeTagSheet);
+        const doneBtn = makeButton("Done", ACCENT, "#000", closeTagSheet);
         doneBtn.style.flex = "0 0 auto";
         doneBtn.style.padding = "6px 14px";
 
@@ -8978,7 +8992,7 @@
 
                     const on = get() === k;
 
-                    btns[k].style.background = on ? "#48e1eb" : "#333";
+                    btns[k].style.background = on ? ACCENT : "#333";
                     btns[k].style.color = on ? "#000" : "#fff";
                 }
             };
@@ -9106,7 +9120,7 @@
 
         // Changes already take effect as they are made, so this is the way out
         // from the foot of the sheet without scrolling back up to Done
-        clearRow.appendChild(makeButton("Apply filters", "#48e1eb", "#000", function () {
+        clearRow.appendChild(makeButton("Apply filters", ACCENT, "#000", function () {
 
             applySmartFilters();
             closeTagSheet();
@@ -9139,15 +9153,15 @@
 
                 const on = settings.bpmUnknown === mode;
 
-                unknownBtns[mode].style.background = on ? "#48e1eb" : "#333";
+                unknownBtns[mode].style.background = on ? ACCENT : "#333";
                 unknownBtns[mode].style.color = on ? "#000" : "#fff";
             }
 
             const sortByCount = settings.tagSort !== "alpha";
 
-            countSortBtn.style.background = sortByCount ? "#48e1eb" : "#333";
+            countSortBtn.style.background = sortByCount ? ACCENT : "#333";
             countSortBtn.style.color = sortByCount ? "#000" : "#fff";
-            alphaSortBtn.style.background = sortByCount ? "#333" : "#48e1eb";
+            alphaSortBtn.style.background = sortByCount ? "#333" : ACCENT;
             alphaSortBtn.style.color = sortByCount ? "#fff" : "#000";
 
             // Measured over the songs that actually match, so the span
@@ -9160,7 +9174,7 @@
                 ? "No songs match"
                 : matches + (matches === 1 ? " song matches" : " songs match");
 
-            countEl.style.color = matches === 0 ? "#ff8a8a" : "#48e1eb";
+            countEl.style.color = matches === 0 ? "#ff8a8a" : ACCENT;
 
             countHintEl.textContent = "of " + cache.songs.length + " in the library"
                 + (bounds.high > 0
@@ -9169,9 +9183,9 @@
 
             const isAnd = settings.tagMode !== "or";
 
-            andBtn.style.background = isAnd ? "#48e1eb" : "#333";
+            andBtn.style.background = isAnd ? ACCENT : "#333";
             andBtn.style.color = isAnd ? "#000" : "#fff";
-            orBtn.style.background = isAnd ? "#333" : "#48e1eb";
+            orBtn.style.background = isAnd ? "#333" : ACCENT;
             orBtn.style.color = isAnd ? "#fff" : "#000";
 
             // The date controls follow the switch and the chosen mode
@@ -14492,6 +14506,11 @@
 
         img.src = url;
     }
+
+    function dbgFlag(v) {
+
+        return v ? "y" : "n";
+    }
     // END SHARED misc
 
     // How long a speaker takes to play what the player sends, in ms, found
@@ -15115,14 +15134,14 @@
 
         if (look === "primary") {
 
-            el.style.background = "#48e1eb";
+            el.style.background = ACCENT;
             el.style.color = "#000";
             el.style.fontWeight = "600";
         } else if (look === "ring") {
 
             el.style.background = "transparent";
-            el.style.color = "#48e1eb";
-            el.style.boxShadow = "inset 0 0 0 2px #48e1eb";
+            el.style.color = ACCENT;
+            el.style.boxShadow = "inset 0 0 0 2px " + ACCENT;
         } else if (look === "ghost") {
 
             el.style.background = "transparent";
@@ -15133,6 +15152,134 @@
             el.style.color = "#fff";
         }
     }
+
+    // BEGIN SHARED volpop
+    // Written by embed-webview.sh from src/shared/volpop.js. Change that
+    // file and run make embed, never the lines up to END SHARED volpop
+    // The parts of the volume training's popup drawn the same way on the
+    // device and in the web view, from the view volTrainView makes. Given a
+    // style, the pieces get inline styles, as the device's popup sits in
+    // Mureka's page with no stylesheet of its own. Without one they get the
+    // classes the web view's page styles.
+    // Shared by the player and the web view's page, src/shared/volpop.js,
+    // inlined into both by embed-webview.sh
+
+    // The choice above the list, made again only when it changes, so a tap
+    // between two drawings is not lost. Says whether there is one
+    function volPopChoice(ui, choice, name, onPick, style) {
+
+        const key = JSON.stringify(choice || null);
+
+        if (key !== ui.choiceKey) {
+
+            ui.choiceKey = key;
+            ui.choice.textContent = "";
+
+            if (choice) {
+
+                const head = document.createElement("div");
+
+                head.textContent = choice.label;
+
+                if (style) {
+                    head.style.cssText = style.choiceHead;
+                } else {
+                    head.className = "trainChoiceHead";
+                }
+
+                ui.choice.appendChild(head);
+
+                for (const o of choice.options || []) {
+
+                    const row = document.createElement("label");
+                    const radio = document.createElement("input");
+
+                    radio.type = "radio";
+                    radio.name = name;
+                    radio.checked = o.value === choice.value;
+
+                    if (style) {
+
+                        row.style.cssText = style.choiceRow;
+                        radio.style.cssText = style.radio;
+                    }
+
+                    radio.addEventListener("change", function () {
+                        onPick(o.value);
+                    });
+                    row.appendChild(radio);
+                    row.appendChild(document.createTextNode(o.label));
+                    ui.choice.appendChild(row);
+                }
+            }
+        }
+
+        return !!choice;
+    }
+
+    // What Save keeps, a step a row: its name, its gap and where the gap
+    // came from. Says whether there are any
+    function volPopRows(box, rows, style) {
+
+        box.textContent = "";
+
+        for (const r of rows || []) {
+
+            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
+
+            for (const c of cells) {
+
+                const el = document.createElement("span");
+
+                el.textContent = c[0];
+
+                if (style) {
+                    style.cell(el, c[1]);
+                } else {
+                    el.className = c[1];
+                }
+
+                box.appendChild(el);
+            }
+        }
+
+        return (rows || []).length > 0;
+    }
+
+    // Lines of plain text under the list, the switch delay. Says whether
+    // there are any
+    function volPopLines(box, lines) {
+
+        box.textContent = "";
+
+        for (const line of lines || []) {
+
+            const el = document.createElement("div");
+
+            el.textContent = line;
+            box.appendChild(el);
+        }
+
+        return (lines || []).length > 0;
+    }
+    // END SHARED volpop
+
+    // The inline styles of the shared popup parts on the device, see
+    // src/shared/volpop.js. Where a gap came from in the accent when
+    // trained, light when kept from before, grey when filled in
+    const VOL_POP_STYLE = {
+        choiceHead: "font-weight:600;margin-bottom:2px",
+        choiceRow: "display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0",
+        radio: "flex:0 0 auto;width:20px;height:20px;margin:0;accent-color:" + ACCENT,
+        cell: function (el, kind) {
+
+            if (kind === "db") {
+                el.style.textAlign = "right";
+            } else if (kind) {
+                el.style.color = kind === "set" ? ACCENT : (kind === "kept" ? "#ccc" : "#888");
+            }
+        }
+    };
 
     // The phone's popup: built once, drawn from the view
     function paintVolTrain() {
@@ -15158,7 +15305,7 @@
         ui.text.textContent = view.text;
         ui.now.textContent = view.now;
         ui.now.style.display = view.at === "step" ? "" : "none";
-        ui.now.style.color = view.upper === true ? "#48e1eb" : "#dff";
+        ui.now.style.color = view.upper === true ? ACCENT : "#dff";
         ui.flip.style.display = view.flip ? "" : "none";
         ui.flip.textContent = view.flip || "";
         ui.gapRow.style.display = view.at === "step" ? "flex" : "none";
@@ -15176,73 +15323,14 @@
         }
 
         ui.quietShown.textContent = view.quiet > 0 ? view.quiet + " dB" : "Off";
-        // The choice made again only when it changes, so a tap is not lost
-        const choiceKey = JSON.stringify(view.choice);
 
-        if (choiceKey !== ui.choiceKey) {
+        const pick = function (v) {
+            volTrainAct("keep", v === "keep");
+        };
 
-            ui.choiceKey = choiceKey;
-            ui.choice.textContent = "";
-
-            if (view.choice) {
-
-                const head = document.createElement("div");
-
-                head.textContent = view.choice.label;
-                head.style.cssText = "font-weight:600;margin-bottom:2px";
-                ui.choice.appendChild(head);
-
-                for (const o of view.choice.options) {
-
-                    const row = document.createElement("label");
-                    const radio = document.createElement("input");
-
-                    row.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0";
-                    radio.type = "radio";
-                    radio.name = "murekaVolTrainKeep";
-                    radio.checked = o.value === view.choice.value;
-                    radio.style.cssText = "flex:0 0 auto;width:20px;height:20px;margin:0;accent-color:#48e1eb";
-                    radio.addEventListener("change", function () {
-                        volTrainAct("keep", o.value === "keep");
-                    });
-                    row.appendChild(radio);
-                    row.appendChild(document.createTextNode(o.label));
-                    ui.choice.appendChild(row);
-                }
-            }
-        }
-
-        ui.choice.style.display = view.choice ? "flex" : "none";
-        ui.rows.textContent = "";
-
-        for (const r of view.rows) {
-
-            const step = document.createElement("span");
-            const db = document.createElement("span");
-            const from = document.createElement("span");
-
-            step.textContent = r.step;
-            db.textContent = r.db;
-            db.style.textAlign = "right";
-            from.textContent = r.from;
-            from.style.color = r.look === "set" ? "#48e1eb" : (r.look === "kept" ? "#ccc" : "#888");
-            ui.rows.appendChild(step);
-            ui.rows.appendChild(db);
-            ui.rows.appendChild(from);
-        }
-
-        ui.rows.style.display = view.rows.length ? "grid" : "none";
-        ui.list.textContent = "";
-
-        for (const line of view.lines) {
-
-            const el = document.createElement("div");
-
-            el.textContent = line;
-            ui.list.appendChild(el);
-        }
-
-        ui.list.style.display = view.lines.length ? "flex" : "none";
+        ui.choice.style.display = volPopChoice(ui, view.choice, "murekaVolTrainKeep", pick, VOL_POP_STYLE) ? "flex" : "none";
+        ui.rows.style.display = volPopRows(ui.rows, view.rows, VOL_POP_STYLE) ? "grid" : "none";
+        ui.list.style.display = volPopLines(ui.list, view.lines) ? "flex" : "none";
         ui.buttons.textContent = "";
 
         for (const b of view.buttons) {
@@ -15288,10 +15376,10 @@
         volTrainEl.style.cssText = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
             + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
         box.style.cssText = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
-            + "background:#1c1c22;border:1px solid rgba(72,225,235,0.45);display:flex;flex-direction:column;gap:12px";
+            + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
         top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
         ui.title = document.createElement("div");
-        ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:#48e1eb";
+        ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
         close.style.flex = "0 0 auto";
         close.style.padding = "4px 12px";
         close.setAttribute("aria-label", "Close");
@@ -15356,16 +15444,16 @@
         ui.quietRow = document.createElement("div");
         ui.quietRow.style.cssText = "display:flex;align-items:center;gap:10px";
         quietName.textContent = "Quieter";
-        quietName.style.cssText = "flex:0 0 auto;color:#ff6b6b;font-weight:600";
+        quietName.style.cssText = "flex:0 0 auto;color:" + DANGER + ";font-weight:600";
         ui.quiet = document.createElement("input");
         ui.quiet.type = "range";
         ui.quiet.min = "0";
         ui.quiet.max = "60";
         ui.quiet.step = "1";
         ui.quiet.setAttribute("aria-label", "Quieter, dB");
-        ui.quiet.style.cssText = "flex:1;min-width:0;accent-color:#ff6b6b";
+        ui.quiet.style.cssText = "flex:1;min-width:0;accent-color:" + DANGER;
         ui.quietShown = document.createElement("span");
-        ui.quietShown.style.cssText = "flex:0 0 4em;text-align:right;font-variant-numeric:tabular-nums;color:#ff6b6b";
+        ui.quietShown.style.cssText = "flex:0 0 4em;text-align:right;font-variant-numeric:tabular-nums;color:" + DANGER;
         ui.quiet.addEventListener("input", function () {
             ui.quietShown.textContent = Number(ui.quiet.value) > 0 ? ui.quiet.value + " dB" : "Off";
         });
@@ -15385,7 +15473,7 @@
         ui.autoRow.style.cssText = "display:flex;align-items:flex-start;gap:10px;cursor:pointer";
         ui.auto = document.createElement("input");
         ui.auto.type = "checkbox";
-        ui.auto.style.cssText = "flex:0 0 auto;width:20px;height:20px;margin:2px 0 0;accent-color:#48e1eb";
+        ui.auto.style.cssText = "flex:0 0 auto;width:20px;height:20px;margin:2px 0 0;accent-color:" + ACCENT;
         ui.auto.addEventListener("change", function () {
             volTrainAct("auto", ui.auto.checked);
         });
@@ -15748,7 +15836,7 @@
         const close = makeButton("×", "#333", "#fff", function () {
             volEditAct("close");
         });
-        const done = makeButton("Done", "#48e1eb", "#000", function () {
+        const done = makeButton("Done", ACCENT, "#000", function () {
             volEditAct("close");
         });
 
@@ -15759,10 +15847,10 @@
         volEditEl.style.cssText = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
             + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
         box.style.cssText = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
-            + "background:#1c1c22;border:1px solid rgba(72,225,235,0.45);display:flex;flex-direction:column;gap:12px";
+            + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
         top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
         ui.title = document.createElement("div");
-        ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:#48e1eb";
+        ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
         close.style.flex = "0 0 auto";
         close.style.padding = "4px 12px";
         close.setAttribute("aria-label", "Close");
@@ -15833,7 +15921,7 @@
             name.textContent = "Volume";
             now.style.cssText = "font-variant-numeric:tabular-nums;font-weight:600";
             track.style.cssText = "height:6px;border-radius:3px;background:#444;overflow:hidden";
-            fill.style.cssText = "height:100%;background:#47e0eb;width:0";
+            fill.style.cssText = "height:100%;background:" + ACCENT + ";width:0";
             nums.style.cssText = "margin-top:8px;font-size:12px;color:#aaa;font-variant-numeric:tabular-nums";
             top.appendChild(name);
             top.appendChild(now);
@@ -16267,7 +16355,7 @@
                     + (forDay && forNight ? ", set for " + here + " day and night" : (forDay ? ", set for " + here
                     : (forNight ? ", set for " + here + " at night" : ""))),
                 ring: forDay || forNight,
-                color: forDay || forNight ? "#48e1eb" : undefined,
+                color: forDay || forNight ? ACCENT : undefined,
                 fn: function () {
                     setSoundPick(p.id);
                 }
@@ -16659,7 +16747,7 @@
 
         if (nightActionBtn) {
 
-            nightActionBtn.style.background = on ? "#48e1eb" : "#444";
+            nightActionBtn.style.background = on ? ACCENT : "#444";
             nightActionBtn.style.color = on ? "#000" : "#fff";
         }
 
@@ -18735,7 +18823,7 @@
     // The three looks a control button has, the same as in the web view.
     // Filled: on, or narrowing things down. Ringed: a ring drawn inside,
     // for the whole library or for something paused or running. Plain: off
-    const CTRL_ACCENT = "#48e1eb";
+    const CTRL_ACCENT = ACCENT;
 
     // Thinner than the web view's, the buttons here are much smaller
     const CTRL_RING = "inset 0 0 0 2px ";
@@ -19539,7 +19627,7 @@
             const folded = setsFolded();
 
             setFoldBtn.style.display = LIB_VIEWS.indexOf(listView) >= 0 && songSets.size > 0 ? "" : "none";
-            setFoldBtn.style.background = folded ? "#48e1eb" : "#333";
+            setFoldBtn.style.background = folded ? ACCENT : "#333";
             setFoldBtn.style.color = folded ? "#000" : "#fff";
         }
 
@@ -19549,7 +19637,7 @@
             const on = setSortOf() === value;
 
             b.style.display = onSets ? "" : "none";
-            b.style.background = on ? "#48e1eb" : "#333";
+            b.style.background = on ? ACCENT : "#333";
             b.style.color = on ? "#000" : "#fff";
         });
 
@@ -19564,7 +19652,7 @@
             // Mureka's songs whichever way they are sorted
             const active = name === "mureka" ? LIB_VIEWS.indexOf(listView) >= 0 : name === listView;
 
-            btn.style.background = active ? "#48e1eb" : "#333";
+            btn.style.background = active ? ACCENT : "#333";
             btn.style.color = active ? "#000" : "#fff";
 
             // The sorts are about Mureka's songs, faint over the queue and
@@ -19680,7 +19768,7 @@
                 || settings.dateEnabled || settings.ratingEnabled;
 
             smartToggleBtn.labelEl.textContent = settings.smartEnabled ? "Filters on" : "Filters off";
-            smartToggleBtn.style.background = on ? "#48e1eb" : "#333";
+            smartToggleBtn.style.background = on ? ACCENT : "#333";
             smartToggleBtn.style.color = on ? "#000" : "#fff";
 
             // Nothing to switch when nothing is set up
@@ -19701,7 +19789,7 @@
 
             const active = value === settings.vocalFilter;
 
-            btn.style.background = active ? "#48e1eb" : "#333";
+            btn.style.background = active ? ACCENT : "#333";
             btn.style.color = active ? "#000" : "#fff";
         });
     }
@@ -19768,7 +19856,7 @@
 
             mark.setAttribute("width", "13");
             mark.setAttribute("height", "13");
-            mark.style.cssText = "flex:0 0 auto;color:#48e1eb";
+            mark.style.cssText = "flex:0 0 auto;color:" + ACCENT;
 
             viewMenuBar.appendChild(mark);
         }
@@ -21504,7 +21592,7 @@
                     : { label: "Play after the playing song instead", ring: true, color: "#b8b8c0", fn: function () {
                         playWhenReady(id, "after");
                     } },
-                { label: "Do not play it when ready", ring: true, color: "#ff6b6b", fn: function () {
+                { label: "Do not play it when ready", ring: true, color: DANGER, fn: function () {
                     cancelWhenReady(id);
                 } }
             ]);
@@ -25406,7 +25494,7 @@
                 "min-height:120px",
                 "border:none",
                 "border-radius:12px",
-                "background:#48e1eb",
+                "background:" + ACCENT,
                 "color:#000",
                 "font:700 28px/1.2 sans-serif",
                 "padding:12px",
@@ -25619,7 +25707,7 @@
             close(false);
         });
 
-        const yes = makeButton(okLabel, "#48e1eb", "#000", function () {
+        const yes = makeButton(okLabel, ACCENT, "#000", function () {
             close(true);
         });
 
@@ -25907,7 +25995,7 @@
             close(onNo);
         });
 
-        const yes = makeButton(yesLabel, danger ? "#ff6b6b" : "#48e1eb", "#000", function () {
+        const yes = makeButton(yesLabel, danger ? DANGER : ACCENT, "#000", function () {
             close(onYes);
         });
 
@@ -25986,7 +26074,7 @@
 
                 const k = document.createElement("span");
                 k.textContent = pair[0];
-                k.style.cssText = "color:#48e1eb;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums";
+                k.style.cssText = "color:" + ACCENT + ";font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums";
 
                 const d = document.createElement("span");
                 d.textContent = pair[1];
@@ -25998,7 +26086,7 @@
             text.textContent = body;
         }
 
-        const okBtn = makeButton("Got it", "#48e1eb", "#000", function () {
+        const okBtn = makeButton("Got it", ACCENT, "#000", function () {
             back.remove();
         });
 
@@ -30149,14 +30237,14 @@
 
             const ring = document.createElement("span");
 
-            ring.style.cssText = "flex:0 0 auto;width:11px;height:11px;border:2px solid rgba(72,225,235,0.3);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+            ring.style.cssText = "flex:0 0 auto;width:11px;height:11px;border:2px solid rgba(" + ACCENT_RGB + ",0.3);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
             panelToastEl.appendChild(ring);
             panelToastEl.style.background = "rgba(29,29,34,0.96)";
-            panelToastEl.style.color = "#48e1eb";
-            panelToastEl.style.boxShadow = "inset 0 0 0 2px #48e1eb, 0 4px 14px rgba(0,0,0,0.5)";
+            panelToastEl.style.color = ACCENT;
+            panelToastEl.style.boxShadow = "inset 0 0 0 2px " + ACCENT + ", 0 4px 14px rgba(0,0,0,0.5)";
         } else {
 
-            panelToastEl.style.background = kind === "bad" ? "#ff6b6b" : (kind === "online" ? "#5fd38d" : "#48e1eb");
+            panelToastEl.style.background = kind === "bad" ? DANGER : (kind === "online" ? "#5fd38d" : ACCENT);
             panelToastEl.style.color = "#0c0c0f";
             panelToastEl.style.boxShadow = "0 4px 14px rgba(0,0,0,0.5)";
         }
@@ -30171,7 +30259,7 @@
             undoBtn.type = "button";
             undoBtn.textContent = "Undo";
             undoBtn.style.cssText = "flex:0 0 auto;pointer-events:auto;margin-left:4px;padding:4px 10px;border:0;border-radius:12px;"
-                + "background:#0c0c0f;color:#48e1eb;font-weight:700;font-size:12px;cursor:pointer";
+                + "background:#0c0c0f;color:" + ACCENT + ";font-weight:700;font-size:12px;cursor:pointer";
             undoBtn.addEventListener("click", function (ev) {
 
                 ev.stopPropagation();
@@ -30833,7 +30921,7 @@
             if (r[1] === null) {
 
                 line.textContent = r[0];
-                line.style.cssText = "color:#48e1eb;font-weight:700;margin-top:6px";
+                line.style.cssText = "color:" + ACCENT + ";font-weight:700;margin-top:6px";
             } else {
 
                 const k = document.createElement("span");
@@ -33272,7 +33360,7 @@
             input.max = String(max);
             input.step = "1";
             input.value = String(value);
-            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:#48e1eb";
+            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:" + ACCENT;
             shown.style.cssText = "flex:0 0 3.6em;text-align:right;font-variant-numeric:tabular-nums";
             shown.textContent = value + unit;
             input.addEventListener("input", function () {
@@ -33355,7 +33443,7 @@
             b.type = "button";
             b.textContent = label;
             b.style.cssText = "min-height:2.9em;padding:0 1.2em;border-radius:10px;border:none;cursor:pointer;font:inherit;"
-                + (accent ? "background:#48e1eb;color:#000" : "background:#3a3a42;color:#fff");
+                + (accent ? "background:" + ACCENT + ";color:#000" : "background:#3a3a42;color:#fff");
             b.addEventListener("click", function () {
                 close(keep);
             });
@@ -34717,7 +34805,7 @@
         ctx.beginPath();
         ctx.arc(size / 2, size / 2, 100, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = "#48e1eb";
+        ctx.strokeStyle = ACCENT;
         ctx.beginPath();
         ctx.arc(size / 2, size / 2, 100, -Math.PI / 2, -Math.PI / 2 + Math.PI * 100 / 180);
         ctx.stroke();
@@ -34788,7 +34876,7 @@
         const keep = doneTimers.get(btn);
 
         btn.textContent = text;
-        btn.style.background = ok ? "#48e1eb" : "#e5484d";
+        btn.style.background = ok ? ACCENT : "#e5484d";
         btn.style.color = ok ? "#000" : "#fff";
 
         keep.timer = setTimeout(function () {
@@ -35802,7 +35890,7 @@
             // Two rows: the countdown text, and the button below it
             unplugEl = document.createElement("div");
             unplugEl.setAttribute("data-mureka-notice", "1");
-            unplugEl.style.cssText = "position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:2147483647;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:12px 16px;border-radius:16px;background:#26262c;border:2px solid #48e1eb;color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,0.5)";
+            unplugEl.style.cssText = "position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:2147483647;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:12px 16px;border-radius:16px;background:#26262c;border:2px solid " + ACCENT + ";color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,0.5)";
 
             unplugTextEl = document.createElement("span");
 
@@ -35810,7 +35898,7 @@
 
             skip.type = "button";
             skip.textContent = "Skip shutdown";
-            skip.style.cssText = "flex:0 0 auto;padding:6px 12px;border:none;border-radius:14px;background:#48e1eb;color:#000;font-weight:600;cursor:pointer";
+            skip.style.cssText = "flex:0 0 auto;padding:6px 12px;border:none;border-radius:14px;background:" + ACCENT + ";color:#000;font-weight:600;cursor:pointer";
             skip.addEventListener("click", function () {
 
                 try {
@@ -37829,7 +37917,7 @@
 
         const bg = String(el.style.background || el.style.backgroundColor || "").toLowerCase();
 
-        return bg.indexOf("#48e1eb") >= 0 || bg.indexOf("72, 225, 235") >= 0;
+        return bg.indexOf(ACCENT) >= 0 || bg.indexOf(ACCENT_RGB) >= 0;
     }
 
     function hostText(el) {
@@ -39874,8 +39962,8 @@
         webViewFloatBtn.title = "Web view";
         webViewFloatBtn.setAttribute("aria-label", "Web view");
         webViewFloatBtn.style.cssText = "position:fixed;left:calc(12px + env(safe-area-inset-left));bottom:calc(12px + env(safe-area-inset-bottom));"
-            + "z-index:999998;width:46px;height:46px;margin:0;padding:0;border-radius:50%;border:1px solid rgba(72,225,235,0.5);"
-            + "background:#1d1d22;color:#48e1eb;display:none;align-items:center;justify-content:center;cursor:pointer;"
+            + "z-index:999998;width:46px;height:46px;margin:0;padding:0;border-radius:50%;border:1px solid rgba(" + ACCENT_RGB + ",0.5);"
+            + "background:#1d1d22;color:" + ACCENT + ";display:none;align-items:center;justify-content:center;cursor:pointer;"
             + "box-shadow:0 2px 12px rgba(0,0,0,0.5)";
         webViewFloatBtn.appendChild(iconWebView());
         webViewFloatBtn.addEventListener("click", function (ev) {
@@ -39993,7 +40081,7 @@
 
         askWaitEl = document.createElement("span");
         askWaitEl.title = "Open the player to answer";
-        askWaitEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(72,225,235,0.6);border-radius:8px;color:#48e1eb;font-weight:600;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+        askWaitEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(" + ACCENT_RGB + ",0.6);border-radius:8px;color:" + ACCENT + ";font-weight:600;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
 
         // Not a drag of the folded player, a way into it
         for (const name of ["mousedown", "pointerdown", "touchstart"]) {
@@ -40048,7 +40136,7 @@
 
         // Logged in user name, filled by the profile probe, hidden until known
         selfNameEl = document.createElement("span");
-        selfNameEl.style.cssText = "display:none;color:#48e1eb";
+        selfNameEl.style.cssText = "display:none;color:" + ACCENT;
 
         // Dash between the name and the source, shown only when both are present
         sourceSepEl = document.createElement("span");
@@ -40723,7 +40811,7 @@
         seekBar.max = "0";
         seekBar.value = "0";
         seekBar.step = "0.1";
-        seekBar.style.cssText = "flex:1;accent-color:#48e1eb;cursor:pointer";
+        seekBar.style.cssText = "flex:1;accent-color:" + ACCENT + ";cursor:pointer";
 
         remTimeEl = document.createElement("span");
         remTimeEl.textContent = "-0:00";
@@ -41067,20 +41155,20 @@
             + "#mureka-search-input::-moz-placeholder{color:#aaa !important;opacity:1 !important}"
             + "#mureka-seek-bar{-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}"
             + "#mureka-seek-bar::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#555}"
-            + "#mureka-seek-bar::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#48e1eb;margin-top:-5px}"
+            + "#mureka-seek-bar::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:" + ACCENT + ";margin-top:-5px}"
             + "#mureka-seek-bar::-moz-range-track{height:6px;border-radius:3px;background:#555}"
-            + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
-            + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:#48e1eb}"
+            + "#mureka-seek-bar::-moz-range-progress{height:6px;border-radius:3px;background:" + ACCENT + "}"
+            + "#mureka-seek-bar::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:" + ACCENT + "}"
             // The color picker's sliders, drawn by the player, so the page's
             // own look for fields and Safari's plain one do not show
             + "input.mureka-range{-webkit-appearance:none !important;appearance:none !important;background:transparent !important;"
             + "border:none !important;box-shadow:none !important;padding:0 !important;margin:0 !important;height:32px !important}"
             + "input.mureka-range::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--mureka-track,#555)}"
             + "input.mureka-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;"
-            + "border-radius:50%;background:#48e1eb;margin-top:-8px;border:none}"
+            + "border-radius:50%;background:" + ACCENT + ";margin-top:-8px;border:none}"
             + "input.mureka-range::-moz-range-track{height:6px;border-radius:3px;background:var(--mureka-track,#555)}"
-            + "input.mureka-range::-moz-range-progress{height:6px;border-radius:3px;background:#48e1eb}"
-            + "input.mureka-range::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:#48e1eb}"
+            + "input.mureka-range::-moz-range-progress{height:6px;border-radius:3px;background:" + ACCENT + "}"
+            + "input.mureka-range::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:" + ACCENT + "}"
             // Room for the strip the system owns at the top of an iPhone in
             // fullscreen. A class rather than an inline property, because
             // clearing an inline longhand also breaks apart the padding
@@ -41096,7 +41184,7 @@
             // browser moving it to keep a row in place
             + "#mureka-player-list{overflow-anchor:none}"
             + ".mureka-resize-handle{background:transparent;transition:background 0.12s ease}"
-            + ".mureka-resize-handle:hover{background:rgba(72,225,235,0.45)}"
+            + ".mureka-resize-handle:hover{background:rgba(" + ACCENT_RGB + ",0.45)}"
 
             // A finger on a wider screen, a tablet say, cannot hit a few
             // pixels it cannot see. The sides and the bottom grow a little,
@@ -41106,10 +41194,10 @@
             + ".mureka-resize-handle[data-edge=l],.mureka-resize-handle[data-edge=r]{width:14px !important}"
             + ".mureka-resize-handle[data-edge=b]{height:12px !important;left:36px !important;right:36px !important}"
             + ".mureka-resize-handle[data-edge=bl],.mureka-resize-handle[data-edge=br]{width:34px !important;height:34px !important}"
-            + ".mureka-resize-handle[data-edge=br]{background:linear-gradient(135deg,transparent 52%,rgba(72,225,235,0.75) 52%,"
-            + "rgba(72,225,235,0.75) 58%,transparent 58%,transparent 68%,rgba(72,225,235,0.75) 68%,rgba(72,225,235,0.75) 74%,transparent 74%) !important}"
-            + ".mureka-resize-handle[data-edge=bl]{background:linear-gradient(225deg,transparent 52%,rgba(72,225,235,0.75) 52%,"
-            + "rgba(72,225,235,0.75) 58%,transparent 58%,transparent 68%,rgba(72,225,235,0.75) 68%,rgba(72,225,235,0.75) 74%,transparent 74%) !important}"
+            + ".mureka-resize-handle[data-edge=br]{background:linear-gradient(135deg,transparent 52%,rgba(" + ACCENT_RGB + ",0.75) 52%,"
+            + "rgba(" + ACCENT_RGB + ",0.75) 58%,transparent 58%,transparent 68%,rgba(" + ACCENT_RGB + ",0.75) 68%,rgba(" + ACCENT_RGB + ",0.75) 74%,transparent 74%) !important}"
+            + ".mureka-resize-handle[data-edge=bl]{background:linear-gradient(225deg,transparent 52%,rgba(" + ACCENT_RGB + ",0.75) 52%,"
+            + "rgba(" + ACCENT_RGB + ",0.75) 58%,transparent 58%,transparent 68%,rgba(" + ACCENT_RGB + ",0.75) 68%,rgba(" + ACCENT_RGB + ",0.75) 74%,transparent 74%) !important}"
             + "}"
             + "@keyframes mureka-pulse{0%,100%{opacity:1}50%{opacity:0.15}}"
 
@@ -41117,9 +41205,9 @@
             // view. --mureka-p is how much, in percent. Registered, so the
             // fill grows smoothly between updates where the browser can
             + "@property --mureka-p{syntax:'<number>';inherits:false;initial-value:100}"
-            + ".mureka-pie{display:inline-block;border-radius:50%;background:conic-gradient(#48e1eb calc(var(--mureka-p) * 1%),rgba(72,225,235,0.25) 0);transition:--mureka-p 1s linear}"
+            + ".mureka-pie{display:inline-block;border-radius:50%;background:conic-gradient(" + ACCENT + " calc(var(--mureka-p) * 1%),rgba(" + ACCENT_RGB + ",0.25) 0);transition:--mureka-p 1s linear}"
             + ".mureka-pie.mureka-pie-loading{animation:mureka-fade-dot 1.2s ease-in-out infinite}"
-            + ".mureka-pie.mureka-pie-ring{background:transparent;box-shadow:inset 0 0 0 1.5px #48e1eb}"
+            + ".mureka-pie.mureka-pie-ring{background:transparent;box-shadow:inset 0 0 0 1.5px " + ACCENT + "}"
             + "@keyframes mureka-fade-dot{50%{opacity:0.45}}"
             + "@keyframes mureka-spin{to{transform:rotate(360deg)}}"
             + "@keyframes mureka-wave-wait{0%,100%{opacity:1}50%{opacity:0.45}}"
@@ -41457,7 +41545,7 @@
 
         // The reload indicator revealed when the list is pulled down past the top
         pullEl = document.createElement("div");
-        pullEl.style.cssText = "position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:center;color:#48e1eb;opacity:0;pointer-events:none";
+        pullEl.style.cssText = "position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:center;color:" + ACCENT + ";opacity:0;pointer-events:none";
 
         const pullIcon = iconLoad();
         pullIcon.style.width = "22px";
@@ -41478,7 +41566,7 @@
         toTopBtn.type = "button";
         toTopBtn.setAttribute("aria-label", "Scroll to top");
         toTopBtn.title = "Scroll to top";
-        toTopBtn.style.cssText = "position:absolute;right:10px;bottom:10px;z-index:3;width:36px;height:36px;border-radius:50%;border:none;background:rgba(72,225,235,0.92);color:#0c0c0f;font-size:20px;line-height:36px;text-align:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.25s ease;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
+        toTopBtn.style.cssText = "position:absolute;right:10px;bottom:10px;z-index:3;width:36px;height:36px;border-radius:50%;border:none;background:rgba(" + ACCENT_RGB + ",0.92);color:#0c0c0f;font-size:20px;line-height:36px;text-align:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.25s ease;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
         toTopBtn.textContent = "\u2191";
         toTopBtn.addEventListener("click", scrollListEdge);
 
@@ -41488,7 +41576,7 @@
         locateBtn.type = "button";
         locateBtn.setAttribute("aria-label", "Show the playing song");
         locateBtn.title = "Show the playing song";
-        locateBtn.style.cssText = "position:absolute;right:10px;bottom:54px;z-index:3;width:36px;height:36px;border-radius:50%;border:1px solid rgba(72,225,235,0.6);background:rgba(38,38,44,0.94);color:#48e1eb;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.25s ease;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
+        locateBtn.style.cssText = "position:absolute;right:10px;bottom:54px;z-index:3;width:36px;height:36px;border-radius:50%;border:1px solid rgba(" + ACCENT_RGB + ",0.6);background:rgba(38,38,44,0.94);color:" + ACCENT + ";display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.25s ease;box-shadow:0 2px 6px rgba(0,0,0,0.4)";
         locateBtn.appendChild(makeSvgIcon([
             ["circle", { cx: "12", cy: "12", r: "8" }],
             ["circle", { cx: "12", cy: "12", r: "2.5" }],
@@ -42258,11 +42346,6 @@
         const type = String(el.type || "text").toLowerCase();
 
         return ["text", "search", "number", "email", "url", "tel", "password"].indexOf(type) !== -1;
-    }
-
-    function dbgFlag(v) {
-
-        return v ? "y" : "n";
     }
 
     // Seconds since the page loaded, enough to put the passes in order
@@ -44115,7 +44198,7 @@
             btn.style.background = "#444";
             btn.style.color = active ? CTRL_ACCENT : (failed ? "#ff8a8a" : "#fff");
             btn.style.boxShadow = active ? CTRL_RING + CTRL_ACCENT
-                : (failed ? CTRL_RING + "#ff6b6b" : "");
+                : (failed ? CTRL_RING + DANGER : "");
             btn.title = failed ? restLabel + " failed: " + loadFail.why : "";
 
             // The other button cannot start anything while a run is going on,
@@ -44142,7 +44225,7 @@
 
         // Cyan when both the song and its cover are stored, violet while the
         // cover is not yet
-        const dotColor = audioCached && !artCached ? "#b388ff" : "#48e1eb";
+        const dotColor = audioCached && !artCached ? "#b388ff" : ACCENT;
 
         dot.textContent = "\u25CF";
         dot.title = "";
@@ -44264,8 +44347,8 @@
             return;
         }
 
-        row.style.background = on ? "rgba(72,225,235,0.16)" : "";
-        row.style.boxShadow = on ? "inset 3px 0 0 #48e1eb" : (row.dataset.setBar || "");
+        row.style.background = on ? "rgba(" + ACCENT_RGB + ",0.16)" : "";
+        row.style.boxShadow = on ? "inset 3px 0 0 " + ACCENT : (row.dataset.setBar || "");
     }
 
     function paintSelBar() {
@@ -44383,7 +44466,7 @@
             back.remove();
         };
 
-        const goBtn = makeButton(action, "#48e1eb", "#000", function () {
+        const goBtn = makeButton(action, ACCENT, "#000", function () {
 
             const chosen = {};
 
@@ -44470,13 +44553,13 @@
     function buildSelBar() {
 
         selBarEl = document.createElement("div");
-        selBarEl.style.cssText = "display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 8px;border-radius:8px;background:#26262c;border:1px solid rgba(72,225,235,0.5)";
+        selBarEl.style.cssText = "display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 8px;border-radius:8px;background:#26262c;border:1px solid rgba(" + ACCENT_RGB + ",0.5)";
 
         selCountEl = document.createElement("span");
         selCountEl.style.cssText = "flex:1 1 auto;min-width:0;font-size:12px;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
         selBarEl.appendChild(selCountEl);
 
-        const copyBtn = makeButton("Copy", "#48e1eb", "#000", copySelected);
+        const copyBtn = makeButton("Copy", ACCENT, "#000", copySelected);
 
         copyBtn.style.flex = "0 0 auto";
         selBarEl.appendChild(copyBtn);
@@ -44892,7 +44975,7 @@
             marked = row;
 
             if (row) {
-                row.style.boxShadow = below ? "inset 0 -2px 0 #48e1eb" : "inset 0 2px 0 #48e1eb";
+                row.style.boxShadow = below ? "inset 0 -2px 0 " + ACCENT : "inset 0 2px 0 " + ACCENT;
             }
         };
 
@@ -45014,8 +45097,8 @@
 
         // A ring turning where the number goes, while Mureka is asked
         numEl.style.cssText = "flex:0 0 auto;width:42px;margin-right:8px;display:flex;justify-content:flex-end";
-        ring.style.cssText = "display:inline-block;width:11px;height:11px;border:2px solid rgba(72,225,235,0.3);"
-            + "border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        ring.style.cssText = "display:inline-block;width:11px;height:11px;border:2px solid rgba(" + ACCENT_RGB + ",0.3);"
+            + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         numEl.appendChild(ring);
         titleEl.textContent = (song.title || "").trim() || "Untitled";
         titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.45";
@@ -45080,8 +45163,8 @@
         chip.dataset.foldChip = "1";
         // In color so it is easy to notice, the accent for songs the
         // filters leave out, a set's own color for a set
-        chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1.5px solid #48e1eb;"
-            + "background:rgba(72,225,235,0.1);color:#48e1eb;font-weight:600;font-size:11px;line-height:16px;text-align:center;"
+        chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1.5px solid " + ACCENT + ";"
+            + "background:rgba(" + ACCENT_RGB + ",0.1);color:" + ACCENT + ";font-weight:600;font-size:11px;line-height:16px;text-align:center;"
             + "font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;cursor:pointer";
 
         if (isSet) {
@@ -45094,7 +45177,7 @@
         // Opened, the chip is filled
         if (open) {
 
-            chip.style.background = isSet ? fold.setColor : "#48e1eb";
+            chip.style.background = isSet ? fold.setColor : ACCENT;
             chip.style.color = "#000";
         }
 
@@ -45396,7 +45479,7 @@
         for (const choice of SET_SORTS) {
 
             const on = setSortOf() === choice.value;
-            const b = makeButton(choice.label, on ? "#48e1eb" : "#333", on ? "#000" : "#fff", function () {
+            const b = makeButton(choice.label, on ? ACCENT : "#333", on ? "#000" : "#fff", function () {
                 sortSetsBy(choice.value);
             });
 
@@ -45546,9 +45629,9 @@
         titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
 
         if (isPlaying) {
-            titleEl.style.color = "#48e1eb";
+            titleEl.style.color = ACCENT;
             titleEl.style.fontWeight = "600";
-            numEl.style.color = "#48e1eb";
+            numEl.style.color = ACCENT;
         }
 
         // Put in the queue by hand: its turn in place of its number and a
@@ -45672,7 +45755,7 @@
                 + (!badgeShown ? "background:transparent;color:transparent" : song.shared === true
                     ? "background:#2e2640;color:#c9a8ff"
                     : (isNew
-                        ? "background:#48e1eb;color:#000;font-weight:600"
+                        ? "background:" + ACCENT + ";color:#000;font-weight:600"
                         : (published
                             ? "background:#1f3a2a;color:#7fd6a0"
                             : "background:#3a3a42;color:#bbb")));
@@ -45700,7 +45783,7 @@
             const rep = document.createElement("span");
             rep.textContent = "\u21BB 1";
             rep.title = "Repeat one";
-            rep.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;background:#48e1eb;color:#000;font-size:11px;line-height:16px;font-weight:600";
+            rep.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;background:" + ACCENT + ";color:#000;font-size:11px;line-height:16px;font-weight:600";
             item.appendChild(rep);
         }
 
@@ -46238,7 +46321,7 @@
     function updateToggleButton(btn, on) {
 
         btn.textContent = on ? "On" : "Off";
-        btn.style.background = on ? "#48e1eb" : "#333";
+        btn.style.background = on ? ACCENT : "#333";
         btn.style.color = on ? "#000" : "#fff";
     }
 
@@ -46278,7 +46361,7 @@
         if (previewFn) {
 
             const preview = document.createElement("div");
-            preview.style.cssText = "font-size:12px;color:#48e1eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:16px";
+            preview.style.cssText = "font-size:12px;color:" + ACCENT + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:16px";
             row.appendChild(preview);
 
             refresh = function () {
@@ -46323,7 +46406,7 @@
     // saturation, lightness and opacity sliders, a few ready colors and a
     // swatch of the result over a chequer. Each change is handed to change
     // at once, Cancel or a tap beside it hands back the color it opened with
-    const PICK_SWATCHES = ["#ffffff", "#c8c8d0", "#48e1eb", "#7ee787", "#ffd166", "#ff9f43", "#ff6b9a", "#a78bfa"];
+    const PICK_SWATCHES = ["#ffffff", "#c8c8d0", ACCENT, "#7ee787", "#ffd166", "#ff9f43", "#ff6b9a", "#a78bfa"];
 
     // A color with how much of it shows: a swatch of the two together, a
     // tap on it opens the picker, and the share beside it. The web view
@@ -46822,7 +46905,7 @@
                 const starting = info.starting === true || helperTrying;
 
                 warnEl.style.borderColor = starting ? CTRL_ACCENT : "#e57373";
-                warnEl.style.background = starting ? "rgba(72,225,235,0.10)" : "rgba(229,115,115,0.12)";
+                warnEl.style.background = starting ? "rgba(" + ACCENT_RGB + ",0.10)" : "rgba(229,115,115,0.12)";
                 warnText.style.color = starting ? CTRL_ACCENT : "#ffb4b4";
                 warnText.textContent = starting ? "Starting the hotspot helper" : hotspotFix("nohelper").text;
             }
@@ -47391,7 +47474,7 @@
         heading.textContent = "Settings";
         heading.style.cssText = "font-weight:600";
 
-        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeSettings);
+        const doneBtn = makeButton("Done", ACCENT, "#000", closeSettings);
         doneBtn.style.flex = "0 0 auto";
         doneBtn.style.padding = "6px 14px";
 
@@ -47757,7 +47840,7 @@
                 publishHostSoon();
             });
 
-        const copyLogBtn = makeButton("Copy debug log", "transparent", "#48e1eb", copyDebugLog);
+        const copyLogBtn = makeButton("Copy debug log", "transparent", ACCENT, copyDebugLog);
 
         // A web view copies the phone's log into its own browser
         copyLogBtn.__copyText = debugLogText;
@@ -47774,7 +47857,7 @@
         // Copy in a cyan ring, Clear in red, side by side at the same width
         logRow.style.cssText = "display:flex;align-items:stretch;gap:8px";
         logRow.dataset.hostEven = "1";
-        copyLogBtn.style.boxShadow = "inset 0 0 0 2px #48e1eb";
+        copyLogBtn.style.boxShadow = "inset 0 0 0 2px " + ACCENT;
         copyLogBtn.dataset.hostRing = "1";
         clearLogBtn.dataset.hostDanger = "1";
 
@@ -48839,7 +48922,7 @@
         // What the last export or import did. The status line on the cover
         // sits behind the settings, so it is shown here as well
         dataMsgEl = document.createElement("div");
-        dataMsgEl.style.cssText = "font-size:12px;color:#48e1eb;line-height:1.4";
+        dataMsgEl.style.cssText = "font-size:12px;color:" + ACCENT + ";line-height:1.4";
 
         // Cleared each time the settings open
         settingsRefreshers.push(function () {
@@ -49333,7 +49416,7 @@
 
                         const lit = on === pair[1];
 
-                        made[pair[0]].style.background = lit ? "#48e1eb" : "#333";
+                        made[pair[0]].style.background = lit ? ACCENT : "#333";
                         made[pair[0]].style.color = lit ? "#000" : "#fff";
                     }
                 };
@@ -49388,7 +49471,7 @@
                 // Without WireGuard there is nothing to set
                 wgFreeRow.style.display = free === "" ? "none" : "flex";
                 wgFreeBtn.textContent = free === "1" ? "Unrestricted" : "Open settings";
-                wgFreeBtn.style.background = free === "1" ? "#48e1eb" : "#333";
+                wgFreeBtn.style.background = free === "1" ? ACCENT : "#333";
                 wgFreeBtn.style.color = free === "1" ? "#000" : "#fff";
             };
 
@@ -49424,7 +49507,7 @@
 
                 batteryBtn.textContent = free ? "Allowed" : "Allow";
                 batteryBtn.disabled = free;
-                batteryBtn.style.background = free ? "#48e1eb" : "#333";
+                batteryBtn.style.background = free ? ACCENT : "#333";
                 batteryBtn.style.color = free ? "#000" : "#fff";
             };
 
@@ -49582,7 +49665,7 @@
                         name.textContent = pair[0];
                         name.style.cssText = "flex:0 0 8.5em;font-size:11px;color:#888";
                         value.textContent = pair[1];
-                        value.style.cssText = "flex:1;min-width:0;font-size:13px;color:" + (pair[0] === "Warning" ? "#f0a94a" : "#48e1eb") + ";line-height:1.4";
+                        value.style.cssText = "flex:1;min-width:0;font-size:13px;color:" + (pair[0] === "Warning" ? "#f0a94a" : ACCENT) + ";line-height:1.4";
                         row.appendChild(name);
                         row.appendChild(value);
                         carStatusEl.appendChild(row);
@@ -50232,7 +50315,7 @@
 
             if (strong) {
 
-                el.style.color = "#48e1eb";
+                el.style.color = ACCENT;
                 el.style.fontWeight = "600";
                 delete el.dataset.section;
             }
@@ -50383,7 +50466,7 @@
                 col.dataset.hostCol = "1";
                 name.textContent = title + (inUse ? ", in use" : "");
                 name.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                    + (inUse ? ";color:#48e1eb" : "");
+                    + (inUse ? ";color:" + ACCENT : "");
                 editBtn.style.flex = "0 0 auto";
                 editBtn.style.padding = "6px 14px";
                 col.appendChild(name);
@@ -50564,7 +50647,7 @@
                         name.textContent = text;
                     }
 
-                    name.style.color = here ? "#48e1eb" : "";
+                    name.style.color = here ? ACCENT : "";
 
                     if (words.textContent !== summary) {
                         words.textContent = summary;
@@ -50590,7 +50673,7 @@
                 pop.style.cssText = "position:fixed;inset:0;z-index:2147483644;display:none;align-items:center;justify-content:center;"
                     + "background:rgba(0,0,0,0.6);padding:16px;box-sizing:border-box";
                 box.style.cssText = "width:min(560px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
-                    + "background:#1c1c22;border:1px solid rgba(72,225,235,0.45);display:flex;flex-direction:column;gap:12px";
+                    + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
                 pop.addEventListener("click", function (ev) {
 
                     if (ev.target === pop) {
@@ -50602,7 +50685,7 @@
                 });
                 top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
                 popTitle.textContent = title;
-                popTitle.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:#48e1eb";
+                popTitle.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
                 close.style.flex = "0 0 auto";
                 close.style.padding = "4px 12px";
                 close.setAttribute("aria-label", "Close");
@@ -50700,7 +50783,7 @@
                 slider.step = "5";
                 slider.value = String(pct());
                 slider.setAttribute("aria-label", "Max volume as it connects, %");
-                slider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+                slider.style.cssText = "flex:1;min-width:0;accent-color:" + ACCENT;
                 shown.style.cssText = "flex:0 0 3.5em;text-align:right;font-variant-numeric:tabular-nums";
                 slider.addEventListener("input", function () {
                     take(false);
@@ -50760,7 +50843,7 @@
                     set("lowDb", 0);
                     kept();
                 });
-                const train = makeButton("Train by ear", "transparent", "#48e1eb", function () {
+                const train = makeButton("Train by ear", "transparent", ACCENT, function () {
                     volTrainOpen(phone, address, name);
                 });
                 const editBtn = makeButton("Edit by hand", "#333", "#fff", function () {
@@ -50843,7 +50926,7 @@
                 forgetRow.style.cssText = "display:none";
                 forget.dataset.hostDanger = "1";
                 train.dataset.hostRing = "1";
-                train.style.boxShadow = "inset 0 0 0 2px #48e1eb";
+                train.style.boxShadow = "inset 0 0 0 2px " + ACCENT;
 
                 for (const b of [editBtn, train, forget]) {
 
@@ -50984,7 +51067,7 @@
                 slider.max = "100";
                 slider.step = "0.1";
                 slider.setAttribute("aria-label", "Volume now, %");
-                slider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+                slider.style.cssText = "flex:1;min-width:0;accent-color:" + ACCENT;
                 shown.style.cssText = "flex:0 0 3.5em;text-align:right;font-variant-numeric:tabular-nums";
                 nums.style.fontVariantNumeric = "tabular-nums";
                 slider.addEventListener("input", function () {
@@ -51214,7 +51297,7 @@
                 // Turned on its side, top up, so it works the same in every
                 // browser the player runs in
                 slider.style.cssText = "position:absolute;left:50%;top:50%;width:150px;margin:0;"
-                    + "transform:translate(-50%,-50%) rotate(-90deg);accent-color:#48e1eb";
+                    + "transform:translate(-50%,-50%) rotate(-90deg);accent-color:" + ACCENT;
                 name.textContent = b.label + "\n" + freq;
                 name.style.cssText = "font-size:11px;color:#999;text-align:center;line-height:1.3;white-space:pre-line";
 
@@ -51291,7 +51374,7 @@
             cutSlider.step = "5";
             cutSlider.value = String(edit.bassCut || 0);
             cutSlider.setAttribute("aria-label", "Bass cut, Hz");
-            cutSlider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+            cutSlider.style.cssText = "flex:1;min-width:0;accent-color:" + ACCENT;
             cutShown.style.cssText = "flex:0 0 4.5em;text-align:right;font-variant-numeric:tabular-nums";
             showCut();
 
@@ -53192,7 +53275,7 @@
             }
         };
 
-        const importBtn = makeButton("Import", "#48e1eb", "#000", function () {
+        const importBtn = makeButton("Import", ACCENT, "#000", function () {
 
             const skip = types.filter(function (t) {
                 return !on[t.key];
@@ -54313,7 +54396,7 @@
 
         for (const opt of options) {
 
-            const b = makeButton(opt.label, "#48e1eb", "#000", function () {
+            const b = makeButton(opt.label, ACCENT, "#000", function () {
 
                 hideDataChoice();
                 opt.fn();
@@ -54323,7 +54406,7 @@
             // in a color of its own when given one
             if (opt.ring) {
 
-                const ring = opt.color || "#48e1eb";
+                const ring = opt.color || ACCENT;
 
                 b.style.background = "transparent";
                 b.style.color = ring;
@@ -54376,8 +54459,8 @@
         const paint = function () {
 
             box.textContent = on ? "\u2713" : "";
-            box.style.background = on ? "#48e1eb" : "transparent";
-            box.style.border = on ? "2px solid #48e1eb" : "2px solid #8a8a94";
+            box.style.background = on ? ACCENT : "transparent";
+            box.style.border = on ? "2px solid " + ACCENT : "2px solid #8a8a94";
             line.setAttribute("aria-checked", on ? "true" : "false");
         };
 
@@ -54451,7 +54534,7 @@
 
         for (const opt of options) {
 
-            const b = makeButton(opt.label, "#48e1eb", "#000", function () {
+            const b = makeButton(opt.label, ACCENT, "#000", function () {
                 close(opt.fn);
             });
 
@@ -54459,7 +54542,7 @@
             // in a color of its own when given one
             if (opt.ring) {
 
-                const ring = opt.color || "#48e1eb";
+                const ring = opt.color || ACCENT;
 
                 b.style.background = "transparent";
                 b.style.color = ring;
@@ -54651,7 +54734,7 @@
         }
 
         const cancelBtn = makeButton("Cancel", "#444", "#fff", cancel);
-        const importBtn = makeButton("Import", "#48e1eb", "#000", function () {
+        const importBtn = makeButton("Import", ACCENT, "#000", function () {
 
             const text = area.value;
 
@@ -56426,7 +56509,7 @@
         heading.textContent = "Information";
         heading.style.cssText = "font-weight:600";
 
-        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeInfo);
+        const doneBtn = makeButton("Done", ACCENT, "#000", closeInfo);
         doneBtn.style.flex = "0 0 auto";
         doneBtn.style.padding = "6px 14px";
 
@@ -56613,9 +56696,9 @@
 
         fetchRow.style.cssText = "display:flex;flex-direction:column;gap:4px";
         fetchText.textContent = "Getting the details from Mureka";
-        fetchText.style.cssText = "color:#48e1eb;font-size:12px";
+        fetchText.style.cssText = "color:" + ACCENT + ";font-size:12px";
         fetchBar.style.cssText = "height:3px;border-radius:2px;background:#333;overflow:hidden";
-        fetchFill.style.cssText = "height:100%;width:35%;background:#48e1eb;border-radius:2px";
+        fetchFill.style.cssText = "height:100%;width:35%;background:" + ACCENT + ";border-radius:2px";
         fetchBar.appendChild(fetchFill);
         fetchRow.appendChild(fetchText);
         fetchRow.appendChild(fetchBar);
@@ -57067,7 +57150,7 @@
             return "#2b8f96";
         }
 
-        return "#48e1eb";
+        return ACCENT;
     }
 
     // The dimmed page with the turning ring, or away when the text is empty
@@ -57079,6 +57162,85 @@
 
         trimUi.workingText.textContent = text;
         trimUi.working.style.display = text ? "flex" : "none";
+    }
+
+    // Pause the preview where it is, or go on from there
+    function trimPauseResume() {
+
+        if (!tr) {
+            return;
+        }
+
+        if (tr.src) {
+
+            const at = trimPlayhead();
+            const to = tr.playTo;
+            const mode = tr.playMode;
+
+            trimStop();
+            tr.paused = { at: at, to: to, mode: mode };
+            trimPaint();
+            return;
+        }
+
+        if (tr.paused) {
+
+            const p = tr.paused;
+
+            // The end moved before the paused place, the end is played then
+            if (p.at >= tr.end - 0.02) {
+                trimPlayEnd();
+            } else {
+                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
+            }
+        }
+    }
+
+    // Draw columns of peaks, or a line through the samples once they are
+    // further apart than a column
+    function trimDrawWave(g, w, h, from, to, peaks, gain) {
+
+        const mid = h / 2;
+        const spanPerCol = (to - from) / w;
+        const k = mid * 0.95 * (gain || 1);
+
+        // A sample magnified past the edge is drawn at the edge
+        const y = function (v) {
+            return Math.max(0, Math.min(h, mid - v * k));
+        };
+
+        if (spanPerCol * tr.rate < 1) {
+
+            // Few enough samples to show each one, joined by a line
+            const a = Math.max(0, Math.floor(from * tr.rate));
+            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
+
+            g.lineWidth = Math.max(1, Math.round(w / 400));
+
+            for (let i = a; i < b; i++) {
+
+                const t0 = i / tr.rate;
+                const t1 = (i + 1) / tr.rate;
+
+                g.strokeStyle = trimWaveColor(t0);
+                g.beginPath();
+                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
+                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
+                g.stroke();
+            }
+
+            return;
+        }
+
+        for (let c = 0; c < w; c++) {
+
+            const t = from + (c + 0.5) * spanPerCol;
+            const top = y(peaks.hi[c]);
+            const bottom = y(peaks.lo[c]);
+
+            g.fillStyle = trimWaveColor(t);
+            g.fillRect(c, top, 1, Math.max(1, bottom - top));
+        }
     }
     // END SHARED trim
 
@@ -57186,7 +57348,7 @@
 
                 const on = b.value === get();
 
-                b.el.style.background = on ? "#48e1eb" : "#333";
+                b.el.style.background = on ? ACCENT : "#333";
                 b.el.style.color = on ? "#000" : "#fff";
             }
         };
@@ -57273,7 +57435,7 @@
         ui.heading = document.createElement("div");
         ui.heading.style.cssText = "flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
 
-        ui.trimBtn = makeButton("Trim", "#48e1eb", "#000", askTrim);
+        ui.trimBtn = makeButton("Trim", ACCENT, "#000", askTrim);
         ui.trimBtn.style.flex = "0 0 auto";
         ui.trimBtn.style.padding = "6px 16px";
         ui.trimBtn.style.display = "flex";
@@ -57307,7 +57469,7 @@
 
         const loadingRing = document.createElement("span");
 
-        loadingRing.style.cssText = "width:28px;height:28px;border:3px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        loadingRing.style.cssText = "width:28px;height:28px;border:3px solid rgba(" + ACCENT_RGB + ",0.25);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.loadingText = document.createElement("span");
         ui.loading.appendChild(loadingRing);
         ui.loading.appendChild(ui.loadingText);
@@ -57558,7 +57720,7 @@
         askButtons.appendChild(makeButton("Cancel", "#333", "#fff", function () {
             ui.ask.style.display = "none";
         }));
-        askButtons.appendChild(makeButton("Trim", "#48e1eb", "#000", function () {
+        askButtons.appendChild(makeButton("Trim", ACCENT, "#000", function () {
 
             ui.ask.style.display = "none";
             submitTrim(ui.askDelete.get());
@@ -57630,7 +57792,7 @@
 
         const workingRing = document.createElement("span");
 
-        workingRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        workingRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(" + ACCENT_RGB + ",0.25);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.workingText = document.createElement("span");
         ui.working.appendChild(workingRing);
         ui.working.appendChild(ui.workingText);
@@ -58163,38 +58325,6 @@
         return settings.trimFade !== false && tr !== null && tr.end < tr.duration - 0.05;
     }
 
-    // Pause the preview where it is, or go on from there
-    function trimPauseResume() {
-
-        if (!tr) {
-            return;
-        }
-
-        if (tr.src) {
-
-            const at = trimPlayhead();
-            const to = tr.playTo;
-            const mode = tr.playMode;
-
-            trimStop();
-            tr.paused = { at: at, to: to, mode: mode };
-            trimPaint();
-            return;
-        }
-
-        if (tr.paused) {
-
-            const p = tr.paused;
-
-            // The end moved before the paused place, the end is played then
-            if (p.at >= tr.end - 0.02) {
-                trimPlayEnd();
-            } else {
-                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
-            }
-        }
-    }
-
     function trimStop() {
 
         if (!tr || !tr.src) {
@@ -58232,53 +58362,6 @@
         }
 
         return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
-    }
-
-    // Draw columns of peaks, or a line through the samples once they are
-    // further apart than a column
-    function trimDrawWave(g, w, h, from, to, peaks, gain) {
-
-        const mid = h / 2;
-        const spanPerCol = (to - from) / w;
-        const k = mid * 0.95 * (gain || 1);
-
-        // A sample magnified past the edge is drawn at the edge
-        const y = function (v) {
-            return Math.max(0, Math.min(h, mid - v * k));
-        };
-
-        if (spanPerCol * tr.rate < 1) {
-
-            // Few enough samples to show each one, joined by a line
-            const a = Math.max(0, Math.floor(from * tr.rate));
-            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
-
-            g.lineWidth = Math.max(1, Math.round(w / 400));
-
-            for (let i = a; i < b; i++) {
-
-                const t0 = i / tr.rate;
-                const t1 = (i + 1) / tr.rate;
-
-                g.strokeStyle = trimWaveColor(t0);
-                g.beginPath();
-                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
-                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
-                g.stroke();
-            }
-
-            return;
-        }
-
-        for (let c = 0; c < w; c++) {
-
-            const t = from + (c + 0.5) * spanPerCol;
-            const top = y(peaks.hi[c]);
-            const bottom = y(peaks.lo[c]);
-
-            g.fillStyle = trimWaveColor(t);
-            g.fillRect(c, top, 1, Math.max(1, bottom - top));
-        }
     }
 
     function trimPaint() {
@@ -58846,7 +58929,7 @@
         head.textContent = "New cover for \"" + (title || "Untitled") + "\"";
         head.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
         view.style.cssText = "position:relative;overflow:hidden;touch-action:none;background:#000;"
-            + "border-radius:8px;cursor:grab;align-self:center;box-shadow:inset 0 0 0 1px #48e1eb";
+            + "border-radius:8px;cursor:grab;align-self:center;box-shadow:inset 0 0 0 1px " + ACCENT;
         img.draggable = false;
         img.alt = "";
         img.style.cssText = "position:absolute;left:0;top:0;max-width:none;max-height:none;"
@@ -58855,7 +58938,7 @@
         slider.min = "0";
         slider.max = "1000";
         slider.value = "0";
-        slider.style.cssText = "width:100%;accent-color:#48e1eb";
+        slider.style.cssText = "width:100%;accent-color:" + ACCENT;
         hint.textContent = "Drag to move it. Pinch, scroll or slide to zoom.";
         hint.style.cssText = "color:#aaa;font-size:0.85em";
         row.style.cssText = "display:flex;gap:8px";
@@ -59052,7 +59135,7 @@
         row.appendChild(button("Cancel", "#444", "#fff", function () {
             close(null);
         }));
-        row.appendChild(button("Set cover", "#48e1eb", "#000", finish));
+        row.appendChild(button("Set cover", ACCENT, "#000", finish));
 
         // The page's own keys never hear what is pressed here
         back.addEventListener("keydown", function (ev) {
@@ -62427,7 +62510,7 @@
 
             b.type = "button";
             b.textContent = "Clear";
-            b.style.cssText = "border:none;background:transparent;color:#48e1eb;font:inherit;font-size:12px;font-weight:600;padding:2px 0;cursor:pointer";
+            b.style.cssText = "border:none;background:transparent;color:" + ACCENT + ";font:inherit;font-size:12px;font-weight:600;padding:2px 0;cursor:pointer";
             b.addEventListener("click", clear);
             row.appendChild(b);
             row.clearBtn = b;
@@ -62524,7 +62607,7 @@
         head.style.cssText = "display:flex;align-items:center;gap:8px;flex:0 0 auto";
         heading.textContent = "Create";
         heading.style.cssText = "flex:1;font-weight:600";
-        ui.makeBtn = makeButton("Create", "#48e1eb", "#000", function () {
+        ui.makeBtn = makeButton("Create", ACCENT, "#000", function () {
             createFromPage(false);
         });
         ui.makeBtn.style.flex = "0 0 auto";
@@ -62540,7 +62623,7 @@
         ui.resetBtn = createRing(makeButton("Reset", "#333", "#fff", function () {
 
             askChoices("Start over?\nThe title, lyrics, style and every choice go back to how they start.", [
-                { label: "Start over", ring: true, color: "#ff6b6b", fn: createReset }
+                { label: "Start over", ring: true, color: DANGER, fn: createReset }
             ]);
         }), "#b8b8c0");
         ui.resetBtn.style.flex = "0 0 auto";
@@ -62556,7 +62639,7 @@
         ui.status = document.createElement("div");
         ui.status.style.cssText = "display:none;align-items:center;gap:8px;font-size:13px;color:#ccc;white-space:pre-line";
         ui.statusRing = document.createElement("span");
-        ui.statusRing.style.cssText = "flex:0 0 auto;width:14px;height:14px;border:2px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        ui.statusRing.style.cssText = "flex:0 0 auto;width:14px;height:14px;border:2px solid rgba(" + ACCENT_RGB + ",0.25);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.statusText = document.createElement("span");
         ui.status.appendChild(ui.statusRing);
         ui.status.appendChild(ui.statusText);
@@ -62603,7 +62686,7 @@
 
         // The chat it goes on in, and a way to start a new song
         ui.easyChatRow = document.createElement("div");
-        ui.easyChatRow.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:rgba(72,225,235,0.1);border:1px solid rgba(72,225,235,0.35)";
+        ui.easyChatRow.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:rgba(" + ACCENT_RGB + ",0.1);border:1px solid rgba(" + ACCENT_RGB + ",0.35)";
         ui.easyChatText = document.createElement("span");
         ui.easyChatText.style.cssText = "flex:1 1 100%;font-size:13px;line-height:1.4;color:#dff";
         ui.easyNew = makeButton("New song", "#333", "#fff", function () {
@@ -62779,7 +62862,7 @@
         }), CTRL_ACCENT);
         ui.remixClearBtn = createRing(act("No remix", function () {
             changeCreateDraft({ remix: null, remixName: "", remixStyle: "" });
-        }), "#ff6b6b");
+        }), DANGER);
         createEl.appendChild(createButtonRow([
             act("Choose a song", createRemixFromPage),
             act("Upload a song", createUploadFromPage)
@@ -62819,7 +62902,7 @@
         ui.length.min = "0";
         ui.length.max = String(lengths.length - 1);
         ui.length.step = "1";
-        ui.length.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
+        ui.length.style.cssText = "flex:1;min-width:0;accent-color:" + ACCENT;
         ui.length.addEventListener("input", function () {
 
             createDraft.lengthMs = lengths[Number(ui.length.value) || 0] || 0;
@@ -62837,7 +62920,7 @@
         ui.wild.min = "0";
         ui.wild.max = "100";
         ui.wild.step = "1";
-        ui.wild.style.cssText = "width:100%;accent-color:#48e1eb";
+        ui.wild.style.cssText = "width:100%;accent-color:" + ACCENT;
         ui.wild.addEventListener("input", function () {
 
             createDraft.wildness = Number(ui.wild.value) || 0;
@@ -62921,10 +63004,10 @@
 
         const waitRing = document.createElement("span");
 
-        waitRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(72,225,235,0.25);border-top-color:#48e1eb;border-radius:50%;animation:mureka-spin 0.8s linear infinite";
+        waitRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(" + ACCENT_RGB + ",0.25);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.waitText = document.createElement("span");
 
-        const stopBtn = createRing(makeButton("Stop", "#333", "#fff", stopCreate), "#ff6b6b");
+        const stopBtn = createRing(makeButton("Stop", "#333", "#fff", stopCreate), DANGER);
 
         stopBtn.style.flex = "0 0 auto";
         stopBtn.style.padding = "8px 28px";
@@ -64066,7 +64149,7 @@
         heading.textContent = "Playlists";
         heading.style.cssText = "font-weight:600";
 
-        const doneBtn = makeButton("Done", "#48e1eb", "#000", closePlaylists);
+        const doneBtn = makeButton("Done", ACCENT, "#000", closePlaylists);
         doneBtn.style.flex = "0 0 auto";
         doneBtn.style.padding = "6px 14px";
 
@@ -64077,7 +64160,7 @@
         const top = document.createElement("div");
         top.style.cssText = "display:flex;gap:6px";
 
-        const newBtn = makeButton("New playlist", "#48e1eb", "#000", function () {
+        const newBtn = makeButton("New playlist", ACCENT, "#000", function () {
             startEditPlaylist(null);
         });
 
@@ -64091,7 +64174,7 @@
         // Making or editing a playlist, shown while one is
         playlistsEditEl = document.createElement("div");
         playlistsEditEl.style.cssText = "display:none;flex-direction:column;gap:8px;padding:10px;"
-            + "border-radius:8px;background:#26262c;border:1px solid rgba(72,225,235,0.5)";
+            + "border-radius:8px;background:#26262c;border:1px solid rgba(" + ACCENT_RGB + ",0.5)";
 
         // Container that the playlist rows are rendered into
         playlistsListEl = document.createElement("div");
@@ -64411,7 +64494,7 @@
 
             row.appendChild(art);
 
-            const open = makeButton(pl.name + "  (" + pl.song_count + ")", active ? "#48e1eb" : "#333", active ? "#000" : "#fff", function () {
+            const open = makeButton(pl.name + "  (" + pl.song_count + ")", active ? ACCENT : "#333", active ? "#000" : "#fff", function () {
                 openPlaylist(pl, false);
             });
 
@@ -64506,7 +64589,7 @@
 
         buttons.style.cssText = "display:flex;gap:6px";
 
-        const save = makeButton(pl ? "Save" : "Create", "#48e1eb", "#000", savePlaylistEdit);
+        const save = makeButton(pl ? "Save" : "Create", ACCENT, "#000", savePlaylistEdit);
         const cancel = makeButton("Cancel", "#333", "#fff", function () {
 
             playlistEditing = null;
@@ -64554,7 +64637,7 @@
         playlistsEditEl.appendChild(covers);
 
         const armed = playlistDeleteArmed === String(pl.playlist_id);
-        const del = makeButton(armed ? "Tap again to delete " + pl.name : "Delete playlist", armed ? "#ff6b6b" : "#3a2626", armed ? "#000" : "#ff8a8a", function () {
+        const del = makeButton(armed ? "Tap again to delete " + pl.name : "Delete playlist", armed ? DANGER : "#3a2626", armed ? "#000" : "#ff8a8a", function () {
 
             if (!armed) {
 
@@ -65019,7 +65102,7 @@
         text.appendChild(sub);
         playlistHeadEl.appendChild(text);
 
-        const play = makeButton("Play", "#48e1eb", "#000", function () {
+        const play = makeButton("Play", ACCENT, "#000", function () {
             playOpenPlaylist(false);
         });
         const mix = makeButton("Shuffle", "#333", "#fff", function () {
@@ -65101,7 +65184,7 @@
 
         const active = activePlaylist !== null;
 
-        playlistButton.style.background = active ? "#48e1eb" : "#444";
+        playlistButton.style.background = active ? ACCENT : "#444";
         playlistButton.style.color = active ? "#000" : "#fff";
 
         // The button in the row lit the same way
@@ -65109,7 +65192,7 @@
 
         if (ctl) {
 
-            ctl.style.color = active ? "#48e1eb" : "";
+            ctl.style.color = active ? ACCENT : "";
             ctl.title = active ? "Playlists, " + activePlaylist.name + " open" : "Playlists";
         }
     }
@@ -66007,7 +66090,7 @@
         const has = !!(pl && currentSong && pl.ids.has(String(currentSong.song_id)));
 
         btn.title = pl ? (has ? "In " + pl.name : "Add the playing song to " + pl.name) : "Add the playing song to a playlist";
-        btn.style.color = has ? "#48e1eb" : "";
+        btn.style.color = has ? ACCENT : "";
         publishHostSoon();
     }
 
@@ -66124,7 +66207,7 @@
 
         const active = creatorSource !== null;
 
-        creatorButton.style.background = active ? "#48e1eb" : "#444";
+        creatorButton.style.background = active ? ACCENT : "#444";
         creatorButton.style.color = active ? "#000" : "#fff";
 
         // The published toggle greys out while a creator is being browsed
@@ -66302,7 +66385,7 @@
         heading.textContent = "Creators";
         heading.style.cssText = "font-weight:600";
 
-        const doneBtn = makeButton("Done", "#48e1eb", "#000", closeCreators);
+        const doneBtn = makeButton("Done", ACCENT, "#000", closeCreators);
         doneBtn.style.flex = "0 0 auto";
         doneBtn.style.padding = "6px 14px";
 
@@ -66577,7 +66660,7 @@
         row.style.cssText = "display:flex;gap:6px;align-items:stretch";
 
         const active = creatorSource && String(creatorSource.user_id) === String(creator.user_id);
-        const bg = active ? "#48e1eb" : "#333";
+        const bg = active ? ACCENT : "#333";
         const fg = active ? "#000" : "#fff";
 
         const selectBtn = makeButton(creator.stage_name, bg, fg, function () {
@@ -66854,7 +66937,7 @@
 
         if (navigator.share) {
 
-            const share = makeButton("Share", "#48e1eb", "#000", function () {
+            const share = makeButton("Share", ACCENT, "#000", function () {
 
                 navigator.share({ title: title, text: text }).catch(function () {
                     // Closed without sharing
@@ -67111,7 +67194,7 @@
         if (el) {
 
             el.style.borderRadius = "6px";
-            el.style.boxShadow = (el.dataset.setBar ? el.dataset.setBar + ", " : "") + "inset 0 0 0 999px rgba(72, 225, 235, 0.16)";
+            el.style.boxShadow = (el.dataset.setBar ? el.dataset.setBar + ", " : "") + "inset 0 0 0 999px rgba(" + ACCENT_RGB + ", 0.16)";
         }
     }
 
@@ -67318,7 +67401,7 @@
 
         title.textContent = (song.title || "").trim() || "Untitled";
         title.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;"
-            + "text-overflow:ellipsis;font-weight:600;color:#48e1eb";
+            + "text-overflow:ellipsis;font-weight:600;color:" + ACCENT;
 
         head.addEventListener("click", function (ev) {
             ev.stopPropagation();
@@ -67656,7 +67739,7 @@
 
         } else {
 
-            addMenuRow("Cache", "#48e1eb", function () {
+            addMenuRow("Cache", ACCENT, function () {
                 cacheOne(song);
             }, "cache");
         }
@@ -74924,6 +75007,20 @@
 (function () {
     "use strict";
 
+    // BEGIN SHARED palette
+    // Written by embed-webview.sh from src/shared/palette.js. Change that
+    // file and run make embed, never the lines up to END SHARED palette
+    // The player's colours, each in one place. ACCENT is the cyan of what
+    // is on, picked or in focus, ACCENT_RGB the same as numbers for
+    // rgba(), and DANGER the red of what deletes or warns. First in both
+    // files, so every part of them may use these from the start.
+    // Shared by the player and the web view's page, src/shared/palette.js,
+    // inlined into both by embed-webview.sh
+    const ACCENT = "#48e1eb";
+    const ACCENT_RGB = "72,225,235";
+    const DANGER = "#ff6b6b";
+    // END SHARED palette
+
     const $ = function (id) {
         return document.getElementById(id);
     };
@@ -77836,11 +77933,12 @@
 
         img.src = url;
     }
-    // END SHARED misc
 
     function dbgFlag(v) {
+
         return v ? "y" : "n";
     }
+    // END SHARED misc
 
     // Add one line to the log, and show it at once while the overlay is up.
     // It is kept with the overlay off as well, so switching it on shows what
@@ -80379,7 +80477,7 @@
             input.max = String(max);
             input.step = "1";
             input.value = String(value);
-            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:#48e1eb";
+            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:" + ACCENT;
             shown.style.cssText = "flex:0 0 3.6em;text-align:right;font-variant-numeric:tabular-nums";
             shown.textContent = value + unit;
             input.addEventListener("input", function () {
@@ -80462,7 +80560,7 @@
             b.type = "button";
             b.textContent = label;
             b.style.cssText = "min-height:2.9em;padding:0 1.2em;border-radius:10px;border:none;cursor:pointer;font:inherit;"
-                + (accent ? "background:#48e1eb;color:#000" : "background:#3a3a42;color:#fff");
+                + (accent ? "background:" + ACCENT + ";color:#000" : "background:#3a3a42;color:#fff");
             b.addEventListener("click", function () {
                 close(keep);
             });
@@ -99117,6 +99215,117 @@
         trainUi = ui;
     }
 
+    // BEGIN SHARED volpop
+    // Written by embed-webview.sh from src/shared/volpop.js. Change that
+    // file and run make embed, never the lines up to END SHARED volpop
+    // The parts of the volume training's popup drawn the same way on the
+    // device and in the web view, from the view volTrainView makes. Given a
+    // style, the pieces get inline styles, as the device's popup sits in
+    // Mureka's page with no stylesheet of its own. Without one they get the
+    // classes the web view's page styles.
+    // Shared by the player and the web view's page, src/shared/volpop.js,
+    // inlined into both by embed-webview.sh
+
+    // The choice above the list, made again only when it changes, so a tap
+    // between two drawings is not lost. Says whether there is one
+    function volPopChoice(ui, choice, name, onPick, style) {
+
+        const key = JSON.stringify(choice || null);
+
+        if (key !== ui.choiceKey) {
+
+            ui.choiceKey = key;
+            ui.choice.textContent = "";
+
+            if (choice) {
+
+                const head = document.createElement("div");
+
+                head.textContent = choice.label;
+
+                if (style) {
+                    head.style.cssText = style.choiceHead;
+                } else {
+                    head.className = "trainChoiceHead";
+                }
+
+                ui.choice.appendChild(head);
+
+                for (const o of choice.options || []) {
+
+                    const row = document.createElement("label");
+                    const radio = document.createElement("input");
+
+                    radio.type = "radio";
+                    radio.name = name;
+                    radio.checked = o.value === choice.value;
+
+                    if (style) {
+
+                        row.style.cssText = style.choiceRow;
+                        radio.style.cssText = style.radio;
+                    }
+
+                    radio.addEventListener("change", function () {
+                        onPick(o.value);
+                    });
+                    row.appendChild(radio);
+                    row.appendChild(document.createTextNode(o.label));
+                    ui.choice.appendChild(row);
+                }
+            }
+        }
+
+        return !!choice;
+    }
+
+    // What Save keeps, a step a row: its name, its gap and where the gap
+    // came from. Says whether there are any
+    function volPopRows(box, rows, style) {
+
+        box.textContent = "";
+
+        for (const r of rows || []) {
+
+            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
+
+            for (const c of cells) {
+
+                const el = document.createElement("span");
+
+                el.textContent = c[0];
+
+                if (style) {
+                    style.cell(el, c[1]);
+                } else {
+                    el.className = c[1];
+                }
+
+                box.appendChild(el);
+            }
+        }
+
+        return (rows || []).length > 0;
+    }
+
+    // Lines of plain text under the list, the switch delay. Says whether
+    // there are any
+    function volPopLines(box, lines) {
+
+        box.textContent = "";
+
+        for (const line of lines || []) {
+
+            const el = document.createElement("div");
+
+            el.textContent = line;
+            box.appendChild(el);
+        }
+
+        return (lines || []).length > 0;
+    }
+    // END SHARED volpop
+
     function paintTrainPop() {
 
         const v = state && state.volTrain ? state.volTrain : null;
@@ -99164,69 +99373,13 @@
             ui.quietShown.textContent = Number(v.quiet) > 0 ? v.quiet + " dB" : "Off";
         }
 
-        // The choice made again only when it changes, so a tap is not lost
-        const choiceKey = JSON.stringify(v.choice || null);
+        const pick = function (value) {
+            send("volTrain", { op: "keep", value: value === "keep" });
+        };
 
-        if (choiceKey !== ui.choiceKey) {
-
-            ui.choiceKey = choiceKey;
-            ui.choice.textContent = "";
-
-            if (v.choice) {
-
-                const head = document.createElement("div");
-
-                head.className = "trainChoiceHead";
-                head.textContent = v.choice.label;
-                ui.choice.appendChild(head);
-
-                for (const o of v.choice.options || []) {
-
-                    const row = document.createElement("label");
-                    const radio = document.createElement("input");
-
-                    radio.type = "radio";
-                    radio.name = "trainKeep";
-                    radio.checked = o.value === v.choice.value;
-                    radio.addEventListener("change", function () {
-                        send("volTrain", { op: "keep", value: o.value === "keep" });
-                    });
-                    row.appendChild(radio);
-                    row.appendChild(document.createTextNode(o.label));
-                    ui.choice.appendChild(row);
-                }
-            }
-        }
-
-        ui.choice.style.display = v.choice ? "" : "none";
-        ui.rows.textContent = "";
-
-        for (const r of v.rows || []) {
-
-            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
-
-            for (const c of cells) {
-
-                const el = document.createElement("span");
-
-                el.textContent = c[0];
-                el.className = c[1];
-                ui.rows.appendChild(el);
-            }
-        }
-
-        ui.rows.style.display = (v.rows || []).length ? "" : "none";
-        ui.list.textContent = "";
-
-        for (const line of v.lines || []) {
-
-            const el = document.createElement("div");
-
-            el.textContent = line;
-            ui.list.appendChild(el);
-        }
-
-        ui.list.style.display = (v.lines || []).length ? "" : "none";
+        ui.choice.style.display = volPopChoice(ui, v.choice, "trainKeep", pick, null) ? "" : "none";
+        ui.rows.style.display = volPopRows(ui.rows, v.rows, null) ? "" : "none";
+        ui.list.style.display = volPopLines(ui.list, v.lines) ? "" : "none";
 
         // The buttons made again only when they change, so a tap is not lost
         const key = JSON.stringify(v.buttons || []);
@@ -100914,7 +101067,7 @@
             return "#2b8f96";
         }
 
-        return "#48e1eb";
+        return ACCENT;
     }
 
     // The dimmed page with the turning ring, or away when the text is empty
@@ -100926,6 +101079,85 @@
 
         trimUi.workingText.textContent = text;
         trimUi.working.style.display = text ? "flex" : "none";
+    }
+
+    // Pause the preview where it is, or go on from there
+    function trimPauseResume() {
+
+        if (!tr) {
+            return;
+        }
+
+        if (tr.src) {
+
+            const at = trimPlayhead();
+            const to = tr.playTo;
+            const mode = tr.playMode;
+
+            trimStop();
+            tr.paused = { at: at, to: to, mode: mode };
+            trimPaint();
+            return;
+        }
+
+        if (tr.paused) {
+
+            const p = tr.paused;
+
+            // The end moved before the paused place, the end is played then
+            if (p.at >= tr.end - 0.02) {
+                trimPlayEnd();
+            } else {
+                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
+            }
+        }
+    }
+
+    // Draw columns of peaks, or a line through the samples once they are
+    // further apart than a column
+    function trimDrawWave(g, w, h, from, to, peaks, gain) {
+
+        const mid = h / 2;
+        const spanPerCol = (to - from) / w;
+        const k = mid * 0.95 * (gain || 1);
+
+        // A sample magnified past the edge is drawn at the edge
+        const y = function (v) {
+            return Math.max(0, Math.min(h, mid - v * k));
+        };
+
+        if (spanPerCol * tr.rate < 1) {
+
+            // Few enough samples to show each one, joined by a line
+            const a = Math.max(0, Math.floor(from * tr.rate));
+            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
+
+            g.lineWidth = Math.max(1, Math.round(w / 400));
+
+            for (let i = a; i < b; i++) {
+
+                const t0 = i / tr.rate;
+                const t1 = (i + 1) / tr.rate;
+
+                g.strokeStyle = trimWaveColor(t0);
+                g.beginPath();
+                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
+                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
+                g.stroke();
+            }
+
+            return;
+        }
+
+        for (let c = 0; c < w; c++) {
+
+            const t = from + (c + 0.5) * spanPerCol;
+            const top = y(peaks.hi[c]);
+            const bottom = y(peaks.lo[c]);
+
+            g.fillStyle = trimWaveColor(t);
+            g.fillRect(c, top, 1, Math.max(1, bottom - top));
+        }
     }
     // END SHARED trim
 
@@ -101874,37 +102106,6 @@
         return trimFadeOn && tr !== null && tr.end < tr.duration - 0.05;
     }
 
-    // Pause the preview where it is, or go on from there
-    function trimPauseResume() {
-
-        if (!tr) {
-            return;
-        }
-
-        if (tr.src) {
-
-            const at = trimPlayhead();
-            const to = tr.playTo;
-            const mode = tr.playMode;
-
-            trimStop();
-            tr.paused = { at: at, to: to, mode: mode };
-            trimPaint();
-            return;
-        }
-
-        if (tr.paused) {
-
-            const p = tr.paused;
-
-            if (p.at >= tr.end - 0.02) {
-                trimPlayEnd();
-            } else {
-                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
-            }
-        }
-    }
-
     function trimStop() {
 
         if (!tr || !tr.src) {
@@ -101963,52 +102164,6 @@
         }
 
         return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
-    }
-
-    // Draw columns of peaks, or a line through the samples once they are
-    // further apart than a column
-    function trimDrawWave(g, w, h, from, to, peaks, gain) {
-
-        const mid = h / 2;
-        const spanPerCol = (to - from) / w;
-        const k = mid * 0.95 * (gain || 1);
-
-        // A sample magnified past the edge is drawn at the edge
-        const y = function (v) {
-            return Math.max(0, Math.min(h, mid - v * k));
-        };
-
-        if (spanPerCol * tr.rate < 1) {
-
-            const a = Math.max(0, Math.floor(from * tr.rate));
-            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
-
-            g.lineWidth = Math.max(1, Math.round(w / 400));
-
-            for (let i = a; i < b; i++) {
-
-                const t0 = i / tr.rate;
-                const t1 = (i + 1) / tr.rate;
-
-                g.strokeStyle = trimWaveColor(t0);
-                g.beginPath();
-                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
-                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
-                g.stroke();
-            }
-
-            return;
-        }
-
-        for (let c = 0; c < w; c++) {
-
-            const t = from + (c + 0.5) * spanPerCol;
-            const top = y(peaks.hi[c]);
-            const bottom = y(peaks.lo[c]);
-
-            g.fillStyle = trimWaveColor(t);
-            g.fillRect(c, top, 1, Math.max(1, bottom - top));
-        }
     }
 
     function trimPaint() {

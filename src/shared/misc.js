@@ -107,3 +107,8 @@
 
         img.src = url;
     }
+
+    function dbgFlag(v) {
+
+        return v ? "y" : "n";
+    }

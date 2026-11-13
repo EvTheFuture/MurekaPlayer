@@ -61,7 +61,6 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -542,25 +541,13 @@ final class PlayerWeb {
             return false;
         }
 
-        Uri uri = Uri.parse(url);
-        String host = uri.getHost();
-
-        return "https".equals(uri.getScheme()) && host != null && (host.equals("mureka.ai") || host.endsWith(".mureka.ai"));
+        return Mureka.isUrl(url);
     }
 
     private static String readAsset(Context c, String name) {
 
         try (InputStream in = c.getAssets().open(name)) {
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[65536];
-            int n;
-
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-
-            return out.toString(StandardCharsets.UTF_8.name());
+            return new String(Io.readAll(in, Integer.MAX_VALUE), StandardCharsets.UTF_8);
         } catch (IOException e) {
             return null;
         }
@@ -1642,7 +1629,7 @@ final class PlayerWeb {
 
                 String h = host == null ? "" : host.replace("\"", "");
 
-                if (!(h.equals("mureka.ai") || h.endsWith(".mureka.ai"))) {
+                if (!Mureka.isHost(h)) {
                     return;
                 }
 

@@ -330,7 +330,7 @@
             return "#2b8f96";
         }
 
-        return "#48e1eb";
+        return ACCENT;
     }
 
     // The dimmed page with the turning ring, or away when the text is empty
@@ -342,4 +342,83 @@
 
         trimUi.workingText.textContent = text;
         trimUi.working.style.display = text ? "flex" : "none";
+    }
+
+    // Pause the preview where it is, or go on from there
+    function trimPauseResume() {
+
+        if (!tr) {
+            return;
+        }
+
+        if (tr.src) {
+
+            const at = trimPlayhead();
+            const to = tr.playTo;
+            const mode = tr.playMode;
+
+            trimStop();
+            tr.paused = { at: at, to: to, mode: mode };
+            trimPaint();
+            return;
+        }
+
+        if (tr.paused) {
+
+            const p = tr.paused;
+
+            // The end moved before the paused place, the end is played then
+            if (p.at >= tr.end - 0.02) {
+                trimPlayEnd();
+            } else {
+                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
+            }
+        }
+    }
+
+    // Draw columns of peaks, or a line through the samples once they are
+    // further apart than a column
+    function trimDrawWave(g, w, h, from, to, peaks, gain) {
+
+        const mid = h / 2;
+        const spanPerCol = (to - from) / w;
+        const k = mid * 0.95 * (gain || 1);
+
+        // A sample magnified past the edge is drawn at the edge
+        const y = function (v) {
+            return Math.max(0, Math.min(h, mid - v * k));
+        };
+
+        if (spanPerCol * tr.rate < 1) {
+
+            // Few enough samples to show each one, joined by a line
+            const a = Math.max(0, Math.floor(from * tr.rate));
+            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
+
+            g.lineWidth = Math.max(1, Math.round(w / 400));
+
+            for (let i = a; i < b; i++) {
+
+                const t0 = i / tr.rate;
+                const t1 = (i + 1) / tr.rate;
+
+                g.strokeStyle = trimWaveColor(t0);
+                g.beginPath();
+                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
+                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
+                g.stroke();
+            }
+
+            return;
+        }
+
+        for (let c = 0; c < w; c++) {
+
+            const t = from + (c + 0.5) * spanPerCol;
+            const top = y(peaks.hi[c]);
+            const bottom = y(peaks.lo[c]);
+
+            g.fillStyle = trimWaveColor(t);
+            g.fillRect(c, top, 1, Math.max(1, bottom - top));
+        }
     }

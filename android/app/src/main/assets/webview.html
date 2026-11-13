@@ -7188,6 +7188,20 @@
 (function () {
     "use strict";
 
+    // BEGIN SHARED palette
+    // Written by embed-webview.sh from src/shared/palette.js. Change that
+    // file and run make embed, never the lines up to END SHARED palette
+    // The player's colours, each in one place. ACCENT is the cyan of what
+    // is on, picked or in focus, ACCENT_RGB the same as numbers for
+    // rgba(), and DANGER the red of what deletes or warns. First in both
+    // files, so every part of them may use these from the start.
+    // Shared by the player and the web view's page, src/shared/palette.js,
+    // inlined into both by embed-webview.sh
+    const ACCENT = "#48e1eb";
+    const ACCENT_RGB = "72,225,235";
+    const DANGER = "#ff6b6b";
+    // END SHARED palette
+
     const $ = function (id) {
         return document.getElementById(id);
     };
@@ -10100,11 +10114,12 @@
 
         img.src = url;
     }
-    // END SHARED misc
 
     function dbgFlag(v) {
+
         return v ? "y" : "n";
     }
+    // END SHARED misc
 
     // Add one line to the log, and show it at once while the overlay is up.
     // It is kept with the overlay off as well, so switching it on shows what
@@ -12643,7 +12658,7 @@
             input.max = String(max);
             input.step = "1";
             input.value = String(value);
-            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:#48e1eb";
+            input.style.cssText = "flex:1;min-width:0;height:2.2em;accent-color:" + ACCENT;
             shown.style.cssText = "flex:0 0 3.6em;text-align:right;font-variant-numeric:tabular-nums";
             shown.textContent = value + unit;
             input.addEventListener("input", function () {
@@ -12726,7 +12741,7 @@
             b.type = "button";
             b.textContent = label;
             b.style.cssText = "min-height:2.9em;padding:0 1.2em;border-radius:10px;border:none;cursor:pointer;font:inherit;"
-                + (accent ? "background:#48e1eb;color:#000" : "background:#3a3a42;color:#fff");
+                + (accent ? "background:" + ACCENT + ";color:#000" : "background:#3a3a42;color:#fff");
             b.addEventListener("click", function () {
                 close(keep);
             });
@@ -31381,6 +31396,117 @@
         trainUi = ui;
     }
 
+    // BEGIN SHARED volpop
+    // Written by embed-webview.sh from src/shared/volpop.js. Change that
+    // file and run make embed, never the lines up to END SHARED volpop
+    // The parts of the volume training's popup drawn the same way on the
+    // device and in the web view, from the view volTrainView makes. Given a
+    // style, the pieces get inline styles, as the device's popup sits in
+    // Mureka's page with no stylesheet of its own. Without one they get the
+    // classes the web view's page styles.
+    // Shared by the player and the web view's page, src/shared/volpop.js,
+    // inlined into both by embed-webview.sh
+
+    // The choice above the list, made again only when it changes, so a tap
+    // between two drawings is not lost. Says whether there is one
+    function volPopChoice(ui, choice, name, onPick, style) {
+
+        const key = JSON.stringify(choice || null);
+
+        if (key !== ui.choiceKey) {
+
+            ui.choiceKey = key;
+            ui.choice.textContent = "";
+
+            if (choice) {
+
+                const head = document.createElement("div");
+
+                head.textContent = choice.label;
+
+                if (style) {
+                    head.style.cssText = style.choiceHead;
+                } else {
+                    head.className = "trainChoiceHead";
+                }
+
+                ui.choice.appendChild(head);
+
+                for (const o of choice.options || []) {
+
+                    const row = document.createElement("label");
+                    const radio = document.createElement("input");
+
+                    radio.type = "radio";
+                    radio.name = name;
+                    radio.checked = o.value === choice.value;
+
+                    if (style) {
+
+                        row.style.cssText = style.choiceRow;
+                        radio.style.cssText = style.radio;
+                    }
+
+                    radio.addEventListener("change", function () {
+                        onPick(o.value);
+                    });
+                    row.appendChild(radio);
+                    row.appendChild(document.createTextNode(o.label));
+                    ui.choice.appendChild(row);
+                }
+            }
+        }
+
+        return !!choice;
+    }
+
+    // What Save keeps, a step a row: its name, its gap and where the gap
+    // came from. Says whether there are any
+    function volPopRows(box, rows, style) {
+
+        box.textContent = "";
+
+        for (const r of rows || []) {
+
+            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
+
+            for (const c of cells) {
+
+                const el = document.createElement("span");
+
+                el.textContent = c[0];
+
+                if (style) {
+                    style.cell(el, c[1]);
+                } else {
+                    el.className = c[1];
+                }
+
+                box.appendChild(el);
+            }
+        }
+
+        return (rows || []).length > 0;
+    }
+
+    // Lines of plain text under the list, the switch delay. Says whether
+    // there are any
+    function volPopLines(box, lines) {
+
+        box.textContent = "";
+
+        for (const line of lines || []) {
+
+            const el = document.createElement("div");
+
+            el.textContent = line;
+            box.appendChild(el);
+        }
+
+        return (lines || []).length > 0;
+    }
+    // END SHARED volpop
+
     function paintTrainPop() {
 
         const v = state && state.volTrain ? state.volTrain : null;
@@ -31428,69 +31554,13 @@
             ui.quietShown.textContent = Number(v.quiet) > 0 ? v.quiet + " dB" : "Off";
         }
 
-        // The choice made again only when it changes, so a tap is not lost
-        const choiceKey = JSON.stringify(v.choice || null);
+        const pick = function (value) {
+            send("volTrain", { op: "keep", value: value === "keep" });
+        };
 
-        if (choiceKey !== ui.choiceKey) {
-
-            ui.choiceKey = choiceKey;
-            ui.choice.textContent = "";
-
-            if (v.choice) {
-
-                const head = document.createElement("div");
-
-                head.className = "trainChoiceHead";
-                head.textContent = v.choice.label;
-                ui.choice.appendChild(head);
-
-                for (const o of v.choice.options || []) {
-
-                    const row = document.createElement("label");
-                    const radio = document.createElement("input");
-
-                    radio.type = "radio";
-                    radio.name = "trainKeep";
-                    radio.checked = o.value === v.choice.value;
-                    radio.addEventListener("change", function () {
-                        send("volTrain", { op: "keep", value: o.value === "keep" });
-                    });
-                    row.appendChild(radio);
-                    row.appendChild(document.createTextNode(o.label));
-                    ui.choice.appendChild(row);
-                }
-            }
-        }
-
-        ui.choice.style.display = v.choice ? "" : "none";
-        ui.rows.textContent = "";
-
-        for (const r of v.rows || []) {
-
-            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
-
-            for (const c of cells) {
-
-                const el = document.createElement("span");
-
-                el.textContent = c[0];
-                el.className = c[1];
-                ui.rows.appendChild(el);
-            }
-        }
-
-        ui.rows.style.display = (v.rows || []).length ? "" : "none";
-        ui.list.textContent = "";
-
-        for (const line of v.lines || []) {
-
-            const el = document.createElement("div");
-
-            el.textContent = line;
-            ui.list.appendChild(el);
-        }
-
-        ui.list.style.display = (v.lines || []).length ? "" : "none";
+        ui.choice.style.display = volPopChoice(ui, v.choice, "trainKeep", pick, null) ? "" : "none";
+        ui.rows.style.display = volPopRows(ui.rows, v.rows, null) ? "" : "none";
+        ui.list.style.display = volPopLines(ui.list, v.lines) ? "" : "none";
 
         // The buttons made again only when they change, so a tap is not lost
         const key = JSON.stringify(v.buttons || []);
@@ -33178,7 +33248,7 @@
             return "#2b8f96";
         }
 
-        return "#48e1eb";
+        return ACCENT;
     }
 
     // The dimmed page with the turning ring, or away when the text is empty
@@ -33190,6 +33260,85 @@
 
         trimUi.workingText.textContent = text;
         trimUi.working.style.display = text ? "flex" : "none";
+    }
+
+    // Pause the preview where it is, or go on from there
+    function trimPauseResume() {
+
+        if (!tr) {
+            return;
+        }
+
+        if (tr.src) {
+
+            const at = trimPlayhead();
+            const to = tr.playTo;
+            const mode = tr.playMode;
+
+            trimStop();
+            tr.paused = { at: at, to: to, mode: mode };
+            trimPaint();
+            return;
+        }
+
+        if (tr.paused) {
+
+            const p = tr.paused;
+
+            // The end moved before the paused place, the end is played then
+            if (p.at >= tr.end - 0.02) {
+                trimPlayEnd();
+            } else {
+                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
+            }
+        }
+    }
+
+    // Draw columns of peaks, or a line through the samples once they are
+    // further apart than a column
+    function trimDrawWave(g, w, h, from, to, peaks, gain) {
+
+        const mid = h / 2;
+        const spanPerCol = (to - from) / w;
+        const k = mid * 0.95 * (gain || 1);
+
+        // A sample magnified past the edge is drawn at the edge
+        const y = function (v) {
+            return Math.max(0, Math.min(h, mid - v * k));
+        };
+
+        if (spanPerCol * tr.rate < 1) {
+
+            // Few enough samples to show each one, joined by a line
+            const a = Math.max(0, Math.floor(from * tr.rate));
+            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
+
+            g.lineWidth = Math.max(1, Math.round(w / 400));
+
+            for (let i = a; i < b; i++) {
+
+                const t0 = i / tr.rate;
+                const t1 = (i + 1) / tr.rate;
+
+                g.strokeStyle = trimWaveColor(t0);
+                g.beginPath();
+                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
+                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
+                g.stroke();
+            }
+
+            return;
+        }
+
+        for (let c = 0; c < w; c++) {
+
+            const t = from + (c + 0.5) * spanPerCol;
+            const top = y(peaks.hi[c]);
+            const bottom = y(peaks.lo[c]);
+
+            g.fillStyle = trimWaveColor(t);
+            g.fillRect(c, top, 1, Math.max(1, bottom - top));
+        }
     }
     // END SHARED trim
 
@@ -34138,37 +34287,6 @@
         return trimFadeOn && tr !== null && tr.end < tr.duration - 0.05;
     }
 
-    // Pause the preview where it is, or go on from there
-    function trimPauseResume() {
-
-        if (!tr) {
-            return;
-        }
-
-        if (tr.src) {
-
-            const at = trimPlayhead();
-            const to = tr.playTo;
-            const mode = tr.playMode;
-
-            trimStop();
-            tr.paused = { at: at, to: to, mode: mode };
-            trimPaint();
-            return;
-        }
-
-        if (tr.paused) {
-
-            const p = tr.paused;
-
-            if (p.at >= tr.end - 0.02) {
-                trimPlayEnd();
-            } else {
-                trimPlay(p.at, Math.min(p.to, tr.end), p.mode);
-            }
-        }
-    }
-
     function trimStop() {
 
         if (!tr || !tr.src) {
@@ -34227,52 +34345,6 @@
         }
 
         return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
-    }
-
-    // Draw columns of peaks, or a line through the samples once they are
-    // further apart than a column
-    function trimDrawWave(g, w, h, from, to, peaks, gain) {
-
-        const mid = h / 2;
-        const spanPerCol = (to - from) / w;
-        const k = mid * 0.95 * (gain || 1);
-
-        // A sample magnified past the edge is drawn at the edge
-        const y = function (v) {
-            return Math.max(0, Math.min(h, mid - v * k));
-        };
-
-        if (spanPerCol * tr.rate < 1) {
-
-            const a = Math.max(0, Math.floor(from * tr.rate));
-            const b = Math.min(tr.mono.length - 1, Math.ceil(to * tr.rate));
-
-            g.lineWidth = Math.max(1, Math.round(w / 400));
-
-            for (let i = a; i < b; i++) {
-
-                const t0 = i / tr.rate;
-                const t1 = (i + 1) / tr.rate;
-
-                g.strokeStyle = trimWaveColor(t0);
-                g.beginPath();
-                g.moveTo((t0 - from) / (to - from) * w, y(tr.mono[i]));
-                g.lineTo((t1 - from) / (to - from) * w, y(tr.mono[i + 1]));
-                g.stroke();
-            }
-
-            return;
-        }
-
-        for (let c = 0; c < w; c++) {
-
-            const t = from + (c + 0.5) * spanPerCol;
-            const top = y(peaks.hi[c]);
-            const bottom = y(peaks.lo[c]);
-
-            g.fillStyle = trimWaveColor(t);
-            g.fillRect(c, top, 1, Math.max(1, bottom - top));
-        }
     }
 
     function trimPaint() {

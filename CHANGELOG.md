@@ -981,6 +981,23 @@ In development.
   files between BEGIN SHARED and END SHARED lines, before the page goes
   into the player, and the pre-commit hook and make check compare them
   too. No function changed, they only moved.
+- **More shared, colours in one place, small Java helpers.**
+  - Three more functions the two files had alike, apart from their
+    comments, are shared too, 47 in all.
+  - The player's colours are constants, first thing in both files:
+    ACCENT, ACCENT_RGB and DANGER, from src/shared/palette.js. They take
+    the place of 142 written-out cyans, 33 rgba cyans and 13 reds. The
+    volume card's bar was a slightly different cyan and now has the same
+    one.
+  - The volume training's choice, its list of steps and its lines are
+    drawn by the same code on the device and in the web view, from
+    src/shared/volpop.js. The device gives it inline styles, the web view
+    its classes.
+  - In the app, whether an address is Mureka's is decided in one place,
+    Mureka.java, instead of four, and streams are copied and read by
+    Io.java instead of seven loops of their own.
+  - Every screen checked looks the same pixel for pixel, apart from the
+    volume card's bar.
 
 ### Build
 

@@ -40,7 +40,6 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.InterfaceAddress;
-import java.net.MalformedURLException;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -333,7 +332,7 @@ final class WebViewServer {
             }
 
             if (running) {
-                sleep(5000);
+                Io.sleep(5000);
             }
         }
 
@@ -348,15 +347,6 @@ final class WebViewServer {
             s.close();
         } catch (IOException e) {
             // Gone already
-        }
-    }
-
-    private static void sleep(long ms) {
-
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         }
     }
 
@@ -1207,18 +1197,7 @@ final class WebViewServer {
 
         markPoll();
 
-        URL parsed;
-
-        try {
-            parsed = new URL(url);
-        } catch (MalformedURLException e) {
-            parsed = null;
-        }
-
-        String host = parsed != null && parsed.getHost() != null ? parsed.getHost().toLowerCase(Locale.ROOT) : "";
-
-        if (parsed == null || !"https".equals(parsed.getProtocol())
-            || !(host.equals("mureka.ai") || host.endsWith(".mureka.ai"))) {
+        if (!Mureka.isUrl(url)) {
 
             send(out, 403, "text/plain", bytes("Not a Mureka song"));
             return;
@@ -1258,13 +1237,7 @@ final class WebViewServer {
             out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
 
             try (InputStream in = c.getInputStream()) {
-
-                byte[] buf = new byte[65536];
-                int n;
-
-                while ((n = in.read(buf)) != -1) {
-                    out.write(buf, 0, n);
-                }
+                Io.copy(in, out, -1);
             }
 
             out.flush();
@@ -1286,7 +1259,7 @@ final class WebViewServer {
     // shows another picture
     private void sendCover(OutputStream out, String url) throws IOException {
 
-        if (!CoverCache.allowed(url)) {
+        if (!Mureka.isUrl(url)) {
 
             send(out, 403, "text/plain", bytes("Not a Mureka cover"));
             return;
@@ -1315,13 +1288,7 @@ final class WebViewServer {
         out.write(head.getBytes(StandardCharsets.US_ASCII));
 
         try (InputStream in = new java.io.FileInputStream(file)) {
-
-            byte[] buf = new byte[32768];
-            int n;
-
-            while ((n = in.read(buf)) != -1) {
-                out.write(buf, 0, n);
-            }
+            Io.copy(in, out, -1);
         }
 
         out.flush();
@@ -1337,7 +1304,7 @@ final class WebViewServer {
 
         markPoll();
 
-        if (!CoverCache.allowed(url)) {
+        if (!Mureka.isUrl(url)) {
 
             send(out, 403, "text/plain", bytes("Not a Mureka song"));
             return;
@@ -2533,16 +2500,7 @@ final class WebViewServer {
     private byte[] readAsset(String name) {
 
         try (InputStream in = context.getAssets().open(name)) {
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[16384];
-            int n;
-
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-
-            return out.toByteArray();
+            return Io.readAll(in, Integer.MAX_VALUE);
         } catch (IOException e) {
             return null;
         }

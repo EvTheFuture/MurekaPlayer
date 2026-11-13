@@ -30,7 +30,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -104,21 +103,6 @@ final class CoverCache {
         Hub.addListener(CoverCache::onState);
     }
 
-    // Only Mureka's own pictures over https, never an address of the
-    // browser's choosing
-    static boolean allowed(String url) {
-
-        try {
-
-            URL parsed = new URL(url);
-            String host = parsed.getHost() == null ? "" : parsed.getHost().toLowerCase(Locale.ROOT);
-
-            return "https".equals(parsed.getProtocol()) && (host.equals("mureka.ai") || host.endsWith(".mureka.ai"));
-        } catch (MalformedURLException e) {
-            return false;
-        }
-    }
-
     // A connection to a Mureka address, its redirects followed by hand so
     // each one must lead to Mureka too, three at the most
     static HttpURLConnection openMureka(String url, int connectMs, int readMs) throws IOException {
@@ -127,7 +111,7 @@ final class CoverCache {
 
         for (int hop = 0; hop < 4; hop++) {
 
-            if (!allowed(at)) {
+            if (!Mureka.isUrl(at)) {
                 throw new IOException("not a Mureka address");
             }
 
@@ -161,7 +145,7 @@ final class CoverCache {
     // Null when it could not be had
     static File get(String url) {
 
-        if (dir == null || !allowed(url)) {
+        if (dir == null || !Mureka.isUrl(url)) {
             return null;
         }
 
@@ -351,7 +335,7 @@ final class CoverCache {
 
             String url = ahead.optString(i, "");
 
-            if (!url.isEmpty() && allowed(url)) {
+            if (!url.isEmpty() && Mureka.isUrl(url)) {
                 urls.add(url);
             }
         }
@@ -410,19 +394,7 @@ final class CoverCache {
 
             try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(part)) {
 
-                byte[] buf = new byte[32768];
-                int n;
-
-                while ((n = in.read(buf)) != -1) {
-
-                    total += n;
-
-                    if (total > MAX_FILE) {
-                        throw new IOException("cover too large");
-                    }
-
-                    out.write(buf, 0, n);
-                }
+                total = Io.copy(in, out, MAX_FILE);
             }
 
             got = total > 0 && part.renameTo(file);

@@ -133,7 +133,7 @@ final class MdnsResponder {
                     status = "not answering, " + e.getMessage() + ", trying again";
                 }
 
-                sleep(5000);
+                Io.sleep(5000);
             }
         }
     }
@@ -392,15 +392,6 @@ final class MdnsResponder {
         }
 
         return out;
-    }
-
-    private static void sleep(long ms) {
-
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     // What a question asked for, once it turned out to be about our name
