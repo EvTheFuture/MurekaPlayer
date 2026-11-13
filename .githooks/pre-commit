@@ -1,8 +1,10 @@
 #!/bin/sh
 #
 # Refuse a commit whose src/player.js does not carry the web view's page as
-# it is staged. The staged copies are compared, not the working tree, so a
-# page changed but not embedded, or embedded but not added, is caught.
+# it is staged, or whose player or page does not carry the shared code in
+# src/shared as it is staged. The staged copies are compared, not the
+# working tree, so a change not embedded, or embedded but not added, is
+# caught.
 #
 # Turned on once with make hooks, which runs:
 #   git config core.hooksPath .githooks
@@ -11,9 +13,10 @@ set -e
 
 PLAYER="src/player.js"
 PAGE="android/app/src/main/assets/webview.html"
+SHARED="src/shared"
 
 # Nothing to compare unless one of the two is part of the commit
-if git diff --cached --quiet -- "$PLAYER" "$PAGE"; then
+if git diff --cached --quiet -- "$PLAYER" "$PAGE" "$SHARED"; then
     exit 0
 fi
 
@@ -22,10 +25,16 @@ trap 'rm -rf "$TMP"' EXIT
 
 git show ":$PLAYER" > "$TMP/player.js"
 git show ":$PAGE" > "$TMP/webview.html"
+mkdir "$TMP/shared"
 
-if ! ./embed-webview.sh --check "$TMP/player.js" "$TMP/webview.html" >/dev/null; then
+# Every staged shared file, by its name in the index
+git ls-files -- "$SHARED" | while read -r f; do
+    git show ":$f" > "$TMP/shared/$(basename "$f")"
+done
 
-    echo "pre-commit: the staged $PLAYER does not carry the staged $PAGE"
-    echo "pre-commit: run make embed, then git add $PLAYER"
+if ! ./embed-webview.sh --check "$TMP/player.js" "$TMP/webview.html" "$TMP/shared" >/dev/null; then
+
+    echo "pre-commit: the staged $PLAYER or $PAGE does not carry the staged $PAGE or $SHARED"
+    echo "pre-commit: run make embed, then git add $PLAYER $PAGE $SHARED"
     exit 1
 fi

@@ -974,6 +974,13 @@ In development.
   keeps the app's Bluetooth check going. The web views already move the
   position on by themselves. Idle and during steady playback that is a
   fifth of the states. The app reads each state once instead of twice.
+- **Shared code kept once.** 44 functions the player and the web view's
+  page both had, word for word, now live once in src/shared: the
+  waveform drawing, the trimmer's working parts, the colour helpers and
+  picker, and a few small helpers. make embed writes them into both
+  files between BEGIN SHARED and END SHARED lines, before the page goes
+  into the player, and the pre-commit hook and make check compare them
+  too. No function changed, they only moved.
 
 ### Build
 

@@ -130,6 +130,7 @@ browser download.
 ## Files
 
 - src/player.js              The player, shared by the app, the add-on and the bookmarklet
+- src/shared/                Code the player and the web view's page both use, written into both
 - src/content.js             Injects the player and relays downloads
 - src/background.js          Saves downloads into the Mureka folder
 - manifest.json              The add-on's manifest
@@ -141,8 +142,8 @@ browser download.
 - fastlane/, fdroid/         Store texts and the F-Droid build recipe
 - Makefile                   Checks, add-on packages, the APK and releases
 - build.sh                   Builds the add-on packages
-- embed-webview.sh           Writes the web view's page into src/player.js
-- .githooks/pre-commit       Refuses a commit whose player lacks the current web view page
+- embed-webview.sh           Writes src/shared into the player and the page, and the page into the player
+- .githooks/pre-commit       Refuses a commit whose player or page lacks the current shared code or page
 - release-bookmarklet.sh     Pins the release bookmarklet to a tag
 - privacy.html               The privacy policy
 

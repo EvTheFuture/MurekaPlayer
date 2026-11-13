@@ -9,9 +9,13 @@
 # reviewer. It may hold no backtick and no dollar brace, which would end or
 # open the template, and that is checked.
 #
-#   ./embed-webview.sh                    write the page into the player
+# Code both the player and the page use lives once, in src/shared/<name>.js.
+# It is written into both, between the lines BEGIN SHARED <name> and
+# END SHARED <name>, before the page goes into the player.
+#
+#   ./embed-webview.sh                    write the shared code and the page
 #   ./embed-webview.sh --check            only compare, fail when it differs
-#   ./embed-webview.sh --check P W        the same for other copies, the git
+#   ./embed-webview.sh --check P W D      the same for other copies, the git
 #                                         index's in the pre-commit hook
 
 set -e
@@ -26,6 +30,7 @@ fi
 
 PLAYER="${1:-src/player.js}"
 PAGE="${2:-android/app/src/main/assets/webview.html}"
+SHARED="${3:-src/shared}"
 
 BEGIN_LINE="    // BEGIN WEBVIEW PAGE"
 END_LINE="    // END WEBVIEW PAGE"
@@ -46,10 +51,16 @@ if [ "$(grep -cx "$BEGIN_LINE" "$PLAYER")" != "1" ] || [ "$(grep -cx "$END_LINE"
     exit 1
 fi
 
-if grep -q -e '`' -e '\${' "$PAGE"; then
+if [ ! -d "$SHARED" ]; then
 
-    echo "embed-webview: $PAGE has a backtick or a dollar brace, which a String.raw template cannot hold"
-    grep -n -e '`' -e '\${' "$PAGE" | head -5
+    echo "embed-webview: $SHARED is missing"
+    exit 1
+fi
+
+if grep -q -e '`' -e '\${' "$PAGE" "$SHARED"/*.js; then
+
+    echo "embed-webview: $PAGE or $SHARED has a backtick or a dollar brace, which a String.raw template cannot hold"
+    grep -n -e '`' -e '\${' "$PAGE" "$SHARED"/*.js | head -5
     exit 1
 fi
 
@@ -60,10 +71,86 @@ if grep -q -x -e "$BEGIN_LINE" -e "$END_LINE" "$PAGE"; then
 fi
 
 OUT=$(mktemp)
-trap 'rm -f "$OUT"' EXIT
+PAGE_OUT=$(mktemp)
+MID=$(mktemp)
+trap 'rm -f "$OUT" "$PAGE_OUT" "$MID"' EXIT
 
-# Everything outside the markers as it is, the page in between
-awk -v page="$PAGE" -v begin_line="$BEGIN_LINE" -v end_line="$END_LINE" '
+# The shared code between its markers, in the page and in the player, but
+# not in the player's copy of the page, which is written whole below. A
+# block whose file is missing, or a block not closed, stops it
+SHARED_AWK='
+    function shared(name,    file, line, n) {
+
+        file = dir "/" name ".js"
+        n = 0
+
+        while ((getline line < file) > 0) {
+
+            print line
+            n += 1
+        }
+
+        close(file)
+
+        if (n == 0) {
+
+            print "embed-webview: " file " is missing or empty" > "/dev/stderr"
+            failed = 1
+        }
+    }
+
+    $0 == begin_line {
+        inpage = 1
+    }
+
+    $0 == end_line {
+        inpage = 0
+    }
+
+    !inpage && !inshared && /^    \/\/ BEGIN SHARED [a-z0-9-]+$/ {
+
+        print
+        open_name = $4
+        print "    // Written by embed-webview.sh from src/shared/" open_name ".js. Change that"
+        print "    // file and run make embed, never the lines up to END SHARED " open_name
+        shared(open_name)
+        inshared = 1
+        next
+    }
+
+    inshared && $0 == "    // END SHARED " open_name {
+
+        print
+        inshared = 0
+        next
+    }
+
+    !inshared {
+        print
+    }
+
+    END {
+
+        if (inshared) {
+
+            print "embed-webview: BEGIN SHARED " open_name " has no END SHARED " open_name > "/dev/stderr"
+            exit 1
+        }
+
+        if (failed) {
+            exit 1
+        }
+    }
+'
+
+awk -v dir="$SHARED" -v begin_line="$BEGIN_LINE" -v end_line="$END_LINE" "$SHARED_AWK" "$PAGE" > "$PAGE_OUT"
+
+# The player's own shared blocks, then everything outside the page's
+# markers as it is and the page in between. Kept in files, not a pipe, so a
+# failed step stops the script
+awk -v dir="$SHARED" -v begin_line="$BEGIN_LINE" -v end_line="$END_LINE" "$SHARED_AWK" "$PLAYER" > "$MID"
+
+awk -v page="$PAGE_OUT" -v begin_line="$BEGIN_LINE" -v end_line="$END_LINE" '
     $0 == begin_line {
 
         print
@@ -88,25 +175,37 @@ awk -v page="$PAGE" -v begin_line="$BEGIN_LINE" -v end_line="$END_LINE" '
     !skip {
         print
     }
-' "$PLAYER" > "$OUT"
+' "$MID" > "$OUT"
 
 if [ "$MODE" = "check" ]; then
 
+    if ! cmp -s "$PAGE_OUT" "$PAGE"; then
+
+        echo "The shared code in $PAGE is not the current $SHARED, run make embed"
+        exit 1
+    fi
+
     if cmp -s "$OUT" "$PLAYER"; then
 
-        echo "The web view's page in $PLAYER is the current one"
+        echo "The shared code and the web view's page in $PLAYER are the current ones"
         exit 0
     fi
 
-    echo "The web view's page in $PLAYER is not the current $PAGE, run make embed"
+    echo "The shared code or the web view's page in $PLAYER is not the current one, run make embed"
     exit 1
+fi
+
+if ! cmp -s "$PAGE_OUT" "$PAGE"; then
+
+    cat "$PAGE_OUT" > "$PAGE"
+    echo "Wrote the shared code into $PAGE"
 fi
 
 if cmp -s "$OUT" "$PLAYER"; then
 
-    echo "The web view's page in $PLAYER was current already"
+    echo "The shared code and the web view's page in $PLAYER were current already"
     exit 0
 fi
 
 cat "$OUT" > "$PLAYER"
-echo "Wrote the web view's page into $PLAYER"
+echo "Wrote the shared code and the web view's page into $PLAYER"

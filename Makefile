@@ -72,7 +72,7 @@ help:
 	@echo "  make signing        ask again which key signs the APKs"
 	@echo "  make check          syntax check the player, compare versions and the embedded web view"
 	@echo "  make version        bump manifest.json to the player version"
-	@echo "  make embed          write the web view's page into src/player.js"
+	@echo "  make embed          write src/shared into the player and the page, the page into the player"
 	@echo "  make hooks          let git check the embedded web view before each commit"
 	@echo "  make bookmarklet    pin the release bookmarklet to a tag, TAG=v$(VERSION) unless given"
 	@echo "  make fdroid         the F-Droid recipe for a tag in fdroid/, TAG=v$(VERSION) unless given"
@@ -126,8 +126,9 @@ prune:
 	    fi; \
 	done
 
-# The web view's page written into the player, which the add-on and the
-# bookmarklet carry with it. Run after every change to webview.html
+# The shared code written into the player and the web view's page, and the
+# page into the player, which the add-on and the bookmarklet carry with it.
+# Run after every change to webview.html or src/shared
 embed:
 	./embed-webview.sh
 
