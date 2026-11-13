@@ -1091,6 +1091,20 @@ In development.
   were, every band weaker halfway. Tempos are worked out again as songs
   come up, and the debug log and Stats for nerds say when a tempo was
   doubled this way.
+- **Drum and bass at its own tempo, also when Mureka says half.** With
+  Mureka's tempo near the one first found, the beat was kept, so a drum
+  and bass song Mureka gives 87 stayed at 87. Kick and snare taking turns
+  now overrules that, as Mureka gives such songs half too. It doubles
+  only up to 185 BPM, the drum and bass range, as a song in half time
+  feel at 105 shows the same and is no 210. Tried on nine real songs and
+  six made ones: the drum and bass song is 174 with or without Mureka's
+  87, the others as before.
+- **A tempo worked out an older way is redone when its Information is
+  opened.** It was redone only once the song came up next, so a stored
+  song further away kept the old tempo. Opening Information on a stored
+  song now works its tempo out at once, ahead of the others, and the BPM
+  row changes when it is done. All tempos are worked out again this
+  time.
 
 ### Build
 

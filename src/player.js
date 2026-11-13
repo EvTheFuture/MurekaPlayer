@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.120";
+    const VERSION = "2.0.1.121";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -216,12 +216,12 @@
     // the deep band, the way it was worked out, kick and snare taking
     // turns]}}, moved being 1 up, 2 up as kick and snare take turns, -1
     // down, 3 three beats where two were counted, 0 kept. One worked out an
-    // older way is kept and used until the song comes up and is worked out
-    // again, so the BPM filter keeps it meanwhile. All are worked out again when
+    // older way is kept and used until the song comes up, or its Information
+    // is opened, and is worked out again, so the BPM filter keeps it meanwhile. All are worked out again when
     // the way of working them out changes (v). A tempo is used only when
     // the beat stood out clearly enough (TEMPO_SURE, 0 to 1)
     const DETECTED_BPM_KEY = "mureka_detected_bpm_v1";
-    const TEMPO_VERSION = 8;
+    const TEMPO_VERSION = 9;
     const TEMPO_SURE = 0.5;
 
     // localStorage key for star ratings, song_id to 0 to 5. A song missing
@@ -31314,7 +31314,7 @@
 
             if (t && t.bpm > 0) {
 
-                add("From the song", t.bpm + " BPM" + (t.v !== TEMPO_VERSION ? ", worked out an older way, again when it comes up" : ""));
+                add("From the song", t.bpm + " BPM" + (t.v !== TEMPO_VERSION ? ", worked out an older way, again when it comes up or its Information is opened" : ""));
                 // Sure enough is not the same as in use: Mureka's tempo can
                 // come first, as chosen under BPM from
                 let sureText = ", too unsure to use, below " + Math.round(TEMPO_SURE * 100) + " %";
@@ -32107,9 +32107,13 @@
     // least TEMPO_TURN_HALF as strong. A song at half that tempo keeps its
     // kick and snare on its beats, softer sounds halfway, every band weaker
     // there. A drum and bass song at 175 came out at 87, its deep band 83%
-    // as strong halfway where 85% was asked, its middle band 111%
+    // as strong halfway where 85% was asked, its middle band 111%. Only up
+    // to TEMPO_TURN_MAX, the drum and bass range, as a half time feel at
+    // around 105 shows the same and is no 210. Mureka's tempo near the beat
+    // found does not hold it back, as Mureka gives such songs half too
     const TEMPO_TURN = 1;
     const TEMPO_TURN_HALF = 0.7;
+    const TEMPO_TURN_MAX = 185;
 
     async function detectTempo(data, rate, hint) {
 
@@ -32595,7 +32599,7 @@
 
             best = best / 2;
             moved = 1;
-        } else if (upTo > TEMPO_UP_HIGH && upTo <= TEMPO_MAX && hinted !== "kept" && half >= TEMPO_TURN_HALF && turn >= TEMPO_TURN) {
+        } else if (upTo > TEMPO_UP_HIGH && upTo <= TEMPO_TURN_MAX && half >= TEMPO_TURN_HALF && turn >= TEMPO_TURN) {
 
             best = best / 2;
             moved = 2;
@@ -32700,6 +32704,10 @@
     // with Mureka's goes to the debug log
     const tempoWaiting = new Map();
     const tempoInfo = new Map();
+
+    // Songs whose Information was opened, worked out first even when not
+    // coming up, so a tempo worked out an older way is redone at once
+    const tempoAsked = new Set();
     let tempoBusy = false;
     let tempoTimer = 0;
     let tempoTally = { n: 0, agree: 0, near: 0, double: 0, other: 0, unsure: 0, none: 0, up: 0, down: 0, thirds: 0 };
@@ -32808,8 +32816,10 @@
 
                 tempoWaiting.delete(next[0]);
 
-                // Done meanwhile, or no longer coming up
-                if (tempoDone(next[0]) || !tempoNear(next[1])) {
+                // Done meanwhile, or no longer coming up and not asked for
+                const asked = tempoAsked.delete(next[0]);
+
+                if (tempoDone(next[0]) || (!asked && !tempoNear(next[1]))) {
                     continue;
                 }
 
@@ -32893,6 +32903,10 @@
         noteTempo(song, r, Date.now() - t0);
         tempoInfo.set(id, "in " + (Date.now() - t0) + " ms, " + Math.round(buffer.duration) + " s of sound");
 
+        if (infoBpmEl && infoBpmId === id) {
+            infoBpmEl.textContent = infoBpmText(song);
+        }
+
         // Only the latest few, for Stats for nerds
         if (tempoInfo.size > 50) {
             tempoInfo.delete(tempoInfo.keys().next().value);
@@ -32972,7 +32986,8 @@
 
         if (t.moved === 2) {
             return "first found " + t.first + ", doubled as kick and snare take turns: halfway between beats the deep or middle band was "
-                + pct(t.turn) + " as strong as on the beat, all the sound " + pct(t.half) + lean;
+                + pct(t.turn) + " as strong as on the beat, all the sound " + pct(t.half)
+                + (t.hinted === "kept" ? barText + ", Mureka's tempo near the first found, taken as half too" : lean);
         }
 
         if (t.moved === -1) {
@@ -56945,6 +56960,29 @@
         };
     }
 
+    // The BPM row of Information, which tempo is in use and the other one
+    // when they differ
+    let infoBpmEl = null;
+    let infoBpmId = "";
+
+    function infoBpmText(song) {
+
+        const shownBpm = effectiveBpm(song);
+        const bpmFrom = bpmOrigin(song);
+        const ownBpm = songTempo(song);
+        let bpmText = shownBpm > 0 ? String(shownBpm) : "-";
+
+        if (bpmFrom === "hand") {
+            bpmText += " (by hand)";
+        } else if (bpmFrom === "mureka") {
+            bpmText += " (Mureka's" + (ownBpm && Math.abs(ownBpm - shownBpm) > 1 ? ", the song's own " + ownBpm : "") + ")";
+        } else if (bpmFrom === "song") {
+            bpmText += " (from the song" + (murekaBpm(song) && Math.abs(murekaBpm(song) - shownBpm) > 1 ? ", Mureka's " + murekaBpm(song) : "") + ")";
+        }
+
+        return bpmText;
+    }
+
     // Open the information overlay for a song. The cached song gives genre,
     // mood, BPM, model, duration and dates at once, then the detail fetch fills
     // in the style prompt, the lyrics and the social counts
@@ -56993,21 +57031,16 @@
         // Metadata available straight from the cached song
         addInfoRow("Genre", (song.genres || []).join(", ") || "-");
         addInfoRow("Mood", (song.moods || []).join(", ") || "-");
-        const shownBpm = effectiveBpm(song);
+        infoBpmEl = addInfoRow("BPM", infoBpmText(song));
+        infoBpmId = String(song.song_id);
 
-        const bpmFrom = bpmOrigin(song);
-        const ownBpm = songTempo(song);
-        let bpmText = shownBpm > 0 ? String(shownBpm) : "-";
+        // A tempo not worked out yet, or worked out an older way, is worked
+        // out now when the song is stored here, and the row above follows
+        if (tempoWanted() && !isStubSong(song) && cachedIds.has(song.song_id) && !tempoDone(song.song_id)) {
 
-        if (bpmFrom === "hand") {
-            bpmText += " (by hand)";
-        } else if (bpmFrom === "mureka") {
-            bpmText += " (Mureka's" + (ownBpm && Math.abs(ownBpm - shownBpm) > 1 ? ", the song's own " + ownBpm : "") + ")";
-        } else if (bpmFrom === "song") {
-            bpmText += " (from the song" + (murekaBpm(song) && Math.abs(murekaBpm(song) - shownBpm) > 1 ? ", Mureka's " + murekaBpm(song) : "") + ")";
+            tempoAsked.add(infoBpmId);
+            queueTempo(song, true);
         }
-
-        addInfoRow("BPM", bpmText);
         addInfoRow("Model", song.model || "-");
         addInfoRow("Rating", ratingText(getRating(song)));
 
