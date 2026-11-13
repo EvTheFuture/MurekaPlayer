@@ -948,6 +948,14 @@ In development.
   and its - and + go through them one at a time, the levels show with
   one decimal, such as 2.7%, and a slider lands on the nearest. Set how
   far down the lowest is, the levels go down to it evenly in dB.
+- **Words that fit any Android device.** The texts no longer say phone,
+  as the player may run on a tablet or a TV too, and never say device
+  where a speaker could be meant: the device running the app is the
+  Android device, its volume steps Android's volume steps, and the sound
+  settings for its own speaker, headphones and speakers not set up are
+  Default, with Same as default in a speaker's drop-downs. Default says
+  what it covers in the list, and a speaker with both profiles as the
+  default's says Profiles as default.
 
 ### Build
 

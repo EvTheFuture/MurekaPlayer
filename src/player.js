@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.107";
+    const VERSION = "2.0.1.108";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -565,7 +565,7 @@
         { id: "playback", name: "Playback", kinds: ["Song", "Audio", "Status", "Phone"],
             hint: "Song changes, playing and pausing, the audio element and the status line." },
         { id: "commands", name: "Commands", kinds: ["Command", "Send"], app: true,
-            hint: "What the web view asks the phone to do." },
+            hint: "What the web view asks the Android device to do." },
         { id: "screen", name: "Screen and page", kinds: ["Screen", "Page", "Size"],
             hint: "The screen, fullscreen, the page showing or hiding, and its size." },
         { id: "settings", name: "Setting changes", kinds: ["Setting"],
@@ -573,7 +573,7 @@
         { id: "power", name: "Power saving", kinds: ["Power", "Hotspot", "WireGuard", "VPN"], app: true,
             hint: "The charger and the chosen Bluetooth devices coming and going, the countdown, the hotspot and the background work stopping and starting." },
         { id: "network", name: "Network", kinds: ["Net", "Offline"],
-            hint: "Going online and offline, and the phone not answering the web view.",
+            hint: "Going online and offline, and the Android device not answering the web view.",
             plainHint: "Going online and offline." },
         { id: "errors", name: "Errors", kinds: ["Error"],
             hint: "Errors in the page." },
@@ -13928,7 +13928,7 @@
         // The speaker's delay found before, else a usual one for Bluetooth
         // or for this phone
         volTrain.delay = rec && rec.delayMs >= 0 ? rec.delayMs : (volTrain.phone ? 80 : 250);
-        dbgLog("Sound", "volume training of " + (volTrain.phone ? "this device" : volTrain.name) + " opened");
+        dbgLog("Sound", "volume training of " + (volTrain.phone ? "the default" : volTrain.name) + " opened");
         clearInterval(volTrainTimer);
 
         // The music gone to another output ends the training, as the app
@@ -14135,13 +14135,13 @@
 
         const at = volTrainScreen();
         const max = volTrain.max;
-        const who = volTrain.phone ? "this device" : volTrain.name;
+        const who = volTrain.phone ? "" : volTrain.name;
         const view = { at: at, quiet: volTrain.quiet, gap: 0, delay: volTrain.delay, auto: volTrain.auto, now: "", lines: [], rows: [], choice: null, buttons: [] };
 
         if (at === "intro") {
 
-            view.title = "Train the volume steps of " + who;
-            view.text = "A speaker does not get louder by the same amount at each of the phone's steps. Here each step is set by ear. "
+            view.title = who ? "Train the volume steps of " + who : "Train the default volume steps";
+            view.text = "A speaker does not get louder by the same amount at each of Android's volume steps. Here each step is set by ear. "
                 + "The song playing is heard at a step, turned down by the player by a gap, and Switch moves to the step below and back, as often as needed. "
                 + "Press - or + until switching makes no difference to how loud it is, then Keep. The steps go from quiet to loud: "
                 + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
@@ -14703,7 +14703,7 @@
 
         const max = Number(fineInfo().max) || 0;
         const st = volStepsOf(volEdit.phone, volEdit.address);
-        const who = volEdit.phone ? "this device" : volEdit.name;
+        const who = volEdit.phone ? "" : volEdit.name;
         const rows = [{
             key: "low",
             label: "Step 1, from the lowest",
@@ -14740,8 +14740,8 @@
         });
 
         return {
-            title: "Volume steps of " + who,
-            text: "How many dB louder each of the phone's steps is than the step below it, step 1 than the lowest level above silence. "
+            title: who ? "Volume steps of " + who : "Default volume steps",
+            text: "How many dB louder each of Android's volume steps is than the step below it, step 1 than the lowest level above silence. "
                 + "A step left empty is drawn on a straight line from those set around it, and shows greyed what is used for it. "
                 + "Changes are kept at once, and the cross takes a value away again.",
             rows: rows
@@ -15240,7 +15240,7 @@
 
         const s = sound();
         const dev = btNow && s.devices[btNow.address] ? s.devices[btNow.address] : null;
-        const where = btNow ? btNow.name : "this device";
+        const where = btNow ? btNow.name : "the Android device";
         let p = null;
 
         if (liveSound()) {
@@ -15363,7 +15363,7 @@
         const live = !!liveSound();
         const setFor = soundSetFor();
         const asSet = soundProfile(sound().night && setFor.night ? setFor.night : setFor.day);
-        const here = btNow ? "this speaker" : "this device";
+        const here = btNow ? "this speaker" : "the Android device";
         const options = [{
             label: (picked || live ? "" : "\u2713 ") + "As set for " + a.where + (asSet ? ": " + asSet.name : ""),
             ring: true,
@@ -24337,7 +24337,7 @@
             wakeLock.addEventListener("release", function () {
 
                 wakeLock = null;
-                dbgLog("Screen", "left to the phone");
+                dbgLog("Screen", "left to the Android device");
             });
         } catch (e) {
 
@@ -24915,7 +24915,7 @@
 
             status.textContent = on
                 ? "On. A browser asks for the password once, and stays signed in until the password changes or all browsers are signed out. The app's own screen never asks."
-                : "Off. Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
+                : "Off. Anyone on the Android device's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
             status.style.color = on ? "#9a9aa2" : "#f5c518";
             setBtn.textContent = on ? "Change password" : "Set password";
             offBtn.style.display = on ? "" : "none";
@@ -24974,7 +24974,7 @@
         };
 
         askYesNo("The web view has no password",
-            "Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later in the settings under Web view, here or in the web view.",
+            "Anyone on the Android device's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later in the settings under Web view, here or in the web view.",
             "Set a password", function () {
 
                 remember();
@@ -30060,7 +30060,7 @@
         }
 
         if (hostCarAudio) {
-            add("Heard in", "A web view, the phone plays along silently");
+            add("Heard in", "A web view, the Android device plays along silently");
         }
 
         add("Time to first sound", trackHeardMs ? trackHeardMs + " ms" : "");
@@ -30088,10 +30088,10 @@
             if (fine.on === true) {
 
                 sub("Real volume", pctText(fine.pct) + " %, more steps");
-                sub("Phone step", fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
+                sub("Android step", fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
                     + (fine.handDb > 0 ? ", " + fine.handDb + " dB steps set by hand" : ""));
                 sub("Mixer", (typeof fine.gainDb === "number" ? fine.gainDb.toFixed(1) : "0.0") + " dB, " + Math.round((fine.gain || 0) * 1000) / 10 + " %");
-                sub("Volume buttons", fine.buttons === true ? "1% steps" : "The phone's own steps");
+                sub("Volume buttons", fine.buttons === true ? "1% steps" : "Android's own steps");
             }
 
             // How late the sound is heard against the song's clock, and
@@ -35539,7 +35539,7 @@
     function hotspotFix(status) {
 
         if (hotspotInfoNow().paired === true) {
-            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off without Wi-Fi. The player starts it through wireless debugging, which needs the phone on Wi-Fi once, and it then keeps running until the phone restarts.", paired: true };
+            return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off without Wi-Fi. The player starts it through wireless debugging, which needs the Android device on Wi-Fi once, and it then keeps running until the Android device restarts.", paired: true };
         }
 
         return { text: "The hotspot helper is not running, so the hotspot cannot be turned on or off. Pair the player with wireless debugging once, further down this page, and it starts the helper by itself.", paired: false };
@@ -35643,7 +35643,7 @@
         heatReadAt = Date.now();
 
         if (heatRead.level !== null && heatRead.level >= 3) {
-            dbgLog("Power", "the phone is hot, Android's heat level " + heatRead.level
+            dbgLog("Power", "the Android device is hot, Android's heat level " + heatRead.level
                 + (temp !== null ? ", battery " + temp + " C" : ""));
         }
 
@@ -38128,7 +38128,7 @@
 
             const gap = arg && typeof arg === "object" ? arg : {};
 
-            dbgLog("Net", "a web view could not reach the phone for " + Number(gap.s || 0) + " s, "
+            dbgLog("Net", "a web view could not reach the Android device for " + Number(gap.s || 0) + " s, "
                 + String(gap.why || "").slice(0, 80));
             return;
         }
@@ -38688,7 +38688,7 @@
             hostCarAudio = arg === true || arg === "true" || arg === 1;
             applyCarAudioVolume();
 
-            setStatus(hostCarAudio ? "Music plays in the browser" : "Music plays on the phone");
+            setStatus(hostCarAudio ? "Music plays in the browser" : "Music plays on the Android device");
         } else if (cmd === "carGone") {
 
             // The browser playing the music stopped asking for the state,
@@ -38697,8 +38697,8 @@
             hostCarAudio = false;
             carGoneAt = Date.now();
             applyCarAudioVolume();
-            setStatus("Music plays on the phone, the browser stopped answering");
-            showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the phone", false);
+            setStatus("Music plays on the Android device, the browser stopped answering");
+            showToast("The browser stopped answering for " + (Number(arg) || 0) + " s, the music is back on the Android device", false);
         } else if (cmd === "unplugCountdown") {
             noteUnplug(Number(arg));
         } else if (cmd === "network") {
@@ -38755,7 +38755,7 @@
 
                 hostCarAudio = false;
                 applyCarAudioVolume();
-                setStatus("Music plays on the phone, Bluetooth took it back");
+                setStatus("Music plays on the Android device, Bluetooth took it back");
             }
         }
 
@@ -46509,20 +46509,20 @@
         // each setting they belong to
         const WORDS = {
             charger: {
-                master: ["Save power when on battery", "Turns everything below on or off together. Off, nothing changes when the phone goes on battery or back on the charger."],
+                master: ["Save power when on battery", "Turns everything below on or off together. Off, nothing changes when the Android device goes on battery or back on the charger."],
                 away: "When the charger is pulled out",
-                grace: "How long the phone may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once.",
-                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the phone is back on the charger.",
-                hotspotOff: ["Turn off hotspot when on battery", "After the grace time on battery. The hotspot warms the phone the most, and with nothing connected it does no good."],
-                hotspotOn: ["Turn on hotspot when charging", "As soon as the phone is back on the charger, so devices that use its hotspot find it again without the phone being touched."]
+                grace: "How long the Android device may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the Android device and in the web view, with a button to skip the shutdown. 0 stops at once.",
+                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the Android device awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the Android device is back on the charger.",
+                hotspotOff: ["Turn off hotspot when on battery", "After the grace time on battery. The hotspot warms the Android device the most, and with nothing connected it does no good."],
+                hotspotOn: ["Turn on hotspot when charging", "As soon as the Android device is back on the charger, so devices that use its hotspot find it again without anyone touching the Android device."]
             },
             bluetooth: {
                 master: ["Save power when Bluetooth disconnects", "Turns everything below on or off together. Off, nothing changes when the chosen Bluetooth devices disconnect or connect again."],
                 away: "When the Bluetooth devices disconnect",
-                grace: "How long after the last chosen device disconnects before anything is stopped. Connected again in time, nothing happens, so a short drop does not cut the music. A note counts down on the phone and in the web view, with a button to skip the shutdown. 0 stops at once.",
-                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the phone awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
-                hotspotOff: ["Turn off hotspot when disconnected", "After the grace time once the last chosen device has disconnected. The hotspot warms the phone the most, and with nothing connected it does no good."],
-                hotspotOn: ["Turn on hotspot when connected", "As soon as one of the chosen devices connects, so devices that use the phone's hotspot find it again without the phone being touched."]
+                grace: "How long after the last chosen device disconnects before anything is stopped. Connected again in time, nothing happens, so a short drop does not cut the music. A note counts down on the Android device and in the web view, with a button to skip the shutdown. 0 stops at once.",
+                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the Android device awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
+                hotspotOff: ["Turn off hotspot when disconnected", "After the grace time once the last chosen device has disconnected. The hotspot warms the Android device the most, and with nothing connected it does no good."],
+                hotspotOn: ["Turn on hotspot when connected", "As soon as one of the chosen devices connects, so devices that use the Android device's hotspot find it again without anyone touching the Android device."]
             }
         };
 
@@ -46858,7 +46858,7 @@
             if (host.askBluetooth && host.askBluetooth()) {
                 showToast("Android asks for the Nearby devices permission", true);
             } else {
-                showToast("Open the player on the phone to allow Bluetooth access", false);
+                showToast("Open the player on the Android device to allow Bluetooth access", false);
             }
         }));
 
@@ -46938,7 +46938,7 @@
             if (info.permission === false) {
                 devNote.textContent = "The player needs the Nearby devices permission to see which Bluetooth devices are paired and connected.";
             } else if (info.available === false) {
-                devNote.textContent = "This phone has no Bluetooth.";
+                devNote.textContent = "The Android device has no Bluetooth.";
             } else if (info.enabled === false) {
                 devNote.textContent = "Bluetooth is off. The devices show once it is on.";
             } else if (devices.length === 0) {
@@ -47010,22 +47010,22 @@
 
         page.appendChild(masterLabelRow);
         add(makeLabel("What starts it"));
-        add(withHint(triggerRow, "On battery follows the charger. Bluetooth disconnects follows the devices ticked below, for a phone that stays on a charger."));
+        add(withHint(triggerRow, "On battery follows the charger. Bluetooth disconnects follows the devices ticked below, for an Android device that stays on a charger."));
         add(btOnly(makeSubLabel("Bluetooth devices")));
         add(btOnly(devAskRow));
         add(btOnly(devList));
         add(btOnly(devNote));
         add(awayLabel);
         add(withHint(graceRow, WORDS.charger.grace));
-        add(withHint(pauseRow, "The music stops, so it does not carry on from the phone's speaker after you have gone."));
+        add(withHint(pauseRow, "The music stops, so it does not carry on from the Android device's speaker after you have gone."));
         add(withHint(quietRow, WORDS.charger.quiet));
 
         // The hotspot after the basic options, marked as experimental
         add(makeLabel("Hotspot (experimental, advanced)"));
-        add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the phone's debugging shell. It turns the phone's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
+        add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the Android device's debugging shell. It turns the Android device's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
         add(warnEl);
         add(withHint(hotspotOffRow, WORDS.charger.hotspotOff[1]));
-        add(withHint(hotspotWaitRow, "When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the phone's Wi-Fi never count."));
+        add(withHint(hotspotWaitRow, "When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the Android device's Wi-Fi never count."));
         add(withHint(hotspotOnRow, WORDS.charger.hotspotOn[1]));
         add(statusEl);
         add(tryRow);
@@ -47033,20 +47033,20 @@
         add(makeSubLabel("Pairing with wireless debugging"));
         add(pairRow);
         add(startRow);
-        add(makeHint("This is experimental and may not work on every phone. The player is paired with wireless debugging once:"));
+        add(makeHint("This is experimental and may not work on every Android device. The player is paired with wireless debugging once:"));
         add(makeSteps([
-            "Switch Developer options on: tap Build number in About phone seven times.",
+            "Switch Developer options on: tap Build number in About phone, About tablet on a tablet, seven times.",
             "Tap Pair with wireless debugging above.",
             "Switch Wireless debugging on in the screen that opens.",
             "Open Pair device with pairing code.",
             "Keep that dialog open.",
             "Pull down the player's notification, type the six digit code there and send it."
         ]));
-        add(makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the phone on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the phone restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. USB debugging is switched on for that, since with it off Android ends the helper as soon as wireless debugging goes off. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
+        add(makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the Android device on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the Android device restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. USB debugging is switched on for that, since with it off Android ends the helper as soon as wireless debugging goes off. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
         add(makeSubLabel("From a computer instead"));
         add(commandEl);
         add(copyRow);
-        add(makeHint("For a phone that is not on Wi-Fi: run the command on a computer with adb connected to the phone. It starts the helper to keep running."));
+        add(makeHint("For an Android device that is not on Wi-Fi: run the command on a computer with adb connected to the Android device. It starts the helper to keep running."));
 
         paintWords();
         settingsRefreshers.push(paintWords);
@@ -47839,7 +47839,7 @@
         }, 10000);
 
         cachePage.appendChild(makeLabel("Songs"));
-        cachePage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal, and in the app so the web view plays them from the phone. 0 downloads none ahead."));
+        cachePage.appendChild(withHint(cacheRow, "How many of the next songs are downloaded ahead, so playback carries on without signal, and in the app so the web view plays them from the Android device. 0 downloads none ahead."));
         cachePage.appendChild(songStatusEl);
         cachePage.appendChild(songButtonsRow);
         cachePage.appendChild(makeHint("Cache all stores every song in the library, a second press stops it. Clear song cache removes the stored songs, the library itself stays. Room used is everything the player keeps here: songs, covers and song details."));
@@ -47849,7 +47849,7 @@
         const prevSecondsRow = makeStepperRow("Seconds before it restarts",
             function () { return typeof settings.prevRestart === "number" ? settings.prevRestart : 3; },
             function (v) { settings.prevRestart = v; }, 1, 30);
-        const prevSecondsBox = withHint(prevSecondsRow, "A press within this many seconds of the start still goes to the previous song. Raise it if the car or the phone is slow to react.");
+        const prevSecondsBox = withHint(prevSecondsRow, "A press within this many seconds of the start still goes to the previous song. Raise it if the car or the Android device is slow to react.");
 
         const showPrevSeconds = function () {
             prevSecondsBox.style.display = settings.prevRestartOn === false ? "none" : "";
@@ -48628,7 +48628,7 @@
             syncWakeLock();
         });
 
-        devicePage.appendChild(withHint(keepOnRow, "Never leaves the screen to the phone's own timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the phone never locks and Bluetooth buttons always reach it."));
+        devicePage.appendChild(withHint(keepOnRow, "Never leaves the screen to Android's own screen timeout, so it turns off even over music and the black screen. While playing keeps it on while music plays and the black screen is up. Always keeps it on as long as the player is open, so the Android device never locks and Bluetooth buttons always reach it."));
 
         // Fullscreen and the screen off of this screen alone, the web view
         // has its own on its page
@@ -48673,7 +48673,7 @@
                     paintWebViewHead();
                 });
 
-            mobilePage.appendChild(withHint(landscapeRow, "In landscape, the web view fills the screen in place of this player, the large layout the Android app serves to other browsers, and in portrait this player is back. The phone button in the web view's bar comes back here at any time, and the round Web view button in the corner goes there again. Off, Web view is in the header in landscape, and in the actions."));
+            mobilePage.appendChild(withHint(landscapeRow, "In landscape, the web view fills the screen in place of this player, the large layout the Android app serves to other browsers, and in portrait this player is back. The Android device button in the web view's bar comes back here at any time, and the round Web view button in the corner goes there again. Off, Web view is in the header in landscape, and in the actions."));
         }
         mobilePage.appendChild(withHint(carGateRow, "The browser only allows fullscreen after a tap, so the first tap on the player switches to fullscreen."));
 
@@ -49029,10 +49029,10 @@
 
             // Steps are the phone's, the web view in the page has percent
             if (isApkHost()) {
-                webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step the phone counts, 0 to 15 on most phones."));
+                webPage.appendChild(withHint(webVolumeRow, "How the volume is written in the web view: as a percentage, or as the step Android counts, 0 to 15 on most devices."));
 
                 if (isApkHost()) {
-                    webPage.appendChild(withHint(webVolumeNumbersRow, "Shows the real volume in percent, the phone's step and its dB, and how far the player's own mixer turns the sound down, small under the phone's volume bar, and under the volume shown as the keys or arrows move it."));
+                    webPage.appendChild(withHint(webVolumeNumbersRow, "Shows the real volume in percent, Android's volume step and its dB, and how far the player's own mixer turns the sound down, small under the Android device's volume bar, and under the volume shown as the keys or arrows move it."));
                 }
             }
 
@@ -49088,15 +49088,15 @@
             // The badges along the top
             webPage.appendChild(makeLabel("Badges"));
             webPage.appendChild(makeHint("Hold a badge in the web view and drag it to another place, with a finger or the mouse, as the buttons."));
-            webPage.appendChild(withHint(webOnlineBadgeRow, "A red Offline badge shows while the phone has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the phone is online."));
-            webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the phone, before the badges. Off leaves more room on a narrow screen."));
+            webPage.appendChild(withHint(webOnlineBadgeRow, "A red Offline badge shows while the Android device has no internet. Coming back online it turns into a green Online badge, which fades away after a few seconds or stays as long as the Android device is online."));
+            webPage.appendChild(withHint(webWhoRow, "The name of the account signed in on the Android device, before the badges. Off leaves more room on a narrow screen."));
 
             // The phone's own heat, battery, hotspot and tunnel, only the
             // app's web view knows them
             if (isApkHost()) {
-                webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the phone's hotspot is on and grey while it is off, dashed when the phone cannot tell. A tap offers to switch it."));
+                webPage.appendChild(withHint(webHotspotRow, "A badge after the heat and WireGuard badges, an icon in cyan while the Android device's hotspot is on and grey while it is off, dashed when the Android device cannot tell. A tap offers to switch it."));
                 webPage.appendChild(withHint(webWgRow, "A badge before the hotspot badge, a white shield ringed in red while WireGuard's tunnel is up and grey while it is down, shown once a tunnel is named under Connections. A tap offers to switch it."));
-                webPage.appendChild(withHint(webHeatRow, "How warm the phone is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
+                webPage.appendChild(withHint(webHeatRow, "How warm the Android device is, from the battery's temperature, or worse when Android says so. A tap shows the temperature and, while the hotspot is on, a button that switches it off."));
                 webPage.appendChild(withHint(heatTextRow, "The word, the word and the battery's temperature, or the temperature alone. The color follows the limits below either way."));
                 webPage.appendChild(heatWarmRow);
                 webPage.appendChild(heatHotRow);
@@ -49136,7 +49136,7 @@
                 window.MurekaHost.setPref(key, v ? "1" : "0");
             };
 
-            const hotspotRow = makeBoolRow("Allow from the phone's hotspot",
+            const hotspotRow = makeBoolRow("Allow from the hotspot",
                 function () { return pref("allowHotspot"); },
                 function (v) { setPref("allowHotspot", v); });
 
@@ -49188,7 +49188,7 @@
             const wgPingRow = makeCarTextRow("Host to ping while WireGuard is on, blank for none", "wgPingHost", "");
             const wgPingSecRow = makeCarTextRow("Ping every, seconds", "wgPingSeconds", "20");
             const wgRestartRow = makeCarTextRow("Restart WireGuard after no answer for, seconds", "wgRestartSeconds", "0");
-            const wgPingAwakeRow = makeDropRow("Keep the phone awake for the pings", [
+            const wgPingAwakeRow = makeDropRow("Keep the Android device awake for the pings", [
                 { label: "On a charger", value: "charger" },
                 { label: "Always", value: "always" },
                 { label: "Never", value: "never" }
@@ -49341,8 +49341,8 @@
             const carStatusEl = document.createElement("div");
             carStatusEl.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:2px 0";
 
-            const netHint = makeHint("Who may open the web view. A device can join the phone's hotspot, or use a Wi-Fi the phone is on.");
-            const vpnHint = makeHint("Some browsers, Tesla's among them, refuse private addresses, and a hotspot only hands those out. This gives the phone one extra public address to open with :8080 after it. No traffic goes through it.");
+            const netHint = makeHint("Who may open the web view. A browser's device can join the Android device's hotspot, or share its Wi-Fi.");
+            const vpnHint = makeHint("Some browsers, Tesla's among them, refuse private addresses, and a hotspot only hands those out. This gives the Android device one extra public address to open with :8080 after it. No traffic goes through it.");
 
             const carHint = document.createElement("div");
             carHint.textContent = "The mobile network is never allowed. Android asks once before"
@@ -49386,7 +49386,7 @@
 
                 if (st.vpnExternal) {
 
-                    lines.push(["Public address", st.carUrl ? "On, from another VPN" : "Waiting, no VPN on the phone has the address yet"]);
+                    lines.push(["Public address", st.carUrl ? "On, from another VPN" : "Waiting, no VPN on the Android device has the address yet"]);
 
                     // Android 14 and later drops connections from the
                     // hotspot to a VPN's address that VPN lists only once
@@ -49658,7 +49658,7 @@
 
             cachePage.appendChild(makeLabel("Covers for the web view"));
             cachePage.appendChild(coverAheadRow);
-            cachePage.appendChild(makeHint("The covers of the playing song and of as many songs coming up next are fetched to the phone ahead, whether or not a browser is open. The browser gets every cover from the phone, which keeps them."));
+            cachePage.appendChild(makeHint("The covers of the playing song and of as many songs coming up next are fetched to the Android device ahead, whether or not a browser is open. The browser gets every cover from the Android device, which keeps them."));
             cachePage.appendChild(coverSizeRow);
             cachePage.appendChild(makeHint("Once the covers take more room than this, those shown longest ago are removed first."));
             cachePage.appendChild(coverStatusEl);
@@ -49677,16 +49677,16 @@
             connPage.appendChild(netHint);
             connPage.appendChild(hotspotRow);
             connPage.appendChild(wifiRow);
-            connPage.appendChild(withHint(vpnInRow, "A device reaching the phone through a VPN the phone is on, WireGuard for one. Only from a private address, so a VPN that carries everything does not open the web view to the internet."));
+            connPage.appendChild(withHint(vpnInRow, "A browser reaching the Android device through a VPN they share, WireGuard for one. Only from a private address, so a VPN that carries everything does not open the web view to the internet."));
             connPage.appendChild(withHint(vpnRow, vpnHint.textContent));
             connPage.appendChild(addressRow);
-            connPage.appendChild(withHint(externalRow, "For a VPN that is on anyway, WireGuard say: add the address above to that VPN's own addresses, for WireGuard the tunnel's Address line, such as 10.8.0.2/32, 3.3.3.3/31, 3.3.3.3/32. The address twice, with /31 and /32, as Android 14 and later otherwise drops connections to it from the hotspot. On, the app starts no VPN of its own and does not turn WireGuard off or on for the hotspot, the address works while that VPN is up. Browsers at the VPN's other end may use the address too, when that network sends it to the phone."));
-            connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the phone's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
+            connPage.appendChild(withHint(externalRow, "For a VPN that is on anyway, WireGuard say: add the address above to that VPN's own addresses, for WireGuard the tunnel's Address line, such as 10.8.0.2/32, 3.3.3.3/31, 3.3.3.3/32. The address twice, with /31 and /32, as Android 14 and later otherwise drops connections to it from the hotspot. On, the app starts no VPN of its own and does not turn WireGuard off or on for the hotspot, the address works while that VPN is up. Browsers at the VPN's other end may use the address too, when that network sends it to the Android device."));
+            connPage.appendChild(withHint(hotspotOnlyRow, "The public address only while the Android device's hotspot is on. Android runs one VPN at a time, so the rest of the time another VPN app, such as WireGuard, can run."));
             connPage.appendChild(withHint(wgRow, "When the public address goes, this WireGuard tunnel is turned on again, and off before it comes. WireGuard needs Allow remote control apps switched on, in its advanced settings, and Android asks once whether this app may control tunnels."));
-            connPage.appendChild(withHint(hotspotNowRow, "Switches the phone's hotspot now, with the helper under Charger and power. Browsers on the hotspot lose the web view when it goes off."));
+            connPage.appendChild(withHint(hotspotNowRow, "Switches the Android device's hotspot now, with the helper under Charger and power. Browsers on the hotspot lose the web view when it goes off."));
             connPage.appendChild(withHint(wgTestRow, "Switches the tunnel now, as the hand over does. On takes Android's one VPN from the public address. Browsers that came through the one going off lose the web view."));
             connPage.appendChild(withHint(wgFreeRow, "Android lets WireGuard start its tunnel from the background only when its battery use is Unrestricted. Open settings shows WireGuard's app info, set it under Battery."));
-            connPage.appendChild(withHint(wgAwakeRow, "A sleeping phone stops sending WireGuard's keepalives, the mobile network then forgets it after a minute or two, and the web view cannot reach it through the tunnel until it wakes. On, the phone stays awake while WireGuard holds the tunnel. It costs some battery, only while the tunnel is WireGuard's."));
+            connPage.appendChild(withHint(wgAwakeRow, "A sleeping Android device stops sending WireGuard's keepalives, the mobile network then forgets it after a minute or two, and the web view cannot reach it through the tunnel until it wakes. On, the Android device stays awake while WireGuard holds the tunnel. It costs some battery, only while the tunnel is WireGuard's."));
             // What is pinged and how the phone is kept awake for it only on
             // the phone, a browser could otherwise look for hosts behind the
             // tunnel or keep the phone from sleeping. How it goes shows in
@@ -49699,7 +49699,7 @@
             connPage.appendChild(wgPingRow);
             connPage.appendChild(wgPingHint);
             connPage.appendChild(withHint(wgPingSecRow, "How often, from 5 to 600 seconds."));
-            connPage.appendChild(withHint(wgPingAwakeRow, "A sleeping phone does not ping. On a charger it is kept awake for them, where it costs no battery. Always also on battery, Never lets the pings pause while it sleeps. How the pings go is under How it stands."));
+            connPage.appendChild(withHint(wgPingAwakeRow, "A sleeping Android device does not ping. On a charger it is kept awake for them, where it costs no battery. Always also on battery, Never lets the pings pause while it sleeps. How the pings go is under How it stands."));
             connPage.appendChild(withHint(wgRestartRow, "When not one ping has been answered for this long, WireGuard is turned off and on again a few seconds later, which sets the tunnel up afresh. The screen comes on for a moment for it, as for the hand over. Another restart waits at least as long again, and a minute or more. 0 never restarts it, otherwise from 30 to 3600 seconds."));
             connPage.appendChild(nameRow);
             connPage.appendChild(makeSubLabel("How it stands"));
@@ -49707,7 +49707,7 @@
             connPage.appendChild(pingResetRow);
             connPage.appendChild(carHint);
 
-            devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, a phone left lying a while can stop answering the web view with music until the app is opened."));
+            devicePage.appendChild(withHint(batteryRow, "Leaves the app out of Android's battery saving. Without it, an Android device left lying a while can stop answering the web view with music until the app is opened."));
 
             // The phone tells the service when a Bluetooth output goes away,
             // the service does the pausing, so it works with the screen off
@@ -49725,8 +49725,8 @@
                 publishHostSoon();
             });
 
-            bluetoothPlayEls.push(withHint(playBtRow, "Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the phone, even if it was set to play in a browser."));
-            bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the phone's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));
+            bluetoothPlayEls.push(withHint(playBtRow, "Starts the music when a Bluetooth car stereo, speaker or headphones connects, from where it was. If it was playing starts it only when it was playing as the last Bluetooth device went away, so a drive picks up where it stopped and a paused player stays paused. The sound comes to the Android device, even if it was set to play in a browser."));
+            bluetoothPlayEls.push(withHint(pauseBtRow, "Pauses the music when the Bluetooth car stereo, speaker or headphones it plays on disconnects, so it does not carry on from the Android device's own speaker. Not while the music plays in a browser, and not when another Bluetooth device takes over."));
 
             connPageBtn = makePageButton("Connections", "connections");
 
@@ -49749,7 +49749,7 @@
         }
 
         devPage.appendChild(makeHint("Tools for tracking down problems, not needed for normal use."));
-        devPage.appendChild(withHint(statsRow, "A small ringed i after the time opens what the player knows about the playing song: where the sound and the cover come from, the file, the waveform, what is stored and how full the store is. In the web views too, for the song on the phone."));
+        devPage.appendChild(withHint(statsRow, "A small ringed i after the time opens what the player knows about the playing song: where the sound and the cover come from, the file, the waveform, what is stored and how full the store is. In the web views too, for the song on the Android device."));
         devPage.appendChild(withHint(debugRow, "Says on the status line why a key, a tap or a media button was passed over, and adds Copy JSON to the song menu."
             + (isApkHost() ? " In the app it also lets chrome://inspect on a computer with USB debugging look into the app's pages, signed in to Mureka, so keep it off otherwise." : "")));
         devPage.appendChild(withHint(debugLogRow, "Keeps a log of what the player does, for Copy debug log, while the player is used as usual. Mureka's requests are in it too, with anything that looks like a token, password or signature blanked out. Off, nothing is logged, except while a debug overlay is shown."));
@@ -49874,7 +49874,7 @@
         if (isApkHost()) {
 
             aboutPage.appendChild(makeLabel("Open the web view"));
-            aboutPage.appendChild(makeHint("From a browser on a device on the same hotspot or Wi-Fi as this phone, open one of these. They change when the phone joins another network."));
+            aboutPage.appendChild(makeHint("From a browser on a device on the same hotspot or Wi-Fi as the Android device, open one of these. They change when it joins another network."));
 
             const addressesEl = document.createElement("div");
 
@@ -49921,7 +49921,7 @@
                 // joined, or USB tethering, in the words the Connections page
                 // uses
                 const netNames = {
-                    Hotspot: "Phone's hotspot",
+                    Hotspot: "Android device's hotspot",
                     "Wi-Fi": "Joined Wi-Fi",
                     USB: "USB tethering",
                     VPN: "VPN local address"
@@ -49934,7 +49934,7 @@
                 // The VPN's address answers on the hotspot only, the one that
                 // stays the same whatever address the hotspot hands out
                 if (st.carUrl) {
-                    rows.push([st.carUrl, "Phone's hotspot, fixed address"]);
+                    rows.push([st.carUrl, "Android device's hotspot, fixed address"]);
                 }
 
                 if (st.localUrl && st.mdns && st.mdns !== "off") {
@@ -50361,7 +50361,7 @@
             // as the boxes in the web view's volume popup
             if (isApkHost() && window.MurekaHost && typeof window.MurekaHost.fineVolume === "function") {
 
-                soundBox.appendChild(soundHeading("Phone volume"));
+                soundBox.appendChild(soundHeading("Android volume"));
                 soundBox.appendChild(makeBoolRow("More volume steps, 100", function () {
                     return fineAsked("on");
                 }, function (v) {
@@ -50376,7 +50376,7 @@
                     fineAsk("buttons", v);
                     window.MurekaHost.volumeButtons(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeHint("More volume steps turns the phone's few media volume steps into 100, the player's own sound evening out between them. With the volume buttons on as well, they move it by 1%, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+                soundBox.appendChild(makeHint("More volume steps turns Android's few media volume steps into 100, the player's own sound evening out between them. With the volume buttons on as well, they move it by 1%, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
             }
 
             // Which profiles each speaker takes
@@ -50395,7 +50395,7 @@
 
             const dayChoices = function (phone) {
 
-                const out = phone ? [] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
+                const out = phone ? [] : [{ value: "", label: "Same as default" }, { value: "none", label: "None" }];
 
                 return out.concat(profilesByName().filter(function (x) {
                     return !x.night;
@@ -50405,7 +50405,7 @@
             };
             const nightChoices = function (phone) {
 
-                const out = phone ? [{ value: "", label: "None" }] : [{ value: "", label: "Same as this device" }, { value: "none", label: "None" }];
+                const out = phone ? [{ value: "", label: "None" }] : [{ value: "", label: "Same as default" }, { value: "none", label: "None" }];
 
                 return out.concat(profilesByName().filter(function (x) {
                     return x.night;
@@ -50459,7 +50459,14 @@
                     const here = typeof fine.output === "string" ? playsOn(fine, phone, address) : !!(d && d.active);
                     const said = here ? "playing here" : (d && d.connected ? "connected" : "");
                     const text = title + (said ? " \u00b7 " + said : "");
-                    const summary = "Profile " + label(dayChoices(phone), get("day") || "") + ", night profile " + label(nightChoices(phone), get("night") || "") + ".";
+                    const day = get("day") || "";
+                    const night = get("night") || "";
+                    const named = function (choices, v) {
+                        return !phone && v === "" ? "as default" : label(choices, v);
+                    };
+                    const summary = (phone ? "For the Android device's own speaker and headphones, and speakers not set up. " : "")
+                        + (!phone && day === "" && night === "" ? "Profiles as default."
+                            : "Profile " + named(dayChoices(phone), day) + ", night profile " + named(nightChoices(phone), night) + ".");
 
                     if (name.textContent !== text) {
                         name.textContent = text;
@@ -50525,8 +50532,8 @@
                     soundChanged();
                 })));
                 box.appendChild(makeHint(phone
-                    ? "The profile and the night profile for this device, and for the speakers that take the ones of this device. None as a night profile keeps the profile in night mode."
-                    : "Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode."));
+                    ? "The default is for the Android device's own speaker and headphones, for a Bluetooth speaker without settings of its own, and for a speaker set to Same as default. None as a night profile keeps the profile in night mode."
+                    : "Same as default takes the default's. None leaves the sound as it is, and as a night profile keeps the profile in night mode."));
 
                 // A speaker of its own, connecting while night mode is on
                 if (!phone) {
@@ -50707,13 +50714,13 @@
                     if (st.hasOwn) {
                         said.textContent = "Volume steps set by hand or trained: " + listed(st.gaps) + " The step size is not used meanwhile.";
                     } else if (st.useFb) {
-                        said.textContent = "Same as this device: " + listed(st.fb);
+                        said.textContent = "Same as default: " + listed(st.fb);
                     } else if (st.own > 0) {
                         said.textContent = "The step size set here, for every step.";
                     } else if (!phone && sound().fallback.stepDb > 0) {
-                        said.textContent = "The step size of this device, for every step.";
+                        said.textContent = "The default step size, for every step.";
                     } else {
-                        said.textContent = "The step size the phone says, for every step.";
+                        said.textContent = "The step size Android gives, for every step.";
                     }
 
                     said.textContent += (st.low > 0 ? " The lowest " + st.low + " dB under step 1." : "")
@@ -50761,7 +50768,7 @@
                 into.appendChild(makeHint("For More volume steps: how much louder the speaker gets at each of the device's own steps, as a Bluetooth speaker turns its sound down by its own curve. "
                     + "Train by ear finds them while it plays, one step against the step below. Edit by hand takes them typed in, a step left empty drawn from those set around it, "
                     + "and step 1 against the lowest level above silence. Without any, the step size counts for every step."
-                    + (phone ? "" : " A speaker without either takes the volume steps of this device.")));
+                    + (phone ? "" : " A speaker without either takes the default volume steps.")));
                 into.appendChild(size);
                 into.appendChild(said);
                 into.appendChild(buttons);
@@ -50777,7 +50784,7 @@
                 const fbLow = sound().fallback.lowSteps || 0;
                 const lowChoices = [{
                     value: 0,
-                    label: !phone && fbLow > 0 ? "Same as this device, " + fbLow : "Auto" + (high > 1 ? ", " + (high - 1) + apart(high - 1) : "")
+                    label: !phone && fbLow > 0 ? "Same as default, " + fbLow : "Auto" + (high > 1 ? ", " + (high - 1) + apart(high - 1) : "")
                 }].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40].map(function (n) {
                     return { value: n, label: String(n) + apart(n) };
                 }));
@@ -50918,7 +50925,7 @@
                 tryPaints.push(paint);
             };
 
-            speaker("This device and others not set up", function (k) {
+            speaker("Default", function (k) {
                 return sound().fallback[k] || "";
             }, function (k, v) {
                 sound().fallback[k] = v;
@@ -51359,7 +51366,7 @@
         // Each page opens with the way back and a word on what it holds
         const heads = [
             [devicePage, "This device", "Settings for this phone, tablet or computer only, whatever the player looks like on it. They are never synced."],
-            [connPage, "Connections", "How browsers on other devices reach the web view on this phone."],
+            [connPage, "Connections", "How browsers on other devices reach the web view on the Android device."],
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
@@ -51367,7 +51374,7 @@
             [soundPage, "Sound profiles", "The bass, mids and treble, a volume below the device's lowest step and a compressor, a profile of its own and a night profile for each Bluetooth speaker."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
             [setsPage, "Song sets", "The versions of a song kept together, to compare them and listen them through. Kept on this device and carried by song tweaks."],
-            [chargerPage, "Charger and power", "What happens when the phone goes on battery, or chosen Bluetooth devices disconnect, and when that changes back. A phone left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
+            [chargerPage, "Charger and power", "What happens when the Android device goes on battery, or chosen Bluetooth devices disconnect, and when that changes back. An Android device left somewhere warm stays cooler with less running, and devices using its hotspot find it again by themselves."],
             [cachePage, "Cache control", "What the player keeps on this device so songs and covers are there without waiting for Mureka, and how much room it takes."],
             [backupPage, "Backup and restore", null],
             [devPage, "Developer", null],
@@ -53895,7 +53902,7 @@
         }
 
         const names = {
-            allowHotspot: "allow from the phone's hotspot",
+            allowHotspot: "allow from the hotspot",
             allowWifi: "allow from Wi-Fi networks",
             allowVpn: "allow from a VPN",
             carVpn: "public address (VPN)",
@@ -54051,7 +54058,7 @@
     window.__murekaSaveResult = function (ok, where) {
 
         if (ok) {
-            dataStatus("Saved to " + (where || "the phone"));
+            dataStatus("Saved to " + (where || "the Android device"));
         } else if (where) {
             dataStatus(where);
         } else {
@@ -55852,14 +55859,14 @@
             const net = appPrefChanges(p.appSettings);
 
             out.what = "Settings saved " + when + (net
-                ? ". Who can reach the web view stays as it is, that is only imported on the phone" : "");
+                ? ". Who can reach the web view stays as it is, that is only imported on the Android device" : "");
         } else if (p.kind === "queue") {
 
             const found = queueImportSongs(p);
 
             out.what = "A play queue saved " + when + ", " + found.songs.length
                 + (found.songs.length === 1 ? " song" : " songs") + queueForeignText(found)
-                + (found.missing > 0 ? ", " + found.missing + " not on the phone "
+                + (found.missing > 0 ? ", " + found.missing + " not on the Android device "
                     + (found.missing === 1 ? "is" : "are") + " left out" : "");
             out.songs = found.songs.length;
             out.playing = soundingNow();
@@ -59962,10 +59969,10 @@
 
                 rtrim.id = id;
                 rtrim.buffer = buffer;
-                dbgLog("Trim", "the web view's trimmer is heard on the phone, " + (song.title || "Untitled") + " read");
+                dbgLog("Trim", "the web view's trimmer is heard on the Android device, " + (song.title || "Untitled") + " read");
             } catch (e) {
 
-                dbgLog("Trim", "the web view's preview could not be played on the phone: " + errText(e));
+                dbgLog("Trim", "the web view's preview could not be played on the Android device: " + errText(e));
 
                 if (seq === rtrim.seq) {
                     rtrim.loading = false;
@@ -60081,7 +60088,7 @@
 
         if (!song || creatorSource) {
 
-            hostTrimJob = { job: job, state: "failed", text: "The song is not in the library on the phone" };
+            hostTrimJob = { job: job, state: "failed", text: "The song is not in the library on the Android device" };
             publishHostSoon();
             return;
         }
@@ -74506,9 +74513,9 @@
         </div>
         <button class="soundIco" id="volBtn" type="button" data-icon="speaker" aria-label="Volume" title="Volume"></button>
         <div id="sound">
-            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" data-name="Phone / Bluetooth" aria-label="Music on the phone or Bluetooth, hold or right click for its Bluetooth devices" title="Music on the phone or Bluetooth, hold or right click for its Bluetooth devices"></button>
+            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" data-name="Android device / Bluetooth" aria-label="Music on the Android device or Bluetooth, hold or right click for its Bluetooth devices" title="Music on the Android device or Bluetooth, hold or right click for its Bluetooth devices"></button>
             <button id="soundCar" type="button" data-icon="browser" data-name="This browser" aria-label="Music in this browser" title="Music in this browser"></button>
-            <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the phone and other browsers are left alone"></button>
+            <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the Android device and other browsers are left alone"></button>
         </div>
         <div id="midBar">
             <span id="badges">
@@ -74889,7 +74896,7 @@
         head.className = "loginHead";
         head.textContent = "Mureka Player";
         text.className = "loginText";
-        text.textContent = "The phone asks for the web view's password.";
+        text.textContent = "The Android device asks for the web view's password.";
         field.type = "password";
         field.autocomplete = "current-password";
         field.placeholder = "Password";
@@ -74942,7 +74949,7 @@
             }).catch(function () {
 
                 btn.disabled = false;
-                note.textContent = "The phone did not answer.";
+                note.textContent = "The Android device did not answer.";
             });
         });
     }
@@ -76095,7 +76102,7 @@
         hint.className = "pText small";
         hint.textContent = on
             ? "On. Every browser signs in once and stays signed in until the password changes or all browsers are signed out, this one included. Changing or removing it asks for the current one."
-            : "Off. Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
+            : "Off. Anyone on the Android device's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
         hint.style.color = on ? "" : "#f5c518";
         section.appendChild(hint);
 
@@ -76162,9 +76169,9 @@
             hint.appendChild(document.createTextNode("While on, the settings marked"));
             hint.appendChild(localDot());
             hint.appendChild(document.createTextNode(" apply only to this browser when they are changed "
-                + "here. The phone and other browsers keep theirs. These settings are saved in this "
+                + "here. The Android device and other browsers keep theirs. These settings are saved in this "
                 + "browser's own storage on this device, much like a cookie, and used only to show the "
-                + "web view here. They are never sent to the phone, Mureka or anyone else, and hold "
+                + "web view here. They are never sent to the Android device, Mureka or anyone else, and hold "
                 + "nothing about you. Switching it off deletes them."));
             section.appendChild(r);
             section.appendChild(hint);
@@ -76523,14 +76530,14 @@
         // from the page
         if (direct && gainNode && audio.src.indexOf("/song?") !== -1) {
 
-            dbgLog("Audio", "the phone could not give the song, and with the volume set here it cannot come straight from Mureka");
+            dbgLog("Audio", "the Android device could not give the song, and with the volume set here it cannot come straight from Mureka");
             return;
         }
 
         if (direct && audio.src.indexOf("/song?") !== -1 && audio.dataset.direct !== direct) {
 
             audio.dataset.direct = direct;
-            dbgLog("Audio", "the phone could not give the song, straight from Mureka");
+            dbgLog("Audio", "the Android device could not give the song, straight from Mureka");
             audio.src = direct;
 
             if (state && state.playing && unlocked) {
@@ -77161,7 +77168,7 @@
         }
 
         if (!!a.carAudio !== !!b.carAudio) {
-            dbgLog("Phone", "sound " + (b.carAudio ? "here" : "on the phone"));
+            dbgLog("Phone", "sound " + (b.carAudio ? "here" : "on the Android device"));
         }
 
         if (a.repeat !== b.repeat) {
@@ -77202,7 +77209,7 @@
 
                 const ok = copyText(text);
 
-                toast(ok ? "Debug log copied" : "This browser cannot copy, send it to the phone instead", ok ? "ok" : "bad");
+                toast(ok ? "Debug log copied" : "This browser cannot copy, send it to the Android device instead", ok ? "ok" : "bad");
             });
 
             return;
@@ -77210,7 +77217,7 @@
 
         const ok = copyText(text);
 
-        toast(ok ? "Debug log copied" : "This browser cannot copy, send it to the phone instead", ok ? "ok" : "bad");
+        toast(ok ? "Debug log copied" : "This browser cannot copy, send it to the Android device instead", ok ? "ok" : "bad");
     }
 
     // To the phone, where Copy debug log in the settings takes it along. The
@@ -77224,7 +77231,7 @@
         }
 
         send("webDebugLog", lines.join("\n"));
-        toast("Debug log sent to the phone", "ok");
+        toast("Debug log sent to the Android device", "ok");
     }
 
     // What the page receives, written to the log. Only ever listens: every
@@ -78076,8 +78083,8 @@
         el.appendChild(icon(st === "on" ? "hotspot" : (st === "off" ? "hotspotOff" : "hotspotUnknown")));
         el.setAttribute("aria-label", st === "on" ? "Hotspot on" : (st === "off" ? "Hotspot off" : "Hotspot not known"));
         el.title = st === "unknown"
-            ? "The phone cannot tell whether its hotspot is on"
-            : "The phone's hotspot is " + st;
+            ? "The Android device cannot tell whether its hotspot is on"
+            : "The Android device's hotspot is " + st;
     }
 
     // How warm the phone is. The battery's temperature decides, against
@@ -78195,7 +78202,7 @@
             items.push({ icon: "hotspot", label: "Hotspot", cls: "accent", fn: openHotspotPanel });
         }
 
-        openChoice("Phone heat", items);
+        openChoice("Android device heat", items);
     }
 
     // What the badge's words mean, the limits set on the phone. A tap goes
@@ -78589,10 +78596,10 @@
 
     // How this browser reaches the phone, in a line for the panels
     const VIA_WORDS = {
-        hotspot: "This browser is on the phone's hotspot",
+        hotspot: "This browser is on the Android device's hotspot",
         public: "This browser is on the hotspot, through the public address",
         vpn: "This browser comes through a VPN",
-        wifi: "This browser shares a Wi-Fi with the phone"
+        wifi: "This browser shares a Wi-Fi with the Android device"
     };
 
     // The panel for something switched on the phone: a ringed icon with how
@@ -78707,7 +78714,7 @@
         const helperWords = {
             running: { text: "The hotspot helper is running.", kind: "" },
             old: { text: "The hotspot helper runs from an earlier version of the app, start it again.", kind: "wait" },
-            stopped: { text: "The hotspot helper is not running, so the phone cannot switch the hotspot.", kind: "bad" },
+            stopped: { text: "The hotspot helper is not running, so the Android device cannot switch the hotspot.", kind: "bad" },
             starting: { text: "The hotspot helper is starting.", kind: "wait" }
         };
         const helper = helperShown;
@@ -78732,12 +78739,12 @@
         }
 
         openSwitchPanel({
-            title: "Phone's hotspot",
+            title: "Hotspot",
             icon: st === "on" ? "hotspot" : (st === "off" ? "hotspotOff" : "hotspotUnknown"),
             ring: st === "on" ? "hotspot" : "",
             word: st === "on" ? "On" : (st === "off" ? "Off" : "Not known"),
-            about: "Devices join the phone's hotspot to open the web view. It is switched by the hotspot helper on"
-                + " the phone, the way the quick settings tile does it.",
+            about: "Devices join the Android device's hotspot to open the web view. It is switched by the hotspot helper on"
+                + " the Android device, the way the quick settings tile does it.",
             note: helperWords[helper] || null,
             warn: canSwitch && st !== "off" && onHere
                 ? "If switched off, this browser loses the web view until the hotspot is on again." : "",
@@ -78794,7 +78801,7 @@
             warn = "WireGuard takes Android's one VPN from the public address, so this browser loses the web view"
                 + " until the public address is back.";
         } else if (up && via === "vpn") {
-            warn = "If turned off, this browser loses the web view until it can reach the phone another way.";
+            warn = "If turned off, this browser loses the web view until it can reach the Android device another way.";
         }
 
         openSwitchPanel({
@@ -78802,7 +78809,7 @@
             icon: up ? "vpn" : "vpnOff",
             ring: up ? "wireguard" : "",
             word: up ? "Tunnel up" : "Tunnel down",
-            about: "The phone's WireGuard tunnel. Android runs one VPN at a time, so it gives way to the public"
+            about: "The Android device's WireGuard tunnel. Android runs one VPN at a time, so it gives way to the public"
                 + " address while the hotspot is on and comes back once it is off.",
             warn: warn,
             buttons: [up
@@ -78824,7 +78831,7 @@
             el.textContent = name;
         }
 
-        el.title = name ? "Signed in to Mureka on the phone as " + name : "";
+        el.title = name ? "Signed in to Mureka on the Android device as " + name : "";
         el.style.display = name ? "inline-block" : "none";
     }
 
@@ -78842,11 +78849,11 @@
         let bad = null;
 
         if (!online && phoneSeen) {
-            bad = { text: "No phone", title: "This browser cannot reach the phone" };
+            bad = { text: "No connection", title: "This browser cannot reach the Android device" };
         } else if (s && s.offline === true) {
-            bad = { text: "Offline", title: "The phone has no internet, only songs stored on it play" };
+            bad = { text: "Offline", title: "The Android device has no internet, only songs stored on it play" };
         } else if (browserNet === false) {
-            bad = { text: "Browser offline", title: "This browser cannot reach Mureka, only songs stored on the phone play here" };
+            bad = { text: "Browser offline", title: "This browser cannot reach Mureka, only songs stored on the Android device play here" };
         }
 
         if (!s && !bad) {
@@ -78903,7 +78910,7 @@
     function showNetOnline(el) {
 
         el.textContent = "Online";
-        el.title = "The phone and this browser are connected to the internet";
+        el.title = "The Android device and this browser are connected to the internet";
         el.classList.add("online");
         el.classList.remove("fading");
         el.style.display = "inline-block";
@@ -78956,8 +78963,8 @@
 
         if (!s || !s.id) {
 
-            titleLine.setText(online ? "Nothing playing" : "Connecting to the phone");
-            subtitleLine.setText(online ? "Start a song on the phone or tap play" : "");
+            titleLine.setText(online ? "Nothing playing" : "Connecting to the Android device");
+            subtitleLine.setText(online ? "Start a song on the Android device or tap play" : "");
             paintStars(null);
             $("like").classList.remove("liked");
         } else {
@@ -79206,7 +79213,7 @@
         $("soundNone").classList.toggle("on", localMute);
         $("soundNone").classList.toggle("off", alone && !localMute);
         paintVolIcon();
-        statusLine.setText(online ? (s && s.status ? s.status : "") : "Not connected to the phone");
+        statusLine.setText(online ? (s && s.status ? s.status : "") : "Not connected to the Android device");
         $("signin").style.display = online && s && s.signedIn === "no" ? "block" : "none";
 
         // The phone asks for the sound here but this page has not been
@@ -80469,8 +80476,8 @@
             // here yet: this browser goes to the phone's place
             if (!hereAudible() || jumped || Math.abs(drift) > DRIFT_FOLLOW_S) {
 
-                dbgLog("Audio", "to the phone's place, " + (drift > 0 ? "back " : "on ") + Math.abs(drift).toFixed(1)
-                    + " s" + (jumped ? ", the phone jumped" : ""));
+                dbgLog("Audio", "to the Android device's place, " + (drift > 0 ? "back " : "on ") + Math.abs(drift).toFixed(1)
+                    + " s" + (jumped ? ", the Android device jumped" : ""));
 
                 try {
                     audio.currentTime = want;
@@ -80482,7 +80489,7 @@
                 // here: the phone is set to the place heard, the music here
                 // never jumps back for it
                 phoneKickAt = Date.now();
-                dbgLog("Audio", "the phone drifted " + drift.toFixed(1) + " s, set to the place heard here");
+                dbgLog("Audio", "the Android device drifted " + drift.toFixed(1) + " s, set to the place heard here");
                 send("seek", audio.currentTime);
             }
         }
@@ -83374,7 +83381,7 @@
 
             opened.delete(head);
             paintFoldChip(chip, false);
-            toast("The phone did not send the songs, tap again", "bad");
+            toast("The Android device did not send the songs, tap again", "bad");
         };
 
         fetchJson("/list?q=" + esc(f.q()) + "&view=" + (listSort || "mureka") + (isSet ? "&set=" : "&run=") + esc(head)).then(function (data) {
@@ -83431,7 +83438,7 @@
 
             f.add(data.songs.length);
         }).catch(function () {
-            failed("the phone did not answer");
+            failed("the Android device did not answer");
         });
     }
 
@@ -84310,7 +84317,7 @@
             fadeAt = t0;
             fadeMs = ms;
             clearInterval(fadeTimer);
-            dbgLog("Audio", "fading out with the phone over " + (ms / 1000) + " s");
+            dbgLog("Audio", "fading out with the Android device over " + (ms / 1000) + " s");
 
             fadeTimer = setInterval(function () {
 
@@ -84511,7 +84518,7 @@
     function volTargets() {
 
         if (!state || !state.carAudio) {
-            return [{ key: "phone", kind: "phone", name: "The phone" }];
+            return [{ key: "phone", kind: "phone", name: "The Android device" }];
         }
 
         const list = otherPlayers();
@@ -84718,7 +84725,7 @@
 
         if (t.kind === "other") {
 
-            const via = { hotspot: "over the phone's hotspot", wifi: "on Wi-Fi", vpn: "over a VPN", public: "over the public address" }[t.via];
+            const via = { hotspot: "over the Android device's hotspot", wifi: "on Wi-Fi", vpn: "over a VPN", public: "over the public address" }[t.via];
 
             return "Its own volume" + (via ? ", " + via : "");
         }
@@ -84726,14 +84733,14 @@
         const max = volTopOf(t);
 
         if (max <= 0 || !state || typeof state.vol !== "number" || state.vol < 0) {
-            return "The phone did not say what its volume is";
+            return "Android did not say what its volume is";
         }
 
         if (volFineOn()) {
-            return "The phone's media volume in 100 steps, its own " + state.volMax + " evened out by the player, now step " + state.vol;
+            return "Android's media volume in 100 steps, its own " + state.volMax + " evened out by the player, now step " + state.vol;
         }
 
-        return "The phone's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
+        return "Android's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
             + ", the one its volume buttons move";
     }
 
@@ -84742,7 +84749,7 @@
 
         return volTarget().kind === "none"
             ? "No browser plays the music now, and this one is set to play none"
-            : "The phone did not say what its volume is";
+            : "Android did not say what its volume is";
     }
 
     // One bar of the popup: the name, the slider with a step down and up
@@ -84831,7 +84838,7 @@
 
             fine.className = "volFine";
             box.type = "checkbox";
-            text.textContent = "More steps: 100 instead of the phone's own, the player evens out between them";
+            text.textContent = "More steps: 100 instead of Android's own, the player evens out between them";
             box.addEventListener("change", function () {
 
                 const on = box.checked;
@@ -84851,7 +84858,7 @@
 
             keys.className = "volFine volKeys";
             keysBox.type = "checkbox";
-            keysText.textContent = "The phone's volume buttons move them by 1%, outside the app too while its music plays";
+            keysText.textContent = "The Android device's volume buttons move them by 1%, outside the app too while its music plays";
             keysBox.addEventListener("change", function () {
                 send("sysVolumeButtons", keysBox.checked);
             });
@@ -84869,7 +84876,7 @@
             const fineHint = document.createElement("div");
 
             fineHint.className = "ceLabel volFineHint";
-            fineHint.textContent = "A speaker that jumps just past one of the phone's steps: set its volume step size in Settings \u2192 Sound profiles \u2192 Speakers";
+            fineHint.textContent = "A speaker that jumps just past one of Android's volume steps: set its volume step size in Settings \u2192 Sound profiles \u2192 Speakers";
             bar.appendChild(fineHint);
         }
 
@@ -88083,7 +88090,7 @@
             full = c.state === "stored";
             loading = !full;
             p = full ? 100 : (c.p >= 0 ? c.p : 100);
-            tip = full ? "The song is stored on the phone" : "The phone is fetching the song" + (c.p >= 0 ? ", " + c.p + "%" : "");
+            tip = full ? "The song is stored on the Android device" : "The Android device is fetching the song" + (c.p >= 0 ? ", " + c.p + "%" : "");
         } else if (here) {
 
             const d = audio.duration;
@@ -88096,7 +88103,7 @@
             full = p >= 99;
             loading = !full;
             ring = full;
-            tip = full ? "The whole song is in this browser, not stored on the phone" : "Loading the song into this browser, " + p + "%";
+            tip = full ? "The whole song is in this browser, not stored on the Android device" : "Loading the song into this browser, " + p + "%";
         }
 
         dot.classList.toggle("full", full);
@@ -88136,8 +88143,8 @@
 
         const why = s && typeof s.hotspotWarn === "string" ? s.hotspotWarn : "";
         const words = {
-            nohelper: "The hotspot helper is not running on the phone, so the hotspot cannot be turned on or off by the power saving. The phone starts it by itself on Wi-Fi.",
-            starting: "Starting the hotspot helper on the phone."
+            nohelper: "The hotspot helper is not running on the Android device, so the hotspot cannot be turned on or off by the power saving. The player starts it by itself on Wi-Fi.",
+            starting: "Starting the hotspot helper on the Android device."
         };
 
         if (why !== hotspotClosed) {
@@ -88158,7 +88165,7 @@
 
         send("startHotspotHelper");
         $("hotspotPop").classList.add("starting");
-        $("hotspotText").textContent = "Starting the hotspot helper on the phone.";
+        $("hotspotText").textContent = "Starting the hotspot helper on the Android device.";
     });
 
     $("hotspotClose").addEventListener("click", function () {
@@ -90010,7 +90017,7 @@
 
             const secs = Math.round((Date.now() - lostSince) / 100) / 10;
 
-            dbgLog("Net", "the phone answers again after " + secs + " s");
+            dbgLog("Net", "the Android device answers again after " + secs + " s");
             send("webLostPhone", { s: secs, why: lostWhy });
             lostSince = 0;
         }
@@ -90243,14 +90250,14 @@
                 lostSince = askedAt;
                 lostWhy = err && err.name === "AbortError" ? "no answer in 10 s"
                     : String((err && err.message) || err || "failed");
-                dbgLog("Net", "the phone did not answer: " + lostWhy);
+                dbgLog("Net", "the Android device did not answer: " + lostWhy);
             }
 
             seq = -1;
 
             if (online && Date.now() - lostSince >= LOST_SHOW_MS) {
 
-                dbgLog("Net", "lost the phone");
+                dbgLog("Net", "lost the Android device");
                 online = false;
                 render();
             }
@@ -91058,7 +91065,7 @@
 
         if (list.length === 0) {
 
-            toast("Sound profiles are not offered on this phone", "bad");
+            toast("Sound profiles are not offered on the Android device", "bad");
             return;
         }
 
@@ -91066,14 +91073,14 @@
         const picked = live ? "" : state.soundPicked || "";
         const setDay = state.soundSetDay || "";
         const setNight = state.soundSetNight || "";
-        const here = !state.soundWhere || state.soundWhere === "this device" ? "this device" : "this speaker";
+        const here = !state.soundWhere || state.soundWhere === "the Android device" ? "the Android device" : "this speaker";
         const asSet = list.find(function (p) {
             return p.id === (state.nightOn && setNight ? setNight : setDay);
         });
 
-        openChoice("Sound profile for " + (state.soundWhere || "the phone") + ". Used until another speaker or headphones take over, or it is set back. Tweak the sound now changes it live, to save or forget.", [{
+        openChoice("Sound profile for " + (state.soundWhere || "the Android device") + ". Used until another speaker or headphones take over, or it is set back. Tweak the sound now changes it live, to save or forget.", [{
             icon: picked || live ? "close" : "check",
-            label: "As set for " + (state.soundWhere || "the phone") + (asSet ? ": " + asSet.name : ""),
+            label: "As set for " + (state.soundWhere || "the Android device") + (asSet ? ": " + asSet.name : ""),
             fn: function () {
 
                 closeSongMenu();
@@ -91204,8 +91211,8 @@
 
         phoneSoundKey = key;
         setIcon(btn, bt ? "bluetooth" : "phone");
-        btn.dataset.name = bt ? (name ? "Bluetooth, " + name : "Bluetooth") : "Phone";
-        btn.title = (bt ? "Music on Bluetooth" + (name ? ", " + name : "") : "Music on the phone")
+        btn.dataset.name = bt ? (name ? "Bluetooth, " + name : "Bluetooth") : "Android device";
+        btn.title = (bt ? "Music on Bluetooth" + (name ? ", " + name : "") : "Music on the Android device")
             + ", hold or right click for its Bluetooth devices";
         btn.setAttribute("aria-label", btn.title);
     }
@@ -91255,7 +91262,7 @@
 
         btPopKey = null;
         $("btRows").textContent = "";
-        btNote("Reading the phone's Bluetooth devices", false, false);
+        btNote("Reading the Android device's Bluetooth devices", false, false);
         $("btPop").style.display = "flex";
         readBt();
     }
@@ -91282,7 +91289,7 @@
         }).catch(function () {
 
             if (isShown("btPop") && btPopKey === null) {
-                btNote("The phone did not answer", true, false);
+                btNote("The Android device did not answer", true, false);
             }
         }).then(function () {
 
@@ -91349,13 +91356,13 @@
 
         if (data.permission !== true) {
 
-            btNote("The app on the phone may not see Bluetooth devices. Bluetooth access is allowed under Charger and power on the phone", true, false);
+            btNote("The player may not see Bluetooth devices. Bluetooth access is allowed under Charger and power in its settings", true, false);
             return;
         }
 
         if (data.available !== true) {
 
-            btNote("This phone has no Bluetooth", true, false);
+            btNote("The Android device has no Bluetooth", true, false);
             return;
         }
 
@@ -91363,7 +91370,7 @@
 
             const doing = data.busy ? BT_DOING[data.busy] || "Working" : "";
 
-            btNote(doing ? doing + "..." : "Bluetooth is off on the phone" + (data.last ? ", " + data.last : ""),
+            btNote(doing ? doing + "..." : "Bluetooth is off on the Android device" + (data.last ? ", " + data.last : ""),
                 !doing, !doing);
             $("btOn").disabled = !!doing;
             return;
@@ -91373,9 +91380,9 @@
         if (data.helper === "old") {
             btNote("The helper is from an earlier version of the app and cannot connect, start it again", true, false, data.paired === true);
         } else if (data.helper !== "running" && data.paired !== true) {
-            btNote("Connecting needs the helper. Pair the player with wireless debugging under Charger and power on the phone first", true, false);
+            btNote("Connecting needs the helper. Pair the player with wireless debugging under Charger and power on the Android device first", true, false);
         } else if (data.helper !== "running") {
-            btNote("The helper is not running, so connecting goes over wireless debugging and needs the phone on a Wi-Fi", false, false, true);
+            btNote("The helper is not running, so connecting goes over wireless debugging and needs the Android device on a Wi-Fi", false, false, true);
         } else {
             btNote("", false, false);
         }
@@ -91910,8 +91917,8 @@
         }
 
         carGoneSeen = at;
-        toast("The phone took the music back, this browser had not been heard from for a while", "bad");
-        dbgLog("Net", "the phone took the music back while this browser was silent");
+        toast("The Android device took the music back, this browser had not been heard from for a while", "bad");
+        dbgLog("Net", "the Android device took the music back while this browser was silent");
     }
 
     function watchToast(s) {
@@ -92172,7 +92179,7 @@
         // On the app's own screen this browser is the phone
         if (!appScreen) {
 
-            choices.push({ icon: "speaker", label: "The phone", fn: function () {
+            choices.push({ icon: "speaker", label: "The Android device", fn: function () {
 
                 closeSongMenu();
                 panelAction("hclick", buttonId);
@@ -92187,7 +92194,7 @@
     // so a second tap copies it once it is here
     function copyExportHere(kind) {
 
-        toast("Getting the export from the phone", "wait");
+        toast("Getting the export from the Android device", "wait");
 
         fetch("/download/export.json?kind=" + esc(kind), { cache: "no-store" }).then(function (res) {
 
@@ -92207,7 +92214,7 @@
                 toast(ok ? "Copied, paste it under Import" : "This browser could not copy it", ok ? "ok" : "bad");
             });
         }).catch(function () {
-            toast("Could not get the export from the phone", "bad");
+            toast("Could not get the export from the Android device", "bad");
         });
     }
 
@@ -92231,7 +92238,7 @@
         // On the app's own screen this browser is the phone
         if (!appScreen) {
 
-            choices.push({ icon: "speaker", label: "The phone", fn: function () {
+            choices.push({ icon: "speaker", label: "The Android device", fn: function () {
 
                 closeSongMenu();
                 panelAction("hclick", buttonId);
@@ -92376,7 +92383,7 @@
             return;
         }
 
-        toast("Reading it on the phone", "wait");
+        toast("Reading it on the Android device", "wait");
 
         fetch("/importText?from=" + from, {
             method: "POST",
@@ -92389,7 +92396,7 @@
 
             if (!r || !r.ok) {
 
-                toast(r && r.why ? r.why : "The phone could not read it", "bad");
+                toast(r && r.why ? r.why : "The Android device could not read it", "bad");
                 return;
             }
 
@@ -92397,7 +92404,7 @@
 
             if (r.kind === "settings") {
 
-                askConfirm(r.what + ". Import them? The phone's settings are replaced.", "Import", false, function () {
+                askConfirm(r.what + ". Import them? The Android device's settings are replaced.", "Import", false, function () {
                     applyImport(r.key, []);
                 });
                 return;
@@ -92492,7 +92499,7 @@
             if (r.kind === "library") {
 
                 askConfirm(r.what + ". Import it?"
-                    + (r.here > 0 ? " The " + r.here + " songs on the phone are kept, songs only in the file are added." : "")
+                    + (r.here > 0 ? " The " + r.here + " songs on the Android device are kept, songs only in the file are added." : "")
                     + (r.otherAccount ? " The file is from another Mureka account." : ""), "Import", false, function () {
                     applyImport(r.key, []);
                 });
@@ -92501,7 +92508,7 @@
 
             askTweaksImport(r);
         }).catch(function () {
-            toast("The phone could not be reached", "bad");
+            toast("The Android device could not be reached", "bad");
         });
     }
 
@@ -92561,7 +92568,7 @@
 
         if (types.length === 0) {
 
-            askConfirm(r.what + ". Merge them into the phone's?", "Import", false, function () {
+            askConfirm(r.what + ". Merge them into the Android device's?", "Import", false, function () {
                 merge([]);
             });
             return;
@@ -92677,7 +92684,7 @@
 
     function applyImport(key, answers, skip, tweakAnswers) {
 
-        toast("Importing on the phone", "wait");
+        toast("Importing on the Android device", "wait");
 
         const ask = { key: key, answers: answers };
 
@@ -92700,9 +92707,9 @@
         }).then(function (res) {
             return res.json();
         }).then(function (r) {
-            toast(r && r.ok ? (r.text || "Imported") : (r && r.why ? r.why : "The phone could not import it"), r && r.ok ? "ok" : "bad");
+            toast(r && r.ok ? (r.text || "Imported") : (r && r.why ? r.why : "The Android device could not import it"), r && r.ok ? "ok" : "bad");
         }).catch(function () {
-            toast("The phone could not be reached", "bad");
+            toast("The Android device could not be reached", "bad");
         });
     }
 
@@ -93039,7 +93046,7 @@
             dbgLog("Download", name);
         }).catch(function (e) {
 
-            dbgLog("Download", "through the phone failed, " + (e && e.message ? e.message : e) + ", opening the link");
+            dbgLog("Download", "through the Android device failed, " + (e && e.message ? e.message : e) + ", opening the link");
 
             if (safeRemote(m.src)) {
                 window.open(safeRemote(m.src), "_blank", "noopener,noreferrer");
@@ -93254,7 +93261,7 @@
             }
 
             // Not here yet, so one more tap copies it once it is
-            toast("Getting it from the phone", "wait");
+            toast("Getting it from the Android device", "wait");
             ask().then(function (r) {
 
                 if (!r || !r.ok || !r.text) {
@@ -93269,7 +93276,7 @@
                     finish(r);
                 });
             }).catch(function () {
-                toast("The phone could not be reached", "bad");
+                toast("The Android device could not be reached", "bad");
             });
         };
 
@@ -93882,7 +93889,7 @@
 
     function sendPlaylistCover(id, file, crop) {
 
-        toast("Sending the cover to the phone", "wait");
+        toast("Sending the cover to the Android device", "wait");
 
         fetch("/setCover?playlist=" + encodeURIComponent(id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
             + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), {
@@ -93900,7 +93907,7 @@
                 toast(r && r.why ? r.why : "The cover could not be changed", "bad");
             }
         }).catch(function () {
-            toast("The phone could not be reached", "bad");
+            toast("The Android device could not be reached", "bad");
         });
     }
 
@@ -93951,7 +93958,7 @@
         }).then(function (res) {
             return res.json();
         }).catch(function () {
-            return { ok: false, why: "The phone could not be reached" };
+            return { ok: false, why: "The Android device could not be reached" };
         });
     }
 
@@ -94806,12 +94813,12 @@
 
             if (file.size > CR_UPLOAD_MAX) {
 
-                toast("The song is too large to send through the phone, at most 16 MB", "bad");
+                toast("The song is too large to send through the Android device, at most 16 MB", "bad");
                 return;
             }
 
             showCrPick(false);
-            toast("Sending the song to the phone", "wait");
+            toast("Sending the song to the Android device", "wait");
             fetch("/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), {
                 method: "POST",
                 headers: { "Content-Type": file.type || "audio/mpeg" },
@@ -94827,7 +94834,7 @@
                     toast(r && r.why ? r.why : "The song could not be uploaded", "bad");
                 }
             }).catch(function () {
-                toast("The phone could not be reached", "bad");
+                toast("The Android device could not be reached", "bad");
             });
         });
         input.click();
@@ -95529,7 +95536,7 @@
         if (songs.length === 0) {
 
             closeSongMenu();
-            toast("The phone sent no songs for the set, update the app", "bad");
+            toast("The Android device sent no songs for the set, update the app", "bad");
             return;
         }
 
@@ -95671,7 +95678,7 @@
         if (found.length === 0) {
 
             closeSongMenu();
-            toast("No similar songs found. Lyrics only count for songs played or opened on the phone before.", "bad");
+            toast("No similar songs found. Lyrics only count for songs played or opened on the Android device before.", "bad");
             return;
         }
 
@@ -95992,7 +95999,7 @@
         box.appendChild(menuItem("close", "Delete from list", function () {
 
             close();
-            askConfirm("Delete \"" + m.title + "\" from the list on the phone?", "Delete", true, function () {
+            askConfirm("Delete \"" + m.title + "\" from the list on the Android device?", "Delete", true, function () {
 
                 act("delete").then(function () {
 
@@ -96014,7 +96021,7 @@
 
                 close();
                 askConfirm("Delete \"" + m.title + "\" on Mureka? It is deleted from your library on Mureka for good, "
-                    + "and from the phone. This cannot be undone.", "Delete", true, function () {
+                    + "and from the Android device. This cannot be undone.", "Delete", true, function () {
 
                     act("deleteMureka").then(function () {
 
@@ -96381,7 +96388,7 @@
     // says it only when the phone could not be reached
     function sendCover(m, file, crop) {
 
-        toast("Sending the cover to the phone", "wait");
+        toast("Sending the cover to the Android device", "wait");
 
         fetch("/setCover?id=" + encodeURIComponent(m.id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
             + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), {
@@ -96399,7 +96406,7 @@
                 toast(r && r.why ? r.why : "The cover could not be changed", "bad");
             }
         }).catch(function () {
-            toast("The phone could not be reached", "bad");
+            toast("The Android device could not be reached", "bad");
         });
     }
 
@@ -97510,7 +97517,7 @@
 
         if (!rows) {
 
-            box.textContent = online ? "Asking the phone..." : "The phone is not reachable";
+            box.textContent = online ? "Asking the Android device..." : "The Android device is not reachable";
             return;
         }
 
@@ -99430,7 +99437,7 @@
                 return;
             }
 
-            askConfirm("Store every song on the phone for offline play? This downloads the whole library.", "Cache all", false, function () {
+            askConfirm("Store every song on the Android device for offline play? This downloads the whole library.", "Cache all", false, function () {
                 send("cacheAll");
             });
         }, "accent"));
@@ -99438,7 +99445,7 @@
         box.appendChild(menuItem("trash", "Clear", function () {
 
             close();
-            askConfirm("Clear the song list on the phone? It is loaded again on the next Load.", "Clear", true, function () {
+            askConfirm("Clear the song list on the Android device? It is loaded again on the next Load.", "Clear", true, function () {
                 send("clearCache");
             });
         }, "danger"));
@@ -99521,7 +99528,7 @@
                 copyDebugLog();
             }));
 
-            box.appendChild(menuItem("download", "Send debug log to the phone", function () {
+            box.appendChild(menuItem("download", "Send debug log to the Android device", function () {
 
                 close();
                 sendDebugLog();
@@ -99769,11 +99776,11 @@
                 } else if (j && j.wrong) {
                     note.textContent = "Wrong current password.";
                 } else {
-                    note.textContent = "The phone said no, HTTP " + res.status + ".";
+                    note.textContent = "The Android device said no, HTTP " + res.status + ".";
                 }
             });
         }).catch(function () {
-            note.textContent = "The phone did not answer.";
+            note.textContent = "The Android device did not answer.";
         });
     }
 
@@ -99880,7 +99887,7 @@
 
         pwDialog({
             title: "No password set",
-            text: "Anyone on the phone's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later in the settings under Web view.",
+            text: "Anyone on the Android device's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka. A password can be set now, or later in the settings under Web view.",
             check: "Never show again in this browser",
             buttons: [
                 { label: "Not now", cls: "plain", fn: function (v, ticked, note, close) {
@@ -100118,7 +100125,7 @@
         hint.className = "pText small";
         hint.textContent = mine
             ? "This browser's own, kept in this browser only. Settings for this browser, at the top of the settings, switches them off again."
-            : "This browser follows the phone's screen off settings. Switch on Settings for this browser, at the top of the settings, to set this browser apart.";
+            : "This browser follows the Android device's screen off settings. Switch on Settings for this browser, at the top of the settings, to set this browser apart.";
         box.appendChild(hint);
 
         const onBtn = toggle(ss.on, function () {
@@ -100515,7 +100522,7 @@
         // While the music plays on the phone, the preview still plays here
         ui.where = document.createElement("div");
         ui.where.className = "trimWhere";
-        ui.where.textContent = "The preview plays in this browser, not on the phone or its Bluetooth";
+        ui.where.textContent = "The preview plays in this browser, not on the Android device or its Bluetooth";
 
         // The whole song, the kept part lit, the ends to drag
         ui.overview = document.createElement("canvas");
@@ -100850,8 +100857,8 @@
         // when the phone can play it, else it plays here
         trimUi.where.style.display = state && !state.carAudio ? "block" : "none";
         trimUi.where.textContent = state && state.trimRemote === true
-            ? "The preview plays on the phone, where the songs play"
-            : "The preview plays in this browser, not on the phone or its Bluetooth";
+            ? "The preview plays on the Android device, where the songs play"
+            : "The preview plays in this browser, not on the Android device or its Bluetooth";
 
         // The preview needs the sound to itself, the music pauses, shown
         // at once, the next state from the phone confirms it. The phone
@@ -100918,7 +100925,7 @@
         trimUi.page.style.display = "flex";
         trimUi.page.scrollTop = 0;
         trimStatus("");
-        trimLoading("Asking the phone for the song");
+        trimLoading("Asking the Android device for the song");
         trimPaint();
         dbgLog("Trim", "opened for " + m.id);
 
@@ -101016,7 +101023,7 @@
         const res = await fetch("/audio?url=" + encodeURIComponent(m.src), { cache: "no-store", signal: ctl ? ctl.signal : undefined });
 
         if (!res.ok) {
-            throw new Error(res.status === 403 ? "not a Mureka song" : "the phone could not get it, " + res.status);
+            throw new Error(res.status === 403 ? "not a Mureka song" : "the Android device could not get it, " + res.status);
         }
 
         const total = Number(res.headers.get("Content-Length")) || 0;
@@ -101417,7 +101424,7 @@
             const from = tr.playFrom;
             const to = tr.playTo;
 
-            dbgLog("Trim", "the phone did not play the preview, it plays in this browser");
+            dbgLog("Trim", "the Android device did not play the preview, it plays in this browser");
             tr.src = null;
             tr.phone = null;
             tr.phoneFailed = true;
@@ -102177,7 +102184,7 @@
                 tr.job = "";
                 trimWorking("");
                 trimBusy(false);
-                trimStatus("No answer from the phone, check the song list before trying again");
+                trimStatus("No answer from the Android device, check the song list before trying again");
             }
         }, 120000);
     }
