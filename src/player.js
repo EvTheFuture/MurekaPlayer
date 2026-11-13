@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.126";
+    const VERSION = "2.0.1.127";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22782,7 +22782,7 @@
         // Requests about making songs, their whole body and a longer answer
         // logged, lyrics and styles being long: generating, lyrics, voices,
         // styles, models, tags, references and the like
-        const MAKING = /generate|lyric|vocal|voice|singer|character|style|prompt|model|genre|mood|tag|refer|motif|extend|regenerate|instrumental|inspir|template|create|remix|resource|lora/i;
+        const MAKING = /generate|lyric|vocal|voice|singer|character|style|prompt|model|genre|mood|tag|refer|motif|extend|regenerate|instrumental|inspir|template|create|remix|resource|restore|lora/i;
 
         // What could let someone act as the user is blanked before it is
         // logged: values of keys that look like tokens, passwords or
@@ -22956,12 +22956,6 @@
             if (json && typeof json === "object") {
 
                 dbgLog("Mureka", feedSummary(json, "Mureka's " + kind + " list"));
-
-                // What a generation there holds besides its songs, as Restore
-                // on Mureka's page brings back what a song was made from
-                if (kind === "createdresult") {
-                    dbgLog("Mureka", "createdresult " + generationShape(json));
-                }
             }
         };
 
@@ -63034,39 +63028,24 @@
             changes.voice = gender;
         }
 
-        // A remix takes along the song it remixed, an uploaded one or one on
-        // Mureka, so the new one is a remix of it too. Mureka keeps no record
-        // of which, so it is the one kept here when the songs were made,
-        // else whatever the detail says. Control type 11 marks a remix
+        // What the songs were made from, as Restore on Mureka's page brings
+        // it back: the lyrics as written, the style and the song remixed
         const feedId = String(s.feed_id || data.feed_id || song.feed_id || "");
-        const kept = remixFromFeed(feedId);
-        let ref = kept ? { remix: kept, resourceId: 0, title: String(kept.title || ""), ms: 0 } : createRemixRefOf(data, s, song);
-        const types = [].concat(s.control_types || [], data.control_types || [], song.control_types || []).map(Number);
+        const restored = feedId ? await createRestoreOf(feedId, song.song_id) : null;
 
-        // Not kept here: the generation in Mureka's own list of what was
-        // made, which Restore on its page brings back
-        if (!ref && types.indexOf(11) >= 0 && feedId) {
-
-            let gen = null;
-
-            try {
-                gen = await createGenerationOf(feedId);
-            } catch (e) {
-                dbgLog("Create", "Mureka's list of what was made could not be read, " + errText(e));
-            }
-
-            if (gen) {
-
-                dbgLog("Create", "generation " + feedId + " in Mureka's list: " + Object.keys(gen).join(", ").slice(0, 400));
-                ref = createRemixRefOf(gen, gen.feed && typeof gen.feed === "object" ? gen.feed : gen, song);
-
-                if (ref && ref.remix) {
-                    rememberRemixFrom(feedId, ref.remix);
-                }
-            } else {
-                dbgLog("Create", "generation " + feedId + " not found in Mureka's list of what was made");
-            }
+        if (restored) {
+            createFromRestore(restored, changes);
         }
+
+        // A remix takes along the song it remixed, an uploaded one or one on
+        // Mureka, so the new one is a remix of it too: Restore's, else the
+        // one kept here when the songs were made, else whatever the detail
+        // says. Control type 11 marks a remix
+        const kept = remixFromFeed(feedId);
+        const back = restored ? createCleanRemix(restored.remix) : null;
+        const ref = back ? { remix: back, resourceId: 0, title: String(back.title || ""), ms: 0 }
+            : kept ? { remix: kept, resourceId: 0, title: String(kept.title || ""), ms: 0 } : createRemixRefOf(data, s, song);
+        const types = [].concat(s.control_types || [], data.control_types || [], song.control_types || []).map(Number);
 
         if (ref) {
 
@@ -63081,112 +63060,114 @@
                 changes.remixStyle = used.style;
             }
 
-            return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental, remix: ref, remixed: !!used };
+            return { changes: changes, style: changes.style, lyrics: changes.lyrics, instrumental: instrumental, remix: ref, remixed: !!used };
         }
 
         if (types.indexOf(11) >= 0) {
 
             dbgLog("Create", "song " + song.song_id + " is a remix, of which song is not known here");
-            return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental, remix: true, remixed: false };
+            return { changes: changes, style: changes.style, lyrics: changes.lyrics, instrumental: instrumental, remix: true, remixed: false };
         }
 
-        return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental };
+        return { changes: changes, style: changes.style, lyrics: changes.lyrics, instrumental: instrumental };
     }
 
-    // A generation in Mureka's list of what was made, found by its feed id
-    // anywhere in a page: the object with that feed_id and no song_id
-    function findGeneration(node, feedId, depth) {
+    // What a generation was made from, as Restore on Mureka's page asks
+    // for it: the title, the lyrics as written, the style and the remix.
+    // Null when Mureka gives nothing
+    async function createRestoreOf(feedId, songId) {
 
-        if (!node || typeof node !== "object" || (depth || 0) > 6) {
-            return null;
-        }
+        const num = function (v) {
 
-        if (Array.isArray(node)) {
+            const n = Number(v);
 
-            for (const x of node) {
+            return Number.isSafeInteger(n) ? n : v;
+        };
 
-                const hit = findGeneration(x, feedId, (depth || 0) + 1);
+        try {
 
-                if (hit) {
-                    return hit;
-                }
-            }
+            const r = await createPost("/api/pgc/feed/restore", { feed_id: num(feedId), song_id: num(songId) }, 20000);
 
-            return null;
-        }
-
-        if (!("song_id" in node) && node.feed_id !== undefined && String(node.feed_id) === feedId) {
-            return node;
-        }
-
-        for (const k of Object.keys(node)) {
-
-            const v = node[k];
-
-            if (v && typeof v === "object") {
-
-                const hit = findGeneration(v, feedId, (depth || 0) + 1);
-
-                if (hit) {
-                    return hit;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    // The fields of the first generation in a page of Mureka's list, the
-    // remix among them whole, for the debug log
-    function generationShape(page) {
-
-        const list = createListOf(page && page.data !== undefined ? page.data : page);
-        const g = list.find(function (x) {
-            return x && typeof x === "object";
-        });
-
-        if (!g) {
-            return "page fields: " + Object.keys(page || {}).join(", ").slice(0, 300);
-        }
-
-        const inner = g.feed && typeof g.feed === "object" ? "; feed: " + Object.keys(g.feed).join(", ") : "";
-        const remixed = list.find(function (x) {
-            return x && (x.remix || (x.feed && x.feed.remix));
-        });
-
-        return "generation fields: " + Object.keys(g).join(", ").slice(0, 400) + inner.slice(0, 400)
-            + (remixed ? "; a remix: " + JSON.stringify(remixed.remix || remixed.feed.remix).slice(0, 1200) : "");
-    }
-
-    // The generation a song came from in Mureka's list of what was made,
-    // where Restore on Mureka's page reads it from, a few pages back at most
-    async function createGenerationOf(feedId) {
-
-        let last = "";
-
-        for (let i = 0; i < 8; i++) {
-
-            const data = await createGet("/api/pgc/feed/list?listRenderType=createdresult" + (last ? "&last_id=" + encodeURIComponent(last) : ""));
-            const hit = findGeneration(data, feedId, 0);
-
-            if (i === 0) {
-                dbgLog("Create", "createdresult " + generationShape(data));
-            }
-
-            if (hit) {
-                return hit;
-            }
-
-            const next = data && data.last_id !== undefined && data.last_id !== null ? String(data.last_id) : "";
-
-            if (!next || next === "0" || next === last || data.has_more === false || createListOf(data).length === 0) {
+            if (!r || typeof r !== "object") {
                 return null;
             }
 
-            last = next;
+            dbgLog("Create", "restore of generation " + feedId + ": " + Object.keys(r).join(", ").slice(0, 400)
+                + (r.prompt ? "; prompt " + Object.keys(r.prompt || {}).join(", ") : "")
+                + (r.remix ? "; remix " + (r.remix.title || r.remix.id) + ", source type " + r.remix.source_type : "; no remix"));
+
+            return r;
+        } catch (e) {
+
+            dbgLog("Create", "restore of generation " + feedId + " failed, " + errText(e) + ", the song's own detail is used");
+            return null;
+        }
+    }
+
+    // Restore's answer over what was read from the song's detail, only
+    // where it has the field
+    function createFromRestore(r, changes) {
+
+        const text = function (v) {
+            return typeof v === "string" && v.trim() ? v.trim() : "";
+        };
+        const prompt = r.prompt && typeof r.prompt === "object" ? r.prompt : null;
+        const style = text(prompt ? prompt.content : r.prompt) || text(r.style) || text(r.desc);
+        const gender = String(prompt && prompt.gender || r.gender || "").toLowerCase();
+        const modelName = String(r.model || "").toLowerCase();
+        const model = modelName ? CREATE_MODELS.find(function (m) {
+            return m.label.toLowerCase() === modelName || m.value === modelName;
+        }) : null;
+        const character = r.character && typeof r.character === "object" ? r.character : null;
+        const advanced = r.advanced_options && typeof r.advanced_options === "object" ? r.advanced_options : null;
+
+        if (text(r.title)) {
+            changes.title = text(r.title).slice(0, CREATE_TITLE_MAX);
         }
 
-        return null;
+        if (text(r.lyrics)) {
+            changes.lyrics = text(r.lyrics).slice(0, CREATE_LYRICS_MAX);
+        }
+
+        if (style) {
+
+            changes.style = style.slice(0, CREATE_STYLE_MAX);
+
+            // The saved style it came from, named while it is still its text
+            if (prompt && prompt.style_prompt_id) {
+
+                changes.stylePromptId = String(prompt.style_prompt_id);
+                changes.stylePromptText = changes.style;
+            }
+        }
+
+        if (Number(r.mode) === 3 || Number(r.generation_method) === 7) {
+            changes.kind = "instrumental";
+        }
+
+        if (model) {
+            changes.model = model.value;
+        }
+
+        if (character && (character.id || character.character_id)) {
+
+            changes.voice = "character";
+            changes.characterId = String(character.id || character.character_id);
+            changes.characterName = String(character.name || character.title || changes.characterName || "");
+        } else if (gender === "male" || gender === "female") {
+            changes.voice = gender;
+        }
+
+        if (advanced) {
+
+            if (isFinite(Number(advanced.weirdness))) {
+                changes.wildness = Number(advanced.weirdness);
+            }
+
+            if (isFinite(Number(advanced.duration_ms))) {
+                changes.lengthMs = Number(advanced.duration_ms);
+            }
+        }
     }
 
     // What a song made as a remix says about the song it remixed, uploaded
