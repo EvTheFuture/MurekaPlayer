@@ -1845,6 +1845,76 @@
         backdrop-filter: blur(14px);
     }
 
+    /* The volume steps by hand, over the settings */
+    #editPop {
+        position: fixed;
+        inset: 0;
+        top: var(--seenTop, 0px);
+        bottom: auto;
+        height: var(--seenH, 100%);
+        z-index: 58;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    #editBox {
+        background: var(--card);
+        border: 1px solid rgba(72, 225, 235, 0.45);
+        border-radius: 18px;
+        padding: 2.4vh 2.4vw;
+        width: min(640px, 92vw);
+        max-height: min(88vh, calc(100% - 16px));
+        overflow-y: auto;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .editRows {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .editRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .chip.editSmall {
+        flex: 0 0 auto;
+        min-width: 44px;
+        justify-content: center;
+        padding: 0 10px;
+    }
+
+    .editField {
+        flex: 0 0 4.2em;
+        width: 4.2em;
+        height: var(--ctl-h, 44px);
+        box-sizing: border-box;
+        text-align: center;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0 4px;
+    }
+
+    .editField::placeholder {
+        color: var(--muted);
+        font-style: italic;
+        opacity: 1;
+    }
+
     /* The training of the volume steps, over the settings */
     #trainPop {
         position: fixed;
@@ -4186,6 +4256,20 @@
         /* A layer of its own, or the part outside the name's box is left
            unpainted in some browsers when the settings are drawn again */
         will-change: transform;
+    }
+
+    /* Buttons across the page, the same width side by side */
+    #panelBody .pRow.even {
+        display: grid;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    #panelBody .pBtn.full {
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
+        text-align: center;
     }
 
     /* Buttons spread out, onto another line when they do not fit */
@@ -17596,8 +17680,11 @@
             }
 
             // Buttons spread out on a line of their own keep their own
-            // width, so they fit side by side
-            if (row.classList.contains("btns")) {
+            // width, so they fit side by side, and those across the page
+            // take the page's
+            if (row.classList.contains("btns") || row.classList.contains("even") || buttons.every(function (b) {
+                return b.classList.contains("full");
+            })) {
 
                 for (const b of buttons) {
                     b.style.minWidth = "";
@@ -17845,7 +17932,7 @@
                 if (kids.length === 1) {
                     out.push(kids[0]);
                 } else if (kids.length > 1) {
-                    out.push({ t: "row", c: kids, spread: node.spread === true });
+                    out.push(Object.assign({}, node, { c: kids }));
                 }
 
                 continue;
@@ -18030,6 +18117,13 @@
                 row.classList.add("spread");
             }
 
+            // Buttons of the same width across the page, side by side
+            if (node.even) {
+
+                row.classList.add("even");
+                row.style.gridTemplateColumns = "repeat(" + node.c.length + ", minmax(0, 1fr))";
+            }
+
             // Buttons alone, spread out, go onto another line when the
             // page is too narrow for them, the last one kept at the right
             if (node.spread && node.c.every(function (child) {
@@ -18115,7 +18209,8 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
-                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "") + (node.ring ? " ring" : "");
+                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "") + (node.ring ? " ring" : "")
+                + (node.full ? " full" : "");
             btn.disabled = node.off === true;
 
             // Still being switched, also when the settings are drawn again
@@ -22006,6 +22101,7 @@
         paintNewAsk();
         paintSetAsk();
         paintTrainPop();
+        paintEditPop();
         paintLiveLines();
         paintFollowAsk();
         followWaveZoomKeep(state);
@@ -30802,6 +30898,162 @@
                     send("volTrain", { op: b.op });
                 }, b.strong ? "crPrimary" : ""));
             }
+        }
+
+        ui.pop.style.display = "flex";
+    }
+
+    // The volume steps by hand, a popup of its own drawn from the phone's
+    // state: each step with - and +, a field to type in, and a cross to
+    // take a value away again, an empty one showing greyed what is used
+    let editUi = null;
+
+    function buildEditPop() {
+
+        const ui = {};
+        const top = document.createElement("div");
+        const chip = function (text, then, look) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip" + (look ? " " + look : "");
+            b.textContent = text;
+            b.addEventListener("click", then);
+
+            return b;
+        };
+
+        ui.pop = document.createElement("div");
+        ui.pop.id = "editPop";
+        ui.box = document.createElement("div");
+        ui.box.id = "editBox";
+        top.className = "trainTop";
+        ui.title = document.createElement("span");
+        ui.title.className = "trainTitle";
+        ui.close = chip("", function () {
+            send("volEdit", { op: "close" });
+        }, "iconOnly");
+        ui.close.setAttribute("aria-label", "Close");
+        ui.close.appendChild(icon("close"));
+        top.appendChild(ui.title);
+        top.appendChild(ui.close);
+        ui.text = document.createElement("div");
+        ui.text.className = "trainText";
+        ui.rows = document.createElement("div");
+        ui.rows.className = "editRows";
+        ui.done = chip("Done", function () {
+            send("volEdit", { op: "close" });
+        }, "crPrimary trainFlip");
+        ui.box.appendChild(top);
+        ui.box.appendChild(ui.text);
+        ui.box.appendChild(ui.rows);
+        ui.box.appendChild(ui.done);
+        ui.pop.appendChild(ui.box);
+        document.body.appendChild(ui.pop);
+        ui.key = "";
+        ui.fields = {};
+        ui.chip = chip;
+        editUi = ui;
+    }
+
+    function editRow(r) {
+
+        const ui = editUi;
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const field = document.createElement("input");
+        const clear = ui.chip("×", function () {
+            send("volEdit", { op: "clear", key: r.key });
+        }, "editSmall");
+
+        row.className = "editRow";
+        name.className = "trainName";
+        name.textContent = r.label;
+        field.type = "text";
+        field.inputMode = "decimal";
+        field.className = "editField";
+        field.setAttribute("aria-label", r.label);
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter") {
+                field.blur();
+            }
+        });
+        field.addEventListener("change", function () {
+
+            const typed = field.value.trim().replace(",", ".");
+
+            if (typed === "" || isFinite(Number(typed))) {
+                send("volEdit", { op: typed === "" ? "clear" : "set", key: r.key, value: typed });
+            }
+        });
+        clear.setAttribute("aria-label", "Back to the value used without it");
+        row.appendChild(name);
+        row.appendChild(ui.chip("-", function () {
+            send("volEdit", { op: "by", key: r.key, value: -r.step });
+        }, "editSmall"));
+        row.appendChild(field);
+        row.appendChild(ui.chip("+", function () {
+            send("volEdit", { op: "by", key: r.key, value: r.step });
+        }, "editSmall"));
+        row.appendChild(clear);
+        ui.rows.appendChild(row);
+
+        return { field: field, clear: clear };
+    }
+
+    function paintEditPop() {
+
+        const v = state && state.volEdit ? state.volEdit : null;
+
+        if (!v) {
+
+            if (editUi) {
+                editUi.pop.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!editUi) {
+            buildEditPop();
+        }
+
+        const ui = editUi;
+        const rows = v.rows || [];
+        const key = rows.map(function (r) {
+            return r.key;
+        }).join(",");
+
+        ui.title.textContent = v.title || "";
+        ui.text.textContent = v.text || "";
+
+        // The rows made again only when there are others, so a field being
+        // typed in is left alone
+        if (key !== ui.key) {
+
+            ui.key = key;
+            ui.rows.textContent = "";
+            ui.fields = {};
+
+            for (const r of rows) {
+                ui.fields[r.key] = editRow(r);
+            }
+        }
+
+        for (const r of rows) {
+
+            const f = ui.fields[r.key];
+
+            if (document.activeElement !== f.field) {
+                f.field.value = r.value === "" ? "" : String(r.value);
+            }
+
+            f.field.placeholder = r.shown || "";
+            f.clear.style.visibility = r.value === "" ? "hidden" : "";
         }
 
         ui.pop.style.display = "flex";

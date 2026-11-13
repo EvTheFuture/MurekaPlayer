@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.101";
+    const VERSION = "2.0.1.102";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -14391,6 +14391,350 @@
         volTrainEl.appendChild(box);
         document.body.appendChild(volTrainEl);
         volTrainUi = ui;
+    }
+
+    // ---- Volume steps typed in by hand, in a popup of its own ----
+
+    // The volume steps of a speaker, or of this device for the phone, by
+    // hand: step 1 against the lowest, each step against the one below and
+    // the switch delay, each left empty showing what is used for it. The
+    // phone's popup and the web view's are drawn from the same view
+    let volEdit = null;
+    let volEditEl = null;
+    let volEditUi = null;
+
+    // The settings of a speaker, this device's for the phone, made when
+    // something is to be kept for a speaker without any yet
+    function volStepsRecord(phone, address, name, make) {
+
+        if (phone) {
+            return sound().fallback;
+        }
+
+        const all = sound().devices;
+
+        if (!all[address] && make) {
+            all[address] = { name: String(name || address), day: "", night: "", nightOff: "keep", stepDb: 0, capPct: 0, gaps: {}, delayMs: -1, lowDb: 0 };
+        }
+
+        return all[address] || null;
+    }
+
+    // The volume steps in use: those set for it, else this device's for a
+    // speaker, else the step size, its own, this device's or the phone's
+    function volStepsOf(phone, address) {
+
+        const rec = volStepsRecord(phone, address, "", false) || {};
+        const gaps = rec.gaps || {};
+        const fb = phone ? {} : (sound().fallback.gaps || {});
+        const own = Number(rec.stepDb) || 0;
+        const size = own > 0 ? own
+            : (!phone && sound().fallback.stepDb > 0 ? sound().fallback.stepDb : Math.round(phoneStepDb(!phone) * 2) / 2);
+        const low = Number(rec.lowDb) || 0;
+        const lowShown = low > 0 ? low
+            : (!phone && sound().fallback.lowDb > 0 ? sound().fallback.lowDb : defaultLowDb(Number(fineInfo().max) || 0));
+        const hasOwn = Object.keys(gaps).length > 0;
+        const useFb = !hasOwn && !(own > 0) && Object.keys(fb).length > 0;
+
+        return {
+            gaps: gaps,
+            fb: fb,
+            own: own,
+            size: size,
+            low: low,
+            lowShown: lowShown,
+            delay: typeof rec.delayMs === "number" && rec.delayMs >= 0 ? rec.delayMs : -1,
+            hasOwn: hasOwn,
+            useFb: useFb,
+            drawn: function (k) {
+                return hasOwn ? volGapFrom(gaps, k) : (useFb ? volGapFrom(fb, k) : size);
+            }
+        };
+    }
+
+    function volEditOpen(phone, address, name) {
+
+        if (!(Number(fineInfo().max) >= 2)) {
+            return;
+        }
+
+        volEdit = { phone: phone === true, address: String(address || ""), name: String(name || "") };
+        volEditKey = "";
+        paintVolEdit();
+        publishHostSoon();
+    }
+
+    // A value set, moved by - or +, or taken away, from here or from a web
+    // view, kept at once
+    function volEditAct(op, key, value) {
+
+        if (!volEdit) {
+            return;
+        }
+
+        if (op === "close") {
+
+            volEdit = null;
+            paintVolEdit();
+            publishHostSoon();
+            return;
+        }
+
+        const row = (volEditView().rows || []).find(function (r) {
+            return r.key === String(key);
+        });
+
+        if (!row) {
+            return;
+        }
+
+        let raw = "";
+
+        if (op === "set") {
+            raw = String(value === undefined || value === null ? "" : value).trim().replace(",", ".");
+        } else if (op === "by") {
+
+            const from = row.value !== "" ? Number(row.value) : Number(row.shown);
+            const next = Math.max(row.min, Math.min(row.max, (isFinite(from) ? from : row.min) + (Number(value) || 0)));
+
+            raw = String(Math.round(next / row.step) * row.step);
+        } else if (op !== "clear") {
+            return;
+        }
+
+        const rec = volStepsRecord(volEdit.phone, volEdit.address, volEdit.name, true);
+
+        if (row.key === "low") {
+            rec.lowDb = raw === "" ? 0 : cleanLowDb(raw);
+        } else if (row.key === "delay") {
+            rec.delayMs = raw === "" ? -1 : cleanDelayMs(raw);
+        } else {
+
+            const all = Object.assign({}, rec.gaps || {});
+            const db = cleanStepDb(raw);
+
+            if (raw === "" || !(db > 0)) {
+                delete all[row.key];
+            } else {
+                all[row.key] = db;
+            }
+
+            rec.gaps = cleanGaps(all);
+        }
+
+        saveSettings();
+        pushStepSizes();
+        settingsRefreshers.forEach(function (fn) {
+            fn();
+        });
+        paintVolEdit();
+        publishHostSoon();
+    }
+
+    // The popup as rows, drawn here and in a web view: each with its own
+    // value, empty when not set, and the value used without it
+    function volEditView() {
+
+        if (!volEdit) {
+            return null;
+        }
+
+        const max = Number(fineInfo().max) || 0;
+        const st = volStepsOf(volEdit.phone, volEdit.address);
+        const who = volEdit.phone ? "this device" : volEdit.name;
+        const rows = [{
+            key: "low",
+            label: "Step 1, from the lowest",
+            value: st.low > 0 ? st.low : "",
+            shown: st.lowShown > 0 ? st.lowShown.toFixed(1) : "",
+            min: 0.5,
+            max: 60,
+            step: 0.5
+        }];
+
+        for (let k = 2; k <= max; k++) {
+
+            const drawn = st.drawn(k);
+
+            rows.push({
+                key: String(k),
+                label: "Step " + k,
+                value: st.gaps[k] > 0 ? st.gaps[k] : "",
+                shown: drawn > 0 ? drawn.toFixed(1) : "",
+                min: 0.5,
+                max: 30,
+                step: 0.5
+            });
+        }
+
+        rows.push({
+            key: "delay",
+            label: "Switch delay, ms",
+            value: st.delay >= 0 ? st.delay : "",
+            shown: volEdit.phone ? "80" : "250",
+            min: 0,
+            max: 1000,
+            step: 25
+        });
+
+        return {
+            title: "Volume steps of " + who,
+            text: "How many dB louder each of the phone's steps is than the step below it, step 1 than the lowest level above silence. "
+                + "A step left empty is drawn on a straight line from those set around it, and shows greyed what is used for it. "
+                + "Changes are kept at once, and the cross takes a value away again.",
+            rows: rows
+        };
+    }
+
+    // The phone's popup, its rows made again when they change in number
+    let volEditKey = "";
+
+    function paintVolEdit() {
+
+        const view = volEditView();
+
+        if (!view) {
+
+            if (volEditEl) {
+                volEditEl.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!volEditEl) {
+            buildVolEdit();
+        }
+
+        const ui = volEditUi;
+        const key = view.rows.map(function (r) {
+            return r.key;
+        }).join(",");
+
+        ui.title.textContent = view.title;
+        ui.text.textContent = view.text;
+
+        if (key !== volEditKey) {
+
+            volEditKey = key;
+            ui.rows.textContent = "";
+            ui.fields = {};
+
+            for (const r of view.rows) {
+                ui.fields[r.key] = volEditRow(ui.rows, r);
+            }
+        }
+
+        for (const r of view.rows) {
+
+            const f = ui.fields[r.key];
+
+            if (document.activeElement !== f.input) {
+                f.input.value = r.value === "" ? "" : String(r.value);
+            }
+
+            f.input.placeholder = r.shown;
+            f.clear.style.visibility = r.value === "" ? "hidden" : "";
+        }
+
+        volEditEl.style.display = "flex";
+    }
+
+    function volEditRow(box, r) {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const input = document.createElement("input");
+        const small = function (text, fn) {
+
+            const b = makeButton(text, "#333", "#fff", fn);
+
+            b.style.cssText += ";flex:0 0 38px;padding:6px 0";
+
+            return b;
+        };
+        const minus = small("-", function () {
+            volEditAct("by", r.key, -r.step);
+        });
+        const plus = small("+", function () {
+            volEditAct("by", r.key, r.step);
+        });
+        const clear = small("×", function () {
+            volEditAct("clear", r.key);
+        });
+
+        row.style.cssText = "display:flex;align-items:center;gap:6px";
+        name.textContent = r.label;
+        name.style.cssText = "flex:1;min-width:0;font-size:14px";
+        input.type = "number";
+        input.min = String(r.min);
+        input.max = String(r.max);
+        input.step = String(r.step);
+        input.inputMode = "decimal";
+        input.style.cssText = "flex:0 0 64px;width:64px;height:32px;box-sizing:border-box;text-align:center;font-variant-numeric:tabular-nums;"
+            + "padding:4px;border:1px solid #3a3a42;border-radius:6px;background:#26262c;color:#fff;font-size:14px";
+        input.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter") {
+
+                ev.preventDefault();
+                input.blur();
+            }
+        });
+        input.addEventListener("change", function () {
+            volEditAct("set", r.key, input.value);
+        });
+        clear.setAttribute("aria-label", "Back to the value used without it");
+        row.appendChild(name);
+        row.appendChild(minus);
+        row.appendChild(input);
+        row.appendChild(plus);
+        row.appendChild(clear);
+        box.appendChild(row);
+
+        return { input: input, clear: clear };
+    }
+
+    function buildVolEdit() {
+
+        const ui = {};
+        const box = document.createElement("div");
+        const top = document.createElement("div");
+        const close = makeButton("×", "#333", "#fff", function () {
+            volEditAct("close");
+        });
+        const done = makeButton("Done", "#48e1eb", "#000", function () {
+            volEditAct("close");
+        });
+
+        volEditEl = document.createElement("div");
+        volEditEl.dataset.murekaNotice = "1";
+        volEditEl.style.cssText = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
+            + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
+        box.style.cssText = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
+            + "background:#1c1c22;border:1px solid rgba(72,225,235,0.45);display:flex;flex-direction:column;gap:12px";
+        top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
+        ui.title = document.createElement("div");
+        ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:#48e1eb";
+        close.style.flex = "0 0 auto";
+        close.style.padding = "4px 12px";
+        close.setAttribute("aria-label", "Close");
+        top.appendChild(ui.title);
+        top.appendChild(close);
+        ui.text = document.createElement("div");
+        ui.text.style.cssText = "font-size:13px;line-height:1.45;color:#bbb";
+        ui.rows = document.createElement("div");
+        ui.rows.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        done.style.padding = "10px 16px";
+        box.appendChild(top);
+        box.appendChild(ui.text);
+        box.appendChild(ui.rows);
+        box.appendChild(done);
+        volEditEl.appendChild(box);
+        document.body.appendChild(volEditEl);
+        volEditUi = ui;
     }
 
     // More steps as the app has them now, for the stats and the settings
@@ -34314,8 +34658,10 @@
             newAsk: newAsk ? { n: newAsk.n, title: newAsk.title, text: newAsk.text, making: newAsk.making || 0, sets: newAsk.sets || [] } : null,
             setAsk: setAsk ? { n: setAsk.n, title: setAsk.title, text: setAsk.text, options: setAsk.options } : null,
 
-            // The training of the volume steps, drawn as a popup there too
+            // The training of the volume steps and the volume steps by hand,
+            // drawn as popups there too
             volTrain: volTrainView(),
+            volEdit: volEditView(),
             followAsk: followAsk ? { n: followAsk.n, title: followAsk.title, text: followAsk.text } : null,
             pendingCount: pendingCount(),
             retryAsk: retryAsk ? {
@@ -37082,6 +37428,7 @@
                 ring: el.dataset.hostRing === "1",
                 imp: el.dataset.hostImport === "1",
                 wide: el.style.textAlign === "left",
+                full: el.dataset.hostFull === "1",
                 copy: typeof el.__copyText === "function" ? String(el.__copyText() || "") : undefined
             });
             return;
@@ -37244,7 +37591,7 @@
             if (row.length === 1) {
                 out.push(row[0]);
             } else if (row.length > 1) {
-                out.push({ t: "row", c: row, spread: el.dataset.hostSpread === "1" });
+                out.push({ t: "row", c: row, spread: el.dataset.hostSpread === "1", even: el.dataset.hostEven === "1" });
             }
 
             return;
@@ -37793,6 +38140,13 @@
             // A web view shows the stats, or closed them
             statsWebUntil = arg === true ? Date.now() + 8000 : 0;
             publishHostSoon();
+        } else if (cmd === "volEdit") {
+
+            // The volume steps by hand in a web view: a value set, moved,
+            // taken away, or the popup closed
+            const a = arg && typeof arg === "object" ? arg : {};
+
+            volEditAct(String(a.op || ""), a.key, a.value);
         } else if (cmd === "volTrain") {
 
             // The training's popup in a web view: a button, - or +, or
@@ -49547,6 +49901,9 @@
         const soundBox = document.createElement("div");
         let soundEditId = "";
         let soundTryTimer = 0;
+
+        // The speakers whose settings past the profiles are shown
+        const soundMoreOpen = {};
         let soundKey = "";
 
         soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
@@ -49868,6 +50225,9 @@
                     soundChanged();
                 })));
 
+                // The rest folded away under the profiles, opened per speaker
+                const from = soundBox.children.length;
+
                 // A speaker of its own, connecting while night mode is on
                 if (!phone) {
 
@@ -49887,6 +50247,40 @@
                 if (stepsOffered) {
                     stepsRows(get, set, phone, address, title.replace(/, connected$/, ""));
                 }
+
+                const rest = Array.from(soundBox.children).slice(from);
+
+                if (!rest.length) {
+                    return;
+                }
+
+                const key = phone ? "phone" : String(address || "");
+                const more = document.createElement("div");
+                const toggle = makeButton("", "transparent", "#48e1eb", function () {
+
+                    soundMoreOpen[key] = !soundMoreOpen[key];
+                    paintMore();
+                    publishHostSoon();
+                });
+                const paintMore = function () {
+
+                    more.style.display = soundMoreOpen[key] ? "flex" : "none";
+                    toggle.textContent = soundMoreOpen[key] ? "Show less \u25b4" : "Show more \u25be";
+                };
+
+                more.style.cssText = "display:none;flex-direction:column;gap:12px";
+
+                for (const el of rest) {
+                    more.appendChild(el);
+                }
+
+                toggle.style.alignSelf = "flex-start";
+                toggle.style.flex = "0 0 auto";
+                toggle.style.padding = "6px 2px";
+                toggle.setAttribute("aria-label", "More settings for " + title.replace(/, connected$/, ""));
+                soundBox.appendChild(toggle);
+                soundBox.appendChild(more);
+                paintMore();
             };
 
             // The highest volume a speaker starts at as it connects, as a
@@ -49971,17 +50365,6 @@
             // from those set. Without any, the phone's own curve
             const stepsRows = function (get, set, phone, address, name) {
 
-                const gaps = function () {
-                    return get("gaps") || {};
-                };
-                const delay = function () {
-
-                    const raw = get("delayMs");
-                    const v = Number(raw);
-
-                    // A speaker with nothing kept yet has none
-                    return raw !== "" && raw !== null && raw !== undefined && isFinite(v) && v >= 0 ? v : -1;
-                };
                 const kept = function () {
 
                     saveSettings();
@@ -49990,6 +50373,7 @@
                 };
                 const said = makeHint("");
                 const buttons = document.createElement("div");
+                const forgetRow = document.createElement("div");
                 const forget = makeButton("Forget", "#b03a3a", "#fff", function () {
 
                     set("gaps", {});
@@ -49997,58 +50381,21 @@
                     set("lowDb", 0);
                     kept();
                 });
-
-                // Under the first step: typed here, else this device's for
-                // a speaker, else the app's own way down
-                const low = function () {
-                    return Number(get("lowDb")) || 0;
-                };
-                const lowShown = function () {
-
-                    if (low() > 0) {
-                        return low();
-                    }
-
-                    if (!phone && sound().fallback.lowDb > 0) {
-                        return sound().fallback.lowDb;
-                    }
-
-                    return defaultLowDb(Number(fineInfo().max) || 0);
-                };
                 const train = makeButton("Train by ear", "transparent", "#48e1eb", function () {
                     volTrainOpen(phone, address, name);
                 });
                 const editBtn = makeButton("Edit by hand", "#333", "#fff", function () {
-
-                    editing = !editing;
-                    buildEditor();
-                    paint();
+                    volEditOpen(phone, address, name);
                 });
-                const editor = document.createElement("div");
-                const fields = [];
-                let editing = false;
 
                 // The step size for every step, used while no step is set:
                 // its own, else this device's for a speaker, else what the
                 // phone says. Greyed while trained or typed steps are used
-                const own = function () {
-                    return Number(get("stepDb")) || 0;
-                };
-                const sizeShown = function () {
+                const size = makeStepperRow("Volume step size, dB", function () {
+                    return volStepsOf(phone, address).size;
+                }, function (v) {
 
-                    if (own() > 0) {
-                        return own();
-                    }
-
-                    if (!phone && sound().fallback.stepDb > 0) {
-                        return sound().fallback.stepDb;
-                    }
-
-                    return Math.round(phoneStepDb(!phone) * 2) / 2;
-                };
-                const size = makeStepperRow("Volume step size, dB", sizeShown, function (v) {
-
-                    if (Object.keys(gaps()).length) {
+                    if (volStepsOf(phone, address).hasOwn) {
                         return;
                     }
 
@@ -50056,120 +50403,32 @@
                     pushStepSizes();
                     paint();
                 }, 0.5, 30, 0.5);
-                let delayField = null;
-                let lowField = null;
-
-                // A field for each step, and the delay, made once the
-                // number of the phone's steps is known
-                const buildEditor = function () {
-
-                    const max = Number(fineInfo().max) || 0;
-
-                    if (!editing || fields.length || max < 2) {
-                        return;
-                    }
-
-                    const field = function (label, min, maxValue, step, take) {
-
-                        const row = document.createElement("div");
-                        const text = document.createElement("span");
-                        const input = document.createElement("input");
-
-                        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
-                        text.textContent = label;
-                        input.type = "number";
-                        input.min = String(min);
-                        input.max = String(maxValue);
-                        input.step = String(step);
-                        input.inputMode = "decimal";
-                        input.style.cssText = "width:84px;height:30px;box-sizing:border-box;flex:0 0 auto;text-align:center;"
-                            + "font-variant-numeric:tabular-nums;padding:6px 4px;border:1px solid #3a3a42;border-radius:6px;"
-                            + "background:#26262c;color:#fff;font-size:13px";
-                        input.addEventListener("keydown", function (ev) {
-
-                            ev.stopPropagation();
-
-                            if (ev.key === "Enter") {
-
-                                ev.preventDefault();
-                                input.blur();
-                            }
-                        });
-                        input.addEventListener("change", function () {
-                            take(input.value.trim());
-                        });
-                        row.appendChild(text);
-                        row.appendChild(input);
-                        editor.appendChild(row);
-
-                        return input;
-                    };
-
-                    // The first step against the lowest level above silence,
-                    // which nothing can be heard against while training
-                    lowField = field("Step 1, dB louder than the lowest", 0, 60, 0.5, function (v) {
-
-                        set("lowDb", v === "" ? 0 : cleanLowDb(v));
-                        kept();
-                    });
-
-                    for (let k = 2; k <= max; k++) {
-
-                        const input = field("Step " + k + ", dB louder than " + (k - 1), 0, 30, 0.5, function (v) {
-
-                            const all = Object.assign({}, gaps());
-                            const db = cleanStepDb(v);
-
-                            if (v === "" || !(db > 0)) {
-                                delete all[k];
-                            } else {
-                                all[k] = db;
-                            }
-
-                            set("gaps", all);
-                            kept();
-                        });
-
-                        input.dataset.step = String(k);
-                        fields.push(input);
-                    }
-
-                    delayField = field("Switch delay, ms", 0, 1000, 25, function (v) {
-
-                        set("delayMs", v === "" ? -1 : cleanDelayMs(v));
-                        kept();
-                    });
-                };
 
                 const paint = function () {
 
-                    const g = gaps();
-                    const at = Object.keys(g).map(Number).sort(function (a, b) {
-                        return a - b;
-                    });
+                    const st = volStepsOf(phone, address);
                     const fine = fineInfo();
                     const here = typeof fine.output === "string" && playsOn(fine, phone, address);
+                    const listed = function (all) {
 
-                    // What is in use: its own, else this device's for a
-                    // speaker, else the phone's curve, always with its dB
-                    const fb = phone ? {} : (sound().fallback.gaps || {});
-                    const fbAt = Object.keys(fb).map(Number).sort(function (a, b) {
-                        return a - b;
-                    });
-                    const listed = function (set, keys) {
+                        const keys = Object.keys(all).map(Number).sort(function (a, b) {
+                            return a - b;
+                        });
 
                         return keys.length > 1
                             ? keys.map(function (k) {
-                                return k + ": " + set[k] + " dB";
+                                return k + ": " + all[k] + " dB";
                             }).join(", ") + ", those between drawn from them."
-                            : set[keys[0]] + " dB a step.";
+                            : all[keys[0]] + " dB a step.";
                     };
 
-                    if (at.length) {
-                        said.textContent = "Volume steps set by hand or trained: " + listed(g, at) + " The step size is not used meanwhile.";
-                    } else if (fbAt.length && !(own() > 0)) {
-                        said.textContent = "Same as this device: " + listed(fb, fbAt);
-                    } else if (own() > 0) {
+                    // What is in use: its own, else this device's for a
+                    // speaker, else the step size, always with its dB
+                    if (st.hasOwn) {
+                        said.textContent = "Volume steps set by hand or trained: " + listed(st.gaps) + " The step size is not used meanwhile.";
+                    } else if (st.useFb) {
+                        said.textContent = "Same as this device: " + listed(st.fb);
+                    } else if (st.own > 0) {
                         said.textContent = "The step size set here, for every step.";
                     } else if (!phone && sound().fallback.stepDb > 0) {
                         said.textContent = "The step size of this device, for every step.";
@@ -50177,77 +50436,52 @@
                         said.textContent = "The step size the phone says, for every step.";
                     }
 
+                    said.textContent += (st.low > 0 ? " The lowest " + st.low + " dB under step 1." : "")
+                        + (st.delay >= 0 ? " Switch delay " + st.delay + " ms." : "");
+
                     // The step size greyed and still while steps are set
                     const sizeField = size.querySelector("input");
 
-                    size.style.opacity = at.length ? "0.4" : "";
+                    size.style.opacity = st.hasOwn ? "0.4" : "";
 
                     for (const el of size.querySelectorAll("button, input")) {
-                        el.disabled = at.length > 0;
+                        el.disabled = st.hasOwn;
                     }
 
                     if (sizeField && document.activeElement !== sizeField) {
-                        sizeField.value = String(sizeShown());
+                        sizeField.value = String(st.size);
                     }
 
-                    said.textContent += (low() > 0 ? " The lowest " + low() + " dB under step 1." : "")
-                        + (delay() >= 0 ? " Switch delay " + delay() + " ms." : "");
-                    forget.style.display = at.length || delay() >= 0 || low() > 0 ? "" : "none";
+                    forgetRow.style.display = st.hasOwn || st.delay >= 0 || st.low > 0 ? "flex" : "none";
                     train.style.display = here && !volTrain ? "" : "none";
-                    editBtn.textContent = editing ? "Done editing" : "Edit by hand";
-                    editor.style.display = editing ? "flex" : "none";
-
-                    // The fields as kept, not under a finger, the steps left
-                    // empty showing what is drawn for them
-                    for (const input of fields) {
-
-                        const k = Number(input.dataset.step);
-
-                        if (document.activeElement !== input) {
-                            input.value = g[k] > 0 ? String(g[k]) : "";
-                        }
-
-                        const drawn = at.length ? volGapFrom(g, k)
-                            : (fbAt.length && !(own() > 0) ? volGapFrom(fb, k) : sizeShown());
-
-                        input.placeholder = drawn > 0 ? drawn.toFixed(1) : "";
-                    }
-
-                    if (lowField && document.activeElement !== lowField) {
-
-                        lowField.value = low() > 0 ? String(low()) : "";
-                        lowField.placeholder = lowShown() > 0 ? lowShown().toFixed(1) : "";
-                    }
-
-                    if (delayField && document.activeElement !== delayField) {
-
-                        delayField.value = delay() >= 0 ? String(delay()) : "";
-                        delayField.placeholder = phone ? "80" : "250";
-                    }
                 };
 
-                // Forget on the left in red, Train by ear on the right in a
-                // cyan ring
-                buttons.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap";
-                buttons.dataset.hostSpread = "1";
+                // Edit by hand and Train by ear side by side, the same width
+                // across the page, and Forget in red across it on a line of
+                // its own. Edit by hand takes the whole line alone
+                buttons.style.cssText = "display:flex;align-items:stretch;gap:8px";
+                buttons.dataset.hostEven = "1";
+                forgetRow.style.cssText = "display:none";
                 forget.dataset.hostDanger = "1";
                 train.dataset.hostRing = "1";
                 train.style.boxShadow = "inset 0 0 0 2px #48e1eb";
-                train.style.marginLeft = "auto";
 
-                for (const b of [forget, editBtn, train]) {
+                for (const b of [editBtn, train, forget]) {
 
-                    b.style.flex = "0 0 auto";
-                    b.style.padding = "6px 14px";
-                    buttons.appendChild(b);
+                    b.dataset.hostFull = "1";
+                    b.style.flex = "1 1 0";
+                    b.style.minWidth = "0";
+                    b.style.padding = "8px 14px";
                 }
 
-                editor.style.cssText = "display:none;flex-direction:column;gap:6px";
+                buttons.appendChild(editBtn);
+                buttons.appendChild(train);
+                forgetRow.appendChild(forget);
                 soundBox.appendChild(makeLabel("Volume steps"));
                 soundBox.appendChild(size);
                 soundBox.appendChild(said);
                 soundBox.appendChild(buttons);
-                soundBox.appendChild(editor);
+                soundBox.appendChild(forgetRow);
                 paint();
                 settingsRefreshers.push(paint);
                 tryPaints.push(paint);
@@ -68954,6 +69188,76 @@
         backdrop-filter: blur(14px);
     }
 
+    /* The volume steps by hand, over the settings */
+    #editPop {
+        position: fixed;
+        inset: 0;
+        top: var(--seenTop, 0px);
+        bottom: auto;
+        height: var(--seenH, 100%);
+        z-index: 58;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    #editBox {
+        background: var(--card);
+        border: 1px solid rgba(72, 225, 235, 0.45);
+        border-radius: 18px;
+        padding: 2.4vh 2.4vw;
+        width: min(640px, 92vw);
+        max-height: min(88vh, calc(100% - 16px));
+        overflow-y: auto;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .editRows {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .editRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .chip.editSmall {
+        flex: 0 0 auto;
+        min-width: 44px;
+        justify-content: center;
+        padding: 0 10px;
+    }
+
+    .editField {
+        flex: 0 0 4.2em;
+        width: 4.2em;
+        height: var(--ctl-h, 44px);
+        box-sizing: border-box;
+        text-align: center;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0 4px;
+    }
+
+    .editField::placeholder {
+        color: var(--muted);
+        font-style: italic;
+        opacity: 1;
+    }
+
     /* The training of the volume steps, over the settings */
     #trainPop {
         position: fixed;
@@ -71295,6 +71599,20 @@
         /* A layer of its own, or the part outside the name's box is left
            unpainted in some browsers when the settings are drawn again */
         will-change: transform;
+    }
+
+    /* Buttons across the page, the same width side by side */
+    #panelBody .pRow.even {
+        display: grid;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    #panelBody .pBtn.full {
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
+        text-align: center;
     }
 
     /* Buttons spread out, onto another line when they do not fit */
@@ -84705,8 +85023,11 @@
             }
 
             // Buttons spread out on a line of their own keep their own
-            // width, so they fit side by side
-            if (row.classList.contains("btns")) {
+            // width, so they fit side by side, and those across the page
+            // take the page's
+            if (row.classList.contains("btns") || row.classList.contains("even") || buttons.every(function (b) {
+                return b.classList.contains("full");
+            })) {
 
                 for (const b of buttons) {
                     b.style.minWidth = "";
@@ -84954,7 +85275,7 @@
                 if (kids.length === 1) {
                     out.push(kids[0]);
                 } else if (kids.length > 1) {
-                    out.push({ t: "row", c: kids, spread: node.spread === true });
+                    out.push(Object.assign({}, node, { c: kids }));
                 }
 
                 continue;
@@ -85139,6 +85460,13 @@
                 row.classList.add("spread");
             }
 
+            // Buttons of the same width across the page, side by side
+            if (node.even) {
+
+                row.classList.add("even");
+                row.style.gridTemplateColumns = "repeat(" + node.c.length + ", minmax(0, 1fr))";
+            }
+
             // Buttons alone, spread out, go onto another line when the
             // page is too narrow for them, the last one kept at the right
             if (node.spread && node.c.every(function (child) {
@@ -85224,7 +85552,8 @@
 
             btn.type = "button";
             btn.className = (node.t === "button" ? "pBtn" : "pClick") + (node.on ? " on" : "")
-                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "") + (node.ring ? " ring" : "");
+                + (node.wide ? " wide" : "") + (node.danger ? " danger" : "") + (node.ring ? " ring" : "")
+                + (node.full ? " full" : "");
             btn.disabled = node.off === true;
 
             // Still being switched, also when the settings are drawn again
@@ -89115,6 +89444,7 @@
         paintNewAsk();
         paintSetAsk();
         paintTrainPop();
+        paintEditPop();
         paintLiveLines();
         paintFollowAsk();
         followWaveZoomKeep(state);
@@ -97911,6 +98241,162 @@
                     send("volTrain", { op: b.op });
                 }, b.strong ? "crPrimary" : ""));
             }
+        }
+
+        ui.pop.style.display = "flex";
+    }
+
+    // The volume steps by hand, a popup of its own drawn from the phone's
+    // state: each step with - and +, a field to type in, and a cross to
+    // take a value away again, an empty one showing greyed what is used
+    let editUi = null;
+
+    function buildEditPop() {
+
+        const ui = {};
+        const top = document.createElement("div");
+        const chip = function (text, then, look) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "chip" + (look ? " " + look : "");
+            b.textContent = text;
+            b.addEventListener("click", then);
+
+            return b;
+        };
+
+        ui.pop = document.createElement("div");
+        ui.pop.id = "editPop";
+        ui.box = document.createElement("div");
+        ui.box.id = "editBox";
+        top.className = "trainTop";
+        ui.title = document.createElement("span");
+        ui.title.className = "trainTitle";
+        ui.close = chip("", function () {
+            send("volEdit", { op: "close" });
+        }, "iconOnly");
+        ui.close.setAttribute("aria-label", "Close");
+        ui.close.appendChild(icon("close"));
+        top.appendChild(ui.title);
+        top.appendChild(ui.close);
+        ui.text = document.createElement("div");
+        ui.text.className = "trainText";
+        ui.rows = document.createElement("div");
+        ui.rows.className = "editRows";
+        ui.done = chip("Done", function () {
+            send("volEdit", { op: "close" });
+        }, "crPrimary trainFlip");
+        ui.box.appendChild(top);
+        ui.box.appendChild(ui.text);
+        ui.box.appendChild(ui.rows);
+        ui.box.appendChild(ui.done);
+        ui.pop.appendChild(ui.box);
+        document.body.appendChild(ui.pop);
+        ui.key = "";
+        ui.fields = {};
+        ui.chip = chip;
+        editUi = ui;
+    }
+
+    function editRow(r) {
+
+        const ui = editUi;
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const field = document.createElement("input");
+        const clear = ui.chip("×", function () {
+            send("volEdit", { op: "clear", key: r.key });
+        }, "editSmall");
+
+        row.className = "editRow";
+        name.className = "trainName";
+        name.textContent = r.label;
+        field.type = "text";
+        field.inputMode = "decimal";
+        field.className = "editField";
+        field.setAttribute("aria-label", r.label);
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter") {
+                field.blur();
+            }
+        });
+        field.addEventListener("change", function () {
+
+            const typed = field.value.trim().replace(",", ".");
+
+            if (typed === "" || isFinite(Number(typed))) {
+                send("volEdit", { op: typed === "" ? "clear" : "set", key: r.key, value: typed });
+            }
+        });
+        clear.setAttribute("aria-label", "Back to the value used without it");
+        row.appendChild(name);
+        row.appendChild(ui.chip("-", function () {
+            send("volEdit", { op: "by", key: r.key, value: -r.step });
+        }, "editSmall"));
+        row.appendChild(field);
+        row.appendChild(ui.chip("+", function () {
+            send("volEdit", { op: "by", key: r.key, value: r.step });
+        }, "editSmall"));
+        row.appendChild(clear);
+        ui.rows.appendChild(row);
+
+        return { field: field, clear: clear };
+    }
+
+    function paintEditPop() {
+
+        const v = state && state.volEdit ? state.volEdit : null;
+
+        if (!v) {
+
+            if (editUi) {
+                editUi.pop.style.display = "none";
+            }
+
+            return;
+        }
+
+        if (!editUi) {
+            buildEditPop();
+        }
+
+        const ui = editUi;
+        const rows = v.rows || [];
+        const key = rows.map(function (r) {
+            return r.key;
+        }).join(",");
+
+        ui.title.textContent = v.title || "";
+        ui.text.textContent = v.text || "";
+
+        // The rows made again only when there are others, so a field being
+        // typed in is left alone
+        if (key !== ui.key) {
+
+            ui.key = key;
+            ui.rows.textContent = "";
+            ui.fields = {};
+
+            for (const r of rows) {
+                ui.fields[r.key] = editRow(r);
+            }
+        }
+
+        for (const r of rows) {
+
+            const f = ui.fields[r.key];
+
+            if (document.activeElement !== f.field) {
+                f.field.value = r.value === "" ? "" : String(r.value);
+            }
+
+            f.field.placeholder = r.shown || "";
+            f.clear.style.visibility = r.value === "" ? "hidden" : "";
         }
 
         ui.pop.style.display = "flex";

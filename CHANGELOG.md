@@ -867,6 +867,23 @@ In development.
   loud and need not be turned down more and more by hand. The first two
   are not damped. Both sides are damped alike, so the gaps found stay
   the same, and Quieter comes on top of it.
+- **Each speaker folded under its profiles.** Under Sound profiles a
+  speaker shows its Profile and Night profile, and Show more opens the
+  rest under them: night mode as it connects, max volume as it connects,
+  the volume steps and Volume now, folded again with Show less. Which
+  are open is kept while the player runs, on the phone and in the web
+  view.
+- **Edit by hand in a popup of its own.** The volume steps typed in by
+  hand open in a popup on the phone and in the web view: step 1 from the
+  lowest, each step and the switch delay, each with - and +, a field to
+  type in and a cross to take the value away, a step left empty showing
+  greyed what is used for it. Changes are kept at once.
+- **The volume steps' buttons line up.** Edit by hand and Train by ear
+  sit side by side at the same width across the page, Edit by hand alone
+  across it while the speaker does not play, and Forget across it in red
+  on a line of its own when there is something to forget. In the web
+  view a row of buttons laid out alike keeps that, as its copy of the
+  page let it go before.
 
 ### Build
 
