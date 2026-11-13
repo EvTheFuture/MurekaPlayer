@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.118";
+    const VERSION = "2.0.1.119";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15497,7 +15497,7 @@
     function buildVolTrain() {
 
         const ui = {};
-        const box = document.createElement("div");
+        let box = null;
         const top = document.createElement("div");
         const close = makeButton("\u00d7", "#333", "#fff", function () {
             volTrainAct("cancel");
@@ -15511,12 +15511,18 @@
         const gapName = document.createElement("span");
         const quietName = document.createElement("span");
 
-        volTrainEl = document.createElement("div");
-        volTrainEl.dataset.murekaNotice = "1";
-        volTrainEl.style.cssText = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
-            + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
-        box.style.cssText = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
-            + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
+        // Escape cancels it as its cross does. A tap beside it does not,
+        // the steps set so far would be lost to a stray tap
+        const dialog = makeDialog({
+            screen: true,
+            outside: false,
+            onCancel: function () {
+                volTrainAct("cancel");
+            }
+        });
+
+        volTrainEl = dialog.back;
+        box = dialog.card;
         top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
         ui.title = document.createElement("div");
         ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
@@ -15657,7 +15663,6 @@
         box.appendChild(ui.rows);
         box.appendChild(ui.list);
         box.appendChild(ui.buttons);
-        volTrainEl.appendChild(box);
         document.body.appendChild(volTrainEl);
         volTrainUi = ui;
     }
@@ -15930,7 +15935,7 @@
         const plus = small("+", function () {
             volEditAct("by", r.key, r.step);
         });
-        const clear = small("×", function () {
+        const clear = small("\u00d7", function () {
             volEditAct("clear", r.key);
         });
 
@@ -15971,9 +15976,9 @@
     function buildVolEdit() {
 
         const ui = {};
-        const box = document.createElement("div");
+        let box = null;
         const top = document.createElement("div");
-        const close = makeButton("×", "#333", "#fff", function () {
+        const close = makeButton("\u00d7", "#333", "#fff", function () {
             volEditAct("close");
         });
         const done = makeButton("Done", ACCENT, "#000", function () {
@@ -15982,12 +15987,18 @@
 
         lookButton(done, "primary");
 
-        volEditEl = document.createElement("div");
-        volEditEl.dataset.murekaNotice = "1";
-        volEditEl.style.cssText = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
-            + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
-        box.style.cssText = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
-            + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
+        // Escape closes it as Done does, the values typed are kept. A tap
+        // beside it does not
+        const dialog = makeDialog({
+            screen: true,
+            outside: false,
+            onCancel: function () {
+                volEditAct("close");
+            }
+        });
+
+        volEditEl = dialog.back;
+        box = dialog.card;
         top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
         ui.title = document.createElement("div");
         ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
@@ -16005,7 +16016,6 @@
         box.appendChild(ui.text);
         box.appendChild(ui.rows);
         box.appendChild(done);
-        volEditEl.appendChild(box);
         document.body.appendChild(volEditEl);
         volEditUi = ui;
     }
@@ -25771,42 +25781,95 @@
     // the button, to dim it until it can be used
     // kind makes the field a password, true, or numbers only, "numeric",
     // which brings up the number pad on a phone
+    // How a dialog looks behind its card: over the player's panel, its
+    // questions, or over the whole screen, the volume popups, hidden until
+    // shown. And the card of those over the whole screen
+    const DIALOG_PANEL_BACK = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
+        + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
+    const DIALOG_SCREEN_BACK = "position:fixed;inset:0;z-index:2147483645;display:none;align-items:center;justify-content:center;"
+        + "background:rgba(0,0,0,0.6);font:15px system-ui,sans-serif;color:#fff;padding:16px;box-sizing:border-box";
+    const DIALOG_SCREEN_CARD = "width:min(520px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
+        + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
+
+    // A dialog: a backdrop with a card in it, the same way for every one.
+    // Escape cancels the one on top, as its Cancel or cross would, and so
+    // does a tap beside the card unless outside is false, for a dialog
+    // whose work a stray tap should not throw away. Taking options:
+    //   backCss, cardCss   how it looks, by default as over the panel, or
+    //                      over the screen with screen true
+    //   screen             over the whole screen, hidden until shown
+    //   onCancel           what cancelling does, besides closing one over
+    //                      the panel
+    //   outside            false to keep a tap beside the card from it
+    //   notice             false to leave it out of the open questions,
+    //                      which keep the shortcuts off and look alike
+    //   className          a class for the backdrop
+    // Answers the backdrop, the card and close, which takes a dialog over
+    // the panel away and then runs what it is given
+    function makeDialog(opts) {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const screen = opts.screen === true;
+
+        back.style.cssText = opts.backCss || (screen ? DIALOG_SCREEN_BACK : DIALOG_PANEL_BACK);
+        card.style.cssText = opts.cardCss || (screen ? DIALOG_SCREEN_CARD : "");
+
+        if (opts.className) {
+            back.className = opts.className;
+        }
+
+        if (opts.notice !== false) {
+            back.setAttribute("data-mureka-notice", "1");
+        }
+
+        back.setAttribute("data-mureka-dialog", screen ? "screen" : "panel");
+
+        const close = function (fn) {
+
+            if (!screen) {
+                back.remove();
+            }
+
+            if (fn) {
+                fn();
+            }
+        };
+
+        // Found by closeTopDialog for Escape
+        back.__cancel = function () {
+            close(opts.onCancel);
+        };
+
+        if (opts.outside !== false) {
+
+            back.addEventListener("click", function (ev) {
+
+                if (ev.target === back) {
+                    back.__cancel();
+                }
+            });
+        }
+
+        back.appendChild(card);
+
+        return { back: back, card: card, close: close };
+    }
+
     function askText(title, value, okLabel, onOk, extra, kind) {
 
         if (!panelEl) {
             return;
         }
 
-        const back = document.createElement("div");
-        back.style.cssText = [
-            "position:absolute",
-            "inset:0",
-            "background:rgba(0,0,0,0.6)",
-            "display:flex",
-            "align-items:center",
-            "justify-content:center",
-            "padding:16px",
-            "box-sizing:border-box",
-            "z-index:10"
-        ].join(";");
-
         // Counted as an open dialog, so the shortcuts keep off and Escape
         // closes it when the field has lost focus
-        back.setAttribute("data-mureka-notice", "1");
-
-        const card = document.createElement("div");
-        card.style.cssText = [
-            "background:#26262c",
-            "border:1px solid #3a3a42",
-            "border-radius:10px",
-            "padding:14px",
-            "width:100%",
-            "max-width:340px",
-            "box-sizing:border-box",
-            "display:flex",
-            "flex-direction:column",
-            "gap:10px"
-        ].join(";");
+        const dialog = makeDialog({
+            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
+                + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px"
+        });
+        const back = dialog.back;
+        const card = dialog.card;
 
         const head = document.createElement("div");
         head.textContent = title;
@@ -25842,11 +25905,9 @@
 
         const close = function (accept) {
 
-            back.remove();
-
-            if (accept) {
+            dialog.close(accept ? function () {
                 onOk(field.value);
-            }
+            } : null);
         };
 
         const no = makeButton("Cancel", "#444", "#fff", function () {
@@ -25916,15 +25977,6 @@
         card.appendChild(head);
         card.appendChild(field);
         card.appendChild(row);
-        back.appendChild(card);
-
-        back.addEventListener("click", function (ev) {
-
-            if (ev.target === back) {
-                close(false);
-            }
-        });
-
         panelEl.appendChild(back);
 
         // Focused in the same tap that asked, which is what lets a phone
@@ -26089,33 +26141,18 @@
             return;
         }
 
-        const back = document.createElement("div");
-
-        // Its buttons tall on a touch screen, like a question's
-        back.className = "mureka-ask";
-        back.style.cssText = [
-            "position:absolute",
-            "inset:0",
-            "background:rgba(0,0,0,0.6)",
-            "display:flex",
-            "align-items:center",
-            "justify-content:center",
-            "padding:16px",
-            "box-sizing:border-box",
-            "z-index:10"
-        ].join(";");
-
-        const card = document.createElement("div");
-        card.style.cssText = [
-            "background:#26262c",
-            "border:1px solid #3a3a42",
-            "border-radius:10px",
-            "padding:14px",
-            "max-width:340px",
-            "display:flex",
-            "flex-direction:column",
-            "gap:10px"
-        ].join(";");
+        // Its buttons tall on a touch screen, like a question's. Left out
+        // of the open questions, as it always was, and closed by Escape
+        // and a tap beside it as No
+        const dialog = makeDialog({
+            className: "mureka-ask",
+            notice: false,
+            onCancel: onNo,
+            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;max-width:340px;"
+                + "display:flex;flex-direction:column;gap:10px"
+        });
+        const back = dialog.back;
+        const card = dialog.card;
 
         const head = document.createElement("div");
         head.textContent = title;
@@ -26128,14 +26165,7 @@
         const row = document.createElement("div");
         row.style.cssText = "display:flex;gap:8px";
 
-        const close = function (fn) {
-
-            back.remove();
-
-            if (fn) {
-                fn();
-            }
-        };
+        const close = dialog.close;
 
         const no = makeButton(noLabel || "Cancel", "#444", "#fff", function () {
             close(onNo);
@@ -26157,15 +26187,6 @@
         }
 
         card.appendChild(row);
-        back.appendChild(card);
-
-        back.addEventListener("click", function (ev) {
-
-            if (ev.target === back) {
-                close(onNo);
-            }
-        });
-
         panelEl.appendChild(back);
 
         return back;
@@ -26373,15 +26394,45 @@
         return !!el && el.style.display !== "none" && el.style.display !== "";
     }
 
+    // The dialog Escape closes first, if one is open: one over the whole
+    // screen, the highest of them, else the last question over the panel.
+    // Folded, the questions are out of sight and left as they are
+    function dialogOnTop() {
+
+        const screens = Array.from(document.querySelectorAll("[data-mureka-dialog=\"screen\"]")).filter(function (el) {
+            return el.style.display !== "none" && el.getClientRects().length > 0 && typeof el.__cancel === "function";
+        });
+
+        if (screens.length > 0) {
+
+            screens.sort(function (a, b) {
+                return (Number(a.style.zIndex) || 0) - (Number(b.style.zIndex) || 0);
+            });
+
+            return screens[screens.length - 1];
+        }
+
+        const notices = panelEl && !minimized ? panelEl.querySelectorAll("[data-mureka-notice], [data-mureka-dialog=\"panel\"]") : [];
+
+        return notices.length > 0 ? notices[notices.length - 1] : null;
+    }
+
     // Close the top most thing over the player. True when something closed
     function closeTopDialog() {
 
-        // Folded, the questions are out of sight and left as they are
-        const notices = panelEl && !minimized ? panelEl.querySelectorAll("[data-mureka-notice]") : [];
+        // A dialog first. One made by makeDialog says how it is cancelled,
+        // as its cross or Cancel would, so whoever waits for its answer
+        // hears it
+        const top = dialogOnTop();
 
-        if (notices.length > 0) {
+        if (top) {
 
-            notices[notices.length - 1].remove();
+            if (typeof top.__cancel === "function") {
+                top.__cancel();
+            } else {
+                top.remove();
+            }
+
             return true;
         }
 
@@ -50838,8 +50889,8 @@
                 const col = document.createElement("div");
                 const name = document.createElement("div");
                 const words = makeHint("");
-                const pop = document.createElement("div");
-                const box = document.createElement("div");
+                let pop = null;
+                let box = null;
                 const top = document.createElement("div");
                 const popTitle = document.createElement("div");
                 const opened = function (open) {
@@ -50910,18 +50961,24 @@
                 row.appendChild(col);
                 row.appendChild(editBtn);
 
-                // The dialog, drawn by the web view as a popup of its own
-                pop.dataset.hostPop = "1";
-                pop.style.cssText = "position:fixed;inset:0;z-index:2147483644;display:none;align-items:center;justify-content:center;"
-                    + "background:rgba(0,0,0,0.6);padding:16px;box-sizing:border-box";
-                box.style.cssText = "width:min(560px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
-                    + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px";
-                pop.addEventListener("click", function (ev) {
-
-                    if (ev.target === pop) {
+                // The dialog, drawn by the web view as a popup of its own.
+                // Under the volume popups, which open from it, and not one
+                // of the open questions, which would make its buttons taller
+                const dialog = makeDialog({
+                    screen: true,
+                    notice: false,
+                    onCancel: function () {
                         opened(false);
-                    }
+                    },
+                    backCss: "position:fixed;inset:0;z-index:2147483644;display:none;align-items:center;justify-content:center;"
+                        + "background:rgba(0,0,0,0.6);padding:16px;box-sizing:border-box",
+                    cardCss: "width:min(560px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
+                        + "background:#1c1c22;border:1px solid rgba(" + ACCENT_RGB + ",0.45);display:flex;flex-direction:column;gap:12px"
                 });
+
+                pop = dialog.back;
+                box = dialog.card;
+                pop.dataset.hostPop = "1";
                 box.addEventListener("scroll", function () {
                     soundPopScroll = box.scrollTop;
                 });
@@ -50935,7 +50992,6 @@
                 top.appendChild(popTitle);
                 top.appendChild(close);
                 box.appendChild(top);
-                pop.appendChild(box);
                 into = box;
 
                 box.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
@@ -54753,31 +54809,24 @@
         }
 
         const lines = String(title).split("\n");
-        const back = document.createElement("div");
-        const card = document.createElement("div");
+        const dialog = makeDialog({
+            onCancel: onCancel,
+            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
+                + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px"
+        });
+        const back = dialog.back;
+        const card = dialog.card;
         const head = document.createElement("div");
         const text = document.createElement("div");
         const col = document.createElement("div");
 
-        back.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;"
-            + "justify-content:center;padding:16px;box-sizing:border-box;z-index:10";
-        back.setAttribute("data-mureka-notice", "1");
-        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
-            + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = lines[0];
         head.style.cssText = "font-weight:600";
         text.textContent = lines.slice(1).join("\n").trim();
         text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
         col.style.cssText = "display:flex;flex-direction:column;gap:6px";
 
-        const close = function (fn) {
-
-            back.remove();
-
-            if (fn) {
-                fn();
-            }
-        };
+        const close = dialog.close;
 
         for (const opt of options) {
 
@@ -54828,14 +54877,6 @@
         }
 
         card.appendChild(col);
-        back.appendChild(card);
-        back.addEventListener("click", function (ev) {
-
-            if (ev.target === back) {
-                close(onCancel);
-            }
-        });
-
         panelEl.appendChild(back);
 
         return back;
@@ -58069,8 +58110,9 @@
         // left to the shortcuts, which close the settings
         window.addEventListener("keydown", function (ev) {
 
+            // A dialog over the settings is closed first, by the shortcuts
             if (ev.key !== "Escape" || !settingsOpen || settingsPageNow === "main"
-                || (trimEl && trimEl.style.display !== "none")) {
+                || (trimEl && trimEl.style.display !== "none") || dialogOnTop()) {
                 return;
             }
 

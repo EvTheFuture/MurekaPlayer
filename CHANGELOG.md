@@ -1065,6 +1065,20 @@ In development.
   the app for one level up or down, and the app counts as its own
   buttons do. Each state says which levels lie next to the one it is
   at, so the next one shows at once.
+- **Every dialog closes the same way.** The questions over the player
+  (a name to type, yes or no, a choice), the volume training, editing
+  the steps by hand and a speaker's settings are made by one makeDialog,
+  which owns the backdrop, the card and closing. Escape now closes the
+  dialog on top as its Cancel or cross would, and whoever waits for the
+  answer hears it: before, Escape took a question away without a word,
+  left a choice, a yes or no and the volume popups open, and with the
+  settings open on a page went back a page under the dialog instead. A
+  tap beside a dialog closes it as before, except the training and
+  editing by hand, where a stray tap should not lose work. They look the
+  same as before, pixel for pixel.
+- **The crosses in editing by hand show as crosses.** Two were written
+  as a raw character and came out as other letters where the player is
+  loaded without its character set.
 
 ### Build
 
