@@ -1044,6 +1044,21 @@ In development.
   the same as a whole drawing would make it. Where the mark could move
   the song, show it or hide it, in the queue, the sets, under a set's
   head, or with a row not built yet, the whole list is drawn as before.
+- **A smaller player in the app.** The app's copy of the player leaves
+  out the lines that are only comments and every line's indentation,
+  2.3 MB down to 1.3 MB, which changes nothing the script does. Each
+  line stays a line, so a line number in an error still points at the
+  same line of src/player.js. The build stops if the player ever holds
+  a template string, where taking indentation off would change text.
+  The add-on and the bookmarklet keep loading the readable player: the
+  bookmarklet's pinned file is cached after its first load, and the
+  add-on stores want readable code.
+- **A smaller APK.** The release build is made smaller by R8, most of
+  all by leaving out the parts of Bouncy Castle the app never uses. The
+  app's own classes and the adb library are kept whole, see
+  proguard-rules.pro. Not yet built or tried: pairing with wireless
+  debugging, starting the hotspot helper, the hotspot and Bluetooth
+  through it, and the web view's settings are the ones to try first.
 
 ### Build
 

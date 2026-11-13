@@ -200,7 +200,13 @@ android {
         // does. Without it the release APK is left unsigned, which is what
         // F-Droid's build server expects, it signs with its own key
         release {
-            minifyEnabled = false
+
+            // Made smaller by R8, most of all the parts of Bouncy Castle
+            // that are never used. What must stay as it is is listed in
+            // proguard-rules.pro. Only the release build, the one that is
+            // installed, tested and published
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             signingConfig = hasReleaseKey ? signingConfigs.release : null
         }
 
@@ -232,7 +238,11 @@ dependencies {
 // The player is the same file the extension and the bookmarklet use. It is
 // copied in from the repository at build time, so there is only one copy.
 // The web view's page written into it is for a browser, the app serves its
-// own, so the app's copy goes without it and the player sees an empty page
+// own, so the app's copy goes without it and the player sees an empty page.
+// The copy is also made smaller: a line that is only a comment is left
+// empty and every line loses its indentation, which changes nothing the
+// script does. Each line stays a line, so a line number in an error points
+// at the same line of src/player.js up to the page
 def copyPlayer = tasks.register("copyPlayer", Copy) {
     from(rootProject.file("../src/player.js"))
     into(layout.projectDirectory.dir("src/main/assets"))
@@ -253,7 +263,19 @@ def copyPlayer = tasks.register("copyPlayer", Copy) {
             return line
         }
 
-        return page.skip ? null : line
+        if (page.skip) {
+            return null
+        }
+
+        // Taking the indentation off is only safe while no string spans
+        // lines, which only a template literal could, so one stops the build
+        if (line.contains("`")) {
+            throw new GradleException("src/player.js has a backtick outside the web view's page, the app's copy cannot be made smaller safely")
+        }
+
+        def bare = line.replaceFirst(/^[ \t]+/, "")
+
+        return bare.startsWith("//") ? "" : bare
     }
 }
 
