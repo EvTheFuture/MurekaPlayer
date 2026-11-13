@@ -891,7 +891,7 @@ final class SysVolume {
             int step = Math.max(2, Math.min(max, a.optInt("step", 2)));
             boolean upper = a.optBoolean("upper", true);
             float gap = (float) Math.max(0, Math.min(HAND_MAX_DB, a.optDouble("gap", 3)));
-            float quiet = (float) Math.max(0, Math.min(40, a.optDouble("quiet", 0)));
+            float quiet = (float) Math.max(0, Math.min(80, a.optDouble("quiet", 0)));
 
             trainDelay = Math.max(0, Math.min(TRAIN_DELAY_MAX_MS, a.optLong("delay", 250)));
             boolean fresh = !training || step != trainStep;

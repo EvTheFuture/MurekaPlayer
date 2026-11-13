@@ -854,6 +854,19 @@ In development.
   step turned down by the gap and the step below, as often as needed, on
   the phone and in the web view. Each step starts on the step itself.
   With nothing pressed for 15 minutes the training still ends by itself.
+- **A training updates the steps set before, or replaces them.** The
+  steps set before stay apart from those set now: a step left as it is,
+  with Leave as is, the new name of Leave out, keeps its value from
+  before. When steps were set before, the end of the training asks with
+  two buttons: Save, keep the others keeps those from before for the
+  steps not set now, and Save, only these lets them go. The list there
+  marks each step set now, kept from before or drawn.
+- **Damp the louder steps.** A box in the training, on at first, turns
+  both sides down from the third step trained on by as much as the steps
+  have risen since the second, so the louder steps are heard about as
+  loud and need not be turned down more and more by hand. The first two
+  are not damped. Both sides are damped alike, so the gaps found stay
+  the same, and Quieter comes on top of it.
 
 ### Build
 

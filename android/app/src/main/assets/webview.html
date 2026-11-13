@@ -1951,6 +1951,27 @@
         line-height: 1.4;
     }
 
+    .trainAuto {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        cursor: pointer;
+    }
+
+    .trainAuto > span {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .trainAuto input {
+        flex: 0 0 auto;
+        width: 22px;
+        height: 22px;
+        margin: 2px 0 0;
+        accent-color: var(--accent);
+    }
+
     .trainList {
         display: flex;
         flex-direction: column;
@@ -30664,6 +30685,27 @@
         ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
             + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
 
+        // Damp the louder steps, so the volume need not be turned down
+        // more and more by hand
+        const autoText = document.createElement("span");
+        const autoName = document.createElement("span");
+        const autoHint = document.createElement("span");
+
+        ui.autoRow = document.createElement("label");
+        ui.autoRow.className = "trainAuto";
+        ui.auto = document.createElement("input");
+        ui.auto.type = "checkbox";
+        ui.auto.addEventListener("change", function () {
+            send("volTrain", { op: "auto", value: ui.auto.checked });
+        });
+        autoName.textContent = "Damp the louder steps";
+        autoHint.className = "trainText";
+        autoHint.textContent = "From the third step on, the player turns both sides down by as much as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoText.appendChild(autoName);
+        autoText.appendChild(autoHint);
+        ui.autoRow.appendChild(ui.auto);
+        ui.autoRow.appendChild(autoText);
+
         ui.list = document.createElement("div");
         ui.list.className = "trainList";
         ui.acts = document.createElement("div");
@@ -30678,6 +30720,7 @@
         ui.box.appendChild(ui.gapRow);
         ui.box.appendChild(ui.delayRow);
         ui.box.appendChild(ui.delayHint);
+        ui.box.appendChild(ui.autoRow);
         ui.box.appendChild(ui.quietRow);
         ui.box.appendChild(ui.quietHint);
         ui.box.appendChild(ui.list);
@@ -30721,6 +30764,11 @@
         ui.delay.textContent = (Number(v.delay) || 0) + " ms";
         ui.quietRow.style.display = v.at === "done" ? "none" : "";
         ui.quietHint.style.display = v.at === "done" ? "none" : "";
+        ui.autoRow.style.display = v.at === "done" ? "none" : "";
+
+        if (document.activeElement !== ui.auto) {
+            ui.auto.checked = v.auto === true;
+        }
 
         // Not moved back under a finger, nor before the phone has it
         if (Date.now() - trainQuietAt > 1500) {

@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.100";
+    const VERSION = "2.0.1.101";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13674,6 +13674,7 @@
     // same view of it, the web view's through the state
     let volTrain = null;
     let volTrainQuiet = 0;
+    let volTrainAuto = true;
     let volTrainEl = null;
     let volTrainUi = null;
     let volTrainTimer = 0;
@@ -13778,10 +13779,24 @@
             return volTrain.gaps[step];
         }
 
-        const drawn = volGapFrom(volTrain.gaps, step);
+        if (volTrain.prev[step] > 0) {
+            return volTrain.prev[step];
+        }
+
+        const drawn = volGapFrom(Object.assign({}, volTrain.prev, volTrain.gaps), step);
 
         if (drawn > 0) {
             return Math.round(drawn * 2) / 2;
+        }
+
+        const rec = volTrainRecord(false);
+
+        if (rec && rec.stepDb > 0) {
+            return rec.stepDb;
+        }
+
+        if (!volTrain.phone && sound().fallback.stepDb > 0) {
+            return sound().fallback.stepDb;
         }
 
         if (!volTrain.phone) {
@@ -13794,6 +13809,26 @@
         }
 
         return Math.round(phoneStepDb(!volTrain.phone) * 2) / 2;
+    }
+
+    // How far the louder steps are turned down with Damp on: from the third
+    // step trained, by as much as the steps have risen since the second, so
+    // they are heard about as loud. Both sides alike, so the gap found is
+    // the same
+    function volTrainDamp() {
+
+        if (!volTrain || !volTrain.auto || volTrainScreen() !== "step" || volTrain.i < 2) {
+            return 0;
+        }
+
+        const base = volTrain.steps[1];
+        let db = 0;
+
+        for (let j = base + 1; j < volTrainStep(); j++) {
+            db += volTrainGap(j);
+        }
+
+        return Math.round(db * 2) / 2;
     }
 
     // The app told what to play: the step against the one below on a
@@ -13811,7 +13846,14 @@
 
         try {
             window.MurekaHost.volumeTrain(JSON.stringify(on
-                ? { on: true, step: volTrainStep(), gap: volTrainGap(volTrainStep()), quiet: volTrain.quiet, delay: volTrain.delay, upper: volTrain.side }
+                ? {
+                    on: true,
+                    step: volTrainStep(),
+                    gap: volTrainGap(volTrainStep()),
+                    quiet: volTrain.quiet + volTrainDamp(),
+                    delay: volTrain.delay,
+                    upper: volTrain.side
+                }
                 : { on: false }));
         } catch (e) {
             dbgLog("Sound", "volume training not taken: " + errText(e));
@@ -13844,12 +13886,17 @@
             gaps: {},
             quiet: volTrainQuiet,
             upper: null,
-            side: true
+            side: true,
+            prev: {},
+            auto: volTrainAuto
         };
 
         const rec = volTrainRecord(false);
 
-        volTrain.gaps = Object.assign({}, rec && rec.gaps ? rec.gaps : {});
+        // Those kept from before apart from those set now, so a step left
+        // as it is keeps its value
+        volTrain.prev = Object.assign({}, rec && rec.gaps ? rec.gaps : {});
+        volTrain.gaps = {};
 
         // The speaker's delay found before, else a usual one for Bluetooth
         // or for this phone
@@ -13924,7 +13971,9 @@
         publishHostSoon();
     }
 
-    function volTrainSave() {
+    // Saved with those kept from before for the steps not set now, or
+    // only those set now
+    function volTrainSave(only) {
 
         const rec = volTrainRecord(true);
 
@@ -13932,7 +13981,7 @@
             return;
         }
 
-        rec.gaps = cleanGaps(volTrain.gaps);
+        rec.gaps = cleanGaps(only ? volTrain.gaps : Object.assign({}, volTrain.prev, volTrain.gaps));
         rec.delayMs = cleanDelayMs(volTrain.delay);
 
         if (!volTrain.phone) {
@@ -13961,7 +14010,7 @@
             volTrainGo(volTrain.i - 1);
         } else if (op === "skip" && at === "step") {
 
-            // Left out: drawn from the others
+            // Left as it is: set before, or drawn from the others
             delete volTrain.gaps[volTrainStep()];
             volTrainGo(volTrain.i + 1);
         } else if (op === "next" && at === "step") {
@@ -13999,10 +14048,18 @@
             if (at === "step") {
                 volTrainSend();
             }
-        } else if (op === "save" && at === "done") {
+        } else if ((op === "save" || op === "saveOnly") && at === "done") {
 
-            volTrainSave();
+            volTrainSave(op === "saveOnly");
             return;
+        } else if (op === "auto") {
+
+            volTrain.auto = value === true || value === "true";
+            volTrainAuto = volTrain.auto;
+
+            if (at === "step") {
+                volTrainSend();
+            }
         } else if (op === "cancel") {
 
             volTrainEnd();
@@ -14035,7 +14092,7 @@
         const at = volTrainScreen();
         const max = volTrain.max;
         const who = volTrain.phone ? "this device" : volTrain.name;
-        const view = { at: at, quiet: volTrain.quiet, gap: 0, delay: volTrain.delay, now: "", lines: [], buttons: [] };
+        const view = { at: at, quiet: volTrain.quiet, gap: 0, delay: volTrain.delay, auto: volTrain.auto, damp: 0, now: "", lines: [], buttons: [] };
 
         if (at === "intro") {
 
@@ -14044,7 +14101,7 @@
                 + "The song playing is heard at a step, turned down by the player by a gap, and Switch moves to the step below and back, as often as needed. "
                 + "Press - or + until switching makes no difference to how loud it is, then Keep. The steps go from quiet to loud: "
                 + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
-                + "Set Quieter first when others are asleep. While training, the compressor of the sound profile is off. "
+                + "Damp the louder steps keeps them about as loud as the second, and Quieter turns everything down when others are asleep. While training, the compressor of the sound profile is off. "
                 + "If the sound dips or bumps for a moment as it switches, change the switch delay until it is smooth, as the player's share reaches the speaker later than the step.";
             view.buttons = [{ op: "start", label: "Start", strong: true }, { op: "cancel", label: "Cancel" }];
         } else if (at === "step") {
@@ -14057,42 +14114,53 @@
 
             view.text = "Switch moves between step " + k + " turned down by the gap and step " + (k - 1) + " as it is. "
                 + "Louder on step " + k + ": press +. Quieter: press -. "
-                + (last ? "Keep, finish once they sound the same. " : "Keep, next once they sound the same, or Keep, done to keep it and leave the steps still to come to be drawn from those kept. ")
-                + "Leave out drops this step, to be drawn from the others."
+                + (last ? "Keep, finish once they sound the same. " : "Keep, next once they sound the same, or Keep, done to keep it and go to the end. ")
+                + (volTrain.prev[k] > 0 ? "Leave as is keeps the " + volTrain.prev[k] + " dB set before." : "Leave as is leaves it to be drawn from the others.")
                 + (playing ? "" : " Play a song to hear them.");
             view.gap = volTrainGap(k);
-            view.now = volTrain.upper === null ? "Starting"
-                : (volTrain.upper ? "Now: step " + k + ", turned down " + view.gap + " dB" : "Now: step " + (k - 1));
+            view.now = (volTrain.upper === null ? "Starting"
+                : (volTrain.upper ? "Now: step " + k + ", turned down " + view.gap + " dB" : "Now: step " + (k - 1)))
+                + (volTrainDamp() > 0 ? ", both damped " + volTrainDamp() + " dB" : "");
             view.upper = volTrain.upper;
             view.flip = volTrain.side ? "Switch to step " + (k - 1) : "Switch to step " + k;
-            view.buttons = [{ op: "back", label: "Back" }, { op: "skip", label: "Leave out" }]
+            view.damp = volTrainDamp();
+            view.buttons = [{ op: "back", label: "Back" }, { op: "skip", label: "Leave as is" }]
                 .concat(last ? [] : [{ op: "done", label: "Keep, done" }])
                 .concat([{ op: "next", label: last ? "Keep, finish" : "Keep, next", strong: true }, { op: "cancel", label: "Cancel" }]);
         } else {
 
-            const any = Object.keys(volTrain.gaps).length > 0;
+            const now = Object.keys(volTrain.gaps).length > 0;
+            const before = Object.keys(volTrain.prev).length > 0;
+            const all = Object.assign({}, volTrain.prev, volTrain.gaps);
 
             view.title = "Trained";
-            view.text = any
-                ? "The gap to the step below for each step, set by ear or drawn from those set. Save puts them to use."
-                : "No step was set. Train again, or Cancel to keep things as they were.";
 
-            for (let k = 2; any && k <= max; k++) {
-
-                const own = volTrain.gaps[k] > 0;
-                const v = own ? volTrain.gaps[k] : volGapFrom(volTrain.gaps, k);
-
-                view.lines.push("Step " + k + ": " + v.toFixed(1) + " dB" + (own ? "" : ", drawn"));
+            if (!now) {
+                view.text = "No step was set now." + (before ? " Those set before stay as they are." : "") + " Train again, or Cancel.";
+            } else if (before) {
+                view.text = "Steps were set before as well. Save, keep the others keeps those set before for the steps not set now. "
+                    + "Save, only these keeps only the steps set now, those set before are let go.";
+            } else {
+                view.text = "The gap to the step below for each step, set now or drawn from those set. Save puts them to use.";
             }
 
-            if (any) {
+            for (let k = 2; now && k <= max; k++) {
+
+                const set = volTrain.gaps[k] > 0;
+                const kept = !set && volTrain.prev[k] > 0;
+                const v = set ? volTrain.gaps[k] : (kept ? volTrain.prev[k] : volGapFrom(all, k));
+
+                view.lines.push("Step " + k + ": " + v.toFixed(1) + " dB" + (set ? ", set now" : (kept ? ", kept from before" : ", drawn")));
+            }
+
+            if (now) {
                 view.lines.push("Switch delay: " + volTrain.delay + " ms");
             }
 
-            view.buttons = (any ? [{ op: "save", label: "Save", strong: true }] : []).concat([
-                { op: "again", label: "Train again" },
-                { op: "cancel", label: "Cancel" }
-            ]);
+            view.buttons = (now && before
+                ? [{ op: "save", label: "Save, keep the others", strong: true }, { op: "saveOnly", label: "Save, only these" }]
+                : (now ? [{ op: "save", label: "Save", strong: true }] : []))
+                .concat([{ op: "again", label: "Train again" }, { op: "cancel", label: "Cancel" }]);
         }
 
         return view;
@@ -14132,6 +14200,8 @@
         ui.delayValue.textContent = view.delay + " ms";
         ui.quietRow.style.display = view.at === "done" ? "none" : "flex";
         ui.quietHint.style.display = view.at === "done" ? "none" : "";
+        ui.autoRow.style.display = view.at === "done" ? "none" : "flex";
+        ui.auto.checked = view.auto === true;
 
         if (document.activeElement !== ui.quiet) {
             ui.quiet.value = String(view.quiet);
@@ -14278,6 +14348,29 @@
             + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
         ui.quietHint.style.cssText = "font-size:12px;line-height:1.4;color:#e8a0a0";
 
+        // Damp the louder steps, so the volume need not be turned down
+        // more and more by hand
+        ui.autoRow = document.createElement("label");
+        ui.autoRow.style.cssText = "display:flex;align-items:flex-start;gap:10px;cursor:pointer";
+        ui.auto = document.createElement("input");
+        ui.auto.type = "checkbox";
+        ui.auto.style.cssText = "flex:0 0 auto;width:20px;height:20px;margin:2px 0 0;accent-color:#48e1eb";
+        ui.auto.addEventListener("change", function () {
+            volTrainAct("auto", ui.auto.checked);
+        });
+
+        const autoText = document.createElement("span");
+        const autoName = document.createElement("div");
+        const autoHint = document.createElement("div");
+
+        autoName.textContent = "Damp the louder steps";
+        autoHint.textContent = "From the third step on, the player turns both sides down by as much as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.style.cssText = "font-size:12px;line-height:1.4;color:#999;margin-top:2px";
+        autoText.appendChild(autoName);
+        autoText.appendChild(autoHint);
+        ui.autoRow.appendChild(ui.auto);
+        ui.autoRow.appendChild(autoText);
+
         ui.list = document.createElement("div");
         ui.list.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:13px;color:#ccc;font-variant-numeric:tabular-nums";
         ui.buttons = document.createElement("div");
@@ -14290,6 +14383,7 @@
         box.appendChild(ui.gapRow);
         box.appendChild(ui.delayRow);
         box.appendChild(ui.delayHint);
+        box.appendChild(ui.autoRow);
         box.appendChild(ui.quietRow);
         box.appendChild(ui.quietHint);
         box.appendChild(ui.list);
@@ -68966,6 +69060,27 @@
         line-height: 1.4;
     }
 
+    .trainAuto {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        cursor: pointer;
+    }
+
+    .trainAuto > span {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .trainAuto input {
+        flex: 0 0 auto;
+        width: 22px;
+        height: 22px;
+        margin: 2px 0 0;
+        accent-color: var(--accent);
+    }
+
     .trainList {
         display: flex;
         flex-direction: column;
@@ -97679,6 +97794,27 @@
         ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
             + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
 
+        // Damp the louder steps, so the volume need not be turned down
+        // more and more by hand
+        const autoText = document.createElement("span");
+        const autoName = document.createElement("span");
+        const autoHint = document.createElement("span");
+
+        ui.autoRow = document.createElement("label");
+        ui.autoRow.className = "trainAuto";
+        ui.auto = document.createElement("input");
+        ui.auto.type = "checkbox";
+        ui.auto.addEventListener("change", function () {
+            send("volTrain", { op: "auto", value: ui.auto.checked });
+        });
+        autoName.textContent = "Damp the louder steps";
+        autoHint.className = "trainText";
+        autoHint.textContent = "From the third step on, the player turns both sides down by as much as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoText.appendChild(autoName);
+        autoText.appendChild(autoHint);
+        ui.autoRow.appendChild(ui.auto);
+        ui.autoRow.appendChild(autoText);
+
         ui.list = document.createElement("div");
         ui.list.className = "trainList";
         ui.acts = document.createElement("div");
@@ -97693,6 +97829,7 @@
         ui.box.appendChild(ui.gapRow);
         ui.box.appendChild(ui.delayRow);
         ui.box.appendChild(ui.delayHint);
+        ui.box.appendChild(ui.autoRow);
         ui.box.appendChild(ui.quietRow);
         ui.box.appendChild(ui.quietHint);
         ui.box.appendChild(ui.list);
@@ -97736,6 +97873,11 @@
         ui.delay.textContent = (Number(v.delay) || 0) + " ms";
         ui.quietRow.style.display = v.at === "done" ? "none" : "";
         ui.quietHint.style.display = v.at === "done" ? "none" : "";
+        ui.autoRow.style.display = v.at === "done" ? "none" : "";
+
+        if (document.activeElement !== ui.auto) {
+            ui.auto.checked = v.auto === true;
+        }
 
         // Not moved back under a finger, nor before the phone has it
         if (Date.now() - trainQuietAt > 1500) {
