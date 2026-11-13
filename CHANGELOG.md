@@ -1091,6 +1091,15 @@ In development.
   were, every band weaker halfway. Tempos are worked out again as songs
   come up, and the debug log and Stats for nerds say when a tempo was
   doubled this way.
+- **Create song from this keeps the remix.** On a song made as a remix
+  the form got its title, lyrics and style but not the uploaded song it
+  remixed, so the new song was no remix. The uploaded song now comes
+  along, made ready to remix again by Mureka: by its id when the song's
+  detail gives one, else found among the uploaded songs by its title, else
+  the remix the song kept is used as it is. The note under the form says
+  which song is remixed, or that it could not be found and can be picked
+  under Remix. Every field of the song's detail that could name it goes to
+  the debug log, as Mureka's names for them are not known for sure.
 - **Drum and bass at its own tempo, also when Mureka says half.** With
   Mureka's tempo near the one first found, the beat was kept, so a drum
   and bass song Mureka gives 87 stayed at 87. Kick and snare taking turns

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.121";
+    const VERSION = "2.0.1.122";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -62810,7 +62810,143 @@
             changes.voice = gender;
         }
 
+        // A remix takes along the uploaded song it remixed, made ready
+        // again, so the new one is a remix of it too
+        const ref = createRemixRefOf(data, s, song);
+
+        if (ref) {
+
+            const used = await createRun("Mureka gets the remixed song ready", function () {
+                return createRemixAgain(ref);
+            });
+
+            if (used) {
+
+                changes.remix = used.remix;
+                changes.remixName = used.name;
+                changes.remixStyle = used.style;
+            }
+
+            return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental, remix: ref, remixed: !!used };
+        }
+
         return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental };
+    }
+
+    // What a song made as a remix says about the uploaded song it remixed:
+    // the object sent with it, or an id and a title of the upload, from
+    // whichever field of the song's detail holds them. Null for a song
+    // that is no remix. Every such field goes to the debug log, as Mureka
+    // names them its own way
+    const CREATE_REMIX_KEY = /remix|resource|refer|origin/i;
+
+    function createRemixRefOf(data, s, song) {
+
+        const seen = [];
+        let ref = null;
+
+        for (const src of [s, data, song]) {
+
+            if (!src || typeof src !== "object") {
+                continue;
+            }
+
+            for (const k of Object.keys(src)) {
+
+                const v = src[k];
+
+                if (!CREATE_REMIX_KEY.test(k) || v === null || v === undefined || v === "" || v === 0 || v === false) {
+                    continue;
+                }
+
+                // Remixing allowed says nothing of what it was made from
+                if (/^allow_|^is_|_allowed$/.test(k)) {
+                    continue;
+                }
+
+                seen.push(k + "=" + (typeof v === "object" ? JSON.stringify(v) : String(v)).slice(0, 300));
+
+                if (ref) {
+                    continue;
+                }
+
+                if (typeof v === "object" && !Array.isArray(v) && (v.id || v.resource_id)) {
+
+                    const o = v.resource && typeof v.resource === "object" ? v.resource : v;
+
+                    ref = {
+                        remix: o.url && o.id ? createCleanRemix(o) : null,
+                        resourceId: o.resource_id || o.origin_resource_id || (/resource|origin/i.test(k) ? o.id : 0) || 0,
+                        title: String(o.title || o.name || "").slice(0, 120),
+                        ms: Number(o.duration_milliseconds) || 0
+                    };
+                } else if ((typeof v === "number" || /^\d+$/.test(String(v))) && /resource.*id|remix.*id|origin.*id/i.test(k)) {
+                    ref = { remix: null, resourceId: v, title: "", ms: 0 };
+                }
+            }
+        }
+
+        if (seen.length > 0) {
+            dbgLog("Create", "song " + song.song_id + " remix fields: " + seen.join("; ").slice(0, 1500));
+        }
+
+        return ref;
+    }
+
+    // The uploaded song a remix was made from, made ready to remix again.
+    // By its id when the song gives it, else found among the uploaded songs
+    // by its title. The remix object the song kept is used as it is when
+    // nothing else is to be had
+    async function createRemixAgain(ref) {
+
+        let res = ref.resourceId ? { id: ref.resourceId, title: ref.title, ms: ref.ms } : null;
+
+        if (!res && ref.title) {
+
+            let last = "0";
+
+            for (let i = 0; i < 5 && !res; i++) {
+
+                let page = null;
+
+                try {
+                    page = await createResources(last);
+                } catch (e) {
+                    break;
+                }
+
+                res = page.list.find(function (r) {
+                    return r.title === ref.title;
+                }) || null;
+
+                if (!page.more) {
+                    break;
+                }
+
+                last = page.last;
+            }
+        }
+
+        if (res) {
+
+            try {
+
+                const used = await createUse(res);
+
+                dbgLog("Create", "remixed song " + res.id + " made ready again for the new song");
+                return used;
+            } catch (e) {
+                dbgLog("Create", "remixed song " + res.id + " could not be made ready again, " + errText(e));
+            }
+        }
+
+        if (ref.remix) {
+
+            dbgLog("Create", "remix " + ref.remix.id + " taken as the song had it");
+            return { remix: ref.remix, name: ref.title || ref.remix.title || "", style: "" };
+        }
+
+        return null;
     }
 
     async function createFromSong(song) {
@@ -62883,7 +63019,9 @@
         }
 
         changeCreateDraft(read.changes);
-        setCreateNote("From \"" + (song.title || "the song") + "\"" + (read.style ? "" : ", Mureka gave no style") + (read.instrumental || read.lyrics ? "" : ", no lyrics"));
+        setCreateNote("From \"" + (song.title || "the song") + "\"" + (read.style ? "" : ", Mureka gave no style") + (read.instrumental || read.lyrics ? "" : ", no lyrics")
+            + (read.remix ? (read.remixed ? ", remixing " + (read.changes.remixName || "the same uploaded song")
+            : ", a remix but the song it remixed could not be found, pick it under Remix") : ""), read.remix && !read.remixed);
         showToast("The form has the song's title, lyrics and style", true, function () {
             changeCreateDraft(before);
         });
