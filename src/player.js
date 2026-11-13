@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.122";
+    const VERSION = "2.0.1.123";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22782,7 +22782,7 @@
         // Requests about making songs, their whole body and a longer answer
         // logged, lyrics and styles being long: generating, lyrics, voices,
         // styles, models, tags, references and the like
-        const MAKING = /generate|lyric|vocal|voice|singer|character|style|prompt|model|genre|mood|tag|refer|motif|extend|regenerate|instrumental|inspir|template|create|remix|lora/i;
+        const MAKING = /generate|lyric|vocal|voice|singer|character|style|prompt|model|genre|mood|tag|refer|motif|extend|regenerate|instrumental|inspir|template|create|remix|resource|lora/i;
 
         // What could let someone act as the user is blanked before it is
         // logged: values of keys that look like tokens, passwords or
@@ -62810,8 +62810,8 @@
             changes.voice = gender;
         }
 
-        // A remix takes along the uploaded song it remixed, made ready
-        // again, so the new one is a remix of it too
+        // A remix takes along the song it remixed, an uploaded one or one on
+        // Mureka, so the new one is a remix of it too
         const ref = createRemixRefOf(data, s, song);
 
         if (ref) {
@@ -62833,8 +62833,8 @@
         return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental };
     }
 
-    // What a song made as a remix says about the uploaded song it remixed:
-    // the object sent with it, or an id and a title of the upload, from
+    // What a song made as a remix says about the song it remixed, uploaded
+    // or on Mureka: the object sent with it, or an id and a title, from
     // whichever field of the song's detail holds them. Null for a song
     // that is no remix. Every such field goes to the debug log, as Mureka
     // names them its own way
@@ -62875,7 +62875,7 @@
                     const o = v.resource && typeof v.resource === "object" ? v.resource : v;
 
                     ref = {
-                        remix: o.url && o.id ? createCleanRemix(o) : null,
+                        remix: o.url && o.id ? createCleanRemix(o) : (v.url && v.id ? createCleanRemix(v) : null),
                         resourceId: o.resource_id || o.origin_resource_id || (/resource|origin/i.test(k) ? o.id : 0) || 0,
                         title: String(o.title || o.name || "").slice(0, 120),
                         ms: Number(o.duration_milliseconds) || 0
@@ -62893,11 +62893,19 @@
         return ref;
     }
 
-    // The uploaded song a remix was made from, made ready to remix again.
-    // By its id when the song gives it, else found among the uploaded songs
-    // by its title. The remix object the song kept is used as it is when
-    // nothing else is to be had
+    // What a remix was made from, ready to remix again. The remix the song
+    // kept is used as it is, whether it was an uploaded song or a song on
+    // Mureka. Without one, an uploaded song is made ready again by Mureka:
+    // by its id when the song gives it, else found among the uploaded songs
+    // by its title
     async function createRemixAgain(ref) {
+
+        if (ref.remix) {
+
+            dbgLog("Create", "remix " + ref.remix.id + " taken as the song had it, " + (ref.remix.title || "no title")
+                + ", source type " + (ref.remix.source_type === undefined ? "-" : ref.remix.source_type));
+            return { remix: ref.remix, name: ref.title || ref.remix.title || "", style: "" };
+        }
 
         let res = ref.resourceId ? { id: ref.resourceId, title: ref.title, ms: ref.ms } : null;
 
@@ -62938,12 +62946,6 @@
             } catch (e) {
                 dbgLog("Create", "remixed song " + res.id + " could not be made ready again, " + errText(e));
             }
-        }
-
-        if (ref.remix) {
-
-            dbgLog("Create", "remix " + ref.remix.id + " taken as the song had it");
-            return { remix: ref.remix, name: ref.title || ref.remix.title || "", style: "" };
         }
 
         return null;
@@ -63021,7 +63023,7 @@
         changeCreateDraft(read.changes);
         setCreateNote("From \"" + (song.title || "the song") + "\"" + (read.style ? "" : ", Mureka gave no style") + (read.instrumental || read.lyrics ? "" : ", no lyrics")
             + (read.remix ? (read.remixed ? ", remixing " + (read.changes.remixName || "the same uploaded song")
-            : ", a remix but the song it remixed could not be found, pick it under Remix") : ""), read.remix && !read.remixed);
+            : ", a remix but the song it remixed could not be found") : ""), read.remix && !read.remixed);
         showToast("The form has the song's title, lyrics and style", true, function () {
             changeCreateDraft(before);
         });
@@ -63712,7 +63714,7 @@
         ui.modelBox.style.display = song && d.remix ? "none" : "flex";
         ui.modelRow.paint();
         ui.remixName.textContent = d.remix
-            ? "Remixing " + (d.remixName || d.remix.title || "an uploaded song")
+            ? "Remixing " + (d.remixName || d.remix.title || "a song")
                 + (d.remix.trim_end_ms ? ", " + trimTimeText((d.remix.trim_end_ms - (d.remix.trim_start_ms || 0)) / 1000) : "")
             : "None, a new song";
         ui.remixName.style.color = d.remix ? "#fff" : "#888";
