@@ -1079,6 +1079,18 @@ In development.
 - **The crosses in editing by hand show as crosses.** Two were written
   as a raw character and came out as other letters where the player is
   loaded without its character set.
+- **Drum and bass at its own tempo, not half.** In drum and bass the kick
+  and the snare take turns, so folded at half the tempo the place
+  halfway is the stronger one in the deep band or the middle one, though
+  not in all the sound. That now doubles the tempo past 160 BPM too,
+  with the starts halfway at least 70% as strong. A song at 175 BPM came
+  out at 87: its deep band was 83% as strong halfway where 85% was
+  asked, its middle band, the snare, 111%. Now 174, as it measures over
+  the whole song. Hip hop at 87, a song at 100 with chords on every
+  eighth and funk at 95 with the bass on the off beats stay as they
+  were, every band weaker halfway. Tempos are worked out again as songs
+  come up, and the debug log and Stats for nerds say when a tempo was
+  doubled this way.
 
 ### Build
 
