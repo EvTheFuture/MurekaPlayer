@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.115";
+    const VERSION = "2.0.1.116";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13543,7 +13543,10 @@
         // Remember it so a later Download all can skip it
         downloadedIds.add(song.song_id);
         saveDownloadedIds();
-        renderList();
+
+        if (!repaintSongRow(song)) {
+            renderList();
+        }
 
         setStatus("Saving to the Mureka folder: " + (song.title || "Untitled"));
     }
@@ -22719,7 +22722,10 @@
                 saveCache();
 
                 // Take the New mark off the row, here and in the web view
-                renderList();
+                if (!repaintSongRow(kept || song)) {
+                    renderList();
+                }
+
                 publishHostSoon();
             }
 
@@ -24571,7 +24577,10 @@
             if (ok) {
 
                 cachedIds.add(song.song_id);
-                renderList();
+
+                if (!repaintSongRow(song)) {
+                    renderList();
+                }
 
                 // The immediate next song just became available from the cache
                 if (i === 1) {
@@ -38393,7 +38402,25 @@
         return null;
     }
 
-    function hostPanel(name) {
+    // A short fingerprint of a text, FNV-1a, for telling the web view its
+    // copy of a panel is still the one drawn
+    function textPrint(text) {
+
+        let x = 0x811c9dc5;
+
+        for (let i = 0; i < text.length; i++) {
+
+            x ^= text.charCodeAt(i);
+            x = Math.imul(x, 0x01000193) >>> 0;
+        }
+
+        return x.toString(36) + "." + text.length.toString(36);
+    }
+
+    // A panel for the web view. Given the fingerprint of the copy it shows,
+    // a panel that is still the same is answered with that alone, so it is
+    // not sent and read again every two seconds
+    function hostPanel(name, have) {
 
         let root = null;
 
@@ -38452,7 +38479,13 @@
             playlistsPanelDone = 0;
         }
 
-        return { name: name, items: items, close: close };
+        const print = textPrint(JSON.stringify(items));
+
+        if (!close && typeof have === "string" && have === print) {
+            return { name: name, same: true, print: print };
+        }
+
+        return { name: name, items: items, close: close, print: print };
     }
 
     // Find a control the web view picked from a panel copy. Only one the
@@ -39802,7 +39835,7 @@
 
                 const name = ["settings", "filters", "creators", "info", "playlists"].indexOf(q("name")) >= 0 ? q("name") : "settings";
 
-                return inPageJson(hostPanel(name));
+                return inPageJson(hostPanel(name, q("have")));
             } else if (path === "/menu") {
                 return inPageJson(hostSongMenu(q("id")));
             } else if (path === "/parts") {
@@ -46164,6 +46197,72 @@
     // Render any list of songs, the number shown is always the Mureka position
     // Build the next rows of the list as elements. Called for the first chunk
     // on every redraw and again whenever the scroll gets near the bottom
+    // One song's row drawn again in place, for a mark that changed on it,
+    // played or stored, instead of the whole list. Only where the mark
+    // cannot move the song, show it or hide it: not in the queue or the
+    // sets, not under a set's head, and only while the playlist, the search
+    // and the filters let it through as before. Anything else, a row not
+    // built yet among them, answers false, and the whole list is drawn as
+    // before
+    function repaintSongRow(song) {
+
+        if (!listEl || !song || listView === "queue" || listView === "sets") {
+            return false;
+        }
+
+        let row = null;
+
+        for (const el of listEl.children) {
+
+            if (el.__row && el.__row.song.song_id === song.song_id) {
+
+                // The same song twice in view, drawn as a whole
+                if (row) {
+                    return false;
+                }
+
+                row = el;
+            }
+        }
+
+        if (!row || (row.__row.entry && row.__row.entry.setUnder)) {
+            return false;
+        }
+
+        const was = row.__row;
+        const s = was.song;
+
+        if (isPendingSong(s) || !passesPlaylist(s) || !searchMatches(s, searchQuery)) {
+            return false;
+        }
+
+        const greyed = !passesSongFilters(s);
+
+        if (greyed !== was.greyed || (greyed && !showLeftOut())) {
+            return false;
+        }
+
+        const item = buildSongRow(s, was.number, was.isPlaying, was.dimmed, was.queueIndex, was.entry);
+
+        if (row.style.marginLeft) {
+            item.style.marginLeft = row.style.marginLeft;
+        }
+
+        item.__row = was;
+        row.replaceWith(item);
+
+        if (was.isPlaying) {
+            playingItemEl = item;
+        }
+
+        // As a whole drawing does: the web view's copy made again, the
+        // marks kept
+        hostListStamp += 1;
+        saveCacheMarksSoon();
+
+        return true;
+    }
+
     function renderMoreRows(count) {
 
         if (!listEl || !lazyState) {
@@ -46208,13 +46307,19 @@
                 dimmed = false;
             }
 
-            const item = buildSongRow(song, lazyState.numberById.get(song.song_id), isPlaying, dimmed,
-                lazyState.byQueueIndex ? entry.index : -1, lazyState.byQueueIndex ? null : entry);
+            const number = lazyState.numberById.get(song.song_id);
+            const queueIndex = lazyState.byQueueIndex ? entry.index : -1;
+            const rowEntry = lazyState.byQueueIndex ? null : entry;
+            const item = buildSongRow(song, number, isPlaying, dimmed, queueIndex, rowEntry);
 
             // Under its set's head, set in like the Sets view
             if (entry.setUnder) {
                 item.style.marginLeft = "10px";
             }
+
+            // How it was built, so a mark changing on it draws it alone again
+            item.__row = { song: song, number: number, isPlaying: isPlaying, dimmed: dimmed, queueIndex: queueIndex,
+                entry: rowEntry, greyed: !!entry.greyed };
 
             if (isPlaying) {
                 playingItemEl = item;
@@ -78875,6 +78980,62 @@
     const MARQUEE_GAP_SHARE = 0.5;
     const marquees = [];
 
+    // A function run once on the next frame, however often it is asked for
+    // until then, so a burst of scrolls or changes measures the page once
+    function onNextFrame(fn) {
+
+        let asked = false;
+
+        return function () {
+
+            if (asked) {
+                return;
+            }
+
+            asked = true;
+            requestAnimationFrame(function () {
+
+                asked = false;
+                fn();
+            });
+        };
+    }
+
+    // How often a check that is also run on every change it depends on runs
+    // anyway, for what no event tells, such as a cover coming in and making
+    // a row taller. Without the browser's watchers the checks run as often
+    // as they did before, see watchOr
+    const SAFETY_CHECK_MS = 3000;
+
+    // Run a check when the boxes change size or their rows come and go,
+    // and every SAFETY_CHECK_MS. A browser without ResizeObserver or
+    // MutationObserver checks every fallbackMs instead, as before
+    function watchOr(ids, check, fallbackMs) {
+
+        if (typeof ResizeObserver !== "function" || typeof MutationObserver !== "function") {
+
+            setInterval(check, fallbackMs);
+            return;
+        }
+
+        const soon = onNextFrame(check);
+        const sizes = new ResizeObserver(soon);
+        const rows = new MutationObserver(soon);
+
+        for (const id of ids) {
+
+            const el = $(id);
+
+            if (el) {
+
+                sizes.observe(el);
+                rows.observe(el, { childList: true });
+            }
+        }
+
+        setInterval(check, SAFETY_CHECK_MS);
+    }
+
     function makeMarquee(box) {
 
         const track = document.createElement("span");
@@ -79116,12 +79277,30 @@
         statusRoom.observe($("badges"));
     }
 
-    setInterval(function () {
+    // A line's width changes as the screen turns, panels open and badges
+    // come and go, and only then may it start or stop walking. Its text
+    // changing starts it again by itself
+    if (typeof ResizeObserver === "function") {
 
-        for (const m of marquees) {
-            m.check();
+        const lineRoom = new ResizeObserver(onNextFrame(function () {
+
+            for (const m of marquees) {
+                m.check();
+            }
+        }));
+
+        for (const id of ["title", "subtitle", "upTitle", "playTitle", "status", "fromText"]) {
+            lineRoom.observe($(id));
         }
-    }, 1000);
+    } else {
+
+        setInterval(function () {
+
+            for (const m of marquees) {
+                m.check();
+            }
+        }, 1000);
+    }
 
     // The online and offline badge, in the bottom bar, or beside the name
     // at the top on a phone. Offline shows as long as it lasts. Back online
@@ -81221,6 +81400,11 @@
         return next;
     }
 
+    // What the frame last put on the page, so a frame where nothing moved
+    // writes nothing. Writing the same width or text again still makes the
+    // browser lay the page out anew, sixty times a second while paused
+    const tickShown = { bar: "", cur: "", left: "" };
+
     function tick() {
 
         const dur = state && state.duration ? state.duration : 0;
@@ -81231,13 +81415,31 @@
 
         const pos = dragging ? dragFrac * dur : smoothPosition(position());
         const frac = dur > 0 ? Math.min(1, pos / dur) : 0;
+        const bar = (frac * 100) + "%";
+        const cur = fmt(pos);
+        const left = "-" + fmt(dur - pos);
 
-        $("fill").style.width = (frac * 100) + "%";
-        $("knob").style.left = (frac * 100) + "%";
+        if (bar !== tickShown.bar) {
+
+            tickShown.bar = bar;
+            $("fill").style.width = bar;
+            $("knob").style.left = bar;
+        }
+
         drawWave(frac);
         showLyrics(pos);
-        $("cur").textContent = fmt(pos);
-        $("left").textContent = "-" + fmt(dur - pos);
+
+        if (cur !== tickShown.cur) {
+
+            tickShown.cur = cur;
+            $("cur").textContent = cur;
+        }
+
+        if (left !== tickShown.left) {
+
+            tickShown.left = left;
+            $("left").textContent = left;
+        }
 
         requestAnimationFrame(tick);
     }
@@ -86234,6 +86436,13 @@
     let panelTimer = null;
     let panelBusy = false;
 
+    // The phone's fingerprint of a panel read, which panel it was, and the
+    // drawing made from it. Sent back only while that drawing is still the
+    // one shown, not one drawn here from a page kept or a change made here
+    let panelPrint = "";
+    let panelPrintName = "";
+    let panelPrintDrawn = "";
+
     // The last reading of the panel, drawn again after a change made here
     let lastPanelItems = null;
 
@@ -86280,7 +86489,18 @@
             }
         };
 
-        return fetchJson("/panel?name=" + esc(name), 20000).then(function (data) {
+        // The fingerprint of the copy drawn now, so the phone answers with
+        // that alone when nothing changed
+        const have = panelPrint && panelPrintName === name && panelPrintDrawn === panelDrawn
+            && $("panelBody").childElementCount > 0 ? "&have=" + esc(panelPrint) : "";
+
+        return fetchJson("/panel?name=" + esc(name) + have, 20000).then(function (data) {
+
+            if (data && data.same === true) {
+
+                next();
+                return;
+            }
 
             // Never redrawn under a finger typing in one of its fields, or
             // moving a button in the transport bar editor, nor from a
@@ -86295,7 +86515,17 @@
                 && $("panelBody").childElementCount > 0;
 
             if (data && data.items && panelOpen() && !typing && !editorBusy && !eqMoving && acts === panelActs && name === panelName && !same) {
+
                 renderPanel(data.items);
+            }
+
+            // The fingerprint kept with the drawing it belongs to, whether
+            // drawn now or found the same as the one shown
+            if (data && data.items && name === panelName && JSON.stringify(data.items) === panelDrawn) {
+
+                panelPrint = typeof data.print === "string" ? data.print : "";
+                panelPrintName = name;
+                panelPrintDrawn = panelDrawn;
             }
 
             // A playlist picked there closes the page
@@ -90122,7 +90352,8 @@
     // Looked at again now and then as well: rows change height as covers
     // come in and sets open, and a phone browser asleep a while misses the
     // moment the song changed
-    setInterval(updateMiniLocate, 700);
+    $("miniRows").addEventListener("scroll", onNextFrame(updateMiniLocate), { passive: true });
+    watchOr(["miniRows"], updateMiniLocate, 700);
     document.addEventListener("visibilitychange", function () {
 
         if (!document.hidden) {
@@ -90512,8 +90743,8 @@
         $("toCurrent").click();
     });
 
-    $("rows").addEventListener("scroll", updateRowsLocate, { passive: true });
-    setInterval(updateRowsLocate, 700);
+    $("rows").addEventListener("scroll", onNextFrame(updateRowsLocate), { passive: true });
+    watchOr(["rows"], updateRowsLocate, 700);
 
     $("closeBrowse").addEventListener("click", function () {
 
@@ -100875,7 +101106,7 @@
     }
 
     window.addEventListener("resize", fixGutters);
-    setInterval(fixGutters, 500);
+    watchOr(["rows", "menuBox", "actionsBox", "helpBox"], fixGutters, 500);
 
     // The trimmer: a page over everything to cut the start and the end off
     // a song of the account's own. The same as the phone's, drawn here: the song is

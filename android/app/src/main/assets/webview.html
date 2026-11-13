@@ -10854,6 +10854,62 @@
     const MARQUEE_GAP_SHARE = 0.5;
     const marquees = [];
 
+    // A function run once on the next frame, however often it is asked for
+    // until then, so a burst of scrolls or changes measures the page once
+    function onNextFrame(fn) {
+
+        let asked = false;
+
+        return function () {
+
+            if (asked) {
+                return;
+            }
+
+            asked = true;
+            requestAnimationFrame(function () {
+
+                asked = false;
+                fn();
+            });
+        };
+    }
+
+    // How often a check that is also run on every change it depends on runs
+    // anyway, for what no event tells, such as a cover coming in and making
+    // a row taller. Without the browser's watchers the checks run as often
+    // as they did before, see watchOr
+    const SAFETY_CHECK_MS = 3000;
+
+    // Run a check when the boxes change size or their rows come and go,
+    // and every SAFETY_CHECK_MS. A browser without ResizeObserver or
+    // MutationObserver checks every fallbackMs instead, as before
+    function watchOr(ids, check, fallbackMs) {
+
+        if (typeof ResizeObserver !== "function" || typeof MutationObserver !== "function") {
+
+            setInterval(check, fallbackMs);
+            return;
+        }
+
+        const soon = onNextFrame(check);
+        const sizes = new ResizeObserver(soon);
+        const rows = new MutationObserver(soon);
+
+        for (const id of ids) {
+
+            const el = $(id);
+
+            if (el) {
+
+                sizes.observe(el);
+                rows.observe(el, { childList: true });
+            }
+        }
+
+        setInterval(check, SAFETY_CHECK_MS);
+    }
+
     function makeMarquee(box) {
 
         const track = document.createElement("span");
@@ -11095,12 +11151,30 @@
         statusRoom.observe($("badges"));
     }
 
-    setInterval(function () {
+    // A line's width changes as the screen turns, panels open and badges
+    // come and go, and only then may it start or stop walking. Its text
+    // changing starts it again by itself
+    if (typeof ResizeObserver === "function") {
 
-        for (const m of marquees) {
-            m.check();
+        const lineRoom = new ResizeObserver(onNextFrame(function () {
+
+            for (const m of marquees) {
+                m.check();
+            }
+        }));
+
+        for (const id of ["title", "subtitle", "upTitle", "playTitle", "status", "fromText"]) {
+            lineRoom.observe($(id));
         }
-    }, 1000);
+    } else {
+
+        setInterval(function () {
+
+            for (const m of marquees) {
+                m.check();
+            }
+        }, 1000);
+    }
 
     // The online and offline badge, in the bottom bar, or beside the name
     // at the top on a phone. Offline shows as long as it lasts. Back online
@@ -13200,6 +13274,11 @@
         return next;
     }
 
+    // What the frame last put on the page, so a frame where nothing moved
+    // writes nothing. Writing the same width or text again still makes the
+    // browser lay the page out anew, sixty times a second while paused
+    const tickShown = { bar: "", cur: "", left: "" };
+
     function tick() {
 
         const dur = state && state.duration ? state.duration : 0;
@@ -13210,13 +13289,31 @@
 
         const pos = dragging ? dragFrac * dur : smoothPosition(position());
         const frac = dur > 0 ? Math.min(1, pos / dur) : 0;
+        const bar = (frac * 100) + "%";
+        const cur = fmt(pos);
+        const left = "-" + fmt(dur - pos);
 
-        $("fill").style.width = (frac * 100) + "%";
-        $("knob").style.left = (frac * 100) + "%";
+        if (bar !== tickShown.bar) {
+
+            tickShown.bar = bar;
+            $("fill").style.width = bar;
+            $("knob").style.left = bar;
+        }
+
         drawWave(frac);
         showLyrics(pos);
-        $("cur").textContent = fmt(pos);
-        $("left").textContent = "-" + fmt(dur - pos);
+
+        if (cur !== tickShown.cur) {
+
+            tickShown.cur = cur;
+            $("cur").textContent = cur;
+        }
+
+        if (left !== tickShown.left) {
+
+            tickShown.left = left;
+            $("left").textContent = left;
+        }
 
         requestAnimationFrame(tick);
     }
@@ -18213,6 +18310,13 @@
     let panelTimer = null;
     let panelBusy = false;
 
+    // The phone's fingerprint of a panel read, which panel it was, and the
+    // drawing made from it. Sent back only while that drawing is still the
+    // one shown, not one drawn here from a page kept or a change made here
+    let panelPrint = "";
+    let panelPrintName = "";
+    let panelPrintDrawn = "";
+
     // The last reading of the panel, drawn again after a change made here
     let lastPanelItems = null;
 
@@ -18259,7 +18363,18 @@
             }
         };
 
-        return fetchJson("/panel?name=" + esc(name), 20000).then(function (data) {
+        // The fingerprint of the copy drawn now, so the phone answers with
+        // that alone when nothing changed
+        const have = panelPrint && panelPrintName === name && panelPrintDrawn === panelDrawn
+            && $("panelBody").childElementCount > 0 ? "&have=" + esc(panelPrint) : "";
+
+        return fetchJson("/panel?name=" + esc(name) + have, 20000).then(function (data) {
+
+            if (data && data.same === true) {
+
+                next();
+                return;
+            }
 
             // Never redrawn under a finger typing in one of its fields, or
             // moving a button in the transport bar editor, nor from a
@@ -18274,7 +18389,17 @@
                 && $("panelBody").childElementCount > 0;
 
             if (data && data.items && panelOpen() && !typing && !editorBusy && !eqMoving && acts === panelActs && name === panelName && !same) {
+
                 renderPanel(data.items);
+            }
+
+            // The fingerprint kept with the drawing it belongs to, whether
+            // drawn now or found the same as the one shown
+            if (data && data.items && name === panelName && JSON.stringify(data.items) === panelDrawn) {
+
+                panelPrint = typeof data.print === "string" ? data.print : "";
+                panelPrintName = name;
+                panelPrintDrawn = panelDrawn;
             }
 
             // A playlist picked there closes the page
@@ -22101,7 +22226,8 @@
     // Looked at again now and then as well: rows change height as covers
     // come in and sets open, and a phone browser asleep a while misses the
     // moment the song changed
-    setInterval(updateMiniLocate, 700);
+    $("miniRows").addEventListener("scroll", onNextFrame(updateMiniLocate), { passive: true });
+    watchOr(["miniRows"], updateMiniLocate, 700);
     document.addEventListener("visibilitychange", function () {
 
         if (!document.hidden) {
@@ -22491,8 +22617,8 @@
         $("toCurrent").click();
     });
 
-    $("rows").addEventListener("scroll", updateRowsLocate, { passive: true });
-    setInterval(updateRowsLocate, 700);
+    $("rows").addEventListener("scroll", onNextFrame(updateRowsLocate), { passive: true });
+    watchOr(["rows"], updateRowsLocate, 700);
 
     $("closeBrowse").addEventListener("click", function () {
 
@@ -32854,7 +32980,7 @@
     }
 
     window.addEventListener("resize", fixGutters);
-    setInterval(fixGutters, 500);
+    watchOr(["rows", "menuBox", "actionsBox", "helpBox"], fixGutters, 500);
 
     // The trimmer: a page over everything to cut the start and the end off
     // a song of the account's own. The same as the phone's, drawn here: the song is

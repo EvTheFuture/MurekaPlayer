@@ -982,7 +982,12 @@ final class WebViewServer {
                     name = "settings";
                 }
 
-                sendCall(out, "__murekaHostPanel", JSONObject.quote(name));
+                // With the fingerprint of the copy the browser shows, which
+                // only ever goes in quoted
+                String have = param(query, "have");
+
+                sendCall(out, "__murekaHostPanel", JSONObject.quote(name) + ", "
+                    + (have.isEmpty() || have.length() > 40 ? "null" : JSONObject.quote(have)));
             } else if ("GET".equals(method) && "/bt".equals(path)) {
 
                 // The phone's paired Bluetooth devices, read by the app

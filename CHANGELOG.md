@@ -1024,6 +1024,26 @@ In development.
 - **Another tab's save is no longer written over.** Taking over a list
   another tab saved first wrote this tab's waiting list over it. Now
   the other tab's list is read as it arrived.
+- **The web view lays its page out only when something changed.** Its
+  frame loop wrote the progress bar and the two times on every frame,
+  the same values too, which made the browser lay the whole page out
+  sixty times a second even while paused. Now it writes only what
+  changed: idle, no layout at all instead of 600 in ten seconds, and
+  half the script time. The scrollbar gutters, the buttons that find the
+  playing song and the walking lines are checked when the boxes change
+  size, their rows change or they scroll, and every three seconds for
+  what no event tells, instead of every half second to second. Browsers
+  without those watchers check as before.
+- **An unchanged settings page is not sent again.** The web view reads
+  an open panel every two seconds. It now sends a fingerprint of the
+  copy it shows, and an unchanged panel is answered with that alone,
+  so it is not sent, read and compared each time. The phone still looks
+  at the page each time, so nothing can go stale.
+- **One row drawn again for a mark.** A song marked played, stored for
+  offline or saved to the downloads has only its own row drawn again,
+  the same as a whole drawing would make it. Where the mark could move
+  the song, show it or hide it, in the queue, the sets, under a set's
+  head, or with a row not built yet, the whole list is drawn as before.
 
 ### Build
 
