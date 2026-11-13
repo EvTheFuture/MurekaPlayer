@@ -838,6 +838,22 @@ In development.
   slider was let go. The web view now draws that line itself from the
   phone's state, as the volume popup does, so it follows while the
   slider is moved back and forth.
+- **Step 1 against the lowest, typed in by hand.** Edit by hand starts
+  with Step 1, dB louder than the lowest: how much quieter the lowest
+  level above silence, 1%, is than the phone's first step. Set, the
+  levels under step 1 go down by it evenly in dB, as between the other
+  steps. Empty, they go down by their share of step 1 as before, which
+  the field shows greyed, about 15.6 dB with 16 steps. It cannot be
+  trained, as there is nothing to hear it against, and it has no part in
+  drawing the steps from 2 up. Each speaker has its own, this device's
+  for those without, and Forget takes it away with the rest. Any value
+  typed in is taken away by emptying its field, or with the cross in the
+  web view.
+- **Switch by hand in the training.** The training no longer switches by
+  itself every three seconds: a large Switch button moves between the
+  step turned down by the gap and the step below, as often as needed, on
+  the phone and in the web view. Each step starts on the step itself.
+  With nothing pressed for 15 minutes the training still ends by itself.
 
 ### Build
 

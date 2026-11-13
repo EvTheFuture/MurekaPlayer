@@ -124,14 +124,24 @@ final class SysVolume {
     // the speaker at the same moment, going up and going down. -1 for the
     // output in use when there is none, the waits below used instead
     private static final Map<String, Integer> DELAY_BY_ADDRESS = new HashMap<>();
+
+    // How much quieter the lowest level above silence is than the phone's
+    // first step, in dB, typed in by hand, for each speaker and for this
+    // phone and the speakers without. Set, the levels under the first step
+    // go down by it evenly in dB, else by the share of the first step. The
+    // one for the output in use, 0 when there is none
+    private static final Map<String, Float> LOW_BY_ADDRESS = new HashMap<>();
+    private static float lowFallback = 0;
+    private static float lowDb = 0;
+    private static final float LOW_MAX_DB = 60;
     private static int delayFallback = -1;
     private static int stepDelay = -1;
 
     // The training: the step trained and the one below it in turn, the
     // step turned down by the player by the gap being tried, so the two
     // sound the same once the gap is right. Both turned down alike by the
-    // quieter amount for training at night. Three seconds each, and no
-    // break in the sound between them
+    // quieter amount for training at night. Switched from one to the other
+    // when asked, with no break in the sound between them
     private static boolean training = false;
     private static int trainStep = 2;
     private static float trainGap = 3;
@@ -139,19 +149,17 @@ final class SysVolume {
     private static long trainDelay = 250;
     private static boolean trainUpper = false;
     private static int trainBefore = -1;
-    private static long trainAskedAt = 0;
     private static String trainKey = null;
-    private static final long TRAIN_HOLD_MS = 3000;
     private static final long TRAIN_FADE_MS = 30;
     private static final long TRAIN_DELAY_MAX_MS = 1000;
 
     // Left on with nothing asked for a while, as a closed page cannot say
     // so, the training ends by itself
     private static final long TRAIN_IDLE_MS = 15 * 60 * 1000;
-    private static final Runnable TRAIN_SWITCH = new Runnable() {
+    private static final Runnable TRAIN_IDLE = new Runnable() {
         @Override
         public void run() {
-            trainSwitch();
+            stopTrain();
         }
     };
     private static final Runnable TRAIN_STEP = new Runnable() {
@@ -238,7 +246,7 @@ final class SysVolume {
 
         MAIN.removeCallbacks(CHECK);
         MAIN.removeCallbacks(CAP_CHECK);
-        MAIN.removeCallbacks(TRAIN_SWITCH);
+        MAIN.removeCallbacks(TRAIN_IDLE);
         MAIN.removeCallbacks(TRAIN_STEP);
         training = false;
         seenKey = null;
@@ -364,8 +372,21 @@ final class SysVolume {
             return new float[] { step, 1 };
         }
 
-        // Below the lowest step only the player can go, by its share of it
+        // Below the lowest step only the player can go: down evenly in dB
+        // to the lowest percent when how far is typed in, else by the
+        // share of the step
         if (step == 1) {
+
+            if (lowDb > 0 && high > 1) {
+
+                float down = lowDb * (high - Math.max(1, p)) / (high - 1);
+
+                // Under a whole percent, the rest of the way by its share
+                float share = p < 1 ? p : 1;
+
+                return new float[] { 1, (float) Math.pow(10, -down / 20) * share };
+            }
+
             return new float[] { 1, Math.max(0, p / high) };
         }
 
@@ -537,6 +558,8 @@ final class SysVolume {
         CAP_BY_ADDRESS.clear();
         GAPS_BY_ADDRESS.clear();
         DELAY_BY_ADDRESS.clear();
+        LOW_BY_ADDRESS.clear();
+        lowFallback = 0;
         delayFallback = -1;
         gapsFallback = new TreeMap<>();
         handFallback = 0;
@@ -599,6 +622,27 @@ final class SysVolume {
             int fbDelay = o.optInt("fallbackDelay", -1);
 
             delayFallback = fbDelay >= 0 && fbDelay <= TRAIN_DELAY_MAX_MS ? fbDelay : -1;
+
+            JSONObject lows = o.optJSONObject("lows");
+
+            if (lows != null) {
+
+                Iterator<String> keys = lows.keys();
+
+                while (keys.hasNext()) {
+
+                    String a = keys.next();
+                    float db = (float) lows.optDouble(a, 0);
+
+                    if (db > 0 && db <= LOW_MAX_DB) {
+                        LOW_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), db);
+                    }
+                }
+            }
+
+            float fbLow = (float) o.optDouble("fallbackLow", 0);
+
+            lowFallback = fbLow > 0 && fbLow <= LOW_MAX_DB ? fbLow : 0;
 
             JSONObject caps = o.optJSONObject("caps");
 
@@ -735,6 +779,9 @@ final class SysVolume {
         handDb = -1;
 
         Integer ownDelay = address.isEmpty() ? null : DELAY_BY_ADDRESS.get(address);
+        Float ownLow = address.isEmpty() ? null : LOW_BY_ADDRESS.get(address);
+
+        lowDb = ownLow != null ? ownLow : lowFallback;
 
         stepDelay = ownDelay != null ? ownDelay : (address.isEmpty() ? delayFallback : -1);
 
@@ -842,6 +889,7 @@ final class SysVolume {
             }
 
             int step = Math.max(2, Math.min(max, a.optInt("step", 2)));
+            boolean upper = a.optBoolean("upper", true);
             float gap = (float) Math.max(0, Math.min(HAND_MAX_DB, a.optDouble("gap", 3)));
             float quiet = (float) Math.max(0, Math.min(40, a.optDouble("quiet", 0)));
 
@@ -850,7 +898,11 @@ final class SysVolume {
 
             trainGap = gap;
             trainQuiet = quiet;
-            trainAskedAt = System.currentTimeMillis();
+
+            // Left on with nothing asked for a while, as a closed page
+            // cannot say so, the training ends by itself
+            MAIN.removeCallbacks(TRAIN_IDLE);
+            MAIN.postDelayed(TRAIN_IDLE, TRAIN_IDLE_MS);
 
             if (!training) {
 
@@ -864,15 +916,18 @@ final class SysVolume {
 
             trainStep = step;
 
-            // A new step starts with the step itself, a new gap or quieter
-            // amount is heard at once in the side playing
-            if (fresh) {
+            // A new step, or the other side asked for, is switched to, a new
+            // gap or quieter amount is heard at once in the side playing
+            if (fresh || upper != trainUpper) {
 
-                MAIN.removeCallbacks(TRAIN_SWITCH);
                 MAIN.removeCallbacks(TRAIN_STEP);
-                trainUpper = false;
-                Hub.note("Volume", "training step " + step + " against " + (step - 1) + ", the gap " + gap + " dB, "
-                    + quiet + " dB quieter, the step " + trainDelay + " ms after the player");
+                trainUpper = !upper;
+
+                if (fresh) {
+                    Hub.note("Volume", "training step " + step + " against " + (step - 1) + ", the gap " + gap + " dB, "
+                        + quiet + " dB quieter, the step " + trainDelay + " ms after the player");
+                }
+
                 trainSwitch();
             } else {
                 Hub.command("fineGainFade", trainFadeArg(trainUpper ? trainGain(true) : trainGain(false)));
@@ -914,12 +969,6 @@ final class SysVolume {
             return;
         }
 
-        if (System.currentTimeMillis() - trainAskedAt > TRAIN_IDLE_MS) {
-
-            stopTrain();
-            return;
-        }
-
         trainUpper = !trainUpper;
         MAIN.removeCallbacks(TRAIN_STEP);
 
@@ -933,7 +982,6 @@ final class SysVolume {
             putTrainStep();
         }
 
-        MAIN.postDelayed(TRAIN_SWITCH, TRAIN_HOLD_MS);
     }
 
     // The phone's step for the side playing
@@ -956,7 +1004,7 @@ final class SysVolume {
     // as they were, or the step from before it and the whole sound
     static void stopTrain() {
 
-        MAIN.removeCallbacks(TRAIN_SWITCH);
+        MAIN.removeCallbacks(TRAIN_IDLE);
         MAIN.removeCallbacks(TRAIN_STEP);
 
         if (!training) {
@@ -1085,6 +1133,7 @@ final class SysVolume {
 
             o.put("trained", gaps != null && !gaps.isEmpty());
             o.put("delay", stepDelay);
+            o.put("lowDb", lowDb);
 
             if (training) {
 

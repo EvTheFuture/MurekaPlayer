@@ -1903,6 +1903,16 @@
         color: var(--accent);
     }
 
+    .chip.trainFlip {
+        align-self: stretch;
+        justify-content: center;
+        min-height: 56px;
+        height: auto;
+        padding: 12px 18px;
+        font-weight: 600;
+        font-size: 1.05em;
+    }
+
     .trainRow {
         display: flex;
         align-items: center;
@@ -30580,6 +30590,11 @@
         ui.now = document.createElement("div");
         ui.now.className = "trainNow";
 
+        // The other side, as often as needed
+        ui.flip = chip("Switch", function () {
+            send("volTrain", { op: "flip" });
+        }, "crPrimary trainFlip");
+
         ui.gapRow = document.createElement("div");
         ui.gapRow.className = "trainRow";
         gapName.className = "trainName";
@@ -30659,6 +30674,7 @@
         ui.box.appendChild(top);
         ui.box.appendChild(ui.text);
         ui.box.appendChild(ui.now);
+        ui.box.appendChild(ui.flip);
         ui.box.appendChild(ui.gapRow);
         ui.box.appendChild(ui.delayRow);
         ui.box.appendChild(ui.delayHint);
@@ -30696,6 +30712,8 @@
         ui.now.textContent = v.now || "";
         ui.now.style.display = step ? "" : "none";
         ui.now.classList.toggle("upper", v.upper === true);
+        ui.flip.style.display = v.flip ? "" : "none";
+        ui.flip.textContent = v.flip || "";
         ui.gapRow.style.display = step ? "" : "none";
         ui.gap.textContent = (Number(v.gap) || 0).toFixed(1) + " dB";
         ui.delayRow.style.display = step ? "" : "none";

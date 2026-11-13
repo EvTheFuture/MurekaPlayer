@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.99";
+    const VERSION = "2.0.1.100";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13514,7 +13514,8 @@
                     stepDb: cleanStepDb(d.stepDb),
                     capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct),
                     gaps: cleanGaps(d.gaps),
-                    delayMs: cleanDelayMs(d.delayMs)
+                    delayMs: cleanDelayMs(d.delayMs),
+                    lowDb: cleanLowDb(d.lowDb)
                 };
             }
         }
@@ -13529,7 +13530,8 @@
                 night: has(fb.night) ? fb.night : firstOf(true),
                 stepDb: cleanStepDb(fb.stepDb),
                 gaps: cleanGaps(fb.gaps),
-                delayMs: cleanDelayMs(fb.delayMs)
+                delayMs: cleanDelayMs(fb.delayMs),
+                lowDb: cleanLowDb(fb.lowDb)
             },
             devices: devices
         };
@@ -13569,6 +13571,24 @@
         return out;
     }
 
+    // How much quieter the lowest level above silence is than the phone's
+    // first step, typed in by hand, 0 for the app's own way down
+    function cleanLowDb(v) {
+
+        const n = Number(v);
+
+        return isFinite(n) && n > 0 ? Math.round(Math.min(60, Math.max(0.5, n)) * 2) / 2 : 0;
+    }
+
+    // How far the app goes down under the first step on its own: the
+    // lowest percent by its share of the first step's percent
+    function defaultLowDb(max) {
+
+        const first = max > 0 ? Math.round(100 / max) : 0;
+
+        return first > 1 ? 20 * Math.log10(first) : 0;
+    }
+
     // How long a speaker takes to play what the player sends, in ms, found
     // by ear in the training, -1 for not known
     function cleanDelayMs(v) {
@@ -13600,6 +13620,7 @@
         const caps = {};
         const gaps = {};
         const delays = {};
+        const lows = {};
 
         for (const a of Object.keys(s.devices)) {
 
@@ -13616,6 +13637,10 @@
                 delays[a] = s.devices[a].delayMs;
             }
 
+            if (s.devices[a].lowDb > 0) {
+                lows[a] = s.devices[a].lowDb;
+            }
+
             // The highest volume as it connects, for the speakers it is on for
             if (s.devices[a].capPct > 0) {
                 caps[a] = s.devices[a].capPct;
@@ -13630,7 +13655,9 @@
                 gaps: gaps,
                 fallbackGaps: s.fallback.gaps || {},
                 delays: delays,
-                fallbackDelay: s.fallback.delayMs >= 0 ? s.fallback.delayMs : -1
+                fallbackDelay: s.fallback.delayMs >= 0 ? s.fallback.delayMs : -1,
+                lows: lows,
+                fallbackLow: s.fallback.lowDb || 0
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
@@ -13720,7 +13747,7 @@
         const all = sound().devices;
 
         if (!all[volTrain.address] && make) {
-            all[volTrain.address] = { name: volTrain.name, day: "", night: "", nightOff: "keep", stepDb: 0, capPct: 0, gaps: {}, delayMs: -1 };
+            all[volTrain.address] = { name: volTrain.name, day: "", night: "", nightOff: "keep", stepDb: 0, capPct: 0, gaps: {}, delayMs: -1, lowDb: 0 };
         }
 
         return all[volTrain.address] || null;
@@ -13784,7 +13811,7 @@
 
         try {
             window.MurekaHost.volumeTrain(JSON.stringify(on
-                ? { on: true, step: volTrainStep(), gap: volTrainGap(volTrainStep()), quiet: volTrain.quiet, delay: volTrain.delay }
+                ? { on: true, step: volTrainStep(), gap: volTrainGap(volTrainStep()), quiet: volTrain.quiet, delay: volTrain.delay, upper: volTrain.side }
                 : { on: false }));
         } catch (e) {
             dbgLog("Sound", "volume training not taken: " + errText(e));
@@ -13816,7 +13843,8 @@
             i: -1,
             gaps: {},
             quiet: volTrainQuiet,
-            upper: null
+            upper: null,
+            side: true
         };
 
         const rec = volTrainRecord(false);
@@ -13862,6 +13890,9 @@
         }
 
         volTrain.i = Math.max(-1, Math.min(volTrain.steps.length, i));
+
+        // Each step starts on the step itself, turned down by the gap
+        volTrain.side = true;
         volTrainSend();
         paintVolTrain();
         publishHostSoon();
@@ -13951,6 +13982,11 @@
                 volTrain.gaps[volTrainStep()] = v;
                 volTrainSend();
             }
+        } else if (op === "flip" && at === "step") {
+
+            // The other side: the step below, or the step turned down
+            volTrain.side = !volTrain.side;
+            volTrainSend();
         } else if (op === "delayBy" && at === "step") {
 
             volTrain.delay = Math.max(0, Math.min(1000, volTrain.delay + Math.round(Number(value) || 0)));
@@ -14005,11 +14041,11 @@
 
             view.title = "Train the volume steps of " + who;
             view.text = "A speaker does not get louder by the same amount at each of the phone's steps. Here each step is set by ear. "
-                + "The song playing is heard at a step and at the step below in turn, three seconds each, the step turned down by the player by a gap. "
-                + "Press - or + until the change can no longer be heard, then Keep. The steps go from quiet to loud: "
+                + "The song playing is heard at a step, turned down by the player by a gap, and Switch moves to the step below and back, as often as needed. "
+                + "Press - or + until switching makes no difference to how loud it is, then Keep. The steps go from quiet to loud: "
                 + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
                 + "Set Quieter first when others are asleep. While training, the compressor of the sound profile is off. "
-                + "If the sound dips or bumps for a moment at each switch, change the switch delay until it is smooth, as the player's share reaches the speaker later than the step.";
+                + "If the sound dips or bumps for a moment as it switches, change the switch delay until it is smooth, as the player's share reaches the speaker later than the step.";
             view.buttons = [{ op: "start", label: "Start", strong: true }, { op: "cancel", label: "Cancel" }];
         } else if (at === "step") {
 
@@ -14019,7 +14055,7 @@
             view.title = "Step " + k + " of " + max + " (" + (volTrain.i + 1) + " of " + volTrain.steps.length + ")";
             const last = volTrain.i === volTrain.steps.length - 1;
 
-            view.text = "Step " + k + " turned down by the gap, and step " + (k - 1) + " as it is, in turn. "
+            view.text = "Switch moves between step " + k + " turned down by the gap and step " + (k - 1) + " as it is. "
                 + "Louder on step " + k + ": press +. Quieter: press -. "
                 + (last ? "Keep, finish once they sound the same. " : "Keep, next once they sound the same, or Keep, done to keep it and leave the steps still to come to be drawn from those kept. ")
                 + "Leave out drops this step, to be drawn from the others."
@@ -14028,6 +14064,7 @@
             view.now = volTrain.upper === null ? "Starting"
                 : (volTrain.upper ? "Now: step " + k + ", turned down " + view.gap + " dB" : "Now: step " + (k - 1));
             view.upper = volTrain.upper;
+            view.flip = volTrain.side ? "Switch to step " + (k - 1) : "Switch to step " + k;
             view.buttons = [{ op: "back", label: "Back" }, { op: "skip", label: "Leave out" }]
                 .concat(last ? [] : [{ op: "done", label: "Keep, done" }])
                 .concat([{ op: "next", label: last ? "Keep, finish" : "Keep, next", strong: true }, { op: "cancel", label: "Cancel" }]);
@@ -14086,6 +14123,8 @@
         ui.now.textContent = view.now;
         ui.now.style.display = view.at === "step" ? "" : "none";
         ui.now.style.color = view.upper === true ? "#48e1eb" : "#dff";
+        ui.flip.style.display = view.flip ? "" : "none";
+        ui.flip.textContent = view.flip || "";
         ui.gapRow.style.display = view.at === "step" ? "flex" : "none";
         ui.gapValue.textContent = view.gap.toFixed(1) + " dB";
         ui.delayRow.style.display = view.at === "step" ? "flex" : "none";
@@ -14161,6 +14200,15 @@
         ui.text.style.cssText = "font-size:13px;line-height:1.45;color:#bbb";
         ui.now = document.createElement("div");
         ui.now.style.cssText = "font-weight:600;font-variant-numeric:tabular-nums";
+
+        // The other side, as often as needed
+        ui.flip = makeButton("Switch", "#48e1eb", "#000", function () {
+            volTrainAct("flip");
+        });
+        ui.flip.style.flex = "0 0 auto";
+        ui.flip.style.padding = "14px 18px";
+        ui.flip.style.fontSize = "16px";
+        ui.flip.style.fontWeight = "600";
 
         ui.gapRow = document.createElement("div");
         ui.gapRow.style.cssText = "display:flex;align-items:center;gap:10px";
@@ -14238,6 +14286,7 @@
         box.appendChild(top);
         box.appendChild(ui.text);
         box.appendChild(ui.now);
+        box.appendChild(ui.flip);
         box.appendChild(ui.gapRow);
         box.appendChild(ui.delayRow);
         box.appendChild(ui.delayHint);
@@ -49685,6 +49734,7 @@
             if (stepsOffered) {
                 soundBox.appendChild(makeHint("Volume steps are for More volume steps: how much louder a speaker gets at each of the phone's steps, as a Bluetooth speaker turns its sound down by its own curve, not by what the phone says. "
                     + "Train by ear, while the speaker plays, finds them one step against the step below. Edit by hand takes them typed in, a step left empty drawn on a straight line from the steps set around it. "
+                    + "Step 1 against the lowest level above silence is typed in only, as there is nothing to hear it against: empty, the levels under step 1 go down by its share, set, evenly in dB to the lowest. A value is taken away by emptying its field, or with the cross in the web view. "
                     + "Without any, the volume step size counts for every step: the speaker's own, else this device's, else what the phone says. A speaker without either takes this device's volume steps. They are kept with the settings, and in a copy of them."
                     + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under them, to hear the result." : "")));
             }
@@ -49850,8 +49900,27 @@
 
                     set("gaps", {});
                     set("delayMs", -1);
+                    set("lowDb", 0);
                     kept();
                 });
+
+                // Under the first step: typed here, else this device's for
+                // a speaker, else the app's own way down
+                const low = function () {
+                    return Number(get("lowDb")) || 0;
+                };
+                const lowShown = function () {
+
+                    if (low() > 0) {
+                        return low();
+                    }
+
+                    if (!phone && sound().fallback.lowDb > 0) {
+                        return sound().fallback.lowDb;
+                    }
+
+                    return defaultLowDb(Number(fineInfo().max) || 0);
+                };
                 const train = makeButton("Train by ear", "transparent", "#48e1eb", function () {
                     volTrainOpen(phone, address, name);
                 });
@@ -49894,6 +49963,7 @@
                     paint();
                 }, 0.5, 30, 0.5);
                 let delayField = null;
+                let lowField = null;
 
                 // A field for each step, and the delay, made once the
                 // number of the phone's steps is known
@@ -49940,6 +50010,14 @@
 
                         return input;
                     };
+
+                    // The first step against the lowest level above silence,
+                    // which nothing can be heard against while training
+                    lowField = field("Step 1, dB louder than the lowest", 0, 60, 0.5, function (v) {
+
+                        set("lowDb", v === "" ? 0 : cleanLowDb(v));
+                        kept();
+                    });
 
                     for (let k = 2; k <= max; k++) {
 
@@ -50018,8 +50096,9 @@
                         sizeField.value = String(sizeShown());
                     }
 
-                    said.textContent += delay() >= 0 ? " Switch delay " + delay() + " ms." : "";
-                    forget.style.display = at.length || delay() >= 0 ? "" : "none";
+                    said.textContent += (low() > 0 ? " The lowest " + low() + " dB under step 1." : "")
+                        + (delay() >= 0 ? " Switch delay " + delay() + " ms." : "");
+                    forget.style.display = at.length || delay() >= 0 || low() > 0 ? "" : "none";
                     train.style.display = here && !volTrain ? "" : "none";
                     editBtn.textContent = editing ? "Done editing" : "Edit by hand";
                     editor.style.display = editing ? "flex" : "none";
@@ -50038,6 +50117,12 @@
                             : (fbAt.length && !(own() > 0) ? volGapFrom(fb, k) : sizeShown());
 
                         input.placeholder = drawn > 0 ? drawn.toFixed(1) : "";
+                    }
+
+                    if (lowField && document.activeElement !== lowField) {
+
+                        lowField.value = low() > 0 ? String(low()) : "";
+                        lowField.placeholder = lowShown() > 0 ? lowShown().toFixed(1) : "";
                     }
 
                     if (delayField && document.activeElement !== delayField) {
@@ -68831,6 +68916,16 @@
 
     .trainNow.upper {
         color: var(--accent);
+    }
+
+    .chip.trainFlip {
+        align-self: stretch;
+        justify-content: center;
+        min-height: 56px;
+        height: auto;
+        padding: 12px 18px;
+        font-weight: 600;
+        font-size: 1.05em;
     }
 
     .trainRow {
@@ -97510,6 +97605,11 @@
         ui.now = document.createElement("div");
         ui.now.className = "trainNow";
 
+        // The other side, as often as needed
+        ui.flip = chip("Switch", function () {
+            send("volTrain", { op: "flip" });
+        }, "crPrimary trainFlip");
+
         ui.gapRow = document.createElement("div");
         ui.gapRow.className = "trainRow";
         gapName.className = "trainName";
@@ -97589,6 +97689,7 @@
         ui.box.appendChild(top);
         ui.box.appendChild(ui.text);
         ui.box.appendChild(ui.now);
+        ui.box.appendChild(ui.flip);
         ui.box.appendChild(ui.gapRow);
         ui.box.appendChild(ui.delayRow);
         ui.box.appendChild(ui.delayHint);
@@ -97626,6 +97727,8 @@
         ui.now.textContent = v.now || "";
         ui.now.style.display = step ? "" : "none";
         ui.now.classList.toggle("upper", v.upper === true);
+        ui.flip.style.display = v.flip ? "" : "none";
+        ui.flip.textContent = v.flip || "";
         ui.gapRow.style.display = step ? "" : "none";
         ui.gap.textContent = (Number(v.gap) || 0).toFixed(1) + " dB";
         ui.delayRow.style.display = step ? "" : "none";
