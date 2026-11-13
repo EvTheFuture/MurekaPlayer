@@ -1103,8 +1103,12 @@ In development.
   - Use in Create on a song of such a generation puts the same remix in the
     form, whole, as Mureka's site sent it, and the note says which song is
     remixed.
-  - A remix made before this version, or in another browser, is named a
-    remix in the note, with no song to remix, as there is none to be had.
+  - A remix found in neither is named a remix in the note, with no song to
+    remix.
+  - A remix not noted here is looked up in Mureka's own list of what was
+    made, a few pages back, where Restore on Mureka's page should be
+    reading it from. What a generation there holds goes to the debug log,
+    as its fields are not known for sure yet.
   - Kept in this browser's storage, the latest ones up to 400 kB.
   - An uploaded song named in a song's detail is still made ready again,
     and the fields that could name it still go to the debug log.

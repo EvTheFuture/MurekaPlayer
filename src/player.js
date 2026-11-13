@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.125";
+    const VERSION = "2.0.1.126";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22954,7 +22954,14 @@
         const sumUp = function (kind, json) {
 
             if (json && typeof json === "object") {
+
                 dbgLog("Mureka", feedSummary(json, "Mureka's " + kind + " list"));
+
+                // What a generation there holds besides its songs, as Restore
+                // on Mureka's page brings back what a song was made from
+                if (kind === "createdresult") {
+                    dbgLog("Mureka", "createdresult " + generationShape(json));
+                }
             }
         };
 
@@ -63031,9 +63038,35 @@
         // Mureka, so the new one is a remix of it too. Mureka keeps no record
         // of which, so it is the one kept here when the songs were made,
         // else whatever the detail says. Control type 11 marks a remix
-        const kept = remixFromFeed(s.feed_id || data.feed_id || song.feed_id);
-        const ref = kept ? { remix: kept, resourceId: 0, title: String(kept.title || ""), ms: 0 } : createRemixRefOf(data, s, song);
+        const feedId = String(s.feed_id || data.feed_id || song.feed_id || "");
+        const kept = remixFromFeed(feedId);
+        let ref = kept ? { remix: kept, resourceId: 0, title: String(kept.title || ""), ms: 0 } : createRemixRefOf(data, s, song);
         const types = [].concat(s.control_types || [], data.control_types || [], song.control_types || []).map(Number);
+
+        // Not kept here: the generation in Mureka's own list of what was
+        // made, which Restore on its page brings back
+        if (!ref && types.indexOf(11) >= 0 && feedId) {
+
+            let gen = null;
+
+            try {
+                gen = await createGenerationOf(feedId);
+            } catch (e) {
+                dbgLog("Create", "Mureka's list of what was made could not be read, " + errText(e));
+            }
+
+            if (gen) {
+
+                dbgLog("Create", "generation " + feedId + " in Mureka's list: " + Object.keys(gen).join(", ").slice(0, 400));
+                ref = createRemixRefOf(gen, gen.feed && typeof gen.feed === "object" ? gen.feed : gen, song);
+
+                if (ref && ref.remix) {
+                    rememberRemixFrom(feedId, ref.remix);
+                }
+            } else {
+                dbgLog("Create", "generation " + feedId + " not found in Mureka's list of what was made");
+            }
+        }
 
         if (ref) {
 
@@ -63058,6 +63091,102 @@
         }
 
         return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental };
+    }
+
+    // A generation in Mureka's list of what was made, found by its feed id
+    // anywhere in a page: the object with that feed_id and no song_id
+    function findGeneration(node, feedId, depth) {
+
+        if (!node || typeof node !== "object" || (depth || 0) > 6) {
+            return null;
+        }
+
+        if (Array.isArray(node)) {
+
+            for (const x of node) {
+
+                const hit = findGeneration(x, feedId, (depth || 0) + 1);
+
+                if (hit) {
+                    return hit;
+                }
+            }
+
+            return null;
+        }
+
+        if (!("song_id" in node) && node.feed_id !== undefined && String(node.feed_id) === feedId) {
+            return node;
+        }
+
+        for (const k of Object.keys(node)) {
+
+            const v = node[k];
+
+            if (v && typeof v === "object") {
+
+                const hit = findGeneration(v, feedId, (depth || 0) + 1);
+
+                if (hit) {
+                    return hit;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // The fields of the first generation in a page of Mureka's list, the
+    // remix among them whole, for the debug log
+    function generationShape(page) {
+
+        const list = createListOf(page && page.data !== undefined ? page.data : page);
+        const g = list.find(function (x) {
+            return x && typeof x === "object";
+        });
+
+        if (!g) {
+            return "page fields: " + Object.keys(page || {}).join(", ").slice(0, 300);
+        }
+
+        const inner = g.feed && typeof g.feed === "object" ? "; feed: " + Object.keys(g.feed).join(", ") : "";
+        const remixed = list.find(function (x) {
+            return x && (x.remix || (x.feed && x.feed.remix));
+        });
+
+        return "generation fields: " + Object.keys(g).join(", ").slice(0, 400) + inner.slice(0, 400)
+            + (remixed ? "; a remix: " + JSON.stringify(remixed.remix || remixed.feed.remix).slice(0, 1200) : "");
+    }
+
+    // The generation a song came from in Mureka's list of what was made,
+    // where Restore on Mureka's page reads it from, a few pages back at most
+    async function createGenerationOf(feedId) {
+
+        let last = "";
+
+        for (let i = 0; i < 8; i++) {
+
+            const data = await createGet("/api/pgc/feed/list?listRenderType=createdresult" + (last ? "&last_id=" + encodeURIComponent(last) : ""));
+            const hit = findGeneration(data, feedId, 0);
+
+            if (i === 0) {
+                dbgLog("Create", "createdresult " + generationShape(data));
+            }
+
+            if (hit) {
+                return hit;
+            }
+
+            const next = data && data.last_id !== undefined && data.last_id !== null ? String(data.last_id) : "";
+
+            if (!next || next === "0" || next === last || data.has_more === false || createListOf(data).length === 0) {
+                return null;
+            }
+
+            last = next;
+        }
+
+        return null;
     }
 
     // What a song made as a remix says about the song it remixed, uploaded
