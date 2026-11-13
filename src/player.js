@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.106";
+    const VERSION = "2.0.1.107";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13515,7 +13515,8 @@
                     capPct: d.capOn === false ? 0 : cleanCapPct(d.capPct),
                     gaps: cleanGaps(d.gaps),
                     delayMs: cleanDelayMs(d.delayMs),
-                    lowDb: cleanLowDb(d.lowDb)
+                    lowDb: cleanLowDb(d.lowDb),
+                    lowSteps: cleanLowSteps(d.lowSteps)
                 };
             }
         }
@@ -13531,7 +13532,8 @@
                 stepDb: cleanStepDb(fb.stepDb),
                 gaps: cleanGaps(fb.gaps),
                 delayMs: cleanDelayMs(fb.delayMs),
-                lowDb: cleanLowDb(fb.lowDb)
+                lowDb: cleanLowDb(fb.lowDb),
+                lowSteps: cleanLowSteps(fb.lowSteps)
             },
             devices: devices
         };
@@ -13580,13 +13582,35 @@
         return isFinite(n) && n > 0 ? Math.round(Math.min(60, Math.max(0.5, n)) * 2) / 2 : 0;
     }
 
+    // How many levels lie between off and the phone's first step, 0 for
+    // one at each whole percent under it
+    function cleanLowSteps(v) {
+
+        const n = Math.round(Number(v));
+
+        return isFinite(n) && n >= 1 ? Math.min(40, n) : 0;
+    }
+
     // How far the app goes down under the first step on its own: the
-    // lowest percent by its share of the first step's percent
-    function defaultLowDb(max) {
+    // lowest level by its share of the first step's percent
+    function defaultLowDb(max, count) {
 
         const first = max > 0 ? Math.round(100 / max) : 0;
 
+        if (count > 0) {
+            return 20 * Math.log10(count + 1);
+        }
+
         return first > 1 ? 20 * Math.log10(first) : 0;
+    }
+
+    // A level in percent as it is shown: whole, or with one decimal under
+    // the first step where the levels lie closer
+    function pctText(p) {
+
+        const v = Math.round((Number(p) || 0) * 10) / 10;
+
+        return Number.isInteger(v) ? String(v) : v.toFixed(1);
     }
 
     // How long a speaker takes to play what the player sends, in ms, found
@@ -13621,6 +13645,7 @@
         const gaps = {};
         const delays = {};
         const lows = {};
+        const lowSteps = {};
 
         for (const a of Object.keys(s.devices)) {
 
@@ -13641,6 +13666,10 @@
                 lows[a] = s.devices[a].lowDb;
             }
 
+            if (s.devices[a].lowSteps > 0) {
+                lowSteps[a] = s.devices[a].lowSteps;
+            }
+
             // The highest volume as it connects, for the speakers it is on for
             if (s.devices[a].capPct > 0) {
                 caps[a] = s.devices[a].capPct;
@@ -13657,7 +13686,9 @@
                 delays: delays,
                 fallbackDelay: s.fallback.delayMs >= 0 ? s.fallback.delayMs : -1,
                 lows: lows,
-                fallbackLow: s.fallback.lowDb || 0
+                fallbackLow: s.fallback.lowDb || 0,
+                lowSteps: lowSteps,
+                fallbackLowSteps: s.fallback.lowSteps || 0
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
@@ -13884,7 +13915,7 @@
             side: true,
             prev: {},
             auto: volTrainAuto,
-            keep: true
+            keep: false
         };
 
         const rec = volTrainRecord(false);
@@ -14143,7 +14174,7 @@
             const count = Object.keys(volTrain.gaps).length;
             const now = count > 0;
             const before = Object.keys(volTrain.prev).length > 0;
-            const keep = before && volTrain.keep !== false;
+            const keep = before && volTrain.keep === true;
             const used = keep ? Object.assign({}, volTrain.prev, volTrain.gaps) : Object.assign({}, volTrain.gaps);
 
             view.title = "Trained";
@@ -14161,8 +14192,8 @@
                     label: "Steps not trained this time",
                     value: keep ? "keep" : "only",
                     options: [
-                        { value: "keep", label: "Keep the earlier values" },
-                        { value: "only", label: "Fill them in from the trained ones" }
+                        { value: "only", label: "Fill them in from the trained ones" },
+                        { value: "keep", label: "Keep the earlier values" }
                     ]
                 };
             }
@@ -14560,8 +14591,9 @@
         const size = own > 0 ? own
             : (!phone && sound().fallback.stepDb > 0 ? sound().fallback.stepDb : Math.round(phoneStepDb(!phone) * 2) / 2);
         const low = Number(rec.lowDb) || 0;
+        const lowSteps = Number(rec.lowSteps) > 0 ? Number(rec.lowSteps) : (!phone && sound().fallback.lowSteps > 0 ? sound().fallback.lowSteps : 0);
         const lowShown = low > 0 ? low
-            : (!phone && sound().fallback.lowDb > 0 ? sound().fallback.lowDb : defaultLowDb(Number(fineInfo().max) || 0));
+            : (!phone && sound().fallback.lowDb > 0 ? sound().fallback.lowDb : defaultLowDb(Number(fineInfo().max) || 0, lowSteps));
         const hasOwn = Object.keys(gaps).length > 0;
         const useFb = !hasOwn && !(own > 0) && Object.keys(fb).length > 0;
 
@@ -14571,6 +14603,7 @@
             own: own,
             size: size,
             low: low,
+            lowSteps: lowSteps,
             lowShown: lowShown,
             delay: typeof rec.delayMs === "number" && rec.delayMs >= 0 ? rec.delayMs : -1,
             hasOwn: hasOwn,
@@ -14935,7 +14968,7 @@
 
         const pct = Math.max(0, Math.min(100, Number(fine.pct) || 0));
 
-        volKeyEl._now.textContent = Math.round(pct) + " %";
+        volKeyEl._now.textContent = pctText(pct) + " %";
         volKeyEl._fill.style.width = pct + "%";
         volKeyEl._nums.textContent = settings.webVolumeNumbers === true ? fineNumbersText(fine) : "";
         volKeyEl._nums.style.display = settings.webVolumeNumbers === true ? "" : "none";
@@ -30054,7 +30087,7 @@
 
             if (fine.on === true) {
 
-                sub("Real volume", fine.pct + " %, more steps");
+                sub("Real volume", pctText(fine.pct) + " %, more steps");
                 sub("Phone step", fine.step + " of " + fine.max + (typeof fine.stepDb === "number" ? " at " + fine.stepDb.toFixed(1) + " dB" : "")
                     + (fine.handDb > 0 ? ", " + fine.handDb + " dB steps set by hand" : ""));
                 sub("Mixer", (typeof fine.gainDb === "number" ? fine.gainDb.toFixed(1) : "0.0") + " dB, " + Math.round((fine.gain || 0) * 1000) / 10 + " %");
@@ -37477,6 +37510,31 @@
                     return { id: g.id, label: groupLabel(g.id), show: groupShown(g, false) };
                 })
             });
+            return;
+        }
+
+        // A dialog of the phone, drawn by the web view as a popup of its own
+        // while it shows, with its close button by its place
+        if (el.dataset.hostPop) {
+
+            const box = el.children[0];
+            const inner = [];
+            let closeId = "";
+
+            if (box) {
+
+                Array.from(box.children).forEach(function (c, i) {
+                    hostWalk(c, inner, path + ".0." + i);
+                });
+
+                const x = box.querySelector("[data-host-close]");
+
+                if (x && x.parentElement && x.parentElement.parentElement === box) {
+                    closeId = path + ".0." + Array.prototype.indexOf.call(box.children, x.parentElement) + "." + Array.prototype.indexOf.call(x.parentElement.children, x);
+                }
+            }
+
+            out.push({ t: "pop", c: inner, close: closeId });
             return;
         }
 
@@ -50047,7 +50105,10 @@
         let soundTryTimer = 0;
 
         // The speakers whose settings past the profiles are shown
-        const soundMoreOpen = {};
+        // The speaker whose settings show in a dialog, "phone" for this
+        // device, and where its dialog was scrolled to when drawn again
+        let soundSpeakerOpen = "";
+        let soundPopScroll = 0;
         let soundKey = "";
 
         soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
@@ -50159,6 +50220,13 @@
             }
 
             soundKey = key;
+
+            const openBox = soundBox.querySelector("[data-host-pop] > div");
+
+            if (openBox && openBox.offsetParent !== null) {
+                soundPopScroll = openBox.scrollTop;
+            }
+
             soundBox.textContent = "";
 
             if (!soundOffered()) {
@@ -50313,7 +50381,7 @@
 
             // Which profiles each speaker takes
             soundBox.appendChild(soundHeading("Speakers"));
-            soundBox.appendChild(makeHint("Each speaker has a profile and a night profile. Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode. Night mode as it connects says whether night mode stays on, is asked about or goes off when that speaker connects while it is on."));
+            soundBox.appendChild(makeHint("Each speaker has its own profiles, how it starts as it connects and its volume steps. Edit opens them."));
 
             const stepsOffered = isApkHost() && !!(window.MurekaHost && window.MurekaHost.volumeStepSizes);
 
@@ -50322,17 +50390,8 @@
             const tryPaints = [];
 
 
-            if (capsOffered) {
-                soundBox.appendChild(makeHint("Max volume as it connects lowers a speaker's volume to the level set when it connects, if it is higher. A lower volume is left as it is. Off at the left end."));
-            }
-
-            if (stepsOffered) {
-                soundBox.appendChild(makeHint("Volume steps are for More volume steps: how much louder a speaker gets at each of the phone's steps, as a Bluetooth speaker turns its sound down by its own curve, not by what the phone says. "
-                    + "Train by ear, while the speaker plays, finds them one step against the step below. Edit by hand takes them typed in, a step left empty drawn on a straight line from the steps set around it. "
-                    + "Step 1 against the lowest level above silence is typed in only, as there is nothing to hear it against: empty, the levels under step 1 go down by its share, set, evenly in dB to the lowest. A value is taken away by emptying its field, or with the cross in the web view. "
-                    + "Without any, the volume step size counts for every step: the speaker's own, else this device's, else what the phone says. A speaker without either takes this device's volume steps. They are kept with the settings, and in a copy of them."
-                    + (tryOffered ? " The speaker playing now has a volume slider with 100 steps under them, to hear the result." : "")));
-            }
+            // Where a speaker's rows go: its dialog while it is built
+            let into = soundBox;
 
             const dayChoices = function (phone) {
 
@@ -50357,99 +50416,151 @@
             const even = evenDrop;
             const speaker = function (title, get, set, phone, address) {
 
-                const heading = soundHeading(title, false, true);
+                const key = phone ? "phone" : String(address || "");
+                const row = document.createElement("div");
+                const col = document.createElement("div");
+                const name = document.createElement("div");
+                const words = makeHint("");
+                const pop = document.createElement("div");
+                const box = document.createElement("div");
+                const top = document.createElement("div");
+                const popTitle = document.createElement("div");
+                const opened = function (open) {
 
-                // A speaker's heading says whether it is connected and
-                // whether the music plays on it, kept up while the page shows
-                if (!phone) {
+                    soundSpeakerOpen = open ? key : "";
+                    soundPopScroll = 0;
+                    paintState();
+                    publishHostSoon();
+                };
+                const editBtn = makeButton("Edit", "#333", "#fff", function () {
+                    opened(true);
+                });
+                const close = makeButton("\u00d7", "#333", "#fff", function () {
+                    opened(false);
+                });
+                const label = function (choices, v) {
 
-                    const paintHeading = function () {
+                    const c = choices.find(function (x) {
+                        return x.value === v;
+                    });
 
-                        const d = soundDevices().find(function (x) {
-                            return x.address === address;
-                        });
-                        const fine = fineInfo();
-                        const here = typeof fine.output === "string" ? fine.output === "bt:" + String(address || "").toUpperCase() : !!(d && d.active);
-                        const said = here ? " \u00b7 playing here" : (d && d.connected ? " \u00b7 connected" : "");
+                    return c ? c.label : "None";
+                };
 
-                        if (heading.textContent !== title + said) {
-                            heading.textContent = title + said;
-                        }
-                    };
+                // Its name, whether the music plays on it or it is connected,
+                // and its profiles, kept up while the page shows. The dialog
+                // shows while it is the one open
+                const paintState = function () {
 
-                    paintHeading();
-                    settingsRefreshers.push(paintHeading);
-                    tryPaints.push(paintHeading);
-                }
+                    const d = phone ? null : soundDevices().find(function (x) {
+                        return x.address === address;
+                    });
+                    const fine = fineInfo();
+                    const here = typeof fine.output === "string" ? playsOn(fine, phone, address) : !!(d && d.active);
+                    const said = here ? "playing here" : (d && d.connected ? "connected" : "");
+                    const text = title + (said ? " \u00b7 " + said : "");
+                    const summary = "Profile " + label(dayChoices(phone), get("day") || "") + ", night profile " + label(nightChoices(phone), get("night") || "") + ".";
 
-                soundBox.appendChild(heading);
-                soundBox.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
+                    if (name.textContent !== text) {
+                        name.textContent = text;
+                    }
+
+                    name.style.color = here ? "#48e1eb" : "";
+
+                    if (words.textContent !== summary) {
+                        words.textContent = summary;
+                    }
+
+                    pop.style.display = soundSpeakerOpen === key ? "flex" : "none";
+                };
+
+                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px";
+                col.dataset.hostCol = "1";
+                name.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+                editBtn.style.flex = "0 0 auto";
+                editBtn.style.padding = "6px 14px";
+                editBtn.setAttribute("aria-label", "Edit " + title);
+                col.appendChild(name);
+                col.appendChild(words);
+                row.appendChild(col);
+                row.appendChild(editBtn);
+
+                // The dialog, drawn by the web view as a popup of its own
+                pop.dataset.hostPop = "1";
+                pop.style.cssText = "position:fixed;inset:0;z-index:2147483644;display:none;align-items:center;justify-content:center;"
+                    + "background:rgba(0,0,0,0.6);padding:16px;box-sizing:border-box";
+                box.style.cssText = "width:min(560px,100%);max-height:100%;overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:16px;"
+                    + "background:#1c1c22;border:1px solid rgba(72,225,235,0.45);display:flex;flex-direction:column;gap:12px";
+                pop.addEventListener("click", function (ev) {
+
+                    if (ev.target === pop) {
+                        opened(false);
+                    }
+                });
+                box.addEventListener("scroll", function () {
+                    soundPopScroll = box.scrollTop;
+                });
+                top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
+                popTitle.textContent = title;
+                popTitle.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:#48e1eb";
+                close.style.flex = "0 0 auto";
+                close.style.padding = "4px 12px";
+                close.setAttribute("aria-label", "Close");
+                close.dataset.hostClose = "1";
+                top.appendChild(popTitle);
+                top.appendChild(close);
+                box.appendChild(top);
+                pop.appendChild(box);
+                into = box;
+
+                box.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
 
                     set("day", v);
                     soundChanged();
                 })));
-                soundBox.appendChild(even(makeDropRow("Night profile", nightChoices(phone), function () { return get("night"); }, function (v) {
+                box.appendChild(even(makeDropRow("Night profile", nightChoices(phone), function () { return get("night"); }, function (v) {
 
                     set("night", v);
                     soundChanged();
                 })));
-
-                // The rest folded away under the profiles, opened per speaker
-                const from = soundBox.children.length;
+                box.appendChild(makeHint(phone
+                    ? "The profile and the night profile for this device, and for the speakers that take the ones of this device. None as a night profile keeps the profile in night mode."
+                    : "Same as this device takes the ones set for this device. None leaves the sound as it is, and as a night profile keeps the profile in night mode."));
 
                 // A speaker of its own, connecting while night mode is on
                 if (!phone) {
 
-                    soundBox.appendChild(even(makeDropRow("Night mode as it connects", NIGHT_ON_CONNECT, function () {
+                    box.appendChild(even(makeDropRow("Night mode as it connects", NIGHT_ON_CONNECT, function () {
                         return get("nightOff") || "keep";
                     }, function (v) {
 
                         set("nightOff", v);
                         soundChanged();
                     })));
+                    box.appendChild(makeHint("Whether night mode stays on, is asked about or goes off when this speaker connects while it is on."));
                 }
 
                 if (!phone && capsOffered) {
+
                     capRow(get, set);
+                    box.appendChild(makeHint("Lowers the speaker's volume to this level as it connects, if it is higher. A lower volume is left as it is. Off at the left end."));
                 }
 
                 if (stepsOffered) {
                     stepsRows(get, set, phone, address, title);
                 }
 
-                const rest = Array.from(soundBox.children).slice(from);
+                into = soundBox;
+                paintState();
+                settingsRefreshers.push(paintState);
+                tryPaints.push(paintState);
+                soundBox.appendChild(row);
+                soundBox.appendChild(pop);
 
-                if (!rest.length) {
-                    return;
+                if (soundSpeakerOpen === key) {
+                    box.scrollTop = soundPopScroll;
                 }
-
-                const key = phone ? "phone" : String(address || "");
-                const more = document.createElement("div");
-                const toggle = makeButton("", "transparent", "#48e1eb", function () {
-
-                    soundMoreOpen[key] = !soundMoreOpen[key];
-                    paintMore();
-                    publishHostSoon();
-                });
-                const paintMore = function () {
-
-                    more.style.display = soundMoreOpen[key] ? "flex" : "none";
-                    toggle.textContent = soundMoreOpen[key] ? "Show less \u25b4" : "Show more \u25be";
-                };
-
-                more.style.cssText = "display:none;flex-direction:column;gap:12px";
-
-                for (const el of rest) {
-                    more.appendChild(el);
-                }
-
-                toggle.style.alignSelf = "flex-start";
-                toggle.style.flex = "0 0 auto";
-                toggle.style.padding = "6px 2px";
-                toggle.setAttribute("aria-label", "More settings for " + title);
-                soundBox.appendChild(toggle);
-                soundBox.appendChild(more);
-                paintMore();
             };
 
             // The highest volume a speaker starts at as it connects, as a
@@ -50510,7 +50621,7 @@
                 row.appendChild(name);
                 row.appendChild(slider);
                 row.appendChild(shown);
-                soundBox.appendChild(row);
+                into.appendChild(row);
             };
 
             // Whether the music plays on a speaker now: a speaker by its
@@ -50646,11 +50757,41 @@
                 buttons.appendChild(editBtn);
                 buttons.appendChild(train);
                 forgetRow.appendChild(forget);
-                soundBox.appendChild(makeLabel("Volume steps"));
-                soundBox.appendChild(size);
-                soundBox.appendChild(said);
-                soundBox.appendChild(buttons);
-                soundBox.appendChild(forgetRow);
+                into.appendChild(makeLabel("Volume steps"));
+                into.appendChild(makeHint("For More volume steps: how much louder the speaker gets at each of the device's own steps, as a Bluetooth speaker turns its sound down by its own curve. "
+                    + "Train by ear finds them while it plays, one step against the step below. Edit by hand takes them typed in, a step left empty drawn from those set around it, "
+                    + "and step 1 against the lowest level above silence. Without any, the step size counts for every step."
+                    + (phone ? "" : " A speaker without either takes the volume steps of this device.")));
+                into.appendChild(size);
+                into.appendChild(said);
+                into.appendChild(buttons);
+                into.appendChild(forgetRow);
+
+                // How many levels lie between off and step 1, finer for a
+                // speaker whose lowest step is loud already
+                const max = Number(fineInfo().max) || 0;
+                const high = max > 0 ? Math.round(100 / max) : 0;
+                const apart = function (n) {
+                    return high > 0 ? " (" + pctText(high / (n + 1)) + "% apart)" : "";
+                };
+                const fbLow = sound().fallback.lowSteps || 0;
+                const lowChoices = [{
+                    value: 0,
+                    label: !phone && fbLow > 0 ? "Same as this device, " + fbLow : "Auto" + (high > 1 ? ", " + (high - 1) + apart(high - 1) : "")
+                }].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40].map(function (n) {
+                    return { value: n, label: String(n) + apart(n) };
+                }));
+
+                into.appendChild(even(makeDropRow("Levels under step 1", lowChoices, function () {
+                    return Number(get("lowSteps")) || 0;
+                }, function (v) {
+
+                    set("lowSteps", cleanLowSteps(v));
+                    pushStepSizes();
+                    paint();
+                })));
+                into.appendChild(makeHint("The levels between Off and step 1, which the volume buttons go through one at a time. "
+                    + "More of them for a speaker whose lowest step is loud already. Auto has one at each whole percent."));
                 paint();
                 settingsRefreshers.push(paint);
                 tryPaints.push(paint);
@@ -50698,10 +50839,10 @@
                     const pct = Math.max(0, Math.min(100, Number(fine.pct) || 0));
 
                     if (document.activeElement !== slider && Date.now() - sentAt > 600) {
-                        slider.value = String(Math.round(pct));
+                        slider.value = String(Math.round(pct * 10) / 10);
                     }
 
-                    shown.textContent = Math.round(Number(slider.value)) + "%";
+                    shown.textContent = pctText(slider.value) + "%";
                     nums.textContent = fineNumbersText(fine);
                 };
 
@@ -50710,7 +50851,7 @@
                 // again, and a web view's move comes as two as well
                 const tell = function () {
 
-                    const v = Math.round(Number(slider.value) || 0);
+                    const v = Math.round((Number(slider.value) || 0) * 10) / 10;
 
                     if (v === sentValue && Date.now() - sentAt < 1500) {
                         return;
@@ -50742,14 +50883,14 @@
                 slider.type = "range";
                 slider.min = "0";
                 slider.max = "100";
-                slider.step = "1";
+                slider.step = "0.1";
                 slider.setAttribute("aria-label", "Volume now, %");
                 slider.style.cssText = "flex:1;min-width:0;accent-color:#48e1eb";
                 shown.style.cssText = "flex:0 0 3.5em;text-align:right;font-variant-numeric:tabular-nums";
                 nums.style.fontVariantNumeric = "tabular-nums";
                 slider.addEventListener("input", function () {
 
-                    shown.textContent = Math.round(Number(slider.value)) + "%";
+                    shown.textContent = pctText(slider.value) + "%";
                     clearTimeout(later);
 
                     if (Date.now() - sentAt >= 150) {
@@ -50771,7 +50912,7 @@
                 box.appendChild(off);
 
 
-                soundBox.appendChild(box);
+                into.appendChild(box);
                 paint();
                 settingsRefreshers.push(paint);
                 tryPaints.push(paint);
@@ -69443,6 +69584,60 @@
         backdrop-filter: blur(14px);
     }
 
+    /* A dialog of the settings, a speaker's settings, as on the phone */
+    .pPop {
+        position: fixed;
+        inset: 0;
+        z-index: 57;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
+
+    .pPopBox {
+        background: var(--bg);
+        border: 1px solid rgba(72, 225, 235, 0.45);
+        border-radius: 18px;
+        padding: 2.4vh 2.4vw;
+        width: min(760px, 94vw);
+        max-height: min(88vh, calc(100% - 16px));
+        overflow-y: auto;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 1.2vh;
+    }
+
+    /* Its name at the top in cyan, the close button round at its right */
+    .pPopBox > .pPopTop {
+        align-items: center;
+    }
+
+    .pPopBox > .pPopTop .pText:first-child {
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 1.15em;
+    }
+
+    /* Kept round where the buttons of a page are made one width */
+    #panelBody .pPopBox .pBtn.pPopX {
+        flex: 0 0 auto;
+        width: 48px !important;
+        min-width: 48px !important;
+        max-width: 48px !important;
+        height: 48px;
+        min-height: 48px;
+        padding: 0;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+    }
+
     #trainBox {
         background: var(--card);
         border: 1px solid rgba(72, 225, 235, 0.45);
@@ -84353,7 +84548,7 @@
 
         if (volFineOn()) {
 
-            parts.push(Math.round(state.volFine * 10) / 10 + "% real volume");
+            parts.push(pctText(state.volFine) + "% real volume");
             parts.push("step " + state.vol + " of " + state.volMax
                 + (typeof state.volStepDb === "number" ? " at " + state.volStepDb.toFixed(1) + " dB" : ""));
             parts.push("mixer " + (typeof state.volGainDb === "number" ? state.volGainDb.toFixed(1) : "0.0") + " dB");
@@ -84385,7 +84580,7 @@
             return;
         }
 
-        const level = typeof s.volFine === "number" && s.volFine >= 0 ? Math.round(s.volFine) : s.vol * 1000;
+        const level = typeof s.volFine === "number" && s.volFine >= 0 ? Math.round(s.volFine * 100) : s.vol * 100000;
         const was = volSeenLevel;
 
         volSeenLevel = level;
@@ -84504,7 +84699,7 @@
         }
 
         if (volFineOn()) {
-            return Math.round(state.volFine);
+            return Math.round(state.volFine * 100) / 100;
         }
 
         return state && typeof state.vol === "number" ? state.vol : -1;
@@ -84608,7 +84803,7 @@
             const level = volLevelOf(x);
 
             if (level >= 0) {
-                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
+                volSetFor(x, x.kind === "phone" && volFineOn() ? fineNextLevel(level, by) : level + by * (x.kind === "phone" ? 1 : 5), true);
             }
         };
 
@@ -84809,7 +85004,10 @@
             return;
         }
 
-        const value = Math.max(0, Math.min(top, Math.round(level)));
+        // The phone's level with more steps may lie between whole percents
+        // under its first step, the app keeps it to the levels it has
+        const fine = t.kind === "phone" && volFineOn();
+        const value = Math.max(0, Math.min(top, fine ? Math.round(level * 100) / 100 : Math.round(level)));
 
         volMoves[t.key] = { v: value, until: Date.now() + (t.kind === "other" ? 3000 : 1500) };
 
@@ -84895,8 +85093,44 @@
 
         const step = volTarget().kind === "phone" ? 1 : 5;
 
-        volSet(now + by * step, true);
+        volSet(volTarget().kind === "phone" && volFineOn() ? fineNextLevel(now, by) : now + by * step, true);
         volSay();
+    }
+
+    // The phone's next level with more steps, as its own buttons move it:
+    // under its first step by the levels set there, above by a percent
+    function fineNextLevel(pct, dir) {
+
+        const high = Number(state && state.volLowTop) || 0;
+        const n = Math.max(0, Number(state && state.volLowCount) || 0);
+
+        if (!(high > 0)) {
+            return Math.max(0, Math.min(100, Math.round(pct) + dir));
+        }
+
+        if (dir > 0) {
+
+            if (pct >= high - 0.01) {
+                return Math.min(100, Math.round(pct) + 1);
+            }
+
+            return high * Math.min(n + 1, Math.floor(pct * (n + 1) / high + 0.01) + 1) / (n + 1);
+        }
+
+        if (pct > high + 0.01) {
+            return Math.max(high, Math.round(pct) - 1);
+        }
+
+        return high * Math.max(0, Math.ceil(pct * (n + 1) / high - 0.01) - 1) / (n + 1);
+    }
+
+    // A level in percent as it is shown: whole, or with one decimal under
+    // the first step where the levels lie closer
+    function pctText(p) {
+
+        const v = Math.round((Number(p) || 0) * 10) / 10;
+
+        return Number.isInteger(v) ? String(v) : v.toFixed(1);
     }
 
     // Off, and back to where it was. With nothing to go back to it comes
@@ -84938,7 +85172,11 @@
             return "Off";
         }
 
-        if (t.kind !== "phone" || !state || state.volUnit !== "steps" || volFineOn()) {
+        if (t.kind === "phone" && volFineOn()) {
+            return pctText(level / top * 100) + "%";
+        }
+
+        if (t.kind !== "phone" || !state || state.volUnit !== "steps") {
             return Math.round(level / top * 100) + "%";
         }
 
@@ -85501,24 +85739,16 @@
         const box = $("panelBody");
         const scroller = $("panelScroll");
         const keep = scroller.scrollTop;
+        const popWas = box.querySelector(".pPopBox");
+        const popKeep = popWas ? popWas.scrollTop : 0;
 
         box.textContent = "";
+        panelNodes(panelClean(items, true), box);
 
-        for (const node of panelClean(items, true)) {
+        const popNow = box.querySelector(".pPopBox");
 
-            // A button on its own line on the phone keeps a line of its own,
-            // lined up with the rows of buttons around it
-            if (node.t === "button" && !node.wide) {
-
-                const line = document.createElement("div");
-
-                line.className = "pRow";
-                line.appendChild(panelNode(node, true));
-                box.appendChild(line);
-                continue;
-            }
-
-            box.appendChild(panelNode(node, false, true));
+        if (popNow) {
+            popNow.scrollTop = popKeep;
         }
 
         addLocalSection(box);
@@ -85561,6 +85791,83 @@
     // they are left out. A row left with one thing is just that thing
     const PANEL_HEADS = ["Settings", "Filters", "Creators", "Playlists", "Information", "Song"];
 
+    // The items of a panel, or of a dialog in it, each in its place
+    function panelNodes(nodes, box) {
+
+        for (const node of nodes) {
+
+            // A button on its own line on the phone keeps a line of its own,
+            // lined up with the rows of buttons around it
+            if (node.t === "button" && !node.wide) {
+
+                const line = document.createElement("div");
+
+                line.className = "pRow";
+                line.appendChild(panelNode(node, true));
+                box.appendChild(line);
+                continue;
+            }
+
+            box.appendChild(panelNode(node, false, true));
+        }
+    }
+
+    // A dialog of the phone's settings as a popup over the panel. A tap
+    // beside it or Escape closes it, as its close button does
+    function panelPop(node) {
+
+        const pop = document.createElement("div");
+        const box = document.createElement("div");
+
+        pop.className = "pPop";
+        box.className = "pPopBox";
+        box.setAttribute("role", "dialog");
+        box.setAttribute("aria-modal", "true");
+        panelNodes(node.c || [], box);
+
+        // Its close button round with the cross, as on the other popups
+        const first = box.firstElementChild;
+        const x = first ? Array.from(first.querySelectorAll("button")).find(function (b) {
+            return b.textContent.trim() === "\u00d7";
+        }) : null;
+
+        if (x) {
+
+            x.textContent = "";
+            x.appendChild(icon("close"));
+            x.setAttribute("aria-label", "Close");
+            x.classList.add("pPopX");
+            first.classList.add("pPopTop");
+        }
+
+        pop.appendChild(box);
+        pop.addEventListener("click", function (ev) {
+
+            if (ev.target === pop && node.close) {
+                panelAction("hclick", node.close);
+            }
+        });
+        pop.__close = node.close || "";
+
+        return pop;
+    }
+
+    document.addEventListener("keydown", function (ev) {
+
+        if (ev.key !== "Escape") {
+            return;
+        }
+
+        const pop = $("panelBody").querySelector(".pPop");
+
+        if (pop && pop.__close && !(trainUi && trainUi.pop.style.display === "flex") && !(editUi && editUi.pop && editUi.pop.style.display === "flex")) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            panelAction("hclick", pop.__close);
+        }
+    }, true);
+
     function panelClean(items, top) {
 
         const out = [];
@@ -85574,6 +85881,12 @@
             }
 
             if (node.t === "button" && node.s === "Done") {
+                continue;
+            }
+
+            if (node.t === "pop") {
+
+                out.push(Object.assign({}, node, { c: panelClean(node.c || []) }));
                 continue;
             }
 
@@ -85729,6 +86042,10 @@
     }
 
     function panelNode(node, hasButtons, top) {
+
+        if (node.t === "pop") {
+            return panelPop(node);
+        }
 
         // A setting's name with its explanation under it, one column
         if (node.t === "col") {
@@ -86148,7 +86465,7 @@
             return "Step " + state.vol + " of " + state.volMax + " \u00b7 mixer 0.0 dB";
         }
 
-        return Math.round(state.volFine * 10) / 10 + "% \u00b7 step " + state.vol + " of " + state.volMax
+        return pctText(state.volFine) + "% \u00b7 step " + state.vol + " of " + state.volMax
             + (typeof state.volStepDb === "number" ? " at " + state.volStepDb.toFixed(1) + " dB" : "")
             + " \u00b7 mixer " + (typeof state.volGainDb === "number" ? state.volGainDb.toFixed(1) : "0.0") + " dB";
     }

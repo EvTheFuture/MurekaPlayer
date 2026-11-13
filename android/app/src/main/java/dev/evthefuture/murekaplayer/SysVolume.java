@@ -134,6 +134,15 @@ final class SysVolume {
     private static float lowFallback = 0;
     private static float lowDb = 0;
     private static final float LOW_MAX_DB = 60;
+
+    // How many levels lie between off and the phone's first step, for each
+    // speaker and for this phone and the speakers without, 0 for one at
+    // each whole percent. More of them for a speaker whose lowest step is
+    // loud. The one for the output in use
+    private static final Map<String, Integer> LOW_STEPS_BY_ADDRESS = new HashMap<>();
+    private static int lowStepsFallback = 0;
+    private static int lowSteps = 0;
+    private static final int LOW_STEPS_MAX = 40;
     private static int delayFallback = -1;
     private static int stepDelay = -1;
 
@@ -332,7 +341,7 @@ final class SysVolume {
             }
 
             // Turned on without a level, it starts where the step is
-            finePct = pct >= 0 ? Math.max(0, Math.min(100, pct)) : stepPct(cur, max);
+            finePct = pct >= 0 ? snapFine(pct, max) : stepPct(cur, max);
             applyFine();
         } catch (RuntimeException e) {
             // Do not disturb can refuse the change, so leave it as it was
@@ -343,6 +352,67 @@ final class SysVolume {
     // so each step is reached exactly by going a percent at a time
     static float stepPct(int step, int max) {
         return max > 0 ? Math.round(100f * Math.max(0, Math.min(max, step)) / max) : 0;
+    }
+
+    // The levels between off and the first step: as many as set for the
+    // output, else one at each whole percent under it
+    private static int lowCount(int max) {
+
+        float high = stepPct(1, max);
+
+        return lowSteps > 0 ? lowSteps : Math.max(0, Math.round(high) - 1);
+    }
+
+    // A level as one of those offered: under the first step the nearest of
+    // the levels set there, above it a whole percent
+    private static float snapFine(float pct, int max) {
+
+        float p = Math.max(0, Math.min(100, pct));
+        float high = stepPct(1, max);
+
+        if (max <= 0 || p <= 0) {
+            return 0;
+        }
+
+        if (p >= high - 0.0001f) {
+            return Math.max(high, Math.round(p));
+        }
+
+        int n = lowCount(max);
+        int k = Math.max(0, Math.min(n + 1, Math.round(p * (n + 1) / high)));
+
+        return high * k / (n + 1);
+    }
+
+    // The level one up or down from where it is: under the first step by
+    // the levels set there, above it by a whole percent
+    private static float fineNext(float pct, int dir, int max) {
+
+        float high = stepPct(1, max);
+        int n = lowCount(max);
+
+        if (max <= 0 || high <= 0) {
+            return Math.max(0, Math.min(100, Math.round(pct) + dir));
+        }
+
+        if (dir > 0) {
+
+            if (pct >= high - 0.001f) {
+                return Math.min(100, Math.round(pct) + 1);
+            }
+
+            int k = (int) Math.floor(pct * (n + 1) / high + 0.001f) + 1;
+
+            return high * Math.min(n + 1, k) / (n + 1);
+        }
+
+        if (pct > high + 0.001f) {
+            return Math.max(high, Math.round(pct) - 1);
+        }
+
+        int k = (int) Math.ceil(pct * (n + 1) / high - 0.001f) - 1;
+
+        return high * Math.max(0, k) / (n + 1);
     }
 
     // The step for a level in percent and the player's own sound for the
@@ -377,12 +447,17 @@ final class SysVolume {
         // share of the step
         if (step == 1) {
 
-            if (lowDb > 0 && high > 1) {
+            // The lowest of the levels set under the first step, a whole
+            // percent when none are set
+            int n = lowCount(max);
+            float lowest = n > 0 ? high / (n + 1) : high;
 
-                float down = lowDb * (high - Math.max(1, p)) / (high - 1);
+            if (lowDb > 0 && high > lowest) {
 
-                // Under a whole percent, the rest of the way by its share
-                float share = p < 1 ? p : 1;
+                float down = lowDb * (high - Math.max(lowest, p)) / (high - lowest);
+
+                // Under the lowest level, the rest of the way by its share
+                float share = p < lowest ? p / lowest : 1;
 
                 return new float[] { 1, (float) Math.pow(10, -down / 20) * share };
             }
@@ -440,6 +515,8 @@ final class SysVolume {
         boolean own = hasCurve(type, max);
         float[] plan = finePlan(finePct, max, type, own);
         int step = (int) plan[0];
+
+        Hub.setFineLow(stepPct(1, max), lowCount(max));
 
         int was = stepWaiting >= 0 ? stepWaiting : audio.getStreamVolume(AudioManager.STREAM_MUSIC);
         long wait = 0;
@@ -559,6 +636,8 @@ final class SysVolume {
         GAPS_BY_ADDRESS.clear();
         DELAY_BY_ADDRESS.clear();
         LOW_BY_ADDRESS.clear();
+        LOW_STEPS_BY_ADDRESS.clear();
+        lowStepsFallback = 0;
         lowFallback = 0;
         delayFallback = -1;
         gapsFallback = new TreeMap<>();
@@ -643,6 +722,27 @@ final class SysVolume {
             float fbLow = (float) o.optDouble("fallbackLow", 0);
 
             lowFallback = fbLow > 0 && fbLow <= LOW_MAX_DB ? fbLow : 0;
+
+            JSONObject lowCounts = o.optJSONObject("lowSteps");
+
+            if (lowCounts != null) {
+
+                Iterator<String> keys = lowCounts.keys();
+
+                while (keys.hasNext()) {
+
+                    String a = keys.next();
+                    int n = lowCounts.optInt(a, 0);
+
+                    if (n > 0 && n <= LOW_STEPS_MAX) {
+                        LOW_STEPS_BY_ADDRESS.put(a.toUpperCase(Locale.ROOT), n);
+                    }
+                }
+            }
+
+            int fbLowSteps = o.optInt("fallbackLowSteps", 0);
+
+            lowStepsFallback = fbLowSteps > 0 && fbLowSteps <= LOW_STEPS_MAX ? fbLowSteps : 0;
 
             JSONObject caps = o.optJSONObject("caps");
 
@@ -782,6 +882,10 @@ final class SysVolume {
         Float ownLow = address.isEmpty() ? null : LOW_BY_ADDRESS.get(address);
 
         lowDb = ownLow != null ? ownLow : lowFallback;
+
+        Integer ownLowSteps = address.isEmpty() ? null : LOW_STEPS_BY_ADDRESS.get(address);
+
+        lowSteps = ownLowSteps != null ? ownLowSteps : lowStepsFallback;
 
         stepDelay = ownDelay != null ? ownDelay : (address.isEmpty() ? delayFallback : -1);
 
@@ -1087,10 +1191,18 @@ final class SysVolume {
             return;
         }
 
-        float pct = Math.max(0, Math.min(100, Math.round(finePct) + dir));
+        try {
 
-        if (pct != finePct) {
-            setFine(true, pct);
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            float pct = fineNext(finePct, dir, max);
+
+            if (Math.abs(pct - finePct) > 0.0001f) {
+
+                finePct = pct;
+                applyFine();
+            }
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, so leave it as it was
         }
 
         if (shown) {
@@ -1119,7 +1231,7 @@ final class SysVolume {
 
             if (fineOn) {
 
-                o.put("pct", Math.round(finePct * 10) / 10.0);
+                o.put("pct", Math.round(finePct * 100) / 100.0);
                 o.put("step", fineStep);
                 o.put("gain", Math.round(fineGain * 1000) / 1000.0);
                 o.put("gainDb", fineGain > 0 ? Math.round(200 * Math.log10(fineGain)) / 10.0 : -200);
@@ -1134,6 +1246,16 @@ final class SysVolume {
             o.put("trained", gaps != null && !gaps.isEmpty());
             o.put("delay", stepDelay);
             o.put("lowDb", lowDb);
+
+            // The levels under the first step: the first step's percent, how
+            // many there are and how many were set, 0 for one each percent
+            if (max > 0) {
+
+                o.put("lowTop", stepPct(1, max));
+                o.put("lowCount", lowCount(max));
+            }
+
+            o.put("lowSteps", lowSteps);
 
             if (training) {
 

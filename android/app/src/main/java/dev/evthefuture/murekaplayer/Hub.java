@@ -59,6 +59,8 @@ final class Hub {
 
     // The level in percent with more steps on, -1 while off
     private static float volFine = -1;
+    private static float volLowTop = 0;
+    private static int volLowCount = 0;
 
     // The volume buttons moving more steps, the step's level and the
     // player's share in dB, and a count of button presses with the app on
@@ -226,6 +228,24 @@ final class Hub {
         }
     }
 
+    // The levels under the phone's first step: its percent and how many
+    // lie under it, so a browser moves by them as the phone does
+    static void setFineLow(float top, int count) {
+
+        synchronized (LOCK) {
+
+            if (top == volLowTop && count == volLowCount) {
+                return;
+            }
+
+            volLowTop = top;
+            volLowCount = count;
+            rebuild();
+            seq += 1;
+            LOCK.notifyAll();
+        }
+    }
+
     static void setFineInfo(float stepDb, float gainDb) {
 
         synchronized (LOCK) {
@@ -318,7 +338,7 @@ final class Hub {
             o = new JSONObject(playerJson);
             o.put("vol", volLevel);
             o.put("volMax", volMax);
-            o.put("volFine", volFine >= 0 ? Math.round(volFine * 10) / 10.0 : -1);
+            o.put("volFine", volFine >= 0 ? Math.round(volFine * 100) / 100.0 : -1);
             o.put("volButtons", volButtons);
             o.put("volKey", volKeys);
 
@@ -329,6 +349,8 @@ final class Hub {
                 }
 
                 o.put("volGainDb", Math.round(Math.max(-200, volGainDb) * 10) / 10.0);
+                o.put("volLowTop", volLowTop);
+                o.put("volLowCount", volLowCount);
             }
             o.put("clients", clients);
             o.put("btOut", btOut);

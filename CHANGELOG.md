@@ -928,6 +928,26 @@ In development.
   shows what Save keeps, step by step, in columns, each marked trained,
   earlier or filled in, and follows the choice. One Save button in place
   of two, beside Train again, with Cancel at the left, on one row.
+- **Filled in from the trained steps by default.** At the end of the
+  training the choice starts on filling the steps not trained this time
+  in from the trained ones; keeping the earlier values is the other.
+- **Each speaker's settings in a dialog.** Under Sound profiles,
+  Speakers lists each speaker with whether it plays or is connected and
+  its profiles, and Edit opens all its settings in a dialog: the profile
+  and night profile, night mode as it connects, max volume as it
+  connects, the volume steps with their buttons, and Volume now. The
+  folding under each speaker is gone, and so are the profile drop-downs
+  in the list. The explanations sit in the dialog beside what they
+  explain. The web view draws the same dialog as a popup, closed with
+  its round cross, a tap beside it or Escape.
+- **Levels under step 1.** A speaker, and the default for the rest, can
+  have its own number of levels between Off and step 1, from 1 to 40,
+  each with how far apart they are, such as 10 (0.5% apart). Auto keeps
+  one at each whole percent. More of them suit a speaker whose lowest
+  step is loud already. The volume buttons, the web view's arrow keys
+  and its - and + go through them one at a time, the levels show with
+  one decimal, such as 2.7%, and a slider lands on the nearest. Set how
+  far down the lowest is, the levels go down to it evenly in dB.
 
 ### Build
 
