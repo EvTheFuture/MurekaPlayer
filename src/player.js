@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.104";
+    const VERSION = "2.0.1.105";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -14103,7 +14103,7 @@
                 + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
                 + "Damp the louder steps keeps them about as loud as the second, and Quieter turns everything down when others are asleep. While training, the compressor of the sound profile is off. "
                 + "If the sound dips or bumps for a moment as it switches, change the switch delay until it is smooth, as the player's share reaches the speaker later than the step.";
-            view.buttons = [{ op: "start", label: "Start", strong: true }, { op: "cancel", label: "Cancel" }];
+            view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "start", label: "Start", look: "primary" }];
         } else if (at === "step") {
 
             const k = volTrainStep();
@@ -14124,9 +14124,9 @@
             view.upper = volTrain.upper;
             view.flip = volTrain.side ? "Switch to step " + (k - 1) : "Switch to step " + k;
             view.damp = volTrainDamp();
-            view.buttons = [{ op: "back", label: "Back" }, { op: "skip", label: "Leave as is" }]
-                .concat(last ? [] : [{ op: "done", label: "Keep, done" }])
-                .concat([{ op: "next", label: last ? "Keep, finish" : "Keep, next", strong: true }, { op: "cancel", label: "Cancel" }]);
+            view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "back", label: "Back", look: "plain" }, { op: "skip", label: "Leave as is", look: "plain" }]
+                .concat(last ? [] : [{ op: "done", label: "Keep, done", look: "ring" }])
+                .concat([{ op: "next", label: last ? "Keep, finish" : "Keep, next", look: "primary" }]);
         } else {
 
             const now = Object.keys(volTrain.gaps).length > 0;
@@ -14157,13 +14157,42 @@
                 view.lines.push("Switch delay: " + volTrain.delay + " ms");
             }
 
-            view.buttons = (now && before
-                ? [{ op: "save", label: "Save, keep the others", strong: true }, { op: "saveOnly", label: "Save, only these" }]
-                : (now ? [{ op: "save", label: "Save", strong: true }] : []))
-                .concat([{ op: "again", label: "Train again" }, { op: "cancel", label: "Cancel" }]);
+            view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "again", label: "Train again", look: now ? "ring" : "primary" }]
+                .concat(now && before
+                    ? [{ op: "saveOnly", label: "Save, only these", look: "ring" }, { op: "save", label: "Save, keep the others", look: "primary" }]
+                    : (now ? [{ op: "save", label: "Save", look: "primary" }] : []));
         }
 
         return view;
+    }
+
+    // The buttons of the popups by their weight: the one main step filled
+    // in cyan, those that also do something ringed in cyan, the plain ones
+    // grey, and Cancel as quiet text. Red is kept for what deletes
+    function lookButton(el, look) {
+
+        el.style.boxShadow = "";
+        el.style.border = "none";
+
+        if (look === "primary") {
+
+            el.style.background = "#48e1eb";
+            el.style.color = "#000";
+            el.style.fontWeight = "600";
+        } else if (look === "ring") {
+
+            el.style.background = "transparent";
+            el.style.color = "#48e1eb";
+            el.style.boxShadow = "inset 0 0 0 2px #48e1eb";
+        } else if (look === "ghost") {
+
+            el.style.background = "transparent";
+            el.style.color = "#aaa";
+        } else {
+
+            el.style.background = "#333";
+            el.style.color = "#fff";
+        }
     }
 
     // The phone's popup: built once, drawn from the view
@@ -14223,11 +14252,19 @@
 
         for (const b of view.buttons) {
 
-            const el = makeButton(b.label, b.strong ? "#48e1eb" : "#333", b.strong ? "#000" : "#fff", function () {
+            const el = makeButton(b.label, "#333", "#fff", function () {
                 volTrainAct(b.op);
             });
 
             el.style.padding = "8px 16px";
+            el.style.flex = "0 0 auto";
+            lookButton(el, b.look);
+
+            // Cancel at the far left, the rest at the right
+            if (b.look === "ghost") {
+                el.style.marginRight = "auto";
+            }
+
             ui.buttons.appendChild(el);
         }
 
@@ -14272,9 +14309,10 @@
         ui.now.style.cssText = "font-weight:600;font-variant-numeric:tabular-nums";
 
         // The other side, as often as needed
-        ui.flip = makeButton("Switch", "#48e1eb", "#000", function () {
+        ui.flip = makeButton("Switch", "#333", "#fff", function () {
             volTrainAct("flip");
         });
+        lookButton(ui.flip, "ring");
         ui.flip.style.flex = "0 0 auto";
         ui.flip.style.padding = "14px 18px";
         ui.flip.style.fontSize = "16px";
@@ -14315,8 +14353,7 @@
         ui.delayRow.appendChild(ui.delayValue);
         ui.delayRow.appendChild(later);
         ui.delayHint = document.createElement("div");
-        ui.delayHint.textContent = "How long the speaker takes to play what the player sends. Right, a switch has no dip or bump. "
-            + "Change it 25 ms at a time until the switches are smooth. It is kept for the speaker and used by More volume steps too.";
+        ui.delayHint.textContent = "The speaker's own delay: change it until a switch has no dip or bump. Kept for the speaker, and used by More volume steps too.";
         ui.delayHint.style.cssText = "font-size:12px;line-height:1.4;color:#999";
 
         // Quieter: the player alone turns both sides down alike, for
@@ -14344,8 +14381,7 @@
         ui.quietRow.appendChild(ui.quiet);
         ui.quietRow.appendChild(ui.quietShown);
         ui.quietHint = document.createElement("div");
-        ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
-            + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
+        ui.quietHint.textContent = "Turns both sides down alike in the player only, for training at night. The gaps found stay the same, and it is gone once the training ends.";
         ui.quietHint.style.cssText = "font-size:12px;line-height:1.4;color:#e8a0a0";
 
         // Damp the louder steps, so the volume need not be turned down
@@ -14364,7 +14400,7 @@
         const autoHint = document.createElement("div");
 
         autoName.textContent = "Damp the louder steps";
-        autoHint.textContent = "From the third step on, the player turns both sides down by as much as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.textContent = "From the third step on, both sides are turned down as far as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
         autoHint.style.cssText = "font-size:12px;line-height:1.4;color:#999;margin-top:2px";
         autoText.appendChild(autoName);
         autoText.appendChild(autoHint);
@@ -14374,7 +14410,7 @@
         ui.list = document.createElement("div");
         ui.list.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:13px;color:#ccc;font-variant-numeric:tabular-nums";
         ui.buttons = document.createElement("div");
-        ui.buttons.style.cssText = "display:flex;flex-wrap:wrap;gap:8px";
+        ui.buttons.style.cssText = "display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px";
 
         box.appendChild(top);
         box.appendChild(ui.text);
@@ -14708,6 +14744,8 @@
         const done = makeButton("Done", "#48e1eb", "#000", function () {
             volEditAct("close");
         });
+
+        lookButton(done, "primary");
 
         volEditEl = document.createElement("div");
         volEditEl.dataset.murekaNotice = "1";
@@ -50226,7 +50264,32 @@
             const even = evenDrop;
             const speaker = function (title, get, set, phone, address) {
 
-                soundBox.appendChild(soundHeading(title, false, true));
+                const heading = soundHeading(title, false, true);
+
+                // A speaker's heading says whether it is connected and
+                // whether the music plays on it, kept up while the page shows
+                if (!phone) {
+
+                    const paintHeading = function () {
+
+                        const d = soundDevices().find(function (x) {
+                            return x.address === address;
+                        });
+                        const fine = fineInfo();
+                        const here = typeof fine.output === "string" ? fine.output === "bt:" + String(address || "").toUpperCase() : !!(d && d.active);
+                        const said = here ? " \u00b7 playing here" : (d && d.connected ? " \u00b7 connected" : "");
+
+                        if (heading.textContent !== title + said) {
+                            heading.textContent = title + said;
+                        }
+                    };
+
+                    paintHeading();
+                    settingsRefreshers.push(paintHeading);
+                    tryPaints.push(paintHeading);
+                }
+
+                soundBox.appendChild(heading);
                 soundBox.appendChild(even(makeDropRow("Profile", dayChoices(phone), function () { return get("day"); }, function (v) {
 
                     set("day", v);
@@ -50258,7 +50321,7 @@
                 }
 
                 if (stepsOffered) {
-                    stepsRows(get, set, phone, address, title.replace(/, connected$/, ""));
+                    stepsRows(get, set, phone, address, title);
                 }
 
                 const rest = Array.from(soundBox.children).slice(from);
@@ -50290,7 +50353,7 @@
                 toggle.style.alignSelf = "flex-start";
                 toggle.style.flex = "0 0 auto";
                 toggle.style.padding = "6px 2px";
-                toggle.setAttribute("aria-label", "More settings for " + title.replace(/, connected$/, ""));
+                toggle.setAttribute("aria-label", "More settings for " + title);
                 soundBox.appendChild(toggle);
                 soundBox.appendChild(more);
                 paintMore();
@@ -50629,7 +50692,7 @@
 
             for (const d of devs) {
 
-                speaker(String(d.name || d.address) + (d.connected ? ", connected" : ""), function (k) {
+                speaker(String(d.name || d.address), function (k) {
 
                     const dev = sound().devices[d.address];
 
@@ -69222,7 +69285,7 @@
         border: 1px solid rgba(72, 225, 235, 0.45);
         border-radius: 18px;
         padding: 2.4vh 2.4vw;
-        width: min(640px, 92vw);
+        width: min(900px, 94vw);
         max-height: min(88vh, calc(100% - 16px));
         overflow-y: auto;
         box-sizing: border-box;
@@ -69292,13 +69355,13 @@
         border: 1px solid rgba(72, 225, 235, 0.45);
         border-radius: 18px;
         padding: 2.4vh 2.4vw;
-        width: min(640px, 92vw);
+        width: min(900px, 94vw);
         max-height: min(88vh, calc(100% - 16px));
         overflow-y: auto;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 10px;
     }
 
     .trainTop {
@@ -69343,6 +69406,11 @@
         display: flex;
         align-items: center;
         gap: 12px;
+    }
+
+    .trainRow .chip {
+        height: 40px;
+        min-height: 40px;
     }
 
     .trainName {
@@ -69410,7 +69478,16 @@
     .trainActs {
         display: flex;
         flex-wrap: wrap;
+        justify-content: flex-end;
         gap: 8px;
+    }
+
+    /* Cancel as quiet text at the far left, the rest at the right */
+    .chip.trainGhost {
+        margin-right: auto;
+        background: transparent;
+        border-color: transparent;
+        color: var(--muted);
     }
 
     #plBox,
@@ -69525,6 +69602,34 @@
 
     .btRow.linked > .ico {
         color: var(--accent);
+    }
+
+    /* A connected device: a cyan bar on its left, the one playing a
+       little lit too */
+    .btRow.linked {
+        box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .btRow.on {
+        background: rgba(72, 225, 235, 0.08);
+    }
+
+    .btBadge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--accent);
+        color: var(--accent);
+        font-size: 0.72em;
+        font-weight: 600;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    .btBadge.on {
+        background: var(--accent);
+        color: #000;
     }
 
     .btRow .chip {
@@ -90859,6 +90964,17 @@
             name.className = "plRowName";
             how.className = "plRowCount";
             name.textContent = d.name;
+
+            // Connected ones marked beside the name, the one the music goes
+            // to as playing
+            if (d.connected && !doing && d.state !== "disconnecting") {
+
+                const badge = document.createElement("span");
+
+                badge.className = "btBadge" + (d.active ? " on" : "");
+                badge.textContent = d.active ? "Playing" : "Connected";
+                name.appendChild(badge);
+            }
             how.textContent = said;
             how.title = said;
             text.appendChild(name);
@@ -98123,7 +98239,7 @@
         // The other side, as often as needed
         ui.flip = chip("Switch", function () {
             send("volTrain", { op: "flip" });
-        }, "crPrimary trainFlip");
+        }, "ring trainFlip");
 
         ui.gapRow = document.createElement("div");
         ui.gapRow.className = "trainRow";
@@ -98159,8 +98275,7 @@
         }));
         ui.delayHint = document.createElement("div");
         ui.delayHint.className = "trainText";
-        ui.delayHint.textContent = "How long the speaker takes to play what the player sends. Right, a switch has no dip or bump. "
-            + "Change it 25 ms at a time until the switches are smooth. It is kept for the speaker and used by More volume steps too.";
+        ui.delayHint.textContent = "The speaker's own delay: change it until a switch has no dip or bump. Kept for the speaker, and used by More volume steps too.";
 
         // Quieter: the player alone turns both sides down alike, for
         // training at night. Red, as it is not the volume
@@ -98191,8 +98306,7 @@
         ui.quietRow.appendChild(ui.quietShown);
         ui.quietHint = document.createElement("div");
         ui.quietHint.className = "trainQuietHint";
-        ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
-            + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
+        ui.quietHint.textContent = "Turns both sides down alike in the player only, for training at night. The gaps found stay the same, and it is gone once the training ends.";
 
         // Damp the louder steps, so the volume need not be turned down
         // more and more by hand
@@ -98209,7 +98323,7 @@
         });
         autoName.textContent = "Damp the louder steps";
         autoHint.className = "trainText";
-        autoHint.textContent = "From the third step on, the player turns both sides down by as much as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.textContent = "From the third step on, both sides are turned down as far as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
         autoText.appendChild(autoName);
         autoText.appendChild(autoHint);
         ui.autoRow.appendChild(ui.auto);
@@ -98306,10 +98420,14 @@
             ui.actsKey = key;
             ui.acts.textContent = "";
 
+            // By their weight: the main step filled, those that also do
+            // something ringed, the plain ones grey, Cancel as quiet text
+            const looks = { primary: "crPrimary", ring: "ring", ghost: "trainGhost", plain: "" };
+
             for (const b of v.buttons || []) {
                 ui.acts.appendChild(ui.chip(b.label, function () {
                     send("volTrain", { op: b.op });
-                }, b.strong ? "crPrimary" : ""));
+                }, looks[b.look] !== undefined ? looks[b.look] : (b.strong ? "crPrimary" : "")));
             }
         }
 

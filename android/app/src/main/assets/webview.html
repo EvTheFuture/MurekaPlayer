@@ -1866,7 +1866,7 @@
         border: 1px solid rgba(72, 225, 235, 0.45);
         border-radius: 18px;
         padding: 2.4vh 2.4vw;
-        width: min(640px, 92vw);
+        width: min(900px, 94vw);
         max-height: min(88vh, calc(100% - 16px));
         overflow-y: auto;
         box-sizing: border-box;
@@ -1936,13 +1936,13 @@
         border: 1px solid rgba(72, 225, 235, 0.45);
         border-radius: 18px;
         padding: 2.4vh 2.4vw;
-        width: min(640px, 92vw);
+        width: min(900px, 94vw);
         max-height: min(88vh, calc(100% - 16px));
         overflow-y: auto;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 10px;
     }
 
     .trainTop {
@@ -1987,6 +1987,11 @@
         display: flex;
         align-items: center;
         gap: 12px;
+    }
+
+    .trainRow .chip {
+        height: 40px;
+        min-height: 40px;
     }
 
     .trainName {
@@ -2054,7 +2059,16 @@
     .trainActs {
         display: flex;
         flex-wrap: wrap;
+        justify-content: flex-end;
         gap: 8px;
+    }
+
+    /* Cancel as quiet text at the far left, the rest at the right */
+    .chip.trainGhost {
+        margin-right: auto;
+        background: transparent;
+        border-color: transparent;
+        color: var(--muted);
     }
 
     #plBox,
@@ -2169,6 +2183,34 @@
 
     .btRow.linked > .ico {
         color: var(--accent);
+    }
+
+    /* A connected device: a cyan bar on its left, the one playing a
+       little lit too */
+    .btRow.linked {
+        box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .btRow.on {
+        background: rgba(72, 225, 235, 0.08);
+    }
+
+    .btBadge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--accent);
+        color: var(--accent);
+        font-size: 0.72em;
+        font-weight: 600;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    .btBadge.on {
+        background: var(--accent);
+        color: #000;
     }
 
     .btRow .chip {
@@ -23503,6 +23545,17 @@
             name.className = "plRowName";
             how.className = "plRowCount";
             name.textContent = d.name;
+
+            // Connected ones marked beside the name, the one the music goes
+            // to as playing
+            if (d.connected && !doing && d.state !== "disconnecting") {
+
+                const badge = document.createElement("span");
+
+                badge.className = "btBadge" + (d.active ? " on" : "");
+                badge.textContent = d.active ? "Playing" : "Connected";
+                name.appendChild(badge);
+            }
             how.textContent = said;
             how.title = said;
             text.appendChild(name);
@@ -30767,7 +30820,7 @@
         // The other side, as often as needed
         ui.flip = chip("Switch", function () {
             send("volTrain", { op: "flip" });
-        }, "crPrimary trainFlip");
+        }, "ring trainFlip");
 
         ui.gapRow = document.createElement("div");
         ui.gapRow.className = "trainRow";
@@ -30803,8 +30856,7 @@
         }));
         ui.delayHint = document.createElement("div");
         ui.delayHint.className = "trainText";
-        ui.delayHint.textContent = "How long the speaker takes to play what the player sends. Right, a switch has no dip or bump. "
-            + "Change it 25 ms at a time until the switches are smooth. It is kept for the speaker and used by More volume steps too.";
+        ui.delayHint.textContent = "The speaker's own delay: change it until a switch has no dip or bump. Kept for the speaker, and used by More volume steps too.";
 
         // Quieter: the player alone turns both sides down alike, for
         // training at night. Red, as it is not the volume
@@ -30835,8 +30887,7 @@
         ui.quietRow.appendChild(ui.quietShown);
         ui.quietHint = document.createElement("div");
         ui.quietHint.className = "trainQuietHint";
-        ui.quietHint.textContent = "Quieter turns the sound down in the player only, on both sides alike, so the gaps found stay the same. "
-            + "For training at night without waking anyone. Kept apart from the volume, and gone once the training ends.";
+        ui.quietHint.textContent = "Turns both sides down alike in the player only, for training at night. The gaps found stay the same, and it is gone once the training ends.";
 
         // Damp the louder steps, so the volume need not be turned down
         // more and more by hand
@@ -30853,7 +30904,7 @@
         });
         autoName.textContent = "Damp the louder steps";
         autoHint.className = "trainText";
-        autoHint.textContent = "From the third step on, the player turns both sides down by as much as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.textContent = "From the third step on, both sides are turned down as far as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
         autoText.appendChild(autoName);
         autoText.appendChild(autoHint);
         ui.autoRow.appendChild(ui.auto);
@@ -30950,10 +31001,14 @@
             ui.actsKey = key;
             ui.acts.textContent = "";
 
+            // By their weight: the main step filled, those that also do
+            // something ringed, the plain ones grey, Cancel as quiet text
+            const looks = { primary: "crPrimary", ring: "ring", ghost: "trainGhost", plain: "" };
+
             for (const b of v.buttons || []) {
                 ui.acts.appendChild(ui.chip(b.label, function () {
                     send("volTrain", { op: b.op });
-                }, b.strong ? "crPrimary" : ""));
+                }, looks[b.look] !== undefined ? looks[b.look] : (b.strong ? "crPrimary" : "")));
             }
         }
 

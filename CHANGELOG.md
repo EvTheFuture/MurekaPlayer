@@ -900,6 +900,22 @@ In development.
   on the speaker gone.
 - **Copy debug log in a cyan ring, Clear debug log in red**, side by
   side at the same width, on the phone and in the web view.
+- **Which Bluetooth device is connected, at a glance.** In the web
+  view's Bluetooth list a connected device has a cyan bar on its left
+  and a badge beside its name, Connected, or Playing for the one the
+  music goes to, which is lit a little too. Under Sound profiles a
+  speaker's heading says playing here or connected, kept up while the
+  page shows, where it was set once as the page was drawn before.
+- **The training's popup wider, and its buttons by their weight.** In
+  the web view the training and Edit by hand popups are up to 900 px
+  wide, with shorter words under the switch delay, Damp and Quieter, so
+  the training fits without scrolling on a screen about 730 px wide. The
+  buttons follow one order on the phone and in the web view: the one
+  main step filled in cyan at the right, such as Keep, next, Start or
+  Save, keep the others; those that also do something ringed in cyan, as
+  Switch to step, Keep, done, Save, only these and Train again; Back and
+  Leave as is grey; and Cancel as quiet text at the far left. Red is
+  kept for what deletes.
 
 ### Build
 
