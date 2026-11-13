@@ -2483,6 +2483,108 @@
         color: var(--muted, #aaa);
     }
 
+    /* A change of the Android device's volume from its buttons or a
+       Bluetooth speaker: a small banner at the top with its level, and a
+       button that opens the volume popup */
+    #volBanner {
+        position: fixed;
+        top: calc(env(safe-area-inset-top, 0px) + 10px);
+        left: 50%;
+        transform: translate(-50%, -8px);
+        width: min(520px, 94vw);
+        box-sizing: border-box;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 8px 8px 14px;
+        border-radius: 16px;
+        background: rgba(20, 20, 20, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: var(--text);
+        font-size: clamp(14px, 1.3vw, 18px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        z-index: 61;
+        opacity: 0;
+        cursor: pointer;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    #volBanner.shown {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+
+    #volBanner .vbIcon {
+        flex: 0 0 auto;
+        width: 1.4em;
+        height: 1.4em;
+        color: var(--accent);
+    }
+
+    #volBanner .vbIcon svg {
+        width: 100%;
+        height: 100%;
+    }
+
+    #volBanner .vbMain {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    #volBanner .vbTop {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    #volBanner .vbName {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+    }
+
+    #volBanner .vbLevel {
+        flex: 0 0 auto;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    #volBanner .vbTrack {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.15);
+        overflow: hidden;
+    }
+
+    #volBanner .vbFill {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+    }
+
+    #volBanner .vbNums {
+        font-size: 0.75em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    #volBanner .vbOpen {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--accent);
+        background: transparent;
+        color: var(--accent);
+        font: inherit;
+        font-size: 0.9em;
+        cursor: pointer;
+    }
+
     #toast {
         position: fixed;
         left: 50%;
@@ -16752,8 +16854,6 @@
     }
 
     function closeVol() {
-
-        volKeyOpened = false;
         $("volPop").style.display = "none";
     }
 
@@ -16923,7 +17023,13 @@
 
     function noteVolChange(s) {
 
-        if (!s || appScreen || !(s.volMax > 0) || typeof s.vol !== "number") {
+        if (!s || !(s.volMax > 0) || typeof s.vol !== "number") {
+            return;
+        }
+
+        // In the app Android shows its own slider, unless the player has
+        // more steps than Android, then the banner shows a speaker's too
+        if (appScreen && !(s.volFine >= 0)) {
             return;
         }
 
@@ -16936,30 +17042,135 @@
             return;
         }
 
-        if (!volOpen()) {
+        volChangedOutside();
+    }
 
-            volKeyOpened = true;
-            openVol();
-        } else {
+    // A change from the Android device's buttons or a Bluetooth speaker:
+    // the open popup follows it, else the small banner at the top shows it
+    function volChangedOutside() {
+
+        if (volOpen()) {
             paintVol(false);
-        }
-
-        clearTimeout(volKeyTimer);
-
-        if (volKeyOpened) {
-
-            volKeyTimer = setTimeout(function () {
-
-                if (volKeyOpened && volOpen()) {
-                    closeVol();
-                }
-
-                volKeyOpened = false;
-            }, 1500);
+        } else {
+            showVolBanner();
         }
     }
-    let volKeyTimer = 0;
-    let volKeyOpened = false;
+
+    let volBannerEl = null;
+    let volBannerHide = 0;
+
+    function showVolBanner() {
+
+        if (!state || !(state.volMax > 0) || typeof state.vol !== "number") {
+            return;
+        }
+
+        if (!volBannerEl) {
+
+            const el = document.createElement("div");
+            const main = document.createElement("div");
+            const top = document.createElement("div");
+            const track = document.createElement("div");
+            const open = document.createElement("button");
+
+            el.id = "volBanner";
+            el.setAttribute("role", "status");
+            el.appendChild(Object.assign(document.createElement("span"), { className: "vbIcon" }));
+            main.className = "vbMain";
+            top.className = "vbTop";
+            top.appendChild(Object.assign(document.createElement("span"), { className: "vbName" }));
+            top.appendChild(Object.assign(document.createElement("span"), { className: "vbLevel" }));
+            track.className = "vbTrack";
+            track.appendChild(Object.assign(document.createElement("div"), { className: "vbFill" }));
+            main.appendChild(top);
+            main.appendChild(track);
+            main.appendChild(Object.assign(document.createElement("div"), { className: "vbNums" }));
+            open.className = "vbOpen";
+            open.type = "button";
+            open.textContent = "Adjust";
+            open.setAttribute("aria-label", "Open the volume");
+            el.appendChild(main);
+            el.appendChild(open);
+
+            // The banner or its button opens the volume popup
+            el.addEventListener("click", function () {
+
+                hideVolBanner(true);
+                openVol();
+            });
+
+            // Kept while the pointer is on it, to reach the button
+            el.addEventListener("pointerenter", function () {
+                clearTimeout(volBannerHide);
+            });
+            el.addEventListener("pointerleave", function () {
+                hideVolBannerSoon(1500);
+            });
+            document.body.appendChild(el);
+            volBannerEl = el;
+        }
+
+        const phone = { key: "phone", kind: "phone" };
+        const top = volTopOf(phone);
+        const level = volFineOn() ? Math.round(state.volFine * 100) / 100 : state.vol;
+        const part = top > 0 ? Math.max(0, Math.min(1, level / top)) : 0;
+        const where = state.soundWhere && state.soundWhere !== "the Android device" ? state.soundWhere : "Android device";
+        const nums = volNumbersText();
+        const iconEl = volBannerEl.querySelector(".vbIcon");
+        const iconName = part === 0 ? "speakerOff" : (part <= 0.34 ? "speakerLow" : (part <= 0.67 ? "speakerMid" : "speaker"));
+
+        if (iconEl.dataset.icon !== iconName) {
+
+            iconEl.dataset.icon = iconName;
+            iconEl.textContent = "";
+            iconEl.appendChild(icon(iconName));
+        }
+
+        volBannerEl.querySelector(".vbName").textContent = where;
+        volBannerEl.querySelector(".vbLevel").textContent = volTextOf(phone, level) || "Off";
+        volBannerEl.querySelector(".vbFill").style.width = (part * 100) + "%";
+        volBannerEl.querySelector(".vbNums").textContent = nums;
+        volBannerEl.querySelector(".vbNums").style.display = nums ? "" : "none";
+        volBannerEl.style.display = "flex";
+
+        // Shown on the next frame, so it slides in
+        requestAnimationFrame(function () {
+            volBannerEl.classList.add("shown");
+        });
+
+        if (!volBannerEl.matches(":hover")) {
+            hideVolBannerSoon(2500);
+        }
+    }
+
+    function hideVolBannerSoon(ms) {
+
+        clearTimeout(volBannerHide);
+        volBannerHide = setTimeout(function () {
+            hideVolBanner(false);
+        }, ms);
+    }
+
+    function hideVolBanner(now) {
+
+        clearTimeout(volBannerHide);
+
+        if (!volBannerEl) {
+            return;
+        }
+
+        volBannerEl.classList.remove("shown");
+
+        if (now) {
+
+            volBannerEl.style.display = "none";
+            return;
+        }
+
+        volBannerHide = setTimeout(function () {
+            volBannerEl.style.display = "none";
+        }, 220);
+    }
 
     function noteVolKey(s) {
 
@@ -16975,27 +17186,7 @@
             return;
         }
 
-        if (!volOpen()) {
-
-            volKeyOpened = true;
-            openVol();
-        } else {
-            paintVol(false);
-        }
-
-        clearTimeout(volKeyTimer);
-
-        if (volKeyOpened) {
-
-            volKeyTimer = setTimeout(function () {
-
-                if (volKeyOpened && volOpen()) {
-                    closeVol();
-                }
-
-                volKeyOpened = false;
-            }, 1500);
-        }
+        volChangedOutside();
     }
 
     // Whether the phone's volume has more steps than its own, a level in
@@ -17635,12 +17826,6 @@
     $("volBtn").addEventListener("click", openVol);
     $("closeVol").addEventListener("click", closeVol);
 
-    // Touched while opened by a volume button, it stays open
-    $("volPop").addEventListener("pointerdown", function () {
-
-        clearTimeout(volKeyTimer);
-        volKeyOpened = false;
-    });
     $("volPop").addEventListener("click", function (ev) {
 
         if (ev.target === $("volPop")) {

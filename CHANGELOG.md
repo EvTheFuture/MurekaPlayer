@@ -956,6 +956,16 @@ In development.
   Default, with Same as default in a speaker's drop-downs. Default says
   what it covers in the list, and a speaker with both profiles as the
   default's says Profiles as default.
+- **A small banner for the volume instead of the popup.** When the
+  Android device's volume changes from its buttons or a Bluetooth
+  speaker, the web view no longer opens the whole volume popup. A small
+  banner at the top shows where the sound plays, the level with a thin
+  bar and, when turned on, the real volume, step and mixer. It goes
+  after 2.5 s, stays while the pointer is on it, and a tap on it or on
+  Adjust opens the volume popup. With the popup already open, the popup
+  follows the change as before. In the app's own web view the banner
+  also shows a Bluetooth speaker's change when the player has more
+  volume steps.
 
 ### Build
 
