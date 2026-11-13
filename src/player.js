@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.103";
+    const VERSION = "2.0.1.104";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -47476,21 +47476,34 @@
                 publishHostSoon();
             });
 
-        const copyLogBtn = makeButton("Copy debug log", "#333", "#fff", copyDebugLog);
+        const copyLogBtn = makeButton("Copy debug log", "transparent", "#48e1eb", copyDebugLog);
 
         // A web view copies the phone's log into its own browser
         copyLogBtn.__copyText = debugLogText;
 
         // Beside it, starting the log again. From the web view's copy of the
         // settings too, where copying has no clipboard to go to
-        const clearLogBtn = makeButton("Clear debug log", "#333", "#fff", function (ev) {
+        const clearLogBtn = makeButton("Clear debug log", "#b03a3a", "#fff", function (ev) {
 
             clearDebugLog();
             buttonDone(ev.currentTarget, "Cleared", true);
         });
         const logRow = document.createElement("div");
 
-        logRow.style.cssText = "display:flex;gap:8px";
+        // Copy in a cyan ring, Clear in red, side by side at the same width
+        logRow.style.cssText = "display:flex;align-items:stretch;gap:8px";
+        logRow.dataset.hostEven = "1";
+        copyLogBtn.style.boxShadow = "inset 0 0 0 2px #48e1eb";
+        copyLogBtn.dataset.hostRing = "1";
+        clearLogBtn.dataset.hostDanger = "1";
+
+        for (const b of [copyLogBtn, clearLogBtn]) {
+
+            b.dataset.hostFull = "1";
+            b.style.flex = "1 1 0";
+            b.style.minWidth = "0";
+        }
+
         logRow.appendChild(copyLogBtn);
         logRow.appendChild(clearLogBtn);
 

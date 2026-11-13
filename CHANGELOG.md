@@ -891,6 +891,15 @@ In development.
   connects, as the phone's own screen does for its buttons. A change
   made in that browser, by its volume popup, the arrows, Volume now or a
   training, does not open it.
+- **Where the sound goes, by name, in the debug log.** Sound playing on
+  the phone now names the device each sound goes to, and says to nowhere
+  when Android gives it none. After a quick change from one speaker to
+  another the music once played with nothing heard anywhere, the log
+  showing the sound going nowhere while the new speaker's stream started
+  and stopped three times in 20 ms, which looks like Android leaving it
+  on the speaker gone.
+- **Copy debug log in a cyan ring, Clear debug log in red**, side by
+  side at the same width, on the phone and in the web view.
 
 ### Build
 

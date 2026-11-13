@@ -1394,7 +1394,18 @@ public class PlayerService extends Service implements Hub.Listener {
 
                 AudioDeviceInfo dev = config.getAudioDeviceInfo();
 
-                to = dev == null ? "" : (isBluetoothOutput(dev) ? " to Bluetooth" : " to the device");
+                // The device by name, and none at all said too: a sound
+                // with nowhere to go is not heard, as after a quick change
+                // from one speaker to another
+                if (dev == null) {
+                    to = " to nowhere";
+                } else {
+
+                    CharSequence name = dev.getProductName();
+
+                    to = (isBluetoothOutput(dev) ? " to Bluetooth" : " to the device")
+                        + (name != null && name.length() > 0 ? " " + name : "");
+                }
             }
 
             parts.add(kind + to);
