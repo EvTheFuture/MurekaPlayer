@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.109";
+    const VERSION = "2.0.1.110";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -37907,6 +37907,21 @@
 
     let hostPublishTimer = null;
 
+    // The last state handed to the app, without its time and position, when
+    // it went and where the song was then. The state goes again only when
+    // something in it changed, the song did not move on as it plays, or
+    // after HOST_HEARTBEAT_MS, so the app and the web views are not woken
+    // every second for nothing. The web view moves the position on by
+    // itself from the time a state was made
+    let hostPublished = "";
+    let hostPublishedAt = 0;
+    let hostPublishedPos = null;
+    const HOST_HEARTBEAT_MS = 5000;
+
+    // How far the position may be from where a song playing on would be,
+    // in seconds, before the state goes again
+    const HOST_DRIFT_S = 0.5;
+
     function publishHostState() {
 
         // The web view in the page, while it is in front
@@ -37919,7 +37934,35 @@
         }
 
         try {
-            window.MurekaHost.publish(JSON.stringify(hostState()));
+
+            const s = hostState();
+            const at = s.at;
+            const pos = s.position;
+            const now = Date.now();
+
+            s.at = 0;
+            s.position = 0;
+
+            const key = JSON.stringify(s);
+            const last = hostPublishedPos;
+            let steady = last !== null && typeof pos === "number";
+
+            if (steady) {
+
+                const expected = s.playing ? last.pos + (at - last.at) / 1000 : last.pos;
+
+                steady = Math.abs(pos - expected) < HOST_DRIFT_S;
+            }
+
+            if (key !== hostPublished || !steady || now - hostPublishedAt >= HOST_HEARTBEAT_MS) {
+
+                s.at = at;
+                s.position = pos;
+                window.MurekaHost.publish(JSON.stringify(s));
+                hostPublished = key;
+                hostPublishedAt = now;
+                hostPublishedPos = { pos: pos, at: at };
+            }
         } catch (e) {
         }
 

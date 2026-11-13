@@ -154,8 +154,12 @@ final class Hub {
     // Called from the JavaScript bridge thread, handed over to the main one
     static void publish(String json) {
 
+        // Read once, here, so a state that does not parse leaves the last
+        // good one in place, and the same reading builds the merged state
+        JSONObject fresh;
+
         try {
-            new JSONObject(json);
+            fresh = new JSONObject(json);
         } catch (JSONException e) {
             return;
         }
@@ -165,7 +169,7 @@ final class Hub {
         synchronized (LOCK) {
 
             playerJson = json;
-            parsed = rebuild();
+            parsed = rebuild(fresh);
             seq += 1;
             LOCK.notifyAll();
         }
@@ -334,8 +338,20 @@ final class Hub {
         JSONObject o;
 
         try {
-
             o = new JSONObject(playerJson);
+        } catch (JSONException e) {
+            o = new JSONObject();
+        }
+
+        return rebuild(o);
+    }
+
+    // The player's state with the app's own parts put in, from a reading of
+    // the player's JSON the caller made, which is changed in place
+    private static JSONObject rebuild(JSONObject o) {
+
+        try {
+
             o.put("vol", volLevel);
             o.put("volMax", volMax);
             o.put("volFine", volFine >= 0 ? Math.round(volFine * 100) / 100.0 : -1);

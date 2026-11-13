@@ -966,6 +966,14 @@ In development.
   follows the change as before. In the app's own web view the banner
   also shows a Bluetooth speaker's change when the player has more
   volume steps.
+- **The state goes to the app only when it changed.** The player handed
+  its whole state to the app every second, and every web view got it and
+  drew it again, even with nothing playing. Now it goes at once when
+  anything in it changes, or the song does not move on as a playing song
+  would (a seek, a stall), and otherwise every five seconds, which also
+  keeps the app's Bluetooth check going. The web views already move the
+  position on by themselves. Idle and during steady playback that is a
+  fifth of the states. The app reads each state once instead of twice.
 
 ### Build
 

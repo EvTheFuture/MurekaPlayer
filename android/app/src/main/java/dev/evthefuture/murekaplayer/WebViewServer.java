@@ -929,8 +929,8 @@ final class WebViewServer {
 
                 // With since, the answer waits for the next state, so a tap
                 // on play shows as soon as the player has acted on it. The
-                // player publishes at least once a second, so it never
-                // waits long
+                // player publishes on every change and at least every five
+                // seconds, and the wait ends after five anyway
                 String since = param(query, "since");
                 String json;
 
