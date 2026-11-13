@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.102";
+    const VERSION = "2.0.1.103";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -84109,6 +84109,51 @@
     // screen: the popup opens a moment, and closes 1.5 s after the last
     // press unless it was already open
     let volKeySeen = -1;
+
+    // The phone's volume moved from elsewhere, its buttons or a speaker's
+    // highest as it connects, shown in the volume popup for a moment in a
+    // browser too, as the phone's own screen does for its buttons. Not for
+    // a change made here, nor while the volume steps are trained
+    let volLocalAt = 0;
+    let volSeenLevel = null;
+
+    function noteVolChange(s) {
+
+        if (!s || appScreen || !(s.volMax > 0) || typeof s.vol !== "number") {
+            return;
+        }
+
+        const level = typeof s.volFine === "number" && s.volFine >= 0 ? Math.round(s.volFine) : s.vol * 1000;
+        const was = volSeenLevel;
+
+        volSeenLevel = level;
+
+        if (was === null || was === level || s.volTrain || Date.now() - volLocalAt < 2500) {
+            return;
+        }
+
+        if (!volOpen()) {
+
+            volKeyOpened = true;
+            openVol();
+        } else {
+            paintVol(false);
+        }
+
+        clearTimeout(volKeyTimer);
+
+        if (volKeyOpened) {
+
+            volKeyTimer = setTimeout(function () {
+
+                if (volKeyOpened && volOpen()) {
+                    closeVol();
+                }
+
+                volKeyOpened = false;
+            }, 1500);
+        }
+    }
     let volKeyTimer = 0;
     let volKeyOpened = false;
 
@@ -84495,6 +84540,8 @@
     function volSetFor(t, level, last) {
 
         const top = volTopOf(t);
+
+        volLocalAt = Date.now();
 
         if (top <= 0) {
             return;
@@ -85915,6 +85962,11 @@
             shown.textContent = words();
             clearTimeout(later);
 
+            // The volume to try moves the phone's volume from here
+            if (node.live) {
+                volLocalAt = Date.now();
+            }
+
             if (Date.now() - sentAt >= EQ_SEND_MS) {
                 tell();
             } else {
@@ -85925,6 +85977,10 @@
 
             clearTimeout(later);
             eqMoving = false;
+
+            if (node.live) {
+                volLocalAt = Date.now();
+            }
             shown.textContent = words();
             panelAction("hset", { id: node.id, value: slider.value });
 
@@ -89395,6 +89451,7 @@
         online = true;
         phoneSeen = true;
         noteVolKey(s);
+        noteVolChange(s);
         volSayNumbers();
         paintPlayingRating(s);
 

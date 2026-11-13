@@ -884,6 +884,13 @@ In development.
   on a line of its own when there is something to forget. In the web
   view a row of buttons laid out alike keeps that, as its copy of the
   page let it go before.
+- **The volume shown in a browser when the phone moves it.** The web
+  view in a browser, on a computer or another phone, now shows its
+  volume popup for a moment when the phone's volume changes from
+  elsewhere, by the phone's buttons or a speaker's highest as it
+  connects, as the phone's own screen does for its buttons. A change
+  made in that browser, by its volume popup, the arrows, Volume now or a
+  training, does not open it.
 
 ### Build
 
