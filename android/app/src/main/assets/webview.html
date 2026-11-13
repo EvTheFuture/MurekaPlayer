@@ -27363,7 +27363,7 @@
             ui.characterRow.style.display = character ? "flex" : "none";
             ui.characterName.textContent = fresh.characterId ? fresh.characterName || "Character " + fresh.characterId : "No character chosen yet";
             ui.advBox.style.display = character || fresh.remix ? "none" : "flex";
-            ui.remixName.textContent = fresh.remix ? "Remixing " + (fresh.remixName || fresh.remix.title || "an uploaded song") : "None, a new song";
+            ui.remixName.textContent = fresh.remix ? "Remixing " + (fresh.remixName || fresh.remix.title || "a song") : "None, a new song";
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
