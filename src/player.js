@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.112";
+    const VERSION = "2.0.1.113";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -58872,23 +58872,74 @@
         }
     }
 
-    // A new cover for a song of the account's own. The picture goes to Mureka's
-    // storage as it is, the way Mureka's own site sends it, and the song is
-    // told to use it with the square chosen in the editor cut out and made
-    // 1408 by 1408 pixels by the storage itself, as Mureka sizes its covers
+    // A new cover for a song or a playlist of the account's own. The square
+    // chosen in the editor is cut out here and made 1408 by 1408 pixels, as
+    // Mureka sizes its covers, and that picture goes to Mureka's storage.
+    // Mureka keeps a cover's file as it was uploaded: an instruction for the
+    // storage to cut it, added to the file's address, was dropped, and the
+    // whole picture showed
 
     // The side every new cover is made, and the largest file taken, which
     // is what the storage can still work on
     const COVER_SIDE = 1408;
     const COVER_FILE_MAX = 20 * 1024 * 1024;
 
-    // The storage's own work on the picture: turned upright as a camera
-    // marked it, the square cut out and made exactly the cover's size,
-    // larger too when the square is smaller, as a JPEG
-    function coverProcess(crop) {
+    // The square chosen in the editor cut out of the picture and made
+    // COVER_SIDE pixels each way, as a JPEG. The browser turns a photo
+    // upright as the camera marked it, the same way the editor showed it.
+    // A transparent part comes out black
+    function coverSquare(blob, crop) {
 
-        return "?x-oss-process=image/auto-orient,1/crop,x_" + crop.x + ",y_" + crop.y + ",w_" + crop.s + ",h_" + crop.s
-            + "/resize,m_fixed,w_" + COVER_SIDE + ",h_" + COVER_SIDE + ",limit_0/format,jpg";
+        return new Promise(function (resolve, reject) {
+
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            const fail = function (why) {
+
+                URL.revokeObjectURL(url);
+                reject(new Error(why));
+            };
+
+            img.onload = function () {
+
+                try {
+
+                    const canvas = document.createElement("canvas");
+                    const ctx = canvas.getContext("2d");
+
+                    // The editor measured the same picture, but a picture
+                    // read again at another size keeps the same square
+                    const kx = crop.w > 0 ? img.naturalWidth / crop.w : 1;
+                    const ky = crop.h > 0 ? img.naturalHeight / crop.h : 1;
+
+                    canvas.width = COVER_SIDE;
+                    canvas.height = COVER_SIDE;
+                    ctx.fillStyle = "#000";
+                    ctx.fillRect(0, 0, COVER_SIDE, COVER_SIDE);
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = "high";
+                    ctx.drawImage(img, crop.x * kx, crop.y * ky, crop.s * kx, crop.s * ky, 0, 0, COVER_SIDE, COVER_SIDE);
+                    canvas.toBlob(function (out) {
+
+                        URL.revokeObjectURL(url);
+
+                        if (out) {
+                            resolve(out);
+                        } else {
+                            reject(new Error("the square could not be made"));
+                        }
+                    }, "image/jpeg", 0.92);
+                } catch (e) {
+                    fail("the square could not be made");
+                }
+            };
+
+            img.onerror = function () {
+                fail("this browser cannot read the picture");
+            };
+
+            img.src = url;
+        });
     }
 
     // The file name ending and the type the storage is told, from the file
@@ -59347,12 +59398,24 @@
         input.click();
     }
 
-    // Upload the picture and give it to the song, the square cut out by the
-    // storage. Answers whether it went and, when not, why
+    // Cut the chosen square out of the picture, upload it and give it to the
+    // song. Answers whether it went and, when not, why
     async function changeCover(song, blob, crop) {
 
         userTry("a new cover");
 
+        let square;
+
+        try {
+            square = await coverSquare(blob, crop);
+        } catch (e) {
+
+            showToast("Could not use the picture, " + errText(e), false);
+            return { ok: false, why: "Could not use the picture, " + errText(e) };
+        }
+
+        dbgLog("Mureka", "cover square x " + crop.x + ", y " + crop.y + ", size " + crop.s
+            + " of " + crop.w + " x " + crop.h + ", made " + COVER_SIDE + " px, " + Math.round(square.size / 1024) + " kB");
         showToast("Uploading the cover", "wait");
 
         let key;
@@ -59361,7 +59424,7 @@
 
             try {
 
-                key = await uploadCover(blob);
+                key = await uploadCover(square);
                 break;
             } catch (e) {
 
@@ -59381,10 +59444,7 @@
             }
         }
 
-        dbgLog("Mureka", "cover square x " + crop.x + ", y " + crop.y + ", size " + crop.s
-            + " of " + crop.w + " x " + crop.h);
-
-        const ok = await setSongCover(song, key + coverProcess(crop));
+        const ok = await setSongCover(song, key);
 
         return { ok: ok, why: ok ? "" : "Mureka did not take the cover" };
     }
@@ -64766,9 +64826,9 @@
 
                 try {
 
-                    const key = await uploadCover(file);
+                    const key = await uploadCover(await coverSquare(file, crop));
 
-                    await changePlaylist(pl, { cover: key + coverProcess(crop) }, "The cover of " + pl.name + " changed");
+                    await changePlaylist(pl, { cover: key }, "The cover of " + pl.name + " changed");
                 } catch (e) {
                     showToast("Could not upload the cover, " + errText(e), false);
                 }
@@ -65298,7 +65358,7 @@
     }
 
     // A picture sent from the web view made a playlist's cover, the square
-    // chosen there cut out by Mureka's storage. Answers whether it went
+    // chosen there cut out here. Answers whether it went
     async function hostPlaylistCover(pl, blob, crop) {
 
         if (!editablePlaylist(pl)) {
@@ -65310,8 +65370,8 @@
 
         try {
 
-            const key = await uploadCover(blob);
-            const ok = await changePlaylist(pl, { cover: key + coverProcess(crop) }, "The cover of " + pl.name + " changed");
+            const key = await uploadCover(await coverSquare(blob, crop));
+            const ok = await changePlaylist(pl, { cover: key }, "The cover of " + pl.name + " changed");
 
             return ok ? { ok: true } : { ok: false, why: "Mureka did not take the cover" };
         } catch (e) {

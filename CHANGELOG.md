@@ -998,6 +998,12 @@ In development.
     Io.java instead of seven loops of their own.
   - Every screen checked looks the same pixel for pixel, apart from the
     volume card's bar.
+- **A cropped and zoomed cover stays cropped.** The cover editor's square
+  was sent to Mureka as an instruction for its storage to cut the
+  uploaded picture, but Mureka keeps a cover's file as it is uploaded,
+  so the whole picture showed. Now the square is cut out on the device,
+  made 1408 by 1408 pixels as a JPEG, and that is uploaded, for a song's
+  cover and a playlist's, from the device and from the web view alike.
 
 ### Build
 
