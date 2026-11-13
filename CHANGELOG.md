@@ -916,6 +916,18 @@ In development.
   Switch to step, Keep, done, Save, only these and Train again; Back and
   Leave as is grey; and Cancel as quiet text at the far left. Red is
   kept for what deletes.
+- **Damp the louder steps moves Quieter.** With Damp on, Quieter goes up
+  by as much as the steps rise from page to page, from the third on, and
+  the slider shows it, so the training stays about as loud. Too quiet or
+  too loud: move Quieter, the next page goes on from there, and Back
+  turns it down again. Quieter reaches 60 dB, and the words under it are
+  grey, only its name and slider red.
+- **The end of the training asks one question.** Where steps were set
+  before, a choice above the list: keep the earlier values for the steps
+  not trained this time, or fill them in from the trained ones. The list
+  shows what Save keeps, step by step, in columns, each marked trained,
+  earlier or filled in, and follows the choice. One Save button in place
+  of two, beside Train again, with Cancel at the left, on one row.
 
 ### Build
 

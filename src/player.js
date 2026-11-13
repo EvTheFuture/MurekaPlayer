@@ -58,7 +58,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.105";
+    const VERSION = "2.0.1.106";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13811,24 +13811,19 @@
         return Math.round(phoneStepDb(!volTrain.phone) * 2) / 2;
     }
 
-    // How far the louder steps are turned down with Damp on: from the third
-    // step trained, by as much as the steps have risen since the second, so
-    // they are heard about as loud. Both sides alike, so the gap found is
-    // the same
-    function volTrainDamp() {
+    // How loud a page of the training is heard, the step below the one
+    // trained, from the gaps known, counted from the second page, as the
+    // first two are not damped
+    function volTrainLevel(i) {
 
-        if (!volTrain || !volTrain.auto || volTrainScreen() !== "step" || volTrain.i < 2) {
-            return 0;
-        }
-
-        const base = volTrain.steps[1];
+        const at = Math.max(1, Math.min(volTrain.steps.length - 1, i));
         let db = 0;
 
-        for (let j = base + 1; j < volTrainStep(); j++) {
+        for (let j = 2; j < volTrain.steps[at]; j++) {
             db += volTrainGap(j);
         }
 
-        return Math.round(db * 2) / 2;
+        return db;
     }
 
     // The app told what to play: the step against the one below on a
@@ -13850,7 +13845,7 @@
                     on: true,
                     step: volTrainStep(),
                     gap: volTrainGap(volTrainStep()),
-                    quiet: volTrain.quiet + volTrainDamp(),
+                    quiet: volTrain.quiet,
                     delay: volTrain.delay,
                     upper: volTrain.side
                 }
@@ -13888,7 +13883,8 @@
             upper: null,
             side: true,
             prev: {},
-            auto: volTrainAuto
+            auto: volTrainAuto,
+            keep: true
         };
 
         const rec = volTrainRecord(false);
@@ -13936,7 +13932,19 @@
             return;
         }
 
+        const from = volTrain.i;
+
         volTrain.i = Math.max(-1, Math.min(volTrain.steps.length, i));
+
+        // With Damp on, Quieter moves by as much as the steps rose or fell
+        // since the page before, so the louder ones are heard about as
+        // loud. What it was moved to by hand is built on, not undone
+        if (volTrain.auto && from >= 0 && volTrainScreen() === "step" && from < volTrain.steps.length) {
+
+            const moved = Math.round((volTrainLevel(volTrain.i) - volTrainLevel(from)) * 2) / 2;
+
+            volTrain.quiet = Math.max(0, Math.min(60, volTrain.quiet + moved));
+        }
 
         // Each step starts on the step itself, turned down by the gap
         volTrain.side = true;
@@ -14042,15 +14050,20 @@
             volTrainSend();
         } else if (op === "quiet") {
 
-            volTrain.quiet = Math.max(0, Math.min(30, Math.round(Number(value) || 0)));
+            volTrain.quiet = Math.max(0, Math.min(60, Math.round(Number(value) || 0)));
             volTrainQuiet = volTrain.quiet;
 
             if (at === "step") {
                 volTrainSend();
             }
+        } else if (op === "keep" && at === "done") {
+
+            // The steps not trained this time: the earlier values, or
+            // filled in from the trained ones
+            volTrain.keep = value === true || value === "true";
         } else if ((op === "save" || op === "saveOnly") && at === "done") {
 
-            volTrainSave(op === "saveOnly");
+            volTrainSave(op === "saveOnly" || volTrain.keep === false);
             return;
         } else if (op === "auto") {
 
@@ -14092,7 +14105,7 @@
         const at = volTrainScreen();
         const max = volTrain.max;
         const who = volTrain.phone ? "this device" : volTrain.name;
-        const view = { at: at, quiet: volTrain.quiet, gap: 0, delay: volTrain.delay, auto: volTrain.auto, damp: 0, now: "", lines: [], buttons: [] };
+        const view = { at: at, quiet: volTrain.quiet, gap: 0, delay: volTrain.delay, auto: volTrain.auto, now: "", lines: [], rows: [], choice: null, buttons: [] };
 
         if (at === "intro") {
 
@@ -14101,7 +14114,7 @@
                 + "The song playing is heard at a step, turned down by the player by a gap, and Switch moves to the step below and back, as often as needed. "
                 + "Press - or + until switching makes no difference to how loud it is, then Keep. The steps go from quiet to loud: "
                 + volTrain.steps.join(", ") + " of " + max + ". Those between are drawn from them. "
-                + "Damp the louder steps keeps them about as loud as the second, and Quieter turns everything down when others are asleep. While training, the compressor of the sound profile is off. "
+                + "Damp the louder steps moves Quieter up as the steps get louder, and Quieter turns both sides down alike when others are asleep. While training, the compressor of the sound profile is off. "
                 + "If the sound dips or bumps for a moment as it switches, change the switch delay until it is smooth, as the player's share reaches the speaker later than the step.";
             view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "start", label: "Start", look: "primary" }];
         } else if (at === "step") {
@@ -14119,48 +14132,62 @@
                 + (playing ? "" : " Play a song to hear them.");
             view.gap = volTrainGap(k);
             view.now = (volTrain.upper === null ? "Starting"
-                : (volTrain.upper ? "Now: step " + k + ", turned down " + view.gap + " dB" : "Now: step " + (k - 1)))
-                + (volTrainDamp() > 0 ? ", both damped " + volTrainDamp() + " dB" : "");
+                : (volTrain.upper ? "Now: step " + k + ", turned down " + view.gap + " dB" : "Now: step " + (k - 1)));
             view.upper = volTrain.upper;
             view.flip = volTrain.side ? "Switch to step " + (k - 1) : "Switch to step " + k;
-            view.damp = volTrainDamp();
             view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "back", label: "Back", look: "plain" }, { op: "skip", label: "Leave as is", look: "plain" }]
                 .concat(last ? [] : [{ op: "done", label: "Keep, done", look: "ring" }])
                 .concat([{ op: "next", label: last ? "Keep, finish" : "Keep, next", look: "primary" }]);
         } else {
 
-            const now = Object.keys(volTrain.gaps).length > 0;
+            const count = Object.keys(volTrain.gaps).length;
+            const now = count > 0;
             const before = Object.keys(volTrain.prev).length > 0;
-            const all = Object.assign({}, volTrain.prev, volTrain.gaps);
+            const keep = before && volTrain.keep !== false;
+            const used = keep ? Object.assign({}, volTrain.prev, volTrain.gaps) : Object.assign({}, volTrain.gaps);
 
             view.title = "Trained";
 
             if (!now) {
-                view.text = "No step was set now." + (before ? " Those set before stay as they are." : "") + " Train again, or Cancel.";
-            } else if (before) {
-                view.text = "Steps were set before as well. Save, keep the others keeps those set before for the steps not set now. "
-                    + "Save, only these keeps only the steps set now, those set before are let go.";
+                view.text = "No step was trained." + (before ? " The earlier values stay as they are." : "") + " Train again, or Cancel.";
             } else {
-                view.text = "The gap to the step below for each step, set now or drawn from those set. Save puts them to use.";
+                view.text = count + (count === 1 ? " step" : " steps") + " trained, the gap to the step below for each. "
+                    + "Save puts the list below to use.";
             }
 
+            // One question, asked only when there is something to choose
+            if (now && before) {
+                view.choice = {
+                    label: "Steps not trained this time",
+                    value: keep ? "keep" : "only",
+                    options: [
+                        { value: "keep", label: "Keep the earlier values" },
+                        { value: "only", label: "Fill them in from the trained ones" }
+                    ]
+                };
+            }
+
+            // What Save will keep, step by step, and where each came from
             for (let k = 2; now && k <= max; k++) {
 
                 const set = volTrain.gaps[k] > 0;
-                const kept = !set && volTrain.prev[k] > 0;
-                const v = set ? volTrain.gaps[k] : (kept ? volTrain.prev[k] : volGapFrom(all, k));
+                const kept = !set && keep && volTrain.prev[k] > 0;
+                const v = set ? volTrain.gaps[k] : (kept ? volTrain.prev[k] : volGapFrom(used, k));
 
-                view.lines.push("Step " + k + ": " + v.toFixed(1) + " dB" + (set ? ", set now" : (kept ? ", kept from before" : ", drawn")));
+                view.rows.push({
+                    step: "Step " + k,
+                    db: v.toFixed(1) + " dB",
+                    from: set ? "trained" : (kept ? "earlier" : "filled in"),
+                    look: set ? "set" : (kept ? "kept" : "drawn")
+                });
             }
 
             if (now) {
                 view.lines.push("Switch delay: " + volTrain.delay + " ms");
             }
 
-            view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "again", label: "Train again", look: now ? "ring" : "primary" }]
-                .concat(now && before
-                    ? [{ op: "saveOnly", label: "Save, only these", look: "ring" }, { op: "save", label: "Save, keep the others", look: "primary" }]
-                    : (now ? [{ op: "save", label: "Save", look: "primary" }] : []));
+            view.buttons = [{ op: "cancel", label: "Cancel", look: "ghost" }, { op: "again", label: "Train again", look: now ? "plain" : "primary" }]
+                .concat(now ? [{ op: "save", label: "Save", look: "primary" }] : []);
         }
 
         return view;
@@ -14237,6 +14264,62 @@
         }
 
         ui.quietShown.textContent = view.quiet > 0 ? view.quiet + " dB" : "Off";
+        // The choice made again only when it changes, so a tap is not lost
+        const choiceKey = JSON.stringify(view.choice);
+
+        if (choiceKey !== ui.choiceKey) {
+
+            ui.choiceKey = choiceKey;
+            ui.choice.textContent = "";
+
+            if (view.choice) {
+
+                const head = document.createElement("div");
+
+                head.textContent = view.choice.label;
+                head.style.cssText = "font-weight:600;margin-bottom:2px";
+                ui.choice.appendChild(head);
+
+                for (const o of view.choice.options) {
+
+                    const row = document.createElement("label");
+                    const radio = document.createElement("input");
+
+                    row.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0";
+                    radio.type = "radio";
+                    radio.name = "murekaVolTrainKeep";
+                    radio.checked = o.value === view.choice.value;
+                    radio.style.cssText = "flex:0 0 auto;width:20px;height:20px;margin:0;accent-color:#48e1eb";
+                    radio.addEventListener("change", function () {
+                        volTrainAct("keep", o.value === "keep");
+                    });
+                    row.appendChild(radio);
+                    row.appendChild(document.createTextNode(o.label));
+                    ui.choice.appendChild(row);
+                }
+            }
+        }
+
+        ui.choice.style.display = view.choice ? "flex" : "none";
+        ui.rows.textContent = "";
+
+        for (const r of view.rows) {
+
+            const step = document.createElement("span");
+            const db = document.createElement("span");
+            const from = document.createElement("span");
+
+            step.textContent = r.step;
+            db.textContent = r.db;
+            db.style.textAlign = "right";
+            from.textContent = r.from;
+            from.style.color = r.look === "set" ? "#48e1eb" : (r.look === "kept" ? "#ccc" : "#888");
+            ui.rows.appendChild(step);
+            ui.rows.appendChild(db);
+            ui.rows.appendChild(from);
+        }
+
+        ui.rows.style.display = view.rows.length ? "grid" : "none";
         ui.list.textContent = "";
 
         for (const line of view.lines) {
@@ -14365,7 +14448,7 @@
         ui.quiet = document.createElement("input");
         ui.quiet.type = "range";
         ui.quiet.min = "0";
-        ui.quiet.max = "30";
+        ui.quiet.max = "60";
         ui.quiet.step = "1";
         ui.quiet.setAttribute("aria-label", "Quieter, dB");
         ui.quiet.style.cssText = "flex:1;min-width:0;accent-color:#ff6b6b";
@@ -14382,7 +14465,7 @@
         ui.quietRow.appendChild(ui.quietShown);
         ui.quietHint = document.createElement("div");
         ui.quietHint.textContent = "Turns both sides down alike in the player only, for training at night. The gaps found stay the same, and it is gone once the training ends.";
-        ui.quietHint.style.cssText = "font-size:12px;line-height:1.4;color:#e8a0a0";
+        ui.quietHint.style.cssText = "font-size:12px;line-height:1.4;color:#999";
 
         // Damp the louder steps, so the volume need not be turned down
         // more and more by hand
@@ -14400,13 +14483,21 @@
         const autoHint = document.createElement("div");
 
         autoName.textContent = "Damp the louder steps";
-        autoHint.textContent = "From the third step on, both sides are turned down as far as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.textContent = "Quieter goes up by as much as the steps rise from page to page, from the third on, so they stay about as loud. Too quiet or too loud: move Quieter, the next page goes on from there.";
         autoHint.style.cssText = "font-size:12px;line-height:1.4;color:#999;margin-top:2px";
         autoText.appendChild(autoName);
         autoText.appendChild(autoHint);
         ui.autoRow.appendChild(ui.auto);
         ui.autoRow.appendChild(autoText);
 
+        // Keep the earlier values or not, and what Save keeps
+        ui.choice = document.createElement("div");
+        ui.choice.setAttribute("role", "radiogroup");
+        ui.choice.style.cssText = "display:none;flex-direction:column;padding:10px 12px;border-radius:12px;background:#26262e";
+        ui.choiceKey = "";
+        ui.rows = document.createElement("div");
+        ui.rows.style.cssText = "display:none;grid-template-columns:auto auto 1fr;column-gap:18px;row-gap:2px;font-size:13px;color:#ccc;"
+            + "font-variant-numeric:tabular-nums";
         ui.list = document.createElement("div");
         ui.list.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:13px;color:#ccc;font-variant-numeric:tabular-nums";
         ui.buttons = document.createElement("div");
@@ -14422,6 +14513,8 @@
         box.appendChild(ui.autoRow);
         box.appendChild(ui.quietRow);
         box.appendChild(ui.quietHint);
+        box.appendChild(ui.choice);
+        box.appendChild(ui.rows);
         box.appendChild(ui.list);
         box.appendChild(ui.buttons);
         volTrainEl.appendChild(box);
@@ -69440,7 +69533,7 @@
     }
 
     .trainQuietHint {
-        color: #e8a0a0;
+        color: var(--muted);
         font-size: 0.85em;
         line-height: 1.4;
     }
@@ -69473,6 +69566,57 @@
         font-size: 0.9em;
         color: var(--muted);
         font-variant-numeric: tabular-nums;
+    }
+
+    .trainChoice {
+        display: flex;
+        flex-direction: column;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .trainChoiceHead {
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+
+    .trainChoice label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 0;
+        cursor: pointer;
+    }
+
+    .trainChoice input {
+        flex: 0 0 auto;
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        accent-color: var(--accent);
+    }
+
+    .trainRows {
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        column-gap: 18px;
+        row-gap: 2px;
+        font-size: 0.9em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainRows .db {
+        text-align: right;
+    }
+
+    .trainRows .set {
+        color: var(--accent);
+    }
+
+    .trainRows .kept {
+        color: var(--text, #eee);
     }
 
     .trainActs {
@@ -98286,7 +98430,7 @@
         ui.quiet = document.createElement("input");
         ui.quiet.type = "range";
         ui.quiet.min = "0";
-        ui.quiet.max = "30";
+        ui.quiet.max = "60";
         ui.quiet.step = "1";
         ui.quiet.setAttribute("aria-label", "Quieter, dB");
         ui.quietShown = document.createElement("span");
@@ -98323,12 +98467,19 @@
         });
         autoName.textContent = "Damp the louder steps";
         autoHint.className = "trainText";
-        autoHint.textContent = "From the third step on, both sides are turned down as far as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.textContent = "Quieter goes up by as much as the steps rise from page to page, from the third on, so they stay about as loud. Too quiet or too loud: move Quieter, the next page goes on from there.";
         autoText.appendChild(autoName);
         autoText.appendChild(autoHint);
         ui.autoRow.appendChild(ui.auto);
         ui.autoRow.appendChild(autoText);
 
+        // Keep the earlier values or not, and what Save keeps
+        ui.choice = document.createElement("div");
+        ui.choice.className = "trainChoice";
+        ui.choice.setAttribute("role", "radiogroup");
+        ui.choiceKey = "";
+        ui.rows = document.createElement("div");
+        ui.rows.className = "trainRows";
         ui.list = document.createElement("div");
         ui.list.className = "trainList";
         ui.acts = document.createElement("div");
@@ -98346,6 +98497,8 @@
         ui.box.appendChild(ui.autoRow);
         ui.box.appendChild(ui.quietRow);
         ui.box.appendChild(ui.quietHint);
+        ui.box.appendChild(ui.choice);
+        ui.box.appendChild(ui.rows);
         ui.box.appendChild(ui.list);
         ui.box.appendChild(ui.acts);
         ui.pop.appendChild(ui.box);
@@ -98400,6 +98553,58 @@
             ui.quietShown.textContent = Number(v.quiet) > 0 ? v.quiet + " dB" : "Off";
         }
 
+        // The choice made again only when it changes, so a tap is not lost
+        const choiceKey = JSON.stringify(v.choice || null);
+
+        if (choiceKey !== ui.choiceKey) {
+
+            ui.choiceKey = choiceKey;
+            ui.choice.textContent = "";
+
+            if (v.choice) {
+
+                const head = document.createElement("div");
+
+                head.className = "trainChoiceHead";
+                head.textContent = v.choice.label;
+                ui.choice.appendChild(head);
+
+                for (const o of v.choice.options || []) {
+
+                    const row = document.createElement("label");
+                    const radio = document.createElement("input");
+
+                    radio.type = "radio";
+                    radio.name = "trainKeep";
+                    radio.checked = o.value === v.choice.value;
+                    radio.addEventListener("change", function () {
+                        send("volTrain", { op: "keep", value: o.value === "keep" });
+                    });
+                    row.appendChild(radio);
+                    row.appendChild(document.createTextNode(o.label));
+                    ui.choice.appendChild(row);
+                }
+            }
+        }
+
+        ui.choice.style.display = v.choice ? "" : "none";
+        ui.rows.textContent = "";
+
+        for (const r of v.rows || []) {
+
+            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
+
+            for (const c of cells) {
+
+                const el = document.createElement("span");
+
+                el.textContent = c[0];
+                el.className = c[1];
+                ui.rows.appendChild(el);
+            }
+        }
+
+        ui.rows.style.display = (v.rows || []).length ? "" : "none";
         ui.list.textContent = "";
 
         for (const line of v.lines || []) {

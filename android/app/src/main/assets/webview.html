@@ -2021,7 +2021,7 @@
     }
 
     .trainQuietHint {
-        color: #e8a0a0;
+        color: var(--muted);
         font-size: 0.85em;
         line-height: 1.4;
     }
@@ -2054,6 +2054,57 @@
         font-size: 0.9em;
         color: var(--muted);
         font-variant-numeric: tabular-nums;
+    }
+
+    .trainChoice {
+        display: flex;
+        flex-direction: column;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .trainChoiceHead {
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+
+    .trainChoice label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 0;
+        cursor: pointer;
+    }
+
+    .trainChoice input {
+        flex: 0 0 auto;
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        accent-color: var(--accent);
+    }
+
+    .trainRows {
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        column-gap: 18px;
+        row-gap: 2px;
+        font-size: 0.9em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .trainRows .db {
+        text-align: right;
+    }
+
+    .trainRows .set {
+        color: var(--accent);
+    }
+
+    .trainRows .kept {
+        color: var(--text, #eee);
     }
 
     .trainActs {
@@ -30867,7 +30918,7 @@
         ui.quiet = document.createElement("input");
         ui.quiet.type = "range";
         ui.quiet.min = "0";
-        ui.quiet.max = "30";
+        ui.quiet.max = "60";
         ui.quiet.step = "1";
         ui.quiet.setAttribute("aria-label", "Quieter, dB");
         ui.quietShown = document.createElement("span");
@@ -30904,12 +30955,19 @@
         });
         autoName.textContent = "Damp the louder steps";
         autoHint.className = "trainText";
-        autoHint.textContent = "From the third step on, both sides are turned down as far as the steps have risen since the second, so they stay about as loud. The gaps found stay the same.";
+        autoHint.textContent = "Quieter goes up by as much as the steps rise from page to page, from the third on, so they stay about as loud. Too quiet or too loud: move Quieter, the next page goes on from there.";
         autoText.appendChild(autoName);
         autoText.appendChild(autoHint);
         ui.autoRow.appendChild(ui.auto);
         ui.autoRow.appendChild(autoText);
 
+        // Keep the earlier values or not, and what Save keeps
+        ui.choice = document.createElement("div");
+        ui.choice.className = "trainChoice";
+        ui.choice.setAttribute("role", "radiogroup");
+        ui.choiceKey = "";
+        ui.rows = document.createElement("div");
+        ui.rows.className = "trainRows";
         ui.list = document.createElement("div");
         ui.list.className = "trainList";
         ui.acts = document.createElement("div");
@@ -30927,6 +30985,8 @@
         ui.box.appendChild(ui.autoRow);
         ui.box.appendChild(ui.quietRow);
         ui.box.appendChild(ui.quietHint);
+        ui.box.appendChild(ui.choice);
+        ui.box.appendChild(ui.rows);
         ui.box.appendChild(ui.list);
         ui.box.appendChild(ui.acts);
         ui.pop.appendChild(ui.box);
@@ -30981,6 +31041,58 @@
             ui.quietShown.textContent = Number(v.quiet) > 0 ? v.quiet + " dB" : "Off";
         }
 
+        // The choice made again only when it changes, so a tap is not lost
+        const choiceKey = JSON.stringify(v.choice || null);
+
+        if (choiceKey !== ui.choiceKey) {
+
+            ui.choiceKey = choiceKey;
+            ui.choice.textContent = "";
+
+            if (v.choice) {
+
+                const head = document.createElement("div");
+
+                head.className = "trainChoiceHead";
+                head.textContent = v.choice.label;
+                ui.choice.appendChild(head);
+
+                for (const o of v.choice.options || []) {
+
+                    const row = document.createElement("label");
+                    const radio = document.createElement("input");
+
+                    radio.type = "radio";
+                    radio.name = "trainKeep";
+                    radio.checked = o.value === v.choice.value;
+                    radio.addEventListener("change", function () {
+                        send("volTrain", { op: "keep", value: o.value === "keep" });
+                    });
+                    row.appendChild(radio);
+                    row.appendChild(document.createTextNode(o.label));
+                    ui.choice.appendChild(row);
+                }
+            }
+        }
+
+        ui.choice.style.display = v.choice ? "" : "none";
+        ui.rows.textContent = "";
+
+        for (const r of v.rows || []) {
+
+            const cells = [[r.step, ""], [r.db, "db"], [r.from, r.look]];
+
+            for (const c of cells) {
+
+                const el = document.createElement("span");
+
+                el.textContent = c[0];
+                el.className = c[1];
+                ui.rows.appendChild(el);
+            }
+        }
+
+        ui.rows.style.display = (v.rows || []).length ? "" : "none";
         ui.list.textContent = "";
 
         for (const line of v.lines || []) {
