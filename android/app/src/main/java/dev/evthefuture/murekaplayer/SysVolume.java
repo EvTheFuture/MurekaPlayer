@@ -516,7 +516,7 @@ final class SysVolume {
         float[] plan = finePlan(finePct, max, type, own);
         int step = (int) plan[0];
 
-        Hub.setFineLow(stepPct(1, max), lowCount(max));
+        Hub.setFineSteps(fineNext(finePct, 1, max), fineNext(finePct, -1, max));
 
         int was = stepWaiting >= 0 ? stepWaiting : audio.getStreamVolume(AudioManager.STREAM_MUSIC);
         long wait = 0;

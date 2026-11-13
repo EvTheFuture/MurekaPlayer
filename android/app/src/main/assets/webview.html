@@ -17761,8 +17761,14 @@
             const x = target();
             const level = volLevelOf(x);
 
-            if (level >= 0) {
-                volSetFor(x, x.kind === "phone" && volFineOn() ? fineNextLevel(level, by) : level + by * (x.kind === "phone" ? 1 : 5), true);
+            if (level < 0) {
+                return;
+            }
+
+            if (x.kind === "phone" && volFineOn()) {
+                volFineNudge(x, by);
+            } else {
+                volSetFor(x, level + by * (x.kind === "phone" ? 1 : 5), true);
             }
         };
 
@@ -18052,35 +18058,38 @@
 
         const step = volTarget().kind === "phone" ? 1 : 5;
 
-        volSet(volTarget().kind === "phone" && volFineOn() ? fineNextLevel(now, by) : now + by * step, true);
+        if (volTarget().kind === "phone" && volFineOn()) {
+            volFineNudge(volTarget(), by);
+        } else {
+            volSet(now + by * step, true);
+        }
+
         volSay();
     }
 
-    // The phone's next level with more steps, as its own buttons move it:
-    // under its first step by the levels set there, above by a percent
-    function fineNextLevel(pct, dir) {
+    // The phone with more steps moved one level up or down. The app counts
+    // the levels, finer under its first step when set so, as its own
+    // buttons do, and each state says which levels lie next to the one it
+    // is at. That one shows here at once. A second press before the app
+    // has answered moves it on there, and its answer shows a moment later
+    function volFineNudge(t, by) {
 
-        const high = Number(state && state.volLowTop) || 0;
-        const n = Math.max(0, Number(state && state.volLowCount) || 0);
+        const dir = by > 0 ? 1 : -1;
+        const next = dir > 0 ? state && state.volUp : state && state.volDown;
+        const mine = volMoves[t.key];
 
-        if (!(high > 0)) {
-            return Math.max(0, Math.min(100, Math.round(pct) + dir));
+        volLocalAt = Date.now();
+
+        if (!(mine && Date.now() < mine.until) && typeof next === "number" && next >= 0) {
+            volMoves[t.key] = { v: next, until: Date.now() + 600 };
         }
 
-        if (dir > 0) {
-
-            if (pct >= high - 0.01) {
-                return Math.min(100, Math.round(pct) + 1);
-            }
-
-            return high * Math.min(n + 1, Math.floor(pct * (n + 1) / high + 0.01) + 1) / (n + 1);
+        if (volOpen()) {
+            paintVol(false);
         }
 
-        if (pct > high + 0.01) {
-            return Math.max(high, Math.round(pct) - 1);
-        }
-
-        return high * Math.max(0, Math.ceil(pct * (n + 1) / high - 0.01) - 1) / (n + 1);
+        paintVolIcon();
+        send("sysVolumeNudge", dir);
     }
 
     // Off, and back to where it was. With nothing to go back to it comes

@@ -1995,6 +1995,20 @@ final class WebViewServer {
                 return;
             }
 
+            // More steps one level up or down, counted by the app as its
+            // own buttons do, finer under the first step when set so
+            if ("sysVolumeNudge".equals(cmd)) {
+
+                int dir = Integer.signum(arg instanceof Number ? ((Number) arg).intValue() : number(String.valueOf(arg), 0));
+
+                if (dir != 0) {
+                    SysVolume.nudge(dir, false);
+                }
+
+                send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
             // More steps than the phone has, on or off, and the level in
             // percent
             if ("sysVolumeFine".equals(cmd)) {

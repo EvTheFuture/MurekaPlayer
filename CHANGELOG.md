@@ -1059,6 +1059,12 @@ In development.
   proguard-rules.pro. Not yet built or tried: pairing with wireless
   debugging, starting the hotspot helper, the hotspot and Bluetooth
   through it, and the web view's settings are the ones to try first.
+- **The volume levels counted in one place.** The levels under step 1
+  were worked out in the app and again in the web view, which could
+  come to disagree. Now the web view's - and +, and its arrow keys, ask
+  the app for one level up or down, and the app counts as its own
+  buttons do. Each state says which levels lie next to the one it is
+  at, so the next one shows at once.
 
 ### Build
 

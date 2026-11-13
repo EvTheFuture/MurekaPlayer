@@ -59,8 +59,8 @@ final class Hub {
 
     // The level in percent with more steps on, -1 while off
     private static float volFine = -1;
-    private static float volLowTop = 0;
-    private static int volLowCount = 0;
+    private static float volUp = -1;
+    private static float volDown = -1;
 
     // The volume buttons moving more steps, the step's level and the
     // player's share in dB, and a count of button presses with the app on
@@ -232,18 +232,19 @@ final class Hub {
         }
     }
 
-    // The levels under the phone's first step: its percent and how many
-    // lie under it, so a browser moves by them as the phone does
-    static void setFineLow(float top, int count) {
+    // The levels one up and one down from where the volume is, worked out
+    // by SysVolume alone, so a browser shows the next level at once and
+    // never counts the levels a way of its own
+    static void setFineSteps(float up, float down) {
 
         synchronized (LOCK) {
 
-            if (top == volLowTop && count == volLowCount) {
+            if (up == volUp && down == volDown) {
                 return;
             }
 
-            volLowTop = top;
-            volLowCount = count;
+            volUp = up;
+            volDown = down;
             rebuild();
             seq += 1;
             LOCK.notifyAll();
@@ -365,8 +366,8 @@ final class Hub {
                 }
 
                 o.put("volGainDb", Math.round(Math.max(-200, volGainDb) * 10) / 10.0);
-                o.put("volLowTop", volLowTop);
-                o.put("volLowCount", volLowCount);
+                o.put("volUp", Math.round(volUp * 100) / 100.0);
+                o.put("volDown", Math.round(volDown * 100) / 100.0);
             }
             o.put("clients", clients);
             o.put("btOut", btOut);
