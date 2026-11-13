@@ -685,7 +685,9 @@ final class WebViewServer {
             // Whether it came over the hotspot rather than the phone's Wi-Fi
             boolean viaHotspot = onHotspot(c.getInetAddress());
 
-            InputStream in = c.getInputStream();
+            // Buffered, so the head is not read one system call a byte. The
+            // body is read from this same stream, which may hold its start
+            InputStream in = new java.io.BufferedInputStream(c.getInputStream(), 8192);
             OutputStream out = c.getOutputStream();
 
             String requestLine = readLine(in);
@@ -743,49 +745,63 @@ final class WebViewServer {
 
                 int colon = line.indexOf(':');
 
-                // The part of a song the browser asks for, to seek in it
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("range")) {
-                    range = line.substring(colon + 1).trim();
+                if (colon <= 0) {
+                    continue;
                 }
 
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("user-agent")) {
-                    agent = line.substring(colon + 1);
-                }
+                // Each header's name read once, its value as each one needs it
+                String value = line.substring(colon + 1);
 
-                // Where the browser thinks it is and which page sent it, to
-                // turn away requests from other websites
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("host")) {
-                    host = line.substring(colon + 1).trim();
-                }
+                switch (line.substring(0, colon).trim().toLowerCase(Locale.ROOT)) {
 
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("origin")) {
-                    origin = line.substring(colon + 1).trim();
-                }
+                    // The part of a song the browser asks for, to seek in it
+                    case "range":
+                        range = value.trim();
+                        break;
 
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("cookie")) {
-                    cookie = line.substring(colon + 1).trim();
-                }
+                    case "user-agent":
+                        agent = value;
+                        break;
 
-                // Whether the browser says another site made the request
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("sec-fetch-site")) {
-                    fetchSite = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
-                }
+                    // Where the browser thinks it is and which page sent it,
+                    // to turn away requests from other websites
+                    case "host":
+                        host = value.trim();
+                        break;
 
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("sec-fetch-mode")) {
-                    fetchMode = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
-                }
+                    case "origin":
+                        origin = value.trim();
+                        break;
 
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-type")) {
-                    contentType = line.substring(colon + 1).trim().toLowerCase(Locale.ROOT);
-                }
+                    case "cookie":
+                        cookie = value.trim();
+                        break;
 
-                if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-length")) {
+                    // Whether the browser says another site made the request
+                    case "sec-fetch-site":
+                        fetchSite = value.trim().toLowerCase(Locale.ROOT);
+                        break;
 
-                    try {
-                        length = Integer.parseInt(line.substring(colon + 1).trim());
-                    } catch (NumberFormatException e) {
-                        length = 0;
-                    }
+                    case "sec-fetch-mode":
+                        fetchMode = value.trim().toLowerCase(Locale.ROOT);
+                        break;
+
+                    case "content-type":
+                        contentType = value.trim().toLowerCase(Locale.ROOT);
+                        break;
+
+                    case "content-length":
+
+                        try {
+                            length = Integer.parseInt(value.trim());
+                        } catch (NumberFormatException e) {
+                            length = 0;
+                        }
+
+                        break;
+
+                    default:
+                        break;
                 }
             }
 

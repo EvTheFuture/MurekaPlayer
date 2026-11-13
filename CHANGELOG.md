@@ -1004,6 +1004,11 @@ In development.
   so the whole picture showed. Now the square is cut out on the device,
   made 1408 by 1408 pixels as a JPEG, and that is uploaded, for a song's
   cover and a playlist's, from the device and from the web view alike.
+- **The web view's server reads requests in blocks.** It read each
+  request's head one byte per system call, a few hundred for every
+  request, the state asked for each second among them. The head and the
+  body now come through one buffer. Each header's name is read once and
+  picked in one switch instead of up to nine comparisons per line.
 
 ### Build
 
