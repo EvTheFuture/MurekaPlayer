@@ -1105,6 +1105,10 @@ In development.
     log, as Mureka's names for them are not known for sure, and the
     Mureka requests log keeps the whole of resource requests, so remixing
     a song on Mureka's own page shows how it is done.
+  - Mureka's song detail turned out to name no remix field, so the
+    prompt the song was made with, its control types, album and
+    description now go to the debug log whole, and the prompt is searched
+    too.
 - **Drum and bass at its own tempo, not half.** In drum and bass the kick
   and the snare take turns, so folded at half the tempo the place
   halfway is the stronger one in the deep band or the middle one, though

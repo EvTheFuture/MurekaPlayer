@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.123";
+    const VERSION = "2.0.1.124";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -62776,6 +62776,17 @@
             + (s !== data ? "; song: " + Object.keys(s).join(", ").slice(0, 400) : "")
             + (first ? "; a lyric section: " + Object.keys(first).join(", ") : ""));
 
+        // Where a remix could say what it was made from: the prompt it was
+        // made with, its control types and the rest, shown whole
+        const peek = function (v) {
+            return v === undefined ? "-" : JSON.stringify(v).slice(0, 600);
+        };
+
+        dbgLog("Create", "song " + song.song_id + " made with: prompt " + peek(data.prompt) + "; song prompt " + peek(s.prompt)
+            + "; control types " + peek(s.control_types) + " / " + peek(data.control_types) + "; generation method "
+            + peek(data.generation_method) + "; state " + peek(data.state) + "; album " + peek(data.album)
+            + "; description " + peek(s.description));
+
         const lyrics = createLyricsText(lyricsRaw);
         const style = createStyleOf(data, s, song);
         const instrumental = Number(song.generation_method) === 7 || Number(s.generation_method) === 7;
@@ -62845,7 +62856,7 @@
         const seen = [];
         let ref = null;
 
-        for (const src of [s, data, song]) {
+        for (const src of [s, data, song, data.prompt, s.prompt]) {
 
             if (!src || typeof src !== "object") {
                 continue;
