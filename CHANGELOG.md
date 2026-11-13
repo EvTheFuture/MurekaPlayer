@@ -1093,6 +1093,35 @@ In development.
   doubled this way.
 - **Create song from this keeps the remix.** On a song made as a remix
   the form got its title, lyrics and style but not the song it remixed, so
+  the new song was no remix. Mureka keeps no record of what a remix
+  remixed: its song detail only marks it a remix (control type 11). So the
+  player now remembers it when the songs are made:
+  - Every request to make songs that holds a remix is noted with its
+    generation, from the player's Create and from Mureka's own site alike,
+    a song on Mureka (anyone's) as well as an uploaded one. Only those
+    requests are looked at, and they go through untouched.
+  - Use in Create on a song of such a generation puts the same remix in the
+    form, whole, as Mureka's site sent it, and the note says which song is
+    remixed.
+  - A remix made before this version, or in another browser, is named a
+    remix in the note, with no song to remix, as there is none to be had.
+  - Kept in this browser's storage, the latest ones up to 400 kB.
+  - An uploaded song named in a song's detail is still made ready again,
+    and the fields that could name it still go to the debug log.
+- **Drum and bass at its own tempo, not half.** In drum and bass the kick
+  and the snare take turns, so folded at half the tempo the place
+  halfway is the stronger one in the deep band or the middle one, though
+  not in all the sound. That now doubles the tempo past 160 BPM too,
+  with the starts halfway at least 70% as strong. A song at 175 BPM came
+  out at 87: its deep band was 83% as strong halfway where 85% was
+  asked, its middle band, the snare, 111%. Now 174, as it measures over
+  the whole song. Hip hop at 87, a song at 100 with chords on every
+  eighth and funk at 95 with the bass on the off beats stay as they
+  were, every band weaker halfway. Tempos are worked out again as songs
+  come up, and the debug log and Stats for nerds say when a tempo was
+  doubled this way.
+- **Create song from this keeps the remix.** On a song made as a remix
+  the form got its title, lyrics and style but not the song it remixed, so
   the new song was no remix. What it remixed now comes along, an uploaded
   song or a song on Mureka:
   - The remix the song kept is used as it is, whichever kind it was.

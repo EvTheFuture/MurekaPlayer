@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.124";
+    const VERSION = "2.0.1.125";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -60761,8 +60761,6 @@
         { label: "V7.5", value: "mureka-7.5" }
     ];
     const CREATE_UPLOAD_MAX = 60 * 1024 * 1024;
-    const CREATE_REMIX_FIELDS = ["id", "title", "url", "duration_milliseconds", "source_type", "created_at",
-        "origin_control_type", "vocal_start_ms", "vocal_end_ms", "is_subscription_privilege", "trim_start_ms", "trim_end_ms"];
 
     let createDraft = null;
     let createEl = null;
@@ -60805,7 +60803,10 @@
         return typeof value === "string" ? value.slice(0, max) : "";
     }
 
-    // Only the parts of a remix Mureka sent back, numbers and short texts
+    // A remix as it goes to Mureka. An uploaded song's is the numbers and
+    // short texts resource/use gave. A song on Mureka's comes from its site
+    // with more: the lyrics, the cover and who made it, so its texts and
+    // small objects are kept too
     function createCleanRemix(r) {
 
         if (!r || typeof r !== "object" || !r.id) {
@@ -60814,18 +60815,218 @@
 
         const out = {};
 
-        for (const k of CREATE_REMIX_FIELDS) {
+        for (const k of Object.keys(r).slice(0, 40)) {
 
             const v = r[k];
 
-            if (typeof v === "number" || typeof v === "boolean") {
+            if (typeof v === "number" || typeof v === "boolean" || v === null) {
                 out[k] = v;
             } else if (typeof v === "string") {
-                out[k] = v.slice(0, 400);
+                out[k] = v.slice(0, k === "lyrics" ? CREATE_LYRICS_MAX : 1000);
+            } else if (typeof v === "object") {
+
+                try {
+
+                    const text = JSON.stringify(v);
+
+                    if (text.length <= 4000) {
+                        out[k] = JSON.parse(text);
+                    }
+                } catch (e) {
+                    // Left out
+                }
             }
         }
 
         return out.id ? out : null;
+    }
+
+    // What each generation made as a remix remixed, by its feed id, as
+    // Mureka keeps no record of it with the songs: from the player's own
+    // Create and from Mureka's site alike. The latest are kept, up to a size
+    const REMIX_FROM_KEY = "mureka_remix_from_v1";
+    const REMIX_FROM_MAX = 400000;
+
+    function loadRemixFrom() {
+
+        try {
+
+            const v = JSON.parse(localStorage.getItem(REMIX_FROM_KEY) || "null");
+
+            return v && typeof v === "object" && Array.isArray(v.list) ? v.list : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function rememberRemixFrom(feedId, remix) {
+
+        const id = String(feedId || "").replace(/[^0-9]/g, "");
+        const clean = createCleanRemix(remix);
+
+        if (!id || !clean) {
+            return;
+        }
+
+        const list = loadRemixFrom().filter(function (e) {
+            return e && e.feed !== id;
+        });
+
+        list.push({ feed: id, remix: clean, at: Date.now() });
+
+        while (list.length > 1 && JSON.stringify(list).length > REMIX_FROM_MAX) {
+            list.shift();
+        }
+
+        try {
+            localStorage.setItem(REMIX_FROM_KEY, JSON.stringify({ list: list }));
+        } catch (e) {
+            // Not kept, the songs are made all the same
+        }
+
+        dbgLog("Create", "generation " + id + " remixes " + (clean.title || clean.id) + ", source type "
+            + (clean.source_type === undefined ? "-" : clean.source_type) + ", kept for Use in Create");
+    }
+
+    function remixFromFeed(feedId) {
+
+        const id = String(feedId || "");
+        const hit = id ? loadRemixFrom().find(function (e) {
+            return e && e.feed === id;
+        }) : null;
+
+        return hit ? hit.remix : null;
+    }
+
+    // Songs are made through Mureka's site too, so its requests to make
+    // songs are watched, always and only for a remix. The request goes
+    // through untouched, its body and answer are read from copies
+    function installRemixWatch() {
+
+        if (window.__murekaRemixWatch) {
+            return;
+        }
+
+        window.__murekaRemixWatch = true;
+
+        const isGenerate = function (method, url) {
+
+            try {
+                return /^POST$/i.test(String(method || "")) && new URL(String(url), location.href).pathname === "/api/pgc/feed/generate";
+            } catch (e) {
+                return false;
+            }
+        };
+
+        // The remix of a body, or null
+        const remixOf = function (body) {
+
+            try {
+
+                const b = typeof body === "string" ? JSON.parse(body) : null;
+
+                return b && b.remix && typeof b.remix === "object" && b.remix.id ? b.remix : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
+        const answered = function (remix, text) {
+
+            try {
+
+                const json = JSON.parse(text);
+                const feed = json && json.data && json.data.feed;
+
+                if (feed && feed.feed_id !== undefined) {
+                    rememberRemixFrom(feed.feed_id, remix);
+                }
+            } catch (e) {
+                // No generation named
+            }
+        };
+
+        const plainFetch = window.fetch;
+
+        if (typeof plainFetch === "function") {
+
+            window.fetch = function (input, init) {
+
+                const sent = plainFetch.apply(window, arguments);
+
+                try {
+
+                    const url = typeof input === "string" ? input : (input && input.url) || "";
+                    const method = (init && init.method) || (input && input.method) || "GET";
+
+                    if (isGenerate(method, url)) {
+
+                        const body = init && init.body !== undefined && init.body !== null
+                            ? Promise.resolve(init.body)
+                            : (input && typeof input.clone === "function" ? input.clone().text() : Promise.resolve(null));
+
+                        body.then(function (b) {
+
+                            const remix = remixOf(b);
+
+                            if (remix) {
+
+                                sent.then(function (res) {
+                                    return res.clone().text();
+                                }).then(function (text) {
+                                    answered(remix, text);
+                                }).catch(function () {
+                                });
+                            }
+                        }).catch(function () {
+                        });
+                    }
+                } catch (e) {
+                    // Never in the way of the request itself
+                }
+
+                return sent;
+            };
+        }
+
+        const xhr = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+
+        if (xhr) {
+
+            const plainOpen = xhr.open;
+            const plainSend = xhr.send;
+
+            xhr.open = function (method, url) {
+
+                this.__murekaRemixAsk = isGenerate(method, url);
+                return plainOpen.apply(this, arguments);
+            };
+
+            xhr.send = function (body) {
+
+                try {
+
+                    const remix = this.__murekaRemixAsk ? remixOf(body) : null;
+
+                    if (remix) {
+
+                        this.addEventListener("load", function () {
+
+                            try {
+                                answered(remix, this.responseType === "json" ? JSON.stringify(this.response)
+                                    : (this.responseType === "" || this.responseType === "text" ? this.responseText : ""));
+                            } catch (e) {
+                                // Nothing readable
+                            }
+                        });
+                    }
+                } catch (e) {
+                    // Never in the way of the request itself
+                }
+
+                return plainSend.apply(this, arguments);
+            };
+        }
     }
 
     // The chat with Mureka's agent that easy mode goes on in: its ids, the
@@ -61887,6 +62088,11 @@
         }
 
         createRemember(feedId, d);
+
+        if (feedId && body.remix) {
+            rememberRemixFrom(feedId, body.remix);
+        }
+
         createWatchNew();
 
         return {
@@ -62822,8 +63028,12 @@
         }
 
         // A remix takes along the song it remixed, an uploaded one or one on
-        // Mureka, so the new one is a remix of it too
-        const ref = createRemixRefOf(data, s, song);
+        // Mureka, so the new one is a remix of it too. Mureka keeps no record
+        // of which, so it is the one kept here when the songs were made,
+        // else whatever the detail says. Control type 11 marks a remix
+        const kept = remixFromFeed(s.feed_id || data.feed_id || song.feed_id);
+        const ref = kept ? { remix: kept, resourceId: 0, title: String(kept.title || ""), ms: 0 } : createRemixRefOf(data, s, song);
+        const types = [].concat(s.control_types || [], data.control_types || [], song.control_types || []).map(Number);
 
         if (ref) {
 
@@ -62839,6 +63049,12 @@
             }
 
             return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental, remix: ref, remixed: !!used };
+        }
+
+        if (types.indexOf(11) >= 0) {
+
+            dbgLog("Create", "song " + song.song_id + " is a remix, of which song is not known here");
+            return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental, remix: true, remixed: false };
         }
 
         return { changes: changes, style: style, lyrics: lyrics, instrumental: instrumental };
@@ -63034,7 +63250,8 @@
         changeCreateDraft(read.changes);
         setCreateNote("From \"" + (song.title || "the song") + "\"" + (read.style ? "" : ", Mureka gave no style") + (read.instrumental || read.lyrics ? "" : ", no lyrics")
             + (read.remix ? (read.remixed ? ", remixing " + (read.changes.remixName || "the same uploaded song")
-            : ", a remix but the song it remixed could not be found") : ""), read.remix && !read.remixed);
+            : ", a remix, but Mureka does not say of which song. Remixes made from now on, here or on Mureka's site, are remembered") : ""),
+            read.remix && !read.remixed);
         showToast("The form has the song's title, lyrics and style", true, function () {
             changeCreateDraft(before);
         });
@@ -103496,6 +103713,7 @@
     // meant to be
     function startPlayer() {
 
+        installRemixWatch();
         installDebugWatchers();
         installTrimKeys();
         buildPanel();
