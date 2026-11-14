@@ -14719,6 +14719,13 @@
 
             for (const item of items) {
 
+                // Still generating, waiting to play: no place to drag it to
+                if (item.pending) {
+
+                    box.appendChild(makePendingRow(item));
+                    continue;
+                }
+
                 const row = queueRow(item, data.pos);
 
                 if (item.index === data.pos) {
@@ -14910,9 +14917,11 @@
     // On letting go the phone moves the song
     let qDrag = null;
 
+    // The rows with a place in the queue, not the songs still generating
+    // that wait to play after the playing one
     function queueRows(box) {
 
-        return Array.prototype.slice.call((box || $("rows")).querySelectorAll(".row"));
+        return Array.prototype.slice.call((box || $("rows")).querySelectorAll(".row:not(.pending)"));
     }
 
     // The queue as shown, read again wherever it is open
@@ -21840,9 +21849,20 @@
             rowMeta = data.meta || rowMeta;
             clearMiniRows();
 
-            items.forEach(function (item, i) {
+            let place = 0;
 
-                const row = makeRow(item, i + 1);
+            items.forEach(function (item) {
+
+                // Still generating, waiting to play: no place to drag it to
+                if (item.pending) {
+
+                    box.appendChild(makePendingRow(item));
+                    return;
+                }
+
+                place += 1;
+
+                const row = makeRow(item, place);
 
                 row.dataset.qi = String(item.index);
                 row.classList.toggle("playing", item.index === data.pos);

@@ -1091,6 +1091,14 @@ In development.
   were, every band weaker halfway. Tempos are worked out again as songs
   come up, and the debug log and Stats for nerds say when a tempo was
   doubled this way.
+- **The web view's queue shows the songs being generated that play once
+  ready.** Made with Play when ready, they played when done but the queue
+  showed nothing of them until then. They now stand right after the
+  playing song, greyed with a turning ring, "Plays when ready" or "Plays
+  next when ready", in the small list and the whole one; a tap offers the
+  same choices as in the song list. The song list sorted A to Z, by stars
+  or by plays shows songs being generated too, at the top, as the Mureka
+  order did.
 - **Listening together (app only).** One player shares what it plays, others
   listen along on their own devices elsewhere, within about a second of it.
   Built for players on a VPN:

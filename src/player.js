@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.129";
+    const VERSION = "2.0.1.130";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -37480,8 +37480,9 @@
             }
         }
 
-        // Songs read from Mureka meanwhile change the rows too
-        return queue.length + ":" + queuePos + ":" + h + ":" + stubStamp;
+        // Songs read from Mureka meanwhile change the rows too, and songs
+        // still generating asked to play, shown after the playing song
+        return queue.length + ":" + queuePos + ":" + h + ":" + stubStamp + ":" + pendingStamp;
     }
 
     // Changes when what the song list holds does: the filters, the source
@@ -37920,8 +37921,9 @@
         const prepared = hostPrepared(view);
         const numbers = prepared.numbers;
 
-        // Songs still being generated first, in the list's own order only
-        const pending = view === "mureka" ? shownPending() : [];
+        // Songs still being generated first, sorted or not, as they belong
+        // nowhere in an order yet
+        const pending = shownPending();
         const searched = withPendingPlaced(pending.map(function (song) {
             return { song: song, greyed: false };
         }), prepared.entries, function (e) {
@@ -38254,6 +38256,44 @@
                 duration: (song.duration_milliseconds || 0) / 1000,
                 plays: songPlays(song)
             });
+        }
+
+        // Songs still generating that play once ready, right after the
+        // playing song: the ones asked to play at once first, then the rest
+        // in their turn. Not in the queue yet, so with no place in it
+        const waiting = pendingList().filter(function (song) {
+            return pendingPlay.has(String(song.song_id)) && searchMatches(song, q);
+        }).sort(function (a, b) {
+
+            const ka = pendingPlay.get(String(a.song_id)) === "now" ? -1 : afterChain.indexOf(String(a.song_id));
+            const kb = pendingPlay.get(String(b.song_id)) === "now" ? -1 : afterChain.indexOf(String(b.song_id));
+
+            return ka - kb;
+        }).map(function (song) {
+
+            const id = String(song.song_id);
+
+            return {
+                index: -1,
+                id: id,
+                title: (song.title || "").trim() || "Untitled",
+                pending: true,
+                sending: false,
+                playWhenReady: true,
+                playAfter: pendingPlay.get(id) === "after",
+                cover: song.cover ? coverUrl(song) : "",
+                rating: null,
+                duration: 0
+            };
+        });
+
+        if (waiting.length > 0) {
+
+            const at = items.findIndex(function (item) {
+                return item.index > queuePos;
+            });
+
+            items.splice(at === -1 ? items.length : at, 0, ...waiting);
         }
 
         return { pos: queuePos, total: queue.length, items: items, meta: hostRowMeta(), filters: hostFilters() };
@@ -84271,6 +84311,13 @@
 
             for (const item of items) {
 
+                // Still generating, waiting to play: no place to drag it to
+                if (item.pending) {
+
+                    box.appendChild(makePendingRow(item));
+                    continue;
+                }
+
                 const row = queueRow(item, data.pos);
 
                 if (item.index === data.pos) {
@@ -84462,9 +84509,11 @@
     // On letting go the phone moves the song
     let qDrag = null;
 
+    // The rows with a place in the queue, not the songs still generating
+    // that wait to play after the playing one
     function queueRows(box) {
 
-        return Array.prototype.slice.call((box || $("rows")).querySelectorAll(".row"));
+        return Array.prototype.slice.call((box || $("rows")).querySelectorAll(".row:not(.pending)"));
     }
 
     // The queue as shown, read again wherever it is open
@@ -91392,9 +91441,20 @@
             rowMeta = data.meta || rowMeta;
             clearMiniRows();
 
-            items.forEach(function (item, i) {
+            let place = 0;
 
-                const row = makeRow(item, i + 1);
+            items.forEach(function (item) {
+
+                // Still generating, waiting to play: no place to drag it to
+                if (item.pending) {
+
+                    box.appendChild(makePendingRow(item));
+                    return;
+                }
+
+                place += 1;
+
+                const row = makeRow(item, place);
 
                 row.dataset.qi = String(item.index);
                 row.classList.toggle("playing", item.index === data.pos);
