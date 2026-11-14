@@ -8253,7 +8253,7 @@
         const GRAB_PX = 24;
         const EASE_PART = 0.3;
         const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
-            holdTimer: 0, holdZoom: null };
+            holdTimer: 0, holdZoom: null, page: null, pageSpan: 0 };
         const pointers = new Map();
 
         function span() {
@@ -8265,9 +8265,20 @@
         }
 
         // Whether the play head moves along the view instead of staying in
-        // the middle
+        // the middle, drifting with the song or turning pages
         function travels() {
             return !!(hooks.travel && hooks.travel());
+        }
+
+        // Turning pages: the view stands still while the play head runs
+        // across it, and turns to the next part when the play head nears
+        // its right edge, or to wherever the song is when it is out of view.
+        // The play head lands this far in from the left
+        const PAGE_TURN = 0.92;
+        const PAGE_LEAD = 0.08;
+
+        function pages() {
+            return !!(hooks.pages && hooks.pages());
         }
 
         // The view with the play head in the centre, eased near the ends
@@ -8278,6 +8289,30 @@
 
             const s = span();
             const room = 1 - s;
+
+            if (pages()) {
+
+                const f = Math.max(0, Math.min(1, frac));
+                const p = z.page;
+
+                if (p === null || z.pageSpan !== s) {
+
+                    z.page = clampStart(f - s * PAGE_LEAD);
+                    z.pageSpan = s;
+                } else if (f < p || f > p + s * PAGE_TURN) {
+
+                    const next = clampStart(f - s * PAGE_LEAD);
+
+                    // Glides there, as after a seek
+                    if (Math.abs(next - p) > 1e-6) {
+
+                        z.glide = { from: p, at: performance.now() };
+                        z.page = next;
+                    }
+                }
+
+                return z.page;
+            }
 
             // Moving along the song, the play head is as far across the view
             // as the song has come, so the view moves with it at an even pace
@@ -8388,7 +8423,17 @@
             }
 
             if (z.drag || z.held) {
-                return clampStart((z.drag || z.held).start);
+
+                const v = clampStart((z.drag || z.held).start);
+
+                // Turning pages, the view stays where it was left
+                if (pages()) {
+
+                    z.page = v;
+                    z.pageSpan = span();
+                }
+
+                return v;
             }
 
             const target = follow(frac);
@@ -8892,7 +8937,7 @@
     // Where the play head is on the zoomed waveform: in the middle, or
     // moving along the view as the song goes, as when zoomed out, with the
     // progress ending at the play head and no thin line at the foot then
-    const PLAY_HEAD_MODES = ["center", "travel"];
+    const PLAY_HEAD_MODES = ["center", "travel", "page"];
 
     // The look as the phone has it, where this browser starts from
     function phoneLook(raw) {
@@ -12903,7 +12948,7 @@
         // as the waveform's own color, in the colors the phone has. Zoomed
         // out it lies on the played part, and so it does zoomed in with the
         // play head moving along, which leaves out the thin line at the foot
-        const travel = !!state && playHeadMode(state.waveZoomPlayHead) === "travel";
+        const travel = !!state && playHeadMode(state.waveZoomPlayHead) !== "center";
         const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
         const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(71, 224, 235, 1)";
@@ -24378,7 +24423,10 @@
             return !!state && progressLook(state.waveZoomProgressLook) !== "off";
         },
         travel: function () {
-            return !!state && playHeadMode(state.waveZoomPlayHead) === "travel";
+            return !!state && playHeadMode(state.waveZoomPlayHead) !== "center";
+        },
+        pages: function () {
+            return !!state && playHeadMode(state.waveZoomPlayHead) === "page";
         },
         zoomable: function () {
             return !!(state && state.wave && state.wave.length) && $("wave").style.display !== "none";

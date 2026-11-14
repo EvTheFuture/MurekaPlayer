@@ -1091,6 +1091,16 @@ In development.
   were, every band weaker halfway. Tempos are worked out again as songs
   come up, and the debug log and Stats for nerds say when a tempo was
   doubled this way.
+- **Play head zoomed in: a mode that runs across.** "Moves along the song"
+  kept the play head as far across the view as the song had come, so in
+  the middle of a song it sat near the middle and crept only slowly, and
+  looked much like "Stays in the middle". It is now named "Drifts along the
+  song", and a third mode, "Runs across, page by page", has the waveform
+  stand still while the play head runs across it, turning to the next part
+  when the play head nears the right edge (landing 8 % in from the left),
+  or at once to wherever the song is after a seek out of view. A view
+  dragged by hand stays until the play head leaves it. For the mobile
+  player and the web view alike, set for each under its own settings page.
 - **Create song from this is Mureka's Restore.** It reads what the songs
   were made from with the same call Restore on Mureka's page makes
   (feed/restore), so the form gets the lyrics as they were written, the

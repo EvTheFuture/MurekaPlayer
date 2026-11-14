@@ -143,7 +143,7 @@
         const GRAB_PX = 24;
         const EASE_PART = 0.3;
         const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
-            holdTimer: 0, holdZoom: null };
+            holdTimer: 0, holdZoom: null, page: null, pageSpan: 0 };
         const pointers = new Map();
 
         function span() {
@@ -155,9 +155,20 @@
         }
 
         // Whether the play head moves along the view instead of staying in
-        // the middle
+        // the middle, drifting with the song or turning pages
         function travels() {
             return !!(hooks.travel && hooks.travel());
+        }
+
+        // Turning pages: the view stands still while the play head runs
+        // across it, and turns to the next part when the play head nears
+        // its right edge, or to wherever the song is when it is out of view.
+        // The play head lands this far in from the left
+        const PAGE_TURN = 0.92;
+        const PAGE_LEAD = 0.08;
+
+        function pages() {
+            return !!(hooks.pages && hooks.pages());
         }
 
         // The view with the play head in the centre, eased near the ends
@@ -168,6 +179,30 @@
 
             const s = span();
             const room = 1 - s;
+
+            if (pages()) {
+
+                const f = Math.max(0, Math.min(1, frac));
+                const p = z.page;
+
+                if (p === null || z.pageSpan !== s) {
+
+                    z.page = clampStart(f - s * PAGE_LEAD);
+                    z.pageSpan = s;
+                } else if (f < p || f > p + s * PAGE_TURN) {
+
+                    const next = clampStart(f - s * PAGE_LEAD);
+
+                    // Glides there, as after a seek
+                    if (Math.abs(next - p) > 1e-6) {
+
+                        z.glide = { from: p, at: performance.now() };
+                        z.page = next;
+                    }
+                }
+
+                return z.page;
+            }
 
             // Moving along the song, the play head is as far across the view
             // as the song has come, so the view moves with it at an even pace
@@ -278,7 +313,17 @@
             }
 
             if (z.drag || z.held) {
-                return clampStart((z.drag || z.held).start);
+
+                const v = clampStart((z.drag || z.held).start);
+
+                // Turning pages, the view stays where it was left
+                if (pages()) {
+
+                    z.page = v;
+                    z.pageSpan = span();
+                }
+
+                return v;
             }
 
             const target = follow(frac);
