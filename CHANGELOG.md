@@ -1091,6 +1091,30 @@ In development.
   were, every band weaker halfway. Tempos are worked out again as songs
   come up, and the debug log and Stats for nerds say when a tempo was
   doubled this way.
+- **Listening together (app only).** One player shares what it plays, others
+  listen along on their own devices elsewhere, within about a second of it.
+  Built for players on a VPN:
+  - A small relay runs on the VPN server: `server/murekasync`, Go with no
+    dependencies, an OpenRC script and a README. The sharing player only
+    posts its state to it and those listening only read from it, so nothing
+    connects to a player and its web view stays closed to everyone else.
+  - Settings > Listening together: the relay's address, the name shown,
+    Share what plays here (with how many listen along), and Listen along,
+    which lists the players sharing on the relay.
+  - The state is the song (its id, title, cover and Mureka's address of
+    the file), playing or not and where, sent when one of them changes and
+    every 5 s. Never the library.
+  - A player listening along plays the same song straight from Mureka, its
+    own copy when the song is in its library, at the place the relay's
+    clock says. Off by more than 0.6 s, a seek puts it right. Pauses, seeks
+    and the next song follow. Nothing heard for 20 s, it pauses.
+  - Picking another song or pausing stops listening along, and the queue
+    carries on from where it was. The sharing player stopping ends it too.
+  - The app talks to the relay itself, over plain HTTP inside the VPN, with
+    a socket of its own: Android's own HTTP stays limited to https and this
+    device. The relay's time on every answer is the clock all share.
+  - The room and its key stay on the device, a settings backup leaves them
+    out.
 - **Play head zoomed in: a mode that runs across.** "Moves along the song"
   kept the play head as far across the view as the song had come, so in
   the middle of a song it sat near the middle and crept only slowly, and

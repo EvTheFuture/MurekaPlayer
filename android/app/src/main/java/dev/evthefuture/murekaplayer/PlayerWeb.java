@@ -489,6 +489,22 @@ final class PlayerWeb {
         });
     }
 
+    // Listening together: what the relay said, to the player. Only JSON
+    // made here goes into the page, never text as the relay sent it
+    static void syncToPage(JSONObject o) {
+
+        String json = o.toString();
+
+        MAIN.post(() -> {
+
+            if (web == null || !onMureka) {
+                return;
+            }
+
+            web.evaluateJavascript("window.__murekaSync && window.__murekaSync(" + json + ")", null);
+        });
+    }
+
     // The bars follow the setting as soon as it moves, while the app is on
     // screen. With no activity there is nothing to hide
     private static void tellFullscreen() {
@@ -1341,6 +1357,49 @@ final class PlayerWeb {
             }
 
             MAIN.post(PlayerWeb::loadOnline);
+        }
+
+        // Listening together through the relay: sharing what plays here,
+        // listening along with a room, and the rooms open. The answers come
+        // back through window.__murekaSync
+        @JavascriptInterface
+        public void syncLead(String url, String room, String key, String state) {
+
+            if (onMureka) {
+                Sync.lead(url, room, key, state);
+            }
+        }
+
+        @JavascriptInterface
+        public void syncLeadStop(String url, String room, String key) {
+
+            if (onMureka) {
+                Sync.leadStop(url, room, key);
+            }
+        }
+
+        @JavascriptInterface
+        public void syncFollow(String url, String room) {
+
+            if (onMureka) {
+                Sync.follow(url, room);
+            }
+        }
+
+        @JavascriptInterface
+        public void syncFollowStop() {
+
+            if (onMureka) {
+                Sync.followStop();
+            }
+        }
+
+        @JavascriptInterface
+        public void syncRooms(String url) {
+
+            if (onMureka) {
+                Sync.rooms(url);
+            }
         }
 
         // The answer to one of the app's slower questions, a piece of a song
