@@ -17542,10 +17542,13 @@
         return head;
     }
 
-    // What the set's menu needs comes with the menu of its first song
+    // What the set's menu needs comes with the menu of its first song. A
+    // set with no song in the library can be renamed or removed
     function openSetMenu(item) {
 
         if (!item.firstId) {
+
+            emptySetMenu(item);
             return;
         }
 
@@ -17556,6 +17559,30 @@
             }
         }).catch(function () {
         });
+    }
+
+    function emptySetMenu(item) {
+
+        openChoice("Set \"" + item.name + "\", no songs", [
+            { icon: "pencil", label: "Rename the set", fn: function () {
+
+                closeSongMenu();
+                askText("Name of the set", item.name, "Rename", function (typed) {
+
+                    if (typed.trim()) {
+                        send("setById", { id: item.setId, action: "rename", value: typed.trim() });
+                    }
+                });
+            } },
+            { icon: "trash", label: "Remove the set", cls: "danger", fn: function () {
+
+                closeSongMenu();
+                send("setById", { id: item.setId, action: "remove" });
+                toast("Set removed", "ok");
+            } }
+        ]);
+        $("menuCaption").textContent = "None of its songs is in the library, they were deleted on Mureka or taken out.";
+        $("menuCaption").style.display = "";
     }
 
     // The filter row follows whatever the player has set, wherever it was set

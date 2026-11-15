@@ -1210,6 +1210,13 @@ In development.
   go by the panel's width, as big as beside the cover at most and no
   taller than the room under the stars. The panel behind the text blurs
   the cover a little less.
+- **Sets without songs.** A set none of whose songs is in the library any
+  more, its songs deleted on Mureka or taken out, had no menu in the web
+  view's Sets view: the menu was read from the set's first song. It now
+  has one, with Rename the set and Remove the set. Settings > Song sets
+  counts them and has Remove sets without songs beside Dissolve sets with
+  only one song, which no longer takes the empty ones too. Sets with
+  songs still being made stay.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

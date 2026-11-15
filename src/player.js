@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.157";
+    const VERSION = "2.0.1.158";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -42182,6 +42182,25 @@
             }
         } else if (cmd === "unplayLast") {
             undoPlayLast(arg);
+        } else if (cmd === "setById") {
+
+            // A set with no song to go by, from the web view's Sets view
+            const set = arg && typeof arg === "object" ? songSets.get(String(arg.id)) : null;
+
+            if (set && arg.action === "rename") {
+
+                const clean = String(arg.value || "").trim().slice(0, 200);
+
+                if (clean) {
+
+                    set.name = clean;
+                    saveSets();
+                }
+            } else if (set && arg.action === "remove") {
+                dissolveSet(set);
+            }
+
+            setsChanged();
         } else if (cmd === "roomChoice") {
 
             // Pause or Stop in a room, remembered in the web view's question
@@ -53744,7 +53763,25 @@
         const singleSets = function () {
 
             return setsSorted().filter(function (e) {
-                return e.songs.length <= 1;
+                return e.songs.length === 1;
+            });
+        };
+
+        // The sets with no song of the library in them and none still being
+        // made: their songs deleted on Mureka, or the set left empty
+        const emptySets = function () {
+
+            const making = new Set();
+
+            songSetOf.forEach(function (m, id) {
+
+                if (pendingSongs.has(String(id))) {
+                    making.add(m.set);
+                }
+            });
+
+            return setsSorted().filter(function (e) {
+                return e.songs.length === 0 && !making.has(e.set.id);
             });
         };
         const paintSetsCount = function () {
@@ -53755,7 +53792,7 @@
 
             setsCountEl.textContent = songSets.size + (songSets.size === 1 ? " set, " : " sets, ") + done + " done, "
                 + songSetOf.size + (songSetOf.size === 1 ? " song" : " songs") + " in them. "
-                + singleSets().length + " with only one song.";
+                + singleSets().length + " with only one song, " + emptySets().length + " without songs.";
         };
 
         paintSetsCount();
@@ -53812,10 +53849,35 @@
                 }, null, true);
         });
 
+        const emptySetsBtn = makeDangerButton("Remove sets without songs", function () {
+
+            const found = emptySets();
+
+            if (found.length === 0) {
+
+                showToast("No set without songs", true);
+                return;
+            }
+
+            askYesNo("Remove " + found.length + (found.length === 1 ? " set?" : " sets?"),
+                "The sets with no song in the library, and none still being made, are gone.",
+                "Remove", function () {
+
+                    for (const e of found) {
+                        dissolveSet(e.set);
+                    }
+
+                    setsChanged();
+                    paintSetsCount();
+                    showToast(found.length + (found.length === 1 ? " set removed" : " sets removed"), true);
+                }, null, true);
+        });
+
         // In the web view it opens the web view's own Sets view
         openSetsBtn.dataset.hostWeb = "setsView";
         openSetsBtn.style.textAlign = "left";
         singleSetsBtn.style.textAlign = "left";
+        emptySetsBtn.style.textAlign = "left";
         setsPage.appendChild(makeLabel("In the list"));
         setsPage.appendChild(setsCountEl);
         setsPage.appendChild(withHint(setsOnRow, "Off, every song stands on its own in the list and the queue. The sets stay as they are. The Sets button for the button row does the same."));
@@ -53838,6 +53900,8 @@
         setsPage.appendChild(makeHint("The Sets view lists the sets, one row each. A tap opens a set, a long press shows what can be done with it: play it, rename it, color it, mark it done, merge it into another set or dissolve it."));
         setsPage.appendChild(singleSetsBtn);
         setsPage.appendChild(makeHint("A set left with one song after the others were taken out or deleted on Mureka."));
+        setsPage.appendChild(emptySetsBtn);
+        setsPage.appendChild(makeHint("A set none of whose songs is in the library any more, deleted on Mureka or taken out. Sets with songs still being made stay."));
 
         // Sound profiles: switched on, night mode, the profiles to edit and
         // the profiles of each speaker. Drawn again whole when profiles or
@@ -89548,10 +89612,13 @@
         return head;
     }
 
-    // What the set's menu needs comes with the menu of its first song
+    // What the set's menu needs comes with the menu of its first song. A
+    // set with no song in the library can be renamed or removed
     function openSetMenu(item) {
 
         if (!item.firstId) {
+
+            emptySetMenu(item);
             return;
         }
 
@@ -89562,6 +89629,30 @@
             }
         }).catch(function () {
         });
+    }
+
+    function emptySetMenu(item) {
+
+        openChoice("Set \"" + item.name + "\", no songs", [
+            { icon: "pencil", label: "Rename the set", fn: function () {
+
+                closeSongMenu();
+                askText("Name of the set", item.name, "Rename", function (typed) {
+
+                    if (typed.trim()) {
+                        send("setById", { id: item.setId, action: "rename", value: typed.trim() });
+                    }
+                });
+            } },
+            { icon: "trash", label: "Remove the set", cls: "danger", fn: function () {
+
+                closeSongMenu();
+                send("setById", { id: item.setId, action: "remove" });
+                toast("Set removed", "ok");
+            } }
+        ]);
+        $("menuCaption").textContent = "None of its songs is in the library, they were deleted on Mureka or taken out.";
+        $("menuCaption").style.display = "";
     }
 
     // The filter row follows whatever the player has set, wherever it was set
