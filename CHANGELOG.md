@@ -1138,7 +1138,9 @@ In development.
     the control buttons, in the app and in the web view (Settings > Mobile
     player or Web view > Control buttons), there also before a relay is
     set: a tap then says so, with a way to the settings. Filled while on.
-    Stop also leaves the room, or the shared song would only start again.
+    Stop stops the music for everyone and keeps the player in the room,
+    from any player in it: Play then starts it again, from where it
+    stopped, for everyone.
     Leaving, the music goes on as this player's own; a player that only
     played along gets its own queue and filters back.
   - Together's menu: a swipe up on the Together control button, which
@@ -1187,6 +1189,11 @@ In development.
   song's set, a second or more on a phone, for songs in a set. The
   similar songs are now found only for Suggest similar songs and a new
   set.
+- **A room's name, also when joined from the list of an older relay.**
+  A room joined from Active rooms of a relay that does not pass the names
+  on was called by its id, such as r-41ca56dfcc895097. A player now takes
+  the room's name from the one holding it, and the one holding it from
+  one playing along when it has only the id.
 - **Songs being made into a set show in it in the queue too.** Waiting
   to play once ready, a new song asked to go into a set had no set mark
   in the queue, and the queue was not read again when it joined the set.

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.153";
+    const VERSION = "2.0.1.154";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25321,18 +25321,21 @@
     // Stop playback and clear the queue
     function stopPlay() {
 
-        // Listening together, Stop leaves the room first, or the shared song
-        // would only start again. Playing along, the queue here comes back,
-        // and Play later starts it from its song
+        // Listening together, Stop stops the music for everyone in the
+        // room, which this player stays in. Playing along, the one holding
+        // the room is asked to stop, and the music stops here at once
         let fromStart = false;
 
-        if (settings.syncOn === true) {
+        if (syncFollowing && syncMayControl()) {
 
-            fromStart = !!syncFollowing;
-            settings.syncOn = false;
-            saveSettings();
-            syncLeave();
-            showToast("Stopped listening together");
+            const f = syncFollowing;
+
+            f.localPlaying = false;
+            f.localPlayUntil = Date.now() + SYNC_LOCAL_MS;
+            f.localStopUntil = Date.now() + SYNC_LOCAL_MS;
+            syncSend({ cmd: "stop" });
+            syncStopHere();
+            return;
         }
 
         dropNextReady();
@@ -29227,6 +29230,17 @@
 
     // Toggle between play and pause for the current song
     function togglePlayPause() {
+
+        // The room stopped while playing along: Play starts it again for
+        // everyone, from the one holding it
+        if ((!audio || !audio.src) && syncFollowing && syncMayControl() && !syncActing) {
+
+            syncFollowing.localPlaying = true;
+            syncFollowing.localPlayUntil = Date.now() + SYNC_LOCAL_MS;
+            syncSend({ cmd: "play", playing: true, pos: 0 });
+            setStatus("Starting the music in the room");
+            return;
+        }
 
         if (!audio || !audio.src) {
 
@@ -36437,7 +36451,7 @@
             togetherRoom: syncRoomLabel(),
             togetherWho: settings.syncOn === true ? syncWhoText() : "",
             togetherRooms: syncRoomsList.map(function (r) {
-                return { room: String(r.room), label: String(r.label || r.room), line: syncRoomLine(r) };
+                return { room: String(r.room), label: String(r.label || (String(r.room) === syncRoomName() ? syncRoomLabel() : r.room)), line: syncRoomLine(r) };
             }),
             togetherRoomsAt: syncRoomsAt,
             togetherRoomsError: syncRoomsError,
@@ -39733,6 +39747,34 @@
         return syncRoomIdOf(syncRoomLabel());
     }
 
+    // An id worked out from a name, not a name: what a room joined from
+    // the list of a relay that does not pass the names on is called
+    function syncIsRoomId(label) {
+        return /^r-[0-9a-f]{16}$/.test(String(label || ""));
+    }
+
+    // The room's name as another player in it has it, taken when this
+    // player knows the room only by its id, or follows the one holding it.
+    // Only a name of the same room, and never an id
+    function syncAdoptLabel(label, always) {
+
+        const r = syncRoomLabelOf(label);
+
+        if (!r || syncIsRoomId(r) || r === syncRoomLabel() || syncRoomIdOf(r) !== syncRoomName()) {
+            return;
+        }
+
+        if (!always && !syncIsRoomId(syncRoomLabel())) {
+            return;
+        }
+
+        dbgLog("Sync", "the room is called " + r);
+        settings.syncTogether = r;
+        saveSettings();
+        syncPaint();
+        publishHostSoon();
+    }
+
     // The filters the room shares: vocals, published, and the smart
     // filters with all they hold. The creator and the playlists are each
     // player's own
@@ -40195,6 +40237,9 @@
 
         if (c.cmd === "hello") {
 
+            // Known here only by its id, the room takes its name from one
+            // who has it
+            syncAdoptLabel(c.room, false);
             syncPaint();
             return;
         }
@@ -40220,6 +40265,18 @@
             syncFiltersApply(c.filters);
             queueFollowFilter();
             showToast(who + " changed the filters");
+            return;
+        }
+
+        // Stop for everyone, the room stays open
+        if (c.cmd === "stop") {
+
+            if (currentSong) {
+
+                stopPlay();
+                showToast(who + " stopped the music");
+            }
+
             return;
         }
 
@@ -40513,6 +40570,44 @@
         return Math.max(0, Math.min(len - 0.3, pos));
     }
 
+    // The room stopped, or Stop pressed here while playing along: the
+    // music stops here as Stop does, with nothing kept to resume here, as
+    // Play starts the room again from the one holding it
+    function syncStopHere() {
+
+        const f = syncFollowing;
+
+        if (f) {
+
+            f.songId = "";
+            f.loadingId = "";
+        }
+
+        userPaused = true;
+
+        if (audio) {
+
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+        }
+
+        if (currentObjectUrl) {
+            URL.revokeObjectURL(currentObjectUrl);
+            currentObjectUrl = null;
+        }
+
+        currentSong = null;
+        queue = [];
+        queuePos = -1;
+        resumeState = null;
+        renderList();
+        updatePlayerInfo(null);
+        updatePlayPause();
+        setStatus("Stopped");
+        publishHostSoon();
+    }
+
     function syncPlayPause(play) {
 
         const playing = !!(audio && audio.src && !audio.paused);
@@ -40614,7 +40709,12 @@
 
         if (!syncPlayable(st)) {
 
-            if (now > f.localPlayUntil) {
+            // Stopped in the room: stopped here too
+            if ((now > f.localPlayUntil || f.localPlaying === false) && !st.id && audio && audio.src) {
+
+                dbgLog("Sync", "the room stopped");
+                syncStopHere();
+            } else if (now > f.localPlayUntil) {
                 syncPlayPause(false);
             }
 
@@ -40625,6 +40725,13 @@
         if (f.localSongId && now < f.localSongUntil && String(st.id) !== f.localSongId) {
             return;
         }
+
+        // Stopped here, the one holding the room not stopped yet
+        if (f.localStopUntil && now < f.localStopUntil) {
+            return;
+        }
+
+        f.localStopUntil = 0;
 
         f.localSongId = "";
 
@@ -40728,7 +40835,7 @@
         if (Date.now() - syncHelloAt > SYNC_HELLO_MS && f.status === "listening") {
 
             syncHelloAt = Date.now();
-            syncSend({ cmd: "hello", rtt: syncClock.rtt, out: syncOutMs(), drift: f.drift });
+            syncSend({ cmd: "hello", rtt: syncClock.rtt, out: syncOutMs(), drift: f.drift, room: syncRoomLabel() });
         }
 
         if (f.state) {
@@ -41029,6 +41136,9 @@
                 showToast("Listening together with " + String(st.name || "the room").slice(0, 40));
             }
 
+            // The room's name as the one holding it has it
+            syncAdoptLabel(st.room, true);
+
             // The room moves to another name: this player follows it there,
             // a moment after the one holding it opened it
             const moveTo = syncRoomLabelOf(st.moveTo);
@@ -41187,7 +41297,9 @@
 
         const n = Number(r.listeners) || 0;
 
-        return String(r.label || r.room).slice(0, 40) + ": " + String(r.name || "someone").slice(0, 30)
+        const own = String(r.room) === syncRoomName() && !syncIsRoomId(syncRoomLabel()) ? syncRoomLabel() : "";
+
+        return String(r.label || own || r.room).slice(0, 40) + ": " + String(r.name || "someone").slice(0, 30)
             + (r.title ? ", " + String(r.title).slice(0, 40) + (r.playing ? "" : " (paused)") : "")
             + ", " + (n + 1) + (n === 0 ? " player" : " players");
     }
