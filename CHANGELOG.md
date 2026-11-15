@@ -1141,6 +1141,11 @@ In development.
     Stop stops the music for everyone and keeps the player in the room,
     from any player in it: Play then starts it again, from where it
     stopped, for everyone.
+    Songs put in the queue by hand, next, after the queued ones or last,
+    are marked with their number in the queue on every player in the room,
+    not only on the one holding it, and Play after queued keeps its place
+    after them there too. Taken out of the queue on any player, a song
+    leaves the shared queue.
     Pause or Stop pressed in the player, in the app or the web view, asks
     first: for everyone in the room, named in the question, or leave the
     room, then pause or stop for this player alone. A box remembers the

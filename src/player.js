@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.158";
+    const VERSION = "2.0.1.159";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -18345,6 +18345,10 @@
             return;
         }
 
+        if (i > queuePos) {
+            syncHereUnqueue(String(queue[i].song_id));
+        }
+
         const song = queue.splice(i, 1)[0];
 
         // One played before the playing song: that one is a place further
@@ -18463,9 +18467,8 @@
     // once they have, marked as put in by hand itself
     function addAfterQueued(song) {
 
-        // Listening along, the shared queue has no songs put in by hand of
-        // its own, so it goes next there
-        if (syncFollowing && syncHereQueue(song, true)) {
+        // Listening along, after the songs put in by hand in the shared queue
+        if (syncFollowing && syncHereQueue(song, "queued")) {
             return;
         }
 
@@ -18595,6 +18598,8 @@
             return;
         }
 
+        syncHereUnqueue(key);
+
         playLastMarks.delete(key);
 
         for (let i = queue.length - 1; i > queuePos; i -= 1) {
@@ -18626,6 +18631,8 @@
         if (!isPlayNext(key)) {
             return;
         }
+
+        syncHereUnqueue(key);
 
         const oldOffset = playNextMarks.get(key);
         let song = null;
@@ -40131,7 +40138,19 @@
         for (let i = queuePos + 1; i < queue.length && up.length < SYNC_UP_MAX; i += 1) {
 
             if (queue[i] && !isStubSong(queue[i])) {
-                up.push(syncSongInfo(queue[i]));
+
+                // Put in by hand, next or last, so every player marks it
+                // with its number in the queue as this one does
+                const info = syncSongInfo(queue[i]);
+                const id = String(queue[i].song_id);
+
+                if (playNextMarks.has(id)) {
+                    info.hand = "next";
+                } else if (playLastMarks.has(id)) {
+                    info.hand = "last";
+                }
+
+                up.push(info);
             }
         }
 
@@ -40306,7 +40325,34 @@
             return;
         }
 
-        if ((c.cmd === "song" || c.cmd === "addNext" || c.cmd === "addLast") && syncPlayable(c.song)) {
+        // A song taken out of the queue by another player, the first time
+        // it comes up
+        if (c.cmd === "unqueue" && c.id) {
+
+            const id = String(c.id);
+
+            if (isPlayNext(id)) {
+                undoPlayNext(id);
+            } else if (isPlayLast(id)) {
+                undoPlayLast(id);
+            } else {
+
+                const at = queue.findIndex(function (x, i) {
+                    return i > queuePos && String(x.song_id) === id;
+                });
+
+                if (at > queuePos) {
+                    removeFromQueue(at);
+                }
+            }
+
+            renderList();
+            publishHostSoon();
+            showToast(who + " took a song out of the queue");
+            return;
+        }
+
+        if ((c.cmd === "song" || c.cmd === "addNext" || c.cmd === "addQueued" || c.cmd === "addLast") && syncPlayable(c.song)) {
 
             const want = String(c.song.id);
 
@@ -40350,11 +40396,14 @@
 
             if (c.cmd === "addNext") {
                 addNext(syncSongOf(c.song));
+            } else if (c.cmd === "addQueued") {
+                addAfterQueued(syncSongOf(c.song));
             } else {
                 addLast(syncSongOf(c.song));
             }
 
-            showToast(who + (c.cmd === "addNext" ? " put a song next" : " put a song last") + ": " + String(c.song.title || "").slice(0, 60));
+            showToast(who + (c.cmd === "addNext" ? " put a song next" : c.cmd === "addQueued" ? " put a song after the queued ones"
+                : " put a song last") + ": " + String(c.song.title || "").slice(0, 60));
         }
     }
 
@@ -40421,6 +40470,7 @@
             localSongId: "", localSongUntil: 0, localPlaying: null, localPlayUntil: 0, localSeekUntil: 0, drift: 0,
             localFiltersUntil: 0, heard: false };
         syncHelloAt = 0;
+        syncMarksSeen = "";
         window.MurekaHost.syncFollow(syncRelay(), String(room));
         dbgLog("Sync", "joining the room " + room);
         syncPaint();
@@ -40473,6 +40523,16 @@
         queue = saved.queue;
         queuePos = Math.min(saved.pos, queue.length - 1);
         queueOwn = saved.own;
+        playNextMarks.clear();
+        playLastMarks.clear();
+
+        for (const pair of saved.next || []) {
+            playNextMarks.set(pair[0], pair[1]);
+        }
+
+        for (const id of saved.last || []) {
+            playLastMarks.add(id);
+        }
         syncActing = true;
 
         try {
@@ -40499,7 +40559,8 @@
         }
 
         if (!syncSaved) {
-            syncSaved = { queue: queue.slice(), pos: queuePos, own: queueOwn, filters: syncFiltersNow() };
+            syncSaved = { queue: queue.slice(), pos: queuePos, own: queueOwn, filters: syncFiltersNow(),
+                next: Array.from(playNextMarks.entries()), last: Array.from(playLastMarks) };
         }
 
         syncJoinAt = Date.now();
@@ -40640,7 +40701,35 @@
 
     // The shared queue in place of the one here: the shared song and those
     // coming up, the playing song kept as it is when it is the same
+    // The marks of the shared queue last taken up, see syncMirror
+    let syncMarksSeen = "";
+
     function syncMirror(st) {
+
+        // The songs put in by hand in the shared queue, marked here too
+        const up = Array.isArray(st.up) ? st.up.filter(syncPlayable) : [];
+        const marks = up.filter(function (u) {
+            return u.hand === "next" || u.hand === "last";
+        }).map(function (u) {
+            return u.hand + ":" + u.id;
+        }).join(",");
+        const marked = marks !== syncMarksSeen;
+
+        if (marked) {
+
+            syncMarksSeen = marks;
+            playNextMarks.clear();
+            playLastMarks.clear();
+
+            for (const u of up) {
+
+                if (u.hand === "next") {
+                    playNextMarks.set(String(u.id), -1);
+                } else if (u.hand === "last") {
+                    playLastMarks.add(String(u.id));
+                }
+            }
+        }
 
         const want = [String(st.id)].concat((Array.isArray(st.up) ? st.up : []).filter(syncPlayable).map(function (u) {
             return String(u.id);
@@ -40650,6 +40739,14 @@
         });
 
         if (queuePos === 0 && want.join(",") === have.join(",")) {
+
+            // The same queue, only its marks changed
+            if (marked) {
+
+                renderList();
+                publishHostSoon();
+            }
+
             return false;
         }
 
@@ -40967,7 +41064,18 @@
         syncSend({ cmd: "song", song: info });
     }
 
-    // Play next or Play last here goes into the shared queue instead
+    // A song taken out of the queue here while playing along: out of the
+    // shared queue too. Taken out here at once as well, the shared queue
+    // then follows
+    function syncHereUnqueue(id) {
+
+        if (syncFollowing && syncMayControl() && !syncActing) {
+            syncSend({ cmd: "unqueue", id: String(id) });
+        }
+    }
+
+    // Play next, Play after queued or Play last here goes into the shared
+    // queue instead. next: true for next, "queued" for after queued
     function syncHereQueue(song, next) {
 
         const f = syncFollowing;
@@ -40984,8 +41092,9 @@
             return true;
         }
 
-        syncSend({ cmd: next ? "addNext" : "addLast", song: info });
-        showToast(next ? "Plays next, for everyone" : "Plays last, for everyone", true);
+        syncSend({ cmd: next === "queued" ? "addQueued" : next ? "addNext" : "addLast", song: info });
+        showToast(next === "queued" ? "Plays after the queued songs, for everyone" : next ? "Plays next, for everyone"
+            : "Plays last, for everyone", true);
 
         return true;
     }
