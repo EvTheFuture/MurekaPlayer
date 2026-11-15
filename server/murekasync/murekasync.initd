@@ -1,29 +1,32 @@
 #!/sbin/openrc-run
 # Mureka Player listening together relay, for OpenRC (Alpine Linux)
 #
-# Set in /etc/conf.d/murekasync either the VPN interface and the port,
-# MUREKASYNC_INTERFACE="wg0" and MUREKASYNC_PORT="8095", to listen on the
-# interface's addresses, or one address, MUREKASYNC_LISTEN="10.0.0.1:8095"
+# Installed as /etc/init.d/murekasync, set up in /etc/conf.d/murekasync
+# (murekasync.confd): the VPN interface and port to listen on, or one
+# address. Run under supervise-daemon, started again should it stop
 
 name="murekasync"
 description="Mureka Player listening together relay"
 
-: ${MUREKASYNC_LISTEN:="127.0.0.1:8095"}
 : ${MUREKASYNC_INTERFACE:=""}
 : ${MUREKASYNC_PORT:="8095"}
+: ${MUREKASYNC_LISTEN:="127.0.0.1:8095"}
+: ${MUREKASYNC_WAIT:="2m"}
 : ${MUREKASYNC_USER:="nobody"}
+: ${MUREKASYNC_GROUP:="nobody"}
 
 command="/usr/local/bin/murekasync"
 
 if [ -n "${MUREKASYNC_INTERFACE}" ]; then
-    command_args="-interface ${MUREKASYNC_INTERFACE} -port ${MUREKASYNC_PORT}"
+    command_args="-interface ${MUREKASYNC_INTERFACE} -port ${MUREKASYNC_PORT} -wait ${MUREKASYNC_WAIT}"
 else
     command_args="-listen ${MUREKASYNC_LISTEN}"
 fi
 
-command_user="${MUREKASYNC_USER}"
-command_background="yes"
-pidfile="/run/${RC_SVCNAME}.pid"
+command_user="${MUREKASYNC_USER}:${MUREKASYNC_GROUP}"
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
 output_log="/var/log/${RC_SVCNAME}.log"
 error_log="/var/log/${RC_SVCNAME}.log"
 
@@ -33,5 +36,5 @@ depend() {
 }
 
 start_pre() {
-    checkpath --file --owner "${MUREKASYNC_USER}" --mode 0640 "${output_log}"
+    checkpath --file --owner "${MUREKASYNC_USER}:${MUREKASYNC_GROUP}" --mode 0640 "${output_log}"
 }

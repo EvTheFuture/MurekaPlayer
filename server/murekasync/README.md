@@ -22,10 +22,15 @@ can be built on a workstation and the one file copied over. On the server:
 ```sh
 install -m 755 murekasync /usr/local/bin/murekasync
 install -m 755 murekasync.initd /etc/init.d/murekasync
-printf 'MUREKASYNC_INTERFACE="wg0"\nMUREKASYNC_PORT="8095"\n' > /etc/conf.d/murekasync
+install -m 644 murekasync.confd /etc/conf.d/murekasync
 rc-update add murekasync default
 rc-service murekasync start
 ```
+
+`murekasync.initd` is the OpenRC service, run under supervise-daemon so it
+is started again should it stop, logging to `/var/log/murekasync.log`, as
+the user nobody. `murekasync.confd` holds its settings, set to the
+interface wg0 and port 8095, to change as needed.
 
 It listens on the addresses of the VPN interface only (`-interface wg0
 -port 8095`), so it is not reachable from the internet, and waits up to two

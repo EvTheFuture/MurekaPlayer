@@ -1,0 +1,16 @@
+# /etc/conf.d/murekasync
+# Settings of the Mureka Player listening together relay
+
+# The VPN interface to listen on, all its addresses, and the port. The
+# relay waits for the interface to come up and get an address, as long as
+# MUREKASYNC_WAIT says (2m, 30s and the like)
+MUREKASYNC_INTERFACE="wg0"
+MUREKASYNC_PORT="8095"
+#MUREKASYNC_WAIT="2m"
+
+# Or one address and port instead, with MUREKASYNC_INTERFACE left empty
+#MUREKASYNC_LISTEN="10.0.0.1:8095"
+
+# Who it runs as
+#MUREKASYNC_USER="nobody"
+#MUREKASYNC_GROUP="nobody"
