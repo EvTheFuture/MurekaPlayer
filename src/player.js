@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.134";
+    const VERSION = "2.0.1.135";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -38411,9 +38411,11 @@
         return path;
     }
 
+    // A button lit in the accent color. The browser writes a color set as
+    // #48e1eb back as rgb(72, 225, 235), spaces and all, so the spaces go
     function hostOn(el) {
 
-        const bg = String(el.style.background || el.style.backgroundColor || "").toLowerCase();
+        const bg = String(el.style.background || el.style.backgroundColor || "").toLowerCase().replace(/\s+/g, "");
 
         return bg.indexOf(ACCENT) >= 0 || bg.indexOf(ACCENT_RGB) >= 0;
     }
@@ -38681,7 +38683,7 @@
 
             if ((ws === "pre-wrap" || ws === "pre-line" || ws === "pre") && el.textContent.trim()) {
 
-                out.push({ t: "text", s: el.textContent, pre: true });
+                out.push({ t: "text", s: el.textContent, pre: true, status: el.dataset.hostStatus === "1" });
                 return;
             }
 
@@ -38699,7 +38701,8 @@
                     s: text,
                     small: parseFloat(el.style.fontSize || "13") <= 12 || grey,
                     line: el.dataset.sectionLine === "1",
-                    plain: el.dataset.hostPlain === "1"
+                    plain: el.dataset.hostPlain === "1",
+                    status: el.dataset.hostStatus === "1"
                 });
             }
 
@@ -48548,6 +48551,17 @@
         const makeHint = kit.makeHint;
         const withHint = kit.withHint;
 
+        // How it stands now, set apart from the hints in the accent color
+        const makeStatus = function () {
+
+            const line = document.createElement("div");
+
+            line.style.cssText = "font-size:13px;font-weight:600;color:" + ACCENT + ";margin:2px 0 4px";
+            line.dataset.hostStatus = "1";
+
+            return line;
+        };
+
         page.appendChild(makeLabel("Relay"));
 
         const relayRow = makeTextRow("Relay address", function () {
@@ -48584,7 +48598,7 @@
         const shareRow = makeBoolRow("Share what plays here", function () {
             return settings.syncShare === true;
         }, syncSetShare);
-        const shareStatus = makeHint("");
+        const shareStatus = makeStatus();
 
         page.appendChild(withHint(shareRow, "Others on the VPN can listen along: the same song from Mureka at the same place,"
             + " within about a second. Only the song, its cover, where it is and the songs coming up go out, never the"
@@ -48633,7 +48647,7 @@
                 });
             });
         });
-        const followStatus = makeHint("");
+        const followStatus = makeStatus();
 
         page.appendChild(followBtn);
         page.appendChild(roomsBox);
@@ -48644,7 +48658,7 @@
 
         page.appendChild(makeLabel("Timing"));
 
-        const timingText = makeHint("");
+        const timingText = makeStatus();
         const timingBtn = makeButton("Test timing", "#333", "#fff", function () {
 
             if (!syncAvailable() || !syncRelayOk(syncRelay())) {
@@ -48665,7 +48679,7 @@
 
         page.appendChild(makeLabel("In the room"));
 
-        const membersText = makeHint("");
+        const membersText = makeStatus();
 
         membersText.style.whiteSpace = "pre-line";
         page.appendChild(membersText);
@@ -74774,6 +74788,15 @@
         font-size: 0.8em;
     }
 
+    /* How something stands now, a sharing or a measurement, set apart
+       from the hints in the accent color */
+    .pText.status {
+        padding: 4px 4px 6px;
+        color: var(--accent);
+        font-size: 0.9em;
+        font-weight: 600;
+    }
+
     /* An explanation on a line of its own, under the controls it is
        about, runs the whole width */
     #panelBody > .pText.small {
@@ -89806,7 +89829,7 @@
         // Lyrics and the style prompt keep their lines and capitals
         if (node.pre) {
 
-            text.className = "pText pre";
+            text.className = "pText pre" + (node.status ? " status" : "");
             text.textContent = node.s || "";
 
             return text;
@@ -89818,8 +89841,8 @@
         }
 
         // A line of its own that is not a hint is a section heading
-        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small && !node.plain ? " head" : "")
-            + (node.line ? " line" : "");
+        text.className = node.status ? "pText status" : "pText" + (node.small ? " small" : "")
+            + (top && !node.small && !node.plain ? " head" : "") + (node.line ? " line" : "");
         text.textContent = node.s || "";
 
         return text;

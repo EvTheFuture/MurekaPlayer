@@ -4348,6 +4348,15 @@
         font-size: 0.8em;
     }
 
+    /* How something stands now, a sharing or a measurement, set apart
+       from the hints in the accent color */
+    .pText.status {
+        padding: 4px 4px 6px;
+        color: var(--accent);
+        font-size: 0.9em;
+        font-weight: 600;
+    }
+
     /* An explanation on a line of its own, under the controls it is
        about, runs the whole width */
     #panelBody > .pText.small {
@@ -19380,7 +19389,7 @@
         // Lyrics and the style prompt keep their lines and capitals
         if (node.pre) {
 
-            text.className = "pText pre";
+            text.className = "pText pre" + (node.status ? " status" : "");
             text.textContent = node.s || "";
 
             return text;
@@ -19392,8 +19401,8 @@
         }
 
         // A line of its own that is not a hint is a section heading
-        text.className = "pText" + (node.small ? " small" : "") + (top && !node.small && !node.plain ? " head" : "")
-            + (node.line ? " line" : "");
+        text.className = node.status ? "pText status" : "pText" + (node.small ? " small" : "")
+            + (top && !node.small && !node.plain ? " head" : "") + (node.line ? " line" : "");
         text.textContent = node.s || "";
 
         return text;
