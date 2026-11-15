@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.141";
+    const VERSION = "2.0.1.142";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4551,7 +4551,7 @@
                     prevRestartOn: typeof parsed.prevRestartOn === "boolean"
                         ? parsed.prevRestartOn : parsed.prevRestart !== 0,
                     prevRestart: (typeof parsed.prevRestart === "number"
-                        && parsed.prevRestart >= 1 && parsed.prevRestart <= 30)
+                        && parsed.prevRestart >= 1 && parsed.prevRestart <= 300)
                         ? parsed.prevRestart : 3,
                     waveSeek: parsed.waveSeek !== false,
                     waveSource: parsed.waveSource === "song" ? "song" : "mureka",
@@ -50593,10 +50593,29 @@
 
         // The seconds only matter with the switch on, so they are hidden
         // with it off, on the phone and in the web view alike
-        const prevSecondsRow = makeStepperRow("Seconds before it restarts",
-            function () { return typeof settings.prevRestart === "number" ? settings.prevRestart : 3; },
-            function (v) { settings.prevRestart = v; }, 1, 30);
-        const prevSecondsBox = withHint(prevSecondsRow, "A press within this many seconds of the start still goes to the previous song. Raise it if the car or the Android device is slow to react.");
+        // From a second up to five minutes, picked from a list rather than
+        // stepped one second at a time. A number saved before shows as the
+        // nearest one in the list
+        const prevSecondsChoices = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300];
+        const prevSecondsRow = makeDropRow("Seconds before it restarts", prevSecondsChoices.map(function (n) {
+            return { label: n < 60 ? n + " s" : (n / 60) + " min", value: String(n) };
+        }), function () {
+
+            const v = typeof settings.prevRestart === "number" ? settings.prevRestart : 3;
+            let best = prevSecondsChoices[0];
+
+            for (const n of prevSecondsChoices) {
+
+                if (Math.abs(n - v) < Math.abs(best - v)) {
+                    best = n;
+                }
+            }
+
+            return String(best);
+        }, function (v) {
+            settings.prevRestart = Number(v) || 3;
+        });
+        const prevSecondsBox = withHint(prevSecondsRow, "A press within this long of the start still goes to the previous song, up to 5 minutes. Raise it if the car or the Android device is slow to react, or to go back a song well into it.");
 
         const showPrevSeconds = function () {
             prevSecondsBox.style.display = settings.prevRestartOn === false ? "none" : "";

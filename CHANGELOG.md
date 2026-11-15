@@ -1153,6 +1153,10 @@ In development.
     device.
   - The room and its key stay on the device, a settings backup leaves them
     out.
+- **Previous goes back a song up to 5 minutes in.** Seconds before it
+  restarts, under Settings > Playback, went no higher than 30. It is now
+  picked from a list, from 1 s up to 5 min, so previous can go to the
+  previous song well into the playing one.
 - **Lyrics on a turning drum, with breaks.** The lyrics, on the cover and
   in the web view, now turn on a drum in place of the flat roll:
   - One eye sees the drum from in front of the middle of the lyrics, and
