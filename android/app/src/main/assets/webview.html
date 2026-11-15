@@ -12476,9 +12476,7 @@
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
 
         // Lit while the phone shares what it plays or listens along
-        // Filled while sharing, ringed while listening along
-        $("togetherBtn").classList.toggle("on", !!(s && s.together === "share"));
-        $("togetherBtn").classList.toggle("ring", !!(s && s.together === "follow"));
+        $("togetherBtn").classList.toggle("on", !!(s && s.together === "on"));
         $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
 
         // Lit while the playing song is in the playlist songs went into last
@@ -24408,10 +24406,8 @@
         send("toPlaylist");
     });
 
-    // Listening together on and off on the phone: sharing or listening
-    // along stops, neither takes up again the way used last. Not set up
-    // yet, said so, with the way to the settings, and with nothing used
-    // before, the phone's Listening together settings shown here
+    // Listening together on and off on the phone. Not set up yet, said so,
+    // with the way to the phone's Listening together settings, shown here
     $("togetherBtn").addEventListener("click", function () {
 
         const settingsPage = function () {
@@ -24427,12 +24423,6 @@
             openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
                 { icon: "settings", label: "Open the settings", cls: "tall", fn: settingsPage }
             ]);
-            return;
-        }
-
-        if (state && state.together === "off" && state.togetherLast !== true) {
-
-            settingsPage();
             return;
         }
 

@@ -1106,64 +1106,57 @@ In development.
   same choices as in the song list. The song list sorted A to Z, by stars
   or by plays shows songs being generated too, at the top, as the Mureka
   order did.
-- **Listening together (app only).** One player shares what it plays,
-  others on their own devices elsewhere listen along within about a second
-  of it, and may control it too: one shared queue for everyone. Built for
-  players on a VPN:
+- **Listening together (app only).** Players on their own devices
+  elsewhere play one queue together, within about a second of each other,
+  with the same filters, and any of them may control it, for everyone.
+  Built for players on a VPN:
   - A small relay runs on the VPN server: `server/murekasync`, Go with no
-    dependencies, Multipath TCP off, an OpenRC script and a README, built
-    with `make server` (static, SERVER_ARCH for another machine). It
-    listens on the VPN interface's addresses (`-interface wg0`, waiting for
-    it to come up) or on one address (`-listen`). Every
+    dependencies, Multipath TCP off, an OpenRC script, an install script
+    and a README, built with `make server` (static, SERVER_ARCH for another
+    machine). It listens on the VPN interface's addresses (`-interface
+    wg0`, waiting for it to come up) or on one address (`-listen`). Every
     player only connects out to it, nothing connects to a player and its
     web view stays closed to everyone else.
-  - A Together button turns it on or off in a tap: share what plays here,
-    listen along with a player sharing, stop, or who controls. In the
-    header and among the control buttons, in the app and in the web view
-    (Settings > Mobile player or Web view > Control buttons), there also
-    before a relay is set: a tap then says so, with a way to the settings.
-    Lit while sharing or listening along. The web view's opens the
-    settings page.
-  - Settings > Listening together, in the app and in the web view: the
-    relay's address, the name shown, Share what plays here (with how many
-    listen along), Those listening along control too (on by default), Find
-    players sharing (listed on the page, a tap listens along), Timing and
-    In the room.
-  - Shared: the song (Mureka's address of the file, the title, the cover),
-    playing or not, the place and up to 30 songs coming up, when one of
-    them changes and every 5 s. Never the library.
-  - Listening along, the shared queue stands in place of the one here and
-    the songs play straight from Mureka, its own copy when a song is in the
-    library. Pause, play, skip forward or back, a tap on a song, a move in
-    the song and Play next or Play last go to the sharing player, which
-    does them, so they reach everyone. A change shows here at once and
-    stands for 5 s while the sharing player takes it up. With control off,
-    a change here stops listening along instead.
+  - One mode: the players join one room, named the same on all of them
+    ("together" unless changed). The first to come holds the queue and
+    shares it, without anyone choosing: the song (Mureka's address of the
+    file, the title, the cover), playing or not, the place, up to 30 songs
+    coming up and the filters. Never the library.
+  - Everyone controls: pause, play, skip forward or back, a tap on a song,
+    a move in the song, Play next and Play last, and the filters (vocals,
+    published, and the smart filters: genres, moods, models, tempo, dates
+    and rating), go to the player holding the queue, which does them, so
+    they reach everyone. A change shows here at once and stands for 5 s
+    while it is taken up. The queue follows the filters without asking,
+    picking from the library of the player holding it; songs from another
+    player's library come along as plain song links.
+  - The player holding the queue leaving, or going quiet for 20 s, one of
+    the others takes over with the queue it plays, after a short wait of
+    its own so they do not all try at once, and the music goes on for the
+    rest. The relay lets another player take over a room quiet for 20 s.
+  - A Together button turns it on or off in a tap, in the header and among
+    the control buttons, in the app and in the web view (Settings > Mobile
+    player or Web view > Control buttons), there also before a relay is
+    set: a tap then says so, with a way to the settings. Filled while on.
+    Stop also leaves the room, or the shared song would only start again.
+    Leaving, the music goes on as this player's own; a player that only
+    played along gets its own queue and filters back.
+  - Settings > Listening together, in the app and in the web view: Listen
+    together, how it stands, the room, the name shown, the relay's
+    address, Timing and In the room. On after a restart, the player joins
+    again.
   - Timing: each player measures its round trip to the relay (8 tries with
     Test timing, again every minute or so) and the relay's clock, and goes
     by the place heard, the delay of its sound (a Bluetooth speaker's)
     taken off. Off by more than 0.6 s, a seek puts it right, and where
-    the seeks land teaches each device how far ahead to aim them. Those
-    listening along tell the sharing player their timing and how far off
+    the seeks land teaches each device how far ahead to aim them. The
+    players tell the one holding the queue their timing and how far off
     they are, shown to all under In the room.
-  - Nothing heard from the sharing player for 20 s, the music pauses. The
-    sharing player stopping ends it, and the queue here comes back.
   - The app talks to the relay itself, over plain HTTP inside the VPN, with
     a socket of its own: Android's own HTTP stays limited to https and this
     device.
-  - The room and its key stay on the device, a settings backup leaves them
-    out.
-- **The Together button turns listening together on and off.** Sharing
-  or listening along, a tap stops it and the music goes on as this
-  player's own. Neither, a tap takes up again the way used last: sharing,
-  or listening along with the same player. The menu comes only to set it
-  up or with nothing used before, and the header button still opens it.
-  The button is filled while sharing and ringed while listening along, in
-  the app and the web view, where it no longer opens the settings each
-  time.
-- **Stop while listening along stops it.** The shared song started again
-  straight away. Now Stop ends listening along, puts back the queue here
-  and stops.
+  - The room's key stays on the device, a settings backup leaves it and
+    whether it is on out.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
   restarts, under Settings > Playback, went no higher than 30. It is now
   picked from a list, from 1 s up to 5 min, so previous can go to the

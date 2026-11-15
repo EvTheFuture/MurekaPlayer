@@ -1,9 +1,10 @@
 # murekasync
 
-A small relay for listening together in the Mureka Player app. One player
-shares what it plays, any number of players listen along, each in its own
-place, within about a second of each other. Those listening along may pause,
-skip, seek and put songs in the shared queue, for everyone.
+A small relay for listening together in the Mureka Player app. The players
+in a room play one queue together, each in its own place, within about a
+second of each other. One of them holds the room and shares the queue, the
+others play along and send it what they change: pause, skip, seek, songs
+put in the queue and the filters, so it reaches everyone.
 
 Every player only connects out to the relay. Nothing connects to a player,
 and its web view stays closed to everyone else. Meant to run on a VPN
@@ -79,6 +80,9 @@ example `http://10.0.0.1:8095`.
 - `GET /rooms`: the open rooms with the sharing player's name, the song
   and whether it plays, for picking one to listen along with.
 
-A room nobody posted to for 10 minutes closes. At most 64 rooms and 32
+A room whose player posted nothing for 20 s may be taken over by another
+player with its own key, so the others carry on when the player holding it
+went away without closing it. A room nobody posted to for 10 minutes
+closes. At most 64 rooms and 32
 listeners a room. Room names are 1 to 40 lower case letters, digits and
 hyphens.

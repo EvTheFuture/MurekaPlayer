@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.143";
+    const VERSION = "2.0.1.144";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4364,7 +4364,8 @@
             syncRoom: "",
             syncKey: "",
             syncControl: true,
-            syncLast: null
+            syncOn: false,
+            syncTogether: "together"
         };
 
         try {
@@ -4661,7 +4662,9 @@
                         ? parsed.syncRoom : "",
                     syncKey: typeof parsed.syncKey === "string" && /^[0-9a-f]{16,64}$/.test(parsed.syncKey) ? parsed.syncKey : "",
                     syncControl: parsed.syncControl !== false,
-                    syncLast: syncLastOf(parsed.syncLast)
+                    syncOn: parsed.syncOn === true,
+                    syncTogether: typeof parsed.syncTogether === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(parsed.syncTogether)
+                        ? parsed.syncTogether : "together"
                 };
 
                 // Read this time, so saved again in their usual place once
@@ -18987,6 +18990,12 @@
     // losing them unasked. Back where it started, nothing happens
     function queueFollowFilter() {
 
+        // Playing along in a room, the filters are the room's: the change
+        // goes to the one holding it, which makes the queue for everyone
+        if (syncHereFilters()) {
+            return;
+        }
+
         clearTimeout(followTimer);
         followTimer = setTimeout(settleFollow, FOLLOW_SETTLE_MS);
     }
@@ -19018,6 +19027,20 @@
         }
 
         const out = upcomingOutsideList();
+
+        // Holding a room listened to together, the shared queue follows the
+        // filters without asking, as anyone in the room may change them
+        if (out > 0 && syncHolding) {
+
+            queueOwn = false;
+
+            if (resumeState) {
+                resumeState.own = false;
+            }
+
+            rebuildUpcoming();
+            return;
+        }
 
         if (out > 0) {
             askFollowList(out);
@@ -25235,15 +25258,18 @@
     // Stop playback and clear the queue
     function stopPlay() {
 
-        // Listening along, Stop ends it first, or the shared song would only
-        // start again. The song of the shared queue is not this player's to
-        // come back to, so Play later starts the queue here from its song
+        // Listening together, Stop leaves the room first, or the shared song
+        // would only start again. Playing along, the queue here comes back,
+        // and Play later starts it from its song
         let fromStart = false;
 
-        if (syncFollowing) {
+        if (settings.syncOn === true) {
 
-            syncStopFollow("Stopped, listening along stopped");
-            fromStart = true;
+            fromStart = !!syncFollowing;
+            settings.syncOn = false;
+            saveSettings();
+            syncLeave();
+            showToast("Stopped listening together");
         }
 
         dropNextReady();
@@ -36265,11 +36291,9 @@
             nightOn: sound().on && sound().night,
 
             // Listening together: sharing, listening along or neither
-            together: syncFollowing ? "follow" : settings.syncShare ? "share" : "off",
+            together: settings.syncOn === true ? "on" : "off",
             togetherReady: syncRelayOk(syncRelay()),
-            togetherLast: !!syncLastOf(settings.syncLast),
-            togetherText: syncFollowing ? "Listening along with " + syncFollowing.name
-                : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together",
+            togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
 
             // The button for the playlist songs went into last, the
             // playlists to pick for picked songs, and the one open when it
@@ -39401,12 +39425,14 @@
         return el;
     }
 
-    // Listening together, in the app only. One player shares what it plays
-    // through a small relay on a VPN (server/murekasync), the others listen
-    // along, each within about a second of it, by the relay's clock. Those
-    // listening along may also pause, skip, seek and put songs in the
-    // shared queue: their player sends it to the sharing one, which does it
-    // and shares the result, so it reaches everyone. The app talks to the
+    // Listening together, in the app only. The players in a room on a small
+    // relay on a VPN (server/murekasync) play one queue together, within
+    // about a second of each other by the relay's clock, with the same
+    // filters, and any of them may pause, skip, seek, put songs in the queue
+    // or change the filters, for everyone. One of them holds the room: the
+    // first to come, or when it leaves the first of the others to take it
+    // over. It keeps the queue and shares it, the others play it with it and
+    // send it what they change, it does it and the result reaches everyone. The app talks to the
     // relay, the page hands it states and commands and hears back through
     // window.__murekaSync. Every player measures its own way to the relay
     // and the delay of its sound, and goes by the place that is heard, so
@@ -39453,28 +39479,15 @@
     // How far ahead a correcting seek aims, learned on this device from
     // where the seeks landed: how long its seeks take to be heard
     let syncSeekAhead = SYNC_SEEK_AHEAD_S;
+
+    // Whether this player holds the room, what was here before joining, to
+    // come back to on leaving, and a takeover waiting to be tried
+    let syncHolding = false;
+    let syncSaved = null;
+    let syncTakeTimer = 0;
+    let syncJoinAt = 0;
     const syncMembers = new Map();
     const syncPainters = [];
-
-    // The way of listening together used last, sharing or listening along
-    // with a room, for the Together button to take up again. Anything else
-    // is none
-    function syncLastOf(v) {
-
-        if (!v || typeof v !== "object") {
-            return null;
-        }
-
-        if (v.mode === "share") {
-            return { mode: "share" };
-        }
-
-        if (v.mode === "follow" && typeof v.room === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(v.room)) {
-            return { mode: "follow", room: v.room, name: String(v.name || "").slice(0, 40) };
-        }
-
-        return null;
-    }
 
     function syncAvailable() {
         return isApkHost() && !!window.MurekaHost && typeof window.MurekaHost.syncLead === "function";
@@ -39492,9 +39505,100 @@
         return String(settings.syncName || "").trim().slice(0, 40) || "Mureka Player";
     }
 
-    // Whether the sharing player here lets those listening along control
+    // Everyone in the room controls
     function syncControlOn() {
-        return settings.syncControl !== false;
+        return true;
+    }
+
+    // The room every player listening together joins, the same name on all
+    function syncRoomName() {
+
+        const r = String(settings.syncTogether || "");
+
+        return /^[a-z0-9][a-z0-9-]{0,39}$/.test(r) ? r : "together";
+    }
+
+    // The filters the room shares: vocals, published, and the smart
+    // filters with all they hold. The creator and the playlists are each
+    // player's own
+    function syncFiltersNow() {
+
+        return {
+            vocal: settings.vocalFilter || "all",
+            pub: publishFilter,
+            smart: settings.smartEnabled === true,
+            tagGenres: settings.tagGenres.slice(),
+            tagMoods: settings.tagMoods.slice(),
+            tagMode: settings.tagMode,
+            tagModels: settings.tagModels.slice(),
+            dateEnabled: settings.dateEnabled === true,
+            dateMode: settings.dateMode,
+            dateField: settings.dateField,
+            dateAgeValue: settings.dateAgeValue,
+            dateAgeUnit: settings.dateAgeUnit,
+            dateFrom: settings.dateFrom,
+            dateTo: settings.dateTo,
+            ratingEnabled: settings.ratingEnabled === true,
+            ratingMin: settings.ratingMin,
+            ratingUnrated: settings.ratingUnrated,
+            bpmEnabled: settings.bpmEnabled === true,
+            bpmMin: settings.bpmMin,
+            bpmMax: settings.bpmMax,
+            bpmUnknown: settings.bpmUnknown
+        };
+    }
+
+    // Filters put in place here, from the room or from before joining,
+    // each value only as far as it is the right kind
+    function syncFiltersApply(f) {
+
+        if (!f || typeof f !== "object") {
+            return;
+        }
+
+        const list = function (v) {
+            return Array.isArray(v) ? v.filter(function (x) {
+                return typeof x === "string";
+            }).slice(0, 200) : [];
+        };
+        const text = function (key) {
+
+            if (typeof f[key] === "string") {
+                settings[key] = f[key].slice(0, 40);
+            }
+        };
+        const num = function (key) {
+
+            if (typeof f[key] === "number" && isFinite(f[key])) {
+                settings[key] = f[key];
+            }
+        };
+
+        if (typeof f.vocal === "string") {
+            settings.vocalFilter = f.vocal;
+        }
+
+        if (PUBLISH_FILTERS.indexOf(f.pub) >= 0) {
+            publishFilter = f.pub;
+        }
+
+        settings.smartEnabled = f.smart === true;
+        settings.tagGenres = list(f.tagGenres);
+        settings.tagMoods = list(f.tagMoods);
+        settings.tagModels = list(f.tagModels);
+        settings.dateEnabled = f.dateEnabled === true;
+        settings.ratingEnabled = f.ratingEnabled === true;
+        settings.bpmEnabled = f.bpmEnabled === true;
+        ["tagMode", "dateMode", "dateField", "dateAgeUnit", "dateFrom", "dateTo", "ratingUnrated", "bpmUnknown"].forEach(text);
+        ["dateAgeValue", "ratingMin", "bpmMin", "bpmMax"].forEach(num);
+        saveSettings();
+        updateFilterButtons();
+        updateVocalsCtrlButton();
+        updateFeedButton();
+        updateSmartFilterButton();
+        updateViewMenuBar();
+        renderList();
+        publishHostSoon();
     }
 
     // The relay's time now, as near as the app could tell
@@ -39562,67 +39666,64 @@
         }
 
         const ctl = controlButtons ? controlButtons.together : null;
+        const title = syncStatusText();
 
         if (ctl) {
 
-            ctl.title = syncFollowing ? "Listening along with " + syncFollowing.name
-                : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together";
-            paintCtrl(ctl, syncFollowing ? "ring" : settings.syncShare === true ? "fill" : "plain");
+            ctl.title = title;
+            paintCtrl(ctl, settings.syncOn === true ? "fill" : "plain");
         }
 
         if (syncHeadBtn) {
 
-            const on = syncAvailable();
-            const active = !!syncFollowing || settings.syncShare === true;
-
-            syncHeadBtn.style.display = on ? "inline-flex" : "none";
-            syncHeadBtn.style.color = active ? ACCENT : "#aaa";
-            syncHeadBtn.title = syncFollowing ? "Listening along with " + syncFollowing.name
-                : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together";
+            syncHeadBtn.style.display = syncAvailable() ? "inline-flex" : "none";
+            syncHeadBtn.style.color = settings.syncOn === true ? ACCENT : "#aaa";
+            syncHeadBtn.title = title;
         }
     }
 
-    // What the sharing status says, for the settings
-    function syncLeadText() {
+    // How listening together stands, in one line
+    function syncStatusText() {
 
-        if (!settings.syncShare) {
-            return "Not shared.";
-        }
-
-        if (syncFollowing) {
-            return "Paused while listening along with someone else.";
+        if (settings.syncOn !== true) {
+            return "Not listening together.";
         }
 
         if (!syncRelayOk(syncRelay())) {
             return "Set the relay's address first.";
         }
 
-        if (syncLeadInfo.ok === null) {
-            return "Reaching the relay...";
+        // The others in the room: all but the one holding it, and playing
+        // along, all but this player too
+        const n = syncHolding ? syncMembersNow().length - 1 : syncFollowing ? syncMembersOf(syncFollowing.state).length - 2 : 0;
+        const room = "in the room " + syncRoomName();
+
+        if (syncHolding) {
+
+            if (syncLeadInfo.ok === null) {
+                return "Opening the room " + syncRoomName() + "...";
+            }
+
+            if (!syncLeadInfo.ok) {
+                return "Not reached: " + (syncLeadInfo.error || "the relay did not answer") + ".";
+            }
+
+            return "Listening together " + room + (n > 0 ? ", " + n + " more" : ", nobody else yet") + ". This player holds the queue.";
         }
 
-        if (!syncLeadInfo.ok) {
-            return "Not shared: " + (syncLeadInfo.error || "the relay did not answer") + ".";
+        if (syncFollowing) {
+
+            const f = syncFollowing;
+
+            if (f.status !== "listening") {
+                return f.status === "lost" ? "Reaching the relay again..." : "Joining the room " + syncRoomName() + "...";
+            }
+
+            return "Listening together " + room + " with " + f.name + (n > 0 ? " and " + n + " more" : "")
+                + (f.state && f.state.title ? ", " + f.state.title : "") + ".";
         }
 
-        const n = syncLeadInfo.listeners;
-
-        return "Shared as " + syncName() + ", " + (n === 0 ? "nobody" : n === 1 ? "1 player" : n + " players") + " listening along.";
-    }
-
-    function syncFollowText() {
-
-        const f = syncFollowing;
-
-        if (!f) {
-            return "Not listening along.";
-        }
-
-        const what = f.status === "listening" ? "Listening along with " : f.status === "lost"
-            ? "Reaching the relay again, listening along with " : "Joining ";
-
-        return what + f.name + (f.state && f.state.title ? ", " + f.state.title : "")
-            + (f.state && f.state.control === false ? ". Only " + f.name + " controls it." : ".");
+        return "Joining the room " + syncRoomName() + "...";
     }
 
     // This device's timing, measured by the app
@@ -39656,7 +39757,7 @@
 
     function syncMembersText() {
 
-        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : settings.syncShare ? syncMembersNow() : [];
+        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncHolding ? syncMembersNow() : [];
 
         if (list.length === 0) {
             return "Nobody in the room.";
@@ -39706,11 +39807,12 @@
         return list;
     }
 
-    // Sharing on or off. Off closes the room, so those listening hear it
+    // Holding the room or not. Holding, this player keeps the queue and
+    // shares it, the playing song and the filters. Letting go closes the
+    // room, so the others hear it and one of them takes it over
     function syncSetShare(on) {
 
-        settings.syncShare = on === true;
-        saveSettings();
+        syncHolding = on === true;
         syncLeadSent = "";
         syncLeadInfo = { ok: null, listeners: 0, error: "" };
         syncMembers.clear();
@@ -39718,18 +39820,16 @@
         if (on) {
 
             if (syncFollowing) {
-                syncStopFollow();
+                syncStopFollow("", true);
             }
 
-            settings.syncLast = { mode: "share" };
-            saveSettings();
             syncEnsureRoom();
             syncLeadTick();
         } else if (syncAvailable()) {
-            window.MurekaHost.syncLeadStop(syncRelay(), String(settings.syncRoom || ""), String(settings.syncKey || ""));
+            window.MurekaHost.syncLeadStop(syncRelay(), syncRoomName(), String(settings.syncKey || ""));
         }
 
-        dbgLog("Sync", on ? "sharing as " + syncName() + " in room " + settings.syncRoom : "sharing stopped");
+        dbgLog("Sync", on ? "holding the room " + syncRoomName() : "let go of the room " + syncRoomName());
         syncPaint();
     }
 
@@ -39750,16 +39850,16 @@
     // and every few seconds anyway
     function syncLeadTick() {
 
-        if (!settings.syncShare || syncFollowing || !syncAvailable() || !syncRelayOk(syncRelay())) {
+        if (!syncHolding || syncFollowing || !syncAvailable() || !syncRelayOk(syncRelay())) {
             return;
         }
 
         syncEnsureRoom();
 
-        // Commands from those listening along, read while sharing. The app
+        // Commands from the others, read while holding the room. The app
         // keeps one stream, asking again changes nothing
         try {
-            window.MurekaHost.syncCommands(syncRelay(), String(settings.syncRoom), String(settings.syncKey));
+            window.MurekaHost.syncCommands(syncRelay(), syncRoomName(), String(settings.syncKey));
         } catch (e) {
             // The app without it
         }
@@ -39786,7 +39886,8 @@
             cover: info ? info.cover : "",
             ms: info ? info.ms : 0,
             playing: hasAudio && !audio.paused,
-            control: syncControlOn(),
+            control: true,
+            filters: syncFiltersNow(),
             up: up,
             members: members.map(function (m) {
                 return { name: m.name, owner: m.owner === true, rtt: Math.round(Number(m.rtt) / 10) * 10,
@@ -39819,7 +39920,7 @@
         syncLeadPos = { pos: pos, at: now };
 
         try {
-            window.MurekaHost.syncLead(syncRelay(), String(settings.syncRoom), String(settings.syncKey), JSON.stringify(s));
+            window.MurekaHost.syncLead(syncRelay(), syncRoomName(), String(settings.syncKey), JSON.stringify(s));
         } catch (e) {
             // The app without it
         }
@@ -39860,7 +39961,7 @@
     // A command from one listening along, done here and so shared with all
     function syncOwnerCommand(c, relayAt) {
 
-        if (!c || typeof c !== "object" || !settings.syncShare || syncFollowing) {
+        if (!c || typeof c !== "object" || !syncHolding || syncFollowing) {
             return;
         }
 
@@ -39881,13 +39982,17 @@
             return;
         }
 
-        if (!syncControlOn()) {
+        dbgLog("Sync", who + ": " + c.cmd);
 
-            dbgLog("Sync", who + " asked for " + c.cmd + ", only this player controls");
+        // Filters changed by another player: the same here, and the queue
+        // made again from them around the playing song, for everyone
+        if (c.cmd === "filters" && c.filters && typeof c.filters === "object") {
+
+            syncFiltersApply(c.filters);
+            queueFollowFilter();
+            showToast(who + " changed the filters");
             return;
         }
-
-        dbgLog("Sync", who + ": " + c.cmd);
 
         if (c.cmd === "play") {
 
@@ -40016,26 +40121,28 @@
             syncStopFollow();
         }
 
-        if (settings.syncShare) {
-            window.MurekaHost.syncLeadStop(syncRelay(), String(settings.syncRoom || ""), String(settings.syncKey || ""));
+        if (syncHolding) {
+
+            syncHolding = false;
+            window.MurekaHost.syncLeadStop(syncRelay(), syncRoomName(), String(settings.syncKey || ""));
         }
 
         syncEnsureRoom();
         syncFollowing = { room: String(room), name: String(name || "the other player"), status: "connecting",
             state: null, stateAt: 0, songId: "", loadingId: "", loadingAt: 0, correctedAt: 0, quiet: false,
             localSongId: "", localSongUntil: 0, localPlaying: null, localPlayUntil: 0, localSeekUntil: 0, drift: 0,
-            saved: { queue: queue.slice(), pos: queuePos, own: queueOwn } };
+            localFiltersUntil: 0, heard: false };
         syncHelloAt = 0;
-        settings.syncLast = { mode: "follow", room: String(room), name: syncFollowing.name };
-        saveSettings();
         window.MurekaHost.syncFollow(syncRelay(), String(room));
-        dbgLog("Sync", "listening along with " + syncFollowing.name + " in room " + room);
-        setStatus("Listening along with " + syncFollowing.name);
-        showToast("Listening along with " + syncFollowing.name, "wait");
+        dbgLog("Sync", "joining the room " + room);
         syncPaint();
     }
 
-    function syncStopFollow(why) {
+    // Playing along stops. keep leaves the shared queue in place, as when
+    // this player takes the room over, else what was here before joining
+    // comes back, the queue and the filters, the song playing plays on
+    // until it ends
+    function syncStopFollow(why, keep) {
 
         const f = syncFollowing;
 
@@ -40049,23 +40156,118 @@
             window.MurekaHost.syncFollowStop();
         }
 
-        // The queue here as it was, the song playing plays on until it ends
-        queue = f.saved.queue;
-        queuePos = Math.min(f.saved.pos, queue.length - 1);
-        queueOwn = f.saved.own;
+        if (!keep) {
+            syncRestore();
+        }
+
+        dbgLog("Sync", "stopped playing along with " + f.name + (why ? ", " + why : ""));
+
+        if (why) {
+            setStatus(why);
+        }
+
+        syncLeadSent = "";
+        syncLeadInfo = { ok: null, listeners: 0, error: "" };
+        syncPaint();
+    }
+
+    // What was here before joining, back again: the queue and the filters
+    function syncRestore() {
+
+        const saved = syncSaved;
+
+        syncSaved = null;
+
+        if (!saved) {
+            return;
+        }
+
+        queue = saved.queue;
+        queuePos = Math.min(saved.pos, queue.length - 1);
+        queueOwn = saved.own;
+        syncActing = true;
+
+        try {
+            syncFiltersApply(saved.filters);
+        } finally {
+            syncActing = false;
+        }
+
         renderList();
         setArtSources();
         positionArt(0);
         saveQueue();
         publishHostSoon();
+    }
 
-        dbgLog("Sync", "stopped listening along with " + f.name + (why ? ", " + why : ""));
-        setStatus(why ? why : "Stopped listening along with " + f.name);
+    // Joining the room: listening first, which finds whether it is open.
+    // Open, this player plays along with the one holding it. Not open, this
+    // player holds it. The queue and the filters here are kept to come back
+    // to on leaving
+    function syncJoin() {
 
-        // Sharing picks up again, if it is on
-        syncLeadSent = "";
-        syncLeadInfo = { ok: null, listeners: 0, error: "" };
+        if (!syncAvailable() || !syncRelayOk(syncRelay())) {
+            return;
+        }
+
+        if (!syncSaved) {
+            syncSaved = { queue: queue.slice(), pos: queuePos, own: queueOwn, filters: syncFiltersNow() };
+        }
+
+        syncJoinAt = Date.now();
+        syncStartFollow(syncRoomName(), "");
+    }
+
+    // Leaving the room: the music goes on as this player's own. Holding
+    // it, the queue and the filters stay as they are, and one of the others
+    // takes the room over. Playing along, what was here before comes back
+    function syncLeave() {
+
+        clearTimeout(syncTakeTimer);
+        syncTakeTimer = 0;
+
+        if (syncFollowing) {
+            syncStopFollow("", false);
+        }
+
+        if (syncHolding) {
+
+            syncSetShare(false);
+            syncSaved = null;
+        }
+
+        syncSaved = null;
         syncPaint();
+    }
+
+    // The room's holder went away: this player takes the room over with
+    // the shared queue it plays, after a short wait of its own so the
+    // others do not all try at once. The first to post holds it, the
+    // others are refused and play along with it
+    function syncTakeOver(why) {
+
+        if (syncTakeTimer || settings.syncOn !== true) {
+            return;
+        }
+
+        const wait = 300 + Math.floor(Math.random() * 1200);
+
+        dbgLog("Sync", why + ", taking the room over in " + wait + " ms");
+        syncTakeTimer = setTimeout(function () {
+
+            syncTakeTimer = 0;
+
+            if (settings.syncOn !== true || syncHolding) {
+                return;
+            }
+
+            if (syncFollowing) {
+                syncStopFollow("", true);
+            }
+
+            queueOwn = true;
+            syncSetShare(true);
+        }, wait);
     }
 
     // Where the shared song is now, as heard, by the relay's clock
@@ -40152,21 +40354,34 @@
 
         const now = Date.now();
 
-        // Nothing heard for a while: the sharing player is gone quiet
+        // Nothing heard for a while: the one holding the room went away
+        // without closing it, so this player takes it over and plays on
         if (syncNow() - f.stateAt > SYNC_QUIET_MS) {
 
             if (!f.quiet) {
 
                 f.quiet = true;
-                syncPlayPause(false);
-                setStatus("Nothing heard from " + f.name + ", waiting");
-                dbgLog("Sync", "nothing heard from " + f.name + " for " + Math.round((syncNow() - f.stateAt) / 1000) + " s, paused");
+                dbgLog("Sync", "nothing heard from " + f.name + " for " + Math.round((syncNow() - f.stateAt) / 1000) + " s");
+                syncTakeOver("nothing heard from " + f.name);
             }
 
             return;
         }
 
         f.quiet = false;
+
+        // The room's filters, unless they were just changed here and the
+        // change is on its way
+        if (st.filters && now > f.localFiltersUntil && JSON.stringify(st.filters) !== JSON.stringify(syncFiltersNow())) {
+
+            syncActing = true;
+
+            try {
+                syncFiltersApply(st.filters);
+            } finally {
+                syncActing = false;
+            }
+        }
 
         if (!syncPlayable(st)) {
 
@@ -40294,11 +40509,35 @@
 
     function syncTick() {
 
+        // On but in no room, after a start or the relay set: joined. A join
+        // that heard nothing for a while is tried again
+        if (settings.syncOn === true && !syncHolding && !syncTakeTimer && syncAvailable() && syncRelayOk(syncRelay())
+            && (!syncFollowing || (syncFollowing.status !== "listening" && Date.now() - syncJoinAt > 30000))) {
+            syncJoin();
+        }
+
         if (syncFollowing) {
             syncFollowTick();
         } else {
             syncLeadTick();
         }
+    }
+
+    // Filters changed here while playing along: sent to the one holding the
+    // room, which changes them for everyone. The shared queue stays as it
+    // is until the new one comes
+    function syncHereFilters() {
+
+        const f = syncFollowing;
+
+        if (!f || syncActing) {
+            return false;
+        }
+
+        f.localFiltersUntil = Date.now() + SYNC_LOCAL_MS;
+        syncSend({ cmd: "filters", filters: syncFiltersNow() });
+
+        return true;
     }
 
     // Changes made here while listening along, sent to the sharing player.
@@ -40436,6 +40675,15 @@
 
             syncLeadInfo = { ok: m.ok === true, listeners: Number(m.listeners) || 0, error: String(m.error || "") };
 
+            // Another player holds the room: this one plays along with it
+            if (!syncLeadInfo.ok && syncHolding && /belongs to another/i.test(syncLeadInfo.error)) {
+
+                dbgLog("Sync", "another player holds the room " + syncRoomName() + ", playing along with it");
+                syncHolding = false;
+                syncStartFollow(syncRoomName(), "");
+                return;
+            }
+
             if (was !== syncLeadInfo.ok) {
                 dbgLog("Sync", syncLeadInfo.ok ? "shared, " + syncLeadInfo.listeners + " listening" : "not shared, " + syncLeadInfo.error);
             }
@@ -40491,21 +40739,29 @@
 
             if (status === "end" || status === "gone" || status === "error") {
 
-                const name = f.name;
+                if (status === "error") {
 
-                syncStopFollow(status === "error" ? "Could not listen along: " + String(m.error || "")
-                    : name + " stopped sharing");
-
-                if (status !== "error") {
-                    showToast(name + " stopped sharing", false);
+                    syncStopFollow("Could not listen together: " + String(m.error || ""), false);
+                    showToast("Could not listen together: " + String(m.error || "no answer"), false);
+                    return;
                 }
 
+                // Nobody holds the room yet: this player does, at once
+                if (!f.heard) {
+
+                    syncStopFollow("", true);
+                    syncSetShare(true);
+                    showToast("Listening together in the room " + syncRoomName());
+                    return;
+                }
+
+                // The one holding it left: one of the others takes it over
+                showToast(f.name + " left the room", false);
+                syncTakeOver(f.name + " left");
                 return;
             }
 
             if (status === "listening" && f.status !== "listening") {
-
-                showToast("Listening along with " + f.name);
                 syncHelloAt = 0;
             }
 
@@ -40524,6 +40780,13 @@
 
             // Without the sharing player's clock, the time the relay got it
             st.__relayGot = Number(m.data.at) || syncNow();
+
+            if (!f.heard) {
+
+                f.heard = true;
+                showToast("Listening together with " + String(st.name || "the room").slice(0, 40));
+            }
+
             f.state = st;
             f.stateAt = Number(m.data.at) || syncNow();
 
@@ -40536,53 +40799,34 @@
         }
     };
 
-    // The Together button: listening along or sharing, it stops, the music
-    // here goes on as this player's own. Neither, it takes up again the way
-    // used last, sharing or listening along with the same player. Answers
-    // what is still to be asked: "setup" with no relay set, "pick" with
-    // nothing used before, else ""
+    // Listening together on or off, from the Together button, the header's
+    // and the web view's. Answers "setup" when the relay is not set yet
     function syncToggle() {
 
         if (!syncRelayOk(syncRelay()) || !syncAvailable()) {
             return "setup";
         }
 
-        if (syncFollowing) {
+        settings.syncOn = settings.syncOn !== true;
+        saveSettings();
 
-            const name = syncFollowing.name;
+        if (settings.syncOn) {
 
-            syncStopFollow();
-            showToast("Stopped listening along with " + name);
-            return "";
+            syncJoin();
+            showToast("Joining the room " + syncRoomName(), "wait");
+        } else {
+
+            syncLeave();
+            showToast("Stopped listening together");
         }
 
-        if (settings.syncShare) {
-
-            syncSetShare(false);
-            showToast("Stopped sharing");
-            return "";
-        }
-
-        const last = syncLastOf(settings.syncLast);
-
-        if (last && last.mode === "share") {
-
-            syncSetShare(true);
-            showToast("Shared as " + syncName());
-            return "";
-        }
-
-        if (last && last.mode === "follow") {
-
-            syncStartFollow(last.room, last.name);
-            return "";
-        }
-
-        return "pick";
+        syncPaint();
+        publishHostSoon();
+        return "";
     }
 
-    // The control button: on and off in a tap, the menu only to set it up
-    // or pick the first time
+    // The control and header buttons: on and off in a tap, the way to the
+    // settings when the relay is not set yet
     function syncControlTap() {
 
         if (syncToggle()) {
@@ -40590,64 +40834,14 @@
         }
     }
 
-    // Listening together from the header: on or off in a tap or two
     function openSyncMenu() {
 
-        // Not set up yet: said so, with the way to the settings
-        if (!syncRelayOk(syncRelay())) {
+        askChoices("Listening together\nIt needs the address of the listening together relay on the VPN first.", [
+            { label: "Open the settings", fn: function () {
 
-            askChoices("Listening together\nIt needs the address of the listening together relay on the VPN first.", [
-                { label: "Open the settings", fn: function () {
-
-                    openSettings();
-                    showSettingsPage("together");
-                } }
-            ], null, false, true);
-            return;
-        }
-
-        const settingsChoice = { label: "Settings", fn: function () {
-
-            openSettings();
-            showSettingsPage("together");
-        } };
-
-        if (syncFollowing) {
-
-            askChoices("Listening together\n" + syncFollowText(), [
-                { label: "Stop listening along", fn: function () {
-                    syncStopFollow();
-                } },
-                { label: "Listen along with someone else", fn: openSyncRooms },
-                settingsChoice
-            ], null, false, true);
-            return;
-        }
-
-        if (settings.syncShare) {
-
-            askChoices("Listening together\n" + syncLeadText(), [
-                { label: "Stop sharing", fn: function () {
-                    syncSetShare(false);
-                } },
-                { label: syncControlOn() ? "Only this player controls" : "Let those listening along control", fn: function () {
-
-                    settings.syncControl = !syncControlOn();
-                    saveSettings();
-                    syncLeadSent = "";
-                    syncPaint();
-                } },
-                settingsChoice
-            ], null, false, true);
-            return;
-        }
-
-        askChoices("Listening together\nShare what plays here, or listen along with another player.", [
-            { label: "Share what plays here", fn: function () {
-                syncSetShare(true);
-            } },
-            { label: "Listen along", fn: openSyncRooms },
-            settingsChoice
+                openSettings();
+                showSettingsPage("together");
+            } }
         ], null, false, true);
     }
 
@@ -41436,8 +41630,8 @@
             setSoundPick(typeof arg === "string" ? arg : "");
         } else if (cmd === "together") {
 
-            // On and off, as the button here does. Nothing to take up again,
-            // the settings page, which the web view draws as the phone shows it
+            // On and off, as the button here does. Not set up, the settings
+            // page, which the web view draws as the phone shows it
             if (syncToggle()) {
 
                 openSettings();
@@ -49082,88 +49276,6 @@
         return row;
     }
 
-    // The Charger and power page: what happens when the phone goes on
-    // battery or the chosen Bluetooth devices disconnect, and when they come
-    // back, and the hotspot helper. The page helpers of the settings come
-    // along, they live where the pages are built
-    // The players sharing on the relay, to pick one to listen along with
-    function openSyncRooms() {
-
-        if (!panelEl) {
-            return;
-        }
-
-        const dialog = makeDialog({
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
-                + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;max-height:80%;overflow:auto"
-        });
-        const head = document.createElement("div");
-        const list = document.createElement("div");
-
-        head.textContent = "Listen along with";
-        head.style.cssText = "font-weight:600";
-        list.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px;color:#ccc";
-        list.textContent = "Asking the relay...";
-
-        const cancel = makeButton("Cancel", "#444", "#fff", function () {
-            dialog.close();
-        });
-
-        dialog.card.appendChild(head);
-        dialog.card.appendChild(list);
-        dialog.card.appendChild(cancel);
-        panelEl.appendChild(dialog.back);
-
-        syncAskRooms(function (rooms, err) {
-
-            syncFillRooms(list, rooms, err, function () {
-                dialog.close();
-            });
-        });
-    }
-
-    // The players sharing on the relay as buttons in box, a tap listening
-    // along with one, picked called first
-    function syncFillRooms(box, rooms, err, picked) {
-
-        box.textContent = "";
-
-        if (!rooms) {
-
-            box.textContent = "The relay could not be asked" + (err ? ": " + err : "") + ".";
-            return;
-        }
-
-        const others = rooms.filter(function (r) {
-            return r && r.room !== settings.syncRoom;
-        });
-
-        if (others.length === 0) {
-
-            box.textContent = "Nobody is sharing right now.";
-            return;
-        }
-
-        for (const r of others) {
-
-            const name = String(r.name || r.room).slice(0, 40);
-            const what = r.title ? (r.playing ? "Playing " : "Paused on ") + String(r.title).slice(0, 80) : "Nothing playing";
-            const btn = makeButton(name, "#333", "#fff", function () {
-
-                picked();
-                syncStartFollow(r.room, name);
-            });
-            const sub = document.createElement("div");
-
-            btn.style.cssText += ";display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px";
-            sub.textContent = what;
-            sub.style.cssText = "font-size:11px;color:#aaa;font-weight:400;white-space:nowrap;overflow:hidden;"
-                + "text-overflow:ellipsis;max-width:100%";
-            btn.appendChild(sub);
-            box.appendChild(btn);
-        }
-    }
-
     // Settings > Listening together, in the app only: the relay, sharing
     // what plays here and listening along with another player
     function buildTogetherPage(page, kit) {
@@ -49205,7 +49317,54 @@
             + " Plain http, the VPN carries it encrypted. The relay is server/murekasync in the player's source."
             + " Nothing connects to this device, the web view stays closed to the others."));
 
-        page.appendChild(makeLabel("Sharing"));
+        page.appendChild(makeLabel("Listening together"));
+
+        const onRow = makeBoolRow("Listen together", function () {
+            return settings.syncOn === true;
+        }, function (on) {
+
+            if ((on === true) !== (settings.syncOn === true) && syncToggle() === "setup") {
+                showToast("Set the relay's address first", false);
+            }
+        });
+        const status = makeStatus();
+
+        page.appendChild(withHint(onRow, "Every player in the room plays the same queue at the same place, within about a"
+            + " second, with the same filters. Any of them may pause, skip, move in the song, put songs next or last, or"
+            + " change the filters, and it happens for everyone. Stop or the Together button leaves the room, the music goes"
+            + " on as this player's own, and a player that only played along gets its own queue and filters back."));
+        page.appendChild(status);
+
+        const roomRow = makeTextRow("Room", function () {
+            return syncRoomName();
+        }, function (v) {
+
+            const r = String(v || "").trim().toLowerCase();
+
+            if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(r) || r === syncRoomName()) {
+                return;
+            }
+
+            const was = settings.syncOn === true;
+
+            if (was) {
+                syncLeave();
+            }
+
+            settings.syncTogether = r;
+            saveSettings();
+            syncPaint();
+        }, function (v) {
+
+            const r = String(v || "").trim().toLowerCase();
+
+            return r === "" || /^[a-z0-9][a-z0-9-]{0,39}$/.test(r) ? "" : "Lower case letters, digits and hyphens, up to 40";
+        });
+
+        page.appendChild(roomRow);
+        page.appendChild(makeHint("The same on every player that listens together. The first to come holds the queue and"
+            + " shares it. When it leaves, one of the others takes over, and the music goes on for the rest. The filters pick"
+            + " from the library of the player holding the queue."));
 
         const nameRow = makeTextRow("Your name", function () {
             return settings.syncName || "";
@@ -49214,68 +49373,7 @@
         });
 
         page.appendChild(nameRow);
-        page.appendChild(makeHint("Shown to those listening along, and in their list of players to listen along with."));
-
-        const shareRow = makeBoolRow("Share what plays here", function () {
-            return settings.syncShare === true;
-        }, syncSetShare);
-        const shareStatus = makeStatus();
-
-        page.appendChild(withHint(shareRow, "Others on the VPN can listen along: the same song from Mureka at the same place,"
-            + " within about a second. Only the song, its cover, where it is and the songs coming up go out, never the"
-            + " library."));
-        page.appendChild(shareStatus);
-
-        const controlRow = makeBoolRow("Those listening along control too", function () {
-            return syncControlOn();
-        }, function (on) {
-
-            settings.syncControl = on === true;
-            saveSettings();
-            syncLeadSent = "";
-            syncPaint();
-        });
-
-        page.appendChild(withHint(controlRow, "A pause, a skip, a move in the song or a song put next or last by one"
-            + " listening along happens here, and so for everyone: one shared queue. Off, only this player controls, and"
-            + " a change made by one listening along stops it listening along."));
-
-        page.appendChild(makeLabel("Listening along"));
-
-        const roomsBox = document.createElement("div");
-
-        roomsBox.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px;color:#ccc";
-
-        const followBtn = makeButton("Find players sharing", "#333", "#fff", function () {
-
-            if (syncFollowing) {
-
-                syncStopFollow();
-                return;
-            }
-
-            if (!syncRelayOk(syncRelay())) {
-
-                showToast("Set the relay's address first", false);
-                return;
-            }
-
-            roomsBox.textContent = "Asking the relay...";
-            syncAskRooms(function (rooms, err) {
-
-                syncFillRooms(roomsBox, rooms, err, function () {
-                    roomsBox.textContent = "";
-                });
-            });
-        });
-        const followStatus = makeStatus();
-
-        page.appendChild(followBtn);
-        page.appendChild(roomsBox);
-        page.appendChild(followStatus);
-        page.appendChild(makeHint("Plays what another player shares, kept at its place, with its queue in place of the"
-            + " one here. Pause, skip, move in the song and Play next or Play last go to everyone, where the sharing player"
-            + " lets them. Stopping brings the queue here back."));
+        page.appendChild(makeHint("Shown to the others in the room."));
 
         page.appendChild(makeLabel("Timing"));
 
@@ -49296,7 +49394,7 @@
         page.appendChild(timingBtn);
         page.appendChild(makeHint("Each player measures its way to the relay and how late its sound is heard, a Bluetooth"
             + " speaker's delay among it, and goes by the place heard, so all are heard together. Measured again every"
-            + " minute or so while sharing or listening along."));
+            + " minute or so while listening together."));
 
         page.appendChild(makeLabel("In the room"));
 
@@ -49307,13 +49405,7 @@
 
         const paint = function () {
 
-            shareStatus.textContent = syncLeadText();
-            followStatus.textContent = syncFollowText();
-            followBtn.textContent = syncFollowing ? "Stop listening along" : "Find players sharing";
-
-            if (syncFollowing) {
-                roomsBox.textContent = "";
-            }
+            status.textContent = syncStatusText();
             timingText.textContent = syncTimingText();
             membersText.textContent = syncMembersText();
         };
@@ -54763,7 +54855,7 @@
             delete base.settings.syncRoom;
             delete base.settings.syncKey;
             delete base.settings.syncShare;
-            delete base.settings.syncLast;
+            delete base.settings.syncOn;
 
             // The Android app keeps some settings itself, outside the
             // player: the connections and its fullscreen. They go along, so
@@ -83563,9 +83655,7 @@
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
 
         // Lit while the phone shares what it plays or listens along
-        // Filled while sharing, ringed while listening along
-        $("togetherBtn").classList.toggle("on", !!(s && s.together === "share"));
-        $("togetherBtn").classList.toggle("ring", !!(s && s.together === "follow"));
+        $("togetherBtn").classList.toggle("on", !!(s && s.together === "on"));
         $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
 
         // Lit while the playing song is in the playlist songs went into last
@@ -95495,10 +95585,8 @@
         send("toPlaylist");
     });
 
-    // Listening together on and off on the phone: sharing or listening
-    // along stops, neither takes up again the way used last. Not set up
-    // yet, said so, with the way to the settings, and with nothing used
-    // before, the phone's Listening together settings shown here
+    // Listening together on and off on the phone. Not set up yet, said so,
+    // with the way to the phone's Listening together settings, shown here
     $("togetherBtn").addEventListener("click", function () {
 
         const settingsPage = function () {
@@ -95514,12 +95602,6 @@
             openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
                 { icon: "settings", label: "Open the settings", cls: "tall", fn: settingsPage }
             ]);
-            return;
-        }
-
-        if (state && state.together === "off" && state.togetherLast !== true) {
-
-            settingsPage();
             return;
         }
 

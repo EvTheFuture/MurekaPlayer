@@ -63,6 +63,11 @@ const (
     // A room nobody posted to for this long is closed
     roomIdle = 10 * time.Minute
 
+    // A room whose player has posted nothing for this long may be taken
+    // over by another player with its own key, so those listening carry on
+    // when the player holding it went away without closing it
+    takeoverAfter = 20 * time.Second
+
     // A comment line keeps a quiet stream open through every proxy
     pingEvery = 15 * time.Second
 )
@@ -338,8 +343,21 @@ func (r *relay) post(w http.ResponseWriter, req *http.Request, name string) {
         r.rooms[name] = rm
         log.Printf("room %s opened", name)
     } else if !keyFits(rm, key) {
-        fail(w, http.StatusForbidden, "the room belongs to another player")
-        return
+
+        if time.Since(rm.postedAt) < takeoverAfter {
+            fail(w, http.StatusForbidden, "the room belongs to another player")
+            return
+        }
+
+        // The old player's command streams end, the new one reads its own
+        rm.keyHash = hashKey(key)
+
+        for ch := range rm.owners {
+            close(ch)
+            delete(rm.owners, ch)
+        }
+
+        log.Printf("room %s taken over by another player", name)
     }
 
     rm.state = body
