@@ -2,12 +2,13 @@
 
 A small relay for listening together in the Mureka Player app. One player
 shares what it plays, any number of players listen along, each in its own
-place, within about a second of each other.
+place, within about a second of each other. Those listening along may pause,
+skip, seek and put songs in the shared queue, for everyone.
 
-The sharing player only posts to the relay, and the players listening along
-only read from it. Nothing connects to a player, and its web view stays
-closed to everyone else. Meant to run on a VPN server, reachable only over
-the VPN. The traffic is plain HTTP, the VPN carries it encrypted.
+Every player only connects out to the relay. Nothing connects to a player,
+and its web view stays closed to everyone else. Meant to run on a VPN
+server, reachable only over the VPN. The traffic is plain HTTP, the VPN
+carries it encrypted.
 
 No dependencies beyond the Go standard library, nothing kept on disk.
 
@@ -44,6 +45,14 @@ example `http://10.0.0.1:8095`.
   once, then each new one as `event: state` with
   `{"t": <relay time sent>, "at": <relay time received>, "state": {...}}`,
   a comment line every 15 s, and `event: end` when the room closes.
+- `POST /room/<room>/cmd`: a command from a player listening along, any
+  JSON object up to 8 kB (pause, skip, a song to play next, its timing),
+  handed on to the sharing player. 409 while the sharing player is not
+  reading its commands, at most 20 a second a room.
+- `GET /room/<room>/cmds` with the room's key: the sharing player's stream
+  of commands, each as `event: cmd` with
+  `{"t": ..., "at": <relay time received>, "cmd": {...}}`. It applies them,
+  and the state that follows goes out to everyone.
 - `GET /rooms`: the open rooms with the sharing player's name, the song
   and whether it plays, for picking one to listen along with.
 

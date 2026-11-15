@@ -82,10 +82,6 @@ final class Sync {
     private static String leadKey = "";
     private static boolean leadBusy = false;
 
-    // The stream listened to, ended by a new number
-    private static volatile int followGen = 0;
-    private static volatile Socket followSocket = null;
-
     private Sync() {
     }
 
@@ -495,6 +491,8 @@ final class Sync {
 
         Relay r = parse(url);
 
+        commandsStop();
+
         synchronized (LEAD_LOCK) {
             leadState = null;
         }
@@ -543,13 +541,48 @@ final class Sync {
         });
     }
 
-    // Listening along with a room, until stopped or the room ends. A lost
-    // connection is tried again, after longer and longer pauses
+    // A stream of events from the relay, read on a thread of its own and
+    // ended by a new number. A lost connection is tried again, after
+    // longer and longer pauses. Two of them: the room's states for a
+    // player listening along, and the commands for the sharing player
+    static final class Stream {
+
+        final String name;
+        volatile int gen = 0;
+        volatile Socket socket = null;
+
+        Stream(String name) {
+            this.name = name;
+        }
+
+        void stop() {
+
+            gen += 1;
+
+            Socket s = socket;
+
+            socket = null;
+
+            if (s != null) {
+
+                try {
+                    s.close();
+                } catch (IOException e) {
+                    // Closed already
+                }
+            }
+        }
+    }
+
+    private static final Stream FOLLOW = new Stream("follow");
+    private static final Stream COMMANDS = new Stream("commands");
+
+    // Listening along with a room, until stopped or the room ends
     static void follow(String url, String room) {
 
         Relay r = parse(url);
 
-        followStop();
+        FOLLOW.stop();
 
         if (r == null || !roomOk(room)) {
 
@@ -557,94 +590,226 @@ final class Sync {
             return;
         }
 
-        int gen = followGen;
-        Thread t = new Thread(() -> followRun(r, room, gen), "sync-follow");
+        streamStart(FOLLOW, r, "/room/" + room + "/events", null);
+    }
+
+    static void followStop() {
+        FOLLOW.stop();
+    }
+
+    // The sharing player reading the commands of those listening along,
+    // until sharing stops. Started again by the same call, so a page may
+    // ask for it each time it shares
+    static void commands(String url, String room, String key) {
+
+        Relay r = parse(url);
+
+        if (r == null || !roomOk(room) || key == null || key.length() < 16) {
+            return;
+        }
+
+        synchronized (COMMANDS) {
+
+            String path = "/room/" + room + "/cmds";
+
+            if (path.equals(commandsPath) && key.equals(commandsKey) && commandsAlive) {
+                return;
+            }
+
+            COMMANDS.stop();
+            commandsPath = path;
+            commandsKey = key;
+            commandsAlive = true;
+        }
+
+        streamStart(COMMANDS, r, "/room/" + room + "/cmds", key);
+    }
+
+    static void commandsStop() {
+
+        synchronized (COMMANDS) {
+            commandsAlive = false;
+            commandsPath = "";
+        }
+
+        COMMANDS.stop();
+    }
+
+    private static String commandsPath = "";
+    private static String commandsKey = "";
+    private static boolean commandsAlive = false;
+
+    // A command for the sharing player, from one listening along
+    static void command(String url, String room, String json) {
+
+        Relay r = parse(url);
+
+        if (r == null || !roomOk(room) || json == null) {
+            return;
+        }
+
+        ASK.execute(() -> {
+
+            try {
+
+                JSONObject cmd = new JSONObject(json);
+                Answer a = exchange(r, "POST", "/room/" + room + "/cmd", null, cmd.toString().getBytes(StandardCharsets.UTF_8));
+
+                if (a.status != 200) {
+
+                    JSONObject answer = new JSONObject(a.body.isEmpty() ? "{}" : a.body);
+
+                    tell("command", "ok", false, "error", answer.optString("error", "HTTP " + a.status));
+                }
+            } catch (Exception e) {
+                tell("command", "ok", false, "error", "The relay could not be reached");
+            }
+        });
+    }
+
+    // How this device stands with the relay, measured afresh: the round
+    // trip at best and at the middle of eight tries, and the clock
+    static void timing(String url) {
+
+        Relay r = parse(url);
+
+        if (r == null) {
+
+            tell("timing", "ok", false, "error", "The relay's address is not right");
+            return;
+        }
+
+        ASK.execute(() -> {
+
+            long[] rtts = new long[8];
+            int got = 0;
+
+            for (int i = 0; i < rtts.length; i++) {
+
+                try {
+
+                    long sent = System.currentTimeMillis();
+                    Answer a = exchange(r, "GET", "/time", null, null);
+                    long back = System.currentTimeMillis();
+
+                    if (a.status == 200) {
+
+                        clockSample(sent, back, new JSONObject(a.body).optLong("t", 0));
+                        rtts[got] = back - sent;
+                        got += 1;
+                    }
+                } catch (Exception e) {
+                    break;
+                }
+            }
+
+            if (got == 0) {
+
+                tell("timing", "ok", false, "error", "The relay could not be reached");
+                return;
+            }
+
+            java.util.Arrays.sort(rtts, 0, got);
+
+            long[] c = clock();
+
+            try {
+
+                JSONObject o = new JSONObject();
+
+                o.put("type", "timing");
+                o.put("ok", true);
+                o.put("best", rtts[0]);
+                o.put("median", rtts[got / 2]);
+                o.put("tries", got);
+                o.put("offset", c != null ? c[0] : 0);
+                PlayerWeb.syncToPage(o);
+            } catch (Exception e) {
+                // Left out
+            }
+
+            clockSaid = Long.MIN_VALUE;
+            clockTell();
+        });
+    }
+
+    private static void streamStart(Stream st, Relay r, String path, String key) {
+
+        int gen = st.gen;
+        Thread t = new Thread(() -> streamRun(st, r, path, key, gen), "sync-" + st.name);
 
         t.setDaemon(true);
         t.start();
     }
 
-    static void followStop() {
-
-        followGen += 1;
-
-        Socket s = followSocket;
-
-        followSocket = null;
-
-        if (s != null) {
-
-            try {
-                s.close();
-            } catch (IOException e) {
-                // Closed already
-            }
-        }
-    }
-
-    private static void followRun(Relay r, String room, int gen) {
+    private static void streamRun(Stream st, Relay r, String path, String key, int gen) {
 
         long pause = 2000;
 
-        while (gen == followGen) {
+        while (gen == st.gen) {
 
             clockCheck(r, 5);
-            tell("follow", "status", "connecting", null, null);
+            tell(st.name, "status", "connecting", null, null);
 
-            String ended = followOnce(r, room, gen);
+            String ended = streamOnce(st, r, path, key, gen);
 
-            if (gen != followGen) {
+            if (gen != st.gen) {
                 return;
             }
 
             if (ended != null) {
 
-                tell("follow", "status", ended, null, null);
+                tell(st.name, "status", ended, null, null);
                 return;
             }
 
-            tell("follow", "status", "lost", null, null);
+            tell(st.name, "status", "lost", null, null);
             Io.sleep(pause);
             pause = Math.min(15000, pause * 2);
         }
     }
 
-    // One connection to the room's stream. Answers why listening ended for
-    // good, "end" or "gone", or null for a connection lost
-    private static String followOnce(Relay r, String room, int gen) {
+    // One connection to a stream. Answers why it ended for good, "end" or
+    // "gone", or null for a connection lost. The commands' stream of a
+    // room not opened yet is tried again, the state opens it
+    private static String streamOnce(Stream st, Relay r, String path, String key, int gen) {
 
         Socket s = null;
 
         try {
 
             s = open(r, STREAM_READ_MS);
-            followSocket = s;
+            st.socket = s;
 
-            if (gen != followGen) {
+            if (gen != st.gen) {
                 return null;
             }
 
-            sendRequest(s.getOutputStream(), r, "GET", "/room/" + room + "/events", null, null);
+            sendRequest(s.getOutputStream(), r, "GET", path, key, null);
 
             InputStream in = s.getInputStream();
             int status = readHead(in);
 
-            if (status == 404) {
+            if (status == 404 && key == null) {
                 return "gone";
+            }
+
+            if (status == 403) {
+                return "refused";
             }
 
             if (status != 200) {
                 return null;
             }
 
-            tell("follow", "status", "listening", null, null);
+            tell(st.name, "status", "listening", null, null);
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             String kind = "";
             StringBuilder data = new StringBuilder();
             String line;
 
-            while ((line = reader.readLine()) != null && gen == followGen) {
+            while ((line = reader.readLine()) != null && gen == st.gen) {
 
                 if (line.isEmpty()) {
 
@@ -654,8 +819,8 @@ final class Sync {
                             return "end";
                         }
 
-                        if ("state".equals(kind)) {
-                            followEvent(data.toString());
+                        if ("state".equals(kind) || "cmd".equals(kind)) {
+                            streamEvent(kind, data.toString());
                         }
                     }
 
@@ -697,22 +862,22 @@ final class Sync {
                 }
             }
 
-            if (followSocket == s) {
-                followSocket = null;
+            if (st.socket == s) {
+                st.socket = null;
             }
         }
     }
 
-    // A state event to the page, as JSON read here, so only data reaches
-    // the page, along with the clock
-    private static void followEvent(String data) {
+    // A state or a command to the page, as JSON read here, so only data
+    // reaches the page, along with the clock
+    private static void streamEvent(String kind, String data) {
 
         try {
 
             JSONObject o = new JSONObject();
             long[] c = clock();
 
-            o.put("type", "state");
+            o.put("type", kind);
             o.put("data", new JSONObject(data));
             o.put("offset", c != null ? c[0] : 0);
             o.put("clock", c != null);

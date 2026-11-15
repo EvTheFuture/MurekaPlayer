@@ -1106,28 +1106,44 @@ In development.
   same choices as in the song list. The song list sorted A to Z, by stars
   or by plays shows songs being generated too, at the top, as the Mureka
   order did.
-- **Listening together (app only).** One player shares what it plays, others
-  listen along on their own devices elsewhere, within about a second of it.
-  Built for players on a VPN:
+- **Listening together (app only).** One player shares what it plays,
+  others on their own devices elsewhere listen along within about a second
+  of it, and may control it too: one shared queue for everyone. Built for
+  players on a VPN:
   - A small relay runs on the VPN server: `server/murekasync`, Go with no
-    dependencies, an OpenRC script and a README. The sharing player only
-    posts its state to it and those listening only read from it, so nothing
-    connects to a player and its web view stays closed to everyone else.
+    dependencies, Multipath TCP off, an OpenRC script and a README. Every
+    player only connects out to it, nothing connects to a player and its
+    web view stays closed to everyone else.
+  - A button in the header turns it on or off in a tap: share what plays
+    here, listen along with a player sharing, stop, or who controls. Lit
+    while sharing or listening along, shown in the app once the relay is
+    set.
   - Settings > Listening together: the relay's address, the name shown,
-    Share what plays here (with how many listen along), and Listen along,
-    which lists the players sharing on the relay.
-  - The state is the song (its id, title, cover and Mureka's address of
-    the file), playing or not and where, sent when one of them changes and
-    every 5 s. Never the library.
-  - A player listening along plays the same song straight from Mureka, its
-    own copy when the song is in its library, at the place the relay's
-    clock says. Off by more than 0.6 s, a seek puts it right. Pauses, seeks
-    and the next song follow. Nothing heard for 20 s, it pauses.
-  - Picking another song or pausing stops listening along, and the queue
-    carries on from where it was. The sharing player stopping ends it too.
+    Share what plays here (with how many listen along), Those listening
+    along control too (on by default), Listen along, Timing and In the
+    room.
+  - Shared: the song (Mureka's address of the file, the title, the cover),
+    playing or not, the place and up to 30 songs coming up, when one of
+    them changes and every 5 s. Never the library.
+  - Listening along, the shared queue stands in place of the one here and
+    the songs play straight from Mureka, its own copy when a song is in the
+    library. Pause, play, skip forward or back, a tap on a song, a move in
+    the song and Play next or Play last go to the sharing player, which
+    does them, so they reach everyone. A change shows here at once and
+    stands for 5 s while the sharing player takes it up. With control off,
+    a change here stops listening along instead.
+  - Timing: each player measures its round trip to the relay (8 tries with
+    Test timing, again every minute or so) and the relay's clock, and goes
+    by the place heard, the delay of its sound (a Bluetooth speaker's)
+    taken off. Off by more than 0.6 s, a seek puts it right, and where
+    the seeks land teaches each device how far ahead to aim them. Those
+    listening along tell the sharing player their timing and how far off
+    they are, shown to all under In the room.
+  - Nothing heard from the sharing player for 20 s, the music pauses. The
+    sharing player stopping ends it, and the queue here comes back.
   - The app talks to the relay itself, over plain HTTP inside the VPN, with
     a socket of its own: Android's own HTTP stays limited to https and this
-    device. The relay's time on every answer is the clock all share.
+    device.
   - The room and its key stay on the device, a settings backup leaves them
     out.
 - **Play head zoomed in: a mode that runs across.** "Moves along the song"

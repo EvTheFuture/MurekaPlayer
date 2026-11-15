@@ -1402,6 +1402,30 @@ final class PlayerWeb {
             }
         }
 
+        @JavascriptInterface
+        public void syncCommands(String url, String room, String key) {
+
+            if (onMureka) {
+                Sync.commands(url, room, key);
+            }
+        }
+
+        @JavascriptInterface
+        public void syncCommand(String url, String room, String json) {
+
+            if (onMureka) {
+                Sync.command(url, room, json);
+            }
+        }
+
+        @JavascriptInterface
+        public void syncTiming(String url) {
+
+            if (onMureka) {
+                Sync.timing(url);
+            }
+        }
+
         // The answer to one of the app's slower questions, a piece of a song
         // for the web view among them
         @JavascriptInterface

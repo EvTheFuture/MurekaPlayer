@@ -19,14 +19,18 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 // A sharing player claims a room with a key of its own and posts its state
-// to it: the song, where it is and whether it plays. Players listening
-// along read the room as a stream of events. Nothing connects to the
-// sharing player, and the relay keeps nothing on disk. Every answer
-// carries the relay's own time in milliseconds, which the players use as
-// their common clock
+// to it: the song, where it is, whether it plays and what comes next.
+// Players listening along read the room as a stream of events, and may
+// post commands to it (pause, skip, a song to play next), which reach the
+// sharing player on a stream of its own, read with its key. It applies
+// them and the state that follows goes out to all. Nothing connects to a
+// player, and the relay keeps nothing on disk. Every answer carries the
+// relay's own time in milliseconds, which the players use as their common
+// clock
 package main
 
 import (
+    "context"
     "crypto/sha256"
     "crypto/subtle"
     "encoding/json"
@@ -34,6 +38,7 @@ import (
     "fmt"
     "io"
     "log"
+    "net"
     "net/http"
     "regexp"
     "sort"
@@ -43,8 +48,13 @@ import (
 )
 
 const (
-    // The largest state a sharing player may post
-    maxState = 64 * 1024
+    // The largest state a sharing player may post, and the largest
+    // command
+    maxState   = 64 * 1024
+    maxCommand = 8 * 1024
+
+    // Commands a room takes in a second at most
+    maxCommandsPerSecond = 20
 
     // Rooms and listeners at most, so a mistake cannot eat the server
     maxRooms     = 64
@@ -70,6 +80,9 @@ type room struct {
     title     string
     playing   bool
     listeners map[chan []byte]struct{}
+    owners    map[chan []byte]struct{}
+    cmdSecond int64
+    cmdCount  int
 }
 
 type relay struct {
@@ -98,8 +111,9 @@ func fail(w http.ResponseWriter, status int, why string) {
     writeJSON(w, status, map[string]interface{}{"t": nowMs(), "error": why})
 }
 
-// An event as it goes to the listeners: the relay's time and the state
-func event(kind string, state []byte, at int64) []byte {
+// An event as it goes out: the relay's time, when the relay got what it
+// carries, and that under its name, the state or a command
+func eventOf(kind string, field string, body []byte, at int64) []byte {
 
     var b strings.Builder
 
@@ -110,9 +124,11 @@ func event(kind string, state []byte, at int64) []byte {
     b.WriteString(",\"at\":")
     b.WriteString(fmt.Sprint(at))
 
-    if state != nil {
-        b.WriteString(",\"state\":")
-        b.Write(state)
+    if body != nil {
+        b.WriteString(",\"")
+        b.WriteString(field)
+        b.WriteString("\":")
+        b.Write(body)
     }
 
     b.WriteString("}\n\n")
@@ -120,11 +136,15 @@ func event(kind string, state []byte, at int64) []byte {
     return []byte(b.String())
 }
 
-// Hands an event to every listener, dropping it for one too slow to take
-// it, as the next state replaces it anyway
-func (rm *room) send(ev []byte) {
+func event(kind string, state []byte, at int64) []byte {
+    return eventOf(kind, "state", state, at)
+}
 
-    for ch := range rm.listeners {
+// Hands an event to every one on a stream, dropping it for one too slow
+// to take it, as the next state replaces it anyway
+func sendTo(set map[chan []byte]struct{}, ev []byte) {
+
+    for ch := range set {
 
         select {
         case ch <- ev:
@@ -133,12 +153,20 @@ func (rm *room) send(ev []byte) {
     }
 }
 
+func (rm *room) send(ev []byte) {
+    sendTo(rm.listeners, ev)
+}
+
 // Closes a room: the listeners hear it ended
 func (r *relay) close(name string, rm *room) {
 
     rm.send(event("end", nil, nowMs()))
 
     for ch := range rm.listeners {
+        close(ch)
+    }
+
+    for ch := range rm.owners {
         close(ch)
     }
 
@@ -202,26 +230,47 @@ func (r *relay) handleRooms(w http.ResponseWriter, req *http.Request) {
 }
 
 // /room/<name> takes the sharing player's state (POST) or its leaving
-// (DELETE), and /room/<name>/events is the stream to listen to
+// (DELETE), /room/<name>/events is the stream to listen to,
+// /room/<name>/cmd takes a command from one listening along (POST) and
+// /room/<name>/cmds is the sharing player's stream of them
 func (r *relay) handleRoom(w http.ResponseWriter, req *http.Request) {
 
     rest := strings.TrimPrefix(req.URL.Path, "/room/")
-    name := strings.TrimSuffix(rest, "/events")
-    events := name != rest
+    name := rest
+    part := ""
+
+    if i := strings.IndexByte(rest, '/'); i >= 0 {
+        name = rest[:i]
+        part = rest[i+1:]
+    }
 
     if !roomName.MatchString(name) {
         fail(w, http.StatusNotFound, "no such room")
         return
     }
 
-    if events {
+    switch part {
+    case "events", "cmds":
 
         if req.Method != http.MethodGet {
             fail(w, http.StatusMethodNotAllowed, "GET only")
             return
         }
 
-        r.listen(w, req, name)
+        r.listen(w, req, name, part == "cmds")
+        return
+    case "cmd":
+
+        if req.Method != http.MethodPost {
+            fail(w, http.StatusMethodNotAllowed, "POST only")
+            return
+        }
+
+        r.command(w, req, name)
+        return
+    case "":
+    default:
+        fail(w, http.StatusNotFound, "no such room")
         return
     }
 
@@ -285,7 +334,7 @@ func (r *relay) post(w http.ResponseWriter, req *http.Request, name string) {
             return
         }
 
-        rm = &room{keyHash: hashKey(key), listeners: map[chan []byte]struct{}{}}
+        rm = &room{keyHash: hashKey(key), listeners: map[chan []byte]struct{}{}, owners: map[chan []byte]struct{}{}}
         r.rooms[name] = rm
         log.Printf("room %s opened", name)
     } else if !keyFits(rm, key) {
@@ -326,9 +375,63 @@ func (r *relay) leave(w http.ResponseWriter, req *http.Request, name string) {
     writeJSON(w, http.StatusOK, map[string]int64{"t": nowMs()})
 }
 
+// A command from one listening along, handed to the sharing player's
+// stream. Any JSON object, the relay only passes it on
+func (r *relay) command(w http.ResponseWriter, req *http.Request, name string) {
+
+    body, err := io.ReadAll(io.LimitReader(req.Body, maxCommand+1))
+
+    if err != nil || len(body) > maxCommand {
+        fail(w, http.StatusRequestEntityTooLarge, "command too large")
+        return
+    }
+
+    var probe map[string]interface{}
+
+    if json.Unmarshal(body, &probe) != nil {
+        fail(w, http.StatusBadRequest, "command is not a JSON object")
+        return
+    }
+
+    at := nowMs()
+
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    rm := r.rooms[name]
+
+    if rm == nil {
+        fail(w, http.StatusNotFound, "no such room")
+        return
+    }
+
+    second := at / 1000
+
+    if rm.cmdSecond != second {
+        rm.cmdSecond = second
+        rm.cmdCount = 0
+    }
+
+    rm.cmdCount++
+
+    if rm.cmdCount > maxCommandsPerSecond {
+        fail(w, http.StatusTooManyRequests, "too many commands")
+        return
+    }
+
+    if len(rm.owners) == 0 {
+        fail(w, http.StatusConflict, "the sharing player is not reachable")
+        return
+    }
+
+    sendTo(rm.owners, eventOf("cmd", "cmd", body, at))
+    writeJSON(w, http.StatusOK, map[string]int64{"t": at})
+}
+
 // The stream of a room: the last state at once, then every new one, a
-// comment line now and then, and an end event when the room closes
-func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string) {
+// comment line now and then, and an end event when the room closes. With
+// owner, the sharing player's stream of commands, for its key only
+func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string, owner bool) {
 
     flusher, ok := w.(http.Flusher)
 
@@ -348,15 +451,28 @@ func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string) {
         return
     }
 
-    if len(rm.listeners) >= maxListeners {
+    set := rm.listeners
+
+    if owner {
+
+        if !keyFits(rm, req.Header.Get("X-Room-Key")) {
+            r.mu.Unlock()
+            fail(w, http.StatusForbidden, "the room belongs to another player")
+            return
+        }
+
+        set = rm.owners
+    }
+
+    if len(set) >= maxListeners {
         r.mu.Unlock()
         fail(w, http.StatusServiceUnavailable, "too many listening")
         return
     }
 
-    rm.listeners[ch] = struct{}{}
+    set[ch] = struct{}{}
 
-    if rm.state != nil {
+    if rm.state != nil && !owner {
         ch <- event("state", rm.state, rm.stateAt)
     }
 
@@ -367,7 +483,7 @@ func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string) {
         r.mu.Lock()
 
         if cur := r.rooms[name]; cur == rm {
-            delete(rm.listeners, ch)
+            delete(set, ch)
         }
 
         r.mu.Unlock()
@@ -430,6 +546,17 @@ func main() {
         IdleTimeout:       2 * time.Minute,
     }
 
+    // Plain TCP, Multipath TCP turned off: Go turns it on for listeners by
+    // default from 1.24, and a VPN interface gains nothing from it
+    lc := net.ListenConfig{}
+    lc.SetMultipathTCP(false)
+
+    ln, err := lc.Listen(context.Background(), "tcp", *listen)
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
     log.Printf("murekasync listening on %s", *listen)
-    log.Fatal(srv.ListenAndServe())
+    log.Fatal(srv.Serve(ln))
 }
