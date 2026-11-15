@@ -27,6 +27,16 @@ rc-update add murekasync default
 rc-service murekasync start
 ```
 
+Or from the workstation, after `make server`, with `install.sh` in this
+folder: `-n` for a new install, `-u` for an update, which keeps the
+settings on the server, then the server's address. `-l` and `-p` give
+another login and ssh port:
+
+```sh
+server/murekasync/install.sh -n 10.0.0.1
+server/murekasync/install.sh -u 10.0.0.1
+```
+
 `murekasync.initd` is the OpenRC service, run under supervise-daemon so it
 is started again should it stop, logging to `/var/log/murekasync.log`, as
 the user nobody. `murekasync.confd` holds its settings, set to the
