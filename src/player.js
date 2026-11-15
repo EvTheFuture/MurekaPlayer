@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.146";
+    const VERSION = "2.0.1.147";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2425,9 +2425,9 @@
     // press has been held, and the click that follows a drag is swallowed
     let ctrlDragName = null;
 
-    // The order of the control buttons when one was picked up, to tell a
-    // long press that moved nothing from a move
-    let ctrlDragFrom = "";
+    // How the control button being pressed was pressed: a finger, a pen or
+    // a mouse
+    let ctrlPointerType = "";
     let ctrlHoldTimer = null;
     let ctrlGhost = null;
     let ctrlGhostDX = 0;
@@ -28955,20 +28955,12 @@
         }
 
         const el = ctlEl(ctrlDragName);
-        const held = ctrlDragName;
 
         if (el) {
             el.style.opacity = "1";
         }
 
         ctrlDragName = null;
-
-        // Together held and let go where it was: its menu, nothing moved
-        if (held === "together" && currentControlNames().join(",") === ctrlDragFrom) {
-
-            openSyncLongMenu();
-            return;
-        }
 
         saveSettings();
         setStatus("Transport row rearranged");
@@ -29041,9 +29033,16 @@
             btn.style.webkitTouchCallout = "none";
 
             // Android raises a context menu on a long press, which would land
-            // right as the button is picked up
+            // right as the button is picked up. With a mouse, a right click on
+            // Together opens its menu, a hold there moves the button as on
+            // any other
             btn.addEventListener("contextmenu", function (ev) {
+
                 ev.preventDefault();
+
+                if (name === "together" && (ev.pointerType || ctrlPointerType) === "mouse") {
+                    openSyncLongMenu();
+                }
             });
 
             // A drag ends with a click on the button underneath, which would
@@ -29072,10 +29071,32 @@
 
                 ctrlStartX = ev.clientX;
                 ctrlStartY = ev.clientY;
+                ctrlPointerType = ev.pointerType || "";
 
                 ctrlDocMove = function (e) {
 
                     if (ctrlHoldTimer) {
+
+                        // Together swiped upwards opens its menu: the rooms,
+                        // a new room, who is in it. Going up is not a slip
+                        // there until the swipe is long enough
+                        const dx = e.clientX - ctrlStartX;
+                        const dy = e.clientY - ctrlStartY;
+
+                        if (name === "together" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+
+                            if (dy <= -30) {
+
+                                endControlRowDrag();
+                                ctrlSuppressClick = true;
+                                setTimeout(function () {
+                                    ctrlSuppressClick = false;
+                                }, 400);
+                                openSyncLongMenu();
+                            }
+
+                            return;
+                        }
 
                         // Moved before the hold completed, so it was a swipe
                         if (Math.abs(e.clientX - ctrlStartX) > 8
@@ -29118,7 +29139,6 @@
 
                     ctrlHoldTimer = null;
                     ctrlDragName = name;
-                    ctrlDragFrom = currentControlNames().join(",");
                     ctrlSuppressClick = true;
 
                     const r = btn.getBoundingClientRect();
@@ -49573,7 +49593,8 @@
         page.appendChild(roomsBtn);
         page.appendChild(roomsBox);
         page.appendChild(makeHint("The rooms on the relay, who holds each and what plays. Join leaves the room this player is"
-            + " in. A long press on the Together button shows them too, with who is in the room and a way to create a new one."));
+            + " in. A swipe up on the Together control button, or a right click on it, a long press on the one in the header,"
+            + " shows them too, with who is in the room and a way to create a new one."));
 
         const nameRow = makeTextRow("Your name", function () {
             return settings.syncName || "";
@@ -95477,6 +95498,24 @@
             // move the button and waits for the swipe to be long enough
             const swipeBtn = holdStart.btn.id === "browseBtn" || holdStart.btn.id === "miniBtn";
 
+            // Together swiped upwards opens the Listening together settings
+            if (holdStart.btn.id === "togetherBtn" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+
+                clearTimeout(holdTimer);
+
+                if (dy <= -SWIPE_UP) {
+
+                    endHold();
+                    swallowClick = true;
+                    setTimeout(function () {
+                        swallowClick = false;
+                    }, 400);
+                    togetherPage();
+                }
+
+                return;
+            }
+
             if (swipeBtn && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
 
                 clearTimeout(holdTimer);
@@ -95591,8 +95630,6 @@
             ctlGhost = null;
         }
 
-        const held = draggingCtl;
-
         draggingCtl.style.opacity = "";
         draggingCtl = null;
         swallowClick = true;
@@ -95601,17 +95638,6 @@
         setTimeout(function () {
             swallowClick = false;
         }, 400);
-
-        // Together held and let go where it was: the phone's Listening
-        // together settings, with the rooms open and who is in the room
-        if (held.id === "togetherBtn" && visibleControls().map(controlNameOf).join(",") === dragFrom) {
-
-            send("togetherSettings");
-            setTimeout(function () {
-                showPanel("settings");
-            }, 150);
-            return;
-        }
 
         const names = visibleControls().map(controlNameOf).filter(function (name) {
             return name;
@@ -95630,13 +95656,38 @@
         send("setControls", names);
     }
 
-    // The order when a button was picked up, to tell a long press that
-    // moved nothing from a move
-    let dragFrom = "";
+    // How the button being pressed was pressed, a finger or a mouse
+    let pressType = "";
+
+    // The phone's Listening together settings, with the active rooms and
+    // who is in the room
+    function togetherPage() {
+
+        if (state && state.togetherReady === false) {
+
+            openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
+                { icon: "settings", label: "Open the settings", cls: "tall", fn: function () {
+
+                    send("togetherSettings");
+                    setTimeout(function () {
+                        showPanel("settings");
+                    }, 150);
+                } }
+            ]);
+            return;
+        }
+
+        send("togetherSettings");
+        setTimeout(function () {
+            showPanel("settings");
+        }, 150);
+    }
 
     $("controls").addEventListener("pointerdown", function (ev) {
 
         const btn = ev.target.closest(".ctl");
+
+        pressType = ev.pointerType || "";
 
         if (!btn || holdStart || (ev.button !== undefined && ev.button !== 0)) {
             return;
@@ -95658,7 +95709,6 @@
 
             btn.classList.remove("holding");
             draggingCtl = btn;
-            dragFrom = visibleControls().map(controlNameOf).join(",");
             ctlGhost = makeGhost(btn, holdStart.x, holdStart.y);
             btn.style.opacity = "0.3";
         }, 550);
@@ -95674,9 +95724,15 @@
         }
     }, true);
 
-    // A long press opens the context menu on some browsers, not wanted here
+    // A long press opens the context menu on some browsers, not wanted here.
+    // With a mouse, a right click on Together opens its settings
     $("controls").addEventListener("contextmenu", function (ev) {
+
         ev.preventDefault();
+
+        if ((ev.pointerType || pressType) === "mouse" && ev.target.closest && ev.target.closest("#togetherBtn")) {
+            togetherPage();
+        }
     });
 
     // A long press on a mouse must not start the browser's own drag either
@@ -95842,19 +95898,9 @@
     // with the way to the phone's Listening together settings, shown here
     $("togetherBtn").addEventListener("click", function () {
 
-        const settingsPage = function () {
-
-            send("togetherSettings");
-            setTimeout(function () {
-                showPanel("settings");
-            }, 150);
-        };
-
         if (state && state.togetherReady === false) {
 
-            openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
-                { icon: "settings", label: "Open the settings", cls: "tall", fn: settingsPage }
-            ]);
+            togetherPage();
             return;
         }
 

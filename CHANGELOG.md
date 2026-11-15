@@ -1141,12 +1141,13 @@ In development.
     Stop also leaves the room, or the shared song would only start again.
     Leaving, the music goes on as this player's own; a player that only
     played along gets its own queue and filters back.
-  - A long press on the Together button, in the app (the control button or
-    the header's), shows who is in the room, with the room's name set apart
-    in the accent color, Active rooms on the relay to join with a tap,
-    Create a new room, Leave the room ringed in red and Settings. In the
-    web view it opens the Listening together settings, which list the
-    same.
+  - Together's menu: a swipe up on the Together control button, a right
+    click on it with a mouse, or a long press on the one in the header
+    (holding a control button still moves it). In the app it shows who is
+    in the room, with the room's name set apart in the accent color,
+    Active rooms on the relay to join with a tap, Create a new room, Leave
+    the room ringed in red and Settings. In the web view it opens the
+    Listening together settings, which list the same.
   - A player joining takes the room's queue, place and filters, and sends
     filters only when someone changes them, never by joining.
   - Settings > Listening together, in the app and in the web view: Listen
