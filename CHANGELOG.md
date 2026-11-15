@@ -1157,8 +1157,11 @@ In development.
   Cylinder, beside Flat, the roll as it was, which stays the default for
   now. Settings > Mobile player > Cover and lyrics, and Settings > Web
   view > Lyrics, where the web view can follow the mobile player:
-  - The lines turn on a cylinder seen from the side, every line the same
-    size, the ones before and after smaller and squeezed by the turn. The
+  - The lines turn on a cylinder, every line the same size, the ones
+    before and after turned about 40 degrees, squeezed, smaller and
+    narrower at their far edge, each seen in perspective from in front of
+    its own middle, so the words lean out evenly as on a drum rather than
+    slanting like italics, and the left edges stay in line. The
     line being sung is not a heavier font, which jumped and widened it,
     but drawn thicker with an outline that grows and fades as it rolls.
   - A break of 10 s or more from one line's start to the next, the intro
