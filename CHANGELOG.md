@@ -1166,6 +1166,19 @@ In development.
     device.
   - The room's key stays on the device, a settings backup leaves it and
     whether it is on out.
+- **A song still generating can go last.** Besides playing when ready
+  and playing next, Play last when ready puts it at the end of the play
+  queue once it is ready, and All new last does so for every song still
+  generating. In the app and the web view, in the song list and the
+  small list, where the queue shows it at its end, "Plays last when
+  ready", and in Create's Once they are ready as Play last.
+- **Remember my choice.** The choices for a song still generating have a
+  box to remember the one picked: a tap then does it at once, and a long
+  press, or a right click with a mouse, brings the choices back to pick
+  another or let the remembered one go. Kept on the phone, the same in
+  the app and the web view. The choices show which one a song has.
+- **The lyrics roll away after the last line.** They stayed up until the
+  song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
   restarts, under Settings > Playback, went no higher than 30. It is now
   picked from a list, from 1 s up to 5 min, so previous can go to the

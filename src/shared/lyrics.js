@@ -362,12 +362,18 @@
     // it is the step reached, the lines after it once in sight, an empty
     // step never. A line beyond a break still to come, or one reached that
     // has not shown its lines yet, stays out of sight, so it never shows
-    // early, goes and comes back
+    // early, goes and comes back. After the last line, nothing
     function cylShown(roll, r, view) {
 
         const s = roll.steps[r];
 
         if (!s || view.idx < 0) {
+            return false;
+        }
+
+        // Past the end of the last line the lyrics are done: they roll away
+        // and nothing stays up while the song plays out
+        if (view.idx === roll.steps.length - 1 && roll.steps[view.idx].kind === "blank" && view.idx > 0) {
             return false;
         }
 

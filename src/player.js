@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.149";
+    const VERSION = "2.0.1.150";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1938,11 +1938,16 @@
     // Only kept while the player runs. They show greyed at the top of the
     // list, and the first list page is read every few seconds until they
     // are ready. Those asked to play when ready are in pendingPlay, as
-    // "now" to play at once or "after" to play once the playing song ends.
+    // "now" to play at once, "after" to play once the playing song ends or
+    // "last" to go to the end of the queue.
     // Those are kept on the device, so a player opened again still plays
     // them when they are ready, for a few hours
     const pendingSongs = new Map();
     const pendingPlay = new Map();
+
+    // What a tap on a song still generating may be remembered to do: none,
+    // play when ready, next, all new next, last, all new last
+    const PENDING_CHOICES = ["", "now", "after", "all", "last", "allLast"];
     const PENDING_POLL_MS = 5000;
     const PENDING_PLAY_KEY = "mureka_pending_play";
     const PENDING_PLAY_KEEP_MS = 3 * 3600 * 1000;
@@ -2045,9 +2050,9 @@
 
                 // Play now asked before the player was opened again waits for
                 // the song playing by then, rather than cutting it off
-                if (Array.isArray(pair) && (pair[1] === "now" || pair[1] === "after")) {
+                if (Array.isArray(pair) && (pair[1] === "now" || pair[1] === "after" || pair[1] === "last")) {
 
-                    Map.prototype.set.call(pendingPlay, String(pair[0]), "after");
+                    Map.prototype.set.call(pendingPlay, String(pair[0]), pair[1] === "last" ? "last" : "after");
                     askedShown.add(String(pair[0]));
                 }
             }
@@ -4369,7 +4374,8 @@
             syncKey: "",
             syncControl: true,
             syncOn: false,
-            syncTogether: "together"
+            syncTogether: "together",
+            pendingChoice: ""
         };
 
         try {
@@ -4667,6 +4673,7 @@
                     syncKey: typeof parsed.syncKey === "string" && /^[0-9a-f]{16,64}$/.test(parsed.syncKey) ? parsed.syncKey : "",
                     syncControl: parsed.syncControl !== false,
                     syncOn: parsed.syncOn === true,
+                    pendingChoice: PENDING_CHOICES.indexOf(parsed.pendingChoice) > 0 ? parsed.pendingChoice : "",
                     syncTogether: typeof parsed.syncTogether === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(parsed.syncTogether)
                         ? parsed.syncTogether : "together"
                 };
@@ -21603,6 +21610,7 @@
         }));
         const done = [];
         const afters = [];
+        const lasts = [];
         let wanted = null;
 
         for (const id of Array.from(pendingSongs.keys())) {
@@ -21621,11 +21629,13 @@
 
             pendingPlay.delete(id);
 
-            if (how === "after" || how === "now") {
+            if (how === "after" || how === "now" || how === "last") {
                 readyPlacing.set(id, Date.now());
             }
 
-            if (how === "after") {
+            if (how === "last") {
+                lasts.push(song);
+            } else if (how === "after") {
                 afters.push(song);
             } else if (how === "now" && wanted === null) {
                 wanted = song;
@@ -21677,16 +21687,63 @@
 
         // One note, about the songs asked for when there are any, since
         // Mureka makes two at a time and the second would hide the first
-        if (wanted === null && afters.length === 0) {
+        if (wanted === null && afters.length === 0 && lasts.length === 0) {
 
             showToast(done.length === 1 ? "Ready to play: " + (done[0].title || "Untitled")
                 : done.length + " new songs are ready to play", true);
             return;
         }
 
+        // The songs asked to go last: at the end of the queue as it is now,
+        // in the order they were asked for. With nothing playing the first
+        // starts and the others follow it
+        const placeLasts = function () {
+
+            if (lasts.length === 0) {
+                return;
+            }
+
+            lasts.sort(function (a, b) {
+                return lastChain.indexOf(String(a.song_id)) - lastChain.indexOf(String(b.song_id));
+            });
+
+            let started = null;
+
+            for (const song of lasts) {
+
+                const k = String(song.song_id);
+
+                readyPlacing.delete(k);
+
+                if (lastChain.indexOf(k) !== -1) {
+                    lastChain.splice(lastChain.indexOf(k), 1);
+                }
+
+                if (canGoAfter(song)) {
+                    addLast(song);
+                } else if (started === null && (!currentSong || currentSong.song_id !== song.song_id)) {
+
+                    started = song;
+                    playFrom(song.song_id);
+                }
+            }
+
+            saveQueue();
+            publishHostSoon();
+
+            if (wanted === null && afters.length === 0) {
+
+                showToast(started !== null ? "Ready, playing " + (started.title || "Untitled")
+                    : (lasts.length === 1 ? "Ready, last in the queue: " + (lasts[0].title || "Untitled")
+                        : "Ready, " + lasts.length + " new songs last in the queue"), true);
+            }
+        };
+
         // The songs asked to play after: put in once the one asked to play at
         // once plays, so they follow it, else at once
         const placeAfters = function () {
+
+            placeLasts();
 
             if (afters.length === 0) {
                 return;
@@ -21891,9 +21948,31 @@
         }
     }
 
-    // A tap on a song still being generated: said so, with the offer to play
-    // it as soon as it is ready
-    function pendingTap(song) {
+    // What a remembered or picked choice says it does, for a toast
+    function pendingChoiceText(mode) {
+
+        return {
+            now: "plays as soon as it is ready",
+            after: "plays after the playing song once it is ready",
+            all: "the new songs play after the playing song",
+            last: "goes last in the queue once it is ready",
+            allLast: "the new songs go last in the queue"
+        }[mode] || "";
+    }
+
+    // The choice for a tap on a song still generating remembered, or let go
+    function pendingRemember(mode) {
+
+        settings.pendingChoice = PENDING_CHOICES.indexOf(mode) > 0 ? mode : "";
+        saveSettings();
+        publishHostSoon();
+    }
+
+    // A tap on a song still being generated. With a choice remembered it
+    // is done at once, else, and always with a long press, the choices:
+    // play when ready, next or last, all new next or last, with a box to
+    // remember the one picked so a tap does it from then on
+    function pendingTap(song, menu) {
 
         // Not listed by Mureka yet, nothing to ask for until it is
         if (isSendingSong(song)) {
@@ -21904,51 +21983,55 @@
 
         const id = String(song.song_id);
         const title = (song.title || "").trim() || "Untitled";
+        const asked = pendingPlay.get(id) || "";
+        const remembered = settings.pendingChoice || "";
 
-        // Asked for already: the other way, or not played at all, for a
-        // tap that went wrong
-        if (pendingPlay.has(id)) {
+        if (menu !== true && remembered && !asked) {
 
-            const after = pendingPlay.get(id) === "after";
-
-            askChoices("Still generating\n\"" + title + "\" " + (after ? "plays after the playing song once it is ready."
-                : "plays as soon as it is ready."), [
-                after
-                    ? { label: "Play when ready instead", fn: function () {
-                        playWhenReady(id);
-                    } }
-                    : { label: "Play after the playing song instead", ring: true, color: "#b8b8c0", fn: function () {
-                        playWhenReady(id, "after");
-                    } },
-                { label: "Do not play it when ready", ring: true, color: DANGER, fn: function () {
-                    cancelWhenReady(id);
-                } }
-            ]);
+            playWhenReady(id, remembered);
             return;
         }
 
-        // The box says it is still generating, so no note besides
+        const check = { label: "Remember my choice", on: !!remembered };
+        const pick = function (mode) {
+
+            return function () {
+
+                pendingRemember(check.on ? mode : "");
+                playWhenReady(id, mode);
+            };
+        };
+        const several = pendingCount() > 1;
         const options = [
-            { label: "Play when ready", fn: function () {
-                playWhenReady(id);
-            } }
+            { label: asked === "now" ? "Plays when ready" : "Play when ready", ring: asked === "now", fn: pick("now") },
+            { label: asked === "after" ? "Plays next when ready" : "Play next when ready", ring: asked === "after", fn: pick("after") },
+            { label: asked === "last" ? "Plays last when ready" : "Play last when ready", ring: asked === "last", fn: pick("last") }
         ];
 
         // With more than one being generated, all of them can follow
-        if (pendingCount() > 1) {
+        if (several) {
 
-            options.push({ label: "Play all new after the playing song", ring: true, fn: function () {
-                playWhenReady(id, "all");
+            options.push({ label: "All new next", ring: true, color: "#b8b8c0", fn: pick("all") });
+            options.push({ label: "All new last", ring: true, color: "#b8b8c0", fn: pick("allLast") });
+        }
+
+        // Asked for already, it can also be let be
+        if (asked) {
+
+            options.push({ label: "Do not play it when ready", ring: true, color: DANGER, fn: function () {
+
+                if (!check.on) {
+                    pendingRemember("");
+                }
+
+                cancelWhenReady(id);
             } });
         }
 
-        // Grey, so it stands apart from playing all new after the playing song
-        options.push({ label: "Play this after the playing song", ring: true, color: "#b8b8c0", fn: function () {
-            playWhenReady(id, "after");
-        } });
-
-        askChoices("Still generating\n\"" + title + "\" is not finished on Mureka yet. It can start playing as soon"
-            + " as it is ready, or once the playing song has ended.", options);
+        askChoices("Still generating\n\"" + title + "\" " + (asked ? pendingChoiceText(asked) + "."
+            : "is not finished on Mureka yet. It can play as soon as it is ready, after the playing song, or last in the"
+            + " queue.") + (remembered ? " A tap does what is remembered, a long press brings these back." : ""),
+        options, null, false, true, null, check);
     }
 
     // The songs asked to play after the playing song, in the order they
@@ -21956,6 +22039,9 @@
     // in this order that are already in, so one that is ready sooner does
     // not jump ahead of one asked for first
     const afterChain = restoredChain.slice();
+
+    // The songs asked to go last, in the order they were asked for
+    const lastChain = [];
 
     // Songs of the chain that have played or were taken out of the queue
     // are let go
@@ -22049,6 +22135,10 @@
             afterChain.splice(inChain, 1);
         }
 
+        if (lastChain.indexOf(key) !== -1) {
+            lastChain.splice(lastChain.indexOf(key), 1);
+        }
+
         pendingStamp += 1;
         saveQueue();
         renderList();
@@ -22069,7 +22159,7 @@
             return;
         }
 
-        const mode = how === "after" || how === "all" ? how : "now";
+        const mode = how === "after" || how === "all" || how === "last" || how === "allLast" ? how : "now";
 
         if (mode === "now") {
 
@@ -22094,6 +22184,10 @@
                 afterChain.splice(inChain, 1);
             }
 
+            if (lastChain.indexOf(key) !== -1) {
+                lastChain.splice(lastChain.indexOf(key), 1);
+            }
+
             pendingPlay.set(key, "now");
             pendingStamp += 1;
             primeAudio();
@@ -22105,10 +22199,14 @@
 
         pruneAfterChain();
 
+        // Last: to the end of the queue once ready, all new last the others
+        // still generating too
+        const last = mode === "last" || mode === "allLast";
+
         // The song tapped first, then the others still generating
         const keys = [key];
 
-        if (mode === "all") {
+        if (mode === "all" || mode === "allLast") {
 
             for (const s of pendingList()) {
 
@@ -22131,6 +22229,18 @@
 
             if (song) {
 
+                if (last) {
+
+                    if (canGoAfter(song)) {
+                        addLast(song);
+                    } else if (!currentSong || currentSong.song_id !== song.song_id) {
+                        playFrom(song.song_id);
+                    }
+
+                    queued += 1;
+                    continue;
+                }
+
                 if (afterChain.indexOf(k) === -1) {
                     afterChain.push(k);
                 }
@@ -22151,10 +22261,30 @@
                 continue;
             }
 
-            pendingPlay.set(k, "after");
+            pendingPlay.set(k, last ? "last" : "after");
 
-            if (afterChain.indexOf(k) === -1) {
-                afterChain.push(k);
+            // In the one order or the other, not both
+            const inAfter = afterChain.indexOf(k);
+            const inLast = lastChain.indexOf(k);
+
+            if (last) {
+
+                if (inAfter !== -1) {
+                    afterChain.splice(inAfter, 1);
+                }
+
+                if (inLast === -1) {
+                    lastChain.push(k);
+                }
+            } else {
+
+                if (inLast !== -1) {
+                    lastChain.splice(inLast, 1);
+                }
+
+                if (inAfter === -1) {
+                    afterChain.push(k);
+                }
             }
 
             waiting += 1;
@@ -22175,6 +22305,13 @@
         publishHostSoon();
 
         const n = waiting + queued;
+
+        if (last) {
+
+            showToast(n === 1 ? (waiting > 0 ? "Goes last in the queue once it is ready" : "Last in the queue")
+                : n + " new songs go last in the queue, each once it is ready", true);
+            return;
+        }
 
         showToast(n === 1 ? (waiting > 0 ? "Plays after the playing song, once it is ready" : "Plays after this song")
             : n + " new songs play after the playing song, each once it is ready", true);
@@ -30731,12 +30868,18 @@
     // it is the step reached, the lines after it once in sight, an empty
     // step never. A line beyond a break still to come, or one reached that
     // has not shown its lines yet, stays out of sight, so it never shows
-    // early, goes and comes back
+    // early, goes and comes back. After the last line, nothing
     function cylShown(roll, r, view) {
 
         const s = roll.steps[r];
 
         if (!s || view.idx < 0) {
+            return false;
+        }
+
+        // Past the end of the last line the lyrics are done: they roll away
+        // and nothing stays up while the song plays out
+        if (view.idx === roll.steps.length - 1 && roll.steps[view.idx].kind === "blank" && view.idx > 0) {
             return false;
         }
 
@@ -36366,6 +36509,7 @@
             // Listening together: sharing, listening along or neither
             together: settings.syncOn === true ? "on" : "off",
             togetherReady: syncRelayOk(syncRelay()),
+            pendingChoice: settings.pendingChoice || "",
             togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
             togetherStatus: syncStatusText(),
             togetherRoom: syncRoomName(),
@@ -38780,6 +38924,7 @@
                     setSong: e.setUnder === true,
                     playWhenReady: pendingPlay.has(String(song.song_id)),
                     playAfter: pendingPlay.get(String(song.song_id)) === "after",
+                    playLast: pendingPlay.get(String(song.song_id)) === "last",
                     cover: song.cover ? coverUrl(song) : "",
                     rating: null,
                     duration: 0
@@ -38996,7 +39141,7 @@
         // playing song: the ones asked to play at once first, then the rest
         // in their turn. Not in the queue yet, so with no place in it
         const waiting = pendingList().filter(function (song) {
-            return pendingPlay.has(String(song.song_id)) && searchMatches(song, q);
+            return pendingPlay.has(String(song.song_id)) && pendingPlay.get(String(song.song_id)) !== "last" && searchMatches(song, q);
         }).sort(function (a, b) {
 
             const ka = pendingPlay.get(String(a.song_id)) === "now" ? -1 : afterChain.indexOf(String(a.song_id));
@@ -39020,6 +39165,32 @@
                 duration: 0
             };
         });
+
+        // Those asked to go last at the end, in the order asked for
+        const lastOnes = pendingList().filter(function (song) {
+            return pendingPlay.get(String(song.song_id)) === "last" && searchMatches(song, q);
+        }).sort(function (a, b) {
+            return lastChain.indexOf(String(a.song_id)) - lastChain.indexOf(String(b.song_id));
+        }).map(function (song) {
+
+            const id = String(song.song_id);
+
+            return {
+                index: -1,
+                id: id,
+                title: (song.title || "").trim() || "Untitled",
+                pending: true,
+                sending: false,
+                playWhenReady: true,
+                playAfter: false,
+                playLast: true,
+                cover: song.cover ? coverUrl(song) : "",
+                rating: null,
+                duration: 0
+            };
+        });
+
+        items.push(...lastOnes);
 
         if (waiting.length > 0) {
 
@@ -41738,11 +41909,17 @@
 
             // An id alone plays at once when ready, with after it waits
             // for the playing song
+            if (arg && typeof arg === "object" && typeof arg.remember === "boolean") {
+                pendingRemember(arg.remember ? String(arg.mode || "") : "");
+            }
+
             if (arg && typeof arg === "object" && arg.cancel === true) {
                 cancelWhenReady(arg.id);
-            } else if (arg && typeof arg === "object") {
+            } else if (arg && typeof arg === "object" && PENDING_CHOICES.indexOf(arg.mode) > 0) {
+                playWhenReady(arg.id, arg.mode);
+            } else if (arg && typeof arg === "object" && arg.id) {
                 playWhenReady(arg.id, arg.all === true ? "all" : (arg.after === true ? "after" : "now"));
-            } else {
+            } else if (arg && typeof arg !== "object") {
                 playWhenReady(arg);
             }
         } else if (cmd === "playNext") {
@@ -47897,7 +48074,8 @@
         titleEl.textContent = (song.title || "").trim() || "Untitled";
         titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.45";
         stateEl.textContent = isSendingSong(song) ? "Asked of Mureka" : pendingPlay.has(String(song.song_id))
-            ? (pendingPlay.get(String(song.song_id)) === "after" ? "Plays next when ready" : "Plays when ready") : "Generating";
+            ? (pendingPlay.get(String(song.song_id)) === "after" ? "Plays next when ready"
+                : pendingPlay.get(String(song.song_id)) === "last" ? "Plays last when ready" : "Plays when ready") : "Generating";
         stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap;opacity:0.7";
 
         item.appendChild(dot);
@@ -47913,13 +48091,13 @@
         }
 
         item.addEventListener("click", function () {
-            pendingTap(song);
+            pendingTap(song, false);
         });
 
-        item.addEventListener("contextmenu", function (ev) {
-
-            ev.preventDefault();
-            pendingTap(song);
+        // A long press or a right click: the choices again, to change the
+        // one remembered
+        onLongPress(item, function () {
+            pendingTap(song, true);
         });
 
         return item;
@@ -48126,11 +48304,24 @@
 
         let timer = null;
         let fired = false;
+        let lastAt = 0;
+
+        // A long press on a touch screen may also raise a context menu, the
+        // second of the two within a moment is the same press
+        const once = function () {
+
+            if (Date.now() - lastAt < 900) {
+                return;
+            }
+
+            lastAt = Date.now();
+            fn();
+        };
 
         el.addEventListener("contextmenu", function (ev) {
 
             ev.preventDefault();
-            fn();
+            once();
         });
         el.addEventListener("touchstart", function () {
 
@@ -48139,7 +48330,7 @@
             timer = setTimeout(function () {
 
                 fired = true;
-                fn();
+                once();
             }, 550);
         }, { passive: true });
 
@@ -57604,8 +57795,10 @@
     // buttons, easier to hit on a phone
     // marks: words in the text to set apart in the accent color, a name in
     // it say, each where it first comes, or where it first comes after the
-    // words given as after, { after: "room ", word: name }
-    function askChoices(title, options, onCancel, noCancel, tall, marks) {
+    // words given as after, { after: "room ", word: name }. check: a box to
+    // tick under the choices, { label, on }, its state read as check.on
+    // when a choice is made
+    function askChoices(title, options, onCancel, noCancel, tall, marks, check) {
 
         if (!panelEl) {
 
@@ -57690,6 +57883,25 @@
 
         if (tall === true) {
             col.style.gap = "8px";
+        }
+
+        if (check && typeof check === "object") {
+
+            const row = document.createElement("label");
+            const box = document.createElement("input");
+            const name = document.createElement("span");
+
+            row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:14px;color:#ddd;cursor:pointer";
+            box.type = "checkbox";
+            box.checked = check.on === true;
+            box.style.cssText = "width:20px;height:20px;accent-color:" + ACCENT + ";margin:0";
+            box.addEventListener("change", function () {
+                check.on = box.checked;
+            });
+            name.textContent = check.label;
+            row.appendChild(box);
+            row.appendChild(name);
+            col.appendChild(row);
         }
 
         if (noCancel !== true) {
@@ -63817,7 +64029,7 @@
             lengthMs: lengths.indexOf(Number(x.lengthMs)) >= 0 ? Number(x.lengthMs) : 0,
             wildness: isFinite(wild) ? Math.max(0, Math.min(100, wild)) : 50,
             theme: createText(x.theme, CREATE_THEME_MAX),
-            playMode: x.playMode === "now" || x.playMode === "after" ? x.playMode : (x.playReady === true ? "now" : ""),
+            playMode: x.playMode === "now" || x.playMode === "after" || x.playMode === "last" ? x.playMode : (x.playReady === true ? "now" : ""),
             setOn: x.setOn === true || (x.setOn === undefined && !!x.setId),
             setId: createText(x.setId, 40),
             setName: createText(x.setName, 80),
@@ -64843,7 +65055,8 @@
             feedId: feedId,
             text: (early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? " of \"" + body.title + "\"" : "")
                 + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
-                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
+                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next"
+                    : d.playMode === "last" ? ", played last" : "")
                 + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
         };
     }
@@ -65025,7 +65238,8 @@
             ok: true,
             feedId: "",
             text: "Mureka's agent is on it, the songs come in a minute or two"
-                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
+                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next"
+                    : d.playMode === "last" ? ", played last" : "")
         };
     }
 
@@ -65448,7 +65662,7 @@
                 // Played when ready, both are asked to play at once: the one
                 // ready first plays, the other after it
                 if (w.play) {
-                    playWhenReady(id, w.play === "now" ? "now" : "after");
+                    playWhenReady(id, w.play === "now" ? "now" : w.play === "last" ? "last" : "after");
                 }
 
                 dbgLog("Create", "new song " + id + " of " + w.feedId + (w.play ? ", plays when ready" : "")
@@ -66610,7 +66824,8 @@
         ui.playRow = trimSegments([
             { label: "Do not play", value: "" },
             { label: "Play when ready", value: "now" },
-            { label: "Play next", value: "after" }
+            { label: "Play next", value: "after" },
+            { label: "Play last", value: "last" }
         ], function () {
             return loadCreateDraft().playMode;
         }, function (v) {
@@ -84879,12 +85094,18 @@
     // it is the step reached, the lines after it once in sight, an empty
     // step never. A line beyond a break still to come, or one reached that
     // has not shown its lines yet, stays out of sight, so it never shows
-    // early, goes and comes back
+    // early, goes and comes back. After the last line, nothing
     function cylShown(roll, r, view) {
 
         const s = roll.steps[r];
 
         if (!s || view.idx < 0) {
+            return false;
+        }
+
+        // Past the end of the last line the lyrics are done: they roll away
+        // and nothing stays up while the song plays out
+        if (view.idx === roll.steps.length - 1 && roll.steps[view.idx].kind === "blank" && view.idx > 0) {
             return false;
         }
 
@@ -88032,7 +88253,8 @@
 
         if (time) {
             time.textContent = song.sending ? "Asked of Mureka"
-                : song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
+                : song.playWhenReady ? (song.playLast ? "Plays last when ready" : song.playAfter ? "Plays next when ready" : "Plays when ready")
+                    : "Generating";
         }
 
         // Nothing to like before it exists
@@ -88040,9 +88262,23 @@
             heart.remove();
         }
 
-        const tap = function (ev) {
+        // What a choice says it does, for the note after it
+        const said = {
+            now: "Plays as soon as it is ready",
+            after: "Plays after the playing song, once it is ready",
+            all: "The new songs play after the playing song, each once it is ready",
+            last: "Goes last in the queue, once it is ready",
+            allLast: "The new songs go last in the queue, each once it is ready"
+        };
 
-            ev.preventDefault();
+        // A tap does the choice remembered on the phone, else, and always
+        // with a long press, the choices with a box to remember the one
+        // picked
+        const tap = function (ev, menu) {
+
+            if (ev) {
+                ev.preventDefault();
+            }
 
             // Not listed by Mureka yet, nothing to ask for until it is
             if (song.sending) {
@@ -88051,77 +88287,141 @@
                 return;
             }
 
-            // Asked for already: the other way, or not played at all, for a
-            // tap that went wrong
-            if (song.playWhenReady) {
+            const remembered = state && state.pendingChoice ? String(state.pendingChoice) : "";
+            const asked = song.playWhenReady ? (song.playLast ? "last" : song.playAfter ? "after" : "now") : "";
 
-                openChoice("Still generating: " + song.title + ". " + (song.playAfter ? "Plays after the playing song once it is ready."
-                    : "Plays as soon as it is ready."), [
-                    song.playAfter
-                        ? { icon: "play", label: "Play when ready instead", cls: "tall", fn: function () {
+            if (menu !== true && remembered && !asked) {
 
-                            closeSongMenu();
-                            send("playWhenReady", { id: song.id, after: false }).then(function () {
-                                toast("Plays as soon as it is ready", "ok");
-                            });
-                        } }
-                        : { icon: "listPlusTop", label: "Play after the playing song instead", cls: "insetGrey tall", fn: function () {
-
-                            closeSongMenu();
-                            send("playWhenReady", { id: song.id, after: true }).then(function () {
-                                toast("Plays after the playing song, once it is ready", "ok");
-                            });
-                        } },
-                    { icon: "close", label: "Do not play it when ready", cls: "danger tall", fn: function () {
-
-                        closeSongMenu();
-                        send("playWhenReady", { id: song.id, cancel: true }).then(function () {
-                            toast("It is not played when it is ready", "ok");
-                        });
-                    } }
-                ]);
+                send("playWhenReady", { id: song.id, mode: remembered }).then(function () {
+                    toast(said[remembered] || "Plays when ready", "ok");
+                });
                 return;
             }
 
-            // The title says it is still generating, so no note besides.
-            // Tall buttons with room between, a wrong tap starts a song
-            const choices = [
-                { icon: "play", label: "Play when ready", cls: "tall", fn: function () {
+            let keep = !!remembered;
+            const pick = function (mode) {
+
+                return function () {
 
                     closeSongMenu();
-                    send("playWhenReady", { id: song.id, after: false }).then(function () {
-                        toast("Plays as soon as it is ready", "ok");
+                    send("playWhenReady", { id: song.id, mode: mode, remember: keep }).then(function () {
+                        toast(said[mode], "ok");
                     });
-                } }
+                };
+            };
+            const items = [
+                { icon: "play", label: asked === "now" ? "Plays when ready" : "Play when ready", cls: asked === "now" ? "accent" : "", fn: pick("now") },
+                { icon: "listPlusTop", label: asked === "after" ? "Plays next when ready" : "Play next when ready", cls: asked === "after" ? "accent" : "", fn: pick("after") },
+                { icon: "listPlus", label: asked === "last" ? "Plays last when ready" : "Play last when ready", cls: asked === "last" ? "accent" : "", fn: pick("last") }
             ];
 
             // With more than one being generated, all of them can follow
             if (state && Number(state.pendingCount) > 1) {
 
-                choices.push({ icon: "listPlusTop", label: "Play all new after the playing song", cls: "inset tall", fn: function () {
+                items.push({ icon: "listPlusTop", label: "All new next", cls: "insetGrey", fn: pick("all") });
+                items.push({ icon: "listPlus", label: "All new last", cls: "insetGrey", fn: pick("allLast") });
+            }
+
+            // Asked for already, it can also be let be
+            if (asked) {
+
+                items.push({ icon: "close", label: "Do not play it when ready", cls: "danger", fn: function () {
 
                     closeSongMenu();
-                    send("playWhenReady", { id: song.id, after: true, all: true }).then(function () {
-                        toast("The new songs play after the playing song, each once it is ready", "ok");
+                    send("playWhenReady", { id: song.id, cancel: true, mode: "", remember: keep ? !!remembered : false }).then(function () {
+                        toast("It is not played when it is ready", "ok");
                     });
                 } });
             }
 
-            // Grey, so it stands apart from playing all new after the
-            // playing song
-            choices.push({ icon: "listPlusTop", label: "Play this after the playing song", cls: "insetGrey tall", fn: function () {
+            // The box to tick: it stays open, only the mark changes
+            items.push({ icon: keep ? "check" : "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
 
-                closeSongMenu();
-                send("playWhenReady", { id: song.id, after: true }).then(function () {
-                    toast("Plays after the playing song, once it is ready", "ok");
-                });
+                keep = !keep;
+
+                const el = e && e.currentTarget ? e.currentTarget : null;
+
+                if (el) {
+
+                    const old = el.querySelector("svg");
+
+                    if (old) {
+                        old.replaceWith(icon(keep ? "check" : "circle"));
+                    }
+
+                    el.classList.toggle("accent", keep);
+                }
             } });
 
-            openChoice("Still generating: " + song.title, choices);
+            openChoice("Still generating: " + song.title + (asked ? ". " + said[asked] + "." : ""), items);
+
+            const box = $("menuItems").querySelector(".rememberBox");
+
+            if (box) {
+                box.classList.toggle("accent", keep);
+            }
+
+            if (remembered) {
+
+                $("menuCaption").textContent = "A tap does what is remembered, a long press brings these back.";
+                $("menuCaption").style.display = "";
+            }
         };
 
-        row.addEventListener("click", tap);
-        row.addEventListener("contextmenu", tap);
+        // A long press, or a right click, always brings the choices
+        let holdTimer = 0;
+        let held = false;
+
+        row.addEventListener("pointerdown", function (ev) {
+
+            held = false;
+            clearTimeout(holdTimer);
+
+            if (ev.pointerType === "mouse") {
+                return;
+            }
+
+            holdTimer = setTimeout(function () {
+
+                held = true;
+                tap(null, true);
+            }, 550);
+        });
+
+        for (const name of ["pointerup", "pointercancel", "pointerleave"]) {
+
+            row.addEventListener(name, function () {
+                clearTimeout(holdTimer);
+            });
+        }
+
+        row.addEventListener("pointermove", function (ev) {
+
+            if (Math.abs(ev.movementX) + Math.abs(ev.movementY) > 6) {
+                clearTimeout(holdTimer);
+            }
+        });
+
+        row.addEventListener("click", function (ev) {
+
+            // The tap that ended a long press is not a tap as well
+            if (held) {
+
+                held = false;
+                ev.preventDefault();
+                return;
+            }
+
+            tap(ev, false);
+        });
+        row.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+
+            if (!held) {
+                tap(ev, true);
+            }
+        });
 
         return row;
     }
@@ -99476,7 +99776,8 @@
         ui.playMode = crSegments([
             { label: "Do not play", value: "" },
             { label: "Play when ready", value: "now" },
-            { label: "Play next", value: "after" }
+            { label: "Play next", value: "after" },
+            { label: "Play last", value: "last" }
         ], "playMode");
         ready.appendChild(crLine("Play", [ui.playMode]));
         ui.setOn = document.createElement("button");

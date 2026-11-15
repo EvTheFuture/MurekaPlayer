@@ -13378,12 +13378,18 @@
     // it is the step reached, the lines after it once in sight, an empty
     // step never. A line beyond a break still to come, or one reached that
     // has not shown its lines yet, stays out of sight, so it never shows
-    // early, goes and comes back
+    // early, goes and comes back. After the last line, nothing
     function cylShown(roll, r, view) {
 
         const s = roll.steps[r];
 
         if (!s || view.idx < 0) {
+            return false;
+        }
+
+        // Past the end of the last line the lyrics are done: they roll away
+        // and nothing stays up while the song plays out
+        if (view.idx === roll.steps.length - 1 && roll.steps[view.idx].kind === "blank" && view.idx > 0) {
             return false;
         }
 
@@ -16531,7 +16537,8 @@
 
         if (time) {
             time.textContent = song.sending ? "Asked of Mureka"
-                : song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
+                : song.playWhenReady ? (song.playLast ? "Plays last when ready" : song.playAfter ? "Plays next when ready" : "Plays when ready")
+                    : "Generating";
         }
 
         // Nothing to like before it exists
@@ -16539,9 +16546,23 @@
             heart.remove();
         }
 
-        const tap = function (ev) {
+        // What a choice says it does, for the note after it
+        const said = {
+            now: "Plays as soon as it is ready",
+            after: "Plays after the playing song, once it is ready",
+            all: "The new songs play after the playing song, each once it is ready",
+            last: "Goes last in the queue, once it is ready",
+            allLast: "The new songs go last in the queue, each once it is ready"
+        };
 
-            ev.preventDefault();
+        // A tap does the choice remembered on the phone, else, and always
+        // with a long press, the choices with a box to remember the one
+        // picked
+        const tap = function (ev, menu) {
+
+            if (ev) {
+                ev.preventDefault();
+            }
 
             // Not listed by Mureka yet, nothing to ask for until it is
             if (song.sending) {
@@ -16550,77 +16571,141 @@
                 return;
             }
 
-            // Asked for already: the other way, or not played at all, for a
-            // tap that went wrong
-            if (song.playWhenReady) {
+            const remembered = state && state.pendingChoice ? String(state.pendingChoice) : "";
+            const asked = song.playWhenReady ? (song.playLast ? "last" : song.playAfter ? "after" : "now") : "";
 
-                openChoice("Still generating: " + song.title + ". " + (song.playAfter ? "Plays after the playing song once it is ready."
-                    : "Plays as soon as it is ready."), [
-                    song.playAfter
-                        ? { icon: "play", label: "Play when ready instead", cls: "tall", fn: function () {
+            if (menu !== true && remembered && !asked) {
 
-                            closeSongMenu();
-                            send("playWhenReady", { id: song.id, after: false }).then(function () {
-                                toast("Plays as soon as it is ready", "ok");
-                            });
-                        } }
-                        : { icon: "listPlusTop", label: "Play after the playing song instead", cls: "insetGrey tall", fn: function () {
-
-                            closeSongMenu();
-                            send("playWhenReady", { id: song.id, after: true }).then(function () {
-                                toast("Plays after the playing song, once it is ready", "ok");
-                            });
-                        } },
-                    { icon: "close", label: "Do not play it when ready", cls: "danger tall", fn: function () {
-
-                        closeSongMenu();
-                        send("playWhenReady", { id: song.id, cancel: true }).then(function () {
-                            toast("It is not played when it is ready", "ok");
-                        });
-                    } }
-                ]);
+                send("playWhenReady", { id: song.id, mode: remembered }).then(function () {
+                    toast(said[remembered] || "Plays when ready", "ok");
+                });
                 return;
             }
 
-            // The title says it is still generating, so no note besides.
-            // Tall buttons with room between, a wrong tap starts a song
-            const choices = [
-                { icon: "play", label: "Play when ready", cls: "tall", fn: function () {
+            let keep = !!remembered;
+            const pick = function (mode) {
+
+                return function () {
 
                     closeSongMenu();
-                    send("playWhenReady", { id: song.id, after: false }).then(function () {
-                        toast("Plays as soon as it is ready", "ok");
+                    send("playWhenReady", { id: song.id, mode: mode, remember: keep }).then(function () {
+                        toast(said[mode], "ok");
                     });
-                } }
+                };
+            };
+            const items = [
+                { icon: "play", label: asked === "now" ? "Plays when ready" : "Play when ready", cls: asked === "now" ? "accent" : "", fn: pick("now") },
+                { icon: "listPlusTop", label: asked === "after" ? "Plays next when ready" : "Play next when ready", cls: asked === "after" ? "accent" : "", fn: pick("after") },
+                { icon: "listPlus", label: asked === "last" ? "Plays last when ready" : "Play last when ready", cls: asked === "last" ? "accent" : "", fn: pick("last") }
             ];
 
             // With more than one being generated, all of them can follow
             if (state && Number(state.pendingCount) > 1) {
 
-                choices.push({ icon: "listPlusTop", label: "Play all new after the playing song", cls: "inset tall", fn: function () {
+                items.push({ icon: "listPlusTop", label: "All new next", cls: "insetGrey", fn: pick("all") });
+                items.push({ icon: "listPlus", label: "All new last", cls: "insetGrey", fn: pick("allLast") });
+            }
+
+            // Asked for already, it can also be let be
+            if (asked) {
+
+                items.push({ icon: "close", label: "Do not play it when ready", cls: "danger", fn: function () {
 
                     closeSongMenu();
-                    send("playWhenReady", { id: song.id, after: true, all: true }).then(function () {
-                        toast("The new songs play after the playing song, each once it is ready", "ok");
+                    send("playWhenReady", { id: song.id, cancel: true, mode: "", remember: keep ? !!remembered : false }).then(function () {
+                        toast("It is not played when it is ready", "ok");
                     });
                 } });
             }
 
-            // Grey, so it stands apart from playing all new after the
-            // playing song
-            choices.push({ icon: "listPlusTop", label: "Play this after the playing song", cls: "insetGrey tall", fn: function () {
+            // The box to tick: it stays open, only the mark changes
+            items.push({ icon: keep ? "check" : "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
 
-                closeSongMenu();
-                send("playWhenReady", { id: song.id, after: true }).then(function () {
-                    toast("Plays after the playing song, once it is ready", "ok");
-                });
+                keep = !keep;
+
+                const el = e && e.currentTarget ? e.currentTarget : null;
+
+                if (el) {
+
+                    const old = el.querySelector("svg");
+
+                    if (old) {
+                        old.replaceWith(icon(keep ? "check" : "circle"));
+                    }
+
+                    el.classList.toggle("accent", keep);
+                }
             } });
 
-            openChoice("Still generating: " + song.title, choices);
+            openChoice("Still generating: " + song.title + (asked ? ". " + said[asked] + "." : ""), items);
+
+            const box = $("menuItems").querySelector(".rememberBox");
+
+            if (box) {
+                box.classList.toggle("accent", keep);
+            }
+
+            if (remembered) {
+
+                $("menuCaption").textContent = "A tap does what is remembered, a long press brings these back.";
+                $("menuCaption").style.display = "";
+            }
         };
 
-        row.addEventListener("click", tap);
-        row.addEventListener("contextmenu", tap);
+        // A long press, or a right click, always brings the choices
+        let holdTimer = 0;
+        let held = false;
+
+        row.addEventListener("pointerdown", function (ev) {
+
+            held = false;
+            clearTimeout(holdTimer);
+
+            if (ev.pointerType === "mouse") {
+                return;
+            }
+
+            holdTimer = setTimeout(function () {
+
+                held = true;
+                tap(null, true);
+            }, 550);
+        });
+
+        for (const name of ["pointerup", "pointercancel", "pointerleave"]) {
+
+            row.addEventListener(name, function () {
+                clearTimeout(holdTimer);
+            });
+        }
+
+        row.addEventListener("pointermove", function (ev) {
+
+            if (Math.abs(ev.movementX) + Math.abs(ev.movementY) > 6) {
+                clearTimeout(holdTimer);
+            }
+        });
+
+        row.addEventListener("click", function (ev) {
+
+            // The tap that ended a long press is not a tap as well
+            if (held) {
+
+                held = false;
+                ev.preventDefault();
+                return;
+            }
+
+            tap(ev, false);
+        });
+        row.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+
+            if (!held) {
+                tap(ev, true);
+            }
+        });
 
         return row;
     }
@@ -27975,7 +28060,8 @@
         ui.playMode = crSegments([
             { label: "Do not play", value: "" },
             { label: "Play when ready", value: "now" },
-            { label: "Play next", value: "after" }
+            { label: "Play next", value: "after" },
+            { label: "Play last", value: "last" }
         ], "playMode");
         ready.appendChild(crLine("Play", [ui.playMode]));
         ui.setOn = document.createElement("button");
