@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.151";
+    const VERSION = "2.0.1.152";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4376,7 +4376,8 @@
             syncControl: true,
             syncOn: false,
             syncTogether: "together",
-            pendingChoice: ""
+            pendingChoice: "",
+            addChoice: ""
         };
 
         try {
@@ -4675,6 +4676,7 @@
                     syncControl: parsed.syncControl !== false,
                     syncOn: parsed.syncOn === true,
                     pendingChoice: PENDING_CHOICES.indexOf(parsed.pendingChoice) > 0 ? parsed.pendingChoice : "",
+                    addChoice: parsed.addChoice === "next" || parsed.addChoice === "last" ? parsed.addChoice : "",
                     syncTogether: syncRoomLabelOf(parsed.syncTogether) || "together"
                 };
 
@@ -18559,6 +18561,58 @@
         playNextMarks.delete(key);
 
         return false;
+    }
+
+    // Whether a song was put last and is still coming up in the queue
+    function isPlayLast(id) {
+
+        const key = String(id);
+
+        if (!playLastMarks.has(key)) {
+            return false;
+        }
+
+        for (let i = queuePos + 1; i < queue.length; i += 1) {
+
+            if (String(queue[i].song_id) === key) {
+                return true;
+            }
+        }
+
+        playLastMarks.delete(key);
+
+        return false;
+    }
+
+    // Take a song put last out of the queue again
+    function undoPlayLast(id) {
+
+        const key = String(id);
+
+        if (!isPlayLast(key)) {
+            return;
+        }
+
+        playLastMarks.delete(key);
+
+        for (let i = queue.length - 1; i > queuePos; i -= 1) {
+
+            if (String(queue[i].song_id) === key) {
+
+                const song = queue.splice(i, 1)[0];
+
+                setStatus("Removed from play last: " + (song.title || "Untitled"));
+                break;
+            }
+        }
+
+        renderList();
+        setArtTransition("none");
+        setArtSources();
+        positionArt(0);
+        prefetchNext();
+        saveQueue();
+        publishHostSoon();
     }
 
     // Take a song out of play next again. It goes back where it was in the
@@ -36510,6 +36564,7 @@
             together: settings.syncOn === true ? "on" : "off",
             togetherReady: syncRelayOk(syncRelay()),
             pendingChoice: settings.pendingChoice || "",
+            addChoice: settings.addChoice || "",
             togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
             togetherStatus: syncStatusText(),
             togetherRoom: syncRoomLabel(),
@@ -38344,6 +38399,16 @@
 
     // Changes whenever the queue does, shuffled, rebuilt, moved along or
     // edited, so the web view reads its queue again
+    // The color of the set a song still generating was put in, for its row
+    // in the queue, empty when it is in none
+    function pendingSetColor(id) {
+
+        const m = songSetOf.get(String(id));
+        const set = m ? songSets.get(m.set) : null;
+
+        return set ? setMarkColor(set) : "";
+    }
+
     function hostQueueSig() {
 
         let h = 0;
@@ -38357,9 +38422,10 @@
             }
         }
 
-        // Songs read from Mureka meanwhile change the rows too, and songs
-        // still generating asked to play, shown after the playing song
-        return queue.length + ":" + queuePos + ":" + h + ":" + stubStamp + ":" + pendingStamp;
+        // Songs read from Mureka meanwhile change the rows too, songs still
+        // generating asked to play, shown after the playing song, and the
+        // sets, a new song put in its set while it is being generated
+        return queue.length + ":" + queuePos + ":" + h + ":" + stubStamp + ":" + pendingStamp + ":" + songDataStamp;
     }
 
     // Changes when what the song list holds does: the filters, the source
@@ -38948,6 +39014,7 @@
                 duration: (song.duration_milliseconds || 0) / 1000,
                 playing: String(song.song_id) === playingId,
                 playNext: isPlayNext(song.song_id),
+                playLast: isPlayLast(song.song_id),
                 queued: queuedTurns.get(String(song.song_id)) || 0,
                 plays: songPlays(song),
                 greyed: e.greyed === true,
@@ -39047,6 +39114,7 @@
                     duration: (x.duration_milliseconds || 0) / 1000,
                     playing: id === playingId,
                     playNext: isPlayNext(x.song_id),
+                    playLast: isPlayLast(x.song_id),
                     queued: queuedTurns.get(String(x.song_id)) || 0,
                     plays: songPlays(x),
                     greyed: !setSongMatches(x),
@@ -39162,7 +39230,9 @@
                 playAfter: pendingPlay.get(id) === "after",
                 cover: song.cover ? coverUrl(song) : "",
                 rating: null,
-                duration: 0
+                duration: 0,
+                setColor: pendingSetColor(id),
+                setSong: !!pendingSetColor(id)
             };
         });
 
@@ -39186,7 +39256,9 @@
                 playLast: true,
                 cover: song.cover ? coverUrl(song) : "",
                 rating: null,
-                duration: 0
+                duration: 0,
+                setColor: pendingSetColor(id),
+                setSong: !!pendingSetColor(id)
             };
         });
 
@@ -41316,7 +41388,8 @@
             showSettingsPage("together");
         } });
 
-        askChoices("Listening together\n" + syncStatusText() + (who ? "\n\nIn the room:\n" + who : ""), choices, null, false, true,
+        askChoices((settings.syncOn === true ? "Listening together in " + syncRoomLabel() : "Listening together") + "\n"
+            + syncStatusText() + (who ? "\n\nUsers in the room:\n" + who : ""), choices, null, false, true,
             [{ after: "room ", word: syncRoomLabel() }]);
     }
 
@@ -42064,6 +42137,25 @@
             }
         } else if (cmd === "unplayNext") {
             undoPlayNext(arg);
+        } else if (cmd === "playLast") {
+
+            const wanted = String(arg);
+            const song = cache.songs.find(function (s) {
+                return String(s.song_id) === wanted;
+            });
+
+            if (song) {
+                addLast(song);
+            }
+        } else if (cmd === "unplayLast") {
+            undoPlayLast(arg);
+        } else if (cmd === "addChoice") {
+
+            // What the list's add button does with a tap, remembered, or
+            // asked each time
+            settings.addChoice = arg === "next" || arg === "last" ? arg : "";
+            saveSettings();
+            publishHostSoon();
         } else if (cmd === "queueJump") {
 
             const i = Number(arg);
@@ -88188,6 +88280,174 @@
         return btn;
     }
 
+    // The add button on a song's row: play next or play last. A tap does
+    // the choice remembered on the phone, else asks, with a box to remember
+    // it. Put in already, a tap takes it out again. A long press, or a
+    // right click, always asks, to pick the other way or let the remembered
+    // one go. The icon shows what a tap does
+    function addButton(song) {
+
+        const look = function (btn) {
+
+            const chosen = state && state.addChoice === "last" ? "last" : "next";
+            const label = song.playNext ? "Remove from play next" : song.playLast ? "Remove from play last"
+                : chosen === "last" && state && state.addChoice ? "Play last" : "Play next";
+
+            setIcon(btn, song.playNext || song.playLast ? "check" : (state && state.addChoice === "last" ? "listPlus" : "listPlusTop"));
+            btn.title = label;
+            btn.setAttribute("aria-label", label);
+        };
+        const put = function (btn, how) {
+
+            if (how === "last") {
+
+                song.playLast = true;
+                song.playNext = false;
+                send("playLast", song.id);
+            } else {
+
+                song.playNext = true;
+                song.playLast = false;
+                send("playNext", song.id);
+            }
+
+            look(btn);
+        };
+        const ask = function (btn) {
+
+            let keep = !!(state && state.addChoice);
+            const pick = function (how) {
+
+                return function () {
+
+                    closeSongMenu();
+                    send("addChoice", keep ? how : "");
+
+                    if (state) {
+                        state.addChoice = keep ? how : "";
+                    }
+
+                    put(btn, how);
+                };
+            };
+            const items = [
+                { icon: "listPlusTop", label: song.playNext ? "Plays next" : "Play next", cls: song.playNext ? "accent" : "", fn: pick("next") },
+                { icon: "listPlus", label: song.playLast ? "Plays last" : "Play last", cls: song.playLast ? "accent" : "", fn: pick("last") }
+            ];
+
+            if (song.playNext || song.playLast) {
+
+                items.push({ icon: "close", label: "Take it out of the queue", cls: "danger", fn: function () {
+
+                    closeSongMenu();
+                    send(song.playNext ? "unplayNext" : "unplayLast", song.id);
+                    song.playNext = false;
+                    song.playLast = false;
+                    look(btn);
+                } });
+            }
+
+            items.push({ icon: keep ? "check" : "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
+
+                keep = !keep;
+
+                const el = e && e.currentTarget ? e.currentTarget : null;
+
+                if (el) {
+
+                    const old = el.querySelector("svg");
+
+                    if (old) {
+                        old.replaceWith(icon(keep ? "check" : "circle"));
+                    }
+
+                    el.classList.toggle("accent", keep);
+                }
+            } });
+
+            openChoice(song.title || "Untitled", items);
+
+            const box = $("menuItems").querySelector(".rememberBox");
+
+            if (box) {
+                box.classList.toggle("accent", keep);
+            }
+
+            if (state && state.addChoice) {
+
+                $("menuCaption").textContent = "A tap puts songs " + state.addChoice + " as remembered, a long press brings these back.";
+                $("menuCaption").style.display = "";
+            }
+        };
+        const btn = lineButton("Play next", "listPlusTop", function (b) {
+
+            // The tap that ended a long press is not a tap as well
+            if (held) {
+
+                held = false;
+                return;
+            }
+
+            if (song.playNext || song.playLast) {
+
+                send(song.playNext ? "unplayNext" : "unplayLast", song.id);
+                song.playNext = false;
+                song.playLast = false;
+                look(b);
+                return;
+            }
+
+            if (state && (state.addChoice === "next" || state.addChoice === "last")) {
+
+                put(b, state.addChoice);
+                return;
+            }
+
+            ask(b);
+        });
+        let holdTimer = 0;
+        let held = false;
+
+        // The row's own long press is not started from here
+        btn.addEventListener("pointerdown", function (ev) {
+
+            ev.stopPropagation();
+            held = false;
+            clearTimeout(holdTimer);
+
+            if (ev.pointerType === "mouse") {
+                return;
+            }
+
+            holdTimer = setTimeout(function () {
+
+                held = true;
+                ask(btn);
+            }, 550);
+        });
+
+        for (const name of ["pointerup", "pointercancel", "pointerleave"]) {
+
+            btn.addEventListener(name, function () {
+                clearTimeout(holdTimer);
+            });
+        }
+
+        btn.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (!held) {
+                ask(btn);
+            }
+        });
+
+        look(btn);
+
+        return btn;
+    }
+
     // Press and hold a song, or right click it, for the same menu as the
     // phone's long press. Scrolling before the hold is up is left alone, and
     // the tap that ends a hold does not also play the song
@@ -88965,18 +89225,7 @@
             row.appendChild(mark);
         }
 
-        // Play next, and a second press takes it out of play next again
-        const nextBtn = lineButton(song.playNext ? "Remove from play next" : "Play next",
-            song.playNext ? "check" : "listPlusTop", function (btn) {
-
-                song.playNext = !song.playNext;
-                send(song.playNext ? "playNext" : "unplayNext", song.id);
-                setIcon(btn, song.playNext ? "check" : "listPlusTop");
-                btn.title = song.playNext ? "Remove from play next" : "Play next";
-                btn.setAttribute("aria-label", btn.title);
-            });
-
-        row.appendChild(nextBtn);
+        row.appendChild(addButton(song));
 
         row.addEventListener("click", function () {
 
@@ -96238,7 +96487,7 @@
         }
 
         if (who) {
-            cap.appendChild(document.createTextNode("\n\nIn the room:\n" + who));
+            cap.appendChild(document.createTextNode("\n\nUsers in the room:\n" + who));
         }
 
         cap.style.display = "";
@@ -96257,7 +96506,7 @@
         const on = state.together === "on";
         const room = String(state.togetherRoom || "");
 
-        openChoice("Listening together", [
+        openChoice(on ? "Listening together in " + room : "Listening together", [
             { icon: "together", label: "Active rooms", fn: function () {
 
                 closeSongMenu();

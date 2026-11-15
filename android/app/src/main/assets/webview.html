@@ -16330,6 +16330,174 @@
         return btn;
     }
 
+    // The add button on a song's row: play next or play last. A tap does
+    // the choice remembered on the phone, else asks, with a box to remember
+    // it. Put in already, a tap takes it out again. A long press, or a
+    // right click, always asks, to pick the other way or let the remembered
+    // one go. The icon shows what a tap does
+    function addButton(song) {
+
+        const look = function (btn) {
+
+            const chosen = state && state.addChoice === "last" ? "last" : "next";
+            const label = song.playNext ? "Remove from play next" : song.playLast ? "Remove from play last"
+                : chosen === "last" && state && state.addChoice ? "Play last" : "Play next";
+
+            setIcon(btn, song.playNext || song.playLast ? "check" : (state && state.addChoice === "last" ? "listPlus" : "listPlusTop"));
+            btn.title = label;
+            btn.setAttribute("aria-label", label);
+        };
+        const put = function (btn, how) {
+
+            if (how === "last") {
+
+                song.playLast = true;
+                song.playNext = false;
+                send("playLast", song.id);
+            } else {
+
+                song.playNext = true;
+                song.playLast = false;
+                send("playNext", song.id);
+            }
+
+            look(btn);
+        };
+        const ask = function (btn) {
+
+            let keep = !!(state && state.addChoice);
+            const pick = function (how) {
+
+                return function () {
+
+                    closeSongMenu();
+                    send("addChoice", keep ? how : "");
+
+                    if (state) {
+                        state.addChoice = keep ? how : "";
+                    }
+
+                    put(btn, how);
+                };
+            };
+            const items = [
+                { icon: "listPlusTop", label: song.playNext ? "Plays next" : "Play next", cls: song.playNext ? "accent" : "", fn: pick("next") },
+                { icon: "listPlus", label: song.playLast ? "Plays last" : "Play last", cls: song.playLast ? "accent" : "", fn: pick("last") }
+            ];
+
+            if (song.playNext || song.playLast) {
+
+                items.push({ icon: "close", label: "Take it out of the queue", cls: "danger", fn: function () {
+
+                    closeSongMenu();
+                    send(song.playNext ? "unplayNext" : "unplayLast", song.id);
+                    song.playNext = false;
+                    song.playLast = false;
+                    look(btn);
+                } });
+            }
+
+            items.push({ icon: keep ? "check" : "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
+
+                keep = !keep;
+
+                const el = e && e.currentTarget ? e.currentTarget : null;
+
+                if (el) {
+
+                    const old = el.querySelector("svg");
+
+                    if (old) {
+                        old.replaceWith(icon(keep ? "check" : "circle"));
+                    }
+
+                    el.classList.toggle("accent", keep);
+                }
+            } });
+
+            openChoice(song.title || "Untitled", items);
+
+            const box = $("menuItems").querySelector(".rememberBox");
+
+            if (box) {
+                box.classList.toggle("accent", keep);
+            }
+
+            if (state && state.addChoice) {
+
+                $("menuCaption").textContent = "A tap puts songs " + state.addChoice + " as remembered, a long press brings these back.";
+                $("menuCaption").style.display = "";
+            }
+        };
+        const btn = lineButton("Play next", "listPlusTop", function (b) {
+
+            // The tap that ended a long press is not a tap as well
+            if (held) {
+
+                held = false;
+                return;
+            }
+
+            if (song.playNext || song.playLast) {
+
+                send(song.playNext ? "unplayNext" : "unplayLast", song.id);
+                song.playNext = false;
+                song.playLast = false;
+                look(b);
+                return;
+            }
+
+            if (state && (state.addChoice === "next" || state.addChoice === "last")) {
+
+                put(b, state.addChoice);
+                return;
+            }
+
+            ask(b);
+        });
+        let holdTimer = 0;
+        let held = false;
+
+        // The row's own long press is not started from here
+        btn.addEventListener("pointerdown", function (ev) {
+
+            ev.stopPropagation();
+            held = false;
+            clearTimeout(holdTimer);
+
+            if (ev.pointerType === "mouse") {
+                return;
+            }
+
+            holdTimer = setTimeout(function () {
+
+                held = true;
+                ask(btn);
+            }, 550);
+        });
+
+        for (const name of ["pointerup", "pointercancel", "pointerleave"]) {
+
+            btn.addEventListener(name, function () {
+                clearTimeout(holdTimer);
+            });
+        }
+
+        btn.addEventListener("contextmenu", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (!held) {
+                ask(btn);
+            }
+        });
+
+        look(btn);
+
+        return btn;
+    }
+
     // Press and hold a song, or right click it, for the same menu as the
     // phone's long press. Scrolling before the hold is up is left alone, and
     // the tap that ends a hold does not also play the song
@@ -17107,18 +17275,7 @@
             row.appendChild(mark);
         }
 
-        // Play next, and a second press takes it out of play next again
-        const nextBtn = lineButton(song.playNext ? "Remove from play next" : "Play next",
-            song.playNext ? "check" : "listPlusTop", function (btn) {
-
-                song.playNext = !song.playNext;
-                send(song.playNext ? "playNext" : "unplayNext", song.id);
-                setIcon(btn, song.playNext ? "check" : "listPlusTop");
-                btn.title = song.playNext ? "Remove from play next" : "Play next";
-                btn.setAttribute("aria-label", btn.title);
-            });
-
-        row.appendChild(nextBtn);
+        row.appendChild(addButton(song));
 
         row.addEventListener("click", function () {
 
@@ -24380,7 +24537,7 @@
         }
 
         if (who) {
-            cap.appendChild(document.createTextNode("\n\nIn the room:\n" + who));
+            cap.appendChild(document.createTextNode("\n\nUsers in the room:\n" + who));
         }
 
         cap.style.display = "";
@@ -24399,7 +24556,7 @@
         const on = state.together === "on";
         const room = String(state.togetherRoom || "");
 
-        openChoice("Listening together", [
+        openChoice(on ? "Listening together in " + room : "Listening together", [
             { icon: "together", label: "Active rooms", fn: function () {
 
                 closeSongMenu();

@@ -1145,9 +1145,10 @@ In development.
     has a small arrow for it as Songs and List do, a right click on it
     with a mouse, or a long press on the one in the header (holding a
     control button still moves it). In the app and in the web view it
-    shows who is in the room, with the room's name set apart in the accent
-    color, Active rooms on the relay to join with a tap, Create a new
-    room, Leave the room in red and Settings.
+    shows the room's name in its header and in the accent color, the
+    users in the room, Active rooms on the relay to join with a tap,
+    Create a new room, Rename this room, Leave the room in red and
+    Settings.
   - Rooms take any name, Thai say, up to 40 letters: the relay gets an id
     worked out from the name, the same on every player, and lists the
     name. The room in the settings is joined a moment after the typing
@@ -1172,6 +1173,16 @@ In development.
     device.
   - The room's key stays on the device, a settings backup leaves it and
     whether it is on out.
+- **The add button on a song's row: next or last.** In the web view's
+  song lists, the small list over the main page among them, the button
+  on the right asks Play next or Play last, with a box to remember the
+  choice: a tap then does it at once, its icon showing which. Put in
+  already, a tap takes the song out again. A long press, or a right
+  click with a mouse, always asks, to pick the other way, take it out or
+  let the remembered choice go. Kept on the phone.
+- **Songs being made into a set show in it in the queue too.** Waiting
+  to play once ready, a new song asked to go into a set had no set mark
+  in the queue, and the queue was not read again when it joined the set.
 - **A song still generating can go last.** Besides playing when ready
   and playing next, Play last when ready puts it at the end of the play
   queue once it is ready, and All new last does so for every song still
