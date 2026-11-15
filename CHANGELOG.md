@@ -1173,27 +1173,23 @@ In development.
     device.
   - The room's key stays on the device, a settings backup leaves it and
     whether it is on out.
-- **The add button on a song's row: next or last.** In the web view's
-  song lists, the small list over the main page among them, the button
-  on the right asks Play next or Play last, with a box to remember the
-  choice: a tap then does it at once, its icon showing which. Put in
-  already, a tap takes the song out again. A long press, or a right
-  click with a mouse, always asks, to pick the other way, take it out or
-  let the remembered choice go. Kept on the phone.
+- **The add button on a song's row: the song menu's queue choices.** In
+  the web view's song lists, the small list over the main page among
+  them, the button on the right asks Play next, Play after queued (with
+  how many) and Play last, as the song menu does, and Remove from queue
+  for a song in it, with a box to remember the choice: a tap then does it
+  at once, its icon showing which. Put in already, a tap takes the song
+  out again. A long press, or a right click with a mouse, always asks, to
+  pick another way, take it out or let the remembered choice go. Kept on
+  the phone.
+- **A song's menu opens at once in the web view.** The menu waited for
+  the phone to weigh every song of the library against the songs of the
+  song's set, a second or more on a phone, for songs in a set. The
+  similar songs are now found only for Suggest similar songs and a new
+  set.
 - **Songs being made into a set show in it in the queue too.** Waiting
   to play once ready, a new song asked to go into a set had no set mark
   in the queue, and the queue was not read again when it joined the set.
-- **A song still generating can go last.** Besides playing when ready
-  and playing next, Play last when ready puts it at the end of the play
-  queue once it is ready, and All new last does so for every song still
-  generating. In the app and the web view, in the song list and the
-  small list, where the queue shows it at its end, "Plays last when
-  ready", and in Create's Once they are ready as Play last.
-- **Remember my choice.** The choices for a song still generating have a
-  box to remember the one picked: a tap then does it at once, and a long
-  press, or a right click with a mouse, brings the choices back to pick
-  another or let the remembered one go. Kept on the phone, the same in
-  the app and the web view. The choices show which one a song has.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

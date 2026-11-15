@@ -16330,20 +16330,25 @@
         return btn;
     }
 
-    // The add button on a song's row: play next or play last. A tap does
-    // the choice remembered on the phone, else asks, with a box to remember
-    // it. Put in already, a tap takes it out again. A long press, or a
-    // right click, always asks, to pick the other way or let the remembered
-    // one go. The icon shows what a tap does
+    // The add button on a song's row, with the song menu's choices for the
+    // queue: Play next, Play after queued and Play last. A tap does the
+    // choice remembered on the phone, else asks, with a box to remember it.
+    // Put in already, a tap takes it out again. A long press, or a right
+    // click, always asks, to pick another way or let the remembered one go.
+    // The icon shows what a tap does
+    const ADD_NAMES = { next: "Play next", queued: "Play after queued", last: "Play last" };
+
     function addButton(song) {
 
+        const remembered = function () {
+            return state && ADD_NAMES[state.addChoice] ? state.addChoice : "";
+        };
         const look = function (btn) {
 
-            const chosen = state && state.addChoice === "last" ? "last" : "next";
-            const label = song.playNext ? "Remove from play next" : song.playLast ? "Remove from play last"
-                : chosen === "last" && state && state.addChoice ? "Play last" : "Play next";
+            const chosen = remembered() || "next";
+            const label = song.playNext || song.playLast ? "Remove from queue" : ADD_NAMES[chosen];
 
-            setIcon(btn, song.playNext || song.playLast ? "check" : (state && state.addChoice === "last" ? "listPlus" : "listPlusTop"));
+            setIcon(btn, song.playNext || song.playLast ? "check" : (chosen === "last" ? "listPlus" : "listPlusTop"));
             btn.title = label;
             btn.setAttribute("aria-label", label);
         };
@@ -16354,6 +16359,11 @@
                 song.playLast = true;
                 song.playNext = false;
                 send("playLast", song.id);
+            } else if (how === "queued") {
+
+                song.playNext = true;
+                song.playLast = false;
+                send("songAction", { id: song.id, action: "playAfterQueued", value: null });
             } else {
 
                 song.playNext = true;
@@ -16363,9 +16373,27 @@
 
             look(btn);
         };
+        const takeOut = function (btn) {
+
+            send(song.playNext ? "unplayNext" : "unplayLast", song.id);
+            song.playNext = false;
+            song.playLast = false;
+            look(btn);
+        };
+
+        // The choices, with how many were put in by hand and where the song
+        // is in the queue read from the phone first, as the song menu has them
         const ask = function (btn) {
 
-            let keep = !!(state && state.addChoice);
+            fetchJson("/menu?id=" + esc(song.id), 8000).then(function (m) {
+                choose(btn, m && m.id === song.id ? m : {});
+            }).catch(function () {
+                choose(btn, {});
+            });
+        };
+        const choose = function (btn, m) {
+
+            let keep = !!remembered();
             const pick = function (how) {
 
                 return function () {
@@ -16380,20 +16408,33 @@
                     put(btn, how);
                 };
             };
-            const items = [
-                { icon: "listPlusTop", label: song.playNext ? "Plays next" : "Play next", cls: song.playNext ? "accent" : "", fn: pick("next") },
-                { icon: "listPlus", label: song.playLast ? "Plays last" : "Play last", cls: song.playLast ? "accent" : "", fn: pick("last") }
-            ];
+            const items = [{ icon: "listPlusTop", label: ADD_NAMES.next, fn: pick("next") }];
 
-            if (song.playNext || song.playLast) {
+            if (m.queuedBeside > 0) {
+                items.push({ icon: "listPlusTop", label: ADD_NAMES.queued + " (" + m.queuedBeside + ")", fn: pick("queued") });
+            }
 
-                items.push({ icon: "close", label: "Take it out of the queue", cls: "danger", fn: function () {
+            items.push({ icon: "listPlus", label: ADD_NAMES.last, fn: pick("last") });
+
+            // Coming up in the queue, it can be taken out again
+            if (typeof m.queueAt === "number" && m.queueAt >= 0) {
+
+                items.push({ icon: "close", label: "Remove from queue", cls: "warn", fn: function () {
 
                     closeSongMenu();
-                    send(song.playNext ? "unplayNext" : "unplayLast", song.id);
+                    send("queueRemove", m.queueAt).then(function () {
+                        toast("Taken out of the queue", "ok");
+                    });
                     song.playNext = false;
                     song.playLast = false;
                     look(btn);
+                } });
+            } else if (song.playNext || song.playLast) {
+
+                items.push({ icon: "close", label: "Remove from queue", cls: "warn", fn: function () {
+
+                    closeSongMenu();
+                    takeOut(btn);
                 } });
             }
 
@@ -16423,9 +16464,9 @@
                 box.classList.toggle("accent", keep);
             }
 
-            if (state && state.addChoice) {
+            if (remembered()) {
 
-                $("menuCaption").textContent = "A tap puts songs " + state.addChoice + " as remembered, a long press brings these back.";
+                $("menuCaption").textContent = "A tap does " + ADD_NAMES[remembered()] + ", a long press brings these back.";
                 $("menuCaption").style.display = "";
             }
         };
@@ -16440,16 +16481,13 @@
 
             if (song.playNext || song.playLast) {
 
-                send(song.playNext ? "unplayNext" : "unplayLast", song.id);
-                song.playNext = false;
-                song.playLast = false;
-                look(b);
+                takeOut(b);
                 return;
             }
 
-            if (state && (state.addChoice === "next" || state.addChoice === "last")) {
+            if (remembered()) {
 
-                put(b, state.addChoice);
+                put(b, remembered());
                 return;
             }
 
@@ -16705,8 +16743,7 @@
 
         if (time) {
             time.textContent = song.sending ? "Asked of Mureka"
-                : song.playWhenReady ? (song.playLast ? "Plays last when ready" : song.playAfter ? "Plays next when ready" : "Plays when ready")
-                    : "Generating";
+                : song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
         }
 
         // Nothing to like before it exists
@@ -16714,23 +16751,9 @@
             heart.remove();
         }
 
-        // What a choice says it does, for the note after it
-        const said = {
-            now: "Plays as soon as it is ready",
-            after: "Plays after the playing song, once it is ready",
-            all: "The new songs play after the playing song, each once it is ready",
-            last: "Goes last in the queue, once it is ready",
-            allLast: "The new songs go last in the queue, each once it is ready"
-        };
+        const tap = function (ev) {
 
-        // A tap does the choice remembered on the phone, else, and always
-        // with a long press, the choices with a box to remember the one
-        // picked
-        const tap = function (ev, menu) {
-
-            if (ev) {
-                ev.preventDefault();
-            }
+            ev.preventDefault();
 
             // Not listed by Mureka yet, nothing to ask for until it is
             if (song.sending) {
@@ -16739,141 +16762,77 @@
                 return;
             }
 
-            const remembered = state && state.pendingChoice ? String(state.pendingChoice) : "";
-            const asked = song.playWhenReady ? (song.playLast ? "last" : song.playAfter ? "after" : "now") : "";
+            // Asked for already: the other way, or not played at all, for a
+            // tap that went wrong
+            if (song.playWhenReady) {
 
-            if (menu !== true && remembered && !asked) {
+                openChoice("Still generating: " + song.title + ". " + (song.playAfter ? "Plays after the playing song once it is ready."
+                    : "Plays as soon as it is ready."), [
+                    song.playAfter
+                        ? { icon: "play", label: "Play when ready instead", cls: "tall", fn: function () {
 
-                send("playWhenReady", { id: song.id, mode: remembered }).then(function () {
-                    toast(said[remembered] || "Plays when ready", "ok");
-                });
+                            closeSongMenu();
+                            send("playWhenReady", { id: song.id, after: false }).then(function () {
+                                toast("Plays as soon as it is ready", "ok");
+                            });
+                        } }
+                        : { icon: "listPlusTop", label: "Play after the playing song instead", cls: "insetGrey tall", fn: function () {
+
+                            closeSongMenu();
+                            send("playWhenReady", { id: song.id, after: true }).then(function () {
+                                toast("Plays after the playing song, once it is ready", "ok");
+                            });
+                        } },
+                    { icon: "close", label: "Do not play it when ready", cls: "danger tall", fn: function () {
+
+                        closeSongMenu();
+                        send("playWhenReady", { id: song.id, cancel: true }).then(function () {
+                            toast("It is not played when it is ready", "ok");
+                        });
+                    } }
+                ]);
                 return;
             }
 
-            let keep = !!remembered;
-            const pick = function (mode) {
-
-                return function () {
+            // The title says it is still generating, so no note besides.
+            // Tall buttons with room between, a wrong tap starts a song
+            const choices = [
+                { icon: "play", label: "Play when ready", cls: "tall", fn: function () {
 
                     closeSongMenu();
-                    send("playWhenReady", { id: song.id, mode: mode, remember: keep }).then(function () {
-                        toast(said[mode], "ok");
+                    send("playWhenReady", { id: song.id, after: false }).then(function () {
+                        toast("Plays as soon as it is ready", "ok");
                     });
-                };
-            };
-            const items = [
-                { icon: "play", label: asked === "now" ? "Plays when ready" : "Play when ready", cls: asked === "now" ? "accent" : "", fn: pick("now") },
-                { icon: "listPlusTop", label: asked === "after" ? "Plays next when ready" : "Play next when ready", cls: asked === "after" ? "accent" : "", fn: pick("after") },
-                { icon: "listPlus", label: asked === "last" ? "Plays last when ready" : "Play last when ready", cls: asked === "last" ? "accent" : "", fn: pick("last") }
+                } }
             ];
 
             // With more than one being generated, all of them can follow
             if (state && Number(state.pendingCount) > 1) {
 
-                items.push({ icon: "listPlusTop", label: "All new next", cls: "insetGrey", fn: pick("all") });
-                items.push({ icon: "listPlus", label: "All new last", cls: "insetGrey", fn: pick("allLast") });
-            }
-
-            // Asked for already, it can also be let be
-            if (asked) {
-
-                items.push({ icon: "close", label: "Do not play it when ready", cls: "danger", fn: function () {
+                choices.push({ icon: "listPlusTop", label: "Play all new after the playing song", cls: "inset tall", fn: function () {
 
                     closeSongMenu();
-                    send("playWhenReady", { id: song.id, cancel: true, mode: "", remember: keep ? !!remembered : false }).then(function () {
-                        toast("It is not played when it is ready", "ok");
+                    send("playWhenReady", { id: song.id, after: true, all: true }).then(function () {
+                        toast("The new songs play after the playing song, each once it is ready", "ok");
                     });
                 } });
             }
 
-            // The box to tick: it stays open, only the mark changes
-            items.push({ icon: keep ? "check" : "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
+            // Grey, so it stands apart from playing all new after the
+            // playing song
+            choices.push({ icon: "listPlusTop", label: "Play this after the playing song", cls: "insetGrey tall", fn: function () {
 
-                keep = !keep;
-
-                const el = e && e.currentTarget ? e.currentTarget : null;
-
-                if (el) {
-
-                    const old = el.querySelector("svg");
-
-                    if (old) {
-                        old.replaceWith(icon(keep ? "check" : "circle"));
-                    }
-
-                    el.classList.toggle("accent", keep);
-                }
+                closeSongMenu();
+                send("playWhenReady", { id: song.id, after: true }).then(function () {
+                    toast("Plays after the playing song, once it is ready", "ok");
+                });
             } });
 
-            openChoice("Still generating: " + song.title + (asked ? ". " + said[asked] + "." : ""), items);
-
-            const box = $("menuItems").querySelector(".rememberBox");
-
-            if (box) {
-                box.classList.toggle("accent", keep);
-            }
-
-            if (remembered) {
-
-                $("menuCaption").textContent = "A tap does what is remembered, a long press brings these back.";
-                $("menuCaption").style.display = "";
-            }
+            openChoice("Still generating: " + song.title, choices);
         };
 
-        // A long press, or a right click, always brings the choices
-        let holdTimer = 0;
-        let held = false;
-
-        row.addEventListener("pointerdown", function (ev) {
-
-            held = false;
-            clearTimeout(holdTimer);
-
-            if (ev.pointerType === "mouse") {
-                return;
-            }
-
-            holdTimer = setTimeout(function () {
-
-                held = true;
-                tap(null, true);
-            }, 550);
-        });
-
-        for (const name of ["pointerup", "pointercancel", "pointerleave"]) {
-
-            row.addEventListener(name, function () {
-                clearTimeout(holdTimer);
-            });
-        }
-
-        row.addEventListener("pointermove", function (ev) {
-
-            if (Math.abs(ev.movementX) + Math.abs(ev.movementY) > 6) {
-                clearTimeout(holdTimer);
-            }
-        });
-
-        row.addEventListener("click", function (ev) {
-
-            // The tap that ended a long press is not a tap as well
-            if (held) {
-
-                held = false;
-                ev.preventDefault();
-                return;
-            }
-
-            tap(ev, false);
-        });
-        row.addEventListener("contextmenu", function (ev) {
-
-            ev.preventDefault();
-
-            if (!held) {
-                tap(ev, true);
-            }
-        });
+        row.addEventListener("click", tap);
+        row.addEventListener("contextmenu", tap);
 
         return row;
     }
@@ -28226,8 +28185,7 @@
         ui.playMode = crSegments([
             { label: "Do not play", value: "" },
             { label: "Play when ready", value: "now" },
-            { label: "Play next", value: "after" },
-            { label: "Play last", value: "last" }
+            { label: "Play next", value: "after" }
         ], "playMode");
         ready.appendChild(crLine("Play", [ui.playMode]));
         ui.setOn = document.createElement("button");
@@ -29202,7 +29160,7 @@
                     setTimeout(done, 300);
                 });
             }).then(function () {
-                return fetchJson("/menu?id=" + esc(m.id));
+                return fetchJson("/menu?id=" + esc(m.id) + "&similar=1");
             }).then(function (fresh) {
 
                 // Only with one alike enough to be ticked
@@ -29416,7 +29374,21 @@
     // the most alike already ticked
     function askSimilarHere(m, fresh) {
 
-        const found = m.similar || [];
+        // The menu comes without them, they take the phone a while to find
+        if (!Array.isArray(m.similar)) {
+
+            fetchJson("/menu?id=" + esc(m.id) + "&similar=1", 15000).then(function (full) {
+
+                if (full && full.id === m.id && Array.isArray(full.similar)) {
+                    askSimilarHere(full, fresh);
+                }
+            }).catch(function () {
+                toast("The similar songs could not be read", "bad");
+            });
+            return;
+        }
+
+        const found = m.similar;
 
         if (found.length === 0) {
 
