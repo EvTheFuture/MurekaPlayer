@@ -1148,6 +1148,12 @@ In development.
     shows who is in the room, with the room's name set apart in the accent
     color, Active rooms on the relay to join with a tap, Create a new
     room, Leave the room in red and Settings.
+  - Rooms take any name, Thai say, up to 40 letters: the relay gets an id
+    worked out from the name, the same on every player, and lists the
+    name. The room in the settings is joined a moment after the typing
+    stops, not a room for every letter typed. Rename this room, in the
+    Together menu, moves everyone in the room to the new name together,
+    the queue playing on; anyone in the room may rename it.
   - A player joining takes the room's queue, place and filters, and sends
     filters only when someone changes them, never by joining.
   - Settings > Listening together, in the app and in the web view: Listen

@@ -82,6 +82,7 @@ type room struct {
     stateAt   int64
     postedAt  time.Time
     name      string
+    label     string
     title     string
     playing   bool
     listeners map[chan []byte]struct{}
@@ -207,6 +208,7 @@ func (r *relay) handleRooms(w http.ResponseWriter, req *http.Request) {
 
     type entry struct {
         Room      string `json:"room"`
+        Label     string `json:"label"`
         Name      string `json:"name"`
         Title     string `json:"title"`
         Playing   bool   `json:"playing"`
@@ -222,7 +224,7 @@ func (r *relay) handleRooms(w http.ResponseWriter, req *http.Request) {
             continue
         }
 
-        list = append(list, entry{Room: name, Name: rm.name, Title: rm.title, Playing: rm.playing, Listeners: len(rm.listeners)})
+        list = append(list, entry{Room: name, Label: rm.label, Name: rm.name, Title: rm.title, Playing: rm.playing, Listeners: len(rm.listeners)})
     }
 
     r.mu.Unlock()
@@ -318,6 +320,7 @@ func (r *relay) post(w http.ResponseWriter, req *http.Request, name string) {
         Name    string `json:"name"`
         Title   string `json:"title"`
         Playing bool   `json:"playing"`
+        Room    string `json:"room"`
     }
 
     if json.Unmarshal(body, &head) != nil {
@@ -364,6 +367,7 @@ func (r *relay) post(w http.ResponseWriter, req *http.Request, name string) {
     rm.stateAt = at
     rm.postedAt = time.Now()
     rm.name = head.Name
+    rm.label = head.Room
     rm.title = head.Title
     rm.playing = head.Playing
     rm.send(event("state", body, at))

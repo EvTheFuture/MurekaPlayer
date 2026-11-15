@@ -77,8 +77,9 @@ example `http://10.0.0.1:8095`.
   of commands, each as `event: cmd` with
   `{"t": ..., "at": <relay time received>, "cmd": {...}}`. It applies them,
   and the state that follows goes out to everyone.
-- `GET /rooms`: the open rooms with the sharing player's name, the song
-  and whether it plays, for picking one to listen along with.
+- `GET /rooms`: the open rooms with the name people gave each (`label`,
+  from the state's `room`), the holding player's name, the song and
+  whether it plays, for picking one to join.
 
 A room whose player posted nothing for 20 s may be taken over by another
 player with its own key, so the others carry on when the player holding it

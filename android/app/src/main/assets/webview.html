@@ -24408,10 +24408,17 @@
             { icon: "listPlus", label: "Create a new room", fn: function () {
 
                 closeSongMenu();
-                askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
-                    send("togetherJoin", String(v || "").trim().toLowerCase());
+                askText("New room, any name up to 40 letters. The others join it by the same name.", "", "Join", function (v) {
+                    send("togetherJoin", String(v || "").trim());
                 });
             } },
+            on ? { icon: "pencil", label: "Rename this room", fn: function () {
+
+                closeSongMenu();
+                askText("Rename the room " + room + ", for everyone in it", room, "Rename", function (v) {
+                    send("togetherRename", String(v || "").trim());
+                });
+            } } : null,
             on ? { icon: "close", label: "Leave the room", cls: "danger", fn: function () {
 
                 closeSongMenu();
@@ -24426,7 +24433,9 @@
                 closeSongMenu();
                 togetherPage();
             } }
-        ]);
+        ].filter(function (x) {
+            return x;
+        }));
         togetherCaption(String(state.togetherStatus || ""), room, String(state.togetherWho || ""));
     }
 
@@ -24450,12 +24459,12 @@
             const rooms = came && Array.isArray(state.togetherRooms) ? state.togetherRooms : [];
             const here = state && state.together === "on" ? String(state.togetherRoom || "") : "";
             const items = rooms.map(function (r) {
-                return { icon: "together", label: (r.room === here ? "In: " : "") + r.line, cls: r.room === here ? "accent" : "", fn: function () {
+                return { icon: "together", label: (r.label === here ? "In: " : "") + r.line, cls: r.label === here ? "accent" : "", fn: function () {
 
                     closeSongMenu();
 
-                    if (r.room !== here) {
-                        send("togetherJoin", r.room);
+                    if (r.label !== here) {
+                        send("togetherJoin", r.label || r.room);
                     }
                 } };
             });
@@ -24463,8 +24472,8 @@
             items.push({ icon: "listPlus", label: "Create a new room", fn: function () {
 
                 closeSongMenu();
-                askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
-                    send("togetherJoin", String(v || "").trim().toLowerCase());
+                askText("New room, any name up to 40 letters. The others join it by the same name.", "", "Join", function (v) {
+                    send("togetherJoin", String(v || "").trim());
                 });
             } });
 

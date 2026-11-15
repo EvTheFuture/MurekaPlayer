@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.150";
+    const VERSION = "2.0.1.151";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1319,6 +1319,11 @@
             + parseInt(c.slice(5, 7), 16) + ", " + (progressAlpha(alpha) / 100) + ")";
     }
 
+    // What a tap on a song still generating may be remembered to do: none,
+    // play when ready, next, all new next, last, all new last. Before the
+    // settings are read, which check it
+    const PENDING_CHOICES = ["", "now", "after", "all", "last", "allLast"];
+
     let settings = loadSettings();
 
     // Debug overlay, declared early since anything can log from the start.
@@ -1944,10 +1949,6 @@
     // them when they are ready, for a few hours
     const pendingSongs = new Map();
     const pendingPlay = new Map();
-
-    // What a tap on a song still generating may be remembered to do: none,
-    // play when ready, next, all new next, last, all new last
-    const PENDING_CHOICES = ["", "now", "after", "all", "last", "allLast"];
     const PENDING_POLL_MS = 5000;
     const PENDING_PLAY_KEY = "mureka_pending_play";
     const PENDING_PLAY_KEEP_MS = 3 * 3600 * 1000;
@@ -4674,8 +4675,7 @@
                     syncControl: parsed.syncControl !== false,
                     syncOn: parsed.syncOn === true,
                     pendingChoice: PENDING_CHOICES.indexOf(parsed.pendingChoice) > 0 ? parsed.pendingChoice : "",
-                    syncTogether: typeof parsed.syncTogether === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(parsed.syncTogether)
-                        ? parsed.syncTogether : "together"
+                    syncTogether: syncRoomLabelOf(parsed.syncTogether) || "together"
                 };
 
                 // Read this time, so saved again in their usual place once
@@ -36512,10 +36512,10 @@
             pendingChoice: settings.pendingChoice || "",
             togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
             togetherStatus: syncStatusText(),
-            togetherRoom: syncRoomName(),
+            togetherRoom: syncRoomLabel(),
             togetherWho: settings.syncOn === true ? syncWhoText() : "",
             togetherRooms: syncRoomsList.map(function (r) {
-                return { room: String(r.room), line: syncRoomLine(r) };
+                return { room: String(r.room), label: String(r.label || r.room), line: syncRoomLine(r) };
             }),
             togetherRoomsAt: syncRoomsAt,
             togetherRoomsError: syncRoomsError,
@@ -39741,9 +39741,17 @@
     // Whether this player holds the room, what was here before joining, to
     // come back to on leaving, and a takeover waiting to be tried
     let syncHolding = false;
+
+    // The new name of a room being renamed, told to the others before
+    // the move
+    let syncMoveTo = "";
     let syncSaved = null;
     let syncTakeTimer = 0;
     let syncJoinAt = 0;
+
+    // A room moving to another name: no joining before this, so the one
+    // holding it opens it there first
+    let syncJoinWait = 0;
     const syncMembers = new Map();
     const syncPainters = [];
 
@@ -39768,12 +39776,46 @@
         return true;
     }
 
+    // A room's name as people give it: any letters, Thai say, up to 40,
+    // the spaces at its ends and anything unprintable gone, empty when
+    // nothing is left
+    function syncRoomLabelOf(v) {
+
+        return String(typeof v === "string" ? v : "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 40);
+    }
+
     // The room every player listening together joins, the same name on all
+    function syncRoomLabel() {
+        return syncRoomLabelOf(settings.syncTogether) || "together";
+    }
+
+    // The room's id on the relay, which takes only lower case letters,
+    // digits and hyphens: the name itself when it is one, else an id
+    // worked out from it, the same on every player for the same name
+    function syncRoomIdOf(label) {
+
+        const name = syncRoomLabelOf(label).toLowerCase();
+
+        if (/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
+            return name;
+        }
+
+        // Two 32 bit FNV-1a sums of the name's UTF-8, one from each end
+        const bytes = new TextEncoder().encode(name);
+        let a = 0x811c9dc5;
+        let b = 0x811c9dc5;
+
+        for (let i = 0; i < bytes.length; i++) {
+
+            a = Math.imul(a ^ bytes[i], 0x01000193) >>> 0;
+            b = Math.imul(b ^ bytes[bytes.length - 1 - i], 0x01000193) >>> 0;
+        }
+
+        return "r-" + a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
+    }
+
     function syncRoomName() {
-
-        const r = String(settings.syncTogether || "");
-
-        return /^[a-z0-9][a-z0-9-]{0,39}$/.test(r) ? r : "together";
+        return syncRoomIdOf(syncRoomLabel());
     }
 
     // The filters the room shares: vocals, published, and the smart
@@ -39954,12 +39996,12 @@
         // The others in the room: all but the one holding it, and playing
         // along, all but this player too
         const n = syncHolding ? syncMembersNow().length - 1 : syncFollowing ? syncMembersOf(syncFollowing.state).length - 2 : 0;
-        const room = "in the room " + syncRoomName();
+        const room = "in the room " + syncRoomLabel();
 
         if (syncHolding) {
 
             if (syncLeadInfo.ok === null) {
-                return "Opening the room " + syncRoomName() + "...";
+                return "Opening the room " + syncRoomLabel() + "...";
             }
 
             if (!syncLeadInfo.ok) {
@@ -39974,14 +40016,14 @@
             const f = syncFollowing;
 
             if (f.status !== "listening") {
-                return f.status === "lost" ? "Reaching the relay again..." : "Joining the room " + syncRoomName() + "...";
+                return f.status === "lost" ? "Reaching the relay again..." : "Joining the room " + syncRoomLabel() + "...";
             }
 
             return "Listening together " + room + " with " + f.name + (n > 0 ? " and " + n + " more" : "")
                 + (f.state && f.state.title ? ", " + f.state.title : "") + ".";
         }
 
-        return "Joining the room " + syncRoomName() + "...";
+        return "Joining the room " + syncRoomLabel() + "...";
     }
 
     // This device's timing, measured by the app
@@ -40145,6 +40187,8 @@
             ms: info ? info.ms : 0,
             playing: hasAudio && !audio.paused,
             control: true,
+            room: syncRoomLabel(),
+            moveTo: syncMoveTo || undefined,
             filters: syncFiltersNow(),
             up: up,
             members: members.map(function (m) {
@@ -40241,6 +40285,13 @@
         }
 
         dbgLog("Sync", who + ": " + c.cmd);
+
+        // The room renamed by another player, for everyone
+        if (c.cmd === "rename" && typeof c.name === "string") {
+
+            syncRenameRoom(c.name);
+            return;
+        }
 
         // Filters changed by another player: the same here, and the queue
         // made again from them around the playing song, for everyone
@@ -40774,7 +40825,7 @@
 
         // On but in no room, after a start or the relay set: joined. A join
         // that heard nothing for a while is tried again
-        if (settings.syncOn === true && !syncHolding && !syncTakeTimer && syncAvailable() && syncRelayOk(syncRelay())
+        if (settings.syncOn === true && !syncHolding && !syncTakeTimer && Date.now() > syncJoinWait && syncAvailable() && syncRelayOk(syncRelay())
             && (!syncFollowing || (syncFollowing.status !== "listening" && Date.now() - syncJoinAt > 30000))) {
             syncJoin();
         }
@@ -41027,7 +41078,7 @@
 
                     syncStopFollow("", true);
                     syncSetShare(true);
-                    showToast("Listening together in the room " + syncRoomName());
+                    showToast("Listening together in the room " + syncRoomLabel());
                     return;
                 }
 
@@ -41063,6 +41114,29 @@
                 showToast("Listening together with " + String(st.name || "the room").slice(0, 40));
             }
 
+            // The room moves to another name: this player follows it there,
+            // a moment after the one holding it opened it
+            const moveTo = syncRoomLabelOf(st.moveTo);
+
+            if (moveTo && moveTo !== syncRoomLabel()) {
+
+                dbgLog("Sync", "the room moves to " + moveTo);
+                syncStopFollow("", true);
+                settings.syncTogether = moveTo;
+                saveSettings();
+                syncJoinAt = Date.now();
+                syncJoinWait = Date.now() + 1500;
+                setTimeout(function () {
+
+                    if (settings.syncOn === true && !syncFollowing && !syncHolding) {
+                        syncStartFollow(syncRoomName(), "");
+                    }
+                }, 1500);
+                showToast("The room is " + moveTo + " now");
+                syncPaint();
+                return;
+            }
+
             f.state = st;
             f.stateAt = Number(m.data.at) || syncNow();
 
@@ -41089,7 +41163,7 @@
         if (settings.syncOn) {
 
             syncJoin();
-            showToast("Joining the room " + syncRoomName(), "wait");
+            showToast("Joining the room " + syncRoomLabel(), "wait");
         } else {
 
             syncLeave();
@@ -41113,11 +41187,11 @@
     // Joining a room by its name, leaving the one this player is in
     function syncJoinRoom(name) {
 
-        const r = String(name || "").trim().toLowerCase();
+        const r = syncRoomLabelOf(name);
 
-        if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(r)) {
+        if (!r) {
 
-            showToast("A room name is lower case letters, digits and hyphens", false);
+            showToast("A room needs a name", false);
             return;
         }
 
@@ -41132,6 +41206,55 @@
         showToast("Joining the room " + r, "wait");
         syncPaint();
         publishHostSoon();
+    }
+
+    // The room under another name, for everyone in it. Holding it, the
+    // others are told where it moves, then this player opens it under the
+    // new name with the queue and the others join it there. Playing along,
+    // the one holding it is asked to do so
+    function syncRenameRoom(name) {
+
+        const r = syncRoomLabelOf(name);
+
+        if (!r || r === syncRoomLabel()) {
+            return;
+        }
+
+        if (settings.syncOn !== true) {
+
+            settings.syncTogether = r;
+            saveSettings();
+            syncPaint();
+            publishHostSoon();
+            return;
+        }
+
+        if (syncFollowing) {
+
+            syncSend({ cmd: "rename", name: r });
+            showToast("Renaming the room " + syncRoomLabel() + " to " + r, "wait");
+            return;
+        }
+
+        if (!syncHolding) {
+            return;
+        }
+
+        // The others hear where the room moves, from the state
+        syncMoveTo = r;
+        syncLeadSent = "";
+        syncLeadTick();
+
+        setTimeout(function () {
+
+            syncMoveTo = "";
+            syncSetShare(false);
+            settings.syncTogether = r;
+            saveSettings();
+            syncSetShare(true);
+            showToast("The room is " + r + " now");
+            publishHostSoon();
+        }, 600);
     }
 
     // The names in the room, one to a line, for the menu
@@ -41149,7 +41272,7 @@
 
         const n = Number(r.listeners) || 0;
 
-        return String(r.room) + ": " + String(r.name || "someone").slice(0, 30)
+        return String(r.label || r.room).slice(0, 40) + ": " + String(r.name || "someone").slice(0, 30)
             + (r.title ? ", " + String(r.title).slice(0, 40) + (r.playing ? "" : " (paused)") : "")
             + ", " + (n + 1) + (n === 0 ? " player" : " players");
     }
@@ -41171,11 +41294,18 @@
         ];
 
         if (settings.syncOn === true) {
+
+            choices.push({ label: "Rename this room", fn: function () {
+
+                askText("Rename the room " + syncRoomLabel() + ", for everyone in it", syncRoomLabel(), "Rename", function (v) {
+                    syncRenameRoom(v);
+                });
+            } });
             choices.push({ label: "Leave the room", ring: true, color: DANGER, fn: function () {
                 syncToggle();
             } });
         } else {
-            choices.push({ label: "Join " + syncRoomName(), fn: function () {
+            choices.push({ label: "Join " + syncRoomLabel(), fn: function () {
                 syncToggle();
             } });
         }
@@ -41187,7 +41317,7 @@
         } });
 
         askChoices("Listening together\n" + syncStatusText() + (who ? "\n\nIn the room:\n" + who : ""), choices, null, false, true,
-            [{ after: "room ", word: syncRoomName() }]);
+            [{ after: "room ", word: syncRoomLabel() }]);
     }
 
     // The rooms open on the relay, each to join with a tap
@@ -41206,7 +41336,7 @@
                 return { label: (String(r.room) === syncRoomName() && settings.syncOn === true ? "In: " : "") + syncRoomLine(r), fn: function () {
 
                     if (String(r.room) !== syncRoomName() || settings.syncOn !== true) {
-                        syncJoinRoom(String(r.room));
+                        syncJoinRoom(String(r.label || r.room));
                     }
                 } };
             });
@@ -41221,7 +41351,7 @@
     // A new room, or another to join by its name
     function askSyncNewRoom() {
 
-        askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
+        askText("New room, any name up to 40 letters. The others join it by the same name.", "", "Join", function (v) {
             syncJoinRoom(v);
         });
     }
@@ -42050,6 +42180,8 @@
             });
         } else if (cmd === "togetherJoin") {
             syncJoinRoom(String(arg || ""));
+        } else if (cmd === "togetherRename") {
+            syncRenameRoom(String(arg || ""));
         } else if (cmd === "togetherSettings") {
 
             openSettings();
@@ -49761,36 +49893,46 @@
             + " on as this player's own, and a player that only played along gets its own queue and filters back."));
         page.appendChild(status);
 
+        // The room to join, any name. Typed a letter at a time, so it is
+        // taken once the typing has stopped, not a room for every letter
+        let roomTimer = 0;
         const roomRow = makeTextRow("Room", function () {
-            return syncRoomName();
+            return syncRoomLabel();
         }, function (v) {
 
-            const r = String(v || "").trim().toLowerCase();
+            const r = syncRoomLabelOf(v);
 
-            if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(r) || r === syncRoomName()) {
+            clearTimeout(roomTimer);
+
+            if (!r || r === syncRoomLabel()) {
                 return;
             }
 
-            const was = settings.syncOn === true;
+            roomTimer = setTimeout(function () {
 
-            if (was) {
-                syncLeave();
-            }
+                if (r === syncRoomLabel()) {
+                    return;
+                }
 
-            settings.syncTogether = r;
-            saveSettings();
-            syncPaint();
+                if (settings.syncOn === true) {
+                    syncJoinRoom(r);
+                } else {
+
+                    settings.syncTogether = r;
+                    saveSettings();
+                    syncPaint();
+                    publishHostSoon();
+                }
+            }, 1500);
         }, function (v) {
-
-            const r = String(v || "").trim().toLowerCase();
-
-            return r === "" || /^[a-z0-9][a-z0-9-]{0,39}$/.test(r) ? "" : "Lower case letters, digits and hyphens, up to 40";
+            return String(v || "").trim() === "" ? "A room needs a name" : "";
         });
 
         page.appendChild(roomRow);
         page.appendChild(makeHint("The same on every player that listens together. The first to come holds the queue and"
             + " shares it. When it leaves, one of the others takes over, and the music goes on for the rest. The filters pick"
-            + " from the library of the player holding the queue. A new name is a new room."));
+            + " from the library of the player holding the queue. Any name, up to 40 letters. Another name is another room,"
+            + " joined a moment after typing stops. Rename this room, in the Together button's menu, moves everyone in it."));
 
         // The rooms open on the relay, each with a button to join it
         const roomsBox = document.createElement("div");
@@ -49822,7 +49964,7 @@
 
                     if (!here) {
 
-                        syncJoinRoom(String(r.room));
+                        syncJoinRoom(String(r.label || r.room));
                         roomsBox.textContent = "";
                     }
                 });
@@ -96124,10 +96266,17 @@
             { icon: "listPlus", label: "Create a new room", fn: function () {
 
                 closeSongMenu();
-                askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
-                    send("togetherJoin", String(v || "").trim().toLowerCase());
+                askText("New room, any name up to 40 letters. The others join it by the same name.", "", "Join", function (v) {
+                    send("togetherJoin", String(v || "").trim());
                 });
             } },
+            on ? { icon: "pencil", label: "Rename this room", fn: function () {
+
+                closeSongMenu();
+                askText("Rename the room " + room + ", for everyone in it", room, "Rename", function (v) {
+                    send("togetherRename", String(v || "").trim());
+                });
+            } } : null,
             on ? { icon: "close", label: "Leave the room", cls: "danger", fn: function () {
 
                 closeSongMenu();
@@ -96142,7 +96291,9 @@
                 closeSongMenu();
                 togetherPage();
             } }
-        ]);
+        ].filter(function (x) {
+            return x;
+        }));
         togetherCaption(String(state.togetherStatus || ""), room, String(state.togetherWho || ""));
     }
 
@@ -96166,12 +96317,12 @@
             const rooms = came && Array.isArray(state.togetherRooms) ? state.togetherRooms : [];
             const here = state && state.together === "on" ? String(state.togetherRoom || "") : "";
             const items = rooms.map(function (r) {
-                return { icon: "together", label: (r.room === here ? "In: " : "") + r.line, cls: r.room === here ? "accent" : "", fn: function () {
+                return { icon: "together", label: (r.label === here ? "In: " : "") + r.line, cls: r.label === here ? "accent" : "", fn: function () {
 
                     closeSongMenu();
 
-                    if (r.room !== here) {
-                        send("togetherJoin", r.room);
+                    if (r.label !== here) {
+                        send("togetherJoin", r.label || r.room);
                     }
                 } };
             });
@@ -96179,8 +96330,8 @@
             items.push({ icon: "listPlus", label: "Create a new room", fn: function () {
 
                 closeSongMenu();
-                askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
-                    send("togetherJoin", String(v || "").trim().toLowerCase());
+                askText("New room, any name up to 40 letters. The others join it by the same name.", "", "Join", function (v) {
+                    send("togetherJoin", String(v || "").trim());
                 });
             } });
 
