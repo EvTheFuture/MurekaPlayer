@@ -1159,13 +1159,17 @@ In development.
     each line is cut into strips across, each turned to its own place on
     the drum, so the words wrap round it: the lines before and after are
     squeezed more towards their far edge, drawn in a little towards the
-    middle and lean out from it, as on a real drum.
+    middle and lean out from it, as on a real drum. The lines stand 30
+    degrees apart, so two before and two after the sung one are in sight,
+    fading towards the edge, and one more each side rolls in and out of
+    sight on the drum. Each strip darkens the further round it is, so the
+    sung line shows the curve too.
   - Every line has the same text size. The line being sung is not a
     heavier font, which jumped and widened it, but drawn thicker with an
     outline that grows and fades as it rolls.
   - Drum size percent takes the place of line spacing, the drum's radius
-    in lines: smaller turns tighter, with the lines closer together and
-    more turned away. Side line percent makes the lines before and after
+    in lines, 150 to 350, 200 at first: smaller turns tighter, with the
+    lines closer together. Side line percent makes the lines before and after
     smaller still, from their left edge, at 100 they are only as the drum
     makes them. The web view has its own drum size, following the mobile
     player's unless set.
@@ -1176,8 +1180,8 @@ In development.
     have no dark fade.
   - A break of 10 s or more from one line's start to the next, the intro
     too, shows three dots once the line before has ended, lit one by one
-    as the break goes. The line after it shows two bars ahead, 2 to 4 s,
-    3 s without a tempo.
+    as the break goes. The lines after it roll up into sight from below
+    two bars ahead, 2 to 4 s, 3 s without a tempo.
   - Where a line ends: Mureka's own end time where the lyrics give one,
     else worked out from the song: the time per sound of the lines with
     the next one close after, per section when it has three such lines,

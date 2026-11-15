@@ -13021,12 +13021,19 @@
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
-    // The turn from one line to the next on the drum, about 42 degrees,
-    // how far off the drum is seen from, in widths of the lyrics, and the
-    // strips each row is cut into to wrap it round the drum
-    const CYL_STEP = 0.73;
+    // The turn from one line to the next on the drum, 30 degrees, so two
+    // lines each side of the sung one are on the side of the drum facing
+    // out, how far off the drum is seen from, in widths of the lyrics, the
+    // strips each row is cut into to wrap it round the drum, and the rows:
+    // those five and one more each side rolling in and out of sight
+    const CYL_STEP = Math.PI / 6;
     const CYL_EYE = 1.2;
     const CYL_STRIPS = 8;
+    const CYL_ROWS = 7;
+    const CYL_MID = 3;
+
+    // How strong a row shows by how many rows it is from the sung one
+    const CYL_FADE = [1, 0.8, 0.4, 0];
 
     // How long a roll and a line coming into sight take
     const CYL_ROLL_MS = 340;
@@ -13234,9 +13241,9 @@
         };
     }
 
-    // Five rows on a drum seen from the front: the one leaving over the
-    // top, the line before, the line being sung facing straight out, the
-    // next line and the one coming up from below. box is a positioned
+    // Seven rows on a drum seen from the front: the line being sung facing
+    // straight out in the middle, two lines before and two after turned
+    // away and fading, and one more each side rolling in and out of sight. box is a positioned
     // element of its own for them. Each row is a layer over the whole box,
     // seen in perspective from in front of its middle, holding the row's
     // words cut into strips across, each strip turned to its own place on
@@ -13246,7 +13253,7 @@
         const slots = [];
         const strips = [];
 
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < CYL_ROWS; i++) {
 
             const wrap = document.createElement("div");
             const list = [];
@@ -13294,13 +13301,13 @@
     // radius in rows, smaller turning tighter with the lines closer
     // together, side how big the lines before and after are against the
     // sung one besides what the drum does, sideShift how far right of the
-    // sung line they sit. The box is as tall as the three lines in sight
+    // sung line they sit. The box is as tall as the five lines in sight
     function cylLayout(roll, layout) {
 
         const size = Math.max(10, layout.size);
         const lineH = Math.round(size * 1.5);
-        const radius = lineH * Math.max(1.2, Math.min(3, layout.drum || 1.5));
-        const boxH = Math.round(2 * radius * Math.sin(CYL_STEP) + lineH);
+        const radius = lineH * Math.max(1.5, Math.min(3.5, layout.drum || 2));
+        const boxH = Math.round(2 * radius * Math.sin(2 * CYL_STEP) + lineH * 0.6);
         const top = Math.round((boxH - lineH) / 2);
 
         roll.geo = {
@@ -13362,7 +13369,7 @@
     }
 
     // Whether step r shows when the song is at the view: a break only while
-    // it is the step reached, the line after it once in sight, an empty
+    // it is the step reached, the lines after it once in sight, an empty
     // step never
     function cylShown(roll, r, view) {
 
@@ -13382,13 +13389,15 @@
 
         const at = roll.steps[view.idx];
 
-        return !(r === view.idx + 1 && at && at.kind === "pause" && !view.reveal);
+        return !(r > view.idx && at && at.kind === "pause" && !view.reveal);
     }
 
-    // A row's look: each strip turned to its place on the drum, and by how
-    // many rows it is from the sung one smaller still as side asks, from
-    // its left edge so the lines stay near the left, at 100 only as the
-    // drum makes them, dimmer and two rows away gone. The extra turn before
+    // A row's look: each strip turned to its place on the drum and darker
+    // the further round it is, as light falls on a drum, so even the sung
+    // line shows the curve, and by how many rows it is from the sung one
+    // smaller still as side asks, from its left edge so the lines stay near
+    // the left, at 100 only as the drum makes them, dimmer and three rows
+    // away gone. The extra turn before
     // a new section only moves a row, so the line after it looks like any
     // other. The sung line is drawn thicker with an outline of its own
     // color, which grows and fades smoothly and keeps the row as wide as
@@ -13398,10 +13407,12 @@
     function cylPose(roll, angle, off, shown) {
 
         const g = roll.geo;
-        const k = Math.min(1, Math.abs(off));
-        const far = Math.max(0, Math.min(1, Math.abs(off) - 1));
-        const scale = (1 - (1 - g.side) * k) * (1 - 0.25 * far);
-        const opacity = shown ? (1 - 0.25 * k) * (1 - far) : 0;
+        const a = Math.min(CYL_FADE.length - 1, Math.abs(off));
+        const at = Math.floor(a);
+        const k = Math.min(1, a);
+        const scale = 1 - (1 - g.side) * k;
+        const fade = at >= CYL_FADE.length - 1 ? 0 : CYL_FADE[at] + (CYL_FADE[at + 1] - CYL_FADE[at]) * (a - at);
+        const opacity = shown ? fade : 0;
         const c = Math.round(255 - 34 * k);
         const w = Math.round(g.size * 0.03 * (1 - k) * 100) / 100;
         const o = Math.round(Math.max(0.8, g.size * 0.04) * 100) / 100 + w;
@@ -13413,9 +13424,13 @@
         for (let n = 0; n < CYL_STRIPS; n++) {
 
             const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH * scale;
+            const turn = angle + yc / g.radius;
 
-            strips.push("translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                + (-(angle + yc / g.radius)) + "rad) translateZ(" + g.radius + "px) translateY(" + (-yc) + "px) scale(" + scale + ")");
+            strips.push({
+                transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
+                    + (-turn) + "rad) translateZ(" + g.radius + "px) translateY(" + (-yc) + "px) scale(" + scale + ")",
+                opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(turn))) * 1000) / 1000
+            });
         }
 
         return {
@@ -13469,7 +13484,7 @@
     // Light the break's dots as far as it has come, one a quarter through
     function cylDots(roll, view) {
 
-        for (const el of roll.strips[2]) {
+        for (const el of roll.strips[CYL_MID]) {
 
             if (el.dataset.dots !== "1") {
                 return;
@@ -13500,8 +13515,9 @@
     }
 
     // Show the steps at the song's place in milliseconds. One step on rolls
-    // the drum a step, the line after a break fades in where it waits,
-    // anything else, a seek, a new song or force, puts the rows in place
+    // the drum a step, the lines after a break roll up into sight from
+    // below when it is time, anything else, a seek, a new song or force,
+    // puts the rows in place
     function cylShow(roll, ms, force) {
 
         if (!roll.geo) {
@@ -13532,9 +13548,9 @@
         const rolled = !force && view.idx === old.idx + 1;
         const revealed = !force && view.idx === old.idx;
 
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < CYL_ROWS; i++) {
 
-            const r = view.idx + i - 2;
+            const r = view.idx + i - CYL_MID;
             const wrap = roll.slots[i];
             const list = roll.strips[i];
             const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
@@ -13544,36 +13560,45 @@
             wrap.style.opacity = String(to.opacity);
             wrap.style.color = to.color;
             wrap.style.textShadow = to.textShadow;
-            wrap.style.zIndex = i === 2 ? "3" : "2";
+            wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
 
             for (let n = 0; n < list.length; n++) {
 
                 cylStop(list[n]);
-                list[n].style.transform = to.strips[n];
+                list[n].style.transform = to.strips[n].transform;
+                list[n].style.opacity = String(to.strips[n].opacity);
             }
 
             if (!wrap.animate || (!rolled && !revealed)) {
                 continue;
             }
 
-            const from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
+            let from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
 
+            // Coming into sight after a break, a row rolls up from a step
+            // further down, out of sight, rather than just fading in
             if (revealed) {
 
-                if (from.opacity !== to.opacity) {
-                    wrap.animate([{ opacity: from.opacity }, { opacity: to.opacity }], { duration: CYL_SHOW_MS, easing: "ease-out" });
+                if (from.opacity === to.opacity) {
+                    continue;
                 }
 
-                continue;
+                from = cylPose(roll, cylAngle(roll, view.idx, r) + roll.geo.step, r - view.idx + 1, false);
             }
+
+            const time = revealed ? CYL_SHOW_MS : CYL_ROLL_MS;
 
             wrap.animate([
                 { opacity: from.opacity, color: from.color, textShadow: from.textShadow },
                 { opacity: to.opacity, color: to.color, textShadow: to.textShadow }
-            ], { duration: CYL_ROLL_MS, easing: "ease-out" });
+            ], { duration: time, easing: "ease-out" });
 
             for (let n = 0; n < list.length; n++) {
-                list[n].animate([{ transform: from.strips[n] }, { transform: to.strips[n] }], { duration: CYL_ROLL_MS, easing: "ease-out" });
+
+                list[n].animate([
+                    { transform: from.strips[n].transform, opacity: from.strips[n].opacity },
+                    { transform: to.strips[n].transform, opacity: to.strips[n].opacity }
+                ], { duration: time, easing: "ease-out" });
             }
         }
 
@@ -13630,7 +13655,7 @@
         return {
             size: Math.round((typeof l.size === "number" ? l.size : 26) * scale),
             side: typeof l.side === "number" ? l.side : 0.8,
-            drum: typeof l.drum === "number" ? l.drum : 1.5,
+            drum: typeof l.drum === "number" ? l.drum : 2,
             sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale),
             shift: Math.round((typeof l.shift === "number" ? l.shift : 60) * scale),
             bpm: typeof l.bpm === "number" ? l.bpm : 0
