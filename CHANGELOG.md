@@ -1153,6 +1153,26 @@ In development.
     device.
   - The room and its key stay on the device, a settings backup leaves them
     out.
+- **Lyrics on a turning cylinder, with breaks.** A new Lyric style,
+  Cylinder, beside Flat, the roll as it was, which stays the default for
+  now. Settings > Mobile player > Cover and lyrics, and Settings > Web
+  view > Lyrics, where the web view can follow the mobile player:
+  - The lines turn on a cylinder seen from the side, every line the same
+    size, the ones before and after smaller and squeezed by the turn. The
+    line being sung is not a heavier font, which jumped and widened it,
+    but drawn thicker with an outline that grows and fades as it rolls.
+  - A break of 10 s or more from one line's start to the next, the intro
+    too, shows three dots once the line before has ended, lit one by one
+    as the break goes. The line after it shows two bars ahead, 2 to 4 s,
+    3 s without a tempo.
+  - Where a line ends: Mureka's own end time where the lyrics give one,
+    else worked out from the song: the time per sound of the lines with
+    the next one close after, per section when it has three such lines,
+    rounded up to whole bars at the song's tempo.
+  - A new section of the song straight after a line stands a little
+    apart, the lyrics now keep which section each line is in.
+  - The code for it is shared by the player and the web view,
+    src/shared/lyrics.js.
 - **Buttons that take something away are ringed in red.** Remove on a
   button group, Remove password, Forget pairing, Clear debug log, Clear
   song cache, Clear cover cache, Dissolve sets with only one song, Delete

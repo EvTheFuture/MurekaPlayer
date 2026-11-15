@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.136";
+    const VERSION = "2.0.1.137";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3121,6 +3121,13 @@
     let lyricBox = null;
     let lyricSlots = [];
 
+    // The cylinder roll, the other lyric style, and the rows and tempo its
+    // steps were worked out for
+    let lyricCylBox = null;
+    let lyricCyl = null;
+    let lyricCylFor = null;
+    let lyricCylKey = "";
+
     // Overlay elements controlled by the art overlay mode
     let bottomScrimEl = null;
     let bottomWrapEl = null;
@@ -4336,6 +4343,7 @@
             lyricLineMul: 1.5,
             lyricShift: 0,
             lyricSideShift: 0,
+            lyricStyle: "flat",
             lyricNoSemicolon: false,
             webVolumeUnit: "percent",
             webVolumeNumbers: false,
@@ -4344,6 +4352,7 @@
             webLyricLineMul: WEB_LYRIC_LINE,
             webLyricSideShift: null,
             webLyricShift: WEB_LYRIC_SHIFT,
+            webLyricStyle: "",
             metaTitle: "${title}",
             metaSubtitle: "${genre}",
             debugOverlay: false,
@@ -4615,6 +4624,7 @@
                         ? parsed.lyricShift : 0,
                     lyricSideShift: (typeof parsed.lyricSideShift === "number" && parsed.lyricSideShift >= -20 && parsed.lyricSideShift <= 20)
                         ? parsed.lyricSideShift : 0,
+                    lyricStyle: parsed.lyricStyle === "cylinder" ? "cylinder" : "flat",
                     lyricNoSemicolon: parsed.lyricNoSemicolon === true,
                     webVolumeUnit: parsed.webVolumeUnit === "steps" ? "steps" : "percent",
                     webVolumeNumbers: parsed.webVolumeNumbers === true,
@@ -4630,6 +4640,10 @@
                         ? parsed.webLyricSideShift : null,
                     webLyricShift: (typeof parsed.webLyricShift === "number" && parsed.webLyricShift >= -80 && parsed.webLyricShift <= 80)
                         ? parsed.webLyricShift : WEB_LYRIC_SHIFT,
+
+                    // Empty follows the mobile player's style
+                    webLyricStyle: parsed.webLyricStyle === "cylinder" || parsed.webLyricStyle === "flat"
+                        ? parsed.webLyricStyle : "",
                     metaTitle: typeof parsed.metaTitle === "string"
                         ? parsed.metaTitle
                         : "${title}",
@@ -30212,8 +30226,31 @@
         return null;
     }
 
-    // Flatten the timed lyric segments into one sorted list of {t, text}.
-    // Rows without timing are skipped, an empty result disables the display
+    // A lyric row's end time, the same way, null when it gives none
+    function rowEndMs(row) {
+
+        if (!row || typeof row !== "object") {
+            return null;
+        }
+
+        const keys = ["end_ms", "stop_ms", "end_time", "stop_time", "end", "stop", "finish"];
+
+        for (const key of keys) {
+
+            const v = row[key];
+
+            if (typeof v === "number" && isFinite(v) && v >= 0) {
+                return v;
+            }
+        }
+
+        return null;
+    }
+
+    // Flatten the timed lyric segments into one sorted list of {t, text},
+    // with s the number of the segment, the section of the song, the row
+    // came from and e its end when it has one. Rows without timing are
+    // skipped, an empty result disables the display
     function buildLyricRows(lyrics) {
 
         const out = [];
@@ -30222,7 +30259,7 @@
             return out;
         }
 
-        lyrics.forEach(function (seg) {
+        lyrics.forEach(function (seg, n) {
 
             if (!seg || !Array.isArray(seg.rows)) {
                 return;
@@ -30235,10 +30272,19 @@
                 }
 
                 const t = rowStartMs(r);
+                const e = rowEndMs(r);
 
-                if (t !== null) {
-                    out.push({ t: t, text: r.text });
+                if (t === null) {
+                    return;
                 }
+
+                const row = { t: t, text: r.text, s: n };
+
+                if (e !== null && e > t) {
+                    row.e = e;
+                }
+
+                out.push(row);
             });
         });
 
@@ -30250,12 +30296,505 @@
         if (out.length > 0 && out[out.length - 1].t < 600) {
 
             for (const r of out) {
+
                 r.t = r.t * 1000;
+
+                if (typeof r.e === "number") {
+                    r.e = r.e * 1000;
+                }
             }
         }
 
         return out;
     }
+
+    // BEGIN SHARED lyrics
+    // Written by embed-webview.sh from src/shared/lyrics.js. Change that
+    // file and run make embed, never the lines up to END SHARED lyrics
+    // Lyrics on a turning cylinder: the lines of a song, the breaks between
+    // them and the roll that shows them. Shared by the player and the web
+    // view's page, src/shared/lyrics.js, inlined into both by embed-webview.sh
+
+    // From one line's start to the next at least this long is a break
+    const CYL_BREAK_MS = 10000;
+
+    // A line's sung length, per sound, when the song gives nothing to go by
+    const CYL_UNIT_MS = 350;
+
+    // How long a roll and a line coming into sight take
+    const CYL_ROLL_MS = 340;
+    const CYL_SHOW_MS = 600;
+
+    // The sounds in a line, near enough: the vowel groups, or for a script
+    // with no Latin vowels, Thai or Chinese, one for every two letters
+    function cylUnits(text) {
+
+        const s = String(text || "").toLowerCase();
+        const groups = s.match(/[aeiouy\u00e0-\u00f6\u00f8-\u00ff]+/g);
+
+        if (groups && groups.length > 0) {
+            return groups.length;
+        }
+
+        return Math.max(1, Math.round(s.replace(/\s+/g, "").length / 2));
+    }
+
+    // The middle value, 0 for none
+    function cylMedian(list) {
+
+        if (list.length === 0) {
+            return 0;
+        }
+
+        const s = list.slice().sort(function (a, b) {
+            return a - b;
+        });
+
+        return s[Math.floor(s.length / 2)];
+    }
+
+    // One bar in milliseconds at the tempo, 0 without a tempo to trust
+    function cylBar(bpm) {
+
+        return bpm >= 50 && bpm <= 220 ? 240000 / bpm : 0;
+    }
+
+    // An end the song gave for a row that makes sense, else 0
+    function cylRealEnd(rows, i) {
+
+        const r = rows[i];
+        const next = rows[i + 1];
+        const e = r.e;
+
+        if (typeof e !== "number" || !isFinite(e) || e <= r.t || e - r.t > 15000) {
+            return 0;
+        }
+
+        if (next && e > next.t + 1000) {
+            return 0;
+        }
+
+        return e;
+    }
+
+    // When each line ends, the song's own end where it gives one, else
+    // worked out: the time per sound, from the lines the song ends or from
+    // lines with the next one close after, in the line's own section when
+    // it has at least three such lines, times the line's sounds, rounded up
+    // to whole bars at the tempo, as sung lines fill whole bars
+    function cylEnds(rows, bpm) {
+
+        const n = rows.length;
+        const ends = [];
+        const songRates = [];
+        const secRates = {};
+        const bar = cylBar(bpm);
+
+        for (let i = 0; i < n; i++) {
+
+            const r = rows[i];
+            const next = rows[i + 1];
+            const real = cylRealEnd(rows, i);
+            let span = 0;
+
+            if (real) {
+                span = real - r.t;
+            } else if (next && next.t - r.t > 300 && next.t - r.t < CYL_BREAK_MS) {
+                span = next.t - r.t;
+            }
+
+            if (span > 0) {
+
+                const rate = span / cylUnits(r.text);
+                const sec = String(r.s);
+
+                songRates.push(rate);
+                secRates[sec] = secRates[sec] || [];
+                secRates[sec].push(rate);
+            }
+        }
+
+        const songRate = cylMedian(songRates) || CYL_UNIT_MS;
+
+        for (let i = 0; i < n; i++) {
+
+            const r = rows[i];
+            const next = rows[i + 1];
+            const real = cylRealEnd(rows, i);
+
+            if (real) {
+
+                ends.push(real);
+                continue;
+            }
+
+            const sec = secRates[String(r.s)] || [];
+            const rate = sec.length >= 3 ? cylMedian(sec) : songRate;
+            let len = cylUnits(r.text) * rate;
+
+            // A little over a whole bar still counts as that bar
+            if (bar) {
+                len = Math.max(1, Math.ceil(len / bar - 0.25)) * bar;
+            }
+
+            len = Math.max(1500, Math.min(8000, len));
+
+            if (next) {
+                len = Math.min(len, Math.max(300, next.t - r.t));
+            }
+
+            ends.push(Math.round(r.t + len));
+        }
+
+        return ends;
+    }
+
+    // What the roll steps through: the lines, a break where one line's
+    // start is far from the next one's, from the first line's end until the
+    // next starts, and an empty step after the last line. A long wait before
+    // the first line is a break too. The line after a break comes in sight
+    // two bars ahead, 2 to 4 seconds, 3 without a tempo
+    function cylSteps(rows, ends, bpm) {
+
+        const steps = [];
+        const bar = cylBar(bpm);
+        const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
+
+        if (rows.length === 0) {
+            return steps;
+        }
+
+        if (rows[0].t >= CYL_BREAK_MS) {
+            steps.push({ kind: "pause", t: 0, until: rows[0].t, show: rows[0].t - lead });
+        } else {
+            steps.push({ kind: "blank", t: 0 });
+        }
+
+        for (let i = 0; i < rows.length; i++) {
+
+            const r = rows[i];
+            const next = rows[i + 1];
+
+            steps.push({
+                kind: "line",
+                t: r.t,
+                text: r.text,
+                first: i > 0 && r.s !== undefined && r.s !== rows[i - 1].s
+            });
+
+            if (!next) {
+
+                steps.push({ kind: "blank", t: Math.max(r.t + 300, ends[i]) });
+                continue;
+            }
+
+            if (next.t - r.t >= CYL_BREAK_MS) {
+
+                const at = Math.max(r.t + 500, Math.min(ends[i], next.t - 1500));
+
+                steps.push({ kind: "pause", t: at, until: next.t, show: Math.max(at, next.t - lead) });
+            }
+        }
+
+        return steps;
+    }
+
+    // Where the song is on the steps: the step reached, whether the line
+    // after a break is in sight yet, and how far through a break it is
+    function cylViewAt(steps, ms) {
+
+        let idx = 0;
+
+        for (let i = 0; i < steps.length; i++) {
+
+            if (steps[i].t <= ms) {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+
+        const s = steps[idx];
+
+        if (!s || s.kind !== "pause") {
+            return { idx: idx, reveal: true, progress: 0 };
+        }
+
+        return {
+            idx: idx,
+            reveal: ms >= s.show,
+            progress: Math.max(0, Math.min(1, (ms - s.t) / Math.max(1, s.until - s.t)))
+        };
+    }
+
+    // Five rows on a cylinder seen from the side: the one leaving over the
+    // top, the line before, the line being sung facing straight out, the
+    // next line and the one coming up from below. box is a positioned
+    // element of its own for them
+    function makeCylRoll(box) {
+
+        const slots = [];
+
+        for (let i = 0; i < 5; i++) {
+
+            const el = document.createElement("div");
+
+            el.style.position = "absolute";
+            el.style.left = "0";
+            el.style.right = "0";
+            el.style.opacity = "0";
+            el.style.whiteSpace = "nowrap";
+            el.style.overflow = "hidden";
+            el.style.textOverflow = "ellipsis";
+            el.style.transformOrigin = "0 50%";
+            el.style.backfaceVisibility = "hidden";
+            el.style.willChange = "transform, opacity";
+            box.appendChild(el);
+            slots.push(el);
+        }
+
+        return { box: box, slots: slots, steps: [], geo: null, idx: -2, reveal: true };
+    }
+
+    // Size the cylinder: size is the sung line's text, line the spacing as
+    // a share of it, side how big the lines before and after are against
+    // it, sideShift how far right of the sung line they sit. Every row has
+    // the same text size and weight, the turn makes the others smaller, so
+    // the sung line is never bigger than the rows are wide
+    function cylLayout(roll, layout) {
+
+        const size = Math.max(10, layout.size);
+        const lineH = Math.round(size * layout.line);
+        const radius = lineH * 2;
+
+        roll.geo = {
+            size: size,
+            lineH: lineH,
+            radius: radius,
+            step: 2 * Math.asin(lineH / (2 * radius)),
+            side: layout.side,
+            sx: layout.sideShift || 0
+        };
+
+        // Seen from far off, with no perspective: a near view slants the
+        // letters of the turned rows more the further right they are, like
+        // italics. The turn still squeezes them and side makes them smaller
+        roll.box.style.height = (lineH * 4) + "px";
+
+        for (const el of roll.slots) {
+
+            el.style.top = Math.round(lineH * 1.5) + "px";
+            el.style.height = lineH + "px";
+            el.style.lineHeight = lineH + "px";
+            el.style.fontSize = size + "px";
+            el.style.fontWeight = "400";
+        }
+
+        roll.idx = -2;
+    }
+
+    // The turn between one step and the next, a little more where a new
+    // section of the song starts straight after a line
+    function cylGap(roll, j) {
+
+        const a = roll.steps[j];
+        const b = roll.steps[j + 1];
+        const wide = a && b && a.kind === "line" && b.kind === "line" && b.first;
+
+        return roll.geo.step * (wide ? 1.4 : 1);
+    }
+
+    // How far round step r is from step c, upwards negative
+    function cylAngle(roll, c, r) {
+
+        if (c < 0 || c >= roll.steps.length) {
+            return (r - c) * roll.geo.step;
+        }
+
+        let a = 0;
+
+        for (let j = c; j < r; j++) {
+            a += cylGap(roll, j);
+        }
+
+        for (let j = r; j < c; j++) {
+            a -= cylGap(roll, j);
+        }
+
+        return a;
+    }
+
+    // Whether step r shows when the song is at the view: a break only while
+    // it is the step reached, the line after it once in sight, an empty
+    // step never
+    function cylShown(roll, r, view) {
+
+        const s = roll.steps[r];
+
+        if (!s || view.idx < 0) {
+            return false;
+        }
+
+        if (s.kind === "pause") {
+            return r === view.idx;
+        }
+
+        if (s.kind !== "line") {
+            return false;
+        }
+
+        const at = roll.steps[view.idx];
+
+        return !(r === view.idx + 1 && at && at.kind === "pause" && !view.reveal);
+    }
+
+    // A row's look: turned on the cylinder by its angle, and by how many
+    // rows it is from the sung one smaller towards the sides as side asks,
+    // dimmer and two rows away gone. The extra turn before a new section
+    // only moves a row, so the line after it looks like any other. The
+    // sung line is drawn thicker with an outline of its own color, which
+    // grows and fades smoothly and keeps the row as wide as before, where a
+    // heavier font would jump to it and widen the line
+    function cylPose(roll, angle, off, shown) {
+
+        const g = roll.geo;
+        const k = Math.min(1, Math.abs(off));
+        const far = Math.max(0, Math.min(1, Math.abs(off) - 1));
+        const scale = (1 - (1 - g.side) * k) * (1 - 0.25 * far);
+        const opacity = shown ? (1 - 0.25 * k) * (1 - far) : 0;
+        const c = Math.round(255 - 34 * k);
+        const w = Math.round(g.size * 0.03 * (1 - k) * 100) / 100;
+        const ink = "rgba(" + c + ", " + c + ", " + c + ", " + (1 - k) + ")";
+
+        return {
+            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
+                + (-angle) + "rad) translateZ(" + g.radius + "px) scale(" + scale + ")",
+            opacity: opacity,
+            color: "rgb(" + c + ", " + c + ", " + c + ")",
+            textShadow: w + "px 0 0 " + ink + ", " + (-w) + "px 0 0 " + ink + ", 0 " + w + "px 0 " + ink
+                + ", 0 " + (-w) + "px 0 " + ink + ", 0 1px 3px rgba(0, 0, 0, 0.8)"
+        };
+    }
+
+    // A row's words, or for a break three dots that light up as it goes
+    function cylFill(el, step) {
+
+        if (step && step.kind === "pause") {
+
+            if (el.dataset.dots !== "1") {
+
+                el.textContent = "";
+                el.dataset.dots = "1";
+
+                for (let i = 0; i < 3; i++) {
+
+                    const dot = document.createElement("span");
+
+                    dot.textContent = "\u25CF";
+                    dot.style.display = "inline-block";
+                    dot.style.marginRight = "0.5em";
+                    dot.style.fontSize = "0.7em";
+                    dot.style.opacity = "0.3";
+                    dot.style.transition = "opacity 0.4s ease";
+                    el.appendChild(dot);
+                }
+            }
+
+            return;
+        }
+
+        el.dataset.dots = "";
+        el.textContent = step && step.kind === "line" ? step.text : "";
+    }
+
+    // Light the break's dots as far as it has come, one a quarter through
+    function cylDots(roll, view) {
+
+        const el = roll.slots[2];
+
+        if (el.dataset.dots !== "1") {
+            return;
+        }
+
+        const dots = el.children;
+
+        for (let i = 0; i < dots.length; i++) {
+            dots[i].style.opacity = view.progress >= (i + 1) / 4 ? "1" : "0.3";
+        }
+    }
+
+    function cylStop(el) {
+
+        if (!el.getAnimations) {
+            return;
+        }
+
+        try {
+
+            for (const a of el.getAnimations()) {
+                a.cancel();
+            }
+        } catch (e) {
+            // Nothing running
+        }
+    }
+
+    // Show the steps at the song's place in milliseconds. One step on rolls
+    // the cylinder a step, the line after a break fades in where it waits,
+    // anything else, a seek, a new song or force, puts the rows in place
+    function cylShow(roll, ms, force) {
+
+        if (!roll.geo) {
+            return;
+        }
+
+        const view = cylViewAt(roll.steps, ms);
+        const old = { idx: roll.idx, reveal: roll.reveal };
+
+        if (!force && view.idx === old.idx && view.reveal === old.reveal) {
+
+            cylDots(roll, view);
+            return;
+        }
+
+        const rolled = !force && view.idx === old.idx + 1;
+        const revealed = !force && view.idx === old.idx;
+
+        for (let i = 0; i < 5; i++) {
+
+            const r = view.idx + i - 2;
+            const el = roll.slots[i];
+            const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
+
+            cylStop(el);
+            cylFill(el, roll.steps[r]);
+            el.style.transform = to.transform;
+            el.style.opacity = String(to.opacity);
+            el.style.color = to.color;
+            el.style.textShadow = to.textShadow;
+            el.style.zIndex = i === 2 ? "3" : "2";
+
+            if (!el.animate || (!rolled && !revealed)) {
+                continue;
+            }
+
+            const from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
+
+            if (revealed && from.opacity === to.opacity) {
+                continue;
+            }
+
+            el.animate([from, to], {
+                duration: rolled ? CYL_ROLL_MS : CYL_SHOW_MS,
+                easing: "ease-out"
+            });
+        }
+
+        roll.idx = view.idx;
+        roll.reveal = view.reveal;
+        cylDots(roll, view);
+    }
+    // END SHARED lyrics
 
     // Lyric roll layout, five stacked rows, index 0 exit above through 4 entry
     // below, each with its resting y offset, font size, color and opacity. A one
@@ -30330,6 +30869,17 @@
 
         // Positive shifts the whole lyric block down, negative up
         lyricBox.style.transform = "translateY(" + (settings.lyricShift || 0) + "px)";
+
+        if (lyricCyl) {
+
+            cylLayout(lyricCyl, {
+                size: settings.lyricSize || 18,
+                side: settings.lyricSideMul || 0.8,
+                line: settings.lyricLineMul || 1.5,
+                sideShift: settings.lyricSideShift || 0
+            });
+            lyricCylBox.style.transform = lyricBox.style.transform;
+        }
 
         updateLyricLine(true);
     }
@@ -31785,6 +32335,49 @@
         }
     }
 
+    // The playing song's tempo for the lyrics, 0 when it has none
+    function lyricBpm() {
+
+        const bpm = currentSong ? Number(effectiveBpm(currentSong)) : 0;
+
+        return isFinite(bpm) && bpm > 0 ? bpm : 0;
+    }
+
+    // The lyric rows as shown, each with where it ends, the song's own end
+    // or one worked out from the song's lines and tempo, see cylEnds
+    function lyricRowsWithEnds() {
+
+        const bpm = lyricBpm();
+        const ends = cylEnds(lyricRows, bpm);
+
+        return lyricRows.map(function (row, i) {
+            return { t: row.t, text: lyricShown(row.text), e: ends[i], s: row.s };
+        });
+    }
+
+    // Work the cylinder's steps out again when the song's rows, its tempo
+    // or the ; setting changed. True when they did, the rows are then put
+    // in place rather than rolled
+    function lyricCylSteps() {
+
+        const bpm = lyricBpm();
+        const key = bpm + ":" + (settings.lyricNoSemicolon ? 1 : 0);
+
+        if (lyricCylFor === lyricRows && lyricCylKey === key) {
+            return false;
+        }
+
+        const rows = lyricRowsWithEnds();
+
+        lyricCylFor = lyricRows;
+        lyricCylKey = key;
+        lyricCyl.steps = cylSteps(rows, rows.map(function (r) {
+            return r.e;
+        }), bpm);
+
+        return true;
+    }
+
     // Update the lyric rows to the current playback position. A single line
     // advance rolls, any other change like a jump or a seek just sets in place
     function updateLyricLine(force) {
@@ -31806,14 +32399,32 @@
         if (!active) {
 
             lyricBox.style.display = "none";
+
+            if (lyricCylBox) {
+                lyricCylBox.style.display = "none";
+            }
+
             lyricIdx = -1;
             return;
         }
 
-        lyricBox.style.display = "block";
-
         // The line heard, not the one the song's clock has reached
         const ms = isFinite(audio.currentTime) ? songTimes().at * 1000 : 0;
+
+        if (settings.lyricStyle === "cylinder" && lyricCyl) {
+
+            lyricBox.style.display = "none";
+            lyricCylBox.style.display = "block";
+            lyricIdx = -1;
+            cylShow(lyricCyl, ms, lyricCylSteps() || force);
+            return;
+        }
+
+        if (lyricCylBox) {
+            lyricCylBox.style.display = "none";
+        }
+
+        lyricBox.style.display = "block";
 
         // The rows are sorted, take the last one that has started
         let idx = -1;
@@ -35959,9 +36570,7 @@
             return null;
         }
 
-        return lyricRows.map(function (row) {
-            return { t: row.t, text: lyricShown(row.text) };
-        });
+        return lyricRowsWithEnds();
     }
 
     // How the web view lays its lyric rows out, the phone's five row roll
@@ -35979,7 +36588,9 @@
             sideShift: typeof settings.webLyricSideShift === "number"
                 ? settings.webLyricSideShift
                 : Math.round((settings.lyricSideShift || 0) * size / mobileSize),
-            shift: settings.webLyricShift || 0
+            shift: settings.webLyricShift || 0,
+            style: settings.webLyricStyle || settings.lyricStyle || "flat",
+            bpm: lyricBpm()
         };
     }
 
@@ -42472,9 +43083,16 @@
             lyricBox.appendChild(el);
         }
 
+        // The cylinder, in a box of its own, shown in place of the rows
+        // above when the lyric style asks for it
+        lyricCylBox = document.createElement("div");
+        lyricCylBox.style.cssText = "position:relative;overflow:visible;margin-bottom:20px;display:none";
+        lyricCyl = makeCylRoll(lyricCylBox);
+
         applyLyricLayout();
 
         bottomWrap.appendChild(lyricBox);
+        bottomWrap.appendChild(lyricCylBox);
         bottomWrap.appendChild(playerTitle);
         bottomWrap.appendChild(playerMetaEl);
 
@@ -50144,6 +50762,19 @@
             updateLyricLine(true);
         });
 
+        // The rows as they have been, or on a turning cylinder with breaks
+        const lyricStyleRow = makeDropRow("Lyric style", [
+            { label: "Flat", value: "flat" },
+            { label: "Cylinder", value: "cylinder" }
+        ], function () {
+            return settings.lyricStyle || "flat";
+        }, function (v) {
+
+            settings.lyricStyle = v === "cylinder" ? "cylinder" : "flat";
+            updateLyricLine(true);
+            publishHostSoon();
+        });
+
         const lyricSizeRow = makeStepperRow("Lyric size",
             function () { return settings.lyricSize; },
             function (v) { settings.lyricSize = v; applyLyricLayout(); }, 12, 30);
@@ -50687,6 +51318,7 @@
         mobilePage.appendChild(makeLabel("Cover and lyrics"));
         mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
+        mobilePage.appendChild(withHint(lyricStyleRow, "Flat rolls the lines up as before, the line being sung bigger and bold. Cylinder turns them on a cylinder, every line the same size, the line being sung facing you and drawn thicker. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
         mobilePage.appendChild(lyricSizeRow);
         mobilePage.appendChild(lyricSideRow);
         mobilePage.appendChild(lyricSpaceRow);
@@ -51130,6 +51762,19 @@
                 function () { return hostLyricLayout().sideShift; },
                 function (v) { settings.webLyricSideShift = v; publishHostSoon(); }, -40, 40, 1);
 
+            // Its own lyric style, or the mobile player's
+            const webLyricStyleRow = makeDropRow("Lyric style", [
+                { label: "As the mobile player", value: "" },
+                { label: "Flat", value: "flat" },
+                { label: "Cylinder", value: "cylinder" }
+            ], function () {
+                return settings.webLyricStyle || "";
+            }, function (v) {
+
+                settings.webLyricStyle = v === "flat" || v === "cylinder" ? v : "";
+                publishHostSoon();
+            });
+
             // Up or down from where the lyrics sit, beside the cover and on it
             const webLyricShiftRow = makeStepperRow("Lyric position",
                 function () { return settings.webLyricShift || 0; },
@@ -51317,6 +51962,7 @@
             // The synced lyrics and how they are laid out
             webPage.appendChild(makeLabel("Lyrics"));
             webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
+            webPage.appendChild(withHint(webLyricStyleRow, "Flat or on a turning cylinder, with breaks and sections, as on the mobile player."));
             webPage.appendChild(webLyricSizeRow);
             webPage.appendChild(webLyricSideRow);
             webPage.appendChild(webLyricSpaceRow);
@@ -83483,6 +84129,494 @@
         drawPlayHead(ctx, w, h, headX, dpr, span < 1 && !travel ? waveFootHeight(dpr) : 0, headFill);
     }
 
+    // BEGIN SHARED lyrics
+    // Written by embed-webview.sh from src/shared/lyrics.js. Change that
+    // file and run make embed, never the lines up to END SHARED lyrics
+    // Lyrics on a turning cylinder: the lines of a song, the breaks between
+    // them and the roll that shows them. Shared by the player and the web
+    // view's page, src/shared/lyrics.js, inlined into both by embed-webview.sh
+
+    // From one line's start to the next at least this long is a break
+    const CYL_BREAK_MS = 10000;
+
+    // A line's sung length, per sound, when the song gives nothing to go by
+    const CYL_UNIT_MS = 350;
+
+    // How long a roll and a line coming into sight take
+    const CYL_ROLL_MS = 340;
+    const CYL_SHOW_MS = 600;
+
+    // The sounds in a line, near enough: the vowel groups, or for a script
+    // with no Latin vowels, Thai or Chinese, one for every two letters
+    function cylUnits(text) {
+
+        const s = String(text || "").toLowerCase();
+        const groups = s.match(/[aeiouy\u00e0-\u00f6\u00f8-\u00ff]+/g);
+
+        if (groups && groups.length > 0) {
+            return groups.length;
+        }
+
+        return Math.max(1, Math.round(s.replace(/\s+/g, "").length / 2));
+    }
+
+    // The middle value, 0 for none
+    function cylMedian(list) {
+
+        if (list.length === 0) {
+            return 0;
+        }
+
+        const s = list.slice().sort(function (a, b) {
+            return a - b;
+        });
+
+        return s[Math.floor(s.length / 2)];
+    }
+
+    // One bar in milliseconds at the tempo, 0 without a tempo to trust
+    function cylBar(bpm) {
+
+        return bpm >= 50 && bpm <= 220 ? 240000 / bpm : 0;
+    }
+
+    // An end the song gave for a row that makes sense, else 0
+    function cylRealEnd(rows, i) {
+
+        const r = rows[i];
+        const next = rows[i + 1];
+        const e = r.e;
+
+        if (typeof e !== "number" || !isFinite(e) || e <= r.t || e - r.t > 15000) {
+            return 0;
+        }
+
+        if (next && e > next.t + 1000) {
+            return 0;
+        }
+
+        return e;
+    }
+
+    // When each line ends, the song's own end where it gives one, else
+    // worked out: the time per sound, from the lines the song ends or from
+    // lines with the next one close after, in the line's own section when
+    // it has at least three such lines, times the line's sounds, rounded up
+    // to whole bars at the tempo, as sung lines fill whole bars
+    function cylEnds(rows, bpm) {
+
+        const n = rows.length;
+        const ends = [];
+        const songRates = [];
+        const secRates = {};
+        const bar = cylBar(bpm);
+
+        for (let i = 0; i < n; i++) {
+
+            const r = rows[i];
+            const next = rows[i + 1];
+            const real = cylRealEnd(rows, i);
+            let span = 0;
+
+            if (real) {
+                span = real - r.t;
+            } else if (next && next.t - r.t > 300 && next.t - r.t < CYL_BREAK_MS) {
+                span = next.t - r.t;
+            }
+
+            if (span > 0) {
+
+                const rate = span / cylUnits(r.text);
+                const sec = String(r.s);
+
+                songRates.push(rate);
+                secRates[sec] = secRates[sec] || [];
+                secRates[sec].push(rate);
+            }
+        }
+
+        const songRate = cylMedian(songRates) || CYL_UNIT_MS;
+
+        for (let i = 0; i < n; i++) {
+
+            const r = rows[i];
+            const next = rows[i + 1];
+            const real = cylRealEnd(rows, i);
+
+            if (real) {
+
+                ends.push(real);
+                continue;
+            }
+
+            const sec = secRates[String(r.s)] || [];
+            const rate = sec.length >= 3 ? cylMedian(sec) : songRate;
+            let len = cylUnits(r.text) * rate;
+
+            // A little over a whole bar still counts as that bar
+            if (bar) {
+                len = Math.max(1, Math.ceil(len / bar - 0.25)) * bar;
+            }
+
+            len = Math.max(1500, Math.min(8000, len));
+
+            if (next) {
+                len = Math.min(len, Math.max(300, next.t - r.t));
+            }
+
+            ends.push(Math.round(r.t + len));
+        }
+
+        return ends;
+    }
+
+    // What the roll steps through: the lines, a break where one line's
+    // start is far from the next one's, from the first line's end until the
+    // next starts, and an empty step after the last line. A long wait before
+    // the first line is a break too. The line after a break comes in sight
+    // two bars ahead, 2 to 4 seconds, 3 without a tempo
+    function cylSteps(rows, ends, bpm) {
+
+        const steps = [];
+        const bar = cylBar(bpm);
+        const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
+
+        if (rows.length === 0) {
+            return steps;
+        }
+
+        if (rows[0].t >= CYL_BREAK_MS) {
+            steps.push({ kind: "pause", t: 0, until: rows[0].t, show: rows[0].t - lead });
+        } else {
+            steps.push({ kind: "blank", t: 0 });
+        }
+
+        for (let i = 0; i < rows.length; i++) {
+
+            const r = rows[i];
+            const next = rows[i + 1];
+
+            steps.push({
+                kind: "line",
+                t: r.t,
+                text: r.text,
+                first: i > 0 && r.s !== undefined && r.s !== rows[i - 1].s
+            });
+
+            if (!next) {
+
+                steps.push({ kind: "blank", t: Math.max(r.t + 300, ends[i]) });
+                continue;
+            }
+
+            if (next.t - r.t >= CYL_BREAK_MS) {
+
+                const at = Math.max(r.t + 500, Math.min(ends[i], next.t - 1500));
+
+                steps.push({ kind: "pause", t: at, until: next.t, show: Math.max(at, next.t - lead) });
+            }
+        }
+
+        return steps;
+    }
+
+    // Where the song is on the steps: the step reached, whether the line
+    // after a break is in sight yet, and how far through a break it is
+    function cylViewAt(steps, ms) {
+
+        let idx = 0;
+
+        for (let i = 0; i < steps.length; i++) {
+
+            if (steps[i].t <= ms) {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+
+        const s = steps[idx];
+
+        if (!s || s.kind !== "pause") {
+            return { idx: idx, reveal: true, progress: 0 };
+        }
+
+        return {
+            idx: idx,
+            reveal: ms >= s.show,
+            progress: Math.max(0, Math.min(1, (ms - s.t) / Math.max(1, s.until - s.t)))
+        };
+    }
+
+    // Five rows on a cylinder seen from the side: the one leaving over the
+    // top, the line before, the line being sung facing straight out, the
+    // next line and the one coming up from below. box is a positioned
+    // element of its own for them
+    function makeCylRoll(box) {
+
+        const slots = [];
+
+        for (let i = 0; i < 5; i++) {
+
+            const el = document.createElement("div");
+
+            el.style.position = "absolute";
+            el.style.left = "0";
+            el.style.right = "0";
+            el.style.opacity = "0";
+            el.style.whiteSpace = "nowrap";
+            el.style.overflow = "hidden";
+            el.style.textOverflow = "ellipsis";
+            el.style.transformOrigin = "0 50%";
+            el.style.backfaceVisibility = "hidden";
+            el.style.willChange = "transform, opacity";
+            box.appendChild(el);
+            slots.push(el);
+        }
+
+        return { box: box, slots: slots, steps: [], geo: null, idx: -2, reveal: true };
+    }
+
+    // Size the cylinder: size is the sung line's text, line the spacing as
+    // a share of it, side how big the lines before and after are against
+    // it, sideShift how far right of the sung line they sit. Every row has
+    // the same text size and weight, the turn makes the others smaller, so
+    // the sung line is never bigger than the rows are wide
+    function cylLayout(roll, layout) {
+
+        const size = Math.max(10, layout.size);
+        const lineH = Math.round(size * layout.line);
+        const radius = lineH * 2;
+
+        roll.geo = {
+            size: size,
+            lineH: lineH,
+            radius: radius,
+            step: 2 * Math.asin(lineH / (2 * radius)),
+            side: layout.side,
+            sx: layout.sideShift || 0
+        };
+
+        // Seen from far off, with no perspective: a near view slants the
+        // letters of the turned rows more the further right they are, like
+        // italics. The turn still squeezes them and side makes them smaller
+        roll.box.style.height = (lineH * 4) + "px";
+
+        for (const el of roll.slots) {
+
+            el.style.top = Math.round(lineH * 1.5) + "px";
+            el.style.height = lineH + "px";
+            el.style.lineHeight = lineH + "px";
+            el.style.fontSize = size + "px";
+            el.style.fontWeight = "400";
+        }
+
+        roll.idx = -2;
+    }
+
+    // The turn between one step and the next, a little more where a new
+    // section of the song starts straight after a line
+    function cylGap(roll, j) {
+
+        const a = roll.steps[j];
+        const b = roll.steps[j + 1];
+        const wide = a && b && a.kind === "line" && b.kind === "line" && b.first;
+
+        return roll.geo.step * (wide ? 1.4 : 1);
+    }
+
+    // How far round step r is from step c, upwards negative
+    function cylAngle(roll, c, r) {
+
+        if (c < 0 || c >= roll.steps.length) {
+            return (r - c) * roll.geo.step;
+        }
+
+        let a = 0;
+
+        for (let j = c; j < r; j++) {
+            a += cylGap(roll, j);
+        }
+
+        for (let j = r; j < c; j++) {
+            a -= cylGap(roll, j);
+        }
+
+        return a;
+    }
+
+    // Whether step r shows when the song is at the view: a break only while
+    // it is the step reached, the line after it once in sight, an empty
+    // step never
+    function cylShown(roll, r, view) {
+
+        const s = roll.steps[r];
+
+        if (!s || view.idx < 0) {
+            return false;
+        }
+
+        if (s.kind === "pause") {
+            return r === view.idx;
+        }
+
+        if (s.kind !== "line") {
+            return false;
+        }
+
+        const at = roll.steps[view.idx];
+
+        return !(r === view.idx + 1 && at && at.kind === "pause" && !view.reveal);
+    }
+
+    // A row's look: turned on the cylinder by its angle, and by how many
+    // rows it is from the sung one smaller towards the sides as side asks,
+    // dimmer and two rows away gone. The extra turn before a new section
+    // only moves a row, so the line after it looks like any other. The
+    // sung line is drawn thicker with an outline of its own color, which
+    // grows and fades smoothly and keeps the row as wide as before, where a
+    // heavier font would jump to it and widen the line
+    function cylPose(roll, angle, off, shown) {
+
+        const g = roll.geo;
+        const k = Math.min(1, Math.abs(off));
+        const far = Math.max(0, Math.min(1, Math.abs(off) - 1));
+        const scale = (1 - (1 - g.side) * k) * (1 - 0.25 * far);
+        const opacity = shown ? (1 - 0.25 * k) * (1 - far) : 0;
+        const c = Math.round(255 - 34 * k);
+        const w = Math.round(g.size * 0.03 * (1 - k) * 100) / 100;
+        const ink = "rgba(" + c + ", " + c + ", " + c + ", " + (1 - k) + ")";
+
+        return {
+            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
+                + (-angle) + "rad) translateZ(" + g.radius + "px) scale(" + scale + ")",
+            opacity: opacity,
+            color: "rgb(" + c + ", " + c + ", " + c + ")",
+            textShadow: w + "px 0 0 " + ink + ", " + (-w) + "px 0 0 " + ink + ", 0 " + w + "px 0 " + ink
+                + ", 0 " + (-w) + "px 0 " + ink + ", 0 1px 3px rgba(0, 0, 0, 0.8)"
+        };
+    }
+
+    // A row's words, or for a break three dots that light up as it goes
+    function cylFill(el, step) {
+
+        if (step && step.kind === "pause") {
+
+            if (el.dataset.dots !== "1") {
+
+                el.textContent = "";
+                el.dataset.dots = "1";
+
+                for (let i = 0; i < 3; i++) {
+
+                    const dot = document.createElement("span");
+
+                    dot.textContent = "\u25CF";
+                    dot.style.display = "inline-block";
+                    dot.style.marginRight = "0.5em";
+                    dot.style.fontSize = "0.7em";
+                    dot.style.opacity = "0.3";
+                    dot.style.transition = "opacity 0.4s ease";
+                    el.appendChild(dot);
+                }
+            }
+
+            return;
+        }
+
+        el.dataset.dots = "";
+        el.textContent = step && step.kind === "line" ? step.text : "";
+    }
+
+    // Light the break's dots as far as it has come, one a quarter through
+    function cylDots(roll, view) {
+
+        const el = roll.slots[2];
+
+        if (el.dataset.dots !== "1") {
+            return;
+        }
+
+        const dots = el.children;
+
+        for (let i = 0; i < dots.length; i++) {
+            dots[i].style.opacity = view.progress >= (i + 1) / 4 ? "1" : "0.3";
+        }
+    }
+
+    function cylStop(el) {
+
+        if (!el.getAnimations) {
+            return;
+        }
+
+        try {
+
+            for (const a of el.getAnimations()) {
+                a.cancel();
+            }
+        } catch (e) {
+            // Nothing running
+        }
+    }
+
+    // Show the steps at the song's place in milliseconds. One step on rolls
+    // the cylinder a step, the line after a break fades in where it waits,
+    // anything else, a seek, a new song or force, puts the rows in place
+    function cylShow(roll, ms, force) {
+
+        if (!roll.geo) {
+            return;
+        }
+
+        const view = cylViewAt(roll.steps, ms);
+        const old = { idx: roll.idx, reveal: roll.reveal };
+
+        if (!force && view.idx === old.idx && view.reveal === old.reveal) {
+
+            cylDots(roll, view);
+            return;
+        }
+
+        const rolled = !force && view.idx === old.idx + 1;
+        const revealed = !force && view.idx === old.idx;
+
+        for (let i = 0; i < 5; i++) {
+
+            const r = view.idx + i - 2;
+            const el = roll.slots[i];
+            const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
+
+            cylStop(el);
+            cylFill(el, roll.steps[r]);
+            el.style.transform = to.transform;
+            el.style.opacity = String(to.opacity);
+            el.style.color = to.color;
+            el.style.textShadow = to.textShadow;
+            el.style.zIndex = i === 2 ? "3" : "2";
+
+            if (!el.animate || (!rolled && !revealed)) {
+                continue;
+            }
+
+            const from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
+
+            if (revealed && from.opacity === to.opacity) {
+                continue;
+            }
+
+            el.animate([from, to], {
+                duration: rolled ? CYL_ROLL_MS : CYL_SHOW_MS,
+                easing: "ease-out"
+            });
+        }
+
+        roll.idx = view.idx;
+        roll.reveal = view.reveal;
+        cylDots(roll, view);
+    }
+    // END SHARED lyrics
+
     // The synced lyrics, rolling exactly like the phone's. Five rows, each
     // with its own place, size, color and opacity: half a line above that
     // has faded out, the line before, the line being sung, the line after,
@@ -83507,7 +84641,36 @@
             slots.push(el);
         }
 
-        return { roll: roll, slots: slots, geo: null, key: "", idx: -2 };
+        // The cylinder's rows in the same place, shown instead of these
+        // with the cylinder lyric style
+        const cyl = makeCylRoll(roll);
+
+        for (const el of cyl.slots) {
+            el.style.display = "none";
+        }
+
+        return { roll: roll, slots: slots, geo: null, key: "", idx: -2, cyl: cyl, cylFor: null, cylBpm: -1, cylOn: false };
+    }
+
+    // Show the flat rows or the cylinder's
+    function lyricStyleOn(box, cyl) {
+
+        if (box.cylOn === cyl) {
+            return;
+        }
+
+        box.cylOn = cyl;
+
+        for (const el of box.slots) {
+            el.style.display = cyl ? "none" : "";
+        }
+
+        for (const el of box.cyl.slots) {
+            el.style.display = cyl ? "" : "none";
+        }
+
+        box.idx = -2;
+        box.cyl.idx = -2;
     }
 
     // Where the five rows rest, the phone's computeLyricSlots
@@ -83659,7 +84822,9 @@
             side: typeof l.side === "number" ? l.side : 0.8,
             line: typeof l.line === "number" ? l.line : 1.6,
             sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale),
-            shift: Math.round((typeof l.shift === "number" ? l.shift : 60) * scale)
+            shift: Math.round((typeof l.shift === "number" ? l.shift : 60) * scale),
+            style: l.style === "cylinder" ? "cylinder" : "flat",
+            bpm: typeof l.bpm === "number" ? l.bpm : 0
         };
     }
 
@@ -83691,6 +84856,7 @@
 
                 if ($("lyrics").style.visibility !== "hidden") {
 
+                    lyricStyleOn(box, false);
                     setLyricRows(box, ["", "", "", "", ""]);
                     $("lyrics").style.visibility = "hidden";
                 }
@@ -83735,16 +84901,41 @@
         }
 
         const key = [layout.size, layout.side, layout.line, layout.sideShift, layout.shift].join(",");
+        const cyl = layout.style === "cylinder";
 
         other.style.display = "none";
         el.style.display = "block";
         el.style.visibility = "visible";
 
-        if (!box.geo || key !== box.key) {
+        // The rows laid out without lyrics beside the cover leave the
+        // cylinder still to be laid out
+        if (!box.geo || !box.cyl.geo || key !== box.key) {
 
             box.key = key;
             lyricGeometry(box, layout);
+            cylLayout(box.cyl, layout);
             box.idx = -2;
+        }
+
+        lyricStyleOn(box, cyl);
+
+        // On the cylinder, with the breaks and sections worked out again
+        // for a new song or tempo. The rows carry the ends the phone worked
+        // out, an older phone's do not and they are worked out here
+        if (cyl) {
+
+            let fresh = !shown;
+
+            if (box.cylFor !== rows || box.cylBpm !== layout.bpm) {
+
+                box.cylFor = rows;
+                box.cylBpm = layout.bpm;
+                box.cyl.steps = cylSteps(rows, cylEnds(rows, layout.bpm), layout.bpm);
+                fresh = true;
+            }
+
+            cylShow(box.cyl, ms, fresh);
+            return;
         }
 
         if (idx === box.idx && shown) {
