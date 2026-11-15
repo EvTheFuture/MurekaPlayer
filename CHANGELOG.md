@@ -1153,6 +1153,14 @@ In development.
     device.
   - The room and its key stay on the device, a settings backup leaves them
     out.
+- **Buttons that take something away are ringed in red.** Remove on a
+  button group, Remove password, Forget pairing, Clear debug log, Clear
+  song cache, Clear cover cache, Dissolve sets with only one song, Delete
+  profile, Delete playlist, Remove in the picked songs' bar, the cross on
+  a saved creator and Clear among Load and Rescan: red words in a red
+  ring, in the app and in the web view's copy of the settings, where
+  Clear debug log and Forget were filled red. The questions after Remove,
+  Forget pairing and Clear song cache answer in red too.
 - **Play head zoomed in: a mode that runs across.** "Moves along the song"
   kept the play head as far across the view as the song had come, so in
   the middle of a song it sat near the middle and crept only slowly, and
@@ -1179,18 +1187,6 @@ In development.
     is a remix of a song not known.
   - What Restore gave, and the fields that could name a remix, go to the
     debug log.
-- **Drum and bass at its own tempo, not half.** In drum and bass the kick
-  and the snare take turns, so folded at half the tempo the place
-  halfway is the stronger one in the deep band or the middle one, though
-  not in all the sound. That now doubles the tempo past 160 BPM too,
-  with the starts halfway at least 70% as strong. A song at 175 BPM came
-  out at 87: its deep band was 83% as strong halfway where 85% was
-  asked, its middle band, the snare, 111%. Now 174, as it measures over
-  the whole song. Hip hop at 87, a song at 100 with chords on every
-  eighth and funk at 95 with the bass on the off beats stay as they
-  were, every band weaker halfway. Tempos are worked out again as songs
-  come up, and the debug log and Stats for nerds say when a tempo was
-  doubled this way.
 - **Create song from this keeps the remix.** On a song made as a remix
   the form got its title, lyrics and style but not the song it remixed, so
   the new song was no remix. Mureka keeps no record of what a remix
@@ -1212,57 +1208,6 @@ In development.
   - Kept in this browser's storage, the latest ones up to 400 kB.
   - An uploaded song named in a song's detail is still made ready again,
     and the fields that could name it still go to the debug log.
-- **Drum and bass at its own tempo, not half.** In drum and bass the kick
-  and the snare take turns, so folded at half the tempo the place
-  halfway is the stronger one in the deep band or the middle one, though
-  not in all the sound. That now doubles the tempo past 160 BPM too,
-  with the starts halfway at least 70% as strong. A song at 175 BPM came
-  out at 87: its deep band was 83% as strong halfway where 85% was
-  asked, its middle band, the snare, 111%. Now 174, as it measures over
-  the whole song. Hip hop at 87, a song at 100 with chords on every
-  eighth and funk at 95 with the bass on the off beats stay as they
-  were, every band weaker halfway. Tempos are worked out again as songs
-  come up, and the debug log and Stats for nerds say when a tempo was
-  doubled this way.
-- **Create song from this keeps the remix.** On a song made as a remix
-  the form got its title, lyrics and style but not the song it remixed, so
-  the new song was no remix. What it remixed now comes along, an uploaded
-  song or a song on Mureka:
-  - The remix the song kept is used as it is, whichever kind it was.
-  - Without one, an uploaded song is made ready to remix again by Mureka,
-    by its id when the song's detail gives one, else found among the
-    uploaded songs by its title.
-  - The note under the form says which song is remixed, or that it could
-    not be found.
-  - Every field of the song's detail that could name it goes to the debug
-    log, as Mureka's names for them are not known for sure, and the
-    Mureka requests log keeps the whole of resource requests, so remixing
-    a song on Mureka's own page shows how it is done.
-  - Mureka's song detail turned out to name no remix field, so the
-    prompt the song was made with, its control types, album and
-    description now go to the debug log whole, and the prompt is searched
-    too.
-- **Drum and bass at its own tempo, not half.** In drum and bass the kick
-  and the snare take turns, so folded at half the tempo the place
-  halfway is the stronger one in the deep band or the middle one, though
-  not in all the sound. That now doubles the tempo past 160 BPM too,
-  with the starts halfway at least 70% as strong. A song at 175 BPM came
-  out at 87: its deep band was 83% as strong halfway where 85% was
-  asked, its middle band, the snare, 111%. Now 174, as it measures over
-  the whole song. Hip hop at 87, a song at 100 with chords on every
-  eighth and funk at 95 with the bass on the off beats stay as they
-  were, every band weaker halfway. Tempos are worked out again as songs
-  come up, and the debug log and Stats for nerds say when a tempo was
-  doubled this way.
-- **Create song from this keeps the remix.** On a song made as a remix
-  the form got its title, lyrics and style but not the uploaded song it
-  remixed, so the new song was no remix. The uploaded song now comes
-  along, made ready to remix again by Mureka: by its id when the song's
-  detail gives one, else found among the uploaded songs by its title, else
-  the remix the song kept is used as it is. The note under the form says
-  which song is remixed, or that it could not be found and can be picked
-  under Remix. Every field of the song's detail that could name it goes to
-  the debug log, as Mureka's names for them are not known for sure.
 - **Drum and bass at its own tempo, also when Mureka says half.** With
   Mureka's tempo near the one first found, the beat was kept, so a drum
   and bass song Mureka gives 87 stayed at 87. Kick and snare taking turns

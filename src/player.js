@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.135";
+    const VERSION = "2.0.1.136";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10778,7 +10778,7 @@
             finishGone(ask.n, true);
         }, function () {
             finishGone(ask.n, false);
-        });
+        }, true);
         publishHostSoon();
     }
 
@@ -26186,7 +26186,7 @@
             askWebPassword(paint);
         });
 
-        const offBtn = makeButton("Remove password", "#333", "#fff", function () {
+        const offBtn = makeDangerButton("Remove password", function () {
 
             askYesNo("Remove the password?", "The web view opens again for anyone on the hotspot or an allowed Wi-Fi.",
                 "Remove", function () {
@@ -42020,7 +42020,7 @@
         rescanButton.title = "Full refresh, page the whole library and update publish"
             + " dates and likes in place, no need to Clear first";
 
-        const clearButton = makeActionButton(iconClear(), "Clear", "#444", "#fff", clearCache);
+        const clearButton = markDanger(makeActionButton(iconClear(), "Clear", "#444", "#ff8a8a", clearCache));
 
         rowLibrary.appendChild(loadButton);
         rowLibrary.appendChild(rescanButton);
@@ -45233,6 +45233,21 @@
         return b;
     }
 
+    // A button that takes something away, removes, deletes, forgets or
+    // clears: red words in a red ring, the same in the web view's copy
+    function markDanger(b) {
+
+        b.style.color = "#ff8a8a";
+        b.style.boxShadow = CTRL_RING + DANGER;
+        b.dataset.hostDanger = "1";
+
+        return b;
+    }
+
+    function makeDangerButton(label, handler) {
+        return markDanger(makeButton(label, "#333", "#ff8a8a", handler));
+    }
+
     // Helper that builds an icon transport button wired to a handler
     // The content may be a text glyph or an SVG node
     function makeIconButton(content, title, handler) {
@@ -46339,7 +46354,7 @@
         listBtn.style.flex = "0 0 auto";
         selBarEl.appendChild(listBtn);
 
-        selOutBtn = makeButton("Remove", "#333", STAR_GOLD, function () {
+        selOutBtn = makeDangerButton("Remove", function () {
 
             const pl = openEditablePlaylist();
 
@@ -48864,13 +48879,13 @@
             host.hotspotPair();
             showToast("Open Pair device with pairing code, then type the code in the player's notification", true);
         });
-        const forgetBtn = makeButton("Forget pairing", "#333", "#fff", function () {
+        const forgetBtn = makeDangerButton("Forget pairing", function () {
 
             askYesNo("Forget the pairing?", "The player can then not start its helper until it is paired with wireless debugging again. Remove it from the paired devices under Wireless debugging as well.", "Forget", function () {
 
                 host.hotspotUnpair();
                 setTimeout(paintStatus, 300);
-            });
+            }, null, true);
         });
         const startBtn = makeButton("Start the helper", "#333", "#fff", function () {
             startHotspotHelper(true);
@@ -49902,19 +49917,18 @@
 
         // Beside it, starting the log again. From the web view's copy of the
         // settings too, where copying has no clipboard to go to
-        const clearLogBtn = makeButton("Clear debug log", "#b03a3a", "#fff", function (ev) {
+        const clearLogBtn = makeDangerButton("Clear debug log", function (ev) {
 
             clearDebugLog();
             buttonDone(ev.currentTarget, "Cleared", true);
         });
         const logRow = document.createElement("div");
 
-        // Copy in a cyan ring, Clear in red, side by side at the same width
+        // Copy in a cyan ring, Clear in a red one, side by side at the same width
         logRow.style.cssText = "display:flex;align-items:stretch;gap:8px";
         logRow.dataset.hostEven = "1";
         copyLogBtn.style.boxShadow = "inset 0 0 0 2px " + ACCENT;
         copyLogBtn.dataset.hostRing = "1";
-        clearLogBtn.dataset.hostDanger = "1";
 
         for (const b of [copyLogBtn, clearLogBtn]) {
 
@@ -49975,7 +49989,7 @@
             cacheAll();
         });
 
-        const songClearBtn = makeButton("Clear song cache", "#333", "#fff", function () {
+        const songClearBtn = makeDangerButton("Clear song cache", function () {
 
             if (songClearing) {
                 return;
@@ -49989,7 +50003,7 @@
 
             askYesNo("Clear the song cache?", "Every song stored on this device is removed. They are fetched from Mureka again when they play, the library itself stays.", "Clear", function () {
                 clearSongCache();
-            });
+            }, null, true);
         });
 
         songButtonsRow.appendChild(songCacheAll);
@@ -50779,7 +50793,7 @@
 
                 groupsBox.appendChild(withHint(showRow, "The button the group shows in the bar, with what that button shows."));
 
-                remove = makeButton("Remove " + groupLabel(g.id), "#333", "#fff", function () {
+                remove = makeDangerButton("Remove " + groupLabel(g.id), function () {
 
                     settings.ctlGroups = ctlGroups().filter(function (x) {
                         return x.id !== g.id;
@@ -51865,7 +51879,7 @@
                 coverStatusEl.lastChild.style.borderBottom = "none";
             };
 
-            const clearBtn = makeButton("Clear cover cache", "#333", "#fff", function () {
+            const clearBtn = makeDangerButton("Clear cover cache", function () {
 
                 if (coverClearing) {
                     return;
@@ -52276,7 +52290,7 @@
             setView("sets");
         });
 
-        const singleSetsBtn = makeButton("Dissolve sets with only one song", "#333", "#fff", function () {
+        const singleSetsBtn = makeDangerButton("Dissolve sets with only one song", function () {
 
             const found = singleSets();
 
@@ -52896,7 +52910,7 @@
                 const said = makeHint("");
                 const buttons = document.createElement("div");
                 const forgetRow = document.createElement("div");
-                const forget = makeButton("Forget", "#b03a3a", "#fff", function () {
+                const forget = makeDangerButton("Forget", function () {
 
                     set("gaps", {});
                     set("delayMs", -1);
@@ -52984,7 +52998,6 @@
                 buttons.style.cssText = "display:flex;align-items:stretch;gap:8px";
                 buttons.dataset.hostEven = "1";
                 forgetRow.style.cssText = "display:none";
-                forget.dataset.hostDanger = "1";
                 train.dataset.hostRing = "1";
                 train.style.boxShadow = "inset 0 0 0 2px " + ACCENT;
 
@@ -53541,7 +53554,7 @@
                 soundChanged();
                 openSoundEdit(copy.id);
             }));
-            buttons.appendChild(makeButton("Delete profile", "#333", "#fff", function () {
+            buttons.appendChild(makeDangerButton("Delete profile", function () {
 
                 const all = sound().profiles;
 
@@ -67258,7 +67271,7 @@
         playlistsEditEl.appendChild(covers);
 
         const armed = playlistDeleteArmed === String(pl.playlist_id);
-        const del = makeButton(armed ? "Tap again to delete " + pl.name : "Delete playlist", armed ? DANGER : "#3a2626", armed ? "#000" : "#ff8a8a", function () {
+        const del = makeButton(armed ? "Tap again to delete " + pl.name : "Delete playlist", armed ? DANGER : "#333", armed ? "#000" : "#ff8a8a", function () {
 
             if (!armed) {
 
@@ -67279,6 +67292,13 @@
             clearTimeout(playlistDeleteTimer);
             deletePlaylist(pl);
         });
+
+        // In a red ring, filled red once it asks to be tapped again
+        if (armed) {
+            del.dataset.hostDanger = "1";
+        } else {
+            markDanger(del);
+        }
 
         playlistsEditEl.appendChild(del);
     }
@@ -69293,7 +69313,7 @@
 
         if (removable) {
 
-            const removeBtn = makeButton("\u2715", "#444", "#fff", function () {
+            const removeBtn = makeDangerButton("\u2715", function () {
                 removeSavedCreator(creator.user_id);
                 renderCreators();
             });
@@ -74993,11 +75013,10 @@
         box-shadow: inset 0 0 0 2px var(--accent);
     }
 
-    /* A button that takes something away, in red */
+    /* A button that takes something away, ringed in red */
     .pBtn.danger {
-        background: #b03a3a;
-        border-color: #b03a3a;
-        color: #fff;
+        color: #ff8a8a;
+        box-shadow: inset 0 0 0 2px #ff6b6b;
     }
 
     .pBtn.on,
@@ -79830,7 +79849,7 @@
                     });
             });
 
-            row("Remove the password", "Remove", "", askRemovePassword);
+            row("Remove the password", "Remove", "danger", askRemovePassword);
         }
 
         hint.className = "pText small";

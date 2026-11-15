@@ -4553,11 +4553,10 @@
         box-shadow: inset 0 0 0 2px var(--accent);
     }
 
-    /* A button that takes something away, in red */
+    /* A button that takes something away, ringed in red */
     .pBtn.danger {
-        background: #b03a3a;
-        border-color: #b03a3a;
-        color: #fff;
+        color: #ff8a8a;
+        box-shadow: inset 0 0 0 2px #ff6b6b;
     }
 
     .pBtn.on,
@@ -9390,7 +9389,7 @@
                     });
             });
 
-            row("Remove the password", "Remove", "", askRemovePassword);
+            row("Remove the password", "Remove", "danger", askRemovePassword);
         }
 
         hint.className = "pText small";
