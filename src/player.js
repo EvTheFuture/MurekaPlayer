@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.132";
+    const VERSION = "2.0.1.133";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -27611,7 +27611,11 @@
 
         const base = which === "webControlOrder" || which === "web" ? WEB_CONTROL_NAMES : CONTROL_NAMES;
 
-        return base.concat(ctlGroups().map(function (g) {
+        // Listening together is the app's own, a button of its bar only,
+        // in no group, as the web view has none
+        const own = base === CONTROL_NAMES && syncAvailable() ? ["together"] : [];
+
+        return base.concat(own, ctlGroups().map(function (g) {
             return g.id;
         }));
     }
@@ -27783,6 +27787,10 @@
 
         if (name === "toplaylist") {
             return iconPlaylistAdd();
+        }
+
+        if (name === "together") {
+            return iconTogether();
         }
 
         if (name === "playlists") {
@@ -38994,6 +39002,15 @@
             }
         }
 
+        const ctl = controlButtons ? controlButtons.together : null;
+
+        if (ctl) {
+
+            ctl.title = syncFollowing ? "Listening along with " + syncFollowing.name
+                : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together";
+            paintCtrl(ctl, syncFollowing || settings.syncShare === true ? "fill" : "plain");
+        }
+
         if (syncHeadBtn) {
 
             const on = syncAvailable() && syncRelayOk(syncRelay());
@@ -42756,6 +42773,11 @@
             create: makeIconButton(iconCreate(), "Create songs", openCreate)
         };
 
+        // Listening together on or off, in the app
+        if (syncAvailable()) {
+            controlButtons.together = makeIconButton(iconTogether(), "Listening together", openSyncMenu);
+        }
+
         updateFeedButton();
 
         applyControlOrder();
@@ -42763,6 +42785,7 @@
         updateVocalsCtrlButton();
         updateSetsCtrlButton();
         updateNightCtrlButton();
+        syncPaint();
         updateRateButton();
         watchBluetoothSound();
 
@@ -78297,6 +78320,12 @@
             ["circle", { cx: "8.5", cy: "8.5", r: "1.5" }],
             ["polyline", { points: "21 15 16 10 5 21" }]
         ],
+        together: [
+            ["circle", { cx: "9", cy: "8", r: "3.5" }],
+            ["path", { d: "M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" }],
+            ["circle", { cx: "17", cy: "9", r: "2.5" }],
+            ["path", { d: "M16.5 14.2c2.8.2 5 2.2 5 5.3" }]
+        ],
         scissors: [
             ["circle", { cx: "6", cy: "6", r: "3" }],
             ["circle", { cx: "6", cy: "18", r: "3" }],
@@ -78329,6 +78358,12 @@
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
     const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "songs", "minilist"];
+
+    // Buttons of the phone's own bar only, none here, as its editor shows
+    // them: Listening together is the app's
+    const PHONE_CONTROLS = {
+        together: { label: "Together", icon: "together" }
+    };
 
     function icon(name) {
 
@@ -90182,7 +90217,8 @@
             const grp = (node.groups || []).find(function (g) {
                 return g.id === name;
             });
-            const def = CONTROLS[name] || (grp ? { label: grp.label, icon: CONTROLS[grp.show] ? CONTROLS[grp.show].icon : "sets" } : { label: name, icon: "check" });
+            const def = CONTROLS[name] || PHONE_CONTROLS[name]
+                || (grp ? { label: grp.label, icon: CONTROLS[grp.show] ? CONTROLS[grp.show].icon : "sets" } : { label: name, icon: "check" });
             const chip = document.createElement("button");
             const text = document.createElement("span");
             let start = null;

@@ -1117,10 +1117,11 @@ In development.
     it to come up) or on one address (`-listen`). Every
     player only connects out to it, nothing connects to a player and its
     web view stays closed to everyone else.
-  - A button in the header turns it on or off in a tap: share what plays
-    here, listen along with a player sharing, stop, or who controls. Lit
-    while sharing or listening along, shown in the app once the relay is
-    set.
+  - A button turns it on or off in a tap: share what plays here, listen
+    along with a player sharing, stop, or who controls. In the header once
+    the relay is set, and as Together among the control buttons, to put in
+    the bar or a spare place in Settings > Mobile player > Control buttons.
+    Lit while sharing or listening along.
   - Settings > Listening together: the relay's address, the name shown,
     Share what plays here (with how many listen along), Those listening
     along control too (on by default), Listen along, Timing and In the
