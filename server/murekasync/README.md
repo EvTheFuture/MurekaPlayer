@@ -22,14 +22,19 @@ can be built on a workstation and the one file copied over. On the server:
 ```sh
 install -m 755 murekasync /usr/local/bin/murekasync
 install -m 755 murekasync.initd /etc/init.d/murekasync
-echo 'MUREKASYNC_LISTEN="10.0.0.1:8095"' > /etc/conf.d/murekasync
+printf 'MUREKASYNC_INTERFACE="wg0"\nMUREKASYNC_PORT="8095"\n' > /etc/conf.d/murekasync
 rc-update add murekasync default
 rc-service murekasync start
 ```
 
-Use the server's own VPN address in `MUREKASYNC_LISTEN`, so it is not
-reachable from the internet, and let the firewall pass that port from the
+It listens on the addresses of the VPN interface only (`-interface wg0
+-port 8095`), so it is not reachable from the internet, and waits up to two
+minutes (`-wait`) for the interface to come up and get an address. One
+address instead: `MUREKASYNC_LISTEN="10.0.0.1:8095"` (`-listen`), with
+`MUREKASYNC_INTERFACE` left out. Let the firewall pass the port from the
 VPN peers that may listen along.
+
+Building it on Ubuntu needs Go 1.21 or newer: `sudo apt install golang-go`.
 
 In the app: Settings > Listening together, the relay's address, for
 example `http://10.0.0.1:8095`.

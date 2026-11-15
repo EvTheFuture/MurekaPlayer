@@ -1,17 +1,26 @@
 #!/sbin/openrc-run
 # Mureka Player listening together relay, for OpenRC (Alpine Linux)
 #
-# Set the address in /etc/conf.d/murekasync, for example
-# MUREKASYNC_LISTEN="10.0.0.1:8095" for the VPN address of the server
+# Set in /etc/conf.d/murekasync either the VPN interface and the port,
+# MUREKASYNC_INTERFACE="wg0" and MUREKASYNC_PORT="8095", to listen on the
+# interface's addresses, or one address, MUREKASYNC_LISTEN="10.0.0.1:8095"
 
 name="murekasync"
 description="Mureka Player listening together relay"
 
 : ${MUREKASYNC_LISTEN:="127.0.0.1:8095"}
+: ${MUREKASYNC_INTERFACE:=""}
+: ${MUREKASYNC_PORT:="8095"}
 : ${MUREKASYNC_USER:="nobody"}
 
 command="/usr/local/bin/murekasync"
-command_args="-listen ${MUREKASYNC_LISTEN}"
+
+if [ -n "${MUREKASYNC_INTERFACE}" ]; then
+    command_args="-interface ${MUREKASYNC_INTERFACE} -port ${MUREKASYNC_PORT}"
+else
+    command_args="-listen ${MUREKASYNC_LISTEN}"
+fi
+
 command_user="${MUREKASYNC_USER}"
 command_background="yes"
 pidfile="/run/${RC_SVCNAME}.pid"

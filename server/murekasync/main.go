@@ -525,10 +525,96 @@ func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string, ow
     }
 }
 
+// The addresses of a network interface to listen on: its IPv4 ones and
+// its global IPv6 ones, not the link local ones
+func interfaceAddrs(name string) ([]string, error) {
+
+    ifc, err := net.InterfaceByName(name)
+
+    if err != nil {
+        return nil, err
+    }
+
+    addrs, err := ifc.Addrs()
+
+    if err != nil {
+        return nil, err
+    }
+
+    var out []string
+
+    for _, a := range addrs {
+
+        ipn, ok := a.(*net.IPNet)
+
+        if !ok || ipn.IP.IsLinkLocalUnicast() || ipn.IP.IsLinkLocalMulticast() {
+            continue
+        }
+
+        out = append(out, ipn.IP.String())
+    }
+
+    return out, nil
+}
+
+// The addresses to listen on: given as one, or those of an interface. An
+// interface not up yet, or without an address yet, is waited for, as a
+// VPN may come up after the relay
+func listenAddrs(listen string, iface string, port int, wait time.Duration) ([]string, error) {
+
+    if iface == "" {
+        return []string{listen}, nil
+    }
+
+    deadline := time.Now().Add(wait)
+    told := false
+
+    for {
+
+        ips, err := interfaceAddrs(iface)
+
+        if err == nil && len(ips) > 0 {
+
+            out := make([]string, 0, len(ips))
+
+            for _, ip := range ips {
+                out = append(out, net.JoinHostPort(ip, fmt.Sprint(port)))
+            }
+
+            return out, nil
+        }
+
+        if time.Now().After(deadline) {
+
+            if err == nil {
+                err = fmt.Errorf("interface %s has no address", iface)
+            }
+
+            return nil, err
+        }
+
+        if !told {
+            log.Printf("waiting for interface %s to get an address", iface)
+            told = true
+        }
+
+        time.Sleep(2 * time.Second)
+    }
+}
+
 func main() {
 
     listen := flag.String("listen", "127.0.0.1:8095", "address and port to listen on, the VPN address for players on the VPN")
+    iface := flag.String("interface", "", "listen on the addresses of this network interface instead, wg0 for example")
+    port := flag.Int("port", 8095, "the port to listen on with -interface")
+    wait := flag.Duration("wait", 2*time.Minute, "how long to wait for the interface to get an address")
     flag.Parse()
+
+    addrs, err := listenAddrs(*listen, *iface, *port, *wait)
+
+    if err != nil {
+        log.Fatal(err)
+    }
 
     r := &relay{rooms: map[string]*room{}}
 
@@ -540,7 +626,6 @@ func main() {
     mux.HandleFunc("/room/", r.handleRoom)
 
     srv := &http.Server{
-        Addr:              *listen,
         Handler:           mux,
         ReadHeaderTimeout: 10 * time.Second,
         IdleTimeout:       2 * time.Minute,
@@ -551,12 +636,22 @@ func main() {
     lc := net.ListenConfig{}
     lc.SetMultipathTCP(false)
 
-    ln, err := lc.Listen(context.Background(), "tcp", *listen)
+    done := make(chan error, len(addrs))
 
-    if err != nil {
-        log.Fatal(err)
+    for _, addr := range addrs {
+
+        ln, err := lc.Listen(context.Background(), "tcp", addr)
+
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        log.Printf("murekasync listening on %s", addr)
+
+        go func() {
+            done <- srv.Serve(ln)
+        }()
     }
 
-    log.Printf("murekasync listening on %s", *listen)
-    log.Fatal(srv.Serve(ln))
+    log.Fatal(<-done)
 }
