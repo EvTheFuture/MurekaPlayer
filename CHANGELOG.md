@@ -1141,6 +1141,12 @@ In development.
     Stop stops the music for everyone and keeps the player in the room,
     from any player in it: Play then starts it again, from where it
     stopped, for everyone.
+    Pause or Stop pressed in the player, in the app or the web view, asks
+    first: for everyone in the room, named in the question, or leave the
+    room, then pause or stop for this player alone. A box remembers the
+    choice, one for Pause and one for Stop, and Settings > Listening
+    together has both, Ask among them, to change it again. Media keys, a
+    car's among them, ask nothing and act for everyone.
     Leaving, the music goes on as this player's own; a player that only
     played along gets its own queue and filters back.
   - Together's menu: a swipe up on the Together control button, which

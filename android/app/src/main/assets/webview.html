@@ -24683,8 +24683,91 @@
         ev.preventDefault();
     });
 
+    // Pause or Stop pressed here while in a room: for everyone, or leaving
+    // the room first, as remembered on the phone, else asked with a box to
+    // remember it, each its own. Settings > Listening together changes it
+    function roomAsk(kind, go) {
+
+        if (!state || state.togetherIn !== true || (kind === "pause" && !state.playing)) {
+
+            go();
+            return;
+        }
+
+        const remembered = kind === "stop" ? state.stopChoice : state.pauseChoice;
+
+        if (remembered === "all") {
+
+            go();
+            return;
+        }
+
+        if (remembered === "leave") {
+
+            send("leaveThen", kind);
+            return;
+        }
+
+        const word = kind === "stop" ? "Stop" : "Pause";
+        const room = state.togetherRoom || "";
+        let keep = false;
+        const pick = function (how) {
+
+            return function () {
+
+                closeSongMenu();
+
+                if (keep) {
+
+                    send("roomChoice", { kind: kind, value: how });
+
+                    if (kind === "stop") {
+                        state.stopChoice = how;
+                    } else {
+                        state.pauseChoice = how;
+                    }
+                }
+
+                if (how === "leave") {
+                    send("leaveThen", kind);
+                } else {
+                    go();
+                }
+            };
+        };
+
+        openChoice(word + " for everyone?", [
+            { icon: kind, label: word + " for everyone", fn: pick("all") },
+            { icon: "close", label: "Leave the room, then " + kind, cls: "warn", fn: pick("leave") },
+            { icon: "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
+
+                keep = !keep;
+
+                const el = e && e.currentTarget ? e.currentTarget : null;
+
+                if (el) {
+
+                    const old = el.querySelector("svg");
+
+                    if (old) {
+                        old.replaceWith(icon(keep ? "check" : "circle"));
+                    }
+
+                    el.classList.toggle("accent", keep);
+                }
+            } }
+        ]);
+
+        // The room's name lit in the question
+        togetherCaption("You will " + kind + " the music for everyone in the room " + room + "."
+            + " Settings > Listening together changes a remembered choice.", room, "");
+    }
+
     $("stopBtn").addEventListener("click", function () {
-        send("stop");
+
+        roomAsk("stop", function () {
+            send("stop");
+        });
     });
 
     $("pubBtn").addEventListener("click", function () {
@@ -24719,6 +24802,10 @@
     });
 
     $("play").addEventListener("click", function () {
+        roomAsk("pause", playTap);
+    });
+
+    function playTap() {
 
         // Shown at once, the phone confirms it a moment later
         if (state && state.id) {
@@ -24732,7 +24819,7 @@
         }
 
         send("toggle");
-    });
+    }
 
     $("prev").addEventListener("click", function () {
         send("prev", { by: "tap" });

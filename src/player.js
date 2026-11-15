@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.154";
+    const VERSION = "2.0.1.155";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4370,7 +4370,9 @@
             syncControl: true,
             syncOn: false,
             syncTogether: "together",
-            addChoice: ""
+            addChoice: "",
+            syncPauseChoice: "",
+            syncStopChoice: ""
         };
 
         try {
@@ -4669,6 +4671,8 @@
                     syncControl: parsed.syncControl !== false,
                     syncOn: parsed.syncOn === true,
                     addChoice: ["next", "queued", "last"].indexOf(parsed.addChoice) >= 0 ? parsed.addChoice : "",
+                    syncPauseChoice: parsed.syncPauseChoice === "all" || parsed.syncPauseChoice === "leave" ? parsed.syncPauseChoice : "",
+                    syncStopChoice: parsed.syncStopChoice === "all" || parsed.syncStopChoice === "leave" ? parsed.syncStopChoice : "",
                     syncTogether: syncRoomLabelOf(parsed.syncTogether) || "together"
                 };
 
@@ -27091,7 +27095,7 @@
 
             if (key === " ") {
 
-                togglePlayPause();
+                syncAskFirst("pause", togglePlayPause);
                 handled();
                 return;
             }
@@ -36446,6 +36450,9 @@
             together: settings.syncOn === true ? "on" : "off",
             togetherReady: syncRelayOk(syncRelay()),
             addChoice: settings.addChoice || "",
+            togetherIn: syncInRoom(),
+            pauseChoice: settings.syncPauseChoice || "",
+            stopChoice: settings.syncStopChoice || "",
             togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
             togetherStatus: syncStatusText(),
             togetherRoom: syncRoomLabel(),
@@ -41200,6 +41207,88 @@
         return "";
     }
 
+    // In a room: holding it or playing along with the one who does
+    function syncInRoom() {
+        return settings.syncOn === true && (syncHolding || !!syncFollowing);
+    }
+
+    // Leaving the room, then the pause or the stop for this player alone
+    function syncLeaveThen(kind) {
+
+        if (settings.syncOn === true) {
+
+            const room = syncRoomLabel();
+
+            settings.syncOn = false;
+            saveSettings();
+            syncLeave();
+            showToast("Left the room " + room);
+            syncPaint();
+            publishHostSoon();
+        }
+
+        if (kind === "stop") {
+            stopPlay();
+        } else if (audio && audio.src && !audio.paused) {
+            togglePlayPause();
+        }
+    }
+
+    // A pause or a stop pressed in the player while in a room: for
+    // everyone, or leaving the room first, as remembered, else asked.
+    // Each its own remembered choice. Media keys, a car's among them, ask
+    // nothing and act for everyone
+    function syncAskFirst(kind, go) {
+
+        if (!syncInRoom() || (kind === "pause" && !(audio && audio.src && !audio.paused))) {
+
+            go();
+            return;
+        }
+
+        const key = kind === "stop" ? "syncStopChoice" : "syncPauseChoice";
+
+        if (settings[key] === "all") {
+
+            go();
+            return;
+        }
+
+        if (settings[key] === "leave") {
+
+            syncLeaveThen(kind);
+            return;
+        }
+
+        const word = kind === "stop" ? "Stop" : "Pause";
+        const room = syncRoomLabel();
+        const check = { label: "Remember my choice", on: false };
+        const pick = function (how) {
+
+            return function () {
+
+                if (check.on) {
+
+                    settings[key] = how;
+                    saveSettings();
+                    publishHostSoon();
+                }
+
+                if (how === "leave") {
+                    syncLeaveThen(kind);
+                } else {
+                    go();
+                }
+            };
+        };
+
+        askChoices(word + " for everyone?\nYou will " + kind + " the music for everyone in the room " + room + "."
+            + " Settings > Listening together changes a remembered choice.", [
+            { label: word + " for everyone", fn: pick("all") },
+            { label: "Leave the room, then " + kind, ring: true, fn: pick("leave") }
+        ], null, false, true, [{ word: room, after: "the room " }], check);
+    }
+
     // The control and header buttons: on and off in a tap, the way to the
     // settings when the relay is not set yet
     function syncControlTap() {
@@ -42098,6 +42187,21 @@
             }
         } else if (cmd === "unplayLast") {
             undoPlayLast(arg);
+        } else if (cmd === "roomChoice") {
+
+            // Pause or Stop in a room, remembered in the web view's question
+            const how = arg && (arg.value === "all" || arg.value === "leave") ? arg.value : "";
+
+            if (arg && arg.kind === "stop") {
+                settings.syncStopChoice = how;
+            } else if (arg && arg.kind === "pause") {
+                settings.syncPauseChoice = how;
+            }
+
+            saveSettings();
+            publishHostSoon();
+        } else if (cmd === "leaveThen") {
+            syncLeaveThen(arg === "stop" ? "stop" : "pause");
         } else if (cmd === "addChoice") {
 
             // What the list's add button does with a tap, remembered, or
@@ -44084,7 +44188,9 @@
         // into the row and in which order. Previous and next are off by
         // default because the album art swipe already does that job, and fewer
         // buttons means a much larger target for each, which matters on a
-        playPauseBtn = makeIconButton(iconPlay(), "Play / Pause", togglePlayPause);
+        playPauseBtn = makeIconButton(iconPlay(), "Play / Pause", function () {
+            syncAskFirst("pause", togglePlayPause);
+        });
         shuffleBtn = makeIconButton(makeShuffleIcon(), "Shuffle (toggle)", toggleShuffle);
         repeatBtn = makeIconButton(makeRepeatIcon(false), "Repeat", cycleRepeat);
 
@@ -44154,7 +44260,9 @@
                 switchSong("tap", playPrev);
             }),
             play: playPauseBtn,
-            stop: makeIconButton(iconStopTransport(), "Stop", stopPlay),
+            stop: makeIconButton(iconStopTransport(), "Stop", function () {
+                syncAskFirst("stop", stopPlay);
+            }),
             next: makeIconButton(iconNext(), "Next", function () {
                 switchSong("tap", playNext);
             }),
@@ -49928,10 +50036,38 @@
         const status = makeStatus();
 
         page.appendChild(withHint(onRow, "Every player in the room plays the same queue at the same place, within about a"
-            + " second, with the same filters. Any of them may pause, skip, move in the song, put songs next or last, or"
-            + " change the filters, and it happens for everyone. Stop or the Together button leaves the room, the music goes"
-            + " on as this player's own, and a player that only played along gets its own queue and filters back."));
+            + " second, with the same filters. Any of them may pause, stop, skip, move in the song, put songs next or last,"
+            + " or change the filters, and it happens for everyone. The Together button leaves the room, the music goes on"
+            + " as this player's own, and a player that only played along gets its own queue and filters back."));
         page.appendChild(status);
+
+        // What Pause and Stop do in a room, each asked until remembered
+        const roomWays = function (word) {
+            return [
+                { label: "Ask", value: "" },
+                { label: word + " for everyone", value: "all" },
+                { label: "Leave the room, then " + word.toLowerCase(), value: "leave" }
+            ];
+        };
+        const pauseWayRow = makeDropRow("Pause in a room", roomWays("Pause"), function () {
+            return settings.syncPauseChoice || "";
+        }, function (v) {
+
+            settings.syncPauseChoice = v;
+            publishHostSoon();
+        });
+        const stopWayRow = makeDropRow("Stop in a room", roomWays("Stop"), function () {
+            return settings.syncStopChoice || "";
+        }, function (v) {
+
+            settings.syncStopChoice = v;
+            publishHostSoon();
+        });
+
+        page.appendChild(pauseWayRow);
+        page.appendChild(withHint(stopWayRow, "Pause and Stop pressed in the player, here or in the web view, while in a room:"
+            + " for everyone in it, or leaving the room first, for this player alone. Ask asks each time, with a box to"
+            + " remember the choice. Media keys, a car's among them, always act for everyone."));
 
         // The room to join, any name. Typed a letter at a time, so it is
         // taken once the typing has stopped, not a room for every letter
@@ -96578,8 +96714,91 @@
         ev.preventDefault();
     });
 
+    // Pause or Stop pressed here while in a room: for everyone, or leaving
+    // the room first, as remembered on the phone, else asked with a box to
+    // remember it, each its own. Settings > Listening together changes it
+    function roomAsk(kind, go) {
+
+        if (!state || state.togetherIn !== true || (kind === "pause" && !state.playing)) {
+
+            go();
+            return;
+        }
+
+        const remembered = kind === "stop" ? state.stopChoice : state.pauseChoice;
+
+        if (remembered === "all") {
+
+            go();
+            return;
+        }
+
+        if (remembered === "leave") {
+
+            send("leaveThen", kind);
+            return;
+        }
+
+        const word = kind === "stop" ? "Stop" : "Pause";
+        const room = state.togetherRoom || "";
+        let keep = false;
+        const pick = function (how) {
+
+            return function () {
+
+                closeSongMenu();
+
+                if (keep) {
+
+                    send("roomChoice", { kind: kind, value: how });
+
+                    if (kind === "stop") {
+                        state.stopChoice = how;
+                    } else {
+                        state.pauseChoice = how;
+                    }
+                }
+
+                if (how === "leave") {
+                    send("leaveThen", kind);
+                } else {
+                    go();
+                }
+            };
+        };
+
+        openChoice(word + " for everyone?", [
+            { icon: kind, label: word + " for everyone", fn: pick("all") },
+            { icon: "close", label: "Leave the room, then " + kind, cls: "warn", fn: pick("leave") },
+            { icon: "circle", label: "Remember my choice", cls: "rememberBox", fn: function (e) {
+
+                keep = !keep;
+
+                const el = e && e.currentTarget ? e.currentTarget : null;
+
+                if (el) {
+
+                    const old = el.querySelector("svg");
+
+                    if (old) {
+                        old.replaceWith(icon(keep ? "check" : "circle"));
+                    }
+
+                    el.classList.toggle("accent", keep);
+                }
+            } }
+        ]);
+
+        // The room's name lit in the question
+        togetherCaption("You will " + kind + " the music for everyone in the room " + room + "."
+            + " Settings > Listening together changes a remembered choice.", room, "");
+    }
+
     $("stopBtn").addEventListener("click", function () {
-        send("stop");
+
+        roomAsk("stop", function () {
+            send("stop");
+        });
     });
 
     $("pubBtn").addEventListener("click", function () {
@@ -96614,6 +96833,10 @@
     });
 
     $("play").addEventListener("click", function () {
+        roomAsk("pause", playTap);
+    });
+
+    function playTap() {
 
         // Shown at once, the phone confirms it a moment later
         if (state && state.id) {
@@ -96627,7 +96850,7 @@
         }
 
         send("toggle");
-    });
+    }
 
     $("prev").addEventListener("click", function () {
         send("prev", { by: "tap" });
