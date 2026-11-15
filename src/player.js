@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.148";
+    const VERSION = "2.0.1.149";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -36367,6 +36367,14 @@
             together: settings.syncOn === true ? "on" : "off",
             togetherReady: syncRelayOk(syncRelay()),
             togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
+            togetherStatus: syncStatusText(),
+            togetherRoom: syncRoomName(),
+            togetherWho: settings.syncOn === true ? syncWhoText() : "",
+            togetherRooms: syncRoomsList.map(function (r) {
+                return { room: String(r.room), line: syncRoomLine(r) };
+            }),
+            togetherRoomsAt: syncRoomsAt,
+            togetherRoomsError: syncRoomsError,
 
             // The button for the playlist songs went into last, the
             // playlists to pick for picked songs, and the one open when it
@@ -39553,6 +39561,12 @@
     // where the seeks landed: how long its seeks take to be heard
     let syncSeekAhead = SYNC_SEEK_AHEAD_S;
 
+    // The active rooms the relay last told of, asked for by a web view for
+    // its menu, when they came and why there are none
+    let syncRoomsList = [];
+    let syncRoomsAt = 0;
+    let syncRoomsError = "";
+
     // Whether this player holds the room, what was here before joining, to
     // come back to on leaving, and a takeover waiting to be tried
     let syncHolding = false;
@@ -41846,6 +41860,19 @@
             }
 
             publishHostSoon();
+        } else if (cmd === "togetherRooms") {
+
+            // The active rooms for the web view's menu, in the state when
+            // the relay answers
+            syncAskRooms(function (rooms, err) {
+
+                syncRoomsList = Array.isArray(rooms) ? rooms.slice(0, 20) : [];
+                syncRoomsError = rooms ? "" : String(err || "the relay did not answer");
+                syncRoomsAt = Date.now();
+                publishHostSoon();
+            });
+        } else if (cmd === "togetherJoin") {
+            syncJoinRoom(String(arg || ""));
         } else if (cmd === "togetherSettings") {
 
             openSettings();
@@ -71927,16 +71954,19 @@
        List take the whole touch, so a swipe up on them is not taken as a
        scroll */
     #browseBtn,
-    #miniBtn {
+    #miniBtn,
+    #togetherBtn {
         position: relative;
         touch-action: none;
     }
 
     /* A small arrow at the top of Songs and List for the swipe up that
-       opens the other list. On Songs it points down while the small list
-       is open, a swipe down closing it */
+       opens the other list, and of Together for the swipe up that opens its
+       menu. On Songs it points down while the small list is open, a swipe
+       down closing it */
     #browseBtn::before,
-    #miniBtn::before {
+    #miniBtn::before,
+    #togetherBtn::before {
         content: "";
         position: absolute;
         top: 7px;
@@ -95576,7 +95606,7 @@
             // move the button and waits for the swipe to be long enough
             const swipeBtn = holdStart.btn.id === "browseBtn" || holdStart.btn.id === "miniBtn";
 
-            // Together swiped upwards opens the Listening together settings
+            // Together swiped upwards opens its menu
             if (holdStart.btn.id === "togetherBtn" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
 
                 clearTimeout(holdTimer);
@@ -95588,7 +95618,7 @@
                     setTimeout(function () {
                         swallowClick = false;
                     }, 400);
-                    togetherPage();
+                    togetherMenu();
                 }
 
                 return;
@@ -95737,6 +95767,132 @@
     // How the button being pressed was pressed, a finger or a mouse
     let pressType = "";
 
+    // When the active rooms were asked for, to show them once they come
+    let roomsAskedAt = 0;
+    let roomsWait = 0;
+
+    // The menu text: how it stands, the room's name in the accent color,
+    // and who is in the room
+    function togetherCaption(text, room, who) {
+
+        const cap = $("menuCaption");
+        const at = room ? text.indexOf("room " + room) : -1;
+
+        cap.textContent = "";
+        cap.style.whiteSpace = "pre-line";
+
+        if (at < 0) {
+            cap.appendChild(document.createTextNode(text));
+        } else {
+
+            const mark = document.createElement("span");
+
+            mark.textContent = room;
+            mark.style.color = "var(--accent)";
+            mark.style.fontWeight = "600";
+            cap.appendChild(document.createTextNode(text.slice(0, at + 5)));
+            cap.appendChild(mark);
+            cap.appendChild(document.createTextNode(text.slice(at + 5 + room.length)));
+        }
+
+        if (who) {
+            cap.appendChild(document.createTextNode("\n\nIn the room:\n" + who));
+        }
+
+        cap.style.display = "";
+    }
+
+    // Together's menu, as on the phone: who is in the room, the active
+    // rooms to join, a new room, leaving or joining, and the settings
+    function togetherMenu() {
+
+        if (!state || state.togetherReady === false) {
+
+            togetherPage();
+            return;
+        }
+
+        const on = state.together === "on";
+        const room = String(state.togetherRoom || "");
+
+        openChoice("Listening together", [
+            { icon: "together", label: "Active rooms", fn: function () {
+
+                closeSongMenu();
+                togetherRooms();
+            } },
+            { icon: "listPlus", label: "Create a new room", fn: function () {
+
+                closeSongMenu();
+                askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
+                    send("togetherJoin", String(v || "").trim().toLowerCase());
+                });
+            } },
+            on ? { icon: "close", label: "Leave the room", cls: "danger", fn: function () {
+
+                closeSongMenu();
+                send("together");
+            } } : { icon: "together", label: "Join " + room, cls: "accent", fn: function () {
+
+                closeSongMenu();
+                send("together");
+            } },
+            { icon: "settings", label: "Settings", fn: function () {
+
+                closeSongMenu();
+                togetherPage();
+            } }
+        ]);
+        togetherCaption(String(state.togetherStatus || ""), room, String(state.togetherWho || ""));
+    }
+
+    // The active rooms, asked of the phone, which asks the relay, shown
+    // when they come, each to join with a tap
+    function togetherRooms() {
+
+        roomsAskedAt = Date.now();
+        send("togetherRooms");
+        clearInterval(roomsWait);
+        roomsWait = setInterval(function () {
+
+            const came = state && Number(state.togetherRoomsAt) >= roomsAskedAt - 2000;
+
+            if (!came && Date.now() - roomsAskedAt < 6000) {
+                return;
+            }
+
+            clearInterval(roomsWait);
+
+            const rooms = came && Array.isArray(state.togetherRooms) ? state.togetherRooms : [];
+            const here = state && state.together === "on" ? String(state.togetherRoom || "") : "";
+            const items = rooms.map(function (r) {
+                return { icon: "together", label: (r.room === here ? "In: " : "") + r.line, cls: r.room === here ? "accent" : "", fn: function () {
+
+                    closeSongMenu();
+
+                    if (r.room !== here) {
+                        send("togetherJoin", r.room);
+                    }
+                } };
+            });
+
+            items.push({ icon: "listPlus", label: "Create a new room", fn: function () {
+
+                closeSongMenu();
+                askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
+                    send("togetherJoin", String(v || "").trim().toLowerCase());
+                });
+            } });
+
+            openChoice("Active rooms", items);
+            $("menuCaption").textContent = !came ? "The phone did not answer."
+                : state.togetherRoomsError ? "No list of rooms: " + state.togetherRoomsError + "."
+                    : rooms.length === 0 ? "No room is active. A new one opens when you join it."
+                        : "A tap joins the room, with its queue and filters.";
+            $("menuCaption").style.display = "";
+        }, 250);
+    }
+
     // The phone's Listening together settings, with the active rooms and
     // who is in the room
     function togetherPage() {
@@ -95803,13 +95959,13 @@
     }, true);
 
     // A long press opens the context menu on some browsers, not wanted here.
-    // With a mouse, a right click on Together opens its settings
+    // With a mouse, a right click on Together opens its menu
     $("controls").addEventListener("contextmenu", function (ev) {
 
         ev.preventDefault();
 
         if ((ev.pointerType || pressType) === "mouse" && ev.target.closest && ev.target.closest("#togetherBtn")) {
-            togetherPage();
+            togetherMenu();
         }
     });
 
