@@ -1111,7 +1111,8 @@ In development.
   of it, and may control it too: one shared queue for everyone. Built for
   players on a VPN:
   - A small relay runs on the VPN server: `server/murekasync`, Go with no
-    dependencies, Multipath TCP off, an OpenRC script and a README. Every
+    dependencies, Multipath TCP off, an OpenRC script and a README, built
+    with `make server` (static, SERVER_ARCH for another machine). Every
     player only connects out to it, nothing connects to a player and its
     web view stays closed to everyone else.
   - A button in the header turns it on or off in a tap: share what plays

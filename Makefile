@@ -38,6 +38,12 @@ endif
 # Where the Android SDK lives. Ubuntu packages put it here
 ANDROID_HOME ?= /usr/lib/android-sdk
 
+# The listening together relay, built for the VPN server: Linux on x86-64
+# unless told otherwise, static, so the one file runs on Alpine as it is
+SERVER_OS ?= linux
+SERVER_ARCH ?= amd64
+SERVER_BIN := server/murekasync/murekasync
+
 APK_DEBUG := android/app/build/outputs/apk/debug/app-debug.apk
 APK_RELEASE := android/app/build/outputs/apk/release/app-release.apk
 
@@ -58,7 +64,7 @@ KEYTOOL := $(if $(JAVA_HOME),$(JAVA_HOME)/bin/keytool,keytool)
 # The newest apksigner in the SDK, to show who signed the release
 APKSIGNER := $(lastword $(shell ls -d $(ANDROID_HOME)/build-tools/*/apksigner 2>/dev/null | sort -V))
 
-.PHONY: help all addons android apk debug release install install-debug signing check version embed hooks bookmarklet fdroid prune clean distclean
+.PHONY: help all addons android apk debug release install install-debug signing check version embed hooks bookmarklet fdroid prune server clean distclean
 
 help:
 	@echo "Mureka Player $(VERSION)"
@@ -77,6 +83,7 @@ help:
 	@echo "  make bookmarklet    pin the release bookmarklet to a tag, TAG=v$(VERSION) unless given"
 	@echo "  make fdroid         the F-Droid recipe for a tag in fdroid/, TAG=v$(VERSION) unless given"
 	@echo "  make prune          remove release APKs older than $(VERSION), make all does it last"
+	@echo "  make server         the listening together relay, $(SERVER_BIN), for $(SERVER_OS)/$(SERVER_ARCH)"
 	@echo "  make clean          remove build output, keep the caches"
 	@echo "  make distclean      also remove the Gradle and SDK caches in the tree"
 	@echo
@@ -256,9 +263,18 @@ install: release
 install-debug: apk
 	adb install -r $(APK_DEBUG)
 
+# The relay for the VPN server, one static file with nothing to install
+# beside it. SERVER_OS and SERVER_ARCH build it for another machine, for
+# example SERVER_ARCH=arm64. server/murekasync/README.md tells how to
+# install it
+server:
+	cd server/murekasync && CGO_ENABLED=0 GOOS=$(SERVER_OS) GOARCH=$(SERVER_ARCH) \
+	    go build -trimpath -ldflags "-s -w" -o murekasync .
+	@echo "Built $(SERVER_BIN) for $(SERVER_OS)/$(SERVER_ARCH)"
+
 clean:
 	rm -rf android/app/build android/build mureka-player-firefox.zip mureka-player-chromium.zip .build \
-	    mureka-player-*.apk mureka-player-*.apk.sha256
+	    mureka-player-*.apk mureka-player-*.apk.sha256 $(SERVER_BIN)
 
 distclean: clean
 	rm -rf android/.gradle android/local.properties android/app/src/main/assets/player.js

@@ -4,3 +4,4 @@ run-mobile-firefox.sh
 .adb-reconnect.sh
 *.apk
 *.apk.sha256
+server/murekasync/murekasync

@@ -14,9 +14,12 @@ No dependencies beyond the Go standard library, nothing kept on disk.
 
 ## Build and install (Alpine)
 
+From the top of the repository, `make server` builds
+`server/murekasync/murekasync`, static, for Linux on x86-64.
+`SERVER_ARCH=arm64` (and `SERVER_OS`) builds it for another machine, so it
+can be built on a workstation and the one file copied over. On the server:
+
 ```sh
-cd server/murekasync
-go build -trimpath -ldflags "-s -w" -o murekasync .
 install -m 755 murekasync /usr/local/bin/murekasync
 install -m 755 murekasync.initd /etc/init.d/murekasync
 echo 'MUREKASYNC_LISTEN="10.0.0.1:8095"' > /etc/conf.d/murekasync
