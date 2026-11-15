@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.133";
+    const VERSION = "2.0.1.134";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -27598,7 +27598,7 @@
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
     // which opens the small one with a tap. Either or both can be used
-    const WEB_CONTROL_NAMES = CONTROL_NAMES.concat(["songs", "minilist"]);
+    const WEB_CONTROL_NAMES = CONTROL_NAMES.concat(["together", "songs", "minilist"]);
 
     // The buttons a bar can hold, by its setting or by mobile or web. The
     // bars take the button groups as well, a group holds buttons only, every
@@ -27611,8 +27611,7 @@
 
         const base = which === "webControlOrder" || which === "web" ? WEB_CONTROL_NAMES : CONTROL_NAMES;
 
-        // Listening together is the app's own, a button of its bar only,
-        // in no group, as the web view has none
+        // Listening together is the app's own, the web view has it as well
         const own = base === CONTROL_NAMES && syncAvailable() ? ["together"] : [];
 
         return base.concat(own, ctlGroups().map(function (g) {
@@ -35734,6 +35733,12 @@
             setSort: setSortOf(),
             nightOn: sound().on && sound().night,
 
+            // Listening together: sharing, listening along or neither
+            together: syncFollowing ? "follow" : settings.syncShare ? "share" : "off",
+            togetherReady: syncRelayOk(syncRelay()),
+            togetherText: syncFollowing ? "Listening along with " + syncFollowing.name
+                : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together",
+
             // The button for the playlist songs went into last, the
             // playlists to pick for picked songs, and the one open when it
             // can be changed
@@ -39013,7 +39018,7 @@
 
         if (syncHeadBtn) {
 
-            const on = syncAvailable() && syncRelayOk(syncRelay());
+            const on = syncAvailable();
             const active = !!syncFollowing || settings.syncShare === true;
 
             syncHeadBtn.style.display = on ? "inline-flex" : "none";
@@ -39976,10 +39981,16 @@
     // Listening together from the header: on or off in a tap or two
     function openSyncMenu() {
 
-        if (!syncAvailable() || !syncRelayOk(syncRelay())) {
+        // Not set up yet: said so, with the way to the settings
+        if (!syncRelayOk(syncRelay())) {
 
-            openSettings();
-            showSettingsPage("together");
+            askChoices("Listening together\nIt needs the address of the listening together relay on the VPN first.", [
+                { label: "Open the settings", fn: function () {
+
+                    openSettings();
+                    showSettingsPage("together");
+                } }
+            ], null, false, true);
             return;
         }
 
@@ -40811,6 +40822,11 @@
             toggleSetsFolded(typeof arg === "boolean" ? arg : undefined);
         } else if (cmd === "soundPick") {
             setSoundPick(typeof arg === "string" ? arg : "");
+        } else if (cmd === "together") {
+
+            // The web view draws the settings page the phone shows
+            openSettings();
+            showSettingsPage("together");
         } else if (cmd === "soundLive") {
 
             // The web view draws the settings page the phone shows, so the
@@ -48476,43 +48492,52 @@
 
         syncAskRooms(function (rooms, err) {
 
-            list.textContent = "";
-
-            if (!rooms) {
-
-                list.textContent = "The relay could not be asked" + (err ? ": " + err : "") + ".";
-                return;
-            }
-
-            const others = rooms.filter(function (r) {
-                return r && r.room !== settings.syncRoom;
+            syncFillRooms(list, rooms, err, function () {
+                dialog.close();
             });
-
-            if (others.length === 0) {
-
-                list.textContent = "Nobody is sharing right now.";
-                return;
-            }
-
-            for (const r of others) {
-
-                const name = String(r.name || r.room).slice(0, 40);
-                const what = r.title ? (r.playing ? "Playing " : "Paused on ") + String(r.title).slice(0, 80) : "Nothing playing";
-                const btn = makeButton(name, "#333", "#fff", function () {
-
-                    dialog.close();
-                    syncStartFollow(r.room, name);
-                });
-                const sub = document.createElement("div");
-
-                btn.style.cssText += ";display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px";
-                sub.textContent = what;
-                sub.style.cssText = "font-size:11px;color:#aaa;font-weight:400;white-space:nowrap;overflow:hidden;"
-                    + "text-overflow:ellipsis;max-width:100%";
-                btn.appendChild(sub);
-                list.appendChild(btn);
-            }
         });
+    }
+
+    // The players sharing on the relay as buttons in box, a tap listening
+    // along with one, picked called first
+    function syncFillRooms(box, rooms, err, picked) {
+
+        box.textContent = "";
+
+        if (!rooms) {
+
+            box.textContent = "The relay could not be asked" + (err ? ": " + err : "") + ".";
+            return;
+        }
+
+        const others = rooms.filter(function (r) {
+            return r && r.room !== settings.syncRoom;
+        });
+
+        if (others.length === 0) {
+
+            box.textContent = "Nobody is sharing right now.";
+            return;
+        }
+
+        for (const r of others) {
+
+            const name = String(r.name || r.room).slice(0, 40);
+            const what = r.title ? (r.playing ? "Playing " : "Paused on ") + String(r.title).slice(0, 80) : "Nothing playing";
+            const btn = makeButton(name, "#333", "#fff", function () {
+
+                picked();
+                syncStartFollow(r.room, name);
+            });
+            const sub = document.createElement("div");
+
+            btn.style.cssText += ";display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px";
+            sub.textContent = what;
+            sub.style.cssText = "font-size:11px;color:#aaa;font-weight:400;white-space:nowrap;overflow:hidden;"
+                + "text-overflow:ellipsis;max-width:100%";
+            btn.appendChild(sub);
+            box.appendChild(btn);
+        }
     }
 
     // Settings > Listening together, in the app only: the relay, sharing
@@ -48582,19 +48607,36 @@
 
         page.appendChild(makeLabel("Listening along"));
 
-        const followBtn = makeButton("Listen along", "#333", "#fff", function () {
+        const roomsBox = document.createElement("div");
+
+        roomsBox.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px;color:#ccc";
+
+        const followBtn = makeButton("Find players sharing", "#333", "#fff", function () {
 
             if (syncFollowing) {
+
                 syncStopFollow();
-            } else if (!syncRelayOk(syncRelay())) {
-                showToast("Set the relay's address first", false);
-            } else {
-                openSyncRooms();
+                return;
             }
+
+            if (!syncRelayOk(syncRelay())) {
+
+                showToast("Set the relay's address first", false);
+                return;
+            }
+
+            roomsBox.textContent = "Asking the relay...";
+            syncAskRooms(function (rooms, err) {
+
+                syncFillRooms(roomsBox, rooms, err, function () {
+                    roomsBox.textContent = "";
+                });
+            });
         });
         const followStatus = makeHint("");
 
         page.appendChild(followBtn);
+        page.appendChild(roomsBox);
         page.appendChild(followStatus);
         page.appendChild(makeHint("Plays what another player shares, kept at its place, with its queue in place of the"
             + " one here. Pause, skip, move in the song and Play next or Play last go to everyone, where the sharing player"
@@ -48632,7 +48674,11 @@
 
             shareStatus.textContent = syncLeadText();
             followStatus.textContent = syncFollowText();
-            followBtn.textContent = syncFollowing ? "Stop listening along" : "Listen along";
+            followBtn.textContent = syncFollowing ? "Stop listening along" : "Find players sharing";
+
+            if (syncFollowing) {
+                roomsBox.textContent = "";
+            }
             timingText.textContent = syncTimingText();
             membersText.textContent = syncMembersText();
         };
@@ -53606,14 +53652,10 @@
         mainPage.appendChild(makePageButton("Now playing", "nowplaying"));
         mainPage.appendChild(makePageButton("Sound profiles", "sound"));
 
-        // Only the app reaches the relay. The web views leave it out, it is
-        // about this device
+        // Only the app reaches the relay
         if (syncAvailable()) {
 
-            const togetherBtn = makePageButton("Listening together", "together");
-
-            togetherBtn.dataset.hostSkip = "1";
-            mainPage.appendChild(togetherBtn);
+            mainPage.appendChild(makePageButton("Listening together", "together"));
             buildTogetherPage(togetherPage, { makeLabel: makeLabel, makeHint: makeHint, withHint: withHint });
         }
 
@@ -77327,6 +77369,7 @@
         <button class="ctl" id="plOpenBtn" type="button" title="Playlists" data-label="Playlists" aria-label="Playlists" data-icon="playlists"></button>
         <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="To playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
         <button class="ctl" id="createBtn" type="button" title="Create songs" data-label="Create" aria-label="Create songs" data-icon="create"></button>
+        <button class="ctl" id="togetherBtn" type="button" title="Listening together" data-label="Together" aria-label="Listening together" data-icon="together"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -78354,16 +78397,11 @@
         playlists: { label: "Playlists", icon: "playlists", el: "plOpenBtn" },
         toplaylist: { label: "To playlist", icon: "queueAdd", el: "toPlBtn" },
         create: { label: "Create", icon: "create", el: "createBtn" },
+        together: { label: "Together", icon: "together", el: "togetherBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "songs", "minilist"];
-
-    // Buttons of the phone's own bar only, none here, as its editor shows
-    // them: Listening together is the app's
-    const PHONE_CONTROLS = {
-        together: { label: "Together", icon: "together" }
-    };
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "together", "songs", "minilist"];
 
     function icon(name) {
 
@@ -82869,6 +82907,10 @@
         $("eqBtn").classList.toggle("on", !!(s && (s.soundPicked || s.soundLive)));
         $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
+
+        // Lit while the phone shares what it plays or listens along
+        $("togetherBtn").classList.toggle("on", !!(s && (s.together === "share" || s.together === "follow")));
+        $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
 
         // Lit while the playing song is in the playlist songs went into last
         const toPl = s && s.toPlaylist ? s.toPlaylist : null;
@@ -90217,7 +90259,7 @@
             const grp = (node.groups || []).find(function (g) {
                 return g.id === name;
             });
-            const def = CONTROLS[name] || PHONE_CONTROLS[name]
+            const def = CONTROLS[name]
                 || (grp ? { label: grp.label, icon: CONTROLS[grp.show] ? CONTROLS[grp.show].icon : "sets" } : { label: name, icon: "check" });
             const chip = document.createElement("button");
             const text = document.createElement("span");
@@ -94338,6 +94380,29 @@
         }
 
         send("toPlaylist");
+    });
+
+    // The phone's Listening together settings, shown here. Not set up yet,
+    // said so first, with the way there
+    $("togetherBtn").addEventListener("click", function () {
+
+        const go = function () {
+
+            send("together");
+            setTimeout(function () {
+                showPanel("settings");
+            }, 150);
+        };
+
+        if (state && state.togetherReady === false) {
+
+            openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
+                { icon: "settings", label: "Open the settings", cls: "tall", fn: go }
+            ]);
+            return;
+        }
+
+        go();
     });
 
     $("nightBtn").addEventListener("click", function () {

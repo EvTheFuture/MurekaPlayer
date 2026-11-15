@@ -6943,6 +6943,7 @@
         <button class="ctl" id="plOpenBtn" type="button" title="Playlists" data-label="Playlists" aria-label="Playlists" data-icon="playlists"></button>
         <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="To playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
         <button class="ctl" id="createBtn" type="button" title="Create songs" data-label="Create" aria-label="Create songs" data-icon="create"></button>
+        <button class="ctl" id="togetherBtn" type="button" title="Listening together" data-label="Together" aria-label="Listening together" data-icon="together"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -7970,16 +7971,11 @@
         playlists: { label: "Playlists", icon: "playlists", el: "plOpenBtn" },
         toplaylist: { label: "To playlist", icon: "queueAdd", el: "toPlBtn" },
         create: { label: "Create", icon: "create", el: "createBtn" },
+        together: { label: "Together", icon: "together", el: "togetherBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "songs", "minilist"];
-
-    // Buttons of the phone's own bar only, none here, as its editor shows
-    // them: Listening together is the app's
-    const PHONE_CONTROLS = {
-        together: { label: "Together", icon: "together" }
-    };
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "together", "songs", "minilist"];
 
     function icon(name) {
 
@@ -12485,6 +12481,10 @@
         $("eqBtn").classList.toggle("on", !!(s && (s.soundPicked || s.soundLive)));
         $("eqBtn").title = s && s.soundText ? s.soundText : "Sound profile";
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
+
+        // Lit while the phone shares what it plays or listens along
+        $("togetherBtn").classList.toggle("on", !!(s && (s.together === "share" || s.together === "follow")));
+        $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
 
         // Lit while the playing song is in the playlist songs went into last
         const toPl = s && s.toPlaylist ? s.toPlaylist : null;
@@ -19833,7 +19833,7 @@
             const grp = (node.groups || []).find(function (g) {
                 return g.id === name;
             });
-            const def = CONTROLS[name] || PHONE_CONTROLS[name]
+            const def = CONTROLS[name]
                 || (grp ? { label: grp.label, icon: CONTROLS[grp.show] ? CONTROLS[grp.show].icon : "sets" } : { label: name, icon: "check" });
             const chip = document.createElement("button");
             const text = document.createElement("span");
@@ -23954,6 +23954,29 @@
         }
 
         send("toPlaylist");
+    });
+
+    // The phone's Listening together settings, shown here. Not set up yet,
+    // said so first, with the way there
+    $("togetherBtn").addEventListener("click", function () {
+
+        const go = function () {
+
+            send("together");
+            setTimeout(function () {
+                showPanel("settings");
+            }, 150);
+        };
+
+        if (state && state.togetherReady === false) {
+
+            openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
+                { icon: "settings", label: "Open the settings", cls: "tall", fn: go }
+            ]);
+            return;
+        }
+
+        go();
     });
 
     $("nightBtn").addEventListener("click", function () {

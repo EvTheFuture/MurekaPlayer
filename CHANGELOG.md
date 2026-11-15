@@ -1117,15 +1117,18 @@ In development.
     it to come up) or on one address (`-listen`). Every
     player only connects out to it, nothing connects to a player and its
     web view stays closed to everyone else.
-  - A button turns it on or off in a tap: share what plays here, listen
-    along with a player sharing, stop, or who controls. In the header once
-    the relay is set, and as Together among the control buttons, to put in
-    the bar or a spare place in Settings > Mobile player > Control buttons.
-    Lit while sharing or listening along.
-  - Settings > Listening together: the relay's address, the name shown,
-    Share what plays here (with how many listen along), Those listening
-    along control too (on by default), Listen along, Timing and In the
-    room.
+  - A Together button turns it on or off in a tap: share what plays here,
+    listen along with a player sharing, stop, or who controls. In the
+    header and among the control buttons, in the app and in the web view
+    (Settings > Mobile player or Web view > Control buttons), there also
+    before a relay is set: a tap then says so, with a way to the settings.
+    Lit while sharing or listening along. The web view's opens the
+    settings page.
+  - Settings > Listening together, in the app and in the web view: the
+    relay's address, the name shown, Share what plays here (with how many
+    listen along), Those listening along control too (on by default), Find
+    players sharing (listed on the page, a tap listens along), Timing and
+    In the room.
   - Shared: the song (Mureka's address of the file, the title, the cover),
     playing or not, the place and up to 30 songs coming up, when one of
     them changes and every 5 s. Never the library.
