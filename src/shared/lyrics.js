@@ -8,12 +8,12 @@
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
-    // The cylinder's radius in lines, and how far off it is seen from, in
-    // widths of the lyrics. The turn from one line to the next comes from
-    // the radius, so that seen from the front the lines stand a line apart,
-    // as flat ones
-    const CYL_RADIUS = 1.5;
-    const CYL_EYE = 0.8;
+    // The turn from one line to the next on the drum, about 42 degrees,
+    // how far off the drum is seen from, in widths of the lyrics, and the
+    // strips each row is cut into to wrap it round the drum
+    const CYL_STEP = 0.73;
+    const CYL_EYE = 1.2;
+    const CYL_STRIPS = 8;
 
     // How long a roll and a line coming into sight take
     const CYL_ROLL_MS = 340;
@@ -221,68 +221,97 @@
         };
     }
 
-    // Five rows on a cylinder seen from the side: the one leaving over the
+    // Five rows on a drum seen from the front: the one leaving over the
     // top, the line before, the line being sung facing straight out, the
     // next line and the one coming up from below. box is a positioned
-    // element of its own for them
+    // element of its own for them. Each row is a layer over the whole box,
+    // seen in perspective from in front of its middle, holding the row's
+    // words cut into strips across, each strip turned to its own place on
+    // the drum, so the words wrap round it rather than sit on a flat panel
     function makeCylRoll(box) {
 
         const slots = [];
+        const strips = [];
 
         for (let i = 0; i < 5; i++) {
 
-            const el = document.createElement("div");
+            const wrap = document.createElement("div");
+            const list = [];
 
-            el.style.position = "absolute";
-            el.style.left = "0";
-            el.style.right = "0";
-            el.style.opacity = "0";
-            el.style.whiteSpace = "nowrap";
-            el.style.overflow = "hidden";
-            el.style.textOverflow = "ellipsis";
-            el.style.transformOrigin = "50% 50%";
-            el.style.backfaceVisibility = "hidden";
-            el.style.willChange = "transform, opacity";
-            box.appendChild(el);
-            slots.push(el);
+            wrap.style.position = "absolute";
+            wrap.style.left = "0";
+            wrap.style.right = "0";
+            wrap.style.top = "0";
+            wrap.style.bottom = "0";
+            wrap.style.opacity = "0";
+            wrap.style.perspectiveOrigin = "50% 50%";
+            wrap.style.pointerEvents = "none";
+
+            for (let k = 0; k < CYL_STRIPS; k++) {
+
+                const el = document.createElement("div");
+                const top = Math.max(0, k * 100 / CYL_STRIPS - 1);
+                const bottom = Math.max(0, 100 - (k + 1) * 100 / CYL_STRIPS - 1);
+
+                // A little room each side so the outline is not cut off
+                el.style.position = "absolute";
+                el.style.left = "-4px";
+                el.style.right = "-4px";
+                el.style.padding = "0 4px";
+                el.style.whiteSpace = "nowrap";
+                el.style.overflow = "hidden";
+                el.style.textOverflow = "ellipsis";
+                el.style.transformOrigin = "4px 50%";
+                el.style.backfaceVisibility = "hidden";
+                el.style.clipPath = "inset(" + top + "% 0 " + bottom + "% 0)";
+                el.style.willChange = "transform";
+                wrap.appendChild(el);
+                list.push(el);
+            }
+
+            box.appendChild(wrap);
+            slots.push(wrap);
+            strips.push(list);
         }
 
-        return { box: box, slots: slots, steps: [], geo: null, idx: -2, reveal: true, seen: 0 };
+        return { box: box, slots: slots, strips: strips, steps: [], geo: null, idx: -2, reveal: true, seen: 0 };
     }
 
-    // Size the cylinder: size is the sung line's text, line the spacing as
-    // a share of it, side how big the lines before and after are against
-    // it, sideShift how far right of the sung line they sit. Every row has
-    // the same text size and weight, the turn makes the others smaller, so
-    // the sung line is never bigger than the rows are wide
+    // Size the drum: size is the text, every row the same, drum the drum's
+    // radius in rows, smaller turning tighter with the lines closer
+    // together, side how big the lines before and after are against the
+    // sung one besides what the drum does, sideShift how far right of the
+    // sung line they sit. The box is as tall as the three lines in sight
     function cylLayout(roll, layout) {
 
         const size = Math.max(10, layout.size);
-        const lineH = Math.round(size * layout.line);
-        const radius = lineH * CYL_RADIUS;
+        const lineH = Math.round(size * 1.5);
+        const radius = lineH * Math.max(1.2, Math.min(3, layout.drum || 1.5));
+        const boxH = Math.round(2 * radius * Math.sin(CYL_STEP) + lineH);
+        const top = Math.round((boxH - lineH) / 2);
 
         roll.geo = {
             size: size,
             lineH: lineH,
             radius: radius,
-            step: Math.asin(lineH / radius),
+            step: CYL_STEP,
             side: layout.side,
             sx: layout.sideShift || 0
         };
 
-        // Seen by one eye in front of the middle of the lyrics, as a drum
-        // is: the turned lines draw in towards the middle and lean out
-        roll.box.style.height = (lineH * 4) + "px";
-        roll.box.style.perspectiveOrigin = "50% 50%";
+        roll.box.style.height = boxH + "px";
         roll.seen = 0;
 
-        for (const el of roll.slots) {
+        for (const list of roll.strips) {
 
-            el.style.top = Math.round(lineH * 1.5) + "px";
-            el.style.height = lineH + "px";
-            el.style.lineHeight = lineH + "px";
-            el.style.fontSize = size + "px";
-            el.style.fontWeight = "400";
+            for (const el of list) {
+
+                el.style.top = top + "px";
+                el.style.height = lineH + "px";
+                el.style.lineHeight = lineH + "px";
+                el.style.fontSize = size + "px";
+                el.style.fontWeight = "400";
+            }
         }
 
         roll.idx = -2;
@@ -296,7 +325,7 @@
         const b = roll.steps[j + 1];
         const wide = a && b && a.kind === "line" && b.kind === "line" && b.first;
 
-        return roll.geo.step * (wide ? 1.4 : 1);
+        return roll.geo.step * (wide ? 1.25 : 1);
     }
 
     // How far round step r is from step c, upwards negative
@@ -343,15 +372,16 @@
         return !(r === view.idx + 1 && at && at.kind === "pause" && !view.reveal);
     }
 
-    // A row's look: turned on the cylinder by its angle, and by how many
-    // rows it is from the sung one smaller towards the sides as side asks,
-    // dimmer and two rows away gone. The extra turn before a new section
-    // only moves a row, so the line after it looks like any other. The
-    // sung line is drawn thicker with an outline of its own color, which
-    // grows and fades smoothly and keeps the row as wide as before, where a
-    // heavier font would jump to it and widen the line. side makes the
-    // lines before and after smaller still than the drum does, at 100 they
-    // are only as the drum makes them
+    // A row's look: each strip turned to its place on the drum, and by how
+    // many rows it is from the sung one smaller still as side asks, from
+    // its left edge so the lines stay near the left, at 100 only as the
+    // drum makes them, dimmer and two rows away gone. The extra turn before
+    // a new section only moves a row, so the line after it looks like any
+    // other. The sung line is drawn thicker with an outline of its own
+    // color, which grows and fades smoothly and keeps the row as wide as
+    // before, where a heavier font would jump to it and widen the line.
+    // Every row has a thin dark outline round that, so the words read on a
+    // light cover with nothing dark behind them
     function cylPose(roll, angle, off, shown) {
 
         const g = roll.geo;
@@ -361,62 +391,82 @@
         const opacity = shown ? (1 - 0.25 * k) * (1 - far) : 0;
         const c = Math.round(255 - 34 * k);
         const w = Math.round(g.size * 0.03 * (1 - k) * 100) / 100;
+        const o = Math.round(Math.max(0.8, g.size * 0.04) * 100) / 100 + w;
+        const d = Math.round(o * 70) / 100;
         const ink = "rgba(" + c + ", " + c + ", " + c + ", " + (1 - k) + ")";
+        const dark = "rgba(0, 0, 0, 0.5)";
+        const strips = [];
+
+        for (let n = 0; n < CYL_STRIPS; n++) {
+
+            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH * scale;
+
+            strips.push("translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
+                + (-(angle + yc / g.radius)) + "rad) translateZ(" + g.radius + "px) translateY(" + (-yc) + "px) scale(" + scale + ")");
+        }
 
         return {
-            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius)
-                + "px) rotateX(" + (-angle) + "rad) translateZ(" + g.radius + "px) scale(" + scale + ")",
+            strips: strips,
             opacity: opacity,
             color: "rgb(" + c + ", " + c + ", " + c + ")",
-            textShadow: w + "px 0 0 " + ink + ", " + (-w) + "px 0 0 " + ink + ", 0 " + w + "px 0 " + ink
-                + ", 0 " + (-w) + "px 0 " + ink + ", 0 1px 3px rgba(0, 0, 0, 0.8)"
+            textShadow: [
+                w + "px 0 0 " + ink, (-w) + "px 0 0 " + ink, "0 " + w + "px 0 " + ink, "0 " + (-w) + "px 0 " + ink,
+                o + "px 0 0 " + dark, (-o) + "px 0 0 " + dark, "0 " + o + "px 0 " + dark, "0 " + (-o) + "px 0 " + dark,
+                d + "px " + d + "px 0 " + dark, (-d) + "px " + d + "px 0 " + dark, d + "px " + (-d) + "px 0 " + dark,
+                (-d) + "px " + (-d) + "px 0 " + dark, "0 1px " + Math.round(o * 3) + "px rgba(0, 0, 0, 0.5)"
+            ].join(", ")
         };
     }
 
-    // A row's words, or for a break three dots that light up as it goes
-    function cylFill(el, step) {
+    // A row's words, or for a break three dots that light up as it goes,
+    // in every strip of the row
+    function cylFill(list, step) {
 
-        if (step && step.kind === "pause") {
+        for (const el of list) {
 
-            if (el.dataset.dots !== "1") {
+            if (step && step.kind === "pause") {
 
-                el.textContent = "";
-                el.dataset.dots = "1";
+                if (el.dataset.dots !== "1") {
 
-                for (let i = 0; i < 3; i++) {
+                    el.textContent = "";
+                    el.dataset.dots = "1";
 
-                    const dot = document.createElement("span");
+                    for (let i = 0; i < 3; i++) {
 
-                    dot.textContent = "\u25CF";
-                    dot.style.display = "inline-block";
-                    dot.style.marginRight = "0.5em";
-                    dot.style.fontSize = "0.7em";
-                    dot.style.opacity = "0.3";
-                    dot.style.transition = "opacity 0.4s ease";
-                    el.appendChild(dot);
+                        const dot = document.createElement("span");
+
+                        dot.textContent = "\u25CF";
+                        dot.style.display = "inline-block";
+                        dot.style.marginRight = "0.5em";
+                        dot.style.fontSize = "0.7em";
+                        dot.style.opacity = "0.3";
+                        dot.style.transition = "opacity 0.4s ease";
+                        el.appendChild(dot);
+                    }
                 }
+
+                continue;
             }
 
-            return;
+            el.dataset.dots = "";
+            el.textContent = step && step.kind === "line" ? step.text : "";
         }
-
-        el.dataset.dots = "";
-        el.textContent = step && step.kind === "line" ? step.text : "";
     }
 
     // Light the break's dots as far as it has come, one a quarter through
     function cylDots(roll, view) {
 
-        const el = roll.slots[2];
+        for (const el of roll.strips[2]) {
 
-        if (el.dataset.dots !== "1") {
-            return;
-        }
+            if (el.dataset.dots !== "1") {
+                return;
+            }
 
-        const dots = el.children;
+            const dots = el.children;
 
-        for (let i = 0; i < dots.length; i++) {
-            dots[i].style.opacity = view.progress >= (i + 1) / 4 ? "1" : "0.3";
+            for (let i = 0; i < dots.length; i++) {
+                dots[i].style.opacity = view.progress >= (i + 1) / 4 ? "1" : "0.3";
+            }
         }
     }
 
@@ -437,7 +487,7 @@
     }
 
     // Show the steps at the song's place in milliseconds. One step on rolls
-    // the cylinder a step, the line after a break fades in where it waits,
+    // the drum a step, the line after a break fades in where it waits,
     // anything else, a seek, a new song or force, puts the rows in place
     function cylShow(roll, ms, force) {
 
@@ -454,7 +504,10 @@
         if (wide > 0 && wide !== roll.seen) {
 
             roll.seen = wide;
-            roll.box.style.perspective = Math.round(wide * CYL_EYE) + "px";
+
+            for (const wrap of roll.slots) {
+                wrap.style.perspective = Math.round(wide * CYL_EYE) + "px";
+            }
         }
 
         if (!force && view.idx === old.idx && view.reveal === old.reveal) {
@@ -469,31 +522,46 @@
         for (let i = 0; i < 5; i++) {
 
             const r = view.idx + i - 2;
-            const el = roll.slots[i];
+            const wrap = roll.slots[i];
+            const list = roll.strips[i];
             const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
 
-            cylStop(el);
-            cylFill(el, roll.steps[r]);
-            el.style.transform = to.transform;
-            el.style.opacity = String(to.opacity);
-            el.style.color = to.color;
-            el.style.textShadow = to.textShadow;
-            el.style.zIndex = i === 2 ? "3" : "2";
+            cylStop(wrap);
+            cylFill(list, roll.steps[r]);
+            wrap.style.opacity = String(to.opacity);
+            wrap.style.color = to.color;
+            wrap.style.textShadow = to.textShadow;
+            wrap.style.zIndex = i === 2 ? "3" : "2";
 
-            if (!el.animate || (!rolled && !revealed)) {
+            for (let n = 0; n < list.length; n++) {
+
+                cylStop(list[n]);
+                list[n].style.transform = to.strips[n];
+            }
+
+            if (!wrap.animate || (!rolled && !revealed)) {
                 continue;
             }
 
             const from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
 
-            if (revealed && from.opacity === to.opacity) {
+            if (revealed) {
+
+                if (from.opacity !== to.opacity) {
+                    wrap.animate([{ opacity: from.opacity }, { opacity: to.opacity }], { duration: CYL_SHOW_MS, easing: "ease-out" });
+                }
+
                 continue;
             }
 
-            el.animate([from, to], {
-                duration: rolled ? CYL_ROLL_MS : CYL_SHOW_MS,
-                easing: "ease-out"
-            });
+            wrap.animate([
+                { opacity: from.opacity, color: from.color, textShadow: from.textShadow },
+                { opacity: to.opacity, color: to.color, textShadow: to.textShadow }
+            ], { duration: CYL_ROLL_MS, easing: "ease-out" });
+
+            for (let n = 0; n < list.length; n++) {
+                list[n].animate([{ transform: from.strips[n] }, { transform: to.strips[n] }], { duration: CYL_ROLL_MS, easing: "ease-out" });
+            }
         }
 
         roll.idx = view.idx;

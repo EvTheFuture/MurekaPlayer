@@ -1153,18 +1153,27 @@ In development.
     device.
   - The room and its key stay on the device, a settings backup leaves them
     out.
-- **Lyrics on a turning cylinder, with breaks.** A new Lyric style,
-  Cylinder, beside Flat, the roll as it was, which stays the default for
-  now. Settings > Mobile player > Cover and lyrics, and Settings > Web
-  view > Lyrics, where the web view can follow the mobile player:
-  - The lines turn on a cylinder, every line the same size, the ones
-    before and after turned about 40 degrees. One eye sees the drum from
-    in front of the middle of the lyrics, so the turned lines are
-    squeezed, drawn in towards the middle and lean out from it, as on a
-    real drum. Side line percent makes them smaller still, at 100 they
-    are only as the drum makes them. The
-    line being sung is not a heavier font, which jumped and widened it,
-    but drawn thicker with an outline that grows and fades as it rolls.
+- **Lyrics on a turning drum, with breaks.** The lyrics, on the cover and
+  in the web view, now turn on a drum in place of the flat roll:
+  - One eye sees the drum from in front of the middle of the lyrics, and
+    each line is cut into strips across, each turned to its own place on
+    the drum, so the words wrap round it: the lines before and after are
+    squeezed more towards their far edge, drawn in a little towards the
+    middle and lean out from it, as on a real drum.
+  - Every line has the same text size. The line being sung is not a
+    heavier font, which jumped and widened it, but drawn thicker with an
+    outline that grows and fades as it rolls.
+  - Drum size percent takes the place of line spacing, the drum's radius
+    in lines: smaller turns tighter, with the lines closer together and
+    more turned away. Side line percent makes the lines before and after
+    smaller still, from their left edge, at 100 they are only as the drum
+    makes them. The web view has its own drum size, following the mobile
+    player's unless set.
+  - Each line has a thin dark outline, so the lyrics read on a light
+    cover, and nothing dark lies behind them any more: on the mobile
+    player's cover the shading behind the title is the same short one
+    with lyrics as without, and in the web view the lyrics on the cover
+    have no dark fade.
   - A break of 10 s or more from one line's start to the next, the intro
     too, shows three dots once the line before has ended, lit one by one
     as the break goes. The line after it shows two bars ahead, 2 to 4 s,
