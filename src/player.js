@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.145";
+    const VERSION = "2.0.1.146";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -40922,8 +40922,8 @@
 
         const who = settings.syncOn === true ? syncWhoText() : "";
         const choices = [
-            { label: "Rooms open now", fn: openSyncRoomsMenu },
-            { label: "New room", fn: askSyncNewRoom }
+            { label: "Active rooms", fn: openSyncRoomsMenu },
+            { label: "Create a new room", fn: askSyncNewRoom }
         ];
 
         if (settings.syncOn === true) {
@@ -40931,18 +40931,19 @@
                 syncToggle();
             } });
         } else {
-            choices.push({ label: "Join the room " + syncRoomName(), fn: function () {
+            choices.push({ label: "Join " + syncRoomName(), fn: function () {
                 syncToggle();
             } });
         }
 
-        choices.push({ label: "Settings", fn: function () {
+        choices.push({ label: "Settings", ring: true, fn: function () {
 
             openSettings();
             showSettingsPage("together");
         } });
 
-        askChoices("Listening together\n" + syncStatusText() + (who ? "\n\nIn the room:\n" + who : ""), choices, null, false, true);
+        askChoices("Listening together\n" + syncStatusText() + (who ? "\n\nIn the room:\n" + who : ""), choices, null, false, true,
+            [{ after: "room ", word: syncRoomName() }]);
     }
 
     // The rooms open on the relay, each to join with a tap
@@ -40966,9 +40967,9 @@
                 } };
             });
 
-            choices.push({ label: "New room", fn: askSyncNewRoom });
+            choices.push({ label: "Create a new room", fn: askSyncNewRoom });
 
-            askChoices("Rooms open now\n" + (rooms.length === 0 ? "No room is open. A new one opens when you join it."
+            askChoices("Active rooms\n" + (rooms.length === 0 ? "No room is active. A new one opens when you join it."
                 : "A tap joins the room, with its queue and filters."), choices, null, false, true);
         });
     }
@@ -49531,7 +49532,7 @@
 
             if (rooms.length === 0) {
 
-                roomsBox.textContent = "No room is open. A new one opens when a player joins it.";
+                roomsBox.textContent = "No room is active. A new one opens when a player joins it.";
                 return;
             }
 
@@ -49557,7 +49558,7 @@
                 roomsBox.appendChild(row);
             }
         };
-        const roomsBtn = makeButton("Rooms open now", "#333", "#fff", function () {
+        const roomsBtn = makeButton("Active rooms", "#333", "#fff", function () {
 
             if (!syncAvailable() || !syncRelayOk(syncRelay())) {
 
@@ -49572,7 +49573,7 @@
         page.appendChild(roomsBtn);
         page.appendChild(roomsBox);
         page.appendChild(makeHint("The rooms on the relay, who holds each and what plays. Join leaves the room this player is"
-            + " in. A long press on the Together button shows them too, with who is in the room."));
+            + " in. A long press on the Together button shows them too, with who is in the room and a way to create a new one."));
 
         const nameRow = makeTextRow("Your name", function () {
             return settings.syncName || "";
@@ -57514,7 +57515,10 @@
     // noCancel: no Cancel button, for when one of the choices already is
     // the way out. A tap beside the box still calls onCancel. tall: higher
     // buttons, easier to hit on a phone
-    function askChoices(title, options, onCancel, noCancel, tall) {
+    // marks: words in the text to set apart in the accent color, a name in
+    // it say, each where it first comes, or where it first comes after the
+    // words given as after, { after: "room ", word: name }
+    function askChoices(title, options, onCancel, noCancel, tall, marks) {
 
         if (!panelEl) {
 
@@ -57539,8 +57543,31 @@
 
         head.textContent = lines[0];
         head.style.cssText = "font-weight:600";
-        text.textContent = lines.slice(1).join("\n").trim();
         text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
+
+        let rest = lines.slice(1).join("\n").trim();
+
+        for (const m of Array.isArray(marks) ? marks : []) {
+
+            const word = typeof m === "string" ? m : m && typeof m.word === "string" ? m.word : "";
+            const after = m && typeof m.after === "string" ? m.after : "";
+            const found = word ? rest.indexOf(after + word) : -1;
+            const at = found < 0 ? -1 : found + after.length;
+
+            if (at < 0) {
+                continue;
+            }
+
+            const mark = document.createElement("span");
+
+            text.appendChild(document.createTextNode(rest.slice(0, at)));
+            mark.textContent = word;
+            mark.style.cssText = "color:" + ACCENT + ";font-weight:600";
+            text.appendChild(mark);
+            rest = rest.slice(at + word.length);
+        }
+
+        text.appendChild(document.createTextNode(rest));
         col.style.cssText = "display:flex;flex-direction:column;gap:6px";
 
         const close = dialog.close;
