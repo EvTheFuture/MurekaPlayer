@@ -13037,10 +13037,11 @@
     const CYL_UNIT_MS = 350;
 
     // The cylinder's radius in lines, and how far off it is seen from, in
-    // radii. The turn from one line to the next comes from the radius, so
-    // that seen from the front the lines stand a line apart, as flat ones
+    // widths of the lyrics. The turn from one line to the next comes from
+    // the radius, so that seen from the front the lines stand a line apart,
+    // as flat ones
     const CYL_RADIUS = 1.5;
-    const CYL_EYE = 4;
+    const CYL_EYE = 0.8;
 
     // How long a roll and a line coming into sight take
     const CYL_ROLL_MS = 340;
@@ -13261,10 +13262,8 @@
             const el = document.createElement("div");
 
             el.style.position = "absolute";
-            // As wide as its words, so its middle is theirs
             el.style.left = "0";
-            el.style.right = "auto";
-            el.style.maxWidth = "100%";
+            el.style.right = "0";
             el.style.opacity = "0";
             el.style.whiteSpace = "nowrap";
             el.style.overflow = "hidden";
@@ -13276,7 +13275,7 @@
             slots.push(el);
         }
 
-        return { box: box, slots: slots, steps: [], geo: null, idx: -2, reveal: true };
+        return { box: box, slots: slots, steps: [], geo: null, idx: -2, reveal: true, seen: 0 };
     }
 
     // Size the cylinder: size is the sung line's text, line the spacing as
@@ -13294,13 +13293,16 @@
             size: size,
             lineH: lineH,
             radius: radius,
-            eye: radius * CYL_EYE,
             step: Math.asin(lineH / radius),
             side: layout.side,
             sx: layout.sideShift || 0
         };
 
+        // Seen by one eye in front of the middle of the lyrics, as a drum
+        // is: the turned lines draw in towards the middle and lean out
         roll.box.style.height = (lineH * 4) + "px";
+        roll.box.style.perspectiveOrigin = "50% 50%";
+        roll.seen = 0;
 
         for (const el of roll.slots) {
 
@@ -13375,30 +13377,22 @@
     // only moves a row, so the line after it looks like any other. The
     // sung line is drawn thicker with an outline of its own color, which
     // grows and fades smoothly and keeps the row as wide as before, where a
-    // heavier font would jump to it and widen the line.
-    // Each row is seen in perspective from in front of its own middle, so a
-    // turned row narrows at its far edge evenly on both sides, as on a real
-    // drum, rather than slanting like italics. The depth makes it smaller,
-    // the scale makes up the rest of what side asks, and the row is moved
-    // so its left edge stays in line with the others. width is the row's
-    // own width, unturned
-    function cylPose(roll, angle, off, shown, width) {
+    // heavier font would jump to it and widen the line. side makes the
+    // lines before and after smaller still than the drum does, at 100 they
+    // are only as the drum makes them
+    function cylPose(roll, angle, off, shown) {
 
         const g = roll.geo;
         const k = Math.min(1, Math.abs(off));
         const far = Math.max(0, Math.min(1, Math.abs(off) - 1));
-        const want = (1 - (1 - g.side) * k) * (1 - 0.25 * far);
-        const depth = g.radius * (Math.cos(angle) - 1);
-        const near = g.eye / (g.eye - depth);
-        const scale = want / near;
-        const left = Math.round(g.sx * k - (width / 2) * (1 - want));
+        const scale = (1 - (1 - g.side) * k) * (1 - 0.25 * far);
         const opacity = shown ? (1 - 0.25 * k) * (1 - far) : 0;
         const c = Math.round(255 - 34 * k);
         const w = Math.round(g.size * 0.03 * (1 - k) * 100) / 100;
         const ink = "rgba(" + c + ", " + c + ", " + c + ", " + (1 - k) + ")";
 
         return {
-            transform: "translateX(" + left + "px) perspective(" + Math.round(g.eye) + "px) translateZ(" + (-g.radius)
+            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius)
                 + "px) rotateX(" + (-angle) + "rad) translateZ(" + g.radius + "px) scale(" + scale + ")",
             opacity: opacity,
             color: "rgb(" + c + ", " + c + ", " + c + ")",
@@ -13481,6 +13475,15 @@
 
         const view = cylViewAt(roll.steps, ms);
         const old = { idx: roll.idx, reveal: roll.reveal };
+        const wide = roll.box.offsetWidth;
+
+        // The eye's distance goes with the width, so a wide web view and a
+        // narrow phone show the same drum. Hidden, the width is 0
+        if (wide > 0 && wide !== roll.seen) {
+
+            roll.seen = wide;
+            roll.box.style.perspective = Math.round(wide * CYL_EYE) + "px";
+        }
 
         if (!force && view.idx === old.idx && view.reveal === old.reveal) {
 
@@ -13495,12 +13498,10 @@
 
             const r = view.idx + i - 2;
             const el = roll.slots[i];
+            const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
+
             cylStop(el);
             cylFill(el, roll.steps[r]);
-
-            const width = el.offsetWidth;
-            const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view), width);
-
             el.style.transform = to.transform;
             el.style.opacity = String(to.opacity);
             el.style.color = to.color;
@@ -13511,7 +13512,7 @@
                 continue;
             }
 
-            const from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old), width);
+            const from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
 
             if (revealed && from.opacity === to.opacity) {
                 continue;

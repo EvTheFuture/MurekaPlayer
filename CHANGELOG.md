@@ -1158,10 +1158,11 @@ In development.
   now. Settings > Mobile player > Cover and lyrics, and Settings > Web
   view > Lyrics, where the web view can follow the mobile player:
   - The lines turn on a cylinder, every line the same size, the ones
-    before and after turned about 40 degrees, squeezed, smaller and
-    narrower at their far edge, each seen in perspective from in front of
-    its own middle, so the words lean out evenly as on a drum rather than
-    slanting like italics, and the left edges stay in line. The
+    before and after turned about 40 degrees. One eye sees the drum from
+    in front of the middle of the lyrics, so the turned lines are
+    squeezed, drawn in towards the middle and lean out from it, as on a
+    real drum. Side line percent makes them smaller still, at 100 they
+    are only as the drum makes them. The
     line being sung is not a heavier font, which jumped and widened it,
     but drawn thicker with an outline that grows and fades as it rolls.
   - A break of 10 s or more from one line's start to the next, the intro
