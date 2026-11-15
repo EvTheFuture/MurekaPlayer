@@ -1234,10 +1234,13 @@ In development.
   - Drum size percent takes the place of line spacing, the drum's radius
     in lines, 60 to 350, 200 at first: a small drum turns the lines far
     round and bends the sung line across its height, a big one shows more
-    lines, flatter. Side line percent makes the lines before and after
-    smaller still, from their left edge, at 100 they are only as the drum
-    makes them. The web view has its own drum size, following the mobile
-    player's unless set.
+    lines, flatter. The web view has its own drum size, following the
+    mobile player's unless set.
+  - The drum turns as one piece: the words are painted on it, and only
+    its turn moves them. Side line percent and Side line offset are gone,
+    they shrank the lines before and after and moved them aside, so a
+    line grew or shrank as it rolled past the middle and the words seemed
+    to slide over the drum rather than turn with it.
   - Each line has a thin dark outline, so the lyrics read on a light
     cover, and nothing dark lies behind them any more: on the mobile
     player's cover the shading behind the title is the same short one

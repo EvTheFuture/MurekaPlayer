@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.156";
+    const VERSION = "2.0.1.157";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30734,9 +30734,10 @@
 
     // Size the drum: size is the text, every row the same, drum the drum's
     // radius in rows, smaller turning tighter with the lines closer
-    // together, side how big the lines before and after are against the
-    // sung one besides what the drum does, sideShift how far right of the
-    // sung line they sit. The box is as tall as the five lines in sight
+    // together. The box is as tall as the five lines in sight. The words
+    // are painted on the drum, so only its turn moves them: none grows,
+    // shrinks or moves aside as it rolls, which looked like the words
+    // sliding over the drum rather than the drum turning
     function cylLayout(roll, layout) {
 
         const size = Math.max(10, layout.size);
@@ -30750,9 +30751,7 @@
             size: size,
             lineH: lineH,
             radius: radius,
-            step: step,
-            side: layout.side,
-            sx: layout.sideShift || 0
+            step: step
         };
 
         roll.box.style.height = boxH + "px";
@@ -30846,9 +30845,7 @@
     // A row's look: each strip turned to its place on the drum and darker
     // the further round it is, as light falls on a drum, so even the sung
     // line shows the curve, and by how many rows it is from the sung one
-    // smaller still as side asks, from its left edge so the lines stay near
-    // the left, at 100 only as the drum makes them, dimmer and three rows
-    // away gone. The extra turn before
+    // dimmer, three rows away gone. The extra turn before
     // a new section only moves a row, so the line after it looks like any
     // other. The sung line is drawn thicker with an outline of its own
     // color, which grows and fades smoothly and keeps the row as wide as
@@ -30861,7 +30858,6 @@
         const a = Math.min(CYL_FADE.length - 1, Math.abs(off));
         const at = Math.floor(a);
         const k = Math.min(1, a);
-        const scale = 1 - (1 - g.side) * k;
         const fade = at >= CYL_FADE.length - 1 ? 0 : CYL_FADE[at] + (CYL_FADE[at + 1] - CYL_FADE[at]) * (a - at);
         const opacity = shown ? fade : 0;
         const c = Math.round(255 - 34 * k);
@@ -30874,19 +30870,18 @@
 
         for (let n = 0; n < CYL_STRIPS; n++) {
 
-            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH * scale;
+            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH;
             const turn = angle + yc / g.radius;
 
             strips.push({
-                transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                    + (-turn) + "rad) translateZ(" + g.radius + "px) translateY(" + (-yc) + "px) scale(" + scale + ")",
+                transform: "translateZ(" + (-g.radius) + "px) rotateX(" + (-turn) + "rad) translateZ(" + g.radius + "px) translateY("
+                    + (-yc) + "px)",
                 opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(turn))) * 1000) / 1000
             });
         }
 
         const whole = {
-            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px) scale(" + scale + ")",
+            transform: "translateZ(" + (-g.radius) + "px) rotateX(" + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px)",
             opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(angle))) * 1000) / 1000
         };
 
@@ -51670,10 +51665,6 @@
             function () { return settings.lyricSize; },
             function (v) { settings.lyricSize = v; applyLyricLayout(); }, 12, 30);
 
-        const lyricSideRow = makeStepperRow("Side line percent",
-            function () { return Math.round(settings.lyricSideMul * 100); },
-            function (v) { settings.lyricSideMul = v / 100; applyLyricLayout(); }, 50, 100, 5);
-
         // The drum the lines turn on, its radius in lines as a percent
         const lyricDrumRow = makeStepperRow("Drum size percent",
             function () { return Math.round((settings.lyricDrum || 2) * 100); },
@@ -51682,10 +51673,6 @@
         const lyricShiftRow = makeStepperRow("Lyric position",
             function () { return settings.lyricShift; },
             function (v) { settings.lyricShift = v; applyLyricLayout(); }, -30, 30, 2);
-
-        const lyricSideShiftRow = makeStepperRow("Side line offset",
-            function () { return settings.lyricSideShift; },
-            function (v) { settings.lyricSideShift = v; applyLyricLayout(); }, -20, 20, 1);
 
         const directRow = makeBoolRow("Stream direct URL",
             function () { return settings.directAudio; },
@@ -52211,11 +52198,9 @@
         mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(lyricSizeRow);
-        mobilePage.appendChild(lyricSideRow);
         mobilePage.appendChild(lyricDrumRow);
         mobilePage.appendChild(lyricShiftRow);
-        mobilePage.appendChild(lyricSideShiftRow);
-        mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. Side lines are the lines before and after it, in percent of what the drum makes them, 100 only as the drum turns them. Drum size is the drum's radius in percent of a line. The lines sit a line apart along the drum, so a small drum turns them far round and bends the line being sung across its height, and a big one shows more lines, flatter. Lyric position moves the whole block up or down, and side line offset moves the side lines in from the left. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
+        mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. The lines before and after it are as the drum turns them, smaller and squashed only by its turn. Drum size is the drum's radius in percent of a line. The lines sit a line apart along the drum, so a small drum turns them far round and bends the line being sung across its height, and a big one shows more lines, flatter. Lyric position moves the whole block up or down. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
         mobilePage.appendChild(makeLabel("Control buttons"));
         mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
@@ -52635,23 +52620,15 @@
                 publishHostSoon();
             });
 
-            // The web view's lyric drum, laid out like the mobile player's. Side
-            // lines and the drum's size start out as the mobile player has them
+            // The web view's lyric drum, laid out like the mobile player's. The
+            // drum's size starts out as the mobile player has it
             const webLyricSizeRow = makeStepperRow("Lyric size",
                 function () { return settings.webLyricSize; },
                 function (v) { settings.webLyricSize = v; publishHostSoon(); }, 10, 60, 1);
 
-            const webLyricSideRow = makeStepperRow("Side line percent",
-                function () { return Math.round((settings.webLyricSideMul || settings.lyricSideMul) * 100); },
-                function (v) { settings.webLyricSideMul = v / 100; publishHostSoon(); }, 50, 100, 5);
-
             const webLyricDrumRow = makeStepperRow("Drum size percent",
                 function () { return Math.round((settings.webLyricDrum || settings.lyricDrum || 2) * 100); },
                 function (v) { settings.webLyricDrum = v / 100; publishHostSoon(); }, 60, 350, 10);
-
-            const webLyricSideShiftRow = makeStepperRow("Side line offset",
-                function () { return hostLyricLayout().sideShift; },
-                function (v) { settings.webLyricSideShift = v; publishHostSoon(); }, -40, 40, 1);
 
             // Up or down from where the lyrics sit, beside the cover and on it
             const webLyricShiftRow = makeStepperRow("Lyric position",
@@ -52841,11 +52818,9 @@
             webPage.appendChild(makeLabel("Lyrics"));
             webPage.appendChild(withHint(webLyricRow, "Where the synced lyrics show: off, beside the cover under the title, or on the cover."));
             webPage.appendChild(webLyricSizeRow);
-            webPage.appendChild(webLyricSideRow);
             webPage.appendChild(webLyricDrumRow);
-            webPage.appendChild(webLyricSideShiftRow);
             webPage.appendChild(webLyricShiftRow);
-            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Side lines, drum size and side offset work as on the mobile player and start out as it has them."));
+            webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Drum size works as on the mobile player and starts out as it has it."));
 
             webPage.appendChild(makeLabel("Control buttons"));
             webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
@@ -81281,9 +81256,7 @@
         { label: "Progress color up to the play head", page: "Web view", key: "progressFill", kind: "swatch" },
         { label: "Progress color past the play head", page: "Web view", key: "progressAhead", kind: "swatch" },
         { label: "Lyric size", page: "Web view", key: "size", kind: "step", step: 1, min: 10, max: 60 },
-        { label: "Side line percent", page: "Web view", key: "sidePct", kind: "step", step: 5, min: 50, max: 100 },
         { label: "Line spacing percent", page: "Web view", key: "linePct", kind: "step", step: 5, min: 100, max: 200 },
-        { label: "Side line offset", page: "Web view", key: "sideShift", kind: "step", step: 1, min: -40, max: 40 },
         { label: "Lyric position", page: "Web view", key: "shift", kind: "step", step: 2, min: -80, max: 80 },
         { label: "Screen off overlay", page: "Web view", screen: true, key: "on", kind: "bool" },
         { label: "Screen off after seconds", page: "Web view", screen: true, key: "after", kind: "step", step: 5, min: 0, max: 300 },
@@ -85335,9 +85308,10 @@
 
     // Size the drum: size is the text, every row the same, drum the drum's
     // radius in rows, smaller turning tighter with the lines closer
-    // together, side how big the lines before and after are against the
-    // sung one besides what the drum does, sideShift how far right of the
-    // sung line they sit. The box is as tall as the five lines in sight
+    // together. The box is as tall as the five lines in sight. The words
+    // are painted on the drum, so only its turn moves them: none grows,
+    // shrinks or moves aside as it rolls, which looked like the words
+    // sliding over the drum rather than the drum turning
     function cylLayout(roll, layout) {
 
         const size = Math.max(10, layout.size);
@@ -85351,9 +85325,7 @@
             size: size,
             lineH: lineH,
             radius: radius,
-            step: step,
-            side: layout.side,
-            sx: layout.sideShift || 0
+            step: step
         };
 
         roll.box.style.height = boxH + "px";
@@ -85447,9 +85419,7 @@
     // A row's look: each strip turned to its place on the drum and darker
     // the further round it is, as light falls on a drum, so even the sung
     // line shows the curve, and by how many rows it is from the sung one
-    // smaller still as side asks, from its left edge so the lines stay near
-    // the left, at 100 only as the drum makes them, dimmer and three rows
-    // away gone. The extra turn before
+    // dimmer, three rows away gone. The extra turn before
     // a new section only moves a row, so the line after it looks like any
     // other. The sung line is drawn thicker with an outline of its own
     // color, which grows and fades smoothly and keeps the row as wide as
@@ -85462,7 +85432,6 @@
         const a = Math.min(CYL_FADE.length - 1, Math.abs(off));
         const at = Math.floor(a);
         const k = Math.min(1, a);
-        const scale = 1 - (1 - g.side) * k;
         const fade = at >= CYL_FADE.length - 1 ? 0 : CYL_FADE[at] + (CYL_FADE[at + 1] - CYL_FADE[at]) * (a - at);
         const opacity = shown ? fade : 0;
         const c = Math.round(255 - 34 * k);
@@ -85475,19 +85444,18 @@
 
         for (let n = 0; n < CYL_STRIPS; n++) {
 
-            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH * scale;
+            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH;
             const turn = angle + yc / g.radius;
 
             strips.push({
-                transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                    + (-turn) + "rad) translateZ(" + g.radius + "px) translateY(" + (-yc) + "px) scale(" + scale + ")",
+                transform: "translateZ(" + (-g.radius) + "px) rotateX(" + (-turn) + "rad) translateZ(" + g.radius + "px) translateY("
+                    + (-yc) + "px)",
                 opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(turn))) * 1000) / 1000
             });
         }
 
         const whole = {
-            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px) scale(" + scale + ")",
+            transform: "translateZ(" + (-g.radius) + "px) rotateX(" + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px)",
             opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(angle))) * 1000) / 1000
         };
 

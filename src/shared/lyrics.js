@@ -288,9 +288,10 @@
 
     // Size the drum: size is the text, every row the same, drum the drum's
     // radius in rows, smaller turning tighter with the lines closer
-    // together, side how big the lines before and after are against the
-    // sung one besides what the drum does, sideShift how far right of the
-    // sung line they sit. The box is as tall as the five lines in sight
+    // together. The box is as tall as the five lines in sight. The words
+    // are painted on the drum, so only its turn moves them: none grows,
+    // shrinks or moves aside as it rolls, which looked like the words
+    // sliding over the drum rather than the drum turning
     function cylLayout(roll, layout) {
 
         const size = Math.max(10, layout.size);
@@ -304,9 +305,7 @@
             size: size,
             lineH: lineH,
             radius: radius,
-            step: step,
-            side: layout.side,
-            sx: layout.sideShift || 0
+            step: step
         };
 
         roll.box.style.height = boxH + "px";
@@ -400,9 +399,7 @@
     // A row's look: each strip turned to its place on the drum and darker
     // the further round it is, as light falls on a drum, so even the sung
     // line shows the curve, and by how many rows it is from the sung one
-    // smaller still as side asks, from its left edge so the lines stay near
-    // the left, at 100 only as the drum makes them, dimmer and three rows
-    // away gone. The extra turn before
+    // dimmer, three rows away gone. The extra turn before
     // a new section only moves a row, so the line after it looks like any
     // other. The sung line is drawn thicker with an outline of its own
     // color, which grows and fades smoothly and keeps the row as wide as
@@ -415,7 +412,6 @@
         const a = Math.min(CYL_FADE.length - 1, Math.abs(off));
         const at = Math.floor(a);
         const k = Math.min(1, a);
-        const scale = 1 - (1 - g.side) * k;
         const fade = at >= CYL_FADE.length - 1 ? 0 : CYL_FADE[at] + (CYL_FADE[at + 1] - CYL_FADE[at]) * (a - at);
         const opacity = shown ? fade : 0;
         const c = Math.round(255 - 34 * k);
@@ -428,19 +424,18 @@
 
         for (let n = 0; n < CYL_STRIPS; n++) {
 
-            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH * scale;
+            const yc = ((n + 0.5) / CYL_STRIPS - 0.5) * g.lineH;
             const turn = angle + yc / g.radius;
 
             strips.push({
-                transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                    + (-turn) + "rad) translateZ(" + g.radius + "px) translateY(" + (-yc) + "px) scale(" + scale + ")",
+                transform: "translateZ(" + (-g.radius) + "px) rotateX(" + (-turn) + "rad) translateZ(" + g.radius + "px) translateY("
+                    + (-yc) + "px)",
                 opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(turn))) * 1000) / 1000
             });
         }
 
         const whole = {
-            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
-                + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px) scale(" + scale + ")",
+            transform: "translateZ(" + (-g.radius) + "px) rotateX(" + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px)",
             opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(angle))) * 1000) / 1000
         };
 
