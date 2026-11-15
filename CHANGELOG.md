@@ -1091,6 +1091,13 @@ In development.
   were, every band weaker halfway. Tempos are worked out again as songs
   come up, and the debug log and Stats for nerds say when a tempo was
   doubled this way.
+- **A new song asked to play shows whatever the filters say.** Made with
+  Play when ready or Play next, it is in the lists while it is generated,
+  once it is ready and while it waits and plays, even where the filters
+  (vocals, published, tags, BPM, model, date, stars) or the list of
+  published songs would leave it out, on the device and in the web view.
+  Once it has played the filters count again. A search still leaves it
+  out, and a playlist's list holds the playlist's songs only.
 - **The web view's queue shows the songs being generated that play once
   ready.** Made with Play when ready, they played when done but the queue
   showed nothing of them until then. They now stand right after the

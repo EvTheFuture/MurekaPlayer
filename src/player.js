@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.130";
+    const VERSION = "2.0.1.131";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1972,10 +1972,49 @@
         }, 0);
     }
 
+    // Songs asked to play when ready, shown in the lists whatever the
+    // filters say: while generating, waiting in the queue and playing,
+    // until they have played. Only the search still leaves them out
+    const askedShown = new Set();
+
+    function askedToPlay(song) {
+        return !!song && askedShown.size > 0 && askedShown.has(String(song.song_id));
+    }
+
+    // Let go once played: not generating, not asked any more, and nowhere
+    // from the playing song on in the queue
+    function pruneAskedShown() {
+
+        if (askedShown.size === 0) {
+            return;
+        }
+
+        const ahead = new Set(queue.slice(Math.max(0, queuePos)).map(function (x) {
+            return String(x.song_id);
+        }));
+        let gone = false;
+
+        for (const id of Array.from(askedShown)) {
+
+            if (!pendingPlay.has(id) && !ahead.has(id)) {
+
+                askedShown.delete(id);
+                gone = true;
+            }
+        }
+
+        if (gone) {
+
+            pendingStamp += 1;
+            hostListStamp += 1;
+        }
+    }
+
     // Every change kept at once
     pendingPlay.set = function (k, v) {
 
         Map.prototype.set.call(this, k, v);
+        askedShown.add(String(k));
         savePendingPlaySoon();
 
         return this;
@@ -2008,7 +2047,9 @@
                 // Play now asked before the player was opened again waits for
                 // the song playing by then, rather than cutting it off
                 if (Array.isArray(pair) && (pair[1] === "now" || pair[1] === "after")) {
+
                     Map.prototype.set.call(pendingPlay, String(pair[0]), "after");
+                    askedShown.add(String(pair[0]));
                 }
             }
 
@@ -9887,13 +9928,18 @@
     }
 
     function passesFilters(song) {
-        return passesPlaylist(song) && passesSongFilters(song);
+        return askedToPlay(song) || (passesPlaylist(song) && passesSongFilters(song));
     }
 
     // The filters other than the playlist. With the songs they leave out
     // shown, the list holds every song of the playlist or library, the ones
     // these leave out greyed among the others
     function passesSongFilters(song) {
+
+        // Asked to play next, shown even where the filters would leave it out
+        if (askedToPlay(song)) {
+            return true;
+        }
 
         return passesVocalFilter(song) && passesPublishFilter(song)
             && passesTagFilter(song) && passesBpmFilter(song)
@@ -20338,7 +20384,14 @@
     }
 
     function shownPending() {
-        return creatorSource || publishFilter === "published" ? [] : sendingSongs.concat(pendingList());
+
+        // Only published songs or another creator's: the songs being made
+        // only when asked to play next
+        if (creatorSource || publishFilter === "published") {
+            return pendingList().filter(askedToPlay);
+        }
+
+        return sendingSongs.concat(pendingList());
     }
 
     // Two rows for a send to Mureka, named as asked, until its songs are
@@ -22321,6 +22374,7 @@
         ensureAudio();
         currentSong = song;
         trackAskedAt = Date.now();
+        pruneAskedShown();
         clockMovedAt = 0;
         clockLast = -1;
         dbgLog("Song", (song.title || "Untitled") + " (" + song.song_id + "), queue "
@@ -37806,7 +37860,8 @@
     function hostPrepared(view) {
 
         const showAll = showLeftOut();
-        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size + "|" + showAll + "|" + songDataStamp;
+        const key = view + "|" + hostListStamp + "|" + cache.songs.length + "|" + ratings.size + "|" + showAll + "|" + songDataStamp
+            + "|" + askedShown.size;
 
         if (hostListMemo && hostListMemo.key === key) {
             return hostListMemo;
