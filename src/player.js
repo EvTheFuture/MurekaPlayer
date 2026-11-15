@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.147";
+    const VERSION = "2.0.1.148";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30729,7 +30729,9 @@
 
     // Whether step r shows when the song is at the view: a break only while
     // it is the step reached, the lines after it once in sight, an empty
-    // step never
+    // step never. A line beyond a break still to come, or one reached that
+    // has not shown its lines yet, stays out of sight, so it never shows
+    // early, goes and comes back
     function cylShown(roll, r, view) {
 
         const s = roll.steps[r];
@@ -30746,9 +30748,16 @@
             return false;
         }
 
-        const at = roll.steps[view.idx];
+        for (let j = view.idx; j < r; j++) {
 
-        return !(r > view.idx && at && at.kind === "pause" && !view.reveal);
+            const b = roll.steps[j];
+
+            if (b && b.kind === "pause" && !(j === view.idx && view.reveal)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // A row's look: each strip turned to its place on the drum and darker
@@ -30792,8 +30801,15 @@
             });
         }
 
+        const whole = {
+            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
+                + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px) scale(" + scale + ")",
+            opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(angle))) * 1000) / 1000
+        };
+
         return {
             strips: strips,
+            whole: whole,
             opacity: opacity,
             color: "rgb(" + c + ", " + c + ", " + c + ")",
             textShadow: [
@@ -30805,13 +30821,31 @@
         };
     }
 
-    // A row's words, or for a break three dots that light up as it goes,
-    // in every strip of the row
+    // A row's words in every strip of the row, or for a break three dots
+    // that light up as it goes, drawn whole in the first strip with the
+    // others empty: solid dots cut into strips show the joins as lines
     function cylFill(list, step) {
 
-        for (const el of list) {
+        const dots = !!step && step.kind === "pause";
 
-            if (step && step.kind === "pause") {
+        for (let n = 0; n < list.length; n++) {
+
+            const el = list[n];
+
+            if (!el.dataset.clip) {
+                el.dataset.clip = el.style.clipPath;
+            }
+
+            el.style.clipPath = dots && n === 0 ? "none" : el.dataset.clip;
+
+            if (dots && n > 0) {
+
+                el.dataset.dots = "";
+                el.textContent = "";
+                continue;
+            }
+
+            if (dots) {
 
                 if (el.dataset.dots !== "1") {
 
@@ -30843,7 +30877,7 @@
     // Light the break's dots as far as it has come, one a quarter through
     function cylDots(roll, view) {
 
-        for (const el of roll.strips[CYL_MID]) {
+        for (const el of roll.strips[CYL_MID].slice(0, 1)) {
 
             if (el.dataset.dots !== "1") {
                 return;
@@ -30921,11 +30955,16 @@
             wrap.style.textShadow = to.textShadow;
             wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
 
+            const isDots = !!roll.steps[r] && roll.steps[r].kind === "pause";
+            const part = function (pose, n) {
+                return isDots && n === 0 ? pose.whole : pose.strips[n];
+            };
+
             for (let n = 0; n < list.length; n++) {
 
                 cylStop(list[n]);
-                list[n].style.transform = to.strips[n].transform;
-                list[n].style.opacity = String(to.strips[n].opacity);
+                list[n].style.transform = part(to, n).transform;
+                list[n].style.opacity = String(part(to, n).opacity);
             }
 
             if (!wrap.animate || (!rolled && !revealed)) {
@@ -30955,8 +30994,8 @@
             for (let n = 0; n < list.length; n++) {
 
                 list[n].animate([
-                    { transform: from.strips[n].transform, opacity: from.strips[n].opacity },
-                    { transform: to.strips[n].transform, opacity: to.strips[n].opacity }
+                    { transform: part(from, n).transform, opacity: part(from, n).opacity },
+                    { transform: part(to, n).transform, opacity: part(to, n).opacity }
                 ], { duration: time, easing: "ease-out" });
             }
         }
@@ -84808,7 +84847,9 @@
 
     // Whether step r shows when the song is at the view: a break only while
     // it is the step reached, the lines after it once in sight, an empty
-    // step never
+    // step never. A line beyond a break still to come, or one reached that
+    // has not shown its lines yet, stays out of sight, so it never shows
+    // early, goes and comes back
     function cylShown(roll, r, view) {
 
         const s = roll.steps[r];
@@ -84825,9 +84866,16 @@
             return false;
         }
 
-        const at = roll.steps[view.idx];
+        for (let j = view.idx; j < r; j++) {
 
-        return !(r > view.idx && at && at.kind === "pause" && !view.reveal);
+            const b = roll.steps[j];
+
+            if (b && b.kind === "pause" && !(j === view.idx && view.reveal)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // A row's look: each strip turned to its place on the drum and darker
@@ -84871,8 +84919,15 @@
             });
         }
 
+        const whole = {
+            transform: "translateX(" + Math.round(g.sx * k) + "px) translateZ(" + (-g.radius) + "px) rotateX("
+                + (-angle) + "rad) translateZ(" + g.radius + "px) translateY(0px) scale(" + scale + ")",
+            opacity: Math.round(Math.sqrt(Math.max(0, Math.cos(angle))) * 1000) / 1000
+        };
+
         return {
             strips: strips,
+            whole: whole,
             opacity: opacity,
             color: "rgb(" + c + ", " + c + ", " + c + ")",
             textShadow: [
@@ -84884,13 +84939,31 @@
         };
     }
 
-    // A row's words, or for a break three dots that light up as it goes,
-    // in every strip of the row
+    // A row's words in every strip of the row, or for a break three dots
+    // that light up as it goes, drawn whole in the first strip with the
+    // others empty: solid dots cut into strips show the joins as lines
     function cylFill(list, step) {
 
-        for (const el of list) {
+        const dots = !!step && step.kind === "pause";
 
-            if (step && step.kind === "pause") {
+        for (let n = 0; n < list.length; n++) {
+
+            const el = list[n];
+
+            if (!el.dataset.clip) {
+                el.dataset.clip = el.style.clipPath;
+            }
+
+            el.style.clipPath = dots && n === 0 ? "none" : el.dataset.clip;
+
+            if (dots && n > 0) {
+
+                el.dataset.dots = "";
+                el.textContent = "";
+                continue;
+            }
+
+            if (dots) {
 
                 if (el.dataset.dots !== "1") {
 
@@ -84922,7 +84995,7 @@
     // Light the break's dots as far as it has come, one a quarter through
     function cylDots(roll, view) {
 
-        for (const el of roll.strips[CYL_MID]) {
+        for (const el of roll.strips[CYL_MID].slice(0, 1)) {
 
             if (el.dataset.dots !== "1") {
                 return;
@@ -85000,11 +85073,16 @@
             wrap.style.textShadow = to.textShadow;
             wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
 
+            const isDots = !!roll.steps[r] && roll.steps[r].kind === "pause";
+            const part = function (pose, n) {
+                return isDots && n === 0 ? pose.whole : pose.strips[n];
+            };
+
             for (let n = 0; n < list.length; n++) {
 
                 cylStop(list[n]);
-                list[n].style.transform = to.strips[n].transform;
-                list[n].style.opacity = String(to.strips[n].opacity);
+                list[n].style.transform = part(to, n).transform;
+                list[n].style.opacity = String(part(to, n).opacity);
             }
 
             if (!wrap.animate || (!rolled && !revealed)) {
@@ -85034,8 +85112,8 @@
             for (let n = 0; n < list.length; n++) {
 
                 list[n].animate([
-                    { transform: from.strips[n].transform, opacity: from.strips[n].opacity },
-                    { transform: to.strips[n].transform, opacity: to.strips[n].opacity }
+                    { transform: part(from, n).transform, opacity: part(from, n).opacity },
+                    { transform: part(to, n).transform, opacity: part(to, n).opacity }
                 ], { duration: time, easing: "ease-out" });
             }
         }
