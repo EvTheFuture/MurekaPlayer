@@ -24177,6 +24177,8 @@
             ctlGhost = null;
         }
 
+        const held = draggingCtl;
+
         draggingCtl.style.opacity = "";
         draggingCtl = null;
         swallowClick = true;
@@ -24185,6 +24187,17 @@
         setTimeout(function () {
             swallowClick = false;
         }, 400);
+
+        // Together held and let go where it was: the phone's Listening
+        // together settings, with the rooms open and who is in the room
+        if (held.id === "togetherBtn" && visibleControls().map(controlNameOf).join(",") === dragFrom) {
+
+            send("togetherSettings");
+            setTimeout(function () {
+                showPanel("settings");
+            }, 150);
+            return;
+        }
 
         const names = visibleControls().map(controlNameOf).filter(function (name) {
             return name;
@@ -24202,6 +24215,10 @@
         pendingControls = { key: controlsKey, until: Date.now() + 4000 };
         send("setControls", names);
     }
+
+    // The order when a button was picked up, to tell a long press that
+    // moved nothing from a move
+    let dragFrom = "";
 
     $("controls").addEventListener("pointerdown", function (ev) {
 
@@ -24227,6 +24244,7 @@
 
             btn.classList.remove("holding");
             draggingCtl = btn;
+            dragFrom = visibleControls().map(controlNameOf).join(",");
             ctlGhost = makeGhost(btn, holdStart.x, holdStart.y);
             btn.style.opacity = "0.3";
         }, 550);

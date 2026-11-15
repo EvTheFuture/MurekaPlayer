@@ -1141,10 +1141,16 @@ In development.
     Stop also leaves the room, or the shared song would only start again.
     Leaving, the music goes on as this player's own; a player that only
     played along gets its own queue and filters back.
+  - A long press on the Together button, in the app (the control button or
+    the header's) shows who is in the room, the rooms open on the relay to
+    join with a tap, New room to name one, and Leave the room. In the web
+    view it opens the Listening together settings, which list the same.
+  - A player joining takes the room's queue, place and filters, and sends
+    filters only when someone changes them, never by joining.
   - Settings > Listening together, in the app and in the web view: Listen
-    together, how it stands, the room, the name shown, the relay's
-    address, Timing and In the room. On after a restart, the player joins
-    again.
+    together, how it stands, the room, Rooms open now with a Join button
+    each, the name shown, the relay's address, Timing and In the room. On
+    after a restart, the player joins again.
   - Timing: each player measures its round trip to the relay (8 tries with
     Test timing, again every minute or so) and the relay's clock, and goes
     by the place heard, the delay of its sound (a Bluetooth speaker's)

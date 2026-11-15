@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.144";
+    const VERSION = "2.0.1.145";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2424,6 +2424,10 @@
     // A short press must still work the button, so nothing moves until the
     // press has been held, and the click that follows a drag is swallowed
     let ctrlDragName = null;
+
+    // The order of the control buttons when one was picked up, to tell a
+    // long press that moved nothing from a move
+    let ctrlDragFrom = "";
     let ctrlHoldTimer = null;
     let ctrlGhost = null;
     let ctrlGhostDX = 0;
@@ -28951,12 +28955,21 @@
         }
 
         const el = ctlEl(ctrlDragName);
+        const held = ctrlDragName;
 
         if (el) {
             el.style.opacity = "1";
         }
 
         ctrlDragName = null;
+
+        // Together held and let go where it was: its menu, nothing moved
+        if (held === "together" && currentControlNames().join(",") === ctrlDragFrom) {
+
+            openSyncLongMenu();
+            return;
+        }
+
         saveSettings();
         setStatus("Transport row rearranged");
     }
@@ -29105,6 +29118,7 @@
 
                     ctrlHoldTimer = null;
                     ctrlDragName = name;
+                    ctrlDragFrom = currentControlNames().join(",");
                     ctrlSuppressClick = true;
 
                     const r = btn.getBoundingClientRect();
@@ -39768,7 +39782,7 @@
             const bits = [];
 
             if (m.owner) {
-                bits.push("shares");
+                bits.push("holds the queue");
             }
 
             if (Number(m.rtt) > 0) {
@@ -39987,6 +40001,11 @@
         // Filters changed by another player: the same here, and the queue
         // made again from them around the playing song, for everyone
         if (c.cmd === "filters" && c.filters && typeof c.filters === "object") {
+
+            // The same as here already, nothing changed
+            if (JSON.stringify(c.filters) === JSON.stringify(syncFiltersNow())) {
+                return;
+            }
 
             syncFiltersApply(c.filters);
             queueFollowFilter();
@@ -40525,7 +40544,10 @@
 
     // Filters changed here while playing along: sent to the one holding the
     // room, which changes them for everyone. The shared queue stays as it
-    // is until the new one comes
+    // is until the new one comes. Only a real change goes: filters that
+    // are the room's already go nowhere, and until the room is heard a
+    // player that just joined has none of its own to send, it takes the
+    // room's when they come, so it never changes them by joining
     function syncHereFilters() {
 
         const f = syncFollowing;
@@ -40534,8 +40556,18 @@
             return false;
         }
 
+        if (!f.heard || !f.state) {
+            return true;
+        }
+
+        const now = syncFiltersNow();
+
+        if (f.state.filters && JSON.stringify(now) === JSON.stringify(f.state.filters)) {
+            return true;
+        }
+
         f.localFiltersUntil = Date.now() + SYNC_LOCAL_MS;
-        syncSend({ cmd: "filters", filters: syncFiltersNow() });
+        syncSend({ cmd: "filters", filters: now });
 
         return true;
     }
@@ -40832,6 +40864,121 @@
         if (syncToggle()) {
             openSyncMenu();
         }
+    }
+
+    // Joining a room by its name, leaving the one this player is in
+    function syncJoinRoom(name) {
+
+        const r = String(name || "").trim().toLowerCase();
+
+        if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(r)) {
+
+            showToast("A room name is lower case letters, digits and hyphens", false);
+            return;
+        }
+
+        if (settings.syncOn === true) {
+            syncLeave();
+        }
+
+        settings.syncTogether = r;
+        settings.syncOn = true;
+        saveSettings();
+        syncJoin();
+        showToast("Joining the room " + r, "wait");
+        syncPaint();
+        publishHostSoon();
+    }
+
+    // The names in the room, one to a line, for the menu
+    function syncWhoText() {
+
+        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncHolding ? syncMembersNow() : [];
+
+        return list.map(function (m) {
+            return String(m.name || "Someone").slice(0, 40) + (m.owner ? " (holds the queue)" : "");
+        }).join("\n");
+    }
+
+    // A room on the relay in a line: its name, who holds it and what plays
+    function syncRoomLine(r) {
+
+        const n = Number(r.listeners) || 0;
+
+        return String(r.room) + ": " + String(r.name || "someone").slice(0, 30)
+            + (r.title ? ", " + String(r.title).slice(0, 40) + (r.playing ? "" : " (paused)") : "")
+            + ", " + (n + 1) + (n === 0 ? " player" : " players");
+    }
+
+    // A long press on Together: who is in the room, the rooms open on the
+    // relay to join, a new room, leaving and the settings
+    function openSyncLongMenu() {
+
+        if (!syncRelayOk(syncRelay()) || !syncAvailable()) {
+
+            openSyncMenu();
+            return;
+        }
+
+        const who = settings.syncOn === true ? syncWhoText() : "";
+        const choices = [
+            { label: "Rooms open now", fn: openSyncRoomsMenu },
+            { label: "New room", fn: askSyncNewRoom }
+        ];
+
+        if (settings.syncOn === true) {
+            choices.push({ label: "Leave the room", ring: true, color: DANGER, fn: function () {
+                syncToggle();
+            } });
+        } else {
+            choices.push({ label: "Join the room " + syncRoomName(), fn: function () {
+                syncToggle();
+            } });
+        }
+
+        choices.push({ label: "Settings", fn: function () {
+
+            openSettings();
+            showSettingsPage("together");
+        } });
+
+        askChoices("Listening together\n" + syncStatusText() + (who ? "\n\nIn the room:\n" + who : ""), choices, null, false, true);
+    }
+
+    // The rooms open on the relay, each to join with a tap
+    function openSyncRoomsMenu() {
+
+        showToast("Asking the relay", "wait");
+        syncAskRooms(function (rooms, err) {
+
+            if (!rooms) {
+
+                showToast("No list of rooms: " + (err || "the relay did not answer"), false);
+                return;
+            }
+
+            const choices = rooms.slice(0, 20).map(function (r) {
+                return { label: (String(r.room) === syncRoomName() && settings.syncOn === true ? "In: " : "") + syncRoomLine(r), fn: function () {
+
+                    if (String(r.room) !== syncRoomName() || settings.syncOn !== true) {
+                        syncJoinRoom(String(r.room));
+                    }
+                } };
+            });
+
+            choices.push({ label: "New room", fn: askSyncNewRoom });
+
+            askChoices("Rooms open now\n" + (rooms.length === 0 ? "No room is open. A new one opens when you join it."
+                : "A tap joins the room, with its queue and filters."), choices, null, false, true);
+        });
+    }
+
+    // A new room, or another to join by its name
+    function askSyncNewRoom() {
+
+        askText("New room, its name in lower case letters, digits and hyphens. The others join it by the same name.", "", "Join", function (v) {
+            syncJoinRoom(v);
+        });
     }
 
     function openSyncMenu() {
@@ -42758,8 +42905,9 @@
         syncHeadBtn.addEventListener("click", function (ev) {
 
             ev.stopPropagation();
-            openSyncMenu();
+            syncControlTap();
         });
+        onLongPress(syncHeadBtn, openSyncLongMenu);
 
         // Right side of the header holds the action toggle, gear and minimize
         const headerRight = document.createElement("div");
@@ -49364,7 +49512,67 @@
         page.appendChild(roomRow);
         page.appendChild(makeHint("The same on every player that listens together. The first to come holds the queue and"
             + " shares it. When it leaves, one of the others takes over, and the music goes on for the rest. The filters pick"
-            + " from the library of the player holding the queue."));
+            + " from the library of the player holding the queue. A new name is a new room."));
+
+        // The rooms open on the relay, each with a button to join it
+        const roomsBox = document.createElement("div");
+
+        roomsBox.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px;color:#ccc";
+
+        const fillRooms = function (rooms, err) {
+
+            roomsBox.textContent = "";
+
+            if (!rooms) {
+
+                roomsBox.textContent = "No list of rooms: " + (err || "the relay did not answer") + ".";
+                return;
+            }
+
+            if (rooms.length === 0) {
+
+                roomsBox.textContent = "No room is open. A new one opens when a player joins it.";
+                return;
+            }
+
+            for (const r of rooms.slice(0, 20)) {
+
+                const row = document.createElement("div");
+                const text = document.createElement("span");
+                const here = String(r.room) === syncRoomName() && settings.syncOn === true;
+                const join = makeButton(here ? "In it" : "Join", "#333", "#fff", function () {
+
+                    if (!here) {
+
+                        syncJoinRoom(String(r.room));
+                        roomsBox.textContent = "";
+                    }
+                });
+
+                row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+                text.textContent = syncRoomLine(r);
+                text.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
+                row.appendChild(text);
+                row.appendChild(join);
+                roomsBox.appendChild(row);
+            }
+        };
+        const roomsBtn = makeButton("Rooms open now", "#333", "#fff", function () {
+
+            if (!syncAvailable() || !syncRelayOk(syncRelay())) {
+
+                showToast("Set the relay's address first", false);
+                return;
+            }
+
+            roomsBox.textContent = "Asking the relay...";
+            syncAskRooms(fillRooms);
+        });
+
+        page.appendChild(roomsBtn);
+        page.appendChild(roomsBox);
+        page.appendChild(makeHint("The rooms on the relay, who holds each and what plays. Join leaves the room this player is"
+            + " in. A long press on the Together button shows them too, with who is in the room."));
 
         const nameRow = makeTextRow("Your name", function () {
             return settings.syncName || "";
@@ -95356,6 +95564,8 @@
             ctlGhost = null;
         }
 
+        const held = draggingCtl;
+
         draggingCtl.style.opacity = "";
         draggingCtl = null;
         swallowClick = true;
@@ -95364,6 +95574,17 @@
         setTimeout(function () {
             swallowClick = false;
         }, 400);
+
+        // Together held and let go where it was: the phone's Listening
+        // together settings, with the rooms open and who is in the room
+        if (held.id === "togetherBtn" && visibleControls().map(controlNameOf).join(",") === dragFrom) {
+
+            send("togetherSettings");
+            setTimeout(function () {
+                showPanel("settings");
+            }, 150);
+            return;
+        }
 
         const names = visibleControls().map(controlNameOf).filter(function (name) {
             return name;
@@ -95381,6 +95602,10 @@
         pendingControls = { key: controlsKey, until: Date.now() + 4000 };
         send("setControls", names);
     }
+
+    // The order when a button was picked up, to tell a long press that
+    // moved nothing from a move
+    let dragFrom = "";
 
     $("controls").addEventListener("pointerdown", function (ev) {
 
@@ -95406,6 +95631,7 @@
 
             btn.classList.remove("holding");
             draggingCtl = btn;
+            dragFrom = visibleControls().map(controlNameOf).join(",");
             ctlGhost = makeGhost(btn, holdStart.x, holdStart.y);
             btn.style.opacity = "0.3";
         }, 550);
