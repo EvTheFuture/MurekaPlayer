@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.142";
+    const VERSION = "2.0.1.143";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4363,7 +4363,8 @@
             syncShare: false,
             syncRoom: "",
             syncKey: "",
-            syncControl: true
+            syncControl: true,
+            syncLast: null
         };
 
         try {
@@ -4611,7 +4612,7 @@
                         ? parsed.lyricSize : 18,
                     lyricSideMul: (typeof parsed.lyricSideMul === "number" && parsed.lyricSideMul >= 0.5 && parsed.lyricSideMul <= 1)
                         ? parsed.lyricSideMul : 0.8,
-                    lyricDrum: (typeof parsed.lyricDrum === "number" && parsed.lyricDrum >= 1.5 && parsed.lyricDrum <= 3.5)
+                    lyricDrum: (typeof parsed.lyricDrum === "number" && parsed.lyricDrum >= 0.6 && parsed.lyricDrum <= 3.5)
                         ? parsed.lyricDrum : 2,
                     lyricShift: (typeof parsed.lyricShift === "number" && parsed.lyricShift >= -30 && parsed.lyricShift <= 30)
                         ? parsed.lyricShift : 0,
@@ -4626,7 +4627,7 @@
                     // Zero or null follows the mobile player's own value
                     webLyricSideMul: (typeof parsed.webLyricSideMul === "number" && parsed.webLyricSideMul >= 0.5 && parsed.webLyricSideMul <= 1)
                         ? parsed.webLyricSideMul : 0,
-                    webLyricDrum: (typeof parsed.webLyricDrum === "number" && parsed.webLyricDrum >= 1.5 && parsed.webLyricDrum <= 3.5)
+                    webLyricDrum: (typeof parsed.webLyricDrum === "number" && parsed.webLyricDrum >= 0.6 && parsed.webLyricDrum <= 3.5)
                         ? parsed.webLyricDrum : 0,
                     webLyricSideShift: (typeof parsed.webLyricSideShift === "number" && parsed.webLyricSideShift >= -40 && parsed.webLyricSideShift <= 40)
                         ? parsed.webLyricSideShift : null,
@@ -4659,7 +4660,8 @@
                     syncRoom: typeof parsed.syncRoom === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(parsed.syncRoom)
                         ? parsed.syncRoom : "",
                     syncKey: typeof parsed.syncKey === "string" && /^[0-9a-f]{16,64}$/.test(parsed.syncKey) ? parsed.syncKey : "",
-                    syncControl: parsed.syncControl !== false
+                    syncControl: parsed.syncControl !== false,
+                    syncLast: syncLastOf(parsed.syncLast)
                 };
 
                 // Read this time, so saved again in their usual place once
@@ -25233,6 +25235,17 @@
     // Stop playback and clear the queue
     function stopPlay() {
 
+        // Listening along, Stop ends it first, or the shared song would only
+        // start again. The song of the shared queue is not this player's to
+        // come back to, so Play later starts the queue here from its song
+        let fromStart = false;
+
+        if (syncFollowing) {
+
+            syncStopFollow("Stopped, listening along stopped");
+            fromStart = true;
+        }
+
         dropNextReady();
 
         // Stop on a song played on its own from a stopped player puts back
@@ -25246,8 +25259,6 @@
 
         // While a queue played, the song played on its own leaves it, and a
         // later Play goes on with the song after it, from its start
-        let fromStart = false;
-
         if (isPreviewEntry(queue[queuePos])) {
 
             queue.splice(queuePos, 1);
@@ -30306,12 +30317,14 @@
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
-    // The turn from one line to the next on the drum, 30 degrees, so two
-    // lines each side of the sung one are on the side of the drum facing
-    // out, how far off the drum is seen from, in widths of the lyrics, the
-    // strips each row is cut into to wrap it round the drum, and the rows:
-    // those five and one more each side rolling in and out of sight
-    const CYL_STEP = Math.PI / 6;
+    // How far apart the lines are along the drum's face, in lines: the turn
+    // from one to the next comes from it and the drum's size, a small drum
+    // turning them far round and bending the sung line, a big one showing
+    // more of them flatter. How far off the drum is seen from, in widths of
+    // the lyrics, the strips each row is cut into to wrap it round the
+    // drum, and the rows: the sung one, two each side, and one more each
+    // side rolling in and out of sight
+    const CYL_ARC = 1.05;
     const CYL_EYE = 1.2;
     const CYL_STRIPS = 8;
     const CYL_ROWS = 7;
@@ -30591,15 +30604,16 @@
 
         const size = Math.max(10, layout.size);
         const lineH = Math.round(size * 1.5);
-        const radius = lineH * Math.max(1.5, Math.min(3.5, layout.drum || 2));
-        const boxH = Math.round(2 * radius * Math.sin(2 * CYL_STEP) + lineH * 0.6);
+        const radius = lineH * Math.max(0.6, Math.min(3.5, layout.drum || 2));
+        const step = CYL_ARC * lineH / radius;
+        const boxH = Math.round(2 * radius * Math.sin(Math.min(Math.PI / 2, 2 * step)) + lineH * 0.6);
         const top = Math.round((boxH - lineH) / 2);
 
         roll.geo = {
             size: size,
             lineH: lineH,
             radius: radius,
-            step: CYL_STEP,
+            step: step,
             side: layout.side,
             sx: layout.sideShift || 0
         };
@@ -36253,6 +36267,7 @@
             // Listening together: sharing, listening along or neither
             together: syncFollowing ? "follow" : settings.syncShare ? "share" : "off",
             togetherReady: syncRelayOk(syncRelay()),
+            togetherLast: !!syncLastOf(settings.syncLast),
             togetherText: syncFollowing ? "Listening along with " + syncFollowing.name
                 : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together",
 
@@ -39441,6 +39456,26 @@
     const syncMembers = new Map();
     const syncPainters = [];
 
+    // The way of listening together used last, sharing or listening along
+    // with a room, for the Together button to take up again. Anything else
+    // is none
+    function syncLastOf(v) {
+
+        if (!v || typeof v !== "object") {
+            return null;
+        }
+
+        if (v.mode === "share") {
+            return { mode: "share" };
+        }
+
+        if (v.mode === "follow" && typeof v.room === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(v.room)) {
+            return { mode: "follow", room: v.room, name: String(v.name || "").slice(0, 40) };
+        }
+
+        return null;
+    }
+
     function syncAvailable() {
         return isApkHost() && !!window.MurekaHost && typeof window.MurekaHost.syncLead === "function";
     }
@@ -39532,7 +39567,7 @@
 
             ctl.title = syncFollowing ? "Listening along with " + syncFollowing.name
                 : settings.syncShare ? "Shared, " + syncLeadInfo.listeners + " listening along" : "Listening together";
-            paintCtrl(ctl, syncFollowing || settings.syncShare === true ? "fill" : "plain");
+            paintCtrl(ctl, syncFollowing ? "ring" : settings.syncShare === true ? "fill" : "plain");
         }
 
         if (syncHeadBtn) {
@@ -39686,6 +39721,8 @@
                 syncStopFollow();
             }
 
+            settings.syncLast = { mode: "share" };
+            saveSettings();
             syncEnsureRoom();
             syncLeadTick();
         } else if (syncAvailable()) {
@@ -39989,6 +40026,8 @@
             localSongId: "", localSongUntil: 0, localPlaying: null, localPlayUntil: 0, localSeekUntil: 0, drift: 0,
             saved: { queue: queue.slice(), pos: queuePos, own: queueOwn } };
         syncHelloAt = 0;
+        settings.syncLast = { mode: "follow", room: String(room), name: syncFollowing.name };
+        saveSettings();
         window.MurekaHost.syncFollow(syncRelay(), String(room));
         dbgLog("Sync", "listening along with " + syncFollowing.name + " in room " + room);
         setStatus("Listening along with " + syncFollowing.name);
@@ -40496,6 +40535,60 @@
             syncPaint();
         }
     };
+
+    // The Together button: listening along or sharing, it stops, the music
+    // here goes on as this player's own. Neither, it takes up again the way
+    // used last, sharing or listening along with the same player. Answers
+    // what is still to be asked: "setup" with no relay set, "pick" with
+    // nothing used before, else ""
+    function syncToggle() {
+
+        if (!syncRelayOk(syncRelay()) || !syncAvailable()) {
+            return "setup";
+        }
+
+        if (syncFollowing) {
+
+            const name = syncFollowing.name;
+
+            syncStopFollow();
+            showToast("Stopped listening along with " + name);
+            return "";
+        }
+
+        if (settings.syncShare) {
+
+            syncSetShare(false);
+            showToast("Stopped sharing");
+            return "";
+        }
+
+        const last = syncLastOf(settings.syncLast);
+
+        if (last && last.mode === "share") {
+
+            syncSetShare(true);
+            showToast("Shared as " + syncName());
+            return "";
+        }
+
+        if (last && last.mode === "follow") {
+
+            syncStartFollow(last.room, last.name);
+            return "";
+        }
+
+        return "pick";
+    }
+
+    // The control button: on and off in a tap, the menu only to set it up
+    // or pick the first time
+    function syncControlTap() {
+
+        if (syncToggle()) {
+            openSyncMenu();
+        }
+    }
 
     // Listening together from the header: on or off in a tap or two
     function openSyncMenu() {
@@ -41343,7 +41436,17 @@
             setSoundPick(typeof arg === "string" ? arg : "");
         } else if (cmd === "together") {
 
-            // The web view draws the settings page the phone shows
+            // On and off, as the button here does. Nothing to take up again,
+            // the settings page, which the web view draws as the phone shows it
+            if (syncToggle()) {
+
+                openSettings();
+                showSettingsPage("together");
+            }
+
+            publishHostSoon();
+        } else if (cmd === "togetherSettings") {
+
             openSettings();
             showSettingsPage("together");
         } else if (cmd === "soundLive") {
@@ -43297,7 +43400,7 @@
 
         // Listening together on or off, in the app
         if (syncAvailable()) {
-            controlButtons.together = makeIconButton(iconTogether(), "Listening together", openSyncMenu);
+            controlButtons.together = makeIconButton(iconTogether(), "Listening together", syncControlTap);
         }
 
         updateFeedButton();
@@ -50677,7 +50780,7 @@
         // The drum the lines turn on, its radius in lines as a percent
         const lyricDrumRow = makeStepperRow("Drum size percent",
             function () { return Math.round((settings.lyricDrum || 2) * 100); },
-            function (v) { settings.lyricDrum = v / 100; applyLyricLayout(); publishHostSoon(); }, 150, 350, 10);
+            function (v) { settings.lyricDrum = v / 100; applyLyricLayout(); publishHostSoon(); }, 60, 350, 10);
 
         const lyricShiftRow = makeStepperRow("Lyric position",
             function () { return settings.lyricShift; },
@@ -51215,7 +51318,7 @@
         mobilePage.appendChild(lyricDrumRow);
         mobilePage.appendChild(lyricShiftRow);
         mobilePage.appendChild(lyricSideShiftRow);
-        mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. Side lines are the lines before and after it, in percent of what the drum makes them, 100 only as the drum turns them. Drum size is the drum's radius in percent of a line: smaller turns tighter, with the lines closer together and more turned away. Lyric position moves the whole block up or down, and side line offset moves the side lines in from the left. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
+        mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. Side lines are the lines before and after it, in percent of what the drum makes them, 100 only as the drum turns them. Drum size is the drum's radius in percent of a line. The lines sit a line apart along the drum, so a small drum turns them far round and bends the line being sung across its height, and a big one shows more lines, flatter. Lyric position moves the whole block up or down, and side line offset moves the side lines in from the left. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
         mobilePage.appendChild(makeLabel("Control buttons"));
         mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
@@ -51647,7 +51750,7 @@
 
             const webLyricDrumRow = makeStepperRow("Drum size percent",
                 function () { return Math.round((settings.webLyricDrum || settings.lyricDrum || 2) * 100); },
-                function (v) { settings.webLyricDrum = v / 100; publishHostSoon(); }, 150, 350, 10);
+                function (v) { settings.webLyricDrum = v / 100; publishHostSoon(); }, 60, 350, 10);
 
             const webLyricSideShiftRow = makeStepperRow("Side line offset",
                 function () { return hostLyricLayout().sideShift; },
@@ -54660,6 +54763,7 @@
             delete base.settings.syncRoom;
             delete base.settings.syncKey;
             delete base.settings.syncShare;
+            delete base.settings.syncLast;
 
             // The Android app keeps some settings itself, outside the
             // player: the connections and its fullscreen. They go along, so
@@ -83459,7 +83563,9 @@
         $("nightBtn").title = s && s.soundText ? s.soundText : "Night mode";
 
         // Lit while the phone shares what it plays or listens along
-        $("togetherBtn").classList.toggle("on", !!(s && (s.together === "share" || s.together === "follow")));
+        // Filled while sharing, ringed while listening along
+        $("togetherBtn").classList.toggle("on", !!(s && s.together === "share"));
+        $("togetherBtn").classList.toggle("ring", !!(s && s.together === "follow"));
         $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
 
         // Lit while the playing song is in the playlist songs went into last
@@ -84004,12 +84110,14 @@
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
-    // The turn from one line to the next on the drum, 30 degrees, so two
-    // lines each side of the sung one are on the side of the drum facing
-    // out, how far off the drum is seen from, in widths of the lyrics, the
-    // strips each row is cut into to wrap it round the drum, and the rows:
-    // those five and one more each side rolling in and out of sight
-    const CYL_STEP = Math.PI / 6;
+    // How far apart the lines are along the drum's face, in lines: the turn
+    // from one to the next comes from it and the drum's size, a small drum
+    // turning them far round and bending the sung line, a big one showing
+    // more of them flatter. How far off the drum is seen from, in widths of
+    // the lyrics, the strips each row is cut into to wrap it round the
+    // drum, and the rows: the sung one, two each side, and one more each
+    // side rolling in and out of sight
+    const CYL_ARC = 1.05;
     const CYL_EYE = 1.2;
     const CYL_STRIPS = 8;
     const CYL_ROWS = 7;
@@ -84289,15 +84397,16 @@
 
         const size = Math.max(10, layout.size);
         const lineH = Math.round(size * 1.5);
-        const radius = lineH * Math.max(1.5, Math.min(3.5, layout.drum || 2));
-        const boxH = Math.round(2 * radius * Math.sin(2 * CYL_STEP) + lineH * 0.6);
+        const radius = lineH * Math.max(0.6, Math.min(3.5, layout.drum || 2));
+        const step = CYL_ARC * lineH / radius;
+        const boxH = Math.round(2 * radius * Math.sin(Math.min(Math.PI / 2, 2 * step)) + lineH * 0.6);
         const top = Math.round((boxH - lineH) / 2);
 
         roll.geo = {
             size: size,
             lineH: lineH,
             radius: radius,
-            step: CYL_STEP,
+            step: step,
             side: layout.side,
             sx: layout.sideShift || 0
         };
@@ -95386,13 +95495,15 @@
         send("toPlaylist");
     });
 
-    // The phone's Listening together settings, shown here. Not set up yet,
-    // said so first, with the way there
+    // Listening together on and off on the phone: sharing or listening
+    // along stops, neither takes up again the way used last. Not set up
+    // yet, said so, with the way to the settings, and with nothing used
+    // before, the phone's Listening together settings shown here
     $("togetherBtn").addEventListener("click", function () {
 
-        const go = function () {
+        const settingsPage = function () {
 
-            send("together");
+            send("togetherSettings");
             setTimeout(function () {
                 showPanel("settings");
             }, 150);
@@ -95401,12 +95512,18 @@
         if (state && state.togetherReady === false) {
 
             openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
-                { icon: "settings", label: "Open the settings", cls: "tall", fn: go }
+                { icon: "settings", label: "Open the settings", cls: "tall", fn: settingsPage }
             ]);
             return;
         }
 
-        go();
+        if (state && state.together === "off" && state.togetherLast !== true) {
+
+            settingsPage();
+            return;
+        }
+
+        send("together");
     });
 
     $("nightBtn").addEventListener("click", function () {

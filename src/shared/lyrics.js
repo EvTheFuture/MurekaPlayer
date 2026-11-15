@@ -8,12 +8,14 @@
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
-    // The turn from one line to the next on the drum, 30 degrees, so two
-    // lines each side of the sung one are on the side of the drum facing
-    // out, how far off the drum is seen from, in widths of the lyrics, the
-    // strips each row is cut into to wrap it round the drum, and the rows:
-    // those five and one more each side rolling in and out of sight
-    const CYL_STEP = Math.PI / 6;
+    // How far apart the lines are along the drum's face, in lines: the turn
+    // from one to the next comes from it and the drum's size, a small drum
+    // turning them far round and bending the sung line, a big one showing
+    // more of them flatter. How far off the drum is seen from, in widths of
+    // the lyrics, the strips each row is cut into to wrap it round the
+    // drum, and the rows: the sung one, two each side, and one more each
+    // side rolling in and out of sight
+    const CYL_ARC = 1.05;
     const CYL_EYE = 1.2;
     const CYL_STRIPS = 8;
     const CYL_ROWS = 7;
@@ -293,15 +295,16 @@
 
         const size = Math.max(10, layout.size);
         const lineH = Math.round(size * 1.5);
-        const radius = lineH * Math.max(1.5, Math.min(3.5, layout.drum || 2));
-        const boxH = Math.round(2 * radius * Math.sin(2 * CYL_STEP) + lineH * 0.6);
+        const radius = lineH * Math.max(0.6, Math.min(3.5, layout.drum || 2));
+        const step = CYL_ARC * lineH / radius;
+        const boxH = Math.round(2 * radius * Math.sin(Math.min(Math.PI / 2, 2 * step)) + lineH * 0.6);
         const top = Math.round((boxH - lineH) / 2);
 
         roll.geo = {
             size: size,
             lineH: lineH,
             radius: radius,
-            step: CYL_STEP,
+            step: step,
             side: layout.side,
             sx: layout.sideShift || 0
         };

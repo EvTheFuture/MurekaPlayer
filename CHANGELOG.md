@@ -1153,6 +1153,17 @@ In development.
     device.
   - The room and its key stay on the device, a settings backup leaves them
     out.
+- **The Together button turns listening together on and off.** Sharing
+  or listening along, a tap stops it and the music goes on as this
+  player's own. Neither, a tap takes up again the way used last: sharing,
+  or listening along with the same player. The menu comes only to set it
+  up or with nothing used before, and the header button still opens it.
+  The button is filled while sharing and ringed while listening along, in
+  the app and the web view, where it no longer opens the settings each
+  time.
+- **Stop while listening along stops it.** The shared song started again
+  straight away. Now Stop ends listening along, puts back the queue here
+  and stops.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
   restarts, under Settings > Playback, went no higher than 30. It is now
   picked from a list, from 1 s up to 5 min, so previous can go to the
@@ -1163,17 +1174,19 @@ In development.
     each line is cut into strips across, each turned to its own place on
     the drum, so the words wrap round it: the lines before and after are
     squeezed more towards their far edge, drawn in a little towards the
-    middle and lean out from it, as on a real drum. The lines stand 30
-    degrees apart, so two before and two after the sung one are in sight,
-    fading towards the edge, and one more each side rolls in and out of
-    sight on the drum. Each strip darkens the further round it is, so the
-    sung line shows the curve too.
+    middle and lean out from it, as on a real drum. The lines sit a line
+    apart along the drum's face, so at the first drum size they stand 30
+    degrees apart, two before and two after the sung one in sight, fading
+    towards the edge, and one more each side rolls in and out of sight on
+    the drum. Each strip darkens the further round it is, so the sung line
+    shows the curve too.
   - Every line has the same text size. The line being sung is not a
     heavier font, which jumped and widened it, but drawn thicker with an
     outline that grows and fades as it rolls.
   - Drum size percent takes the place of line spacing, the drum's radius
-    in lines, 150 to 350, 200 at first: smaller turns tighter, with the
-    lines closer together. Side line percent makes the lines before and after
+    in lines, 60 to 350, 200 at first: a small drum turns the lines far
+    round and bends the sung line across its height, a big one shows more
+    lines, flatter. Side line percent makes the lines before and after
     smaller still, from their left edge, at 100 they are only as the drum
     makes them. The web view has its own drum size, following the mobile
     player's unless set.
