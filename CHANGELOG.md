@@ -1203,6 +1203,13 @@ In development.
 - **Songs being made into a set show in it in the queue too.** Waiting
   to play once ready, a new song asked to go into a set had no set mark
   in the queue, and the queue was not read again when it joined the set.
+- **Lyrics over the cover with the list beside it, as big as there is
+  room for.** In the web view, with the small list beside the song and the
+  text over the cover, the lyrics were half the size they have beside the
+  cover, also on a large screen where the panel is almost as wide. They now
+  go by the panel's width, as big as beside the cover at most and no
+  taller than the room under the stars. The panel behind the text blurs
+  the cover a little less.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

@@ -2784,8 +2784,8 @@
         overflow: hidden;
         border-radius: 14px;
         background: rgba(22, 22, 27, 0.62);
-        -webkit-backdrop-filter: blur(10px);
-        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(6px);
+        backdrop-filter: blur(6px);
     }
 
     #app.miniSide #title,
@@ -13713,6 +13713,50 @@
         };
     }
 
+    // How tall the drum is for each pixel of text size, as cylLayout
+    // works it out
+    function drumHeightPer(drum) {
+
+        const d = Math.max(0.6, Math.min(3.5, drum || 2));
+
+        return 1.5 * (2 * d * Math.sin(Math.min(Math.PI / 2, 2 * CYL_ARC / d)) + 0.6);
+    }
+
+    // The lyrics over the cover with the list beside it: as big as beside
+    // the cover when the panel is about as wide as the room there, never
+    // bigger, and no taller than the room under the stars. Worked out
+    // again only now and then, it reads the page's layout
+    let sideSize = { at: 0, size: 0, key: "" };
+
+    function sideLyricSize(layout) {
+
+        const key = [layout.size, layout.drum].join(",");
+
+        if (sideSize.size && sideSize.key === key && Date.now() - sideSize.at < 500) {
+            return sideSize.size;
+        }
+
+        const l = state && state.lyricLayout ? state.lyricLayout : {};
+        const base = typeof l.size === "number" ? l.size : 26;
+
+        // The size beside the cover goes by the line under the title, 2 %
+        // of the width between 18 and 30 pixels there
+        const full = Math.round(base * Math.max(18, Math.min(30, window.innerWidth * 0.02)) / 20);
+        const least = Math.round(layout.size * 0.75);
+        const wide = $("lyrics").clientWidth || 0;
+        const info = $("info").getBoundingClientRect();
+        const room = info.bottom - (parseFloat(getComputedStyle($("info")).paddingBottom) || 0) - $("lyrics").getBoundingClientRect().top;
+        let size = Math.min(full, Math.round(wide * 0.05));
+
+        if (room > 0) {
+            size = Math.min(size, Math.floor(room / drumHeightPer(layout.drum)));
+        }
+
+        sideSize = { at: Date.now(), size: Math.max(least, size), key: key };
+
+        return sideSize.size;
+    }
+
     function showLyrics(pos) {
 
         const rows = state && state.lyrics && state.lyrics.length ? state.lyrics : null;
@@ -13763,12 +13807,12 @@
         // size is for a cover about 360 pixels wide
         const layout = lyricLayout();
 
-        // On the cover a little smaller, it shares the picture, and smaller
-        // still over the cover with the list beside it
+        // On the cover a little smaller, it shares the picture. Over the
+        // cover with the list beside it, by the room the panel has there
         if (onCover) {
             layout.size = Math.round(layout.size * 0.85);
         } else if ($("app").classList.contains("miniSide")) {
-            layout.size = Math.round(layout.size * 0.75);
+            layout.size = sideLyricSize(layout);
         }
 
         const key = [layout.size, layout.side, layout.drum, layout.sideShift, layout.shift].join(",");
@@ -22153,7 +22197,7 @@
 
             info.animate([
                 { backgroundColor: "rgba(22, 22, 27, 0)", backdropFilter: "blur(0px)" },
-                { backgroundColor: "rgba(22, 22, 27, 0.62)", backdropFilter: "blur(10px)" }
+                { backgroundColor: "rgba(22, 22, 27, 0.62)", backdropFilter: "blur(6px)" }
             ], { duration: SIDE_MS, easing: SIDE_EASE });
         }
     }
