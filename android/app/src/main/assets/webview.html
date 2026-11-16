@@ -9306,6 +9306,12 @@
         }
 
         local.look = local.look ? Object.assign(phoneLook(rawState), local.look) : freshLook();
+
+        // The play head put somewhere else takes the colors kept for there
+        if (key === "headMode") {
+            waveLookSwitch(local.look, local.look.headMode, value);
+        }
+
         local.look[key] = value;
 
         // A bar set here since Songs became a button of its own says itself
@@ -9328,6 +9334,61 @@
         { label: "Progress color up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
         { label: "Progress color past the play head", key: "progressAhead", field: "waveZoomProgressAhead", c: "#c8c8d0", a: 100 }
     ];
+
+    // This browser's waveform colors and progress look as they come for
+    // each place of the play head, as on the phone: in the middle as they
+    // always were, moving along the played part in the accent color and no
+    // progress over it
+    function waveLookDefaults(mode) {
+
+        const out = {};
+
+        for (const w of WAVE_SWATCHES) {
+            out[w.key] = { c: w.c, a: w.a };
+        }
+
+        out.progressLook = "wave";
+
+        if (playHeadMode(mode) !== "center") {
+
+            out.wavePlayed = { c: "#48e1eb", a: 100 };
+            out.progressLook = "off";
+        }
+
+        return out;
+    }
+
+    // The look's waveform colors kept for where the play head was, and the
+    // ones kept for where it goes taken, or that place's defaults
+    function waveLookSwitch(look, from, to) {
+
+        const a = playHeadMode(from);
+        const b = playHeadMode(to);
+
+        if (a === b) {
+            return;
+        }
+
+        const kept = look.modeLooks && typeof look.modeLooks === "object" ? look.modeLooks : {};
+        const now = {};
+
+        for (const w of WAVE_SWATCHES) {
+            now[w.key] = look[w.key];
+        }
+
+        now.progressLook = look.progressLook;
+        kept[a] = now;
+
+        const next = kept[b] && typeof kept[b] === "object" ? kept[b] : waveLookDefaults(b);
+        const defaults = waveLookDefaults(b);
+
+        for (const w of WAVE_SWATCHES) {
+            look[w.key] = swatchOk(next[w.key]) ? next[w.key] : defaults[w.key];
+        }
+
+        look.progressLook = PROGRESS_LOOKS.indexOf(next.progressLook) !== -1 ? next.progressLook : defaults.progressLook;
+        look.modeLooks = kept;
+    }
 
     // A color and its share from the phone's rgba text, or the default
     function swatchFrom(text, def) {
@@ -9662,11 +9723,17 @@
                     ev.stopPropagation();
                     ev.preventDefault();
 
+                    // As they come for where the play head is here
+                    const own = localSettings();
+                    const mode = own && own.look && PLAY_HEAD_MODES.indexOf(own.look.headMode) !== -1
+                        ? own.look.headMode : playHeadMode(rawState && rawState.waveZoomPlayHead);
+                    const defaults = waveLookDefaults(mode);
+
                     for (const w of WAVE_SWATCHES) {
-                        changeLocalLook(w.key, { c: w.c, a: w.a });
+                        changeLocalLook(w.key, defaults[w.key]);
                     }
 
-                    changeLocalLook("progressLook", "wave");
+                    changeLocalLook("progressLook", defaults.progressLook);
                     renderPanelAgain();
                 }, true);
             }

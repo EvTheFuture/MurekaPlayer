@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.192";
+    const VERSION = "2.0.1.193";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -475,7 +475,8 @@
         + "only slowly; or runs across a waveform standing still, which turns to the next part when the play head "
         + "nears the right edge, with the whole song as the thin line at its foot again. Off the middle, everything "
         + "left of the play head is played and in the played colors, as zoomed out, so the color past the play head "
-        + "is left out.";
+        + "is left out. Each place keeps colors of its own, the first time moving along the played part in the accent "
+        + "color and no progress over it, and Reset the waveform colors puts back those of the place chosen.";
 
     // BEGIN SHARED wave
     // Written by embed-webview.sh from src/shared/wave.js. Change that
@@ -4356,6 +4357,8 @@
             webWaveZoomKeep: false,
             waveProgressLook: "wave",
             webWaveProgressLook: "wave",
+            waveLooks: {},
+            webWaveLooks: {},
             wavePlayHeadMode: "center",
             webWavePlayHeadMode: "center",
             waveColor: WAVE_PLAYED_COLOR,
@@ -4637,6 +4640,9 @@
                     webWaveProgressLook: progressLook(parsed.webWaveProgressLook),
                     wavePlayHeadMode: playHeadMode(parsed.wavePlayHeadMode),
                     webWavePlayHeadMode: playHeadMode(parsed.webWavePlayHeadMode),
+                    waveLooks: parsed.waveLooks && typeof parsed.waveLooks === "object" && !Array.isArray(parsed.waveLooks) ? parsed.waveLooks : {},
+                    webWaveLooks: parsed.webWaveLooks && typeof parsed.webWaveLooks === "object" && !Array.isArray(parsed.webWaveLooks)
+                        ? parsed.webWaveLooks : {},
                     waveColor: progressColor(parsed.waveColor, WAVE_PLAYED_COLOR),
                     webWaveColor: progressColor(parsed.webWaveColor, WEB_WAVE_PLAYED_COLOR),
                     waveAlpha: progressAlpha(parsed.waveAlpha, 100),
@@ -50731,37 +50737,136 @@
     function makeWaveColorReset(prefix, rows, changed) {
 
         const row = document.createElement("div");
-        const key = function (name) {
-            return prefix ? prefix + name.charAt(0).toUpperCase() + name.slice(1) : name;
-        };
 
         row.style.cssText = "display:flex";
         row.appendChild(makeButton("Reset the waveform colors", "#444", "#fff", function (ev) {
 
             buttonDone(ev.currentTarget, "Reset", true);
-
-            for (const d of WAVE_COLOR_DEFAULTS) {
-
-                // The web view's played part, and the progress past the
-                // play head that matches it, have a color of their own
-                const webPlayed = d[0] === "waveColor" || d[0] === "waveZoomProgressAheadColor";
-
-                settings[key(d[0])] = prefix === "web" && webPlayed ? WEB_WAVE_PLAYED_COLOR : d[2];
-                settings[key(d[1])] = d[3];
-            }
-
-            settings[key("waveProgressLook")] = "wave";
-
+            waveLookReset(prefix);
             saveSettings();
+            row.__paintAll();
+            changed();
+        }));
+
+        // The rows drawn again, after the play head's place brought its
+        // own colors
+        row.__paintAll = function () {
 
             for (const r of rows) {
                 r.__paint();
             }
-
-            changed();
-        }));
+        };
 
         return row;
+    }
+
+    // A waveform setting's name, the web view's with its prefix
+    function waveSettingKey(prefix, name) {
+        return prefix ? prefix + name.charAt(0).toUpperCase() + name.slice(1) : name;
+    }
+
+    // The waveform's colors and how the song's progress shows, as they
+    // come for each place of the play head. In the middle as they always
+    // were. Moving along, the played part in the accent color, the rest
+    // grey and no progress over it, the thin line at the foot the whole
+    // song's when turning pages
+    function waveLookDefaults(prefix, mode) {
+
+        const out = {};
+        const center = playHeadMode(mode) === "center";
+
+        for (const d of WAVE_COLOR_DEFAULTS) {
+
+            // The web view's played part, and the progress past the play
+            // head that matches it, have a color of their own
+            const webPlayed = d[0] === "waveColor" || d[0] === "waveZoomProgressAheadColor";
+
+            out[d[0]] = prefix === "web" && webPlayed ? WEB_WAVE_PLAYED_COLOR : d[2];
+            out[d[1]] = d[3];
+        }
+
+        out.waveProgressLook = "wave";
+
+        if (!center) {
+
+            out.waveColor = ACCENT;
+            out.waveAlpha = 100;
+            out.waveProgressLook = "off";
+        }
+
+        return out;
+    }
+
+    // The waveform's look as it is now, by the names without the prefix
+    function waveLookNow(prefix) {
+
+        const out = {};
+
+        for (const d of WAVE_COLOR_DEFAULTS) {
+
+            out[d[0]] = settings[waveSettingKey(prefix, d[0])];
+            out[d[1]] = settings[waveSettingKey(prefix, d[1])];
+        }
+
+        out.waveProgressLook = settings[waveSettingKey(prefix, "waveProgressLook")];
+
+        return out;
+    }
+
+    // A look taken in, each value checked, the defaults where one is wrong
+    function waveLookApply(prefix, look, defaults) {
+
+        for (const d of WAVE_COLOR_DEFAULTS) {
+
+            settings[waveSettingKey(prefix, d[0])] = progressColor(look[d[0]], defaults[d[0]]);
+            settings[waveSettingKey(prefix, d[1])] = progressAlpha(look[d[1]], defaults[d[1]]);
+        }
+
+        settings[waveSettingKey(prefix, "waveProgressLook")] = PROGRESS_LOOKS.indexOf(look.waveProgressLook) !== -1
+            ? look.waveProgressLook : defaults.waveProgressLook;
+    }
+
+    // The looks kept for each place of the play head, the phone's or the
+    // web view's
+    function waveLooksStore(prefix) {
+
+        const name = prefix ? "webWaveLooks" : "waveLooks";
+        const v = settings[name];
+
+        if (!v || typeof v !== "object" || Array.isArray(v)) {
+            settings[name] = {};
+        }
+
+        return settings[name];
+    }
+
+    // The play head put somewhere else: the look so far kept for where it
+    // was, and the one kept for where it goes taken, or that place's own
+    // defaults the first time
+    function waveLookSwitch(prefix, from, to) {
+
+        const a = playHeadMode(from);
+        const b = playHeadMode(to);
+
+        if (a === b) {
+            return;
+        }
+
+        const store = waveLooksStore(prefix);
+        const defaults = waveLookDefaults(prefix, b);
+
+        store[a] = waveLookNow(prefix);
+        waveLookApply(prefix, store[b] && typeof store[b] === "object" ? store[b] : defaults, defaults);
+    }
+
+    // The colors put back as they come for where the play head is now
+    function waveLookReset(prefix) {
+
+        const mode = playHeadMode(settings[waveSettingKey(prefix, "wavePlayHeadMode")]);
+        const defaults = waveLookDefaults(prefix, mode);
+
+        waveLookApply(prefix, defaults, defaults);
+        delete waveLooksStore(prefix)[mode];
     }
 
     function makeBoolRow(label, get, set) {
@@ -53009,7 +53114,9 @@
             function () { return playHeadMode(settings.wavePlayHeadMode); },
             function (v) {
 
+                waveLookSwitch("", settings.wavePlayHeadMode, v);
                 settings.wavePlayHeadMode = v;
+                mobileWaveReset.__paintAll();
                 drawWave();
                 paintMobileWave();
             });
@@ -53608,7 +53715,9 @@
                 function () { return playHeadMode(settings.webWavePlayHeadMode); },
                 function (v) {
 
+                    waveLookSwitch("web", settings.webWavePlayHeadMode, v);
                     settings.webWavePlayHeadMode = v;
+                    webWaveReset.__paintAll();
                     publishHostSoon();
                 });
 
@@ -82481,6 +82590,12 @@
         }
 
         local.look = local.look ? Object.assign(phoneLook(rawState), local.look) : freshLook();
+
+        // The play head put somewhere else takes the colors kept for there
+        if (key === "headMode") {
+            waveLookSwitch(local.look, local.look.headMode, value);
+        }
+
         local.look[key] = value;
 
         // A bar set here since Songs became a button of its own says itself
@@ -82503,6 +82618,61 @@
         { label: "Progress color up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
         { label: "Progress color past the play head", key: "progressAhead", field: "waveZoomProgressAhead", c: "#c8c8d0", a: 100 }
     ];
+
+    // This browser's waveform colors and progress look as they come for
+    // each place of the play head, as on the phone: in the middle as they
+    // always were, moving along the played part in the accent color and no
+    // progress over it
+    function waveLookDefaults(mode) {
+
+        const out = {};
+
+        for (const w of WAVE_SWATCHES) {
+            out[w.key] = { c: w.c, a: w.a };
+        }
+
+        out.progressLook = "wave";
+
+        if (playHeadMode(mode) !== "center") {
+
+            out.wavePlayed = { c: "#48e1eb", a: 100 };
+            out.progressLook = "off";
+        }
+
+        return out;
+    }
+
+    // The look's waveform colors kept for where the play head was, and the
+    // ones kept for where it goes taken, or that place's defaults
+    function waveLookSwitch(look, from, to) {
+
+        const a = playHeadMode(from);
+        const b = playHeadMode(to);
+
+        if (a === b) {
+            return;
+        }
+
+        const kept = look.modeLooks && typeof look.modeLooks === "object" ? look.modeLooks : {};
+        const now = {};
+
+        for (const w of WAVE_SWATCHES) {
+            now[w.key] = look[w.key];
+        }
+
+        now.progressLook = look.progressLook;
+        kept[a] = now;
+
+        const next = kept[b] && typeof kept[b] === "object" ? kept[b] : waveLookDefaults(b);
+        const defaults = waveLookDefaults(b);
+
+        for (const w of WAVE_SWATCHES) {
+            look[w.key] = swatchOk(next[w.key]) ? next[w.key] : defaults[w.key];
+        }
+
+        look.progressLook = PROGRESS_LOOKS.indexOf(next.progressLook) !== -1 ? next.progressLook : defaults.progressLook;
+        look.modeLooks = kept;
+    }
 
     // A color and its share from the phone's rgba text, or the default
     function swatchFrom(text, def) {
@@ -82837,11 +83007,17 @@
                     ev.stopPropagation();
                     ev.preventDefault();
 
+                    // As they come for where the play head is here
+                    const own = localSettings();
+                    const mode = own && own.look && PLAY_HEAD_MODES.indexOf(own.look.headMode) !== -1
+                        ? own.look.headMode : playHeadMode(rawState && rawState.waveZoomPlayHead);
+                    const defaults = waveLookDefaults(mode);
+
                     for (const w of WAVE_SWATCHES) {
-                        changeLocalLook(w.key, { c: w.c, a: w.a });
+                        changeLocalLook(w.key, defaults[w.key]);
                     }
 
-                    changeLocalLook("progressLook", "wave");
+                    changeLocalLook("progressLook", defaults.progressLook);
                     renderPanelAgain();
                 }, true);
             }
