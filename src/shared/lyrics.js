@@ -543,11 +543,15 @@
     // the drum a step, the lines after a break roll up into sight from
     // below when it is time, anything else, a seek, a new song or force,
     // puts the rows in place
+    // roll.ahead: how many ms early each line comes, its roll starting
+    // before it is sung so it stands in the middle as it is heard
     function cylShow(roll, ms, force) {
 
         if (!roll.geo) {
             return;
         }
+
+        ms += roll.ahead || 0;
 
         const view = cylViewAt(roll.steps, ms);
         const old = { idx: roll.idx, reveal: roll.reveal };

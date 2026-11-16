@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.160";
+    const VERSION = "2.0.1.161";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4340,6 +4340,7 @@
             lyricSize: 18,
             lyricSideMul: 0.8,
             lyricDrum: 2,
+            lyricAhead: 500,
             lyricShift: 0,
             lyricSideShift: 0,
             lyricNoSemicolon: false,
@@ -4622,6 +4623,8 @@
                         ? parsed.lyricSideMul : 0.8,
                     lyricDrum: (typeof parsed.lyricDrum === "number" && parsed.lyricDrum >= 0.6 && parsed.lyricDrum <= 3.5)
                         ? parsed.lyricDrum : 2,
+                    lyricAhead: (typeof parsed.lyricAhead === "number" && parsed.lyricAhead >= 0 && parsed.lyricAhead <= 1500)
+                        ? parsed.lyricAhead : 500,
                     lyricShift: (typeof parsed.lyricShift === "number" && parsed.lyricShift >= -30 && parsed.lyricShift <= 30)
                         ? parsed.lyricShift : 0,
                     lyricSideShift: (typeof parsed.lyricSideShift === "number" && parsed.lyricSideShift >= -20 && parsed.lyricSideShift <= 20)
@@ -30998,11 +31001,15 @@
     // the drum a step, the lines after a break roll up into sight from
     // below when it is time, anything else, a seek, a new song or force,
     // puts the rows in place
+    // roll.ahead: how many ms early each line comes, its roll starting
+    // before it is sung so it stands in the middle as it is heard
     function cylShow(roll, ms, force) {
 
         if (!roll.geo) {
             return;
         }
+
+        ms += roll.ahead || 0;
 
         const view = cylViewAt(roll.steps, ms);
         const old = { idx: roll.idx, reveal: roll.reveal };
@@ -31107,6 +31114,7 @@
             drum: settings.lyricDrum || 2,
             sideShift: settings.lyricSideShift || 0
         });
+        lyricCyl.ahead = typeof settings.lyricAhead === "number" ? settings.lyricAhead : 500;
 
         // Positive shifts the whole lyric block down, negative up
         lyricBox.style.transform = "translateY(" + (settings.lyricShift || 0) + "px)";
@@ -36706,7 +36714,8 @@
                 ? settings.webLyricSideShift
                 : Math.round((settings.lyricSideShift || 0) * size / mobileSize),
             shift: settings.webLyricShift || 0,
-            bpm: lyricBpm()
+            bpm: lyricBpm(),
+            ahead: typeof settings.lyricAhead === "number" ? settings.lyricAhead : 500
         };
     }
 
@@ -51800,6 +51809,11 @@
             function () { return Math.round((settings.lyricDrum || 2) * 100); },
             function (v) { settings.lyricDrum = v / 100; applyLyricLayout(); publishHostSoon(); }, 60, 350, 10);
 
+        // How early each line comes, here and in the web view
+        const lyricAheadRow = makeStepperRow("Lyrics ahead, ms",
+            function () { return typeof settings.lyricAhead === "number" ? settings.lyricAhead : 500; },
+            function (v) { settings.lyricAhead = v; applyLyricLayout(); publishHostSoon(); }, 0, 1500, 50);
+
         const lyricShiftRow = makeStepperRow("Lyric position",
             function () { return settings.lyricShift; },
             function (v) { settings.lyricShift = v; applyLyricLayout(); }, -30, 30, 2);
@@ -52329,8 +52343,9 @@
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(lyricSizeRow);
         mobilePage.appendChild(lyricDrumRow);
+        mobilePage.appendChild(lyricAheadRow);
         mobilePage.appendChild(lyricShiftRow);
-        mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. The lines before and after it are as the drum turns them, smaller and squashed only by its turn. Drum size is the drum's radius in percent of a line. The lines sit a line apart along the drum, so a small drum turns them far round and bends the line being sung across its height, and a big one shows more lines, flatter. Lyric position moves the whole block up or down. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
+        mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. The lines before and after it are as the drum turns them, smaller and squashed only by its turn. Drum size is the drum's radius in percent of a line. The lines sit a line apart along the drum, so a small drum turns them far round and bends the line being sung across its height, and a big one shows more lines, flatter. Lyrics ahead starts each line's roll that many milliseconds before it is sung, so it stands in the middle as it is heard, here and in the web view. Lyric position moves the whole block up or down. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
         mobilePage.appendChild(makeLabel("Control buttons"));
         mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
         mobilePage.appendChild(controlOrderRow);
@@ -85741,11 +85756,15 @@
     // the drum a step, the lines after a break roll up into sight from
     // below when it is time, anything else, a seek, a new song or force,
     // puts the rows in place
+    // roll.ahead: how many ms early each line comes, its roll starting
+    // before it is sung so it stands in the middle as it is heard
     function cylShow(roll, ms, force) {
 
         if (!roll.geo) {
             return;
         }
+
+        ms += roll.ahead || 0;
 
         const view = cylViewAt(roll.steps, ms);
         const old = { idx: roll.idx, reveal: roll.reveal };
@@ -85886,7 +85905,8 @@
             drum: typeof l.drum === "number" ? l.drum : 2,
             sideShift: Math.round((typeof l.sideShift === "number" ? l.sideShift : 0) * scale),
             shift: Math.round((typeof l.shift === "number" ? l.shift : 60) * scale),
-            bpm: typeof l.bpm === "number" ? l.bpm : 0
+            bpm: typeof l.bpm === "number" ? l.bpm : 0,
+            ahead: typeof l.ahead === "number" ? l.ahead : 500
         };
     }
 
@@ -86017,6 +86037,7 @@
             fresh = true;
         }
 
+        box.cyl.ahead = layout.ahead;
         cylShow(box.cyl, ms, fresh);
     }
 

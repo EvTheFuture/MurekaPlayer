@@ -1229,6 +1229,10 @@ In development.
   In the web view, Together, Songs and List in a group swipe up (and Songs
   and List down) as they do on the bar, with the same small arrow, and a
   right click on Together opens its menu there too.
+- **Lyrics ahead.** Each line's roll started as it was sung, so it stood
+  in the middle a moment after it was heard. It now starts half a second
+  early. Settings > Mobile player > Lyrics ahead, ms sets how early, 0 to
+  1500, here and in the web view.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
