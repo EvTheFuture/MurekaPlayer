@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.166";
+    const VERSION = "2.0.1.167";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30757,6 +30757,10 @@
         const bar = cylBar(bpm);
         const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
 
+        // A beat, for the dots of a break to pulse to, half a second
+        // without a tempo
+        steps.beat = bar ? bar / 4 : 500;
+
         if (rows.length === 0) {
             return steps;
         }
@@ -30823,6 +30827,7 @@
 
         return {
             idx: idx,
+            ms: ms,
             reveal: ms >= s.show,
             clear: typeof s.clear === "number" && ms >= s.clear,
             progress: Math.max(0, Math.min(1, (ms - s.t) / Math.max(1, s.until - s.t)))
@@ -31125,9 +31130,39 @@
             }
 
             const dots = el.children;
+            const beat = roll.steps.beat || 500;
 
             for (let i = 0; i < dots.length; i++) {
-                dots[i].style.opacity = view.progress >= (i + 1) / 4 ? "1" : "0.3";
+
+                const lit = view.progress >= (i + 1) / 4;
+                const d = dots[i];
+
+                d.style.opacity = lit ? "1" : "0.3";
+
+                if (lit || !d.animate) {
+
+                    if (d.dataset.pulse) {
+
+                        delete d.dataset.pulse;
+                        cylStop(d);
+                    }
+
+                    continue;
+                }
+
+                // Not lit yet: it fades in and out, on one beat and off the
+                // next, so a break is seen to be waiting from its start, in
+                // step with the break's start
+                if (!d.dataset.pulse) {
+
+                    const s = roll.steps[view.idx];
+                    const period = 2 * beat;
+                    const into = s && typeof view.ms === "number" ? Math.max(0, view.ms - s.t) : 0;
+
+                    d.dataset.pulse = "1";
+                    d.animate([{ opacity: 0.15 }, { opacity: 0.7 }, { opacity: 0.15 }],
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -(into % period) });
+                }
             }
         }
     }
@@ -85674,6 +85709,10 @@
         const bar = cylBar(bpm);
         const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
 
+        // A beat, for the dots of a break to pulse to, half a second
+        // without a tempo
+        steps.beat = bar ? bar / 4 : 500;
+
         if (rows.length === 0) {
             return steps;
         }
@@ -85740,6 +85779,7 @@
 
         return {
             idx: idx,
+            ms: ms,
             reveal: ms >= s.show,
             clear: typeof s.clear === "number" && ms >= s.clear,
             progress: Math.max(0, Math.min(1, (ms - s.t) / Math.max(1, s.until - s.t)))
@@ -86042,9 +86082,39 @@
             }
 
             const dots = el.children;
+            const beat = roll.steps.beat || 500;
 
             for (let i = 0; i < dots.length; i++) {
-                dots[i].style.opacity = view.progress >= (i + 1) / 4 ? "1" : "0.3";
+
+                const lit = view.progress >= (i + 1) / 4;
+                const d = dots[i];
+
+                d.style.opacity = lit ? "1" : "0.3";
+
+                if (lit || !d.animate) {
+
+                    if (d.dataset.pulse) {
+
+                        delete d.dataset.pulse;
+                        cylStop(d);
+                    }
+
+                    continue;
+                }
+
+                // Not lit yet: it fades in and out, on one beat and off the
+                // next, so a break is seen to be waiting from its start, in
+                // step with the break's start
+                if (!d.dataset.pulse) {
+
+                    const s = roll.steps[view.idx];
+                    const period = 2 * beat;
+                    const into = s && typeof view.ms === "number" ? Math.max(0, view.ms - s.t) : 0;
+
+                    d.dataset.pulse = "1";
+                    d.animate([{ opacity: 0.15 }, { opacity: 0.7 }, { opacity: 0.15 }],
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -(into % period) });
+                }
             }
         }
     }

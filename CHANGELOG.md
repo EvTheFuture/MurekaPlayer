@@ -1266,6 +1266,10 @@ In development.
   now stopped and started again in the moment between two songs, as a
   pause does, with no tap needed, and the log says so with the engine's
   sample rate.
+- **The dots of a break pulse.** A dot not lit yet fades in and out, on
+  one beat and off the next at the song's tempo, half a second each
+  without one, so a break is seen waiting from its start, before the
+  first dot lights. A lit dot stays on.
 - **The lines before a break roll away.** In a break of 10 s or more, the
   lines sung before it stayed above the dots until the next line came. 3 s
   into the break they now roll on up the drum and out of sight, leaving
