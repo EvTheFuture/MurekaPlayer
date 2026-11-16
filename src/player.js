@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.172";
+    const VERSION = "2.0.1.173";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31143,32 +31143,58 @@
                 }
             }
 
+            // A dot on its way up to full holds the next one back until it
+            // is there
+            let ending = false;
+
+            for (let i = 0; i < dots.length; i++) {
+
+                if (dots[i].dataset.pulse === "ending") {
+                    ending = true;
+                }
+            }
+
+            roll.dotsView = view;
+
             for (let i = 0; i < dots.length; i++) {
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = i === litCount;
+                const pulse = i === litCount && !ending;
 
                 // Lit as it pulsed: the pulse runs on up to its brightest,
-                // which is full, and stops there, staying on
+                // which is full, ends exactly there and stays on, and the
+                // next dot starts then
                 if (lit && d.dataset.pulse === "1" && d.getAnimations) {
 
                     const run = d.getAnimations()[0];
-                    const p = run && run.effect ? run.effect.getComputedTiming().progress : null;
-                    const period = 2 * beat;
-                    const wait = typeof p === "number" ? ((1.5 - p) % 1) * period : 0;
+                    const t = run && run.effect ? run.effect.getComputedTiming() : null;
+
+                    if (!t || typeof t.progress !== "number" || typeof t.currentIteration !== "number") {
+
+                        delete d.dataset.pulse;
+                        cylStop(d);
+                        d.style.opacity = "1";
+                        continue;
+                    }
 
                     d.dataset.pulse = "ending";
-                    clearTimeout(d.pulseEnd);
-                    d.pulseEnd = setTimeout(function () {
+                    ending = true;
+                    run.effect.updateTiming({ iterations: t.currentIteration + (t.progress <= 0.5 ? 0.5 : 1.5), fill: "forwards" });
+                    run.onfinish = function () {
 
-                        if (d.dataset.pulse === "ending") {
-
-                            delete d.dataset.pulse;
-                            cylStop(d);
-                            d.style.opacity = "1";
+                        if (d.dataset.pulse !== "ending") {
+                            return;
                         }
-                    }, wait);
+
+                        delete d.dataset.pulse;
+                        cylStop(d);
+                        d.style.opacity = "1";
+
+                        if (roll.dotsView) {
+                            cylDots(roll, roll.dotsView);
+                        }
+                    };
                     continue;
                 }
 
@@ -31177,11 +31203,12 @@
                     continue;
                 }
 
-                // Not lit after all, moved back in the song: pulsing again
+                // Not lit after all, moved back in the song: no longer
+                // ending, it starts its pulse again below
                 if (!lit && d.dataset.pulse === "ending") {
 
-                    clearTimeout(d.pulseEnd);
-                    d.dataset.pulse = "1";
+                    delete d.dataset.pulse;
+                    cylStop(d);
                 }
 
                 if (!pulse || !d.animate) {
@@ -31199,8 +31226,9 @@
                 d.style.opacity = "0.3";
 
                 // Next to light: it fades in and out, up to full on one beat
-                // and down on the next, so a break is seen to be waiting
-                // from its start, in step with the break's start
+                // and down on the next, so a break is seen to be waiting.
+                // The first from the break's start, in step with it, the
+                // others from the moment the one before is full, rising
                 if (!d.dataset.pulse) {
 
                     const s = roll.steps[view.idx];
@@ -31209,7 +31237,7 @@
 
                     d.dataset.pulse = "1";
                     d.animate([{ opacity: 0.15 }, { opacity: 1 }, { opacity: 0.15 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -(into % period) });
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: litCount === 0 ? -(into % period) : 0 });
                 }
             }
         }
@@ -86143,32 +86171,58 @@
                 }
             }
 
+            // A dot on its way up to full holds the next one back until it
+            // is there
+            let ending = false;
+
+            for (let i = 0; i < dots.length; i++) {
+
+                if (dots[i].dataset.pulse === "ending") {
+                    ending = true;
+                }
+            }
+
+            roll.dotsView = view;
+
             for (let i = 0; i < dots.length; i++) {
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = i === litCount;
+                const pulse = i === litCount && !ending;
 
                 // Lit as it pulsed: the pulse runs on up to its brightest,
-                // which is full, and stops there, staying on
+                // which is full, ends exactly there and stays on, and the
+                // next dot starts then
                 if (lit && d.dataset.pulse === "1" && d.getAnimations) {
 
                     const run = d.getAnimations()[0];
-                    const p = run && run.effect ? run.effect.getComputedTiming().progress : null;
-                    const period = 2 * beat;
-                    const wait = typeof p === "number" ? ((1.5 - p) % 1) * period : 0;
+                    const t = run && run.effect ? run.effect.getComputedTiming() : null;
+
+                    if (!t || typeof t.progress !== "number" || typeof t.currentIteration !== "number") {
+
+                        delete d.dataset.pulse;
+                        cylStop(d);
+                        d.style.opacity = "1";
+                        continue;
+                    }
 
                     d.dataset.pulse = "ending";
-                    clearTimeout(d.pulseEnd);
-                    d.pulseEnd = setTimeout(function () {
+                    ending = true;
+                    run.effect.updateTiming({ iterations: t.currentIteration + (t.progress <= 0.5 ? 0.5 : 1.5), fill: "forwards" });
+                    run.onfinish = function () {
 
-                        if (d.dataset.pulse === "ending") {
-
-                            delete d.dataset.pulse;
-                            cylStop(d);
-                            d.style.opacity = "1";
+                        if (d.dataset.pulse !== "ending") {
+                            return;
                         }
-                    }, wait);
+
+                        delete d.dataset.pulse;
+                        cylStop(d);
+                        d.style.opacity = "1";
+
+                        if (roll.dotsView) {
+                            cylDots(roll, roll.dotsView);
+                        }
+                    };
                     continue;
                 }
 
@@ -86177,11 +86231,12 @@
                     continue;
                 }
 
-                // Not lit after all, moved back in the song: pulsing again
+                // Not lit after all, moved back in the song: no longer
+                // ending, it starts its pulse again below
                 if (!lit && d.dataset.pulse === "ending") {
 
-                    clearTimeout(d.pulseEnd);
-                    d.dataset.pulse = "1";
+                    delete d.dataset.pulse;
+                    cylStop(d);
                 }
 
                 if (!pulse || !d.animate) {
@@ -86199,8 +86254,9 @@
                 d.style.opacity = "0.3";
 
                 // Next to light: it fades in and out, up to full on one beat
-                // and down on the next, so a break is seen to be waiting
-                // from its start, in step with the break's start
+                // and down on the next, so a break is seen to be waiting.
+                // The first from the break's start, in step with it, the
+                // others from the moment the one before is full, rising
                 if (!d.dataset.pulse) {
 
                     const s = roll.steps[view.idx];
@@ -86209,7 +86265,7 @@
 
                     d.dataset.pulse = "1";
                     d.animate([{ opacity: 0.15 }, { opacity: 1 }, { opacity: 0.15 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -(into % period) });
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: litCount === 0 ? -(into % period) : 0 });
                 }
             }
         }
