@@ -1287,10 +1287,10 @@ In development.
   It turns as far as the play head gets meanwhile, so the play head ends
   close to the left edge, 3 % in, rather than further in than the 8 % it
   was set to land at.
-- **A song's note on its badge.** In the web view, a song with a note has
-  a small blue N on the lower corner of its Public or Draft badge, in the
-  lists and on the playing song, and the note shows under the mouse. A
-  row without a badge has the N on its heart instead.
+- **A song's note on its badge.** A song with a note has a small blue N on
+  the lower corner of its Public or Draft badge, in the mobile player's
+  list and in the web view's lists and playing song, and the note shows
+  under the mouse. A row without a badge has the N on its heart instead.
 - **Who comes and goes in a room.** Every player in the room gets a note
   when someone joins it or leaves it. A player leaving says so to the one
   holding the room, so it is told at once; one that just goes away is

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.178";
+    const VERSION = "2.0.1.179";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6946,6 +6946,9 @@
         }
 
         saveNotes();
+
+        // The list again, with or without the note's mark
+        renderList();
     }
 
     // The set a song is in, or null
@@ -49113,6 +49116,19 @@
         return mark;
     }
 
+    // The small blue N of a song with a note, on the lower right corner of
+    // the badge or of the heart, the note itself under the mouse
+    function noteRowMark(note) {
+
+        const mark = document.createElement("span");
+
+        mark.textContent = "N";
+        mark.title = "Note: " + note;
+        mark.style.cssText = "position:absolute;bottom:-4px;right:-3px;width:9px;height:9px;border-radius:50%;background:#6f9cff;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.9;pointer-events:none";
+
+        return mark;
+    }
+
     // The count of a fold and its arrow, opening or folding it. The list
     // stays where it was, the rows under it move
     function buildFoldChip(fold, kind) {
@@ -49723,6 +49739,7 @@
         // In the Sets view the filters do not choose the songs, so each
         // says whether it is public
         const badgeShown = rowBadgeShown(song, listView === "queue") || !!(fold && fold.inSets && !creatorSource);
+        const note = creatorSource ? "" : songNote(song).trim().slice(0, 500);
 
         if (badgeShown) {
 
@@ -49756,6 +49773,15 @@
                 badge.appendChild(trimRowMark());
             }
 
+            // A song with a note, a small blue N on the lower right corner,
+            // the note under the mouse
+            if (badgeShown && note) {
+
+                badge.style.position = "relative";
+                badge.appendChild(noteRowMark(note));
+                badge.title = (badge.title ? badge.title + "\n\n" : "") + "Note: " + note;
+            }
+
             item.appendChild(badge);
         }
 
@@ -49785,13 +49811,23 @@
         // Without a badge, a trimmed song's T sits on the heart's corner
         // instead, so the row keeps the columns of the rows around it. The
         // heart is wrapped, as painting it sets its text
-        if (!badgeShown && isTrimmed(song)) {
+        if (!badgeShown && (isTrimmed(song) || note)) {
 
             const box = document.createElement("span");
 
             box.style.cssText = "flex:0 0 auto;position:relative;display:flex";
             box.appendChild(heart);
-            box.appendChild(trimRowMark());
+
+            if (isTrimmed(song)) {
+                box.appendChild(trimRowMark());
+            }
+
+            if (note) {
+
+                box.appendChild(noteRowMark(note));
+                box.title = "Note: " + note;
+            }
+
             item.appendChild(box);
         } else {
             item.appendChild(heart);
