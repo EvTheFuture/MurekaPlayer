@@ -1269,9 +1269,11 @@ In development.
 - **The dots of a break pulse.** The next dot to light fades in and out,
   on one beat and off the next at the song's tempo, half a second each
   without one: the first from the break's start, so it is seen waiting,
-  then the second, then the third. A pulse goes up to full, and a dot
-  lighting pulses on up to full, ends exactly there and stays on. Only
-  then does the next one start, rising from dim.
+  then the second, then the third. A pulse is full on the song's beats,
+  every second beat counted from the line after the break, which starts
+  on one, so every dot is full on a beat. A dot lighting pulses on up to
+  full on its next beat, ends exactly there and stays on. Only then does
+  the next one start, rising from dim to full on a beat.
 - **The lines before a break roll away.** In a break of 10 s or more, the
   lines sung before it stayed above the dots until the next line came. 3 s
   into the break they now roll on up the drum and out of sight, leaving

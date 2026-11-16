@@ -615,6 +615,24 @@
 
             const dots = el.children;
             const beat = roll.steps.beat || 500;
+            const period = 2 * beat;
+
+            // The song's place as heard, now: the one told last, moved on
+            // by the time since, as the dots may be looked at again between
+            // two tellings
+            if (typeof view.heard === "number") {
+                roll.dotsClock = { heard: view.heard, page: performance.now() };
+            }
+
+            const clock = roll.dotsClock;
+            const heardNow = clock ? clock.heard + (performance.now() - clock.page) : 0;
+
+            // Where a pulse is at that place: full on the beats counted
+            // from the line after the break, which starts on one, and every
+            // second beat from there, dim between them
+            const step = roll.steps[view.idx];
+            const anchor = step && typeof step.until === "number" ? step.until : 0;
+            const phase = ((((heardNow - anchor) / period + 0.5) % 1) + 1) % 1;
 
             // How many are lit: only the next one to light pulses, the
             // first while none is
@@ -653,6 +671,15 @@
 
                     const run = d.getAnimations()[0];
                     const t = run && run.effect ? run.effect.getComputedTiming() : null;
+
+                    // Not started yet, waiting for its dim moment: lit at once
+                    if (t && t.progress === null) {
+
+                        delete d.dataset.pulse;
+                        d.style.opacity = "1";
+                        cylStop(d);
+                        continue;
+                    }
 
                     if (!t || typeof t.progress !== "number" || typeof t.currentIteration !== "number") {
 
@@ -717,13 +744,13 @@
                 // others from the moment the one before is full, rising
                 if (!d.dataset.pulse) {
 
-                    const s = roll.steps[view.idx];
-                    const period = 2 * beat;
-                    const into = s && typeof view.ms === "number" ? Math.max(0, view.ms - s.t) : 0;
-
+                    // The first at once, where the beat has it. The next
+                    // ones from their next dim moment, so each rises to
+                    // full on a beat rather than starting full
                     d.dataset.pulse = "1";
-                    d.animate([{ opacity: 0.15 }, { opacity: 1 }, { opacity: 0.15 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: litCount === 0 ? -(into % period) : 0 });
+                    d.animate([{ opacity: 0.3 }, { opacity: 1 }, { opacity: 0.3 }],
+                        { duration: period, iterations: Infinity, easing: "ease-in-out",
+                            delay: litCount === 0 ? -phase * period : ((1 - phase) % 1) * period });
                 }
             }
         }
@@ -757,9 +784,15 @@
             return;
         }
 
+        const heard = ms;
+
         ms += roll.ahead || 0;
 
         const view = cylViewAt(roll.steps, ms);
+
+        // Where the song is as heard, without the lines' head start, for
+        // the dots to pulse on its beats
+        view.heard = heard;
         const old = { idx: roll.idx, reveal: roll.reveal, clear: roll.clear };
         const wide = roll.box.offsetWidth;
 
