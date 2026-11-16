@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.183";
+    const VERSION = "2.0.1.184";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -73932,6 +73932,30 @@
         align-items: center;
     }
 
+    /* A list's header folded away, for more rows on a short screen: the
+       big list keeps its search line, the small list its top line with
+       the count, the whole list, fold and close */
+    #browse.headFolded #viewRow,
+    #browse.headFolded #filterRow,
+    #browse.headFolded #filterText,
+    #browse.headFolded #counts,
+    #browse.headFolded #plHead,
+    #mini.headFolded #miniSearchRow,
+    #mini.headFolded #miniPlHead,
+    #mini.headFolded #miniTop > .chip:not(#miniHeadFold):not(#miniClose):not(#miniExpand) {
+        display: none !important;
+    }
+
+    /* Points up while the header shows, down to bring it back */
+    .headFoldBtn svg {
+        transform: rotate(180deg);
+        transition: transform 0.2s ease;
+    }
+
+    .headFolded .headFoldBtn svg {
+        transform: none;
+    }
+
     #search {
         flex: 1;
         min-width: 0;
@@ -79833,6 +79857,7 @@
                 <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
+                <button class="chip iconOnly headFoldBtn" id="miniHeadFold" type="button" data-icon="chevronDown" aria-label="Fold the header" title="Fold the header"></button>
                 <button class="chip iconOnly" id="miniClose" type="button" data-icon="close" aria-label="Close the list" title="Close the list"></button>
             </div>
             <div id="miniSearchRow">
@@ -79916,6 +79941,7 @@
     <div id="browseTop">
         <input id="search" type="search" placeholder="Search songs" autocomplete="off">
         <button class="chip iconOnly" id="clearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
+        <button class="chip iconOnly headFoldBtn" id="browseHeadFold" type="button" data-icon="chevronDown" aria-label="Fold the header" title="Fold the header"></button>
         <button class="chip iconOnly" id="closeBrowse" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
     <div class="chipRow" id="viewRow">
@@ -95624,6 +95650,50 @@
     $("miniBtn").addEventListener("click", toggleMini);
 
     $("miniClose").addEventListener("click", closeMini);
+
+    // The headers of the big list and the small one folded away and back,
+    // each remembered in this browser
+    const HEAD_FOLD_KEY = "murekaHeadFold";
+
+    function headFoldInit(boxId, btnId, key) {
+
+        let kept = {};
+
+        try {
+            kept = JSON.parse(localStorage.getItem(HEAD_FOLD_KEY) || "{}") || {};
+        } catch (e) {
+            kept = {};
+        }
+
+        const paint = function (on) {
+
+            $(boxId).classList.toggle("headFolded", on);
+            $(btnId).title = on ? "Show the header" : "Fold the header";
+            $(btnId).setAttribute("aria-label", $(btnId).title);
+        };
+
+        paint(kept[key] === true);
+
+        $(btnId).addEventListener("click", function () {
+
+            const on = !$(boxId).classList.contains("headFolded");
+
+            paint(on);
+
+            try {
+
+                const now = JSON.parse(localStorage.getItem(HEAD_FOLD_KEY) || "{}") || {};
+
+                now[key] = on;
+                localStorage.setItem(HEAD_FOLD_KEY, JSON.stringify(now));
+            } catch (e) {
+                // No storage, folded until the page loads again
+            }
+        });
+    }
+
+    headFoldInit("mini", "miniHeadFold", "mini");
+    headFoldInit("browse", "browseHeadFold", "browse");
 
     // The small list's search: the field, the clear button beside it while
     // there is text, and the list read again. Opened at the top when

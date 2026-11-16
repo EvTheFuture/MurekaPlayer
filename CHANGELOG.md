@@ -1322,6 +1322,12 @@ In development.
   copied from one player never reached the other. The line now carries
   the notes too, Notes among the kinds to copy, on by default. An older
   player reading the line leaves the notes out.
+- **Foldable list headers in the web view.** The whole song list and the
+  small list beside the song each have a button by Close that folds the
+  header away, for more rows on a short screen such as a car's: the whole
+  list keeps only its search line, the small list its top line with the
+  count, the whole list, the fold and Close. The same button brings the
+  header back, and each list remembers it in the browser.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
