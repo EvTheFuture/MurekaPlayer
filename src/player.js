@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.164";
+    const VERSION = "2.0.1.165";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -17247,6 +17247,8 @@
             if (isPriming()) {
                 return;
             }
+
+            restartIosEngineBetweenSongs();
             handleSongEnded();
         });
 
@@ -21444,6 +21446,36 @@
         } else if (iosSilentTicks >= IOS_SILENT_TICKS) {
             iosEngineLost("no sound reaches the speaker while the song moves on, engine " + iosCtx.state);
         }
+    }
+
+    // On an iPhone, the song going through the sound engine at times
+    // crackled after the next song started on its own, until a pause and
+    // play, which a song chosen by hand never did: the engine kept running
+    // across the change while the phone set its sound up anew for the next
+    // song. Stopped and started again in the moment between two songs, as
+    // a pause does, needing no tap, the same as when the engine is lost
+    function restartIosEngineBetweenSongs() {
+
+        if (!iosCtx || !iosGain || iosCtx.state !== "running" || !isIosLike()) {
+            return;
+        }
+
+        dbgLog("Audio", "the sound engine stopped and started again between two songs, " + iosCtx.sampleRate + " Hz");
+
+        const again = function () {
+            return iosCtx.resume();
+        };
+
+        Promise.resolve().then(function () {
+            return iosCtx.suspend();
+        }).then(again, again).then(function () {
+
+            if (iosCtx.state !== "running") {
+                dbgLog("Audio", "the sound engine " + iosCtx.state + " after the restart between two songs");
+            }
+        }, function () {
+            // The watch on the engine takes over
+        });
     }
 
     function iosEngineLost(why) {

@@ -1259,6 +1259,13 @@ In development.
   moved in jerks. Between two steps the play head now moves on with the
   page's own clock, half a second at most, each step putting it back on
   the clock.
+- **No crackle on an iPhone after a song starts on its own.** With the
+  song going through the sound engine, the sound at times crackled after
+  the next song started by itself, until a pause and play, never after a
+  song chosen by hand, which stops the playing song first. The engine is
+  now stopped and started again in the moment between two songs, as a
+  pause does, with no tap needed, and the log says so with the engine's
+  sample rate.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
