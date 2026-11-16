@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.167";
+    const VERSION = "2.0.1.168";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31132,14 +31132,26 @@
             const dots = el.children;
             const beat = roll.steps.beat || 500;
 
+            // How many are lit: none, and all three pulse, else only the
+            // next one to light
+            let litCount = 0;
+
             for (let i = 0; i < dots.length; i++) {
 
-                const lit = view.progress >= (i + 1) / 4;
+                if (view.progress >= (i + 1) / 4) {
+                    litCount = i + 1;
+                }
+            }
+
+            for (let i = 0; i < dots.length; i++) {
+
+                const lit = i < litCount;
                 const d = dots[i];
+                const pulse = !lit && (litCount === 0 || i === litCount);
 
                 d.style.opacity = lit ? "1" : "0.3";
 
-                if (lit || !d.animate) {
+                if (!pulse || !d.animate) {
 
                     if (d.dataset.pulse) {
 
@@ -31150,9 +31162,9 @@
                     continue;
                 }
 
-                // Not lit yet: it fades in and out, on one beat and off the
-                // next, so a break is seen to be waiting from its start, in
-                // step with the break's start
+                // Next to light: it fades in and out, on one beat and off
+                // the next, so a break is seen to be waiting from its
+                // start, in step with the break's start
                 if (!d.dataset.pulse) {
 
                     const s = roll.steps[view.idx];
@@ -86084,14 +86096,26 @@
             const dots = el.children;
             const beat = roll.steps.beat || 500;
 
+            // How many are lit: none, and all three pulse, else only the
+            // next one to light
+            let litCount = 0;
+
             for (let i = 0; i < dots.length; i++) {
 
-                const lit = view.progress >= (i + 1) / 4;
+                if (view.progress >= (i + 1) / 4) {
+                    litCount = i + 1;
+                }
+            }
+
+            for (let i = 0; i < dots.length; i++) {
+
+                const lit = i < litCount;
                 const d = dots[i];
+                const pulse = !lit && (litCount === 0 || i === litCount);
 
                 d.style.opacity = lit ? "1" : "0.3";
 
-                if (lit || !d.animate) {
+                if (!pulse || !d.animate) {
 
                     if (d.dataset.pulse) {
 
@@ -86102,9 +86126,9 @@
                     continue;
                 }
 
-                // Not lit yet: it fades in and out, on one beat and off the
-                // next, so a break is seen to be waiting from its start, in
-                // step with the break's start
+                // Next to light: it fades in and out, on one beat and off
+                // the next, so a break is seen to be waiting from its
+                // start, in step with the break's start
                 if (!d.dataset.pulse) {
 
                     const s = roll.steps[view.idx];
