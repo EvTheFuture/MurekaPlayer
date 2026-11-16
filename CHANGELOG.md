@@ -1239,6 +1239,15 @@ In development.
   that lasts less than a third of what its words take, and under 1.5 s,
   now shares the time with the neighbour that has more to spare, the two
   split by their words, so both show while they are sung, near enough.
+- **A song's end is no interruption.** On Android the pause a song ends
+  with comes a moment before the song says it ended, and it was taken as
+  an interruption: the song went silent for a fade in. Listening
+  together, the player playing along then played the ended song again at
+  its very end, with the fade, until the next song came from the one
+  holding the room. The sound engine could crackle after that and the
+  waveform fall out of step, until a pause and play. A pause in the last
+  moment of a song is now its end, and a song ended while listening
+  along waits for the next one.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

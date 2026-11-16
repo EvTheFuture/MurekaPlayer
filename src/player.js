@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.162";
+    const VERSION = "2.0.1.163";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -17443,8 +17443,10 @@
                 return;
             }
 
-            // Silent until it plays on, then faded in
-            if (!audio.ended) {
+            // Silent until it plays on, then faded in. Not at the song's end:
+            // the pause a song ends with comes before it says it ended on
+            // some phones, and was taken as one
+            if (!atSongEnd()) {
                 quietForResume();
             }
 
@@ -17478,9 +17480,9 @@
                 return;
             }
 
-            if (userPaused || audio.ended) {
+            if (userPaused || atSongEnd()) {
 
-                dbgLog("Audio", audio.ended ? "the song ended" : "paused by a press");
+                dbgLog("Audio", atSongEnd() ? "the song ended" : "paused by a press");
                 setStatus("Paused: " + (currentSong.title || "Untitled"));
                 return;
             }
@@ -20926,6 +20928,23 @@
                 clearInterval(fineFadeTimer);
             }
         }, 20);
+    }
+
+    // At the song's end, or a moment from it: the pause a song ends with
+    // comes before ended says so on Android
+    function atSongEnd() {
+
+        if (!audio) {
+            return false;
+        }
+
+        if (audio.ended) {
+            return true;
+        }
+
+        const d = Number(audio.duration);
+
+        return isFinite(d) && d > 1 && audio.currentTime >= d - 0.3;
     }
 
     // The level a fade moves, the gain where there is one. In steps of the
@@ -40975,6 +40994,15 @@
         }
 
         if (audio.paused) {
+
+            // Ended here a moment before the one holding the room moves on:
+            // its next song is waited for. Played again at its end, the
+            // song stopped and started anew with a fade, and the sound
+            // engine could crackle and fall out of step with the waveform
+            // until a pause
+            if (atSongEnd() || expected >= audio.duration - 0.5) {
+                return;
+            }
 
             syncSeek(expected + syncSeekAhead);
             syncPlayPause(true);
