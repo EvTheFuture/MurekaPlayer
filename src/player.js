@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.159";
+    const VERSION = "2.0.1.160";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -28772,20 +28772,19 @@
                 closeCtlGroup();
             }
         };
-        // Swiped away any way: it follows the finger or the mouse, fading
+        // Swiped away sideways: it follows the finger or the mouse, fading
         // as it goes, and far enough it slides on out of sight and closes,
-        // else it springs back. A press that became a swipe presses nothing
+        // else it springs back. Up and down are left to the buttons in it.
+        // A press that became a swipe presses nothing
         let sx = null;
         let sy = null;
         let swiped = false;
         let gone = false;
         const SWIPE_AWAY = 50;
-        const follow = function (dx, dy) {
+        const follow = function (dx) {
 
-            const dist = Math.hypot(dx, dy);
-
-            drop.style.transform = "translate(" + dx + "px," + dy + "px)";
-            drop.style.opacity = String(Math.max(0.15, 1 - dist / 220));
+            drop.style.transform = "translateX(" + dx + "px)";
+            drop.style.opacity = String(Math.max(0.15, 1 - Math.abs(dx) / 220));
         };
         const down = function (ev) {
 
@@ -28807,7 +28806,14 @@
             const dx = ev.clientX - sx;
             const dy = ev.clientY - sy;
 
-            if (!swiped && Math.hypot(dx, dy) > 10) {
+            // Up or down first: not a swipe of the group
+            if (!swiped && Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+
+                sx = null;
+                return;
+            }
+
+            if (!swiped && Math.abs(dx) > 10) {
 
                 swiped = true;
                 clearTimeout(groupDropTimer);
@@ -28821,7 +28827,7 @@
             }
 
             if (swiped) {
-                follow(dx, dy);
+                follow(dx);
             }
         };
         const up = function (ev) {
@@ -28831,8 +28837,6 @@
             }
 
             const dx = ev.clientX - sx;
-            const dy = ev.clientY - sy;
-            const dist = Math.hypot(dx, dy);
 
             sx = null;
 
@@ -28840,14 +28844,12 @@
                 return;
             }
 
-            if (dist >= SWIPE_AWAY) {
+            if (Math.abs(dx) >= SWIPE_AWAY) {
 
                 // On out the way it went, fading, then gone
-                const k = 260 / Math.max(1, dist);
-
                 gone = true;
                 drop.style.transition = "transform 0.22s ease-out, opacity 0.22s ease-out";
-                follow(dx * k, dy * k);
+                follow(dx < 0 ? -260 : 260);
                 drop.style.opacity = "0";
                 setTimeout(closeCtlGroup, 230);
                 return;
@@ -72633,7 +72635,8 @@
        scroll */
     #browseBtn,
     #miniBtn,
-    #togetherBtn {
+    #togetherBtn,
+    .ctlCopy.swipeUp {
         position: relative;
         touch-action: none;
     }
@@ -72644,7 +72647,8 @@
        down closing it */
     #browseBtn::before,
     #miniBtn::before,
-    #togetherBtn::before {
+    #togetherBtn::before,
+    .ctlCopy.swipeUp::before {
         content: "";
         position: absolute;
         top: 7px;
@@ -72659,7 +72663,8 @@
         transition: transform 0.2s ease, top 0.2s ease;
     }
 
-    #app.miniOpen #browseBtn::before {
+    #app.miniOpen #browseBtn::before,
+    #app.miniOpen .ctlCopy.swipeUp[data-ctl="songs"]::before {
         top: 3px;
         transform: rotate(225deg);
     }
@@ -96062,7 +96067,7 @@
                 m.appendChild(n);
             }
 
-            m.className = real.className + " ctlCopy";
+            m.className = real.className + " ctlCopy" + (m.dataset.ctl && GROUP_SWIPES[m.dataset.ctl] ? " swipeUp" : "");
             m.title = (m.dataset.lead || "") + (real.title || real.getAttribute("aria-label") || "");
             m.style.display = "";
 
@@ -96194,6 +96199,97 @@
     let webGroupEl = null;
     let webGroupTimer = 0;
 
+    // What a swipe up, or down, on a button does, also on its copy in a
+    // group. The group closes first, the menu or the list opening in its
+    // place
+    const GROUP_SWIPES = {
+        together: { up: function () {
+            togetherMenu();
+        } },
+        songs: { up: function () {
+
+            if (!miniOpen) {
+                openMini();
+            }
+        }, down: function () {
+
+            if (miniOpen) {
+                closeMini();
+            }
+        } },
+        minilist: { up: function () {
+            openFullList();
+        }, down: function () {
+
+            if (miniOpen) {
+                closeMini();
+            }
+        } }
+    };
+
+    // A copy of Songs, List or Together in a group swiped up or down as
+    // the button on the bar is. A right click with a mouse on Together
+    // opens its menu too. The press a swipe ends with presses nothing
+    function copySwipe(m, name) {
+
+        const ways = GROUP_SWIPES[name];
+        let sx = null;
+        let sy = null;
+        let done = false;
+
+        m.addEventListener("pointerdown", function (ev) {
+
+            sx = ev.clientX;
+            sy = ev.clientY;
+            done = false;
+        });
+        m.addEventListener("pointermove", function (ev) {
+
+            if (sx === null || done) {
+                return;
+            }
+
+            const dx = ev.clientX - sx;
+            const dy = ev.clientY - sy;
+
+            if (Math.abs(dy) < SWIPE_UP || Math.abs(dy) < Math.abs(dx) * 1.5) {
+                return;
+            }
+
+            const go = dy < 0 ? ways.up : ways.down;
+
+            if (go) {
+
+                done = true;
+                sx = null;
+                closeWebGroup();
+                go();
+            }
+        });
+        m.addEventListener("pointerup", function () {
+            sx = null;
+        });
+        m.addEventListener("click", function (ev) {
+
+            if (done) {
+
+                ev.stopImmediatePropagation();
+                ev.preventDefault();
+                done = false;
+            }
+        }, true);
+
+        if (name === "together") {
+
+            m.addEventListener("contextmenu", function (ev) {
+
+                ev.preventDefault();
+                closeWebGroup();
+                togetherMenu();
+            });
+        }
+    }
+
     function closeWebGroup() {
 
         clearTimeout(webGroupTimer);
@@ -96289,6 +96385,15 @@
 
             m.style.width = at.width + "px";
             m.style.height = at.height + "px";
+
+            // Songs, List and Together swiped up as they are on the bar
+            if (GROUP_SWIPES[name]) {
+
+                m.dataset.ctl = name;
+                m.className += " swipeUp";
+                copySwipe(m, name);
+            }
+
             drop.appendChild(m);
         }
 
@@ -96326,20 +96431,20 @@
                 closeWebGroup();
             }
         };
-        // Swiped away any way: it follows the finger or the mouse, fading
+        // Swiped away sideways: it follows the finger or the mouse, fading
         // as it goes, and far enough it slides on out of sight and closes,
-        // else it springs back. A press that became a swipe presses nothing
+        // else it springs back. Up and down are left to the buttons in it,
+        // Together swiped up opens its menu there too. A press that became a
+        // swipe presses nothing
         let sx = null;
         let sy = null;
         let swiped = false;
         let gone = false;
         const SWIPE_AWAY = 50;
-        const follow = function (dx, dy) {
+        const follow = function (dx) {
 
-            const dist = Math.hypot(dx, dy);
-
-            drop.style.transform = "translate(" + dx + "px," + dy + "px)";
-            drop.style.opacity = String(Math.max(0.15, 1 - dist / 220));
+            drop.style.transform = "translateX(" + dx + "px)";
+            drop.style.opacity = String(Math.max(0.15, 1 - Math.abs(dx) / 220));
         };
         const down = function (ev) {
 
@@ -96361,7 +96466,14 @@
             const dx = ev.clientX - sx;
             const dy = ev.clientY - sy;
 
-            if (!swiped && Math.hypot(dx, dy) > 10) {
+            // Up or down first: not a swipe of the group
+            if (!swiped && Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+
+                sx = null;
+                return;
+            }
+
+            if (!swiped && Math.abs(dx) > 10) {
 
                 swiped = true;
                 clearTimeout(webGroupTimer);
@@ -96375,7 +96487,7 @@
             }
 
             if (swiped) {
-                follow(dx, dy);
+                follow(dx);
             }
         };
         const up = function (ev) {
@@ -96385,8 +96497,6 @@
             }
 
             const dx = ev.clientX - sx;
-            const dy = ev.clientY - sy;
-            const dist = Math.hypot(dx, dy);
 
             sx = null;
 
@@ -96394,14 +96504,12 @@
                 return;
             }
 
-            if (dist >= SWIPE_AWAY) {
+            if (Math.abs(dx) >= SWIPE_AWAY) {
 
                 // On out the way it went, fading, then gone
-                const k = 260 / Math.max(1, dist);
-
                 gone = true;
                 drop.style.transition = "transform 0.22s ease-out, opacity 0.22s ease-out";
-                follow(dx * k, dy * k);
+                follow(dx < 0 ? -260 : 260);
                 drop.style.opacity = "0";
                 setTimeout(closeWebGroup, 230);
                 return;

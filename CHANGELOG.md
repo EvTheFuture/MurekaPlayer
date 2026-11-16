@@ -1222,6 +1222,13 @@ In development.
   counts them and has Remove sets without songs beside Dissolve sets with
   only one song, which no longer takes the empty ones too. Sets with
   songs still being made stay.
+- **A control group swipes away sideways only.** An open group of control
+  buttons closed with a swipe in any direction, so Together in a group
+  could not be swiped up for its menu: the group went instead. It now
+  closes only with a swipe left or right, in the app and in the web view.
+  In the web view, Together, Songs and List in a group swipe up (and Songs
+  and List down) as they do on the bar, with the same small arrow, and a
+  right click on Together opens its menu there too.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
