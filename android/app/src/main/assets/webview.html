@@ -26997,14 +26997,16 @@
                 };
             };
 
+            // The Android device's value against the file's, said so, as
+            // "mine" read as the one on the device the file came from
             const items = [
-                { icon: "check", label: "Keep mine, " + c.mine, fn: answer(false, false), cls: "inset" },
+                { icon: "check", label: "Keep the Android device's, " + c.mine, fn: answer(false, false), cls: "inset" },
                 { icon: "download", label: "Use " + other + ", " + c.file, fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
-                items.push({ icon: "check", label: "Keep mine for all " + left, fn: answer(false, true), cls: "inset" });
+                items.push({ icon: "check", label: "Keep the Android device's for all " + left, fn: answer(false, true), cls: "inset" });
                 items.push({ icon: "download", label: "Use " + other + " for all " + left, fn: answer(true, true) });
             }
 

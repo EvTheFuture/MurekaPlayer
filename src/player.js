@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.181";
+    const VERSION = "2.0.1.182";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -57147,7 +57147,7 @@
 
             const c = conflicts[i];
             const left = conflicts.length - i;
-            const what = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored" }[c.type];
+            const what = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored", notes: "Note", sets: "Set" }[c.type] || c.type;
 
             const answer = function (useFile, all) {
 
@@ -57164,13 +57164,13 @@
             };
 
             const options = [
-                { label: "Keep mine", fn: answer(false, false), ring: true },
+                { label: "Keep the one here", fn: answer(false, false), ring: true },
                 { label: use, fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
-                options.push({ label: "Keep mine for all " + left, fn: answer(false, true), ring: true });
+                options.push({ label: "Keep the ones here for all " + left, fn: answer(false, true), ring: true });
                 options.push({ label: use + " for all " + left, fn: answer(true, true) });
             }
 
@@ -60514,7 +60514,7 @@
 
             // Values that came with the songs and differ from the ones here,
             // for the web view to ask about
-            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored" };
+            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored", notes: "Note", sets: "Set" };
 
             out.tweakConflicts = planShareTweaks(p.queue.tweaks, found.songs).conflicts.map(function (c) {
                 return {
@@ -60542,7 +60542,7 @@
         } else {
 
             const plan = planSongMerge(p);
-            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored" };
+            const names = { rating: "Rating", bpm: "Tempo", instr: "Instrumental", ignore: "Ignored", notes: "Note", sets: "Set" };
 
             entry.plan = plan;
             out.what = "Song tweaks saved " + when + ", " + parsedSummary(p);
@@ -99844,14 +99844,16 @@
                 };
             };
 
+            // The Android device's value against the file's, said so, as
+            // "mine" read as the one on the device the file came from
             const items = [
-                { icon: "check", label: "Keep mine, " + c.mine, fn: answer(false, false), cls: "inset" },
+                { icon: "check", label: "Keep the Android device's, " + c.mine, fn: answer(false, false), cls: "inset" },
                 { icon: "download", label: "Use " + other + ", " + c.file, fn: answer(true, false) }
             ];
 
             if (left > 1) {
 
-                items.push({ icon: "check", label: "Keep mine for all " + left, fn: answer(false, true), cls: "inset" });
+                items.push({ icon: "check", label: "Keep the Android device's for all " + left, fn: answer(false, true), cls: "inset" });
                 items.push({ icon: "download", label: "Use " + other + " for all " + left, fn: answer(true, true) });
             }
 

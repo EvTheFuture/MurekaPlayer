@@ -1311,6 +1311,11 @@ In development.
   only ratings, tempos, instrumental marks, ignored songs and saved
   creators, while the file holds the song sets, notes and playlist orders
   too, and an import offers each of them.
+- **Import conflicts say whose value is whose.** In the web view a value
+  that differs was offered as Keep mine or Use the file's, and mine read
+  as the device the file came from. It is now Keep the Android device's,
+  and on the player itself Keep the one here. A note or a set that
+  differs is named as such, where the player said undefined.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
