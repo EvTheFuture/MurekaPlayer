@@ -13651,33 +13651,58 @@
                 const d = dots[i];
                 const pulse = i === litCount;
 
+                // Lit as it pulsed: the pulse runs on up to its brightest,
+                // which is full, and stops there, staying on
+                if (lit && d.dataset.pulse === "1" && d.getAnimations) {
+
+                    const run = d.getAnimations()[0];
+                    const p = run && run.effect ? run.effect.getComputedTiming().progress : null;
+                    const period = 2 * beat;
+                    const wait = typeof p === "number" ? ((1.5 - p) % 1) * period : 0;
+
+                    d.dataset.pulse = "ending";
+                    clearTimeout(d.pulseEnd);
+                    d.pulseEnd = setTimeout(function () {
+
+                        if (d.dataset.pulse === "ending") {
+
+                            delete d.dataset.pulse;
+                            cylStop(d);
+                            d.style.opacity = "1";
+                        }
+                    }, wait);
+                    continue;
+                }
+
+                // On its way up to its brightest still
+                if (lit && d.dataset.pulse === "ending") {
+                    continue;
+                }
+
+                // Not lit after all, moved back in the song: pulsing again
+                if (!lit && d.dataset.pulse === "ending") {
+
+                    clearTimeout(d.pulseEnd);
+                    d.dataset.pulse = "1";
+                }
+
                 if (!pulse || !d.animate) {
 
                     if (d.dataset.pulse) {
 
-                        // Lit as it pulsed: from where the pulse had it up
-                        // to full, smoothly, and on there
-                        const was = parseFloat(getComputedStyle(d).opacity);
-
                         delete d.dataset.pulse;
                         cylStop(d);
-                        d.style.opacity = lit ? "1" : "0.3";
-
-                        if (lit && d.animate && isFinite(was)) {
-                            d.animate([{ opacity: was }, { opacity: 1 }], { duration: Math.min(600, beat), easing: "ease-out" });
-                        }
-                    } else {
-                        d.style.opacity = lit ? "1" : "0.3";
                     }
 
+                    d.style.opacity = lit ? "1" : "0.3";
                     continue;
                 }
 
                 d.style.opacity = "0.3";
 
-                // Next to light: it fades in and out, on one beat and off
-                // the next, so a break is seen to be waiting from its
-                // start, in step with the break's start
+                // Next to light: it fades in and out, up to full on one beat
+                // and down on the next, so a break is seen to be waiting
+                // from its start, in step with the break's start
                 if (!d.dataset.pulse) {
 
                     const s = roll.steps[view.idx];
@@ -13685,7 +13710,7 @@
                     const into = s && typeof view.ms === "number" ? Math.max(0, view.ms - s.t) : 0;
 
                     d.dataset.pulse = "1";
-                    d.animate([{ opacity: 0.15 }, { opacity: 0.7 }, { opacity: 0.15 }],
+                    d.animate([{ opacity: 0.15 }, { opacity: 1 }, { opacity: 0.15 }],
                         { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -(into % period) });
                 }
             }
