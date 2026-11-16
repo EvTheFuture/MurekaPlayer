@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.182";
+    const VERSION = "2.0.1.183";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -270,16 +270,17 @@
         { key: "instr", label: "Instrumental marks" },
         { key: "rating", label: "Ratings" },
         { key: "ignore", label: "Ignored songs" },
-        { key: "sets", label: "Song sets", only: "tweaks" }
+        { key: "sets", label: "Song sets", only: "tweaks" },
+        { key: "notes", label: "Notes", only: "tweaks" }
     ];
 
     // What each kind of copy carries until chosen otherwise. Songs for
     // someone else leave the ratings and ignored songs out. Song sets only
     // go with song tweaks
     const COPY_DEFAULTS = {
-        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
-        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
-        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true }
+        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false, notes: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false, notes: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true, notes: true }
     };
 
     // The values a kind of copy can carry
@@ -59431,6 +59432,14 @@
             }
         }
 
+        // A song's note, its text as UTF-8 in hex
+        if (types.notes && tweaks && songNotes.has(id)) {
+
+            f += "N" + Array.from(new TextEncoder().encode(String(songNotes.get(id)).slice(0, 1000))).map(function (b) {
+                return b.toString(16).padStart(2, "0");
+            }).join("");
+        }
+
         if (playingId && playingId === id) {
             f += "P";
         }
@@ -59611,6 +59620,10 @@
             add(setNotAuto);
         }
 
+        if (types.notes) {
+            add(songNotes.keys());
+        }
+
         return Array.from(ids);
     }
 
@@ -59705,6 +59718,22 @@
                             e.ignoreGone = true;
                         } else {
                             e.ignore = true;
+                        }
+                    } else if (f[1] === "N" && has && f[2].length % 2 === 0 && /^[0-9a-f]+$/.test(f[2])) {
+
+                        // A note, UTF-8 in hex
+                        try {
+
+                            const bytes = new Uint8Array(f[2].match(/../g).map(function (h) {
+                                return parseInt(h, 16);
+                            }));
+                            const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
+
+                            if (text) {
+                                e.note = text;
+                            }
+                        } catch (err) {
+                            // Not a note to read
                         }
                     } else if ((f[1] === "S" || f[1] === "A") && has) {
 
@@ -59900,6 +59929,16 @@
                 members[e.id] = [e.set[0], e.set[1], e.kept === true ? 1 : 0];
             } else if (e.setOut) {
                 notAuto.push(e.id);
+            }
+        }
+
+        // The notes on the line
+        for (const e of entries) {
+
+            if (e.note) {
+
+                data.notes = data.notes || {};
+                data.notes[e.id] = e.note;
             }
         }
 
@@ -100316,13 +100355,14 @@
         { key: "instr", label: "Instrumental marks" },
         { key: "rating", label: "Ratings" },
         { key: "ignore", label: "Ignored songs" },
-        { key: "sets", label: "Song sets", only: "tweaks" }
+        { key: "sets", label: "Song sets", only: "tweaks" },
+        { key: "notes", label: "Notes", only: "tweaks" }
     ];
 
     const COPY_DEFAULTS = {
-        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
-        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
-        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true }
+        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false, notes: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false, notes: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true, notes: true }
     };
 
     function copyTypesHere(kind) {

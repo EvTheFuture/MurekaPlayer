@@ -27469,13 +27469,14 @@
         { key: "instr", label: "Instrumental marks" },
         { key: "rating", label: "Ratings" },
         { key: "ignore", label: "Ignored songs" },
-        { key: "sets", label: "Song sets", only: "tweaks" }
+        { key: "sets", label: "Song sets", only: "tweaks" },
+        { key: "notes", label: "Notes", only: "tweaks" }
     ];
 
     const COPY_DEFAULTS = {
-        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
-        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false },
-        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true }
+        songs: { bpm: true, instr: true, rating: false, ignore: false, sets: false, notes: false },
+        queue: { bpm: true, instr: true, rating: false, ignore: false, sets: false, notes: false },
+        tweaks: { bpm: true, instr: true, rating: true, ignore: true, sets: true, notes: true }
     };
 
     function copyTypesHere(kind) {

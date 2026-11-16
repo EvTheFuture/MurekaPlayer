@@ -1316,6 +1316,12 @@ In development.
   as the device the file came from. It is now Keep the Android device's,
   and on the player itself Keep the one here. A note or a set that
   differs is named as such, where the player said undefined.
+- **Notes on the copied song tweaks.** Song tweaks copied to the
+  clipboard go as a short line, which carried ratings, tempos,
+  instrumental marks, ignored songs and sets but no notes, so a note
+  copied from one player never reached the other. The line now carries
+  the notes too, Notes among the kinds to copy, on by default. An older
+  player reading the line leaves the notes out.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
