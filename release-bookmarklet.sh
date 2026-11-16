@@ -61,11 +61,14 @@ LINE="javascript:(function(){if(window.__murekaPlayerToggle){window.__murekaPlay
 # The paste ready form
 printf '%s\n' "$LINE" > web/bookmarklet.min.js
 
-# The readable source, its two lines that change with each release
-sed -i \
+# The readable source, its two lines that change with each release. A new
+# file moved over the old one, as sed -i differs between GNU sed, BusyBox
+# and macOS
+sed \
     -e "s#^\(    script.src = \).*#\1\"$URL\";#" \
     -e "s#^\(    script.integrity = \).*#\1\"$HASH\";#" \
-    web/bookmarklet.js
+    web/bookmarklet.js > web/bookmarklet.js.new
+mv web/bookmarklet.js.new web/bookmarklet.js
 
 # The release one-liner in the README, the first javascript: line under the
 # Latest release heading

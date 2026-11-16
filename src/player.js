@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.194";
+    const VERSION = "2.0.1.195";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -8556,13 +8556,13 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:380px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = "Share \"" + set.name + "\"";
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
         body.textContent = "Untick the songs to leave out. Links gives their links on Mureka, an empty line between them, for anyone."
             + " For the player gives a line for Import in another Mureka Player.";
-        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
-        quick.style.cssText = "display:flex;gap:6px";
-        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
-        row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+        body.classList.add("mp-text");
+        quick.classList.add("mp-row6");
+        list.classList.add("mp-band");
+        row.classList.add("mp-wrap6");
 
         const close = function () {
             back.remove();
@@ -8742,12 +8742,12 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = fresh ? "Similar songs for the new set" : "Similar songs";
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
         body.textContent = "Songs that look like more versions of the songs in \"" + set.name + "\", the most alike first and ticked,"
             + " the ones less alike after them. Tick the ones to add. " + hint;
-        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
-        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
-        row.style.cssText = "display:flex;gap:8px";
+        body.classList.add("mp-text");
+        list.classList.add("mp-band");
+        row.classList.add("mp-row8");
 
         const close = function () {
             back.remove();
@@ -9054,7 +9054,7 @@
     function buildTagList(kind, getSelected) {
 
         const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        wrap.classList.add("mp-col6");
 
         const heading = document.createElement("div");
         // Models are single valued per song, so ticking several means any of
@@ -9177,11 +9177,11 @@
         ].join(";");
 
         const head = document.createElement("div");
-        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        head.classList.add("mp-between");
 
         const heading = document.createElement("div");
         heading.textContent = "Filters";
-        heading.style.cssText = "font-weight:600";
+        heading.classList.add("mp-bold");
 
         const doneBtn = makeButton("Done", ACCENT, "#000", closeTagSheet);
         doneBtn.style.flex = "0 0 auto";
@@ -9206,7 +9206,7 @@
 
         // Match all or match any, across both lists
         const modeRow = document.createElement("div");
-        modeRow.style.cssText = "display:flex;gap:6px";
+        modeRow.classList.add("mp-row6");
 
         const andBtn = makeButton("Match all", "#333", "#fff", function () {
             settings.tagMode = "and";
@@ -9223,7 +9223,7 @@
 
         // How the tag lists are ordered
         const sortRow = document.createElement("div");
-        sortRow.style.cssText = "display:flex;gap:6px";
+        sortRow.classList.add("mp-row6");
 
         const countSortBtn = makeButton("Most songs", "#333", "#fff", function () {
             settings.tagSort = "count";
@@ -9240,7 +9240,7 @@
 
         const bpmLabel = document.createElement("div");
         bpmLabel.textContent = "Tempo";
-        bpmLabel.style.cssText = "color:#bbb";
+        bpmLabel.classList.add("mp-soft");
 
         const bpmEnableRow = makeBoolRow("Filter by tempo",
             function () { return settings.bpmEnabled; },
@@ -9256,10 +9256,10 @@
 
         const bpmUnknownLabel = document.createElement("div");
         bpmUnknownLabel.textContent = "Songs with no BPM";
-        bpmUnknownLabel.style.cssText = "color:#bbb";
+        bpmUnknownLabel.classList.add("mp-soft");
 
         const bpmUnknownRow = document.createElement("div");
-        bpmUnknownRow.style.cssText = "display:flex;gap:6px";
+        bpmUnknownRow.classList.add("mp-row6");
 
         const unknownBtns = {};
 
@@ -9294,7 +9294,7 @@
         // span between two calendar days picked with the native date picker
         const dateLabel = document.createElement("div");
         dateLabel.textContent = "Date";
-        dateLabel.style.cssText = "color:#bbb";
+        dateLabel.classList.add("mp-soft");
 
         const dateEnableRow = makeBoolRow("Filter by date",
             function () { return settings.dateEnabled; },
@@ -9356,7 +9356,7 @@
         const makeDayRow = function (label, key) {
 
             const row = document.createElement("div");
-            row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            row.classList.add("mp-between");
 
             const name = document.createElement("span");
             name.textContent = label;
@@ -9400,7 +9400,7 @@
         const dateToRow = makeDayRow("To", "dateTo");
 
         const dateClearRow = document.createElement("div");
-        dateClearRow.style.cssText = "display:flex;gap:6px";
+        dateClearRow.classList.add("mp-row6");
 
         dateClearRow.appendChild(makeButton("Clear dates", "#333", "#fff", function () {
 
@@ -9413,7 +9413,7 @@
         // handled separately from songs rated zero stars
         const ratingLabel = document.createElement("div");
         ratingLabel.textContent = "Rating";
-        ratingLabel.style.cssText = "color:#bbb";
+        ratingLabel.classList.add("mp-soft");
 
         const ratingEnableRow = makeBoolRow("Filter by rating",
             function () { return settings.ratingEnabled; },
@@ -9425,7 +9425,7 @@
 
         const ratingUnratedLabel = document.createElement("div");
         ratingUnratedLabel.textContent = "Songs not yet rated";
-        ratingUnratedLabel.style.cssText = "color:#bbb";
+        ratingUnratedLabel.classList.add("mp-soft");
 
         const ratingUnratedRow = makeSegRow(
             [["any", "Include"], ["hide", "Hide"], ["only", "Only these"]],
@@ -9433,7 +9433,7 @@
             function (v) { settings.ratingUnrated = v; });
 
         const clearRow = document.createElement("div");
-        clearRow.style.cssText = "display:flex;gap:6px";
+        clearRow.classList.add("mp-row6");
 
         clearRow.appendChild(makeButton("Clear all filters", "#444", "#fff", function () {
 
@@ -9570,7 +9570,7 @@
         const sortHint = document.createElement("div");
 
         sortHint.textContent = "Order of the genre, mood and model lists: the ones on the most songs first, or A to Z.";
-        sortHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        sortHint.classList.add("mp-hint");
         tagSheetEl.appendChild(sortHint);
         tagSheetEl.appendChild(sortRow);
         tagSheetEl.appendChild(bpmLabel);
@@ -15732,7 +15732,7 @@
 
         volTrainEl = dialog.back;
         box = dialog.card;
-        top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
+        top.classList.add("mp-top10");
         ui.title = document.createElement("div");
         ui.title.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
         close.style.flex = "0 0 auto";
@@ -15757,9 +15757,9 @@
         ui.flip.style.fontWeight = "600";
 
         ui.gapRow = document.createElement("div");
-        ui.gapRow.style.cssText = "display:flex;align-items:center;gap:10px";
+        ui.gapRow.classList.add("mp-mid10");
         gapName.textContent = "Gap to the step below";
-        gapName.style.cssText = "flex:1;min-width:0";
+        gapName.classList.add("mp-grow");
         ui.gapValue = document.createElement("span");
         ui.gapValue.style.cssText = "min-width:4.5em;text-align:center;font-variant-numeric:tabular-nums;font-weight:600";
         minus.style.cssText += ";flex:0 0 44px;padding:8px 0";
@@ -15779,9 +15779,9 @@
         });
 
         ui.delayRow = document.createElement("div");
-        ui.delayRow.style.cssText = "display:flex;align-items:center;gap:10px";
+        ui.delayRow.classList.add("mp-mid10");
         delayName.textContent = "Switch delay";
-        delayName.style.cssText = "flex:1;min-width:0";
+        delayName.classList.add("mp-grow");
         ui.delayValue = document.createElement("span");
         ui.delayValue.style.cssText = "min-width:4.5em;text-align:center;font-variant-numeric:tabular-nums;font-weight:600";
         sooner.style.cssText += ";flex:0 0 44px;padding:8px 0";
@@ -15797,7 +15797,7 @@
         // Quieter: the player alone turns both sides down alike, for
         // training at night. Red, as it is not the volume
         ui.quietRow = document.createElement("div");
-        ui.quietRow.style.cssText = "display:flex;align-items:center;gap:10px";
+        ui.quietRow.classList.add("mp-mid10");
         quietName.textContent = "Quieter";
         quietName.style.cssText = "flex:0 0 auto;color:" + DANGER + ";font-weight:600";
         ui.quiet = document.createElement("input");
@@ -16219,7 +16219,7 @@
         ui.text = document.createElement("div");
         ui.text.style.cssText = "font-size:13px;line-height:1.45;color:#bbb";
         ui.rows = document.createElement("div");
-        ui.rows.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        ui.rows.classList.add("mp-col6");
         done.style.padding = "10px 16px";
         box.appendChild(top);
         box.appendChild(ui.text);
@@ -23028,43 +23028,67 @@
     }
 
     // The plays made offline go to Mureka, one at a time with a pause in
-    // between. Stops when the connection goes again, the rest wait
+    // between. Stops when the connection goes again, the rest wait. One
+    // tab sends them at a time, where the browser can tell, so two tabs
+    // with the player do not send the same plays twice
     async function flushReports() {
 
-        if (flushingReports || offlineMode()) {
-            return;
-        }
-
-        const list = loadPendingReports();
-
-        if (list.length === 0) {
+        if (flushingReports || offlineMode() || loadPendingReports().length === 0) {
             return;
         }
 
         flushingReports = true;
-        dbgLog("Mureka", "sending " + list.length + " play reports kept while offline");
 
         try {
 
-            while (list.length > 0 && !offlineMode()) {
+            if (navigator.locks && typeof navigator.locks.request === "function") {
 
-                const item = list[0];
-                const song = hostFindSong(String(item.id)) || { song_id: item.id, is_played: false };
-
-                if (item.wasNew && song.is_played === false && !(await reportPlayed(song))) {
-                    break;
-                }
-
-                if (!(await sendPlayReport(song.song_id))) {
-                    break;
-                }
-
-                list.shift();
-                savePendingReports(list);
-                await sleep(1500);
+                await navigator.locks.request(PENDING_REPORTS_KEY, { ifAvailable: true }, function (lock) {
+                    return lock ? sendPendingReports() : null;
+                });
+            } else {
+                await sendPendingReports();
             }
         } finally {
             flushingReports = false;
+        }
+    }
+
+    // The kept plays read again before each one and the one sent taken off
+    // by its song and time, so a play kept meanwhile, by a report that
+    // failed here or in another tab, is not saved over and lost
+    async function sendPendingReports() {
+
+        let told = false;
+
+        while (!offlineMode()) {
+
+            const item = loadPendingReports()[0];
+
+            if (!item) {
+                break;
+            }
+
+            if (!told) {
+
+                told = true;
+                dbgLog("Mureka", "sending " + loadPendingReports().length + " play reports kept while offline");
+            }
+
+            const song = hostFindSong(String(item.id)) || { song_id: item.id, is_played: false };
+
+            if (item.wasNew && song.is_played === false && !(await reportPlayed(song))) {
+                break;
+            }
+
+            if (!(await sendPlayReport(song.song_id))) {
+                break;
+            }
+
+            savePendingReports(loadPendingReports().filter(function (x) {
+                return !(String(x.id) === String(item.id) && x.at === item.at);
+            }));
+            await sleep(1500);
         }
     }
 
@@ -25314,7 +25338,7 @@
             ? "The browser stopped passing the player's sound on. A tap starts it anew. "
             : "The browser only gives the sound back to the player after a tap. ")
             + (currentSong ? "\"" + (currentSong.title || "Untitled") + "\" plays on from where it stopped." : "");
-        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        text.classList.add("mp-text");
         row.style.cssText = "display:flex;gap:10px";
 
         const dismiss = heldAskButton("Dismiss", "#9a9aa2", null);
@@ -26581,7 +26605,7 @@
         text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
 
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;gap:8px";
+        row.classList.add("mp-row8");
 
         const close = dialog.close;
 
@@ -26644,7 +26668,7 @@
 
         const head = document.createElement("div");
         head.textContent = title;
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
 
         const text = document.createElement("div");
         text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
@@ -28123,7 +28147,7 @@
         const inGroup = isGroupKey(key);
 
         const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        wrap.classList.add("mp-col6");
         wrap.dataset.hostControls = inGroup ? key : (key === "webControlOrder" ? "web" : "mobile");
 
         let activeNames = [];
@@ -32104,9 +32128,9 @@
             card.style.cssText = "background:rgba(22,22,27,0.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);"
                 + "box-shadow:0 6px 24px rgba(0,0,0,0.45);border-radius:12px;padding:12px;width:100%;"
                 + "max-width:540px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px";
-            head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            head.classList.add("mp-between");
             title.textContent = "Stats for nerds";
-            title.style.cssText = "font-weight:600";
+            title.classList.add("mp-bold");
             close.style.padding = "4px 12px";
             statsBodyEl = document.createElement("div");
             statsBodyEl.style.cssText = "overflow-y:auto;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#ddd";
@@ -32465,7 +32489,7 @@
                 const k = document.createElement("span");
                 const v = document.createElement("span");
 
-                line.style.cssText = "display:flex;gap:8px";
+                line.classList.add("mp-row8");
                 k.textContent = r[0];
 
                 // A detail of the line above sits indented under its name
@@ -44100,7 +44124,7 @@
 
         const headerTitle = document.createElement("div");
         headerTitle.textContent = "Mureka Player";
-        headerTitle.style.cssText = "font-weight:600";
+        headerTitle.classList.add("mp-bold");
 
         // Show the running version so an update is easy to confirm at a glance
         const versionEl = document.createElement("span");
@@ -44370,7 +44394,7 @@
 
             const row = document.createElement("div");
 
-            row.style.cssText = "display:flex;gap:6px";
+            row.classList.add("mp-row6");
 
             return row;
         };
@@ -45043,7 +45067,7 @@
 
         // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
         const controlRow = document.createElement("div");
-        controlRow.style.cssText = "display:flex;gap:8px";
+        controlRow.classList.add("mp-row8");
         controlRowEl = controlRow;
 
         // All six are built, the controlOrder setting decides which of them go
@@ -45465,7 +45489,7 @@
         // The list shown, one of three: Mureka's songs, sorted as last
         // chosen, the queue or the song sets
         const viewRow = document.createElement("div");
-        viewRow.style.cssText = "display:flex;gap:6px";
+        viewRow.classList.add("mp-row6");
 
         viewButtons.mureka = makeActionButton(iconMureka(), "Mureka", "#333", "#fff", function () {
             setView(libView());
@@ -45490,7 +45514,7 @@
         // to Mureka's own order, and from the queue or the sets a sort opens
         // Mureka's songs sorted that way
         const sortRow = document.createElement("div");
-        sortRow.style.cssText = "display:flex;gap:6px";
+        sortRow.classList.add("mp-row6");
 
         const sortBy = function (view) {
             setView(listView === view ? "mureka" : view);
@@ -45540,7 +45564,7 @@
 
         // Vocals filter row
         const filterRow = document.createElement("div");
-        filterRow.style.cssText = "display:flex;gap:6px";
+        filterRow.classList.add("mp-row6");
 
         filterButtons.all = makeActionButton(iconAll(), "All", "#333", "#fff", function () {
             setVocalFilter("all");
@@ -45565,7 +45589,7 @@
         // list without moving the content, just like the action dropdown
         // Opens the smart filter sheet, tags and tempo
         const smartRow = document.createElement("div");
-        smartRow.style.cssText = "display:flex;gap:6px";
+        smartRow.classList.add("mp-row6");
 
         smartFilterBtn = makeActionButton(iconFilter(), "Edit filters", "#333", "#fff", openTagSheet);
         smartFilterBtn.title = "Filter by genre, mood and tempo";
@@ -48569,12 +48593,12 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = action === "Share" ? titles[kind].replace("Copy", "Share") : titles[kind];
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
         body.textContent = texts[kind];
-        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
-        quick.style.cssText = "display:flex;gap:6px";
-        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
-        row.style.cssText = "display:flex;gap:8px";
+        body.classList.add("mp-text");
+        quick.classList.add("mp-row6");
+        list.classList.add("mp-band");
+        row.classList.add("mp-row8");
 
         const close = function () {
             back.remove();
@@ -49529,7 +49553,7 @@
         row.title = "Tap to open or fold; long press or right-click for the set";
         arrow.textContent = open ? "\u25BE" : "\u25B8";
         arrow.style.cssText = "flex:0 0 auto;width:1em;margin-left:10px;color:" + setMarkColor(set);
-        text.style.cssText = "flex:1;min-width:0";
+        text.classList.add("mp-grow");
         name.textContent = set.name;
         name.style.cssText = "font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (set.done ? "#aaa" : "#fff");
         meta.textContent = setRowMeta(entry);
@@ -49699,7 +49723,7 @@
             const empty = document.createElement("div");
 
             empty.textContent = query ? "No matches" : "No sets yet. A song's menu has Add to a set, and songs picked with Select can be put in a set together.";
-            empty.style.cssText = "padding:6px 2px;color:#888";
+            empty.classList.add("mp-note");
             listEl.appendChild(empty);
         }
 
@@ -50536,7 +50560,7 @@
 
             const empty = document.createElement("div");
             empty.textContent = "Queue is empty, press play";
-            empty.style.cssText = "padding:6px 2px;color:#888";
+            empty.classList.add("mp-note");
             listEl.appendChild(empty);
         }
     }
@@ -50656,7 +50680,7 @@
 
         row.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap";
         name.textContent = label;
-        name.style.cssText = "flex:1;min-width:0";
+        name.classList.add("mp-grow");
         swatch.type = "button";
         swatch.setAttribute("aria-label", "Pick the color");
         swatch.style.cssText = "flex:0 0 auto;width:64px;height:30px;box-sizing:border-box;border-radius:6px;border:1px solid #555;padding:0;"
@@ -50916,7 +50940,7 @@
     function makeCarTextRow(label, key, fallback) {
 
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;flex-direction:column;gap:4px";
+        row.classList.add("mp-col4");
 
         const name = document.createElement("div");
         name.textContent = label;
@@ -51140,7 +51164,7 @@
                     }
                 });
 
-                row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+                row.classList.add("mp-between");
                 text.textContent = syncRoomTitle(r);
                 text.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere;display:flex;flex-direction:column;gap:2px";
                 info.textContent = syncRoomInfo(r);
@@ -51350,8 +51374,8 @@
         const statusEl = document.createElement("div");
         const tryRow = document.createElement("div");
 
-        statusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
-        tryRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        statusEl.classList.add("mp-box");
+        tryRow.classList.add("mp-row6b");
 
         // Disabled while the last known state already is what they ask for
         const onNowBtn = makeButton("Turn on hotspot", "#333", "#fff", function () {
@@ -51372,8 +51396,8 @@
         const pairRow = document.createElement("div");
         const startRow = document.createElement("div");
 
-        pairRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
-        startRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        pairRow.classList.add("mp-row6b");
+        startRow.classList.add("mp-row6b");
 
         const pairBtn = makeButton("Pair with wireless debugging", "#333", "#fff", function () {
 
@@ -51407,7 +51431,7 @@
 
         commandEl.style.cssText = "margin:4px 0 8px;padding:8px 10px;border-radius:8px;background:#1b1b20;color:rgb(232, 232, 232);font:12px/1.5 monospace;word-break:break-all;user-select:text;-webkit-user-select:text";
         commandEl.textContent = "--";
-        copyRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        copyRow.classList.add("mp-row6b");
 
         const copyBtn = makeButton("Copy the command", "#333", "#fff", function () {
 
@@ -51542,8 +51566,8 @@
                 const value = document.createElement("div");
 
                 row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
-                name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
-                value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px";
+                name.classList.add("mp-key");
+                value.classList.add("mp-val");
                 name.textContent = pair[0];
                 value.textContent = pair[1];
                 row.appendChild(name);
@@ -51595,8 +51619,8 @@
         const devList = document.createElement("div");
         const devNote = makeHint("");
 
-        devAskRow.style.cssText = "display:flex;gap:6px";
-        devList.style.cssText = "display:flex;flex-direction:column;gap:12px";
+        devAskRow.classList.add("mp-row6");
+        devList.classList.add("mp-col12");
         devAskRow.appendChild(makeButton("Allow Bluetooth access", "#333", "#fff", function () {
 
             if (host.askBluetooth && host.askBluetooth()) {
@@ -51826,7 +51850,7 @@
 
         row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
         name.textContent = label;
-        name.style.cssText = "flex:1;min-width:0";
+        name.classList.add("mp-grow");
         sel.style.cssText = "flex:0 0 auto;max-width:62%;height:30px;padding:0 8px;box-sizing:border-box;"
             + "border-radius:6px;border:1px solid #555;background:#333;color:#fff;font:inherit;cursor:pointer";
 
@@ -51875,7 +51899,7 @@
         const st = step || 1;
 
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        row.classList.add("mp-between");
 
         const name = document.createElement("span");
         name.textContent = label;
@@ -52037,11 +52061,11 @@
 
         // Heading row with a Done button that closes the overlay
         const head = document.createElement("div");
-        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        head.classList.add("mp-between");
 
         const heading = document.createElement("div");
         heading.textContent = "Settings";
-        heading.style.cssText = "font-weight:600";
+        heading.classList.add("mp-bold");
 
         const doneBtn = makeButton("Done", ACCENT, "#000", closeSettings);
         doneBtn.style.flex = "0 0 auto";
@@ -52221,11 +52245,11 @@
             });
             const name = document.createElement("span");
 
-            row.style.cssText = "display:flex;align-items:center;gap:10px";
+            row.classList.add("mp-mid10");
             back.style.flex = "0 0 auto";
             back.style.padding = "6px 12px";
             name.textContent = title;
-            name.style.cssText = "font-weight:600";
+            name.classList.add("mp-bold");
             row.appendChild(back);
             row.appendChild(name);
 
@@ -52372,7 +52396,7 @@
             + " ${artist} ${duration} ${plays} ${likes} ${ctime} ${ptime} ${mode}"
             + " ${instrumental} ${stars}."
             + " Text in [ ] is dropped when a tag inside it is empty.";
-        tplHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        tplHint.classList.add("mp-hint");
 
         const statsRow = makeBoolRow("Stats for nerds",
             function () { return settings.statsButton === true; },
@@ -52466,8 +52490,8 @@
         const songButtonsRow = document.createElement("div");
         let storageUsed = "";
 
-        songStatusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
-        songButtonsRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        songStatusEl.classList.add("mp-box");
+        songButtonsRow.classList.add("mp-row6b");
 
         // How much room the player takes in this browser or app, all of it,
         // asked for now and then since the answer takes a moment
@@ -52547,9 +52571,9 @@
                 const name = document.createElement("div");
                 const value = document.createElement("div");
 
-                row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
-                name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
-                value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px";
+                row.classList.add("mp-line");
+                name.classList.add("mp-key");
+                value.classList.add("mp-val");
                 name.textContent = pair[0];
                 value.textContent = pair[1];
                 row.appendChild(name);
@@ -52955,7 +52979,7 @@
 
         const readRow = document.createElement("div");
 
-        readRow.style.cssText = "display:flex;gap:6px";
+        readRow.classList.add("mp-row6");
         readRow.appendChild(makeButton("Read play counts", "#333", "#fff", startPlaysJob));
         readRow.appendChild(makeButton("Stop", "#333", "#fff", stopPlaysJob));
 
@@ -52989,8 +53013,8 @@
                 const name = document.createElement("div");
                 const value = document.createElement("div");
 
-                row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
-                name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
+                row.classList.add("mp-line");
+                name.classList.add("mp-key");
                 value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
                 name.textContent = pair[0];
                 value.textContent = pair[1];
@@ -53023,7 +53047,7 @@
         // The next song read at once rather than when its wait is over
         const fetchNowRow = document.createElement("div");
 
-        fetchNowRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+        fetchNowRow.classList.add("mp-row6b");
         fetchNowRow.appendChild(makeButton("Fetch next now", "#333", "#fff", function () {
 
             trickleTick(true);
@@ -53224,7 +53248,7 @@
         // with none yet
         let groupsKey = null;
 
-        groupsBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
+        groupsBox.classList.add("mp-col12");
 
         const drawGroups = function () {
 
@@ -53457,10 +53481,10 @@
             + " Mureka again. Songs already here are kept, missing ones are added."
             + " The play queue holds the songs it plays in their order, an import of it"
             + " replaces the queue here.";
-        dataHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        dataHint.classList.add("mp-hint");
 
         const exportRow = document.createElement("div");
-        exportRow.style.cssText = "display:flex;gap:6px";
+        exportRow.classList.add("mp-row6");
 
         const songsExport = makeButton("Export song tweaks", "#333", "#fff", function () {
             chooseExport("songs");
@@ -53488,14 +53512,14 @@
             chooseExport("queue");
         });
 
-        libraryRow.style.cssText = "display:flex;gap:6px";
+        libraryRow.classList.add("mp-row6");
         libraryExport.dataset.hostExport = "library";
         queueExport.dataset.hostExport = "queue";
         libraryRow.appendChild(libraryExport);
         libraryRow.appendChild(queueExport);
 
         const importRow = document.createElement("div");
-        importRow.style.cssText = "display:flex;gap:6px";
+        importRow.classList.add("mp-row6");
 
         const importBtn = makeButton("Import", "#333", "#fff", chooseImport);
 
@@ -53543,7 +53567,7 @@
             // network rows above
             const webLabel = document.createElement("div");
             webLabel.textContent = "Web view display";
-            webLabel.style.cssText = "color:#bbb";
+            webLabel.classList.add("mp-soft");
 
             const webUpNextRow = makeBoolRow("Show up next",
                 function () { return settings.webUpNext; },
@@ -53965,9 +53989,9 @@
                 const btns = document.createElement("div");
                 const made = {};
 
-                row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+                row.classList.add("mp-between");
                 label.textContent = name;
-                label.style.cssText = "flex:1;min-width:0";
+                label.classList.add("mp-grow");
                 btns.style.cssText = "display:flex;gap:8px;flex:0 0 auto";
 
                 for (const pair of [["On", true], ["Off", false]]) {
@@ -54036,9 +54060,9 @@
                 }
             });
 
-            wgFreeRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            wgFreeRow.classList.add("mp-between");
             wgFreeName.textContent = "WireGuard's battery use";
-            wgFreeName.style.cssText = "flex:1;min-width:0";
+            wgFreeName.classList.add("mp-grow");
             wgFreeBtn.style.flex = "0 0 auto";
             wgFreeBtn.style.minWidth = "56px";
             wgFreeBtn.style.padding = "6px 12px";
@@ -54072,9 +54096,9 @@
                 }
             });
 
-            batteryRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+            batteryRow.classList.add("mp-between");
             batteryName.textContent = "Run freely in the background";
-            batteryName.style.cssText = "flex:1;min-width:0";
+            batteryName.classList.add("mp-grow");
             batteryBtn.style.flex = "0 0 auto";
             batteryBtn.style.minWidth = "56px";
             batteryBtn.style.padding = "6px 12px";
@@ -54103,7 +54127,7 @@
             const carHint = document.createElement("div");
             carHint.textContent = "The mobile network is never allowed. Android asks once before"
                 + " the VPN starts, and it cannot run next to another VPN app.";
-            carHint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+            carHint.classList.add("mp-hint");
 
             // What the page is reachable at, as the app sees it right now
             const renderCarStatus = function () {
@@ -54280,7 +54304,7 @@
                 renderCarStatus();
             });
 
-            pingResetRow.style.cssText = "display:flex;gap:8px";
+            pingResetRow.classList.add("mp-row8");
             pingResetRow.appendChild(pingResetBtn);
 
             const paintPingReset = function () {
@@ -54331,8 +54355,8 @@
             const coverClearRow = document.createElement("div");
             let coverClearing = false;
 
-            coverStatusEl.style.cssText = "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c";
-            coverClearRow.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+            coverStatusEl.classList.add("mp-box");
+            coverClearRow.classList.add("mp-row6b");
 
             const coverInfo = function () {
 
@@ -54378,9 +54402,9 @@
                     const name = document.createElement("div");
                     const value = document.createElement("div");
 
-                    row.style.cssText = "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333";
-                    name.style.cssText = "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px";
-                    value.style.cssText = "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px";
+                    row.classList.add("mp-line");
+                    name.classList.add("mp-key");
+                    value.classList.add("mp-val");
                     name.textContent = pair[0];
                     value.textContent = pair[1];
                     row.appendChild(name);
@@ -54580,7 +54604,7 @@
         // each, side by side
         const coverTestRow = document.createElement("div");
 
-        coverTestRow.style.cssText = "display:flex;gap:8px";
+        coverTestRow.classList.add("mp-row8");
         coverTestRow.appendChild(makeButton("Send loading cover", "#333", "#fff", function (ev) {
             const ok = sendCoverTest("loading");
 
@@ -54634,7 +54658,7 @@
 
             const addressesEl = document.createElement("div");
 
-            addressesEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
+            addressesEl.classList.add("mp-col6");
             aboutPage.appendChild(addressesEl);
 
             // One address with the network it is on beside it
@@ -54912,7 +54936,7 @@
         let soundPopScroll = 0;
         let soundKey = "";
 
-        soundBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
+        soundBox.classList.add("mp-col12");
 
         const soundDevices = function () {
 
@@ -54993,7 +55017,7 @@
                 }
             });
 
-            box.style.cssText = "display:flex;flex-direction:column;gap:6px";
+            box.classList.add("mp-col6");
             box.appendChild(evenDrop(makeDropRow("Overwrite profile", list.map(function (p) {
                 return { value: p.id, label: p.name + (p.id === live.from ? " (it came from)" : "") };
             }), function () { return liveOverId; }, function (v) {
@@ -55087,7 +55111,7 @@
                 const words = makeHint(said);
                 const editBtn = makeButton("Edit", "#333", "#fff", open);
 
-                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                row.classList.add("mp-mid10");
                 col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px";
                 col.dataset.hostCol = "1";
                 name.textContent = title + (inUse ? ", in use" : "");
@@ -55114,7 +55138,7 @@
 
                 const keep = document.createElement("div");
 
-                keep.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+                keep.classList.add("mp-wrap6");
                 keep.appendChild(makeButton("Save as new", "#333", "#fff", function () {
 
                     const fresh = saveLiveAsNew();
@@ -55315,7 +55339,7 @@
                 box.addEventListener("scroll", function () {
                     soundPopScroll = box.scrollTop;
                 });
-                top.style.cssText = "display:flex;align-items:flex-start;gap:10px";
+                top.classList.add("mp-top10");
                 popTitle.textContent = title;
                 popTitle.style.cssText = "flex:1;min-width:0;font-weight:600;font-size:17px;color:" + ACCENT;
                 close.style.flex = "0 0 auto";
@@ -55405,7 +55429,7 @@
                 row.dataset.hostSlider = "1";
                 row.dataset.hostUnit = "%";
                 row.dataset.hostOff = "1";
-                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                row.classList.add("mp-mid10");
                 name.textContent = "Max volume as it connects";
                 name.style.cssText = "flex:0 1 auto;min-width:0";
                 slider.type = "range";
@@ -55689,7 +55713,7 @@
                 // so they follow while a finger is still on its slider
                 row.dataset.hostLive = "fineVol";
                 nums.dataset.hostSkip = "1";
-                row.style.cssText = "display:flex;align-items:center;gap:10px";
+                row.classList.add("mp-mid10");
                 name.textContent = "Volume now";
                 name.style.cssText = "flex:0 0 auto";
                 slider.type = "range";
@@ -55789,7 +55813,7 @@
         const soundEditBox = document.createElement("div");
         let soundEditKey = "";
 
-        soundEditBox.style.cssText = "display:flex;flex-direction:column;gap:12px";
+        soundEditBox.classList.add("mp-col12");
 
         const drawSoundEdit = function () {
 
@@ -55827,11 +55851,11 @@
             });
             const title = document.createElement("span");
 
-            head.style.cssText = "display:flex;align-items:center;gap:10px";
+            head.classList.add("mp-mid10");
             back.style.flex = "0 0 auto";
             back.style.padding = "6px 12px";
             title.textContent = live ? "Tweaking live" : edit.name;
-            title.style.cssText = "font-weight:600";
+            title.classList.add("mp-bold");
             head.appendChild(back);
             head.appendChild(title);
             soundEditBox.appendChild(head);
@@ -55995,7 +56019,7 @@
             };
 
             cutRow.dataset.hostSlider = "1";
-            cutRow.style.cssText = "display:flex;align-items:center;gap:10px";
+            cutRow.classList.add("mp-mid10");
             cutName.textContent = "Bass cut";
             cutName.style.cssText = "flex:0 0 auto";
             cutSlider.type = "range";
@@ -56059,7 +56083,7 @@
                 const keep = document.createElement("div");
 
                 soundEditBox.appendChild(soundHeading("Keep it"));
-                keep.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+                keep.classList.add("mp-wrap6");
 
                 if (from) {
 
@@ -56102,7 +56126,7 @@
 
             const buttons = document.createElement("div");
 
-            buttons.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+            buttons.classList.add("mp-wrap6");
             buttons.appendChild(makeButton("Duplicate profile", "#333", "#fff", function () {
 
                 const copy = cleanProfile(Object.assign({}, edit, { id: "", bands: edit.bands.slice(), name: edit.name + " copy" }), sound().profiles.length);
@@ -57911,11 +57935,11 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = title;
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
         body.textContent = text;
-        body.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
-        list.style.cssText = "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0";
-        row.style.cssText = "display:flex;gap:8px";
+        body.classList.add("mp-text");
+        list.classList.add("mp-band");
+        row.classList.add("mp-row8");
 
         const close = function (fn) {
 
@@ -59043,7 +59067,7 @@
         caption.style.cssText = "font-size:12px;color:#bbb;white-space:pre-line;line-height:1.4";
 
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+        row.classList.add("mp-wrap6");
 
         for (const opt of options) {
 
@@ -59174,7 +59198,7 @@
         const col = document.createElement("div");
 
         head.textContent = lines[0];
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
         text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
 
         let rest = lines.slice(1).join("\n").trim();
@@ -59200,7 +59224,7 @@
         }
 
         text.appendChild(document.createTextNode(rest));
-        col.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        col.classList.add("mp-col6");
 
         const close = dialog.close;
 
@@ -59396,7 +59420,7 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:420px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = "Paste an export or Mureka song links here";
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
 
         // At least 16 pixels, below that iOS zooms the page in on focus
         area.placeholder = "Settings, song tweaks or a song library, as exported";
@@ -59404,7 +59428,7 @@
         area.setAttribute("spellcheck", "false");
         area.style.cssText = "width:100%;height:180px;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;"
             + "border-radius:6px;background:#1b1b20;color:#fff;font:16px monospace;resize:vertical;outline:none";
-        row.style.cssText = "display:flex;gap:8px";
+        row.classList.add("mp-row8");
 
         const close = function () {
             back.remove();
@@ -61238,7 +61262,7 @@
 
         const heading = document.createElement("div");
         heading.textContent = "Information";
-        heading.style.cssText = "font-weight:600";
+        heading.classList.add("mp-bold");
 
         const doneBtn = makeButton("Done", ACCENT, "#000", closeInfo);
         doneBtn.style.flex = "0 0 auto";
@@ -61287,7 +61311,7 @@
         wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;border-top:1px solid #333;padding-top:8px";
 
         const headRow = document.createElement("div");
-        headRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        headRow.classList.add("mp-between");
 
         const title = document.createElement("span");
         title.textContent = label;
@@ -61443,7 +61467,7 @@
         const fetchBar = document.createElement("div");
         const fetchFill = document.createElement("div");
 
-        fetchRow.style.cssText = "display:flex;flex-direction:column;gap:4px";
+        fetchRow.classList.add("mp-col4");
         fetchText.textContent = "Getting the details from Mureka";
         fetchText.style.cssText = "color:" + ACCENT + ";font-size:12px";
         fetchBar.style.cssText = "height:3px;border-radius:2px;background:#333;overflow:hidden";
@@ -62128,9 +62152,9 @@
         const row = document.createElement("div");
         const name = document.createElement("span");
 
-        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        row.classList.add("mp-between");
         name.textContent = label;
-        name.style.cssText = "flex:1;min-width:0";
+        name.classList.add("mp-grow");
 
         const btn = makeButton("Off", "#333", "#fff", function () {
 
@@ -62366,7 +62390,7 @@
         // Listening
         const playRow = document.createElement("div");
 
-        playRow.style.cssText = "display:flex;gap:6px";
+        playRow.classList.add("mp-row6");
         // Each play button is ringed while what it started plays
         ui.playStartBtn = makeButton("Play start", "#333", "#fff", function () {
 
@@ -62465,7 +62489,7 @@
 
         const askButtons = document.createElement("div");
 
-        askButtons.style.cssText = "display:flex;gap:8px";
+        askButtons.classList.add("mp-row8");
         askButtons.appendChild(makeButton("Cancel", "#333", "#fff", function () {
             ui.ask.style.display = "none";
         }));
@@ -62482,7 +62506,7 @@
 
         const hint = document.createElement("div");
 
-        hint.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        hint.classList.add("mp-hint");
         hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. Dragging up or down in the close up, Shift with the wheel, or More gain and Less gain magnify its height, so quiet clicks show. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
         trimEl.appendChild(head);
@@ -63742,7 +63766,7 @@
         slider.style.cssText = "width:100%;accent-color:" + ACCENT;
         hint.textContent = "Drag to move it. Pinch, scroll or slide to zoom.";
         hint.style.cssText = "color:#aaa;font-size:0.85em";
-        row.style.cssText = "display:flex;gap:8px";
+        row.classList.add("mp-row8");
 
         const button = function (text, bg, fg, fn) {
 
@@ -64283,7 +64307,7 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:360px;"
             + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         text.textContent = touch ? "Press and hold in the box, then Paste" : "Click in the box and press Ctrl+V, or use Paste";
-        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        text.classList.add("mp-text");
         field.contentEditable = "true";
         field.setAttribute("aria-label", "Paste the picture here");
         field.style.cssText = "min-height:90px;border:2px dashed " + ACCENT + ";border-radius:8px;outline:none;color:transparent;"
@@ -67960,7 +67984,7 @@
 
         row.style.cssText = "display:flex;align-items:baseline;gap:10px;font-size:12px;color:#aaa;margin-bottom:-4px";
         name.textContent = text;
-        name.style.cssText = "flex:1;min-width:0";
+        name.classList.add("mp-grow");
         count.style.cssText = "font-variant-numeric:tabular-nums";
         row.appendChild(name);
         row.appendChild(count);
@@ -68024,7 +68048,7 @@
 
         const row = document.createElement("div");
 
-        row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+        row.classList.add("mp-wrap6");
 
         for (const b of buttons) {
 
@@ -68121,7 +68145,7 @@
 
         // The model, which a remix with lyrics goes without
         ui.modelBox = document.createElement("div");
-        ui.modelBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.modelBox.classList.add("mp-col8");
         ui.modelBox.appendChild(createLabelRow("Model"));
         ui.modelRow = trimSegments(CREATE_MODELS, function () {
             return loadCreateDraft().model;
@@ -68133,7 +68157,7 @@
 
         // Easy: a wish in words, Mureka's agent writes and makes the songs
         ui.easyBox = document.createElement("div");
-        ui.easyBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.easyBox.classList.add("mp-col8");
         ui.easyLabel = createLabelRow("What to make", function () {
             createClearField("easyText", "The wish");
         });
@@ -68228,7 +68252,7 @@
 
         // The lyrics, with Mureka writing them from a theme or better
         ui.lyricsBox = document.createElement("div");
-        ui.lyricsBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.lyricsBox.classList.add("mp-col8");
         ui.lyricsLabel = createLabelRow("Lyrics", function () {
             createClearField("lyrics", "The lyrics");
         });
@@ -68281,7 +68305,7 @@
 
         // Who sings: a male or female voice, or one of Mureka's characters
         ui.voiceBox = document.createElement("div");
-        ui.voiceBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.voiceBox.classList.add("mp-col8");
         ui.voiceBox.appendChild(createLabelRow("Voice"));
         ui.voiceRow = trimSegments([
             { label: "Male", value: "male" },
@@ -68299,7 +68323,7 @@
         });
         ui.voiceBox.appendChild(ui.voiceRow);
         ui.characterRow = document.createElement("div");
-        ui.characterRow.style.cssText = "display:flex;align-items:center;gap:8px";
+        ui.characterRow.classList.add("mp-mid8");
         ui.characterName = document.createElement("span");
         ui.characterName.style.cssText = "flex:1;min-width:0;font-size:13px;overflow-wrap:anywhere";
 
@@ -68335,7 +68359,7 @@
 
         // Length and wildness, which a character and a remix go without
         ui.advBox = document.createElement("div");
-        ui.advBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.advBox.classList.add("mp-col8");
         // The length on a slider, all the way left automatic, with a step
         // of ten seconds either way on the buttons
         ui.lengthLabel = createLabelRow("Length");
@@ -68356,7 +68380,7 @@
             stepLength(1);
         });
 
-        lengthRow.style.cssText = "display:flex;align-items:center;gap:8px";
+        lengthRow.classList.add("mp-mid8");
         shorter.style.flex = "0 0 44px";
         longer.style.flex = "0 0 44px";
         ui.length = document.createElement("input");
@@ -68422,7 +68446,7 @@
         });
         createEl.appendChild(ui.setRow);
         ui.setBox = document.createElement("div");
-        ui.setBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+        ui.setBox.classList.add("mp-col8");
         // The set chosen, in its own color, a list to change it
         ui.setPick = document.createElement("button");
         ui.setPick.type = "button";
@@ -68434,7 +68458,7 @@
         setChange.style.flex = "0 0 auto";
         setChange.style.padding = "6px 14px";
         ui.setChips = document.createElement("div");
-        ui.setChips.style.cssText = "display:flex;align-items:center;gap:8px";
+        ui.setChips.classList.add("mp-mid8");
         ui.setChips.appendChild(ui.setPick);
         ui.setChips.appendChild(setChange);
         ui.setHint = document.createElement("div");
@@ -68879,9 +68903,9 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = title;
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
         list.style.cssText = "overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:40px;flex:1 1 auto;-webkit-overflow-scrolling:touch";
-        foot.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+        foot.classList.add("mp-wrap6");
 
         const api = { onClose: null };
         const close = function () {
@@ -69605,11 +69629,11 @@
 
         // Heading row with a Done button that closes the page
         const head = document.createElement("div");
-        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        head.classList.add("mp-between");
 
         const heading = document.createElement("div");
         heading.textContent = "Playlists";
-        heading.style.cssText = "font-weight:600";
+        heading.classList.add("mp-bold");
 
         const doneBtn = makeButton("Done", ACCENT, "#000", closePlaylists);
         doneBtn.style.flex = "0 0 auto";
@@ -69620,7 +69644,7 @@
 
         // A new playlist, and the whole library again
         const top = document.createElement("div");
-        top.style.cssText = "display:flex;gap:6px";
+        top.classList.add("mp-row6");
 
         const newBtn = makeButton("New playlist", ACCENT, "#000", function () {
             startEditPlaylist(null);
@@ -69640,7 +69664,7 @@
 
         // Container that the playlist rows are rendered into
         playlistsListEl = document.createElement("div");
-        playlistsListEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        playlistsListEl.classList.add("mp-col6");
 
         playlistsEl.appendChild(head);
         playlistsEl.appendChild(top);
@@ -70015,7 +70039,7 @@
         const title = document.createElement("div");
 
         title.textContent = pl ? "Edit " + pl.name : "New playlist";
-        title.style.cssText = "font-weight:600";
+        title.classList.add("mp-bold");
         playlistsEditEl.appendChild(title);
 
         const field = function (key, placeholder, max) {
@@ -70049,7 +70073,7 @@
 
         const buttons = document.createElement("div");
 
-        buttons.style.cssText = "display:flex;gap:6px";
+        buttons.classList.add("mp-row6");
 
         const save = makeButton(pl ? "Save" : "Create", ACCENT, "#000", savePlaylistEdit);
         const cancel = makeButton("Cancel", "#333", "#fff", function () {
@@ -70072,7 +70096,7 @@
         // The cover from the song playing, or a picture of the phone's own
         const covers = document.createElement("div");
 
-        covers.style.cssText = "display:flex;gap:6px";
+        covers.classList.add("mp-row6");
 
         const fromSong = makeButton("Cover from the playing song", "#333", "#fff", function () {
 
@@ -71848,11 +71872,11 @@
 
         // Heading row with a Done button that closes the overlay
         const head = document.createElement("div");
-        head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+        head.classList.add("mp-between");
 
         const heading = document.createElement("div");
         heading.textContent = "Creators";
-        heading.style.cssText = "font-weight:600";
+        heading.classList.add("mp-bold");
 
         const doneBtn = makeButton("Done", ACCENT, "#000", closeCreators);
         doneBtn.style.flex = "0 0 auto";
@@ -71867,7 +71891,7 @@
 
         // Search and add row, typing filters the list, an id or link can be added
         const addRow = document.createElement("div");
-        addRow.style.cssText = "display:flex;gap:6px";
+        addRow.classList.add("mp-row6");
 
         creatorsInputEl = document.createElement("input");
         creatorsInputEl.type = "text";
@@ -71912,7 +71936,7 @@
 
         // Container that the creator rows are rendered into
         creatorsListEl = document.createElement("div");
-        creatorsListEl.style.cssText = "display:flex;flex-direction:column;gap:6px";
+        creatorsListEl.classList.add("mp-col6");
 
         creatorsEl.appendChild(head);
         creatorsEl.appendChild(mineBtn);
@@ -72389,14 +72413,14 @@
         card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
             + "max-width:420px;max-height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
         head.textContent = said ? title + ", " + said.charAt(0).toLowerCase() + said.slice(1) : title + ", select it and copy";
-        head.style.cssText = "font-weight:600";
+        head.classList.add("mp-bold");
 
         // At least 16 pixels, below that iOS zooms the page in on focus
         area.value = text;
         area.readOnly = true;
         area.style.cssText = "width:100%;height:40vh;box-sizing:border-box;font:12px monospace;font-size:16px;"
             + "background:#1b1b20;color:#ddd;border:1px solid #4a4a52;border-radius:6px;padding:8px";
-        row.style.cssText = "display:flex;gap:8px";
+        row.classList.add("mp-row8");
 
         const close = makeButton("Close", "#444", "#fff", function () {
             back.remove();
@@ -82619,7 +82643,7 @@
         { label: "Color when played", key: "wavePlayed", field: "wavePlayedFill", c: "#c8c8d0", a: 100 },
         { label: "Color still to play", key: "waveRest", field: "waveRestFill", c: "#666666", a: 100 },
         { label: "Play head color", key: "playHead", field: "playHeadFill", c: "#ffffff", a: 60 },
-        { label: "Progress color up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#47e0eb", a: 100 },
+        { label: "Progress color up to the play head", key: "progressFill", field: "waveZoomProgressFill", c: "#48e1eb", a: 100 },
         { label: "Progress color past the play head", key: "progressAhead", field: "waveZoomProgressAhead", c: "#c8c8d0", a: 100 }
     ];
 
@@ -110345,8 +110369,49 @@
 
     // Build the player, then hold the screen on right away if it is always
     // meant to be
+    // The styles many of the player's parts share, as classes of one style
+    // sheet rather than written out on each. Each class is named twice in
+    // its rule, so the page's own rules for an element or a class do not
+    // reach them, as they did not reach the inline styles
+    function installPlayerStyles() {
+
+        if (document.getElementById("mureka-player-styles")) {
+            return;
+        }
+
+        const sheet = document.createElement("style");
+
+        sheet.id = "mureka-player-styles";
+        sheet.textContent = ""
+            + ".mp-row6.mp-row6{display:flex;gap:6px}"
+            + ".mp-bold.mp-bold{font-weight:600}"
+            + ".mp-between.mp-between{display:flex;align-items:center;justify-content:space-between;gap:8px}"
+            + ".mp-row8.mp-row8{display:flex;gap:8px}"
+            + ".mp-mid10.mp-mid10{display:flex;align-items:center;gap:10px}"
+            + ".mp-grow.mp-grow{flex:1;min-width:0}"
+            + ".mp-col6.mp-col6{display:flex;flex-direction:column;gap:6px}"
+            + ".mp-soft.mp-soft{color:#bbb}"
+            + ".mp-text.mp-text{color:#ccc;font-size:13px;line-height:1.5}"
+            + ".mp-wrap6.mp-wrap6{display:flex;gap:6px;flex-wrap:wrap}"
+            + ".mp-row6b.mp-row6b{display:flex;gap:6px;margin-bottom:6px}"
+            + ".mp-col8.mp-col8{display:flex;flex-direction:column;gap:8px}"
+            + ".mp-hint.mp-hint{font-size:11px;color:#888;line-height:1.4}"
+            + ".mp-band.mp-band{display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0}"
+            + ".mp-line.mp-line{display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333}"
+            + ".mp-key.mp-key{flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px}"
+            + ".mp-col12.mp-col12{display:flex;flex-direction:column;gap:12px}"
+            + ".mp-top10.mp-top10{display:flex;align-items:flex-start;gap:10px}"
+            + ".mp-note.mp-note{padding:6px 2px;color:#888}"
+            + ".mp-col4.mp-col4{display:flex;flex-direction:column;gap:4px}"
+            + ".mp-box.mp-box{margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c}"
+            + ".mp-val.mp-val{flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px}"
+            + ".mp-mid8.mp-mid8{display:flex;align-items:center;gap:8px}";
+        (document.head || document.documentElement).appendChild(sheet);
+    }
+
     function startPlayer() {
 
+        installPlayerStyles();
         installRemixWatch();
         installDebugWatchers();
         installTrimKeys();
