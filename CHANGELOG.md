@@ -1283,6 +1283,9 @@ In development.
   running across page by page, the waveform turned to the next page in a
   third of a second, setting off at full speed. It now takes a little over
   a second, setting off and arriving slowly, faster in between.
+  It turns as far as the play head gets meanwhile, so the play head ends
+  close to the left edge, 3 % in, rather than further in than the 8 % it
+  was set to land at.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

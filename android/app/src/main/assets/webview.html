@@ -8286,7 +8286,7 @@
         // its right edge, or to wherever the song is when it is out of view.
         // The play head lands this far in from the left
         const PAGE_TURN = 0.92;
-        const PAGE_LEAD = 0.08;
+        const PAGE_LEAD = 0.03;
 
         function pages() {
             return !!(hooks.pages && hooks.pages());
@@ -8305,6 +8305,19 @@
 
                 const f = Math.max(0, Math.min(1, frac));
                 const p = z.page;
+                const now = performance.now();
+
+                // How fast the play head goes across the song, from the last
+                // looks, to count how far it gets while the page turns
+                if (z.paceAt && now - z.paceAt < 1000 && f > z.paceFrac && f - z.paceFrac < 0.05) {
+
+                    const pace = (f - z.paceFrac) / (now - z.paceAt);
+
+                    z.pace = z.pace ? z.pace * 0.9 + pace * 0.1 : pace;
+                }
+
+                z.paceFrac = f;
+                z.paceAt = now;
 
                 if (p === null || z.pageSpan !== s) {
 
@@ -8312,7 +8325,12 @@
                     z.pageSpan = s;
                 } else if (f < p || f > p + s * PAGE_TURN) {
 
-                    const next = clampStart(f - s * PAGE_LEAD);
+                    // Where the play head will be once the page has turned,
+                    // so it lands close to the left edge rather than where
+                    // it was as the turn began. Not ahead of where the song
+                    // is when it is out of view, say after a seek
+                    const ahead = f > p && f < p + s ? (z.pace || 0) * PAGE_GLIDE_MS : 0;
+                    const next = clampStart(f + Math.min(s / 2, ahead) - s * PAGE_LEAD);
 
                     // Glides there, as after a seek
                     if (Math.abs(next - p) > 1e-6) {
