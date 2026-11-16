@@ -1295,9 +1295,9 @@ In development.
   when someone joins it or leaves it. A player leaving says so to the one
   holding the room, so it is told at once; one that just goes away is
   told once it has not been heard from for a while.
-- **How many are in the room.** In the web view Together has a small
-  count on its corner while in a room, and under the mouse the names of
-  everyone in it.
+- **How many are in the room.** Together has a small count on its corner
+  while in a room, and under the mouse the names of everyone in it, on the
+  mobile player's Together buttons and in the web view.
 - **More in Stats for nerds.** The playing song's set, rating, plays and
   note. The lyrics: lines, breaks, lines Mureka timed far off that were
   shared, the beat the dots pulse to, how far ahead the lines come, the

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.179";
+    const VERSION = "2.0.1.180";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -40411,12 +40411,16 @@
         }
 
         const ctl = controlButtons ? controlButtons.together : null;
-        const title = syncStatusText();
+        const inRoom = settings.syncOn === true && (syncHolding || !!syncFollowing);
+        const who = inRoom ? syncWhoText() : "";
+        const title = syncStatusText() + (who ? "\n\nIn the room:\n" + who : "");
+        const count = inRoom ? (syncFollowing ? syncMembersOf(syncFollowing.state) : syncMembersNow()).length : 0;
 
         if (ctl) {
 
             ctl.title = title;
             paintCtrl(ctl, settings.syncOn === true ? "fill" : "plain");
+            paintSyncCount(ctl, count, "#1d1d22", ACCENT);
         }
 
         if (syncHeadBtn) {
@@ -40424,7 +40428,31 @@
             syncHeadBtn.style.display = syncAvailable() ? "inline-flex" : "none";
             syncHeadBtn.style.color = settings.syncOn === true ? ACCENT : "#aaa";
             syncHeadBtn.title = title;
+            paintSyncCount(syncHeadBtn, count, ACCENT, "#000");
         }
+    }
+
+    // How many are in the room, a small pill on a Together button's lower
+    // corner, the names under the mouse in its title
+    function paintSyncCount(btn, n, back, fore) {
+
+        let pill = btn.querySelector(".mp-sync-count");
+
+        if (!pill) {
+
+            pill = document.createElement("span");
+            pill.className = "mp-sync-count";
+            btn.appendChild(pill);
+
+            if (getComputedStyle(btn).position === "static") {
+                btn.style.position = "relative";
+            }
+        }
+
+        pill.textContent = n > 0 ? String(n) : "";
+        pill.style.cssText = "position:absolute;bottom:2px;right:2px;min-width:14px;height:14px;padding:0 3px;box-sizing:border-box;border-radius:7px;"
+            + "background:" + back + ";color:" + fore + ";font-size:9px;font-weight:700;line-height:14px;text-align:center;pointer-events:none;"
+            + (n > 0 ? "" : "display:none");
     }
 
     // How listening together stands, in one line
@@ -41499,6 +41527,7 @@
         if (!syncSeen || syncSeen.room !== room) {
 
             syncSeen = { room: room, names: here, away: new Map() };
+            syncPaint();
             return;
         }
 
@@ -41551,6 +41580,8 @@
         }
 
         if (came.length > 0 || went.length > 0) {
+
+            syncPaint();
             publishHostSoon();
         }
     }
