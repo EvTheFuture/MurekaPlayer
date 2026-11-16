@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.188";
+    const VERSION = "2.0.1.189";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10028,7 +10028,7 @@
 
             const e = entries[i];
             const free = function (x) {
-                return x.greyed && !x.setId && !isPendingSong(x.song) && String(x.song.song_id) !== playingId;
+                return leftOutFoldable(x) && String(x.song.song_id) !== playingId;
             };
 
             if (!free(e)) {
@@ -10070,6 +10070,14 @@
         }
 
         return out;
+    }
+
+    // A left-out song that folds with the ones around it. A song of a set
+    // on a row of its own folds as any other, the sets shown flat or a set
+    // of one song. A folded set's row stays, its songs fold under it, and
+    // so do the songs of a set opened
+    function leftOutFoldable(x) {
+        return !!x.greyed && !(x.setCount > 1) && !x.setMember && !isPendingSong(x.song);
     }
 
     // The songs of a set, together in the list, folded under the first of
@@ -25055,6 +25063,7 @@
 
         const asked = Date.now();
         const id = currentSong ? currentSong.song_id : null;
+        const at = audio ? audio.currentTime : 0;
         let settled = false;
 
         started.then(function () {
@@ -25076,7 +25085,25 @@
 
             heldPlayTimer = 0;
 
-            if (settled || !audio || !audio.paused || userPaused || !currentSong || currentSong.song_id !== id) {
+            if (settled || !audio || userPaused || !currentSong || currentSong.song_id !== id) {
+                return;
+            }
+
+            // Safari after a play it refused: the next play leaves the song
+            // waiting, not paused, its clock standing still and the play
+            // neither going through nor failing. Loaded again where it
+            // stood it plays, as a tap on the waveform showed
+            if (!audio.paused) {
+
+                if (Math.abs(audio.currentTime - at) < 0.05 && !document.hidden && Date.now() - lastEscalateT > 10000) {
+
+                    lastEscalateT = Date.now();
+                    dbgLog("Audio", "play still waiting after " + (HELD_PLAY_MS / 1000) + " s, the song standing at " + dbgNum(at)
+                        + ", loading it again there");
+                    pendingSeek = at;
+                    playCurrent();
+                }
+
                 return;
             }
 
@@ -39284,7 +39311,7 @@
 
                     const e = rows[k];
 
-                    if (!e.greyed || e.setId || isPendingSong(e.song)) {
+                    if (!leftOutFoldable(e)) {
                         break;
                     }
 
