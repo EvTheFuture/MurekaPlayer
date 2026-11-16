@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.165";
+    const VERSION = "2.0.1.166";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30520,6 +30520,10 @@
     // From one line's start to the next at least this long is a break
     const CYL_BREAK_MS = 10000;
 
+    // How long into a break the lines before it stay, before they roll
+    // away up the drum and only the dots are left
+    const CYL_CLEAR_MS = 3000;
+
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
@@ -30784,8 +30788,12 @@
             if (next.t - r.t >= CYL_BREAK_MS) {
 
                 const at = Math.max(r.t + 500, Math.min(ends[i], next.t - 1500));
+                const show = Math.max(at, next.t - lead);
 
-                steps.push({ kind: "pause", t: at, until: next.t, show: Math.max(at, next.t - lead) });
+                // The lines before a break roll away a while into it, when
+                // it is long enough for that to be worth it
+                steps.push({ kind: "pause", t: at, until: next.t, show: show,
+                    clear: show - at >= CYL_CLEAR_MS + 1500 ? at + CYL_CLEAR_MS : null });
             }
         }
 
@@ -30810,12 +30818,13 @@
         const s = steps[idx];
 
         if (!s || s.kind !== "pause") {
-            return { idx: idx, reveal: true, progress: 0 };
+            return { idx: idx, reveal: true, clear: false, progress: 0 };
         }
 
         return {
             idx: idx,
             reveal: ms >= s.show,
+            clear: typeof s.clear === "number" && ms >= s.clear,
             progress: Math.max(0, Math.min(1, (ms - s.t) / Math.max(1, s.until - s.t)))
         };
     }
@@ -30972,6 +30981,16 @@
 
         if (s.kind !== "line") {
             return false;
+        }
+
+        // A line before a break the lines rolled away in, once they did
+        for (let j = r + 1; j <= view.idx; j++) {
+
+            const b = roll.steps[j];
+
+            if (b && b.kind === "pause" && typeof b.clear === "number" && (j < view.idx || view.clear)) {
+                return false;
+            }
         }
 
         for (let j = view.idx; j < r; j++) {
@@ -31144,7 +31163,7 @@
         ms += roll.ahead || 0;
 
         const view = cylViewAt(roll.steps, ms);
-        const old = { idx: roll.idx, reveal: roll.reveal };
+        const old = { idx: roll.idx, reveal: roll.reveal, clear: roll.clear };
         const wide = roll.box.offsetWidth;
 
         // The eye's distance goes with the width, so a wide web view and a
@@ -31158,7 +31177,7 @@
             }
         }
 
-        if (!force && view.idx === old.idx && view.reveal === old.reveal) {
+        if (!force && view.idx === old.idx && view.reveal === old.reveal && view.clear === old.clear) {
 
             cylDots(roll, view);
             return;
@@ -31198,36 +31217,44 @@
             }
 
             let from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
+            let goal = to;
 
             // Coming into sight after a break, a row rolls up from a step
-            // further down, out of sight, rather than just fading in
+            // further down, out of sight, rather than just fading in. A line
+            // before the break going out of sight rolls on up a step and
+            // out of sight the same way
             if (revealed) {
 
                 if (from.opacity === to.opacity) {
                     continue;
                 }
 
-                from = cylPose(roll, cylAngle(roll, view.idx, r) + roll.geo.step, r - view.idx + 1, false);
+                if (to.opacity < from.opacity && r < view.idx) {
+                    goal = cylPose(roll, cylAngle(roll, view.idx, r) - roll.geo.step, r - view.idx - 1, false);
+                } else {
+                    from = cylPose(roll, cylAngle(roll, view.idx, r) + roll.geo.step, r - view.idx + 1, false);
+                }
             }
 
             const time = revealed ? CYL_SHOW_MS : CYL_ROLL_MS;
 
             wrap.animate([
                 { opacity: from.opacity, color: from.color, textShadow: from.textShadow },
-                { opacity: to.opacity, color: to.color, textShadow: to.textShadow }
+                { opacity: goal.opacity, color: goal.color, textShadow: goal.textShadow }
             ], { duration: time, easing: "ease-out" });
 
             for (let n = 0; n < list.length; n++) {
 
                 list[n].animate([
                     { transform: part(from, n).transform, opacity: part(from, n).opacity },
-                    { transform: part(to, n).transform, opacity: part(to, n).opacity }
+                    { transform: part(goal, n).transform, opacity: part(goal, n).opacity }
                 ], { duration: time, easing: "ease-out" });
             }
         }
 
         roll.idx = view.idx;
         roll.reveal = view.reveal;
+        roll.clear = view.clear;
         cylDots(roll, view);
     }
     // END SHARED lyrics
@@ -85410,6 +85437,10 @@
     // From one line's start to the next at least this long is a break
     const CYL_BREAK_MS = 10000;
 
+    // How long into a break the lines before it stay, before they roll
+    // away up the drum and only the dots are left
+    const CYL_CLEAR_MS = 3000;
+
     // A line's sung length, per sound, when the song gives nothing to go by
     const CYL_UNIT_MS = 350;
 
@@ -85674,8 +85705,12 @@
             if (next.t - r.t >= CYL_BREAK_MS) {
 
                 const at = Math.max(r.t + 500, Math.min(ends[i], next.t - 1500));
+                const show = Math.max(at, next.t - lead);
 
-                steps.push({ kind: "pause", t: at, until: next.t, show: Math.max(at, next.t - lead) });
+                // The lines before a break roll away a while into it, when
+                // it is long enough for that to be worth it
+                steps.push({ kind: "pause", t: at, until: next.t, show: show,
+                    clear: show - at >= CYL_CLEAR_MS + 1500 ? at + CYL_CLEAR_MS : null });
             }
         }
 
@@ -85700,12 +85735,13 @@
         const s = steps[idx];
 
         if (!s || s.kind !== "pause") {
-            return { idx: idx, reveal: true, progress: 0 };
+            return { idx: idx, reveal: true, clear: false, progress: 0 };
         }
 
         return {
             idx: idx,
             reveal: ms >= s.show,
+            clear: typeof s.clear === "number" && ms >= s.clear,
             progress: Math.max(0, Math.min(1, (ms - s.t) / Math.max(1, s.until - s.t)))
         };
     }
@@ -85862,6 +85898,16 @@
 
         if (s.kind !== "line") {
             return false;
+        }
+
+        // A line before a break the lines rolled away in, once they did
+        for (let j = r + 1; j <= view.idx; j++) {
+
+            const b = roll.steps[j];
+
+            if (b && b.kind === "pause" && typeof b.clear === "number" && (j < view.idx || view.clear)) {
+                return false;
+            }
         }
 
         for (let j = view.idx; j < r; j++) {
@@ -86034,7 +86080,7 @@
         ms += roll.ahead || 0;
 
         const view = cylViewAt(roll.steps, ms);
-        const old = { idx: roll.idx, reveal: roll.reveal };
+        const old = { idx: roll.idx, reveal: roll.reveal, clear: roll.clear };
         const wide = roll.box.offsetWidth;
 
         // The eye's distance goes with the width, so a wide web view and a
@@ -86048,7 +86094,7 @@
             }
         }
 
-        if (!force && view.idx === old.idx && view.reveal === old.reveal) {
+        if (!force && view.idx === old.idx && view.reveal === old.reveal && view.clear === old.clear) {
 
             cylDots(roll, view);
             return;
@@ -86088,36 +86134,44 @@
             }
 
             let from = cylPose(roll, cylAngle(roll, old.idx, r), r - old.idx, cylShown(roll, r, old));
+            let goal = to;
 
             // Coming into sight after a break, a row rolls up from a step
-            // further down, out of sight, rather than just fading in
+            // further down, out of sight, rather than just fading in. A line
+            // before the break going out of sight rolls on up a step and
+            // out of sight the same way
             if (revealed) {
 
                 if (from.opacity === to.opacity) {
                     continue;
                 }
 
-                from = cylPose(roll, cylAngle(roll, view.idx, r) + roll.geo.step, r - view.idx + 1, false);
+                if (to.opacity < from.opacity && r < view.idx) {
+                    goal = cylPose(roll, cylAngle(roll, view.idx, r) - roll.geo.step, r - view.idx - 1, false);
+                } else {
+                    from = cylPose(roll, cylAngle(roll, view.idx, r) + roll.geo.step, r - view.idx + 1, false);
+                }
             }
 
             const time = revealed ? CYL_SHOW_MS : CYL_ROLL_MS;
 
             wrap.animate([
                 { opacity: from.opacity, color: from.color, textShadow: from.textShadow },
-                { opacity: to.opacity, color: to.color, textShadow: to.textShadow }
+                { opacity: goal.opacity, color: goal.color, textShadow: goal.textShadow }
             ], { duration: time, easing: "ease-out" });
 
             for (let n = 0; n < list.length; n++) {
 
                 list[n].animate([
                     { transform: part(from, n).transform, opacity: part(from, n).opacity },
-                    { transform: part(to, n).transform, opacity: part(to, n).opacity }
+                    { transform: part(goal, n).transform, opacity: part(goal, n).opacity }
                 ], { duration: time, easing: "ease-out" });
             }
         }
 
         roll.idx = view.idx;
         roll.reveal = view.reveal;
+        roll.clear = view.clear;
         cylDots(roll, view);
     }
     // END SHARED lyrics

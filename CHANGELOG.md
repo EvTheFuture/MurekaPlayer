@@ -1266,6 +1266,11 @@ In development.
   now stopped and started again in the moment between two songs, as a
   pause does, with no tap needed, and the log says so with the engine's
   sample rate.
+- **The lines before a break roll away.** In a break of 10 s or more, the
+  lines sung before it stayed above the dots until the next line came. 3 s
+  into the break they now roll on up the drum and out of sight, leaving
+  the dots alone, and they stay away as the next lines come. A break too
+  short for that keeps them.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
