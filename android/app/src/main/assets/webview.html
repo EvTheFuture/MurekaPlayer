@@ -28463,7 +28463,7 @@
         ui.lyricsBox.appendChild(ui.lyrics);
         ui.lyricsBox.appendChild(crRow([
             crChip("Write from a theme", crTheme, "ring"),
-            crChip("Write them better", function () {
+            crChip("Refine", function () {
                 crHelp("polish");
             }, "ring")
         ]));
@@ -28886,7 +28886,7 @@
 
             if (r && r.ask === "polish") {
 
-                askConfirm("Mureka would rather write these lyrics better before it makes the songs. Make them as they are?",
+                askConfirm("Mureka would rather refine these lyrics before it makes the songs. Make them as they are?",
                     "Make as they are", false, function () {
                         crMake(true);
                     });

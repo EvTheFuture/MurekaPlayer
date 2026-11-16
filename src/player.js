@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.168";
+    const VERSION = "2.0.1.169";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -65693,7 +65693,7 @@
             try {
 
                 if (await createCheckLyrics(d.lyrics.trim()) === 3) {
-                    return { ok: false, ask: "polish", text: "Mureka would write these lyrics better first" };
+                    return { ok: false, ask: "polish", text: "Mureka would refine these lyrics first" };
                 }
             } catch (e) {
                 dbgLog("Create", "the lyrics check failed, made as they are: " + errText(e));
@@ -67418,7 +67418,7 @@
         ui.lyricsBox.appendChild(ui.lyrics);
         ui.lyricsBox.appendChild(createButtonRow([
             createRing(act("Write from a theme", createThemeFromPage), CTRL_ACCENT),
-            createRing(act("Write them better", function () {
+            createRing(act("Refine", function () {
                 createAiFromPage("polish");
             }), CTRL_ACCENT)
         ]));
@@ -67955,7 +67955,7 @@
                 return false;
             }
 
-            const got = await createRun("Mureka writes the lyrics better", function () {
+            const got = await createRun("Mureka refines the lyrics", function () {
 
                 return createAiPolish(before.trim(), function (part) {
 
@@ -68587,9 +68587,9 @@
 
         if (r && r.ask === "polish") {
 
-            askChoices("Write the lyrics better first?\nMureka would rather write these lyrics better before it makes the songs.", [
+            askChoices("Refine the lyrics first?\nMureka would rather refine these lyrics before it makes the songs.", [
                 {
-                    label: "Write them better",
+                    label: "Refine",
                     fn: function () {
                         createAi("polish");
                     }
@@ -100925,7 +100925,7 @@
         ui.lyricsBox.appendChild(ui.lyrics);
         ui.lyricsBox.appendChild(crRow([
             crChip("Write from a theme", crTheme, "ring"),
-            crChip("Write them better", function () {
+            crChip("Refine", function () {
                 crHelp("polish");
             }, "ring")
         ]));
@@ -101348,7 +101348,7 @@
 
             if (r && r.ask === "polish") {
 
-                askConfirm("Mureka would rather write these lyrics better before it makes the songs. Make them as they are?",
+                askConfirm("Mureka would rather refine these lyrics before it makes the songs. Make them as they are?",
                     "Make as they are", false, function () {
                         crMake(true);
                     });
