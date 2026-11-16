@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.170";
+    const VERSION = "2.0.1.171";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31149,18 +31149,29 @@
                 const d = dots[i];
                 const pulse = i === litCount;
 
-                d.style.opacity = lit ? "1" : "0.3";
-
                 if (!pulse || !d.animate) {
 
                     if (d.dataset.pulse) {
 
+                        // Lit as it pulsed: from where the pulse had it up
+                        // to full, smoothly, and on there
+                        const was = parseFloat(getComputedStyle(d).opacity);
+
                         delete d.dataset.pulse;
                         cylStop(d);
+                        d.style.opacity = lit ? "1" : "0.3";
+
+                        if (lit && d.animate && isFinite(was)) {
+                            d.animate([{ opacity: was }, { opacity: 1 }], { duration: Math.min(600, beat), easing: "ease-out" });
+                        }
+                    } else {
+                        d.style.opacity = lit ? "1" : "0.3";
                     }
 
                     continue;
                 }
+
+                d.style.opacity = "0.3";
 
                 // Next to light: it fades in and out, on one beat and off
                 // the next, so a break is seen to be waiting from its
@@ -86113,18 +86124,29 @@
                 const d = dots[i];
                 const pulse = i === litCount;
 
-                d.style.opacity = lit ? "1" : "0.3";
-
                 if (!pulse || !d.animate) {
 
                     if (d.dataset.pulse) {
 
+                        // Lit as it pulsed: from where the pulse had it up
+                        // to full, smoothly, and on there
+                        const was = parseFloat(getComputedStyle(d).opacity);
+
                         delete d.dataset.pulse;
                         cylStop(d);
+                        d.style.opacity = lit ? "1" : "0.3";
+
+                        if (lit && d.animate && isFinite(was)) {
+                            d.animate([{ opacity: was }, { opacity: 1 }], { duration: Math.min(600, beat), easing: "ease-out" });
+                        }
+                    } else {
+                        d.style.opacity = lit ? "1" : "0.3";
                     }
 
                     continue;
                 }
+
+                d.style.opacity = "0.3";
 
                 // Next to light: it fades in and out, on one beat and off
                 // the next, so a break is seen to be waiting from its
