@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.163";
+    const VERSION = "2.0.1.164";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2124,6 +2124,10 @@
     // playing, for the play head on an iPhone or iPad, see markEngineClock,
     // and how far the play head was from the song's own clock as it paused
     let engineMark = null;
+
+    // Where the song was and the engine's clock as the song began to play,
+    // for a mark made late, see lateEngineMark
+    let playStartMark = null;
     let seekedThisLoad = false;
     let pauseHold = null;
 
@@ -17101,6 +17105,7 @@
 
             const before = isIosLike() && iosGain ? songTimes().at : null;
 
+            playStartMark = { el: audio, song: audio.currentTime, engine: iosCtx ? iosCtx.currentTime : null, page: performance.now() };
             markEngineClock();
 
             if (before !== null) {
@@ -17144,6 +17149,7 @@
             }
 
             // Moved while playing, the engine's clock counts from here
+            playStartMark = null;
             markEngineClock();
         });
 
@@ -34999,7 +35005,8 @@
     const ENGINE_PART_SEC = 1.5;
     const ENGINE_STEP_SEC = 0.5;
 
-    function markEngineClock() {
+    // from: where the song is, when better known than Safari's clock for it
+    function markEngineClock(from) {
 
         engineMark = null;
 
@@ -35009,7 +35016,8 @@
         }
 
         pauseHold = null;
-        engineMark = { el: audio, song: audio.currentTime, engine: iosCtx.currentTime, page: performance.now() };
+        engineMark = { el: audio, song: typeof from === "number" ? from : audio.currentTime, engine: iosCtx.currentTime,
+            page: performance.now() };
         noteHeardLag();
     }
 
@@ -35024,7 +35032,25 @@
 
         const before = songTimes().at;
 
-        markEngineClock();
+        // Safari's clock for the song stands still for a few tenths of a
+        // second as a song starts, so a mark from it then set the play head
+        // that far behind the sound for the whole song: the waveform out of
+        // step until a pause. Soon after the song began, it counts from
+        // there by the engine's own clock instead, which only runs while
+        // the song is heard
+        const p = playStartMark;
+        let from;
+
+        if (p && p.el === audio && p.engine !== null && performance.now() - p.page < 5000) {
+
+            const guess = p.song + Math.max(0, iosCtx.currentTime - p.engine);
+
+            if (Math.abs(guess - audio.currentTime) < 1) {
+                from = guess;
+            }
+        }
+
+        markEngineClock(from);
 
         if (engineMark) {
             dbgLog("Audio", "the sound engine runs again, the play head goes by its clock from " + dbgNum(songTimes().at)
@@ -35084,6 +35110,35 @@
         return audio.currentTime + (audio.paused && pauseHold && pauseHold.el === audio ? pauseHold.offset : 0);
     }
 
+    // The play head glides on between the steps of the clock it goes by.
+    // Some clocks move in steps, Safari's for a song at times only about
+    // six times a second, and the waveform then moved in jerks. While the
+    // clock stands still between two steps, the page's own clock moves the
+    // play head on, half a second at most, and each step puts it back on
+    // the clock. Back from a pause, a move or a stall, it starts again
+    let headGlide = null;
+
+    function glideHead(raw) {
+
+        const now = performance.now();
+        const g = headGlide;
+
+        if (!g || g.el !== audio || audio.readyState < 3 || raw < g.raw - 0.05 || raw > g.raw + 1) {
+
+            headGlide = { el: audio, raw: raw, page: now };
+            return raw;
+        }
+
+        if (raw !== g.raw) {
+
+            g.raw = raw;
+            g.page = now;
+            return raw;
+        }
+
+        return raw + Math.min(0.5, (now - g.page) / 1000) * (audio.playbackRate || 1);
+    }
+
     // Where the song is and how long it is. While it plays, the place heard,
     // so the waveform and the time go with the sound
     function songTimes() {
@@ -35102,6 +35157,8 @@
             // more as the song pauses, before the pause itself is told, and
             // the engine's clock still has it then
             if (audio.paused) {
+
+                headGlide = null;
 
                 if (!held && engineMark && engineMark.el === audio) {
 
@@ -35122,7 +35179,7 @@
                 return { at: Math.max(0, Math.min(audio.duration, at + held.offset - held.lag)), length: audio.duration };
             }
 
-            return { at: Math.max(0, Math.min(audio.duration, songClockAt() - heardLag())), length: audio.duration };
+            return { at: Math.max(0, Math.min(audio.duration, glideHead(songClockAt()) - heardLag())), length: audio.duration };
         }
 
         const song = restoredSong();

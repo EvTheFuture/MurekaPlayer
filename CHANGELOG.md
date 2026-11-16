@@ -1248,6 +1248,17 @@ In development.
   waveform fall out of step, until a pause and play. A pause in the last
   moment of a song is now its end, and a song ended while listening
   along waits for the next one.
+- **The waveform in step after a song change on an iPhone.** When the
+  sound engine was not running yet as the next song began, the play head
+  was set from Safari's clock for the song, which stands still for a few
+  tenths of a second as a song starts, and stayed that far behind the
+  sound for the whole song, until a pause and play. It now counts from
+  where the song began by the engine's own clock.
+- **The play head glides between the clock's steps.** Safari's clock for a
+  song moved at times only about six times a second, and the waveform
+  moved in jerks. Between two steps the play head now moves on with the
+  page's own clock, half a second at most, each step putting it back on
+  the clock.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
