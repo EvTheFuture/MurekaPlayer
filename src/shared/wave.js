@@ -534,11 +534,12 @@
 
             // Zoomed in, a press on the lowest third, where the progress line
             // runs, moves through the whole song as the waveform does zoomed
-            // out. Elsewhere it moves the play head in the part in view
+            // out, turning pages too. Elsewhere it moves the play head in the
+            // part in view
             const box = el.getBoundingClientRect();
             const sp = span();
             const travel = travels();
-            let overview = !travel && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            let overview = (!travel || pages()) && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
 
             // Zoomed in with the song's progress over the waveform, its edge
             // is grabbed at any height to move through the whole song. The

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.191";
+    const VERSION = "2.0.1.192";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -473,8 +473,9 @@
         + "under it, with the whole song as a thin line at its foot; or drifts along: at the left edge at the start, "
         + "in the middle halfway and at the right edge at the end, as zoomed out, so in the middle of a song it moves "
         + "only slowly; or runs across a waveform standing still, which turns to the next part when the play head "
-        + "nears the right edge. Off the middle, everything left of the play head is played and in the played "
-        + "colors, as zoomed out, so the thin line and the color past the play head are left out.";
+        + "nears the right edge, with the whole song as the thin line at its foot again. Off the middle, everything "
+        + "left of the play head is played and in the played colors, as zoomed out, so the color past the play head "
+        + "is left out.";
 
     // BEGIN SHARED wave
     // Written by embed-webview.sh from src/shared/wave.js. Change that
@@ -1015,11 +1016,12 @@
 
             // Zoomed in, a press on the lowest third, where the progress line
             // runs, moves through the whole song as the waveform does zoomed
-            // out. Elsewhere it moves the play head in the part in view
+            // out, turning pages too. Elsewhere it moves the play head in the
+            // part in view
             const box = el.getBoundingClientRect();
             const sp = span();
             const travel = travels();
-            let overview = !travel && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            let overview = (!travel || pages()) && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
 
             // Zoomed in with the song's progress over the waveform, its edge
             // is grabbed at any height to move through the whole song. The
@@ -35181,6 +35183,7 @@
         // and so it does zoomed in with the play head moving along, which
         // leaves out the thin line at the foot
         const travel = playHeadMode(settings.wavePlayHeadMode) !== "center";
+        const pageMode = playHeadMode(settings.wavePlayHeadMode) === "page";
         const look = progressLook(settings.waveProgressLook);
         const fill = progressFill(settings.waveZoomProgressColor, settings.waveZoomProgressAlpha);
         const ahead = progressFill(settings.waveZoomProgressAheadColor, settings.waveZoomProgressAheadAlpha);
@@ -35215,11 +35218,16 @@
             drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
-        if (span < 1 && !travel) {
+        // The thin line at the foot, the whole song's progress zoomed in,
+        // with the play head in the middle or turning pages. Drifting
+        // along, the play head is as far across as the song
+        const foot = span < 1 && (!travel || pageMode);
+
+        if (foot) {
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, span < 1 && !travel ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, foot ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // Drawn every frame while zoomed in and playing, while dragging and
@@ -81899,11 +81907,12 @@
 
             // Zoomed in, a press on the lowest third, where the progress line
             // runs, moves through the whole song as the waveform does zoomed
-            // out. Elsewhere it moves the play head in the part in view
+            // out, turning pages too. Elsewhere it moves the play head in the
+            // part in view
             const box = el.getBoundingClientRect();
             const sp = span();
             const travel = travels();
-            let overview = !travel && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
+            let overview = (!travel || pages()) && sp < 1 && box.height > 0 && ev.clientY >= box.bottom - box.height / 3;
 
             // Zoomed in with the song's progress over the waveform, its edge
             // is grabbed at any height to move through the whole song. The
@@ -82242,7 +82251,8 @@
 
     // Where the play head is on the zoomed waveform: in the middle, or
     // moving along the view as the song goes, as when zoomed out, with the
-    // progress ending at the play head and no thin line at the foot then
+    // progress ending at the play head, and the thin line at the foot only
+    // turning pages
     const PLAY_HEAD_MODES = ["center", "travel", "page"];
 
     // The look as the phone has it, where this browser starts from
@@ -86278,8 +86288,9 @@
         // The song's progress across the whole waveform, under it, over it or
         // as the waveform's own color, in the colors the phone has. Zoomed
         // out it lies on the played part, and so it does zoomed in with the
-        // play head moving along, which leaves out the thin line at the foot
+        // play head drifting along, which leaves out the thin line at the foot
         const travel = !!state && playHeadMode(state.waveZoomPlayHead) !== "center";
+        const pageMode = !!state && playHeadMode(state.waveZoomPlayHead) === "page";
         const look = state ? progressLook(state.waveZoomProgressLook) : "off";
         const progress = look !== "off";
         const fill = state && state.waveZoomProgressFill ? state.waveZoomProgressFill : "rgba(71, 224, 235, 1)";
@@ -86290,7 +86301,7 @@
         const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
         const headFill = state && state.playHeadFill ? state.playHeadFill : "rgba(255, 255, 255, 0.6)";
         const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill,
-            restFill, headX, headFill, travel].join(",");
+            restFill, headX, headFill, travel, pageMode].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -86332,11 +86343,16 @@
             drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
-        if (span < 1 && !travel) {
+        // The thin line at the foot, the whole song's progress zoomed in,
+        // with the play head in the middle or turning pages. Drifting
+        // along, the play head is as far across as the song
+        const foot = span < 1 && (!travel || pageMode);
+
+        if (foot) {
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, span < 1 && !travel ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, foot ? waveFootHeight(dpr) : 0, headFill);
     }
 
     // BEGIN SHARED lyrics
