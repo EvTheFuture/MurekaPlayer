@@ -1233,6 +1233,12 @@ In development.
   in the middle a moment after it was heard. It now starts half a second
   early. Settings > Mobile player > Lyrics ahead, ms sets how early, 0 to
   1500, here and in the web view.
+- **Lines Mureka timed far off share the time.** Now and then Mureka times
+  a line wrong: it starts right after the line before, which is then
+  skipped, or just before the next one, and is skipped itself. A line
+  that lasts less than a third of what its words take, and under 1.5 s,
+  now shares the time with the neighbour that has more to spare, the two
+  split by their words, so both show while they are sung, near enough.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.161";
+    const VERSION = "2.0.1.162";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30610,12 +30610,87 @@
         return ends;
     }
 
+    // Mureka now and then times a line far off: one starting right after
+    // the line before it, which is then gone before it is sung, or one
+    // starting just before the next, gone before it is heard. A line that
+    // lasts less than a third of what its sounds take, and under 1.5 s, has
+    // its time shared with the neighbour that has more to spare: the two
+    // split the span of both by their sounds, the first of them no longer
+    // than its sounds take and a bit, so a break after them stays a break
+    function cylSpread(rows) {
+
+        const n = rows.length;
+        const t = rows.map(function (r) {
+            return r.t;
+        });
+        const units = rows.map(function (r) {
+            return cylUnits(r.text);
+        });
+        const rates = [];
+
+        for (let i = 0; i < n - 1; i++) {
+
+            const gap = t[i + 1] - t[i];
+
+            if (gap > 300 && gap < CYL_BREAK_MS) {
+                rates.push(gap / units[i]);
+            }
+        }
+
+        const rate = cylMedian(rates) || CYL_UNIT_MS;
+        let moved = false;
+
+        for (let i = 0; i < n - 1; i++) {
+
+            const gap = t[i + 1] - t[i];
+            const want = units[i] * rate;
+
+            if (gap >= 1500 || gap >= want / 3) {
+                continue;
+            }
+
+            // The time the neighbours have beyond what their sounds take
+            const before = i > 0 ? (t[i] - t[i - 1]) - units[i - 1] * rate : 0;
+            const after = i + 2 < n ? (t[i + 2] - t[i + 1]) - units[i + 1] * rate : 0;
+
+            if (after > 0 && after >= before) {
+
+                // This line and the next share up to the one after them:
+                // the next starts later
+                const total = t[i + 2] - t[i];
+                const share = Math.min(total * units[i] / (units[i] + units[i + 1]), want * 1.3);
+
+                t[i + 1] = Math.round(t[i] + Math.max(gap, Math.min(share, total - 300)));
+                moved = true;
+            } else if (before > 0) {
+
+                // The line before and this one share up to the next line:
+                // this one starts earlier
+                const total = t[i + 1] - t[i - 1];
+                const share = Math.min(total * units[i] / (units[i - 1] + units[i]), want * 1.3);
+
+                t[i] = Math.round(t[i + 1] - Math.max(gap, Math.min(share, total - 300)));
+                moved = true;
+            }
+        }
+
+        if (!moved) {
+            return rows;
+        }
+
+        return rows.map(function (r, i) {
+            return Object.assign({}, r, { t: t[i] });
+        });
+    }
+
     // What the roll steps through: the lines, a break where one line's
     // start is far from the next one's, from the first line's end until the
     // next starts, and an empty step after the last line. A long wait before
     // the first line is a break too. The line after a break comes in sight
     // two bars ahead, 2 to 4 seconds, 3 without a tempo
     function cylSteps(rows, ends, bpm) {
+
+        rows = cylSpread(rows);
 
         const steps = [];
         const bar = cylBar(bpm);
@@ -85365,12 +85440,87 @@
         return ends;
     }
 
+    // Mureka now and then times a line far off: one starting right after
+    // the line before it, which is then gone before it is sung, or one
+    // starting just before the next, gone before it is heard. A line that
+    // lasts less than a third of what its sounds take, and under 1.5 s, has
+    // its time shared with the neighbour that has more to spare: the two
+    // split the span of both by their sounds, the first of them no longer
+    // than its sounds take and a bit, so a break after them stays a break
+    function cylSpread(rows) {
+
+        const n = rows.length;
+        const t = rows.map(function (r) {
+            return r.t;
+        });
+        const units = rows.map(function (r) {
+            return cylUnits(r.text);
+        });
+        const rates = [];
+
+        for (let i = 0; i < n - 1; i++) {
+
+            const gap = t[i + 1] - t[i];
+
+            if (gap > 300 && gap < CYL_BREAK_MS) {
+                rates.push(gap / units[i]);
+            }
+        }
+
+        const rate = cylMedian(rates) || CYL_UNIT_MS;
+        let moved = false;
+
+        for (let i = 0; i < n - 1; i++) {
+
+            const gap = t[i + 1] - t[i];
+            const want = units[i] * rate;
+
+            if (gap >= 1500 || gap >= want / 3) {
+                continue;
+            }
+
+            // The time the neighbours have beyond what their sounds take
+            const before = i > 0 ? (t[i] - t[i - 1]) - units[i - 1] * rate : 0;
+            const after = i + 2 < n ? (t[i + 2] - t[i + 1]) - units[i + 1] * rate : 0;
+
+            if (after > 0 && after >= before) {
+
+                // This line and the next share up to the one after them:
+                // the next starts later
+                const total = t[i + 2] - t[i];
+                const share = Math.min(total * units[i] / (units[i] + units[i + 1]), want * 1.3);
+
+                t[i + 1] = Math.round(t[i] + Math.max(gap, Math.min(share, total - 300)));
+                moved = true;
+            } else if (before > 0) {
+
+                // The line before and this one share up to the next line:
+                // this one starts earlier
+                const total = t[i + 1] - t[i - 1];
+                const share = Math.min(total * units[i] / (units[i - 1] + units[i]), want * 1.3);
+
+                t[i] = Math.round(t[i + 1] - Math.max(gap, Math.min(share, total - 300)));
+                moved = true;
+            }
+        }
+
+        if (!moved) {
+            return rows;
+        }
+
+        return rows.map(function (r, i) {
+            return Object.assign({}, r, { t: t[i] });
+        });
+    }
+
     // What the roll steps through: the lines, a break where one line's
     // start is far from the next one's, from the first line's end until the
     // next starts, and an empty step after the last line. A long wait before
     // the first line is a break too. The line after a break comes in sight
     // two bars ahead, 2 to 4 seconds, 3 without a tempo
     function cylSteps(rows, ends, bpm) {
+
+        rows = cylSpread(rows);
 
         const steps = [];
         const bar = cylBar(bpm);
