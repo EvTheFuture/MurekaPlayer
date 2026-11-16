@@ -1279,6 +1279,10 @@ In development.
   into the break they now roll on up the drum and out of sight, leaving
   the dots alone, and they stay away as the next lines come. A break too
   short for that keeps them.
+- **A gentler page turn of the waveform.** Zoomed in with the play head
+  running across page by page, the waveform turned to the next page in a
+  third of a second, setting off at full speed. It now takes a little over
+  a second, setting off and arriving slowly, faster in between.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

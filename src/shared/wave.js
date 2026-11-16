@@ -136,6 +136,10 @@
         // this many seconds at the very edge, however far zoomed in
         const EDGE_SONG_SEC = 3;
         const GLIDE_MS = 350;
+
+        // A page turn slower than a glide back after a move, eased in and
+        // out, so the waveform sets off and arrives gently
+        const PAGE_GLIDE_MS = 1100;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
         const HOLD_MS = 350;
@@ -196,7 +200,7 @@
                     // Glides there, as after a seek
                     if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now() };
+                        z.glide = { from: p, at: performance.now(), ms: PAGE_GLIDE_MS, inOut: true };
                         z.page = next;
                     }
                 }
@@ -330,12 +334,18 @@
 
             if (z.glide) {
 
-                const k = Math.min(1, (performance.now() - z.glide.at) / GLIDE_MS);
+                const g = z.glide;
+                const k = Math.min(1, (performance.now() - g.at) / (g.ms || GLIDE_MS));
 
                 if (k >= 1) {
                     z.glide = null;
                 } else {
-                    return clampStart(z.glide.from + (target - z.glide.from) * (1 - Math.pow(1 - k, 3)));
+
+                    // Out of a move: quick, slowing at the end. A page turn:
+                    // slow off, quicker in the middle, slow in
+                    const e = g.inOut ? (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2) : 1 - Math.pow(1 - k, 3);
+
+                    return clampStart(g.from + (target - g.from) * e);
                 }
             }
 
