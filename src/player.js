@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.180";
+    const VERSION = "2.0.1.181";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -53231,7 +53231,8 @@
         // settings usually differ between a phone and a desktop while the
         // song tweaks are worth having everywhere
         const dataHint = document.createElement("div");
-        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks, ignored songs and saved creators."
+        dataHint.textContent = "Song tweaks are ratings, tempos, instrumental marks, ignored songs, saved creators,"
+            + " song sets, notes and playlist orders."
             + " Share saves to the Google Drive or Files app, Import can pick the file"
             + " from there. Import sees what a file holds. Song tweaks are merged, and"
             + " when a song has a different value here and in the file you are asked"

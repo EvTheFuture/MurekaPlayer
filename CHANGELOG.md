@@ -1307,6 +1307,10 @@ In development.
   how far ahead seeks aim, when the room was last heard, and everyone in
   it with how each stands. And how long the player has run, the screen,
   memory in use and the page's elements.
+- **Backup and restore says all a song tweaks file holds.** Its note named
+  only ratings, tempos, instrumental marks, ignored songs and saved
+  creators, while the file holds the song sets, notes and playlist orders
+  too, and an import offers each of them.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
