@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.169";
+    const VERSION = "2.0.1.170";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31132,8 +31132,8 @@
             const dots = el.children;
             const beat = roll.steps.beat || 500;
 
-            // How many are lit: none, and all three pulse, else only the
-            // next one to light
+            // How many are lit: only the next one to light pulses, the
+            // first while none is
             let litCount = 0;
 
             for (let i = 0; i < dots.length; i++) {
@@ -31147,7 +31147,7 @@
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = !lit && (litCount === 0 || i === litCount);
+                const pulse = i === litCount;
 
                 d.style.opacity = lit ? "1" : "0.3";
 
@@ -86096,8 +86096,8 @@
             const dots = el.children;
             const beat = roll.steps.beat || 500;
 
-            // How many are lit: none, and all three pulse, else only the
-            // next one to light
+            // How many are lit: only the next one to light pulses, the
+            // first while none is
             let litCount = 0;
 
             for (let i = 0; i < dots.length; i++) {
@@ -86111,7 +86111,7 @@
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = !lit && (litCount === 0 || i === litCount);
+                const pulse = i === litCount;
 
                 d.style.opacity = lit ? "1" : "0.3";
 

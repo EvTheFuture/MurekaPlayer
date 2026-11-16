@@ -617,8 +617,8 @@
             const dots = el.children;
             const beat = roll.steps.beat || 500;
 
-            // How many are lit: none, and all three pulse, else only the
-            // next one to light
+            // How many are lit: only the next one to light pulses, the
+            // first while none is
             let litCount = 0;
 
             for (let i = 0; i < dots.length; i++) {
@@ -632,7 +632,7 @@
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = !lit && (litCount === 0 || i === litCount);
+                const pulse = i === litCount;
 
                 d.style.opacity = lit ? "1" : "0.3";
 
