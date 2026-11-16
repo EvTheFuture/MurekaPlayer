@@ -13141,14 +13141,19 @@
 
         ctx.clearRect(0, 0, w, h);
 
+        // With the play head moving along the view, the progress ends at
+        // the play head, as zoomed out. Turning pages, the play head is not
+        // as far across the view as across the song
+        const progressFrac = travel ? Math.max(0, Math.min(1, headX / w)) : frac;
+
         if (look === "under") {
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
         // The waveform in the colors set, and colored by the progress when
         // that is the look, each layer keeping its shade
         const wave = look === "wave";
-        const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
+        const tint = wavePainter(w, progressFrac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
 
         if (loud) {
             drawLayeredWave(ctx, w, h, data, loud, frac, start, span, tint);
@@ -13157,7 +13162,7 @@
         }
 
         if (look === "over") {
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
         if (span < 1 && !travel) {

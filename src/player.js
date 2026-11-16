@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.190";
+    const VERSION = "2.0.1.191";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -35189,14 +35189,19 @@
         const restFill = progressFill(settings.waveRestColor, progressAlpha(settings.waveRestAlpha, 100));
         const headFill = progressFill(settings.playHeadColor, progressAlpha(settings.playHeadAlpha, PLAY_HEAD_ALPHA));
 
+        // With the play head moving along the view, the progress ends at
+        // the play head, as zoomed out. Turning pages, the play head is not
+        // as far across the view as across the song
+        const progressFrac = travel ? Math.max(0, Math.min(1, headX / w)) : frac;
+
         if (look === "under") {
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
         // The waveform in the colors set, and colored by the progress when
         // that is the look, each layer keeping its shade
         const wave = look === "wave";
-        const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
+        const tint = wavePainter(w, progressFrac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
 
         // Our own waveform in two layers a column per screen pixel, Mureka's
         // as bars, so the two look apart
@@ -35207,7 +35212,7 @@
         }
 
         if (look === "over") {
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
         if (span < 1 && !travel) {
@@ -86303,14 +86308,19 @@
 
         ctx.clearRect(0, 0, w, h);
 
+        // With the play head moving along the view, the progress ends at
+        // the play head, as zoomed out. Turning pages, the play head is not
+        // as far across the view as across the song
+        const progressFrac = travel ? Math.max(0, Math.min(1, headX / w)) : frac;
+
         if (look === "under") {
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
         // The waveform in the colors set, and colored by the progress when
         // that is the look, each layer keeping its shade
         const wave = look === "wave";
-        const tint = wavePainter(w, frac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
+        const tint = wavePainter(w, progressFrac, headX, playedFill, restFill, wave ? fill : null, wave ? ahead : null);
 
         if (loud) {
             drawLayeredWave(ctx, w, h, data, loud, frac, start, span, tint);
@@ -86319,7 +86329,7 @@
         }
 
         if (look === "over") {
-            drawWaveProgress(ctx, w, h, frac, fill, ahead, headX);
+            drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, headX);
         }
 
         if (span < 1 && !travel) {
