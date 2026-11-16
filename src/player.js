@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.184";
+    const VERSION = "2.0.1.185";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -79916,7 +79916,7 @@
         </div>
         <button class="soundIco" id="volBtn" type="button" data-icon="speaker" aria-label="Volume" title="Volume"></button>
         <div id="sound">
-            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" data-name="Android device / Bluetooth" aria-label="Music on the Android device or Bluetooth, hold or right click for its Bluetooth devices" title="Music on the Android device or Bluetooth, hold or right click for its Bluetooth devices"></button>
+            <button id="soundPhone" type="button" class="on" data-icon="bluetooth" data-name="Android device / Bluetooth" aria-label="Music on the Android device or Bluetooth, tap again, hold or right click for its Bluetooth devices" title="Music on the Android device or Bluetooth, tap again, hold or right click for its Bluetooth devices"></button>
             <button id="soundCar" type="button" data-icon="browser" data-name="This browser" aria-label="Music in this browser" title="Music in this browser"></button>
             <button id="soundNone" type="button" data-icon="speakerOff" data-name="No music in this browser" aria-label="No music in this browser" title="No music in this browser, the Android device and other browsers are left alone"></button>
         </div>
@@ -98507,7 +98507,7 @@
         setIcon(btn, bt ? "bluetooth" : "phone");
         btn.dataset.name = bt ? (name ? "Bluetooth, " + name : "Bluetooth") : "Android device";
         btn.title = (bt ? "Music on Bluetooth" + (name ? ", " + name : "") : "Music on the Android device")
-            + ", hold or right click for its Bluetooth devices";
+            + ", tap again, hold or right click for its Bluetooth devices";
         btn.setAttribute("aria-label", btn.title);
     }
 
@@ -98865,6 +98865,15 @@
     });
 
     $("soundPhone").addEventListener("click", function () {
+
+        // Chosen already: a tap again opens the Android device's Bluetooth
+        // devices, to connect another, as a hold or a right click does
+        if ($("soundPhone").classList.contains("on") && state && !state.carAudio) {
+
+            $("sound").classList.remove("open");
+            openBtPop();
+            return;
+        }
 
         setLocalMute(false);
         audio.pause();

@@ -1328,6 +1328,12 @@ In development.
   list keeps only its search line, the small list its top line with the
   count, the whole list, the fold and Close. The same button brings the
   header back, and each list remembers it in the browser.
+- **The Android device's sound choice tapped again opens its Bluetooth
+  devices.** In the web view, with the music already on the Android
+  device or its Bluetooth, a tap on that choice opens the device's
+  Bluetooth devices to connect another, as a hold or a right click does.
+  With the music playing in the browser, a tap still moves it to the
+  Android device.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
