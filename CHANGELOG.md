@@ -1340,6 +1340,7 @@ In development.
   Ctrl+V or the browser's Paste, is taken too. Then the square is chosen
   in the editor as before. In the mobile player and in the web view, where
   over the Android device's own address the browser only takes Ctrl+V.
+- **Paste a picture works on touch screens too.** Paste a picture is always there when a cover is chosen, in the player and the web view. Where the browser lets the page read the clipboard the picture is taken straight away; where it doesn't, such as on a phone or in the web view over the Android device's address, a box opens to paste into: press and hold in it and choose Paste. Ctrl+V is only mentioned where there is a keyboard.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

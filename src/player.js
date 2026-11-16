@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.186";
+    const VERSION = "2.0.1.187";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -63998,33 +63998,102 @@
         const stop = function () {
             document.removeEventListener("paste", onPaste, true);
         };
+        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
+        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
         const options = [{ label: "Choose a picture", fn: function () {
 
             stop();
             choose();
+        } }, { label: "Paste a picture", ring: true, fn: function () {
+
+            stop();
+
+            // The clipboard read straight away where the browser lets it,
+            // else, or when that fails, a place to paste into
+            if (!canRead) {
+
+                pasteBox(panelEl, touch, use);
+                return;
+            }
+
+            clipboardPicture().then(function (file) {
+
+                if (file) {
+                    use(file);
+                } else {
+                    pasteBox(panelEl, touch, use);
+                }
+            }).catch(function () {
+                pasteBox(panelEl, touch, use);
+            });
         } }];
-
-        if (navigator.clipboard && typeof navigator.clipboard.read === "function") {
-
-            options.push({ label: "Paste a picture", ring: true, fn: function () {
-
-                stop();
-                clipboardPicture().then(function (file) {
-
-                    if (file) {
-                        use(file);
-                    } else {
-                        showToast("No picture on the clipboard", false);
-                    }
-                }).catch(function (e) {
-                    showToast("Could not read the clipboard, " + errText(e), false);
-                });
-            } });
-        }
 
         document.addEventListener("paste", onPaste, true);
         back = askChoices("New cover\nFor \"" + ((song.title || "").trim() || "Untitled") + "\". Choose a picture, or paste one"
-            + (navigator.clipboard && navigator.clipboard.read ? "" : " with Ctrl+V") + ".", options, stop);
+            + (touch ? "" : ", Ctrl+V pastes too") + ".", options, stop);
+    }
+
+    // A place to paste a picture into, where the page may not read the
+    // clipboard itself: pressed and held, the browser's own Paste puts the
+    // picture there, as Ctrl+V does with a keyboard
+    function pasteBox(where, touch, onFile) {
+
+        const host = where || document.body;
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const text = document.createElement("div");
+        const field = document.createElement("div");
+        const cancel = document.createElement("button");
+        const close = function () {
+            back.remove();
+        };
+
+        back.setAttribute("data-mureka-notice", "1");
+        back.setAttribute("data-mureka-dialog", "panel");
+        back.style.cssText = "position:" + (host === document.body ? "fixed" : "absolute") + ";inset:0;background:rgba(0,0,0,0.6);"
+            + "display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;z-index:2147483600";
+        back.__cancel = close;
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:360px;"
+            + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px";
+        text.textContent = touch ? "Press and hold in the box, then Paste" : "Click in the box and press Ctrl+V, or use Paste";
+        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
+        field.contentEditable = "true";
+        field.setAttribute("aria-label", "Paste the picture here");
+        field.style.cssText = "min-height:90px;border:2px dashed " + ACCENT + ";border-radius:8px;outline:none;color:transparent;"
+            + "caret-color:" + ACCENT + ";overflow:hidden";
+        cancel.type = "button";
+        cancel.textContent = "Cancel";
+        cancel.style.cssText = "align-self:flex-end;padding:8px 14px;border-radius:8px;border:1px solid #3a3a42;background:#33333a;color:#ddd;font:inherit";
+        cancel.addEventListener("click", close);
+
+        field.addEventListener("paste", function (ev) {
+
+            const file = pastedPicture(ev);
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (!file) {
+
+                showToast("No picture in what was pasted", false);
+                return;
+            }
+
+            close();
+            onFile(file);
+        });
+
+        // Typed or dropped text is not kept
+        field.addEventListener("input", function () {
+            field.textContent = "";
+        });
+
+        card.appendChild(text);
+        card.appendChild(field);
+        card.appendChild(cancel);
+        back.appendChild(card);
+        host.appendChild(back);
+        field.focus();
     }
 
     // Cut the chosen square out of the picture, upload it and give it to the
@@ -103505,6 +103574,7 @@
             input.click();
         };
         const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
+        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
         const onPaste = function (ev) {
 
             const items = ev.clipboardData ? Array.from(ev.clipboardData.items || []) : [];
@@ -103524,52 +103594,61 @@
         const stop = function () {
             document.removeEventListener("paste", onPaste, true);
         };
+        const readClipboard = function () {
+
+            return navigator.clipboard.read().then(async function (list) {
+
+                for (const it of list) {
+
+                    const type = it.types.find(function (t) {
+                        return /^image\//.test(t);
+                    });
+
+                    if (type) {
+
+                        const blob = await it.getType(type);
+
+                        return new File([blob], "pasted." + (type.split("/")[1] || "png"), { type: type });
+                    }
+                }
+
+                return null;
+            });
+        };
         const items = [{ icon: "image", label: "Choose a picture", fn: function () {
 
             stop();
             closeSongMenu();
             choose();
+        } }, { icon: "download", label: "Paste a picture", cls: "inset", fn: function () {
+
+            stop();
+            closeSongMenu();
+
+            // The clipboard read straight away where the browser lets it,
+            // over the Android device's own address it does not, else, or
+            // when that fails, a place to paste into
+            if (!canRead) {
+
+                pasteBox(touch, use);
+                return;
+            }
+
+            readClipboard().then(function (file) {
+
+                if (file) {
+                    use(file);
+                } else {
+                    pasteBox(touch, use);
+                }
+            }).catch(function () {
+                pasteBox(touch, use);
+            });
         } }];
-
-        if (canRead) {
-
-            items.push({ icon: "download", label: "Paste a picture", cls: "inset", fn: function () {
-
-                stop();
-                closeSongMenu();
-                navigator.clipboard.read().then(async function (list) {
-
-                    for (const it of list) {
-
-                        const type = it.types.find(function (t) {
-                            return /^image\//.test(t);
-                        });
-
-                        if (type) {
-
-                            const blob = await it.getType(type);
-
-                            return new File([blob], "pasted." + (type.split("/")[1] || "png"), { type: type });
-                        }
-                    }
-
-                    return null;
-                }).then(function (file) {
-
-                    if (file) {
-                        use(file);
-                    } else {
-                        toast("No picture on the clipboard", "bad");
-                    }
-                }).catch(function () {
-                    toast("Could not read the clipboard", "bad");
-                });
-            } });
-        }
 
         document.addEventListener("paste", onPaste, true);
         openChoice("New cover for \"" + (m.title || "Untitled") + "\"", items);
-        $("menuCaption").textContent = "Choose a picture, or paste one" + (canRead ? "" : " with Ctrl+V") + ".";
+        $("menuCaption").textContent = "Choose a picture, or paste one" + (touch ? "" : ", Ctrl+V pastes too") + ".";
         $("menuCaption").style.display = "";
 
         // Put away without a choice, nothing pasted is taken any more
@@ -103581,6 +103660,75 @@
                 stop();
             }
         }, 500);
+    }
+
+    // A place to paste a picture into, where the page may not read the
+    // clipboard itself: pressed and held, the browser's own Paste puts the
+    // picture there, as Ctrl+V does with a keyboard
+    function pasteBox(touch, onFile) {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const text = document.createElement("div");
+        const field = document.createElement("div");
+        const cancel = document.createElement("button");
+        const close = function () {
+            back.remove();
+        };
+
+        back.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;"
+            + "padding:16px;box-sizing:border-box;z-index:2147483600";
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+        card.style.cssText = "background:var(--panel, #26262c);border:1px solid #3a3a42;border-radius:12px;padding:16px;width:100%;"
+            + "max-width:420px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px";
+        text.textContent = touch ? "Press and hold in the box, then Paste" : "Click in the box and press Ctrl+V, or use Paste";
+        text.style.cssText = "color:var(--muted, #ccc);line-height:1.5";
+        field.contentEditable = "true";
+        field.setAttribute("aria-label", "Paste the picture here");
+        field.style.cssText = "min-height:120px;border:2px dashed var(--accent);border-radius:10px;outline:none;color:transparent;"
+            + "caret-color:var(--accent);overflow:hidden";
+        cancel.type = "button";
+        cancel.className = "chip";
+        cancel.textContent = "Cancel";
+        cancel.style.alignSelf = "flex-end";
+        cancel.addEventListener("click", close);
+
+        field.addEventListener("paste", function (ev) {
+
+            const items = ev.clipboardData ? Array.from(ev.clipboardData.items || []) : [];
+            const item = items.find(function (x) {
+                return x.kind === "file" && /^image\//.test(x.type);
+            });
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (!item) {
+
+                toast("No picture in what was pasted", "bad");
+                return;
+            }
+
+            close();
+            onFile(item.getAsFile());
+        });
+
+        // Typed or dropped text is not kept
+        field.addEventListener("input", function () {
+            field.textContent = "";
+        });
+
+        card.appendChild(text);
+        card.appendChild(field);
+        card.appendChild(cancel);
+        back.appendChild(card);
+        document.body.appendChild(back);
+        field.focus();
     }
 
     function buildCoverEditor(img, url, title, host, big, done) {
