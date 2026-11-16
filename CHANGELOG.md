@@ -1334,6 +1334,12 @@ In development.
   Bluetooth devices to connect another, as a hold or a right click does.
   With the music playing in the browser, a tap still moves it to the
   Android device.
+- **A cover can be pasted.** Set cover asks Choose a picture or Paste a
+  picture, the latter where the browser lets the player read the
+  clipboard, as on an iPhone, and a picture pasted while asked, with
+  Ctrl+V or the browser's Paste, is taken too. Then the square is chosen
+  in the editor as before. In the mobile player and in the web view, where
+  over the Android device's own address the browser only takes Ctrl+V.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

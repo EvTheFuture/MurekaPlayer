@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.185";
+    const VERSION = "2.0.1.186";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -63881,22 +63881,54 @@
         return key;
     }
 
-    // Pick a picture, choose the square in the editor, and on Set cover make
-    // it the song's cover
+    // The picture of the clipboard, as a file, or null. Asked of the
+    // browser, which may ask whether to allow it
+    async function clipboardPicture() {
+
+        if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
+            return null;
+        }
+
+        const items = await navigator.clipboard.read();
+
+        for (const item of items) {
+
+            const type = item.types.find(function (t) {
+                return /^image\//.test(t);
+            });
+
+            if (type) {
+
+                const blob = await item.getType(type);
+
+                return new File([blob], "pasted." + (type.split("/")[1] || "png"), { type: type });
+            }
+        }
+
+        return null;
+    }
+
+    // The first picture in a paste, as a file, or null
+    function pastedPicture(ev) {
+
+        const items = ev && ev.clipboardData ? Array.from(ev.clipboardData.items || []) : [];
+
+        for (const item of items) {
+
+            if (item.kind === "file" && /^image\//.test(item.type)) {
+                return item.getAsFile();
+            }
+        }
+
+        return null;
+    }
+
+    // Choose or paste a picture, choose the square in the editor, and on
+    // Set cover make it the song's cover. A picture pasted while asked,
+    // Ctrl+V or the browser's Paste, is taken as well
     function pickCover(song) {
 
-        const input = document.createElement("input");
-
-        input.type = "file";
-        input.accept = "image/*";
-        input.style.display = "none";
-        document.body.appendChild(input);
-
-        input.addEventListener("change", function () {
-
-            const file = input.files && input.files[0];
-
-            input.remove();
+        const use = function (file) {
 
             if (!file) {
                 return;
@@ -63916,9 +63948,83 @@
                     showToast("Could not use the picture, " + why, false);
                 }
             });
-        });
+        };
+        const choose = function () {
 
-        input.click();
+            const input = document.createElement("input");
+
+            input.type = "file";
+            input.accept = "image/*";
+            input.style.display = "none";
+            document.body.appendChild(input);
+
+            input.addEventListener("change", function () {
+
+                const file = input.files && input.files[0];
+
+                input.remove();
+                use(file);
+            });
+
+            input.click();
+        };
+
+        // Without the clipboard to read, the file picker straight away as
+        // before, a paste still taken while it is open is not possible
+        if (!panelEl) {
+
+            choose();
+            return;
+        }
+
+        let back = null;
+        const onPaste = function (ev) {
+
+            const file = pastedPicture(ev);
+
+            if (!file) {
+                return;
+            }
+
+            ev.preventDefault();
+            stop();
+
+            if (back && back.__cancel) {
+                back.remove();
+            }
+
+            use(file);
+        };
+        const stop = function () {
+            document.removeEventListener("paste", onPaste, true);
+        };
+        const options = [{ label: "Choose a picture", fn: function () {
+
+            stop();
+            choose();
+        } }];
+
+        if (navigator.clipboard && typeof navigator.clipboard.read === "function") {
+
+            options.push({ label: "Paste a picture", ring: true, fn: function () {
+
+                stop();
+                clipboardPicture().then(function (file) {
+
+                    if (file) {
+                        use(file);
+                    } else {
+                        showToast("No picture on the clipboard", false);
+                    }
+                }).catch(function (e) {
+                    showToast("Could not read the clipboard, " + errText(e), false);
+                });
+            } });
+        }
+
+        document.addEventListener("paste", onPaste, true);
+        back = askChoices("New cover\nFor \"" + ((song.title || "").trim() || "Untitled") + "\". Choose a picture, or paste one"
+            + (navigator.clipboard && navigator.clipboard.read ? "" : " with Ctrl+V") + ".", options, stop);
     }
 
     // Cut the chosen square out of the picture, upload it and give it to the
@@ -103353,20 +103459,12 @@
     // A new cover: a picture from this browser, the square chosen in the
     // editor here, and on Set cover the picture as it is and the square
     // sent to the phone, which uploads it to Mureka
+    // A picture chosen or pasted: Choose a picture, Paste a picture where
+    // the browser lets the page read the clipboard, and a paste while
+    // asked, Ctrl+V or the browser's Paste, taken as well
     function pickCover(m) {
 
-        const input = document.createElement("input");
-
-        input.type = "file";
-        input.accept = "image/*";
-        input.style.display = "none";
-        document.body.appendChild(input);
-
-        input.addEventListener("change", function () {
-
-            const file = input.files && input.files[0];
-
-            input.remove();
+        const use = function (file) {
 
             if (!file) {
                 return;
@@ -103386,9 +103484,103 @@
                     toast("Could not use the picture, " + why, "bad");
                 }
             });
-        });
+        };
+        const choose = function () {
 
-        input.click();
+            const input = document.createElement("input");
+
+            input.type = "file";
+            input.accept = "image/*";
+            input.style.display = "none";
+            document.body.appendChild(input);
+
+            input.addEventListener("change", function () {
+
+                const file = input.files && input.files[0];
+
+                input.remove();
+                use(file);
+            });
+
+            input.click();
+        };
+        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
+        const onPaste = function (ev) {
+
+            const items = ev.clipboardData ? Array.from(ev.clipboardData.items || []) : [];
+            const item = items.find(function (x) {
+                return x.kind === "file" && /^image\//.test(x.type);
+            });
+
+            if (!item) {
+                return;
+            }
+
+            ev.preventDefault();
+            stop();
+            closeSongMenu();
+            use(item.getAsFile());
+        };
+        const stop = function () {
+            document.removeEventListener("paste", onPaste, true);
+        };
+        const items = [{ icon: "image", label: "Choose a picture", fn: function () {
+
+            stop();
+            closeSongMenu();
+            choose();
+        } }];
+
+        if (canRead) {
+
+            items.push({ icon: "download", label: "Paste a picture", cls: "inset", fn: function () {
+
+                stop();
+                closeSongMenu();
+                navigator.clipboard.read().then(async function (list) {
+
+                    for (const it of list) {
+
+                        const type = it.types.find(function (t) {
+                            return /^image\//.test(t);
+                        });
+
+                        if (type) {
+
+                            const blob = await it.getType(type);
+
+                            return new File([blob], "pasted." + (type.split("/")[1] || "png"), { type: type });
+                        }
+                    }
+
+                    return null;
+                }).then(function (file) {
+
+                    if (file) {
+                        use(file);
+                    } else {
+                        toast("No picture on the clipboard", "bad");
+                    }
+                }).catch(function () {
+                    toast("Could not read the clipboard", "bad");
+                });
+            } });
+        }
+
+        document.addEventListener("paste", onPaste, true);
+        openChoice("New cover for \"" + (m.title || "Untitled") + "\"", items);
+        $("menuCaption").textContent = "Choose a picture, or paste one" + (canRead ? "" : " with Ctrl+V") + ".";
+        $("menuCaption").style.display = "";
+
+        // Put away without a choice, nothing pasted is taken any more
+        const watch = setInterval(function () {
+
+            if (!isShown("songMenu")) {
+
+                clearInterval(watch);
+                stop();
+            }
+        }, 500);
     }
 
     function buildCoverEditor(img, url, title, host, big, done) {
