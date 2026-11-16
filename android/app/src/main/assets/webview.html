@@ -8345,7 +8345,7 @@
         const GRAB_PX = 24;
         const EASE_PART = 0.3;
         const z = { zoom: 1, drag: null, held: null, glide: null, pinch: null, tap: null, tapTimer: 0, eatUp: false,
-            holdTimer: 0, holdZoom: null, page: null, pageSpan: 0 };
+            holdTimer: 0, holdZoom: null, page: null, pageSpan: 0, turnFrac: null };
         const pointers = new Map();
 
         function span() {
@@ -8369,6 +8369,11 @@
         const PAGE_TURN = 0.92;
         const PAGE_LEAD = 0.03;
 
+        // How long the play head's pace is measured over, and how far ahead
+        // of it a page turn may count on it getting, as part of the view
+        const PACE_SAMPLE_MS = 250;
+        const PAGE_AHEAD_MAX = 0.15;
+
         function pages() {
             return !!(hooks.pages && hooks.pages());
         }
@@ -8388,37 +8393,54 @@
                 const p = z.page;
                 const now = performance.now();
 
-                // How fast the play head goes across the song, from the last
-                // looks, to count how far it gets while the page turns
-                if (z.paceAt && now - z.paceAt < 1000 && f > z.paceFrac && f - z.paceFrac < 0.05) {
+                // How fast the play head goes across the song, to count how
+                // far it gets while the page turns. Measured over a quarter
+                // of a second at least: the view is asked for several times
+                // a frame, and Safari's clock steps a whole millisecond, so
+                // two looks a moment apart gave a pace without end, and the
+                // page turned half a page too far, fast, and back again
+                if (!z.paceAt || now < z.paceAt || now - z.paceAt > 1000 || f < z.paceFrac || f - z.paceFrac > 0.05) {
+
+                    z.paceFrac = f;
+                    z.paceAt = now;
+                } else if (now - z.paceAt >= PACE_SAMPLE_MS) {
 
                     const pace = (f - z.paceFrac) / (now - z.paceAt);
 
-                    z.pace = z.pace ? z.pace * 0.9 + pace * 0.1 : pace;
-                }
+                    if (isFinite(pace)) {
+                        z.pace = z.pace ? z.pace * 0.7 + pace * 0.3 : pace;
+                    }
 
-                z.paceFrac = f;
-                z.paceAt = now;
+                    z.paceFrac = f;
+                    z.paceAt = now;
+                }
 
                 if (p === null || z.pageSpan !== s) {
 
                     z.page = clampStart(f - s * PAGE_LEAD);
+                    z.turnFrac = null;
                     z.pageSpan = s;
-                } else if (f < p || f > p + s * PAGE_TURN) {
+                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * PAGE_TURN) {
 
                     // Where the play head will be once the page has turned,
                     // so it lands close to the left edge rather than where
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
-                    const ahead = f > p && f < p + s ? (z.pace || 0) * PAGE_GLIDE_MS : 0;
-                    const next = clampStart(f + Math.min(s / 2, ahead) - s * PAGE_LEAD);
+                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * PAGE_GLIDE_MS : 0;
+                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * PAGE_LEAD);
 
-                    // Glides there, as after a seek
+                    // Glides there, as after a seek. Landing ahead of the
+                    // play head, the page waits for it to come into view
+                    // rather than turning back for it, unless it goes back
+                    // further than where the turn began
                     if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: PAGE_GLIDE_MS, inOut: true };
                         z.page = next;
+                        z.turnFrac = next > f ? f : null;
                     }
+                } else if (f >= p) {
+                    z.turnFrac = null;
                 }
 
                 return z.page;
@@ -8540,6 +8562,7 @@
                 if (pages()) {
 
                     z.page = v;
+                    z.turnFrac = null;
                     z.pageSpan = span();
                 }
 
