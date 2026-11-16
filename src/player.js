@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.173";
+    const VERSION = "2.0.1.174";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -31107,7 +31107,6 @@
                         dot.style.marginRight = "0.5em";
                         dot.style.fontSize = "0.7em";
                         dot.style.opacity = "0.3";
-                        dot.style.transition = "opacity 0.4s ease";
                         el.appendChild(dot);
                     }
                 }
@@ -31187,9 +31186,11 @@
                             return;
                         }
 
+                        // Full under the pulse first, so taking the pulse
+                        // away changes nothing seen
                         delete d.dataset.pulse;
-                        cylStop(d);
                         d.style.opacity = "1";
+                        cylStop(d);
 
                         if (roll.dotsView) {
                             cylDots(roll, roll.dotsView);
@@ -86135,7 +86136,6 @@
                         dot.style.marginRight = "0.5em";
                         dot.style.fontSize = "0.7em";
                         dot.style.opacity = "0.3";
-                        dot.style.transition = "opacity 0.4s ease";
                         el.appendChild(dot);
                     }
                 }
@@ -86215,9 +86215,11 @@
                             return;
                         }
 
+                        // Full under the pulse first, so taking the pulse
+                        // away changes nothing seen
                         delete d.dataset.pulse;
-                        cylStop(d);
                         d.style.opacity = "1";
+                        cylStop(d);
 
                         if (roll.dotsView) {
                             cylDots(roll, roll.dotsView);
