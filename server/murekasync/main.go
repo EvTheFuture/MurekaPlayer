@@ -75,6 +75,10 @@ const (
 // A room name: lower case letters, digits and hyphens
 var roomName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// The id a player works out from a name in letters a room name does not
+// take, which stands for that name and is not one
+var roomIdPattern = regexp.MustCompile(`^r-[0-9a-f]{16}$`)
+
 // One room: who may post to it, the last state and those listening
 type room struct {
     keyHash   [32]byte
@@ -367,12 +371,18 @@ func (r *relay) post(w http.ResponseWriter, req *http.Request, name string) {
     rm.stateAt = at
     rm.postedAt = time.Now()
     rm.name = head.Name
-    rm.label = head.Room
+
+    // A player that only knows the room by its id does not take away the
+    // name another player gave it
+    if head.Room != "" && (rm.label == "" || !roomIdPattern.MatchString(head.Room)) {
+        rm.label = head.Room
+    }
+
     rm.title = head.Title
     rm.playing = head.Playing
     rm.send(event("state", body, at))
 
-    writeJSON(w, http.StatusOK, map[string]interface{}{"t": at, "listeners": len(rm.listeners)})
+    writeJSON(w, http.StatusOK, map[string]interface{}{"t": at, "listeners": len(rm.listeners), "label": rm.label})
 }
 
 func (r *relay) leave(w http.ResponseWriter, req *http.Request, name string) {

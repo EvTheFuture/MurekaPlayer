@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.187";
+    const VERSION = "2.0.1.188";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -36936,7 +36936,8 @@
             togetherCount: settings.syncOn === true && (syncHolding || syncFollowing)
                 ? (syncFollowing ? syncMembersOf(syncFollowing.state) : syncMembersNow()).length : 0,
             togetherRooms: syncRoomsList.map(function (r) {
-                return { room: String(r.room), label: String(r.label || (String(r.room) === syncRoomName() ? syncRoomLabel() : r.room)), line: syncRoomLine(r) };
+                return { room: String(r.room), label: String(r.label || (String(r.room) === syncRoomName() ? syncRoomLabel() : r.room)), line: syncRoomLine(r),
+                    title: syncRoomTitle(r), info: syncRoomInfo(r) };
             }),
             togetherRoomsAt: syncRoomsAt,
             togetherRoomsError: syncRoomsError,
@@ -41764,6 +41765,12 @@
 
             syncLeadInfo = { ok: m.ok === true, listeners: Number(m.listeners) || 0, error: String(m.error || "") };
 
+            // The name the relay keeps for the room, where this player
+            // only has its id
+            if (m.label) {
+                syncAdoptLabel(String(m.label), false);
+            }
+
             // Another player holds the room: this one plays along with it
             if (!syncLeadInfo.ok && syncHolding && /belongs to another/i.test(syncLeadInfo.error)) {
 
@@ -41786,6 +41793,10 @@
             const done = syncRoomsWaiting;
 
             syncRoomsWaiting = null;
+
+            if (m.ok && m.data && Array.isArray(m.data.rooms)) {
+                syncAdoptFromList(m.data.rooms);
+            }
 
             if (done) {
                 done(m.ok && m.data && Array.isArray(m.data.rooms) ? m.data.rooms : null, String(m.error || ""));
@@ -42116,14 +42127,40 @@
 
     // A room on the relay in a line: its name, who holds it and what plays
     function syncRoomLine(r) {
+        return syncRoomTitle(r) + "\n" + syncRoomInfo(r);
+    }
+
+    // A room's name in a list of rooms. A room only known by its id on the
+    // relay, a name worked out from letters the relay does not take, has
+    // lost its name, which is not shown as the id
+    function syncRoomTitle(r) {
+
+        const own = String(r.room) === syncRoomName() && !syncIsRoomId(syncRoomLabel()) ? syncRoomLabel() : "";
+        const label = String(r.label || "") && !syncIsRoomId(r.label) ? String(r.label) : own;
+
+        return (label || (syncIsRoomId(r.room) ? "Room without a name" : String(r.room))).slice(0, 40);
+    }
+
+    // Who plays what in a room, and how many are in it
+    function syncRoomInfo(r) {
 
         const n = Number(r.listeners) || 0;
 
-        const own = String(r.room) === syncRoomName() && !syncIsRoomId(syncRoomLabel()) ? syncRoomLabel() : "";
-
-        return String(r.label || own || r.room).slice(0, 40) + ": " + String(r.name || "someone").slice(0, 30)
-            + (r.title ? ", " + String(r.title).slice(0, 40) + (r.playing ? "" : " (paused)") : "")
+        return String(r.name || "Someone").slice(0, 30)
+            + (r.title ? (r.playing ? " plays " : " paused ") + String(r.title).slice(0, 40) : "")
             + ", " + (n + 1) + (n === 0 ? " player" : " players");
+    }
+
+    // The room's name from the relay's list, where this player only has
+    // the room's id
+    function syncAdoptFromList(rooms) {
+
+        for (const r of rooms || []) {
+
+            if (String(r.room) === syncRoomName() && r.label) {
+                syncAdoptLabel(String(r.label), false);
+            }
+        }
     }
 
     // A long press on Together: who is in the room, the rooms open on the
@@ -42183,7 +42220,7 @@
             }
 
             const choices = rooms.slice(0, 20).map(function (r) {
-                return { label: (String(r.room) === syncRoomName() && settings.syncOn === true ? "In: " : "") + syncRoomLine(r), fn: function () {
+                return { label: (String(r.room) === syncRoomName() && settings.syncOn === true ? "In: " : "") + syncRoomTitle(r), sub: syncRoomInfo(r), fn: function () {
 
                     if (String(r.room) !== syncRoomName() || settings.syncOn !== true) {
                         syncJoinRoom(String(r.label || r.room));
@@ -50920,6 +50957,7 @@
 
                 const row = document.createElement("div");
                 const text = document.createElement("span");
+                const info = document.createElement("span");
                 const here = String(r.room) === syncRoomName() && settings.syncOn === true;
                 const join = makeButton(here ? "In it" : "Join", "#333", "#fff", function () {
 
@@ -50931,8 +50969,11 @@
                 });
 
                 row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
-                text.textContent = syncRoomLine(r);
-                text.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
+                text.textContent = syncRoomTitle(r);
+                text.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere;display:flex;flex-direction:column;gap:2px";
+                info.textContent = syncRoomInfo(r);
+                info.style.cssText = "font-size:11px;color:#999";
+                text.appendChild(info);
                 row.appendChild(text);
                 row.appendChild(join);
                 roomsBox.appendChild(row);
@@ -58992,6 +59033,16 @@
             const b = makeButton(opt.label, ACCENT, "#000", function () {
                 close(opt.fn);
             });
+
+            // A second, smaller line under the choice
+            if (opt.sub) {
+
+                const sub = document.createElement("span");
+
+                sub.textContent = opt.sub;
+                sub.style.cssText = "display:block;font-size:11px;font-weight:400;opacity:0.75;margin-top:2px";
+                b.appendChild(sub);
+            }
 
             // Ringed rather than filled, so it stands apart from the others,
             // in a color of its own when given one
@@ -76996,6 +77047,11 @@
 
     .menuItem:hover {
         background: #303038;
+    }
+
+    .menuItem .menuSub {
+        font-size: 0.72em;
+        color: var(--muted);
     }
 
     .menuItem.danger {
@@ -98250,7 +98306,8 @@
             const rooms = came && Array.isArray(state.togetherRooms) ? state.togetherRooms : [];
             const here = state && state.together === "on" ? String(state.togetherRoom || "") : "";
             const items = rooms.map(function (r) {
-                return { icon: "together", label: (r.label === here ? "In: " : "") + r.line, cls: r.label === here ? "accent" : "", fn: function () {
+                return { icon: "together", label: (r.label === here ? "In: " : "") + (r.title || r.line), sub: r.title ? r.info : "",
+                    cls: r.label === here ? "accent" : "", fn: function () {
 
                     closeSongMenu();
 
@@ -99603,6 +99660,18 @@
             }).concat(["tall"]).join(" ");
 
             const el = menuItem(item.icon, item.label, item.fn, cls, item.disabled === true);
+
+            // A second, smaller line under the choice
+            if (item.sub) {
+
+                const text = el.lastChild;
+                const sub = document.createElement("span");
+
+                text.style.cssText = "display:flex;flex-direction:column;gap:2px;text-align:left";
+                sub.className = "menuSub";
+                sub.textContent = item.sub;
+                text.appendChild(sub);
+            }
 
             // A set's choices in the set's own color
             if (item.color) {

@@ -381,6 +381,10 @@ final class Sync {
     }
 
     private static void tell(String type, String key1, Object value1, String key2, Object value2) {
+        tell(type, key1, value1, key2, value2, null, null);
+    }
+
+    private static void tell(String type, String key1, Object value1, String key2, Object value2, String key3, Object value3) {
 
         try {
 
@@ -394,6 +398,10 @@ final class Sync {
 
             if (key2 != null) {
                 o.put(key2, value2);
+            }
+
+            if (key3 != null) {
+                o.put(key3, value3);
             }
 
             PlayerWeb.syncToPage(o);
@@ -476,7 +484,7 @@ final class Sync {
                 if (a.status == 200) {
 
                     clockSample(sent, back, answer.optLong("t", 0));
-                    tell("lead", "ok", true, "listeners", answer.optInt("listeners", 0));
+                    tell("lead", "ok", true, "listeners", answer.optInt("listeners", 0), "label", answer.optString("label", ""));
                 } else {
                     tell("lead", "ok", false, "error", answer.optString("error", "HTTP " + a.status));
                 }

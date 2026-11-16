@@ -1341,6 +1341,7 @@ In development.
   in the editor as before. In the mobile player and in the web view, where
   over the Android device's own address the browser only takes Ctrl+V.
 - **Paste a picture works on touch screens too.** Paste a picture is always there when a cover is chosen, in the player and the web view. Where the browser lets the page read the clipboard the picture is taken straight away; where it doesn't, such as on a phone or in the web view over the Android device's address, a box opens to paste into: press and hold in it and choose Paste. Ctrl+V is only mentioned where there is a keyboard.
+- **Active rooms show each room's name, and under it who plays what.** In the player, its settings and the web view, a room is listed by its name, with a smaller line under it: who holds it, the song, playing or paused, and how many players are in it. A room only known by its id is shown as Room without a name rather than its id. The relay keeps the name a player gave the room when another player only knows it by its id, and tells it to the players in it, so that player takes the name too, as it does from the list of rooms. Needs the relay updated.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

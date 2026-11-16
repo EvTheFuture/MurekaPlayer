@@ -62,7 +62,9 @@ example `http://10.0.0.1:8095`.
 - `POST /room/<room>` with the header `X-Room-Key`: the sharing player's
   state, any JSON up to 64 kB. The first post opens the room and ties it to
   the key (kept as a SHA-256 hash), later posts need the same key. Answered
-  with the number of players listening.
+  with the number of players listening and the room's name (`label`). A
+  post whose `room` is only the room's id, `r-` and 16 hex digits, keeps
+  the name another player gave the room.
 - `DELETE /room/<room>` with the same key: the player stopped sharing. The
   listeners get an `end` event.
 - `GET /room/<room>/events`: a server-sent event stream. The last state at

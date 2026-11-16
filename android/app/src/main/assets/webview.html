@@ -3937,6 +3937,11 @@
         background: #303038;
     }
 
+    .menuItem .menuSub {
+        font-size: 0.72em;
+        color: var(--muted);
+    }
+
     .menuItem.danger {
         color: #ff8a8a;
     }
@@ -25189,7 +25194,8 @@
             const rooms = came && Array.isArray(state.togetherRooms) ? state.togetherRooms : [];
             const here = state && state.together === "on" ? String(state.togetherRoom || "") : "";
             const items = rooms.map(function (r) {
-                return { icon: "together", label: (r.label === here ? "In: " : "") + r.line, cls: r.label === here ? "accent" : "", fn: function () {
+                return { icon: "together", label: (r.label === here ? "In: " : "") + (r.title || r.line), sub: r.title ? r.info : "",
+                    cls: r.label === here ? "accent" : "", fn: function () {
 
                     closeSongMenu();
 
@@ -26542,6 +26548,18 @@
             }).concat(["tall"]).join(" ");
 
             const el = menuItem(item.icon, item.label, item.fn, cls, item.disabled === true);
+
+            // A second, smaller line under the choice
+            if (item.sub) {
+
+                const text = el.lastChild;
+                const sub = document.createElement("span");
+
+                text.style.cssText = "display:flex;flex-direction:column;gap:2px;text-align:left";
+                sub.className = "menuSub";
+                sub.textContent = item.sub;
+                text.appendChild(sub);
+            }
 
             // A set's choices in the set's own color
             if (item.color) {
