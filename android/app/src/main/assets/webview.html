@@ -460,6 +460,25 @@
         touch-action: none;
     }
 
+    /* How many are in the room, a small pill on Together's corner */
+    .ctlCount {
+        position: absolute;
+        bottom: 4px;
+        right: 4px;
+        min-width: 1.4em;
+        height: 1.4em;
+        padding: 0 0.3em;
+        box-sizing: border-box;
+        border-radius: 0.7em;
+        background: #1d1d22;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4em;
+        text-align: center;
+        pointer-events: none;
+    }
+
     /* A small arrow at the top of Songs and List for the swipe up that
        opens the other list, and of Together for the swipe up that opens its
        menu. On Songs it points down while the small list is open, a swipe
@@ -5866,9 +5885,40 @@
         right: 0.5em;
     }
 
+    .rowHeart .rowNote {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.55em;
+        bottom: 0.6em;
+        right: 0.5em;
+    }
+
+    html.phone .rowHeart .rowNote {
+        bottom: -0.2em;
+        right: -0.4em;
+    }
+
     html.phone .rowHeart .rowTrim {
         top: -0.2em;
         right: -0.4em;
+    }
+
+    /* A song with a note of its own, a small blue N on the badge's lower
+       corner. Its note shows on the badge under the mouse */
+    .rowNote {
+        position: absolute;
+        bottom: -0.4em;
+        right: -0.3em;
+        width: 1.05em;
+        height: 1.05em;
+        border-radius: 50%;
+        background: #6f9cff;
+        color: var(--bg);
+        font-size: 0.75em;
+        line-height: 1.05em;
+        font-weight: 700;
+        text-align: center;
+        opacity: 0.9;
+        pointer-events: none;
     }
 
     .rowTrim {
@@ -12509,7 +12559,23 @@
 
         // Lit while the phone shares what it plays or listens along
         $("togetherBtn").classList.toggle("on", !!(s && s.together === "on"));
-        $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
+        $("togetherBtn").title = (s && s.togetherText ? s.togetherText : "Listening together")
+            + (s && s.togetherWho ? "\n\nIn the room:\n" + s.togetherWho : "");
+
+        // How many are in the room, on the button's corner, the names
+        // under the mouse
+        let count = $("togetherBtn").querySelector(".ctlCount");
+        const n = s && s.together === "on" && Number(s.togetherCount) > 0 ? Number(s.togetherCount) : 0;
+
+        if (!count) {
+
+            count = document.createElement("span");
+            count.className = "ctlCount";
+            $("togetherBtn").appendChild(count);
+        }
+
+        count.textContent = n > 0 ? String(n) : "";
+        count.style.display = n > 0 ? "" : "none";
 
         // Lit while the playing song is in the playlist songs went into last
         const toPl = s && s.toPlaylist ? s.toPlaylist : null;
@@ -12601,9 +12667,16 @@
         $("pubBadge").classList.toggle("shared", shared);
         $("pubBadge").textContent = pub === null ? "" : (shared ? "Shared" : (fresh ? "New" : (pub ? "Public" : "Draft")));
 
-        // The same small T as in the list for a song made by trimming
+        // The same small T as in the list for a song made by trimming, and
+        // the N of its note
         if (pub !== null && s.songTrimmed === true) {
             $("pubBadge").appendChild(trimMark());
+        }
+
+        $("pubBadge").removeAttribute("title");
+
+        if (pub !== null) {
+            noteMarkOn($("pubBadge"), s.songNote);
         }
 
         // And how many times it has been played
@@ -13229,7 +13302,7 @@
         }
 
         const rate = cylMedian(rates) || CYL_UNIT_MS;
-        let moved = false;
+        let moved = 0;
 
         for (let i = 0; i < n - 1; i++) {
 
@@ -13252,7 +13325,7 @@
                 const share = Math.min(total * units[i] / (units[i] + units[i + 1]), want * 1.3);
 
                 t[i + 1] = Math.round(t[i] + Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             } else if (before > 0) {
 
                 // The line before and this one share up to the next line:
@@ -13261,7 +13334,7 @@
                 const share = Math.min(total * units[i] / (units[i - 1] + units[i]), want * 1.3);
 
                 t[i] = Math.round(t[i + 1] - Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             }
         }
 
@@ -13269,9 +13342,14 @@
             return rows;
         }
 
-        return rows.map(function (r, i) {
+        const out = rows.map(function (r, i) {
             return Object.assign({}, r, { t: t[i] });
         });
+
+        // How many lines were moved, for Stats for nerds
+        out.spread = moved;
+
+        return out;
     }
 
     // What the roll steps through: the lines, a break where one line's
@@ -13288,8 +13366,10 @@
         const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
 
         // A beat, for the dots of a break to pulse to, half a second
-        // without a tempo
+        // without a tempo. And how many lines Mureka timed far off had
+        // their time shared, for Stats for nerds
         steps.beat = bar ? bar / 4 : 500;
+        steps.spread = rows.spread || 0;
 
         if (rows.length === 0) {
             return steps;
@@ -13690,24 +13770,13 @@
                 }
             }
 
-            // A dot on its way up to full holds the next one back until it
-            // is there
-            let ending = false;
-
-            for (let i = 0; i < dots.length; i++) {
-
-                if (dots[i].dataset.pulse === "ending") {
-                    ending = true;
-                }
-            }
-
             roll.dotsView = view;
 
             for (let i = 0; i < dots.length; i++) {
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = i === litCount && !ending;
+                const pulse = i === litCount;
 
                 // Lit as it pulsed: the pulse runs on up to its brightest,
                 // which is full, ends exactly there and stays on, and the
@@ -13735,7 +13804,6 @@
                     }
 
                     d.dataset.pulse = "ending";
-                    ending = true;
                     run.effect.updateTiming({ iterations: t.currentIteration + (t.progress <= 0.5 ? 0.5 : 1.5), fill: "forwards" });
                     run.onfinish = function () {
 
@@ -13785,17 +13853,14 @@
 
                 // Next to light: it fades in and out, up to full on one beat
                 // and down on the next, so a break is seen to be waiting.
-                // The first from the break's start, in step with it, the
-                // others from the moment the one before is full, rising
+                // Each starts at once, where the beat has it, also while
+                // the one before still goes on up to full, so there is no
+                // gap waiting for a beat
                 if (!d.dataset.pulse) {
 
-                    // The first at once, where the beat has it. The next
-                    // ones from their next dim moment, so each rises to
-                    // full on a beat rather than starting full
                     d.dataset.pulse = "1";
                     d.animate([{ opacity: 0.3 }, { opacity: 1 }, { opacity: 0.3 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out",
-                            delay: litCount === 0 ? -phase * period : ((1 - phase) % 1) * period });
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -phase * period });
                 }
             }
         }
@@ -16514,11 +16579,16 @@
 
             paintBadge(badge, song, false);
             row.appendChild(badge);
-        } else if (song.trimmed) {
+        } else {
 
-            // Without a badge, a trimmed song's T sits on the heart's
-            // corner, so the row keeps the columns of the rows around it
-            heart.appendChild(trimMark());
+            // Without a badge, a trimmed song's T and a note's N sit on the
+            // heart's corners, so the row keeps the columns of the rows
+            // around it
+            if (song.trimmed) {
+                heart.appendChild(trimMark());
+            }
+
+            noteMarkOn(heart, song.note);
         }
     }
 
@@ -16585,10 +16655,11 @@
     }
 
     // The badge at the end of a line: new for a song not played yet, else
-    // public or draft, with a small T for a song made by trimming
+    // public or draft, with a small T for a song made by trimming and a
+    // small N for a song with a note, the note shown under the mouse
     function paintBadge(badge, song, plain) {
 
-        // Only the T of a trimmed song, no word
+        // Only the T of a trimmed song and the N of a note, no word
         if (plain) {
 
             badge.className = "rowBadge plain";
@@ -16599,6 +16670,7 @@
                 badge.appendChild(trimMark());
             }
 
+            noteMarkOn(badge, song.note);
             return;
         }
 
@@ -16607,15 +16679,36 @@
             badge.className = "rowBadge shared";
             badge.textContent = "shared";
             badge.title = "Shared with you from another account, it may not be public";
+            noteMarkOn(badge, song.note);
             return;
         }
 
         badge.className = "rowBadge" + (song.isNew ? " new" : (song.published ? "" : " draft"));
         badge.textContent = song.isNew ? "new" : (song.published ? "public" : "draft");
+        badge.removeAttribute("title");
 
         if (song.trimmed) {
             badge.appendChild(trimMark());
         }
+
+        noteMarkOn(badge, song.note);
+    }
+
+    // A song's note on its badge: the N, and the note itself under the mouse
+    function noteMarkOn(badge, note) {
+
+        const text = String(note || "").trim();
+
+        if (!text) {
+            return;
+        }
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowNote";
+        mark.textContent = "N";
+        badge.appendChild(mark);
+        badge.title = (badge.title ? badge.title + "\n\n" : "") + "Note: " + text;
     }
 
     // The small yellow T on the corner of a badge, for a song made by

@@ -1272,8 +1272,9 @@ In development.
   then the second, then the third. A pulse is full on the song's beats,
   every second beat counted from the line after the break, which starts
   on one, so every dot is full on a beat. A dot lighting pulses on up to
-  full on its next beat, ends exactly there and stays on. Only then does
-  the next one start, rising from dim to full on a beat.
+  full on its next beat, ends exactly there and stays on. The next one
+  starts its pulse at once, in step with the beat, with no gap waiting for
+  one.
 - **The lines before a break roll away.** In a break of 10 s or more, the
   lines sung before it stayed above the dots until the next line came. 3 s
   into the break they now roll on up the drum and out of sight, leaving
@@ -1286,6 +1287,26 @@ In development.
   It turns as far as the play head gets meanwhile, so the play head ends
   close to the left edge, 3 % in, rather than further in than the 8 % it
   was set to land at.
+- **A song's note on its badge.** In the web view, a song with a note has
+  a small blue N on the lower corner of its Public or Draft badge, in the
+  lists and on the playing song, and the note shows under the mouse. A
+  row without a badge has the N on its heart instead.
+- **Who comes and goes in a room.** Every player in the room gets a note
+  when someone joins it or leaves it. A player leaving says so to the one
+  holding the room, so it is told at once; one that just goes away is
+  told once it has not been heard from for a while.
+- **How many are in the room.** In the web view Together has a small
+  count on its corner while in a room, and under the mouse the names of
+  everyone in it.
+- **More in Stats for nerds.** The playing song's set, rating, plays and
+  note. The lyrics: lines, breaks, lines Mureka timed far off that were
+  shared, the beat the dots pulse to, how far ahead the lines come, the
+  drum size and where the drum is. Listening together: the room and its
+  id, holding it or playing along, the relay, the round trip and clock
+  against it, how late the sound comes out, how far off from the room and
+  how far ahead seeks aim, when the room was last heard, and everyone in
+  it with how each stands. And how long the player has run, the screen,
+  memory in use and the page's elements.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

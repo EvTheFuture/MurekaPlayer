@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.177";
+    const VERSION = "2.0.1.178";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6912,6 +6912,10 @@
     function saveNotes() {
 
         exportsVersion += 1;
+
+        // The web view's lists drawn again, with the note's mark
+        songDataStamp += 1;
+        hostListStamp += 1;
 
         const out = {};
 
@@ -30727,7 +30731,7 @@
         }
 
         const rate = cylMedian(rates) || CYL_UNIT_MS;
-        let moved = false;
+        let moved = 0;
 
         for (let i = 0; i < n - 1; i++) {
 
@@ -30750,7 +30754,7 @@
                 const share = Math.min(total * units[i] / (units[i] + units[i + 1]), want * 1.3);
 
                 t[i + 1] = Math.round(t[i] + Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             } else if (before > 0) {
 
                 // The line before and this one share up to the next line:
@@ -30759,7 +30763,7 @@
                 const share = Math.min(total * units[i] / (units[i - 1] + units[i]), want * 1.3);
 
                 t[i] = Math.round(t[i + 1] - Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             }
         }
 
@@ -30767,9 +30771,14 @@
             return rows;
         }
 
-        return rows.map(function (r, i) {
+        const out = rows.map(function (r, i) {
             return Object.assign({}, r, { t: t[i] });
         });
+
+        // How many lines were moved, for Stats for nerds
+        out.spread = moved;
+
+        return out;
     }
 
     // What the roll steps through: the lines, a break where one line's
@@ -30786,8 +30795,10 @@
         const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
 
         // A beat, for the dots of a break to pulse to, half a second
-        // without a tempo
+        // without a tempo. And how many lines Mureka timed far off had
+        // their time shared, for Stats for nerds
         steps.beat = bar ? bar / 4 : 500;
+        steps.spread = rows.spread || 0;
 
         if (rows.length === 0) {
             return steps;
@@ -31188,24 +31199,13 @@
                 }
             }
 
-            // A dot on its way up to full holds the next one back until it
-            // is there
-            let ending = false;
-
-            for (let i = 0; i < dots.length; i++) {
-
-                if (dots[i].dataset.pulse === "ending") {
-                    ending = true;
-                }
-            }
-
             roll.dotsView = view;
 
             for (let i = 0; i < dots.length; i++) {
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = i === litCount && !ending;
+                const pulse = i === litCount;
 
                 // Lit as it pulsed: the pulse runs on up to its brightest,
                 // which is full, ends exactly there and stays on, and the
@@ -31233,7 +31233,6 @@
                     }
 
                     d.dataset.pulse = "ending";
-                    ending = true;
                     run.effect.updateTiming({ iterations: t.currentIteration + (t.progress <= 0.5 ? 0.5 : 1.5), fill: "forwards" });
                     run.onfinish = function () {
 
@@ -31283,17 +31282,14 @@
 
                 // Next to light: it fades in and out, up to full on one beat
                 // and down on the next, so a break is seen to be waiting.
-                // The first from the break's start, in step with it, the
-                // others from the moment the one before is full, rising
+                // Each starts at once, where the beat has it, also while
+                // the one before still goes on up to full, so there is no
+                // gap waiting for a beat
                 if (!d.dataset.pulse) {
 
-                    // The first at once, where the beat has it. The next
-                    // ones from their next dim moment, so each rises to
-                    // full on a beat rather than starting full
                     d.dataset.pulse = "1";
                     d.animate([{ opacity: 0.3 }, { opacity: 1 }, { opacity: 0.3 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out",
-                            delay: litCount === 0 ? -phase * period : ((1 - phase) % 1) * period });
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -phase * period });
                 }
             }
         }
@@ -32459,6 +32455,42 @@
             add("Model", song.model);
             add("Length", formatTime((song.duration_milliseconds || 0) / 1000));
             add("Trimmed", yesNo(isTrimmed(song)));
+
+            const set = setOfSong(song);
+
+            add("Set", set ? set.name : "None");
+            add("Rating", getRating(song) ? getRating(song) + " stars" : "None");
+            add("Played", songPlays(song) + (songPlays(song) === 1 ? " time" : " times"));
+
+            if (songNote(song)) {
+                add("Note", songNote(song).slice(0, 200));
+            }
+        }
+
+        // The lyrics as the drum shows them
+        part("Lyrics");
+
+        const steps = lyricCyl && Array.isArray(lyricCyl.steps) ? lyricCyl.steps : [];
+        const lines = steps.filter(function (x) {
+            return x.kind === "line";
+        }).length;
+        const breaks = steps.filter(function (x) {
+            return x.kind === "pause";
+        }).length;
+
+        add("Lines", lines || "None");
+
+        if (lines) {
+
+            sub("Breaks", breaks);
+            sub("Timed far off by Mureka, shared", steps.spread || 0);
+            sub("Beat for the dots", Math.round(steps.beat || 0) + " ms");
+            add("Ahead of the song", (typeof settings.lyricAhead === "number" ? settings.lyricAhead : 500) + " ms");
+            add("Drum size", Math.round((settings.lyricDrum || 2) * 100) + " %");
+
+            if (lyricCyl && lyricCyl.idx >= 0 && steps[lyricCyl.idx]) {
+                sub("Now at", (steps[lyricCyl.idx].kind === "line" ? "line" : steps[lyricCyl.idx].kind) + " " + (lyricCyl.idx + 1) + " of " + steps.length);
+            }
         }
 
         part("Audio");
@@ -32732,6 +32764,42 @@
         add("Built from", queueOwn ? "Songs added by hand" : "The list");
         add("Shuffle", shuffleMode ? "On" : "Off");
 
+        // Listening together, the room and how each player stands in it
+        part("Listening together");
+
+        if (settings.syncOn !== true || (!syncHolding && !syncFollowing)) {
+            add("In a room", "No");
+        } else {
+
+            add("Room", syncRoomLabel());
+            sub("Its id", syncRoomName());
+            add("This player", syncHolding ? "Holds the queue" : "Plays along with " + syncFollowing.name);
+            add("Relay", String(syncRelay() || "").replace(/^https?:\/\//, ""));
+
+            if (syncClock.known) {
+                sub("Round trip", syncClock.rtt + " ms");
+                sub("Clock against the relay's", (syncClock.offset >= 0 ? "+" : "") + syncClock.offset + " ms");
+            }
+
+            add("Sound out", syncOutMs() + " ms after it is played");
+
+            if (syncFollowing) {
+
+                sub("Off from the room", (syncFollowing.drift >= 0 ? "+" : "") + (syncFollowing.drift || 0) + " ms");
+                sub("Seeks aim ahead", Math.round(syncSeekAhead * 1000) + " ms");
+                sub("Last heard", syncFollowing.stateAt ? ((Date.now() - syncFollowing.stateAt) / 1000).toFixed(1) + " s ago" : "Not yet");
+            }
+
+            add("Players", syncMembersText().split("\n").length);
+
+            for (const line of syncMembersText().split("\n")) {
+
+                const at = line.indexOf(": ");
+
+                sub(at > 0 ? line.slice(0, at) : line, at > 0 ? line.slice(at + 2) : "In the room");
+            }
+        }
+
         part("Player");
 
         let host = "Bookmarklet";
@@ -32745,6 +32813,14 @@
         add("Version", VERSION);
         add("Runs as", host);
         add("Network", offlineMode() ? "Offline" : (navigator.onLine === false ? "The browser says offline" : "Online"));
+        add("Running for", formatTime((Date.now() - PLAYER_START) / 1000));
+        add("Screen", window.innerWidth + " x " + window.innerHeight + " at " + (window.devicePixelRatio || 1) + "x");
+
+        if (performance && performance.memory && performance.memory.usedJSHeapSize) {
+            add("Memory in use", bytesText(performance.memory.usedJSHeapSize));
+        }
+
+        add("Page elements", document.getElementsByTagName("*").length);
 
         return rows;
     }
@@ -36794,6 +36870,7 @@
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
             songNew: song && !creatorSource ? song.is_played === false : null,
             songTrimmed: song && !creatorSource ? isTrimmed(song) : null,
+            songNote: song && !creatorSource ? songNote(song).slice(0, 500) : "",
 
             // Shared from another account, it may not be public, Mureka's
             // reply for it says nothing about that
@@ -36852,6 +36929,8 @@
             togetherStatus: syncStatusText(),
             togetherRoom: syncRoomLabel(),
             togetherWho: settings.syncOn === true ? syncWhoText() : "",
+            togetherCount: settings.syncOn === true && (syncHolding || syncFollowing)
+                ? (syncFollowing ? syncMembersOf(syncFollowing.state) : syncMembersNow()).length : 0,
             togetherRooms: syncRoomsList.map(function (r) {
                 return { room: String(r.room), label: String(r.label || (String(r.room) === syncRoomName() ? syncRoomLabel() : r.room)), line: syncRoomLine(r) };
             }),
@@ -39292,6 +39371,7 @@
                 cached: hostCacheState(song),
                 isNew: song.is_played === false,
                 trimmed: isTrimmed(song),
+                note: songNote(song).slice(0, 500) || undefined,
                 ignored: isIgnored(song),
                 shared: song.shared === true,
                 cover: coverUrl(song),
@@ -39392,6 +39472,7 @@
                     cached: hostCacheState(x),
                     isNew: x.is_played === false,
                     trimmed: isTrimmed(x),
+                    note: songNote(x).slice(0, 500) || undefined,
                     ignored: isIgnored(x),
                     shared: x.shared === true,
                     cover: coverUrl(x),
@@ -39480,6 +39561,7 @@
                 cached: hostCacheState(song),
                 isNew: song.is_played === false,
                 trimmed: isTrimmed(song),
+                note: songNote(song).slice(0, 500) || undefined,
                 ignored: isIgnored(song),
                 shared: song.shared === true,
                 stub: isStubSong(song) && !song.__gone,
@@ -40642,6 +40724,15 @@
         const who = String(c.from || "Someone").slice(0, 40);
         const id = String(c.fromId || who).slice(0, 60);
 
+        // Gone from the room, out of the list at once
+        if (c.cmd === "bye") {
+
+            syncMembers.delete(id);
+            dbgLog("Sync", who + " left");
+            publishHostSoon();
+            return;
+        }
+
         syncMembers.set(id, {
             name: who,
             at: Date.now(),
@@ -40968,6 +41059,11 @@
 
         clearTimeout(syncTakeTimer);
         syncTakeTimer = 0;
+
+        // The one holding the room told, so the others hear it at once
+        if (syncFollowing && syncMayControl()) {
+            syncSend({ cmd: "bye" });
+        }
 
         if (syncFollowing) {
             syncStopFollow("", false);
@@ -41358,6 +41454,101 @@
             syncFollowTick();
         } else {
             syncLeadTick();
+        }
+
+        syncWatchMembers();
+    }
+
+    // Who comes into the room and who leaves it, told as a note on every
+    // player in it. The names seen as the room is first looked at are
+    // the start, told nothing. One gone is told after a few seconds out of
+    // sight, so a moment's gap, a new player holding the room say, is not
+    // taken for leaving
+    let syncSeen = null;
+    const SYNC_GONE_TICKS = 4;
+
+    function syncWatchMembers() {
+
+        if (settings.syncOn !== true || (!syncHolding && !syncFollowing) || (syncFollowing && !syncFollowing.state)) {
+
+            if (!syncHolding && !syncFollowing) {
+                syncSeen = null;
+            }
+
+            return;
+        }
+
+        const me = syncName();
+        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncMembersNow();
+        const here = new Set();
+
+        for (const m of list) {
+
+            const name = String(m.name || "Someone").slice(0, 40);
+
+            if (name !== me) {
+                here.add(name);
+            }
+        }
+
+        const room = syncRoomName();
+
+        if (!syncSeen || syncSeen.room !== room) {
+
+            syncSeen = { room: room, names: here, away: new Map() };
+            return;
+        }
+
+        const came = [];
+        const went = [];
+
+        for (const name of here) {
+
+            syncSeen.away.delete(name);
+
+            if (!syncSeen.names.has(name)) {
+
+                syncSeen.names.add(name);
+                came.push(name);
+            }
+        }
+
+        for (const name of Array.from(syncSeen.names)) {
+
+            if (here.has(name)) {
+                continue;
+            }
+
+            const n = (syncSeen.away.get(name) || 0) + 1;
+
+            if (n >= SYNC_GONE_TICKS) {
+
+                syncSeen.names.delete(name);
+                syncSeen.away.delete(name);
+                went.push(name);
+            } else {
+                syncSeen.away.set(name, n);
+            }
+        }
+
+        const join = function (names) {
+            return names.length === 1 ? names[0] : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+        };
+
+        if (came.length > 0) {
+
+            dbgLog("Sync", join(came) + " came into the room");
+            showToast(join(came) + " joined the room", true);
+        }
+
+        if (went.length > 0) {
+
+            dbgLog("Sync", join(went) + " left the room");
+            showToast(join(went) + " left the room", true);
+        }
+
+        if (came.length > 0 || went.length > 0) {
+            publishHostSoon();
         }
     }
 
@@ -73048,6 +73239,25 @@
         touch-action: none;
     }
 
+    /* How many are in the room, a small pill on Together's corner */
+    .ctlCount {
+        position: absolute;
+        bottom: 4px;
+        right: 4px;
+        min-width: 1.4em;
+        height: 1.4em;
+        padding: 0 0.3em;
+        box-sizing: border-box;
+        border-radius: 0.7em;
+        background: #1d1d22;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4em;
+        text-align: center;
+        pointer-events: none;
+    }
+
     /* A small arrow at the top of Songs and List for the swipe up that
        opens the other list, and of Together for the swipe up that opens its
        menu. On Songs it points down while the small list is open, a swipe
@@ -78454,9 +78664,40 @@
         right: 0.5em;
     }
 
+    .rowHeart .rowNote {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.55em;
+        bottom: 0.6em;
+        right: 0.5em;
+    }
+
+    html.phone .rowHeart .rowNote {
+        bottom: -0.2em;
+        right: -0.4em;
+    }
+
     html.phone .rowHeart .rowTrim {
         top: -0.2em;
         right: -0.4em;
+    }
+
+    /* A song with a note of its own, a small blue N on the badge's lower
+       corner. Its note shows on the badge under the mouse */
+    .rowNote {
+        position: absolute;
+        bottom: -0.4em;
+        right: -0.3em;
+        width: 1.05em;
+        height: 1.05em;
+        border-radius: 50%;
+        background: #6f9cff;
+        color: var(--bg);
+        font-size: 0.75em;
+        line-height: 1.05em;
+        font-weight: 700;
+        text-align: center;
+        opacity: 0.9;
+        pointer-events: none;
     }
 
     .rowTrim {
@@ -85097,7 +85338,23 @@
 
         // Lit while the phone shares what it plays or listens along
         $("togetherBtn").classList.toggle("on", !!(s && s.together === "on"));
-        $("togetherBtn").title = s && s.togetherText ? s.togetherText : "Listening together";
+        $("togetherBtn").title = (s && s.togetherText ? s.togetherText : "Listening together")
+            + (s && s.togetherWho ? "\n\nIn the room:\n" + s.togetherWho : "");
+
+        // How many are in the room, on the button's corner, the names
+        // under the mouse
+        let count = $("togetherBtn").querySelector(".ctlCount");
+        const n = s && s.together === "on" && Number(s.togetherCount) > 0 ? Number(s.togetherCount) : 0;
+
+        if (!count) {
+
+            count = document.createElement("span");
+            count.className = "ctlCount";
+            $("togetherBtn").appendChild(count);
+        }
+
+        count.textContent = n > 0 ? String(n) : "";
+        count.style.display = n > 0 ? "" : "none";
 
         // Lit while the playing song is in the playlist songs went into last
         const toPl = s && s.toPlaylist ? s.toPlaylist : null;
@@ -85189,9 +85446,16 @@
         $("pubBadge").classList.toggle("shared", shared);
         $("pubBadge").textContent = pub === null ? "" : (shared ? "Shared" : (fresh ? "New" : (pub ? "Public" : "Draft")));
 
-        // The same small T as in the list for a song made by trimming
+        // The same small T as in the list for a song made by trimming, and
+        // the N of its note
         if (pub !== null && s.songTrimmed === true) {
             $("pubBadge").appendChild(trimMark());
+        }
+
+        $("pubBadge").removeAttribute("title");
+
+        if (pub !== null) {
+            noteMarkOn($("pubBadge"), s.songNote);
         }
 
         // And how many times it has been played
@@ -85817,7 +86081,7 @@
         }
 
         const rate = cylMedian(rates) || CYL_UNIT_MS;
-        let moved = false;
+        let moved = 0;
 
         for (let i = 0; i < n - 1; i++) {
 
@@ -85840,7 +86104,7 @@
                 const share = Math.min(total * units[i] / (units[i] + units[i + 1]), want * 1.3);
 
                 t[i + 1] = Math.round(t[i] + Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             } else if (before > 0) {
 
                 // The line before and this one share up to the next line:
@@ -85849,7 +86113,7 @@
                 const share = Math.min(total * units[i] / (units[i - 1] + units[i]), want * 1.3);
 
                 t[i] = Math.round(t[i + 1] - Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             }
         }
 
@@ -85857,9 +86121,14 @@
             return rows;
         }
 
-        return rows.map(function (r, i) {
+        const out = rows.map(function (r, i) {
             return Object.assign({}, r, { t: t[i] });
         });
+
+        // How many lines were moved, for Stats for nerds
+        out.spread = moved;
+
+        return out;
     }
 
     // What the roll steps through: the lines, a break where one line's
@@ -85876,8 +86145,10 @@
         const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
 
         // A beat, for the dots of a break to pulse to, half a second
-        // without a tempo
+        // without a tempo. And how many lines Mureka timed far off had
+        // their time shared, for Stats for nerds
         steps.beat = bar ? bar / 4 : 500;
+        steps.spread = rows.spread || 0;
 
         if (rows.length === 0) {
             return steps;
@@ -86278,24 +86549,13 @@
                 }
             }
 
-            // A dot on its way up to full holds the next one back until it
-            // is there
-            let ending = false;
-
-            for (let i = 0; i < dots.length; i++) {
-
-                if (dots[i].dataset.pulse === "ending") {
-                    ending = true;
-                }
-            }
-
             roll.dotsView = view;
 
             for (let i = 0; i < dots.length; i++) {
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = i === litCount && !ending;
+                const pulse = i === litCount;
 
                 // Lit as it pulsed: the pulse runs on up to its brightest,
                 // which is full, ends exactly there and stays on, and the
@@ -86323,7 +86583,6 @@
                     }
 
                     d.dataset.pulse = "ending";
-                    ending = true;
                     run.effect.updateTiming({ iterations: t.currentIteration + (t.progress <= 0.5 ? 0.5 : 1.5), fill: "forwards" });
                     run.onfinish = function () {
 
@@ -86373,17 +86632,14 @@
 
                 // Next to light: it fades in and out, up to full on one beat
                 // and down on the next, so a break is seen to be waiting.
-                // The first from the break's start, in step with it, the
-                // others from the moment the one before is full, rising
+                // Each starts at once, where the beat has it, also while
+                // the one before still goes on up to full, so there is no
+                // gap waiting for a beat
                 if (!d.dataset.pulse) {
 
-                    // The first at once, where the beat has it. The next
-                    // ones from their next dim moment, so each rises to
-                    // full on a beat rather than starting full
                     d.dataset.pulse = "1";
                     d.animate([{ opacity: 0.3 }, { opacity: 1 }, { opacity: 0.3 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out",
-                            delay: litCount === 0 ? -phase * period : ((1 - phase) % 1) * period });
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -phase * period });
                 }
             }
         }
@@ -89102,11 +89358,16 @@
 
             paintBadge(badge, song, false);
             row.appendChild(badge);
-        } else if (song.trimmed) {
+        } else {
 
-            // Without a badge, a trimmed song's T sits on the heart's
-            // corner, so the row keeps the columns of the rows around it
-            heart.appendChild(trimMark());
+            // Without a badge, a trimmed song's T and a note's N sit on the
+            // heart's corners, so the row keeps the columns of the rows
+            // around it
+            if (song.trimmed) {
+                heart.appendChild(trimMark());
+            }
+
+            noteMarkOn(heart, song.note);
         }
     }
 
@@ -89173,10 +89434,11 @@
     }
 
     // The badge at the end of a line: new for a song not played yet, else
-    // public or draft, with a small T for a song made by trimming
+    // public or draft, with a small T for a song made by trimming and a
+    // small N for a song with a note, the note shown under the mouse
     function paintBadge(badge, song, plain) {
 
-        // Only the T of a trimmed song, no word
+        // Only the T of a trimmed song and the N of a note, no word
         if (plain) {
 
             badge.className = "rowBadge plain";
@@ -89187,6 +89449,7 @@
                 badge.appendChild(trimMark());
             }
 
+            noteMarkOn(badge, song.note);
             return;
         }
 
@@ -89195,15 +89458,36 @@
             badge.className = "rowBadge shared";
             badge.textContent = "shared";
             badge.title = "Shared with you from another account, it may not be public";
+            noteMarkOn(badge, song.note);
             return;
         }
 
         badge.className = "rowBadge" + (song.isNew ? " new" : (song.published ? "" : " draft"));
         badge.textContent = song.isNew ? "new" : (song.published ? "public" : "draft");
+        badge.removeAttribute("title");
 
         if (song.trimmed) {
             badge.appendChild(trimMark());
         }
+
+        noteMarkOn(badge, song.note);
+    }
+
+    // A song's note on its badge: the N, and the note itself under the mouse
+    function noteMarkOn(badge, note) {
+
+        const text = String(note || "").trim();
+
+        if (!text) {
+            return;
+        }
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowNote";
+        mark.textContent = "N";
+        badge.appendChild(mark);
+        badge.title = (badge.title ? badge.title + "\n\n" : "") + "Note: " + text;
     }
 
     // The small yellow T on the corner of a badge, for a song made by

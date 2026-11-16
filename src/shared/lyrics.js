@@ -184,7 +184,7 @@
         }
 
         const rate = cylMedian(rates) || CYL_UNIT_MS;
-        let moved = false;
+        let moved = 0;
 
         for (let i = 0; i < n - 1; i++) {
 
@@ -207,7 +207,7 @@
                 const share = Math.min(total * units[i] / (units[i] + units[i + 1]), want * 1.3);
 
                 t[i + 1] = Math.round(t[i] + Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             } else if (before > 0) {
 
                 // The line before and this one share up to the next line:
@@ -216,7 +216,7 @@
                 const share = Math.min(total * units[i] / (units[i - 1] + units[i]), want * 1.3);
 
                 t[i] = Math.round(t[i + 1] - Math.max(gap, Math.min(share, total - 300)));
-                moved = true;
+                moved += 1;
             }
         }
 
@@ -224,9 +224,14 @@
             return rows;
         }
 
-        return rows.map(function (r, i) {
+        const out = rows.map(function (r, i) {
             return Object.assign({}, r, { t: t[i] });
         });
+
+        // How many lines were moved, for Stats for nerds
+        out.spread = moved;
+
+        return out;
     }
 
     // What the roll steps through: the lines, a break where one line's
@@ -243,8 +248,10 @@
         const lead = bar ? Math.max(2000, Math.min(4000, 2 * bar)) : 3000;
 
         // A beat, for the dots of a break to pulse to, half a second
-        // without a tempo
+        // without a tempo. And how many lines Mureka timed far off had
+        // their time shared, for Stats for nerds
         steps.beat = bar ? bar / 4 : 500;
+        steps.spread = rows.spread || 0;
 
         if (rows.length === 0) {
             return steps;
@@ -645,24 +652,13 @@
                 }
             }
 
-            // A dot on its way up to full holds the next one back until it
-            // is there
-            let ending = false;
-
-            for (let i = 0; i < dots.length; i++) {
-
-                if (dots[i].dataset.pulse === "ending") {
-                    ending = true;
-                }
-            }
-
             roll.dotsView = view;
 
             for (let i = 0; i < dots.length; i++) {
 
                 const lit = i < litCount;
                 const d = dots[i];
-                const pulse = i === litCount && !ending;
+                const pulse = i === litCount;
 
                 // Lit as it pulsed: the pulse runs on up to its brightest,
                 // which is full, ends exactly there and stays on, and the
@@ -690,7 +686,6 @@
                     }
 
                     d.dataset.pulse = "ending";
-                    ending = true;
                     run.effect.updateTiming({ iterations: t.currentIteration + (t.progress <= 0.5 ? 0.5 : 1.5), fill: "forwards" });
                     run.onfinish = function () {
 
@@ -740,17 +735,14 @@
 
                 // Next to light: it fades in and out, up to full on one beat
                 // and down on the next, so a break is seen to be waiting.
-                // The first from the break's start, in step with it, the
-                // others from the moment the one before is full, rising
+                // Each starts at once, where the beat has it, also while
+                // the one before still goes on up to full, so there is no
+                // gap waiting for a beat
                 if (!d.dataset.pulse) {
 
-                    // The first at once, where the beat has it. The next
-                    // ones from their next dim moment, so each rises to
-                    // full on a beat rather than starting full
                     d.dataset.pulse = "1";
                     d.animate([{ opacity: 0.3 }, { opacity: 1 }, { opacity: 0.3 }],
-                        { duration: period, iterations: Infinity, easing: "ease-in-out",
-                            delay: litCount === 0 ? -phase * period : ((1 - phase) % 1) * period });
+                        { duration: period, iterations: Infinity, easing: "ease-in-out", delay: -phase * period });
                 }
             }
         }
