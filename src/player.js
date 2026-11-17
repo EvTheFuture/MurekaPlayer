@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.198";
+    const VERSION = "2.0.1.199";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -67519,6 +67519,9 @@
     const CREATE_MATCH_MIN = 0.3;
     const CREATE_MATCH_SHOWN = 10;
 
+    // How alike a set must be to be the one suggested, before a new set
+    const CREATE_MATCH_BEST = 0.8;
+
     async function createMatchSets(progress) {
 
         const d = loadCreateDraft();
@@ -67657,7 +67660,11 @@
             return b.score - a.score;
         });
 
-        return { sets: found.slice(0, CREATE_MATCH_SHOWN), name: createNewSetName(d), looked: songSets.size, fetched: fetched };
+        // The best choice: the likeliest set when it is clearly alike, else
+        // a new set
+        const best = found.length > 0 && found[0].score >= CREATE_MATCH_BEST ? found[0].id : "new";
+
+        return { sets: found.slice(0, CREATE_MATCH_SHOWN), name: createNewSetName(d), looked: songSets.size, fetched: fetched, best: best };
     }
 
     // A name for a new set from the form: the title without a version mark
@@ -67732,16 +67739,32 @@
             });
 
             pick.list.textContent = "";
-            pick.add([{ label: "New set: " + r.name, sub: "A set of their own, named so", color: CTRL_ACCENT, value: { id: "new", name: r.name } }]
-                .concat(r.sets.map(function (x) {
 
-                    return {
-                        label: x.name,
-                        sub: [x.count + (x.count === 1 ? " song" : " songs"), x.why.join(", ")].filter(Boolean).join(", "),
-                        color: x.color,
-                        value: { id: x.id }
-                    };
-                })));
+            // The best choice first, marked so
+            const rows = [{ label: "New set: " + r.name, sub: "A set of their own, named so", color: CTRL_ACCENT, value: { id: "new", name: r.name },
+                best: r.best === "new" }].concat(r.sets.map(function (x) {
+
+                return {
+                    label: x.name,
+                    sub: [x.count + (x.count === 1 ? " song" : " songs"), x.why.join(", ")].filter(Boolean).join(", "),
+                    color: x.color,
+                    value: { id: x.id },
+                    best: r.best === x.id
+                };
+            }));
+
+            for (const row of rows) {
+
+                if (row.best) {
+                    row.sub = "Best match, " + row.sub.charAt(0).toLowerCase() + row.sub.slice(1);
+                }
+            }
+
+            pick.add(rows.filter(function (x) {
+                return x.best;
+            }).concat(rows.filter(function (x) {
+                return !x.best;
+            })));
 
             if (r.sets.length === 0) {
 
@@ -69354,6 +69377,11 @@
                 row.style.cssText = "text-align:left;border:none;border-radius:8px;background:#1d1d22;color:#fff;padding:8px 10px;"
                     + "cursor:pointer;font:inherit;font-size:13px;line-height:1.4;flex-shrink:0;display:block;box-sizing:border-box;"
                     + (holder === row ? "width:100%" : "flex:1 1 auto;min-width:0");
+
+                // The one suggested, ringed in the accent
+                if (r.best) {
+                    row.style.boxShadow = "inset 0 0 0 2px " + ACCENT;
+                }
                 main.textContent = r.label;
                 main.style.cssText = "overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:"
                     + (r.lines || 4) + ";overflow:hidden";
@@ -69893,7 +69921,7 @@
         } else if (op === "matchSets") {
 
             createMatchSets().then(function (r) {
-                reply({ ok: true, list: r.sets, name: r.name, looked: r.looked });
+                reply({ ok: true, list: r.sets, name: r.name, looked: r.looked, best: r.best });
             }, failed);
         } else if (op === "state") {
             reply({ ok: true, state: hostCreateState() });
@@ -75241,6 +75269,10 @@
         border-color: var(--accent);
         color: #000;
         font-weight: 600;
+    }
+
+    .crPickRow.crBest {
+        box-shadow: inset 0 0 0 2px var(--accent);
     }
 
     .chip.crPrimary.crBottom {
@@ -103324,22 +103356,41 @@
             const list = Array.isArray(r.list) ? r.list : [];
             const name = String(r.name || "New set");
 
+            const best = String(r.best || "new");
+            const made = [];
+
             rows.textContent = "";
-            rows.appendChild(crPickRow("New set: " + name, "A set of their own, named so", function () {
+            made.push({ id: "new", el: crPickRow("New set: " + name, (best === "new" ? "Best match, a" : "A") + " set of their own, named so", function () {
 
                 showCrPick(false);
                 crSet({ setOn: true, setId: "new", setName: name });
-            }, "#48e1eb"));
+            }, "#48e1eb") });
 
             for (const x of list) {
 
                 const sub = [x.count + (x.count === 1 ? " song" : " songs"), (x.why || []).join(", ")].filter(Boolean).join(", ");
 
-                rows.appendChild(crPickRow(x.name, sub, function () {
+                made.push({ id: x.id, el: crPickRow(x.name, (best === x.id ? "Best match, " : "") + sub, function () {
 
                     showCrPick(false);
                     crSet({ setOn: true, setId: x.id });
-                }, x.color));
+                }, x.color) });
+            }
+
+            // The best choice first, ringed in the accent
+            const ordered = made.filter(function (m) {
+                return m.id === best;
+            }).concat(made.filter(function (m) {
+                return m.id !== best;
+            }));
+
+            for (const m of ordered) {
+
+                if (m.id === best) {
+                    m.el.classList.add("crBest");
+                }
+
+                rows.appendChild(m.el);
             }
 
             if (list.length === 0) {

@@ -1539,6 +1539,10 @@
         font-weight: 600;
     }
 
+    .crPickRow.crBest {
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
     .chip.crPrimary.crBottom {
         flex: 1 1 auto;
         justify-content: center;
@@ -29620,22 +29624,41 @@
             const list = Array.isArray(r.list) ? r.list : [];
             const name = String(r.name || "New set");
 
+            const best = String(r.best || "new");
+            const made = [];
+
             rows.textContent = "";
-            rows.appendChild(crPickRow("New set: " + name, "A set of their own, named so", function () {
+            made.push({ id: "new", el: crPickRow("New set: " + name, (best === "new" ? "Best match, a" : "A") + " set of their own, named so", function () {
 
                 showCrPick(false);
                 crSet({ setOn: true, setId: "new", setName: name });
-            }, "#48e1eb"));
+            }, "#48e1eb") });
 
             for (const x of list) {
 
                 const sub = [x.count + (x.count === 1 ? " song" : " songs"), (x.why || []).join(", ")].filter(Boolean).join(", ");
 
-                rows.appendChild(crPickRow(x.name, sub, function () {
+                made.push({ id: x.id, el: crPickRow(x.name, (best === x.id ? "Best match, " : "") + sub, function () {
 
                     showCrPick(false);
                     crSet({ setOn: true, setId: x.id });
-                }, x.color));
+                }, x.color) });
+            }
+
+            // The best choice first, ringed in the accent
+            const ordered = made.filter(function (m) {
+                return m.id === best;
+            }).concat(made.filter(function (m) {
+                return m.id !== best;
+            }));
+
+            for (const m of ordered) {
+
+                if (m.id === best) {
+                    m.el.classList.add("crBest");
+                }
+
+                rows.appendChild(m.el);
             }
 
             if (list.length === 0) {
