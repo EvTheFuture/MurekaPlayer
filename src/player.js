@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.208";
+    const VERSION = "2.0.1.209";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23401,7 +23401,7 @@
 
                 // Comments read too, to learn how Mureka lists them
                 if ((verb === "GET" || verb === "HEAD")
-                    && READ_ANSWERS.indexOf(u.pathname) < 0 && !/comment|^\/api\/msg\//i.test(u.pathname)
+                    && READ_ANSWERS.indexOf(u.pathname) < 0 && !/comment|mention|^\/api\/msg\//i.test(u.pathname)
                     && !(MAKING.test(u.pathname) && u.pathname !== "/api/pgc/feed/list")) {
                     return "";
                 }
@@ -23447,7 +23447,7 @@
         const logAnswer = function (what, status, text) {
 
             const pass = /cos-token/.test(what);
-            const long = /playlist\/detail|comment|\/api\/msg\//.test(what) || MAKING.test(what);
+            const long = /playlist\/detail|comment|mention|\/api\/msg\//.test(what) || MAKING.test(what);
 
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
                 + (pass ? passShape(text) : redact(text)).replace(/\s+/g, " ").slice(0, long ? 6000 : 800));

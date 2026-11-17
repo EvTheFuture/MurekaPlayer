@@ -1368,6 +1368,7 @@ In development.
 - **Notifications and comments as Mureka really sends them.** A notification's song is found where Mureka puts it, object_id for a like, a playlist add or a share and extra_object_id for a comment, and its time is update_time, so the songs of new notifications are now read again; before, none were found. More comments asks after the last_id Mureka answers with.
 - **A cleaner debug log.** The site's ad tags, analytics and session recorders are left out of the log, and it keeps 600 lines, 300 of them over a reload, so a capture on Mureka's own pages fits.
 - **Delete your own comments.** Your own comments and replies have Delete, asked once more first, a comment going with its replies, and the song read again for its count. Uses Mureka's /api/comment/delete with comment_id and comment_level. In the player and the web view.
+- **The debug log keeps Mureka's mention answers.** The people Mureka offers to @-mention in a comment are kept whole in the log, to learn how mentions are sent.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
