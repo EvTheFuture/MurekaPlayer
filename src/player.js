@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.232";
+    const VERSION = "2.0.1.233";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -41282,7 +41282,7 @@
             });
 
             if (col.length > 0) {
-                out.push({ t: "col", c: col });
+                out.push({ t: "col", c: col, now: el.dataset.hostNow === "1" });
             }
 
             for (const node of after) {
@@ -57373,8 +57373,17 @@
                 const editBtn = makeButton("Edit", "#333", "#fff", open);
 
                 row.classList.add("mp-mid10");
-                col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px";
+
+                // The one in use marked by a bar in the accent beside it,
+                // and its name in the accent, here and in the web view
+                col.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"
+                    + (inUse ? ";border-left:3px solid " + ACCENT + ";padding-left:9px" : "");
                 col.dataset.hostCol = "1";
+
+                if (inUse) {
+                    col.dataset.hostNow = "1";
+                }
+
                 name.textContent = title + (inUse ? ", in use" : "");
                 name.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                     + (inUse ? ";color:" + ACCENT : "");
@@ -82300,6 +82309,24 @@
         padding-top: 0;
     }
 
+    /* The one in use among its kind, a sound profile: a bar in the accent
+       beside its words, joined over the gap between them, not along the
+       button floating in the column, and its name in the accent */
+    .pCol.now > .pText {
+        border-left: 3px solid var(--accent);
+        padding-left: 8px;
+    }
+
+    .pCol.now > .pText + .pText,
+    #panelBody .pRow.float > .pCol.now > .pText + .pText {
+        margin-top: 0;
+        padding-top: 4px;
+    }
+
+    .pCol.now > .pText:not(.small) {
+        color: var(--accent);
+    }
+
     .pBtn,
     .pClick {
         min-height: var(--ctl-h);
@@ -99487,7 +99514,7 @@
 
             const col = document.createElement("div");
 
-            col.className = "pCol";
+            col.className = node.now ? "pCol now" : "pCol";
 
             for (const child of node.c) {
                 col.appendChild(panelNode(child, false));

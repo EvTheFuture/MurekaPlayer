@@ -4908,6 +4908,24 @@
         padding-top: 0;
     }
 
+    /* The one in use among its kind, a sound profile: a bar in the accent
+       beside its words, joined over the gap between them, not along the
+       button floating in the column, and its name in the accent */
+    .pCol.now > .pText {
+        border-left: 3px solid var(--accent);
+        padding-left: 8px;
+    }
+
+    .pCol.now > .pText + .pText,
+    #panelBody .pRow.float > .pCol.now > .pText + .pText {
+        margin-top: 0;
+        padding-top: 4px;
+    }
+
+    .pCol.now > .pText:not(.small) {
+        color: var(--accent);
+    }
+
     .pBtn,
     .pClick {
         min-height: var(--ctl-h);
@@ -22095,7 +22113,7 @@
 
             const col = document.createElement("div");
 
-            col.className = "pCol";
+            col.className = node.now ? "pCol now" : "pCol";
 
             for (const child of node.c) {
                 col.appendChild(panelNode(child, false));
