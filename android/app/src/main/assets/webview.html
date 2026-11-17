@@ -1663,6 +1663,15 @@
         color: #999;
     }
 
+    .cmDel {
+        border: none;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+        font: inherit;
+        color: #e57373;
+    }
+
     .cmLike.on {
         color: #ff6b8a;
     }
@@ -31330,6 +31339,56 @@
             top.appendChild(when);
             acts.appendChild(like);
             acts.appendChild(reply);
+
+            // Your own comment can be taken away, a comment with its replies,
+            // a second tap on Delete to be sure
+            if (c.mine) {
+
+                const del = document.createElement("button");
+                let armed = 0;
+
+                del.type = "button";
+                del.className = "cmDel";
+                del.textContent = "Delete";
+                del.addEventListener("click", function () {
+
+                    if (Date.now() - armed > 3000) {
+
+                        armed = Date.now();
+                        del.textContent = "Tap again to delete";
+                        setTimeout(function () {
+                            del.textContent = "Delete";
+                        }, 3000);
+                        return;
+                    }
+
+                    crAsk({ op: "commentDelete", song: m.id, id: c.id, level: c.level }).then(function (r) {
+
+                        if (!r || !r.ok) {
+
+                            toast("Could not delete it" + (r && r.why ? ", " + r.why : ""), "bad");
+                            return;
+                        }
+
+                        let next = box.nextSibling;
+
+                        // A comment's replies, set in under it, go too
+                        while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
+
+                            const after = next.nextSibling;
+
+                            next.remove();
+                            next = after;
+                        }
+
+                        box.remove();
+                        toast("Deleted", "good");
+                    });
+                });
+                acts.appendChild(del);
+            }
+
+            box.__replyOf = depth > 0 ? c.parent : "";
             box.appendChild(top);
             box.appendChild(text);
             box.appendChild(acts);

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.207";
+    const VERSION = "2.0.1.208";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70262,6 +70262,20 @@
         return { liked: data.is_liked === true, likes: Number(data.like_count) || 0 };
     }
 
+    // One of your own comments taken away, a reply or a comment with its
+    // replies, and the song read again for its count after it
+    async function deleteComment(songId, c) {
+
+        await commentsApi("/api/comment/delete", { comment_id: Number(c.id) || c.id, comment_level: c.level || 1 });
+        dbgLog("Comments", "deleted " + c.id + " on " + songId);
+
+        const song = hostFindSong(String(songId));
+
+        if (song) {
+            fetchDetail(song);
+        }
+    }
+
     // When a comment was written, as a short time ago
     function commentAge(at) {
 
@@ -70425,6 +70439,44 @@
             top.appendChild(when);
             acts.appendChild(like);
             acts.appendChild(reply);
+
+            // Your own comment can be taken away, a comment with its replies
+            if (c.mine) {
+
+                const del = document.createElement("button");
+
+                del.type = "button";
+                del.textContent = "Delete";
+                del.style.cssText = "border:none;background:none;padding:0;cursor:pointer;font:inherit;color:#e57373";
+                del.addEventListener("click", function () {
+
+                    askYesNo("Delete " + (depth > 0 ? "this reply" : "this comment" + (c.replies && c.replies.length ? " and its replies" : "")) + "?",
+                        c.text, "Delete", function () {
+
+                        deleteComment(song.song_id, c).then(function () {
+
+                            let next = box.nextSibling;
+
+                            // A comment's replies, set in under it, go too
+                            while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
+
+                                const after = next.nextSibling;
+
+                                next.remove();
+                                next = after;
+                            }
+
+                            box.remove();
+                            showToast("Deleted", true);
+                        }, function (e) {
+                            showToast("Could not delete it, " + errText(e), false);
+                        });
+                    }, null, true);
+                });
+                acts.appendChild(del);
+            }
+
+            box.__replyOf = depth > 0 ? c.parent : "";
             box.appendChild(top);
             box.appendChild(text);
             box.appendChild(acts);
@@ -70601,6 +70653,11 @@
 
             addComment(String(a.song || ""), String(a.text || "").slice(0, 2000), String(a.parent || "")).then(function (c) {
                 reply({ ok: true, comment: c });
+            }, failed);
+        } else if (op === "commentDelete") {
+
+            deleteComment(String(a.song || ""), { id: String(a.id || ""), level: Number(a.level) || 1 }).then(function () {
+                reply({ ok: true });
             }, failed);
         } else if (op === "commentLike") {
 
@@ -76089,6 +76146,15 @@
         cursor: pointer;
         font: inherit;
         color: #999;
+    }
+
+    .cmDel {
+        border: none;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+        font: inherit;
+        color: #e57373;
     }
 
     .cmLike.on {
@@ -105758,6 +105824,56 @@
             top.appendChild(when);
             acts.appendChild(like);
             acts.appendChild(reply);
+
+            // Your own comment can be taken away, a comment with its replies,
+            // a second tap on Delete to be sure
+            if (c.mine) {
+
+                const del = document.createElement("button");
+                let armed = 0;
+
+                del.type = "button";
+                del.className = "cmDel";
+                del.textContent = "Delete";
+                del.addEventListener("click", function () {
+
+                    if (Date.now() - armed > 3000) {
+
+                        armed = Date.now();
+                        del.textContent = "Tap again to delete";
+                        setTimeout(function () {
+                            del.textContent = "Delete";
+                        }, 3000);
+                        return;
+                    }
+
+                    crAsk({ op: "commentDelete", song: m.id, id: c.id, level: c.level }).then(function (r) {
+
+                        if (!r || !r.ok) {
+
+                            toast("Could not delete it" + (r && r.why ? ", " + r.why : ""), "bad");
+                            return;
+                        }
+
+                        let next = box.nextSibling;
+
+                        // A comment's replies, set in under it, go too
+                        while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
+
+                            const after = next.nextSibling;
+
+                            next.remove();
+                            next = after;
+                        }
+
+                        box.remove();
+                        toast("Deleted", "good");
+                    });
+                });
+                acts.appendChild(del);
+            }
+
+            box.__replyOf = depth > 0 ? c.parent : "";
             box.appendChild(top);
             box.appendChild(text);
             box.appendChild(acts);
