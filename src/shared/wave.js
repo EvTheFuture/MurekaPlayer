@@ -101,14 +101,18 @@
         // where the zoom is shows at a glance
         const bh = lh * 5;
         const glow = ctx.createLinearGradient(0, h - lh - bh, 0, h - lh);
-        const tick = Math.max(1, Math.round(dpr));
+        const tick = Math.max(2, Math.round(2 * dpr));
+        const playedTo = Math.max(x0, Math.min(done, x1));
 
         glow.addColorStop(0, "rgba(255, 255, 255, 0)");
         glow.addColorStop(1, "rgba(255, 255, 255, 0.2)");
         ctx.fillStyle = glow;
         ctx.fillRect(x0, h - lh - bh, x1 - x0, bh);
+        // The played part of it almost white, the rest a little lit
+        ctx.fillStyle = "rgba(235, 252, 255, 0.95)";
+        ctx.fillRect(x0, h - lh, playedTo - x0, lh);
         ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.fillRect(x0, h - lh, x1 - x0, lh);
+        ctx.fillRect(playedTo, h - lh, x1 - playedTo, lh);
         ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
         ctx.fillRect(x0, h - lh - bh, tick, bh + lh);
         ctx.fillRect(x1 - tick, h - lh - bh, tick, bh + lh);
