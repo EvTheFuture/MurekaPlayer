@@ -869,6 +869,22 @@ final class Sync {
 
             if (ended != null) {
 
+                // The commands' stream over for good, refused when another
+                // player took the room meanwhile: no longer alive, so the
+                // next time this player holds the room it is opened again.
+                // Left marked alive, the player held the room deaf to the
+                // others' commands
+                if (st == COMMANDS) {
+
+                    synchronized (COMMANDS) {
+
+                        if (gen == st.gen) {
+                            commandsAlive = false;
+                            commandsPath = "";
+                        }
+                    }
+                }
+
                 tell(st.name, "status", ended, null, null);
                 return;
             }

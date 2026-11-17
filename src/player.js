@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.225";
+    const VERSION = "2.0.1.226";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -42835,6 +42835,11 @@
     }
 
     // A command to the sharing player, from here while listening along
+    // When something was last asked of the room here, and when it was last
+    // told that it did not get through
+    let syncAskedAt = 0;
+    let syncNotSentAt = 0;
+
     function syncSend(cmd) {
 
         const f = syncFollowing;
@@ -42846,6 +42851,12 @@
         cmd.from = syncName();
         cmd.fromId = String(settings.syncRoom || "");
         cmd.at = syncNow();
+
+        // Something asked for here, not the player's own hello, so a
+        // command not getting through is told
+        if (cmd.cmd !== "hello" && cmd.cmd !== "bye") {
+            syncAskedAt = Date.now();
+        }
 
         try {
             window.MurekaHost.syncCommand(syncRelay(), f.room, JSON.stringify(cmd));
@@ -43782,9 +43793,18 @@
             return;
         }
 
+        // Told only for something asked for here, a moment ago, and once in
+        // a while: the player's own hellos every 15 s went unheard quietly
         if (m.type === "command" && m.ok === false) {
 
-            showToast("Not sent to the sharing player: " + String(m.error || "no answer"), false);
+            dbgLog("Sync", "a command did not get through, " + String(m.error || "no answer"));
+
+            if (Date.now() - syncAskedAt < 5000 && Date.now() - syncNotSentAt > 10000) {
+
+                syncNotSentAt = Date.now();
+                showToast("Not sent to " + (syncFollowing ? syncFollowing.name : "the room") + ": " + String(m.error || "no answer"), false);
+            }
+
             return;
         }
 
