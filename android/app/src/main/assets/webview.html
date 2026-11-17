@@ -30284,7 +30284,26 @@
             crSent[k] = { value: changes[k], at: Date.now() };
         }
 
-        return crAsk({ op: "draft", draft: changes });
+        return crAsk({ op: "draft", draft: changes }).then(function (r) {
+
+            if (r && r.ok) {
+                return r;
+            }
+
+            // Not taken by the phone: kept to send again, unless changed
+            // since, so a choice made here is not lost on the way
+            for (const k of Object.keys(changes)) {
+
+                if (crPending[k] === undefined) {
+                    crPending[k] = changes[k];
+                }
+            }
+
+            clearTimeout(crSendTimer);
+            crSendTimer = setTimeout(crFlush, 1500);
+
+            return { ok: false, why: (r && r.why) || "The Android device could not be reached" };
+        });
     }
 
     // A change made at once, a choice rather than typing
@@ -31067,7 +31086,14 @@
 
     function crMake(asIs) {
 
-        crFlush().then(function () {
+        crFlush().then(function (sent) {
+
+            // The form as chosen here first, or nothing is made from an
+            // older one, a set chosen here not yet known to the phone
+            if (sent && sent.ok === false) {
+                return { ok: false, why: "The changes did not reach the phone, nothing made: " + sent.why };
+            }
+
             return crAsk({ op: "make", asIs: asIs === true });
         }).then(function (r) {
 

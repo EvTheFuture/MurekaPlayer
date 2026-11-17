@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.229";
+    const VERSION = "2.0.1.230";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -68793,7 +68793,7 @@
         dbgLog("Create", "making " + (d.kind === "instrumental" ? "an instrumental" : "a song")
             + (d.remix ? " remix" : "") + (d.voice === "character" && d.kind === "song" ? " with a character" : "")
             + ": " + (body.title || "untitled") + ", style " + body.prompt.content.length + " characters"
-            + (body.lyrics !== undefined ? ", lyrics " + body.lyrics.length : ""));
+            + (body.lyrics !== undefined ? ", lyrics " + body.lyrics.length : "") + ", " + createSetText(d));
 
         // Mureka may hold its answer a minute or more while the songs are
         // already being made, so the first page of the library is watched
@@ -69421,6 +69421,22 @@
         });
     }
 
+    // Where the form puts the new songs, in words for the log
+    function createSetText(d) {
+
+        if (!d.setOn) {
+            return "into no set";
+        }
+
+        if (d.setId === "new") {
+            return "into a new set named " + JSON.stringify((d.setName || d.title || "").trim() || "after the title");
+        }
+
+        const set = songSets.get(d.setId);
+
+        return set ? "into the set " + JSON.stringify(set.name) + " (" + d.setId + ")" : "into a set no longer there (" + d.setId + ")";
+    }
+
     // What to do with the new songs of a generation once Mureka lists them:
     // play them when ready, put them in a set. By the generation's id
     const createWishes = [];
@@ -69789,7 +69805,7 @@
         const clean = function (text) {
             return String(text || "").replace(/\s+/g, " ").trim();
         };
-        let name = clean(d.title).replace(/\s*([-(\[#]\s*)?(v|ver|version|take|remix|mix)?\s*\d+\s*[)\]]?$/i, "").trim();
+        let name = clean(d.title).replace(/\s*([-(\[#]\s*)?(v|ver|version|take|remix|mix)?\s*\d+(\.\d+)*\s*[)\]]?$/i, "").trim();
 
         if (!name && d.kind === "song") {
 
@@ -73367,6 +73383,11 @@
             }
 
             changeCreateDraft(changes);
+
+            if (changes.setOn !== undefined || changes.setId !== undefined) {
+                dbgLog("Create", "from a web view, the new songs go " + createSetText(loadCreateDraft()));
+            }
+
             reply({ ok: true, state: hostCreateState() });
         } else if (op === "reset") {
 
@@ -107583,7 +107604,26 @@
             crSent[k] = { value: changes[k], at: Date.now() };
         }
 
-        return crAsk({ op: "draft", draft: changes });
+        return crAsk({ op: "draft", draft: changes }).then(function (r) {
+
+            if (r && r.ok) {
+                return r;
+            }
+
+            // Not taken by the phone: kept to send again, unless changed
+            // since, so a choice made here is not lost on the way
+            for (const k of Object.keys(changes)) {
+
+                if (crPending[k] === undefined) {
+                    crPending[k] = changes[k];
+                }
+            }
+
+            clearTimeout(crSendTimer);
+            crSendTimer = setTimeout(crFlush, 1500);
+
+            return { ok: false, why: (r && r.why) || "The Android device could not be reached" };
+        });
     }
 
     // A change made at once, a choice rather than typing
@@ -108366,7 +108406,14 @@
 
     function crMake(asIs) {
 
-        crFlush().then(function () {
+        crFlush().then(function (sent) {
+
+            // The form as chosen here first, or nothing is made from an
+            // older one, a set chosen here not yet known to the phone
+            if (sent && sent.ok === false) {
+                return { ok: false, why: "The changes did not reach the phone, nothing made: " + sent.why };
+            }
+
             return crAsk({ op: "make", asIs: asIs === true });
         }).then(function (r) {
 
