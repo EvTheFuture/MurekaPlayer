@@ -270,7 +270,8 @@
             return box;
         }
 
-        // The clock time of a message, with the day when not today
+        // The clock time of a message on the 24 hour clock, with the day when
+        // not today
         function whenText(at) {
 
             if (!at) {
@@ -278,7 +279,7 @@
             }
 
             const d = new Date(at);
-            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
             return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
         }

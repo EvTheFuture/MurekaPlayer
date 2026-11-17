@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.219";
+    const VERSION = "2.0.1.220";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1475,7 +1475,7 @@
 
         if (before && Array.isArray(before.lines) && before.lines.length > 0) {
 
-            debugLog.push("--- before the page was opened again, " + new Date(before.at).toLocaleTimeString() + " ---");
+            debugLog.push("--- before the page was opened again, " + new Date(before.at).toLocaleTimeString([], { hourCycle: "h23" }) + " ---");
 
             for (const line of before.lines.slice(-DEBUG_LOG_TAB_LINES)) {
                 debugLog.push(String(line));
@@ -15289,7 +15289,8 @@
             return box;
         }
 
-        // The clock time of a message, with the day when not today
+        // The clock time of a message on the 24 hour clock, with the day when
+        // not today
         function whenText(at) {
 
             if (!at) {
@@ -15297,7 +15298,7 @@
             }
 
             const d = new Date(at);
-            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
             return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
         }
@@ -73843,7 +73844,7 @@
             // one gone
             dbgLog("Mureka", "playlist " + (head.name || pl.name || key) + ", " + order.length + " songs, "
                 + (own && Array.isArray(own.order) && own.order.length > 0
-                    ? "in the order kept here, set " + new Date(own.at || 0).toLocaleString() + " with " + own.order.length + " songs"
+                    ? "in the order kept here, set " + new Date(own.at || 0).toLocaleString([], { hourCycle: "h23" }) + " with " + own.order.length + " songs"
                     : "in Mureka's order, none kept here"));
             const before = playlistById(key);
             const record = playlistRecord(Object.assign({}, head, {
@@ -87425,7 +87426,8 @@
             return box;
         }
 
-        // The clock time of a message, with the day when not today
+        // The clock time of a message on the 24 hour clock, with the day when
+        // not today
         function whenText(at) {
 
             if (!at) {
@@ -87433,7 +87435,7 @@
             }
 
             const d = new Date(at);
-            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
             return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
         }
