@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.205";
+    const VERSION = "2.0.1.206";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -46227,6 +46227,10 @@
         // fresh ones, the first a little after starting up
         loadPlayCounts();
 
+        // The songs Mureka's notifications name, read again for their
+        // comment counts
+        startNotificationWatch();
+
         if (isApkHost()) {
 
             checkHotspotAtStart();
@@ -70003,6 +70007,145 @@
     }
 
     // ---- Comments on Mureka ----
+
+    // Mureka's notifications tell which songs had something happen, a
+    // comment, a reply or a like. The songs of the new ones are read again,
+    // so their comment counts and plays are fresh without reading every
+    // song. Read as Mureka's page reads them, GET /api/msg/list, which does
+    // not mark them read; Mureka's own unread mark is left as it is
+    const MSG_SEEN_KEY = "mureka_msg_seen_v1";
+    const MSG_EVERY_MS = 10 * 60000;
+    let msgBusy = false;
+    let msgCheckedAt = 0;
+
+    // The songs a notification names, wherever it keeps them, the ones
+    // in the library only
+    function msgSongIds(item) {
+
+        const found = new Set();
+        const walk = function (o, depth) {
+
+            if (!o || typeof o !== "object" || depth > 3) {
+                return;
+            }
+
+            for (const key of Object.keys(o)) {
+
+                const v = o[key];
+
+                if (/^(song_id|biz_id|target_id|songId)$/.test(key) && (typeof v === "number" || /^\d+$/.test(String(v)))
+                    && hostFindSong(String(v))) {
+                    found.add(String(v));
+                } else if (key === "song" && v && typeof v === "object" && hostFindSong(String(v.song_id || v.id || ""))) {
+                    found.add(String(v.song_id || v.id));
+                } else if (v && typeof v === "object") {
+                    walk(v, depth + 1);
+                }
+            }
+        };
+
+        walk(item, 0);
+
+        return Array.from(found);
+    }
+
+    async function checkNotifications() {
+
+        if (msgBusy || offlineMode() || creatorSource) {
+            return;
+        }
+
+        msgBusy = true;
+        msgCheckedAt = Date.now();
+
+        try {
+
+            const now = Date.now();
+            const res = await murekaFetch("/api/msg/list?time=" + now + "&last_id=" + now + "&page_size=20", { credentials: "include" });
+            const json = res.ok ? await res.json() : null;
+            const list = json && json.code === 0 && json.data && Array.isArray(json.data.list) ? json.data.list : null;
+
+            if (!list) {
+                return;
+            }
+
+            let seen = 0;
+
+            try {
+                seen = Number(localStorage.getItem(MSG_SEEN_KEY)) || 0;
+            } catch (e) {
+                seen = 0;
+            }
+
+            let newest = seen;
+            const songs = new Set();
+
+            for (const item of list) {
+
+                // When it came, in seconds or milliseconds, else its id
+                const at = Number(item.created_at || item.create_time || item.send_time || item.time || item.id) || 0;
+
+                if (at <= seen) {
+                    continue;
+                }
+
+                newest = Math.max(newest, at);
+
+                for (const id of msgSongIds(item)) {
+                    songs.add(id);
+                }
+            }
+
+            try {
+                localStorage.setItem(MSG_SEEN_KEY, String(newest));
+            } catch (e) {
+            }
+
+            if (list.length > 0 && !seen) {
+                dbgLog("Notifications", "the first has " + Object.keys(list[0]).join(", "));
+            }
+
+            dbgLog("Notifications", list.filter(function (x) {
+                return (Number(x.created_at || x.create_time || x.send_time || x.time || x.id) || 0) > seen;
+            }).length + " new of " + list.length + ", songs to read again: " + (songs.size || "none"));
+
+            // Each song read again a moment apart, its comments and plays
+            for (const id of songs) {
+
+                const song = hostFindSong(id);
+
+                if (song && !offlineMode()) {
+
+                    await fetchDetail(song);
+                    await sleep(800);
+                }
+            }
+        } catch (e) {
+            dbgLog("Notifications", "could not be read, " + errText(e));
+        } finally {
+            msgBusy = false;
+        }
+    }
+
+    // A little after start, every ten minutes, and on coming back into view
+    // when the last look is a while ago
+    function startNotificationWatch() {
+
+        setTimeout(checkNotifications, 20000);
+        setInterval(function () {
+
+            if (!document.hidden) {
+                checkNotifications();
+            }
+        }, MSG_EVERY_MS);
+
+        document.addEventListener("visibilitychange", function () {
+
+            if (!document.hidden && Date.now() - msgCheckedAt > 2 * 60000) {
+                checkNotifications();
+            }
+        });
+    }
 
     // Mureka's comments on a song, as its own page reads and writes them:
     // POST /api/comment/list with song_id and page_size, /api/comment/add
