@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.202";
+    const VERSION = "2.0.1.203";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -1321,7 +1321,8 @@
 
         return function (isPlayed, x, layer) {
 
-            let zone = isPlayed ? 1 : 0;
+            const base = isPlayed ? 1 : 0;
+            let zone = base;
 
             if (x < split) {
                 zone = 2;
@@ -1329,17 +1330,32 @@
                 zone = 3;
             }
 
-            const key = zone + layer;
+            const key = zone + (isPlayed ? "p" : "r") + layer;
             let out = made.get(key);
 
             if (out === undefined) {
 
-                const t = parts[zone];
+                let t = parts[zone];
                 let k = 1;
+
+                // The progress laid over the waveform's own color as much
+                // as it shows, so a progress color see-through, or partly
+                // so, lets the played and rest colors through rather than
+                // leaving the waveform black
+                if (zone >= 2 && t.a < 1) {
+
+                    const b = parts[base];
+                    const a = t.a + b.a * (1 - t.a);
+                    const mix = function (i) {
+                        return a > 0 ? (t.c[i] * t.a + b.c[i] * b.a * (1 - t.a)) / a : 0;
+                    };
+
+                    t = { c: [mix(0), mix(1), mix(2)], a: a };
+                }
 
                 if (layer === "dim") {
                     k = WAVE_DIM_SHADE;
-                } else if (layer === "bar" && zone === 0) {
+                } else if (layer === "bar" && (zone === 0 || (zone >= 2 && base === 0 && parts[zone].a < 1))) {
                     k = WAVE_BAR_REST_SHADE;
                 }
 
@@ -1347,7 +1363,7 @@
                     return Math.round(t.c[i] * k);
                 };
 
-                out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + t.a + ")";
+                out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + Math.round(t.a * 1000) / 1000 + ")";
                 made.set(key, out);
             }
 
@@ -82811,7 +82827,8 @@
 
         return function (isPlayed, x, layer) {
 
-            let zone = isPlayed ? 1 : 0;
+            const base = isPlayed ? 1 : 0;
+            let zone = base;
 
             if (x < split) {
                 zone = 2;
@@ -82819,17 +82836,32 @@
                 zone = 3;
             }
 
-            const key = zone + layer;
+            const key = zone + (isPlayed ? "p" : "r") + layer;
             let out = made.get(key);
 
             if (out === undefined) {
 
-                const t = parts[zone];
+                let t = parts[zone];
                 let k = 1;
+
+                // The progress laid over the waveform's own color as much
+                // as it shows, so a progress color see-through, or partly
+                // so, lets the played and rest colors through rather than
+                // leaving the waveform black
+                if (zone >= 2 && t.a < 1) {
+
+                    const b = parts[base];
+                    const a = t.a + b.a * (1 - t.a);
+                    const mix = function (i) {
+                        return a > 0 ? (t.c[i] * t.a + b.c[i] * b.a * (1 - t.a)) / a : 0;
+                    };
+
+                    t = { c: [mix(0), mix(1), mix(2)], a: a };
+                }
 
                 if (layer === "dim") {
                     k = WAVE_DIM_SHADE;
-                } else if (layer === "bar" && zone === 0) {
+                } else if (layer === "bar" && (zone === 0 || (zone >= 2 && base === 0 && parts[zone].a < 1))) {
                     k = WAVE_BAR_REST_SHADE;
                 }
 
@@ -82837,7 +82869,7 @@
                     return Math.round(t.c[i] * k);
                 };
 
-                out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + t.a + ")";
+                out = "rgba(" + shade(0) + ", " + shade(1) + ", " + shade(2) + ", " + Math.round(t.a * 1000) / 1000 + ")";
                 made.set(key, out);
             }
 
