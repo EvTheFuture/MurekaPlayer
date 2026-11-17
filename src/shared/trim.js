@@ -297,8 +297,8 @@
     }
 
     // The question before trimming, a line each: the song, the part kept,
-    // the new length against the old, what goes from either end and the
-    // new title when it is another
+    // the new length against the old and what goes from either end. The
+    // new song keeps the title, unless it was changed in the Title field
     function trimAskPaint() {
 
         const el = trimUi.askText;
@@ -321,7 +321,7 @@
         }
 
         if (typed && typed !== was) {
-            rows.push(["New title", typed]);
+            rows.push(["Renamed to", typed]);
         }
 
         el.textContent = "";
