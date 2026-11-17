@@ -11,6 +11,11 @@ MUREKASYNC_PORT="8095"
 # Or one address and port instead, with MUREKASYNC_INTERFACE left empty
 #MUREKASYNC_LISTEN="10.0.0.1:8095"
 
+# How long the chat of a room is kept (24h, 12h, 30m and the like), 0
+# turns the chat off, and the messages kept a room at most
+#MUREKASYNC_CHAT_KEEP="24h"
+#MUREKASYNC_CHAT_MAX="200"
+
 # Who it runs as
 #MUREKASYNC_USER="nobody"
 #MUREKASYNC_GROUP="nobody"

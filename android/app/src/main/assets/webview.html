@@ -461,6 +461,77 @@
     }
 
     /* How many are in the room, a small pill on Together's corner */
+    /* The room's chat messages not read yet, orange on the upper corner */
+    .ctlChat {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        min-width: 1.4em;
+        height: 1.4em;
+        padding: 0 0.3em;
+        box-sizing: border-box;
+        border-radius: 0.7em;
+        background: #ffb454;
+        color: #000;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4em;
+        text-align: center;
+        pointer-events: none;
+    }
+
+    /* A chat message: who and when over the text, this player's own on
+       the right */
+    .chatList {
+        gap: 6px;
+    }
+
+    .chatMsg {
+        flex: 0 0 auto;
+        align-self: flex-start;
+        max-width: 85%;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: #1c1c21;
+    }
+
+    .chatMsg.mine {
+        align-self: flex-end;
+        background: rgba(72, 225, 235, 0.16);
+    }
+
+    .chatTop {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 0.75em;
+        color: var(--muted, #888);
+    }
+
+    .chatWho {
+        font-weight: 600;
+        color: #ffb454;
+    }
+
+    .chatMsg.mine .chatWho {
+        color: var(--accent);
+    }
+
+    .chatText {
+        line-height: 1.4;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: #eee;
+    }
+
+    .chatKeep {
+        font-size: 0.75em;
+        color: var(--muted, #888);
+    }
+
     .ctlCount {
         position: absolute;
         bottom: 4px;
@@ -13280,6 +13351,24 @@
         count.textContent = n > 0 ? String(n) : "";
         count.style.display = n > 0 ? "" : "none";
 
+        // Chat messages from the others not read yet, on the upper corner
+        let chat = $("togetherBtn").querySelector(".ctlChat");
+        const unread = s && Number(s.togetherChatUnread) > 0 ? Number(s.togetherChatUnread) : 0;
+
+        if (!chat) {
+
+            chat = document.createElement("span");
+            chat.className = "ctlChat";
+            $("togetherBtn").appendChild(chat);
+        }
+
+        chat.textContent = unread > 99 ? "99+" : unread > 0 ? String(unread) : "";
+        chat.style.display = unread > 0 ? "" : "none";
+
+        if (chatPaint) {
+            chatPaint(s);
+        }
+
         // Lit while the playing song is in the playlist songs went into last
         const toPl = s && s.toPlaylist ? s.toPlaylist : null;
 
@@ -25860,8 +25949,14 @@
 
         const on = state.together === "on";
         const room = String(state.togetherRoom || "");
+        const unread = Number(state.togetherChatUnread) || 0;
 
         openChoice(on ? "Listening together in " + room : "Listening together", [
+            state.togetherIn ? { icon: "comment", label: "Chat" + (unread > 0 ? " (" + unread + " new)" : ""), cls: unread > 0 ? "accent" : "", fn: function () {
+
+                closeSongMenu();
+                openTogetherChat();
+            } } : null,
             { icon: "together", label: "Active rooms", fn: function () {
 
                 closeSongMenu();
@@ -31478,6 +31573,219 @@
         const s = Math.max(0, Math.round(sec));
 
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    // The room's chat, read through the Android device: the messages,
+    // newest at the bottom, each with who and when, this player's own on
+    // the right, and a field to write in. Enter sends, Shift+Enter starts
+    // a new line. Read again as the phone's chat changes, and while open
+    // what comes counts as read. Escape or Close goes back
+    let chatPaint = null;
+
+    function openTogetherChat() {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const shut = document.createElement("button");
+        const keep = document.createElement("div");
+        const listBox = document.createElement("div");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const sendBtn = document.createElement("button");
+        let unBack = null;
+        let shownSeq = -1;
+        let asking = false;
+        let first = true;
+        const timer = setInterval(function () {
+            load();
+        }, 3000);
+        const close = function () {
+
+            clearInterval(timer);
+            chatPaint = null;
+            back.remove();
+
+            if (unBack) {
+                unBack();
+            }
+        };
+
+        back.className = "cmBack";
+        card.className = "cmCard";
+        head.className = "cmHead";
+        title.className = "cmTitle";
+        title.textContent = "Chat";
+        shut.type = "button";
+        shut.className = "chip";
+        shut.textContent = "Close";
+        shut.addEventListener("click", close);
+        keep.className = "chatKeep";
+        keep.style.display = "none";
+        listBox.className = "cmList chatList";
+        foot.className = "cmFoot";
+        field.rows = 2;
+        field.maxLength = 1000;
+        field.placeholder = "Write to everyone in the room";
+        sendBtn.type = "button";
+        sendBtn.className = "chip crPrimary";
+        sendBtn.textContent = "Send";
+        sendBtn.addEventListener("click", post);
+
+        // The page's own keys never hear what is typed here
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+
+                ev.preventDefault();
+                post();
+            } else if (ev.key === "Escape") {
+
+                ev.preventDefault();
+                close();
+            }
+        });
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        head.appendChild(title);
+        head.appendChild(shut);
+        foot.appendChild(field);
+        foot.appendChild(sendBtn);
+        card.appendChild(head);
+        card.appendChild(keep);
+        card.appendChild(listBox);
+        card.appendChild(foot);
+        back.appendChild(card);
+        document.body.appendChild(back);
+        unBack = onBack(close);
+        listBox.appendChild(loadingNode("Reading the chat"));
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text) {
+                return;
+            }
+
+            sendBtn.disabled = true;
+            crAsk({ op: "chatSend", text: text }).then(function (r) {
+
+                sendBtn.disabled = false;
+
+                if (r && r.ok) {
+
+                    field.value = "";
+                    field.focus();
+                    setTimeout(load, 600);
+                } else {
+                    toast("Message not sent" + (r && r.why ? ": " + r.why : ""), "bad");
+                }
+            });
+        }
+
+        function paint(r) {
+
+            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
+            const msgs = Array.isArray(r.msgs) ? r.msgs : [];
+
+            title.textContent = "Chat in " + String(r.room || "the room");
+            keep.textContent = String(r.keepText || "");
+            keep.style.display = keep.textContent ? "" : "none";
+            listBox.textContent = "";
+
+            for (const m of msgs) {
+
+                const mine = String(m.from) === String(r.me);
+                const box = document.createElement("div");
+                const top = document.createElement("div");
+                const who = document.createElement("span");
+                const when = document.createElement("span");
+                const text = document.createElement("div");
+
+                box.className = "chatMsg" + (mine ? " mine" : "");
+                top.className = "chatTop";
+                who.className = "chatWho";
+                who.textContent = mine ? "You" : String(m.from || "Someone");
+                when.textContent = chatWhen(Number(m.at) || 0);
+                text.className = "chatText";
+                text.textContent = String(m.text || "");
+                top.appendChild(who);
+                top.appendChild(when);
+                box.appendChild(top);
+                box.appendChild(text);
+                listBox.appendChild(box);
+            }
+
+            if (!msgs.length) {
+
+                const note = document.createElement("div");
+
+                note.className = "cmNote";
+                note.textContent = r.inRoom === false ? "Not in a room now. Join one to chat." : "No messages yet. What you write goes to everyone in the room.";
+                listBox.appendChild(note);
+            }
+
+            if (atEnd || first) {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+
+            first = false;
+        }
+
+        function load() {
+
+            if (asking) {
+                return;
+            }
+
+            asking = true;
+            crAsk({ op: "chatList", seen: true }).then(function (r) {
+
+                asking = false;
+
+                if (!r || !r.ok) {
+                    return;
+                }
+
+                if (Number(r.seq) !== shownSeq || first) {
+
+                    shownSeq = Number(r.seq);
+                    paint(r);
+                }
+            });
+        }
+
+        // The phone's chat changed: read again at once
+        chatPaint = function (s) {
+
+            if (s && Number(s.togetherChatSeq) !== shownSeq) {
+                load();
+            }
+        };
+        load();
+        field.focus();
+    }
+
+    // The clock time of a message, with the day when not today
+    function chatWhen(at) {
+
+        if (!at) {
+            return "";
+        }
+
+        const d = new Date(at);
+        const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+        return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
     }
 
     // Mureka's notifications, newest first, read through the Android

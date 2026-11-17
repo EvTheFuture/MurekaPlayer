@@ -675,6 +675,42 @@ final class Sync {
         });
     }
 
+    // A chat message to everyone in the room, JSON with from and text. It
+    // comes back on the stream as everyone's does
+    static void chat(String url, String room, String json) {
+
+        Relay r = parse(url);
+
+        if (r == null || !roomOk(room) || json == null) {
+
+            tell("chatSent", "ok", false, "error", "The address or the room is not right");
+            return;
+        }
+
+        ASK.execute(() -> {
+
+            try {
+
+                JSONObject msg = new JSONObject(json);
+                Answer a = exchange(r, "POST", "/room/" + room + "/chat", null, msg.toString().getBytes(StandardCharsets.UTF_8));
+
+                if (a.status == 200) {
+                    tell("chatSent", "ok", true, null, null);
+                    return;
+                }
+
+                // A relay from before the chat knows no such path
+                JSONObject answer = new JSONObject(a.body.isEmpty() ? "{}" : a.body);
+                String why = a.status == 404 ? "The relay has no chat yet, it needs an update"
+                    : answer.optString("error", "HTTP " + a.status);
+
+                tell("chatSent", "ok", false, "error", why);
+            } catch (Exception e) {
+                tell("chatSent", "ok", false, "error", "The relay could not be reached");
+            }
+        });
+    }
+
     // How this device stands with the relay, measured afresh: the round
     // trip at best and at the middle of eight tries, and the clock
     static void timing(String url) {
@@ -827,7 +863,7 @@ final class Sync {
                             return "end";
                         }
 
-                        if ("state".equals(kind) || "cmd".equals(kind)) {
+                        if ("state".equals(kind) || "cmd".equals(kind) || "chat".equals(kind) || "chatlog".equals(kind)) {
                             streamEvent(kind, data.toString());
                         }
                     }

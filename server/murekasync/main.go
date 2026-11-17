@@ -23,7 +23,9 @@
 // Players listening along read the room as a stream of events, and may
 // post commands to it (pause, skip, a song to play next), which reach the
 // sharing player on a stream of its own, read with its key. It applies
-// them and the state that follows goes out to all. Nothing connects to a
+// them and the state that follows goes out to all. Everyone in a room may
+// also chat: a message goes out to all at once, and is kept for those who
+// come later, for a day by default, then it goes. Nothing connects to a
 // player, and the relay keeps nothing on disk. Every answer carries the
 // relay's own time in milliseconds, which the players use as their common
 // clock
@@ -45,6 +47,7 @@ import (
     "strings"
     "sync"
     "time"
+    "unicode/utf8"
 )
 
 const (
@@ -70,6 +73,15 @@ const (
 
     // A comment line keeps a quiet stream open through every proxy
     pingEvery = 15 * time.Second
+
+    // A chat message's text and its sender's name at most, in letters,
+    // and the largest body of one
+    maxChatText = 1000
+    maxChatFrom = 40
+    maxChatBody = 8 * 1024
+
+    // Rooms with chat kept at most, a room's chat outliving the room
+    maxChats = 128
 )
 
 // A room name: lower case letters, digits and hyphens
@@ -95,9 +107,26 @@ type room struct {
     cmdCount  int
 }
 
+// A chat message as it is kept and sent: its number, when the relay got
+// it, who wrote it and what
+type chatMsg struct {
+    ID   int64  `json:"id"`
+    At   int64  `json:"at"`
+    From string `json:"from"`
+    Text string `json:"text"`
+}
+
 type relay struct {
     mu    sync.Mutex
     rooms map[string]*room
+
+    // The chat of each room by its name, kept on when the room closes,
+    // until its messages are older than chatKeep. No more than chatMax a
+    // room, the oldest going first. chatKeep 0 turns the chat off
+    chats    map[string][]chatMsg
+    chatKeep time.Duration
+    chatMax  int
+    chatNext int64
 }
 
 func nowMs() int64 {
@@ -183,7 +212,8 @@ func (r *relay) close(name string, rm *room) {
     delete(r.rooms, name)
 }
 
-// Rooms nobody posted to for a while are closed
+// Rooms nobody posted to for a while are closed, and chat messages
+// older than chatKeep go
 func (r *relay) sweep() {
 
     for {
@@ -199,8 +229,52 @@ func (r *relay) sweep() {
             }
         }
 
+        for name := range r.chats {
+            r.chatFresh(name)
+        }
+
         r.mu.Unlock()
     }
+}
+
+// A room's chat without the messages too old to keep, the room's entry
+// gone when none is left. Called with the lock held
+func (r *relay) chatFresh(name string) []chatMsg {
+
+    msgs := r.chats[name]
+    oldest := nowMs() - r.chatKeep.Milliseconds()
+    i := 0
+
+    for i < len(msgs) && msgs[i].At < oldest {
+        i++
+    }
+
+    msgs = msgs[i:]
+
+    if len(msgs) == 0 {
+        delete(r.chats, name)
+        return nil
+    }
+
+    r.chats[name] = msgs
+
+    return msgs
+}
+
+// The chat as one event's body: how long messages are kept, in
+// milliseconds, and the messages kept now, oldest first. Called with the
+// lock held
+func (r *relay) chatLog(name string) []byte {
+
+    msgs := r.chatFresh(name)
+
+    if msgs == nil {
+        msgs = []chatMsg{}
+    }
+
+    body, _ := json.Marshal(map[string]interface{}{"keep": r.chatKeep.Milliseconds(), "msgs": msgs})
+
+    return body
 }
 
 func (r *relay) handleTime(w http.ResponseWriter, req *http.Request) {
@@ -242,8 +316,10 @@ func (r *relay) handleRooms(w http.ResponseWriter, req *http.Request) {
 
 // /room/<name> takes the sharing player's state (POST) or its leaving
 // (DELETE), /room/<name>/events is the stream to listen to,
-// /room/<name>/cmd takes a command from one listening along (POST) and
-// /room/<name>/cmds is the sharing player's stream of them
+// /room/<name>/cmd takes a command from one listening along (POST),
+// /room/<name>/cmds is the sharing player's stream of them and
+// /room/<name>/chat takes a chat message (POST) or gives the messages kept
+// (GET)
 func (r *relay) handleRoom(w http.ResponseWriter, req *http.Request) {
 
     rest := strings.TrimPrefix(req.URL.Path, "/room/")
@@ -278,6 +354,24 @@ func (r *relay) handleRoom(w http.ResponseWriter, req *http.Request) {
         }
 
         r.command(w, req, name)
+        return
+    case "chat":
+
+        if req.Method == http.MethodPost {
+            r.chat(w, req, name)
+        } else if req.Method == http.MethodGet {
+
+            r.mu.Lock()
+            body := r.chatLog(name)
+            r.mu.Unlock()
+
+            w.Header().Set("Content-Type", "application/json")
+            w.Header().Set("Cache-Control", "no-store")
+            _, _ = fmt.Fprintf(w, "{\"t\":%d,\"chat\":%s}\n", nowMs(), body)
+        } else {
+            fail(w, http.StatusMethodNotAllowed, "GET or POST")
+        }
+
         return
     case "":
     default:
@@ -460,6 +554,101 @@ func (r *relay) command(w http.ResponseWriter, req *http.Request, name string) {
     writeJSON(w, http.StatusOK, map[string]int64{"t": at})
 }
 
+// A chat message from anyone in the room, kept and sent to everyone in
+// it, those listening along and the player holding it. JSON with from
+// and text
+func (r *relay) chat(w http.ResponseWriter, req *http.Request, name string) {
+
+    if r.chatKeep <= 0 {
+        fail(w, http.StatusForbidden, "chat is turned off on this relay")
+        return
+    }
+
+    body, err := io.ReadAll(io.LimitReader(req.Body, maxChatBody+1))
+
+    if err != nil || len(body) > maxChatBody {
+        fail(w, http.StatusRequestEntityTooLarge, "message too large")
+        return
+    }
+
+    var in struct {
+        From string `json:"from"`
+        Text string `json:"text"`
+    }
+
+    if json.Unmarshal(body, &in) != nil {
+        fail(w, http.StatusBadRequest, "message is not JSON")
+        return
+    }
+
+    text := strings.TrimSpace(in.Text)
+    from := strings.TrimSpace(in.From)
+
+    if text == "" {
+        fail(w, http.StatusBadRequest, "empty message")
+        return
+    }
+
+    if utf8.RuneCountInString(text) > maxChatText || utf8.RuneCountInString(from) > maxChatFrom {
+        fail(w, http.StatusRequestEntityTooLarge, "message too long")
+        return
+    }
+
+    if from == "" {
+        from = "Someone"
+    }
+
+    at := nowMs()
+
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    rm := r.rooms[name]
+
+    if rm == nil {
+        fail(w, http.StatusConflict, "the room is not open")
+        return
+    }
+
+    second := at / 1000
+
+    if rm.cmdSecond != second {
+        rm.cmdSecond = second
+        rm.cmdCount = 0
+    }
+
+    rm.cmdCount++
+
+    if rm.cmdCount > maxCommandsPerSecond {
+        fail(w, http.StatusTooManyRequests, "too many messages")
+        return
+    }
+
+    msgs := r.chatFresh(name)
+
+    if msgs == nil && len(r.chats) >= maxChats {
+        fail(w, http.StatusServiceUnavailable, "too many rooms with chat")
+        return
+    }
+
+    r.chatNext++
+    msg := chatMsg{ID: r.chatNext, At: at, From: from, Text: text}
+    msgs = append(msgs, msg)
+
+    if len(msgs) > r.chatMax {
+        msgs = msgs[len(msgs)-r.chatMax:]
+    }
+
+    r.chats[name] = msgs
+
+    out, _ := json.Marshal(msg)
+    ev := eventOf("chat", "msg", out, at)
+
+    sendTo(rm.listeners, ev)
+    sendTo(rm.owners, ev)
+    writeJSON(w, http.StatusOK, map[string]interface{}{"t": at, "id": msg.ID})
+}
+
 // The stream of a room: the last state at once, then every new one, a
 // comment line now and then, and an end event when the room closes. With
 // owner, the sharing player's stream of commands, for its key only
@@ -506,6 +695,11 @@ func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string, ow
 
     if rm.state != nil && !owner {
         ch <- event("state", rm.state, rm.stateAt)
+    }
+
+    // The chat kept so far, for one coming in
+    if r.chatKeep > 0 {
+        ch <- eventOf("chatlog", "chat", r.chatLog(name), nowMs())
     }
 
     r.mu.Unlock()
@@ -640,7 +834,13 @@ func main() {
     iface := flag.String("interface", "", "listen on the addresses of this network interface instead, wg0 for example")
     port := flag.Int("port", 8095, "the port to listen on with -interface")
     wait := flag.Duration("wait", 2*time.Minute, "how long to wait for the interface to get an address")
+    chatKeep := flag.Duration("chat-keep", 24*time.Hour, "how long a room's chat messages are kept, 0 turns the chat off")
+    chatMax := flag.Int("chat-max", 200, "chat messages kept a room at most, the oldest going first")
     flag.Parse()
+
+    if *chatMax < 1 {
+        *chatMax = 1
+    }
 
     addrs, err := listenAddrs(*listen, *iface, *port, *wait)
 
@@ -648,7 +848,13 @@ func main() {
         log.Fatal(err)
     }
 
-    r := &relay{rooms: map[string]*room{}}
+    r := &relay{rooms: map[string]*room{}, chats: map[string][]chatMsg{}, chatKeep: *chatKeep, chatMax: *chatMax}
+
+    if *chatKeep > 0 {
+        log.Printf("chat messages kept for %s, %d a room at most", *chatKeep, *chatMax)
+    } else {
+        log.Printf("chat turned off")
+    }
 
     go r.sweep()
 

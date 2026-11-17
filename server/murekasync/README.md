@@ -79,9 +79,28 @@ example `http://10.0.0.1:8095`.
   of commands, each as `event: cmd` with
   `{"t": ..., "at": <relay time received>, "cmd": {...}}`. It applies them,
   and the state that follows goes out to everyone.
+- `POST /room/<room>/chat`: a chat message from anyone in the room,
+  `{"from": "<name>", "text": "..."}`, up to 1000 letters of text and 40
+  of name. It goes out at once to those listening along and to the player
+  holding the room, as `event: chat` with
+  `{"t": ..., "at": ..., "msg": {"id", "at", "from", "text"}}`, and is
+  kept. 409 when the room is not open, 403 with the chat turned off, at
+  most 20 a second a room, together with the commands.
+- `GET /room/<room>/chat`: the messages kept,
+  `{"t": ..., "chat": {"keep": <ms>, "msgs": [...]}}`, oldest first. A
+  player coming into the room gets the same at once on its stream, as
+  `event: chatlog`.
 - `GET /rooms`: the open rooms with the name people gave each (`label`,
   from the state's `room`), the holding player's name, the song and
   whether it plays, for picking one to join.
+
+The chat of a room is kept in memory only, for 24 hours by default, and
+outlives the room, so it is there again when the room opens again by the
+same name. `MUREKASYNC_CHAT_KEEP` in `murekasync.confd` (`-chat-keep`,
+24h, 12h, 30m and the like) sets how long, 0 turns the chat off, and
+`MUREKASYNC_CHAT_MAX` (`-chat-max`, 200) how many messages a room keeps at
+most, the oldest going first. A restart of the relay clears it. At most
+128 rooms with chat.
 
 A room whose player posted nothing for 20 s may be taken over by another
 player with its own key, so the others carry on when the player holding it

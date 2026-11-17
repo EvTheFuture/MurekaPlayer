@@ -1382,6 +1382,7 @@ In development.
 - **The header's badges all the same height, with the same room between them** in the web view, the bell included, whichever are shown and however they are ordered.
 - **One veil behind every dialog.** The page behind a dialog is dimmed and blurred the same way everywhere, as behind the Bluetooth devices: one rule in the web view, and one look for the player's dialogs.
 - **The Bluetooth devices keep their order** in the web view when one connects or goes away: devices that play sound first, then by name, no longer the connected ones first.
+- **Chat in Listening together.** Everyone in a room can write to the others: Chat is first in the Together menu (swipe up on Together, or its menu in the web view), with the count of unread messages from the others on the Together button's upper corner and a toast for each new one while the chat is not open. Messages show who and when, your own on the right; Enter sends, Shift+Enter starts a new line. The relay sends each message to everyone at once and keeps them for those who join later, for 24 hours by default, then they go: `MUREKASYNC_CHAT_KEEP` (`-chat-keep`) sets how long, 0 turns the chat off, and `MUREKASYNC_CHAT_MAX` (`-chat-max`, 200) how many a room keeps. The chat outlives the room, in memory only. In the player and the web view, with the app; the relay needs the update.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

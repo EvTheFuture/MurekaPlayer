@@ -14,6 +14,8 @@ description="Mureka Player listening together relay"
 : ${MUREKASYNC_WAIT:="2m"}
 : ${MUREKASYNC_USER:="nobody"}
 : ${MUREKASYNC_GROUP:="nobody"}
+: ${MUREKASYNC_CHAT_KEEP:="24h"}
+: ${MUREKASYNC_CHAT_MAX:="200"}
 
 command="/usr/local/bin/murekasync"
 
@@ -22,6 +24,8 @@ if [ -n "${MUREKASYNC_INTERFACE}" ]; then
 else
     command_args="-listen ${MUREKASYNC_LISTEN}"
 fi
+
+command_args="${command_args} -chat-keep ${MUREKASYNC_CHAT_KEEP} -chat-max ${MUREKASYNC_CHAT_MAX}"
 
 command_user="${MUREKASYNC_USER}:${MUREKASYNC_GROUP}"
 supervisor="supervise-daemon"

@@ -1419,6 +1419,14 @@ final class PlayerWeb {
         }
 
         @JavascriptInterface
+        public void syncChat(String url, String room, String json) {
+
+            if (onMureka) {
+                Sync.chat(url, room, json);
+            }
+        }
+
+        @JavascriptInterface
         public void syncTiming(String url) {
 
             if (onMureka) {

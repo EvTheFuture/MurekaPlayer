@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.217";
+    const VERSION = "2.0.1.218";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -37237,6 +37237,8 @@
             togetherReady: syncRelayOk(syncRelay()),
             addChoice: settings.addChoice || "",
             togetherIn: syncInRoom(),
+            togetherChatUnread: chatUnread(),
+            togetherChatSeq: syncChat.seq,
             pauseChoice: settings.syncPauseChoice || "",
             stopChoice: settings.syncStopChoice || "",
             togetherText: settings.syncOn === true ? syncStatusText() : "Listening together",
@@ -40782,6 +40784,7 @@
             ctl.title = title;
             paintCtrl(ctl, settings.syncOn === true ? "fill" : "plain");
             paintSyncCount(ctl, count, "#1d1d22", ACCENT);
+            paintChatCount(ctl, chatUnread());
         }
 
         if (syncHeadBtn) {
@@ -40790,6 +40793,7 @@
             syncHeadBtn.style.color = settings.syncOn === true ? ACCENT : "#aaa";
             syncHeadBtn.title = title;
             paintSyncCount(syncHeadBtn, count, ACCENT, "#000");
+            paintChatCount(syncHeadBtn, chatUnread());
         }
     }
 
@@ -40814,6 +40818,362 @@
         pill.style.cssText = "position:absolute;bottom:2px;right:2px;min-width:14px;height:14px;padding:0 3px;box-sizing:border-box;border-radius:7px;"
             + "background:" + back + ";color:" + fore + ";font-size:9px;font-weight:700;line-height:14px;text-align:center;pointer-events:none;"
             + (n > 0 ? "" : "display:none");
+    }
+
+    // ---- The room's chat ----
+    // Everyone in a room may write to the others. The relay sends each
+    // message to all at once and keeps them for those who come later, for
+    // as long as it is set to, a day by default, then they go. Kept here
+    // for the room this player is in, the time of the newest one read kept
+    // a room
+    const CHAT_SEEN_KEY = "mureka_chat_seen_v1";
+    const CHAT_TEXT_MAX = 1000;
+    let syncChat = { room: "", keep: 0, msgs: [], seq: 0 };
+    let syncChatRepaint = null;
+
+    // When a web view last read the chat while it had it open
+    let chatWebAt = 0;
+
+    function chatSeenAll() {
+
+        try {
+
+            const o = JSON.parse(localStorage.getItem(CHAT_SEEN_KEY) || "{}");
+
+            return o && typeof o === "object" ? o : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    // The newest message of the room read here
+    function chatSeen() {
+        return Number(chatSeenAll()[syncChat.room]) || 0;
+    }
+
+    function chatMarkSeen() {
+
+        const last = syncChat.msgs.length ? Number(syncChat.msgs[syncChat.msgs.length - 1].at) || 0 : 0;
+        const all = chatSeenAll();
+
+        if (!syncChat.room || last <= (Number(all[syncChat.room]) || 0)) {
+            return;
+        }
+
+        all[syncChat.room] = last;
+
+        try {
+            localStorage.setItem(CHAT_SEEN_KEY, JSON.stringify(all));
+        } catch (e) {
+        }
+
+        syncPaint();
+        publishHostSoon();
+    }
+
+    // The messages in the room from the others not read yet, none while
+    // the chat is open
+    function chatUnread() {
+
+        if (syncChatRepaint || Date.now() - chatWebAt < 5000 || !syncInRoom()) {
+            return 0;
+        }
+
+        const seen = chatSeen();
+        const me = syncName();
+
+        return syncChat.msgs.filter(function (m) {
+            return Number(m.at) > seen && m.from !== me;
+        }).length;
+    }
+
+    // One message as the lists show it
+    function chatMsgOf(m) {
+
+        return {
+            id: Number(m && m.id) || 0,
+            at: Number(m && m.at) || 0,
+            from: String(m && m.from || "Someone").slice(0, 40),
+            text: String(m && m.text || "").slice(0, CHAT_TEXT_MAX)
+        };
+    }
+
+    // The chat kept on the relay, as it comes when this player's stream
+    // opens, or a new message. A message from another tells as a toast
+    // while the chat is not open
+    function chatHeard(kind, data) {
+
+        const room = syncRoomName();
+
+        if (syncChat.room !== room) {
+            syncChat = { room: room, keep: 0, msgs: [], seq: syncChat.seq + 1 };
+        }
+
+        if (kind === "chatlog") {
+
+            const c = data && data.chat ? data.chat : {};
+
+            syncChat.keep = Number(c.keep) || 0;
+            syncChat.msgs = (Array.isArray(c.msgs) ? c.msgs : []).map(chatMsgOf);
+        } else {
+
+            const m = chatMsgOf(data && data.msg);
+
+            if (!m.text || syncChat.msgs.some(function (x) {
+                return x.id === m.id && x.at === m.at;
+            })) {
+                return;
+            }
+
+            syncChat.msgs.push(m);
+
+            if (syncChat.msgs.length > 300) {
+                syncChat.msgs.splice(0, syncChat.msgs.length - 300);
+            }
+
+            if (!syncChatRepaint && Date.now() - chatWebAt > 5000 && m.from !== syncName()) {
+                showToast(m.from + ": " + (m.text.length > 120 ? m.text.slice(0, 120) + "..." : m.text), true);
+            }
+        }
+
+        syncChat.seq += 1;
+
+        if (syncChatRepaint) {
+
+            syncChatRepaint();
+            chatMarkSeen();
+        }
+
+        syncPaint();
+        publishHostSoon();
+    }
+
+    // A message to everyone in the room. It shows when the relay sends it
+    // back, as everyone's does. Answers why it could not go, or ""
+    function chatSend(text) {
+
+        const t = String(text || "").trim().slice(0, CHAT_TEXT_MAX);
+
+        if (!t) {
+            return "Nothing to send";
+        }
+
+        if (!syncInRoom()) {
+            return "Join a room first";
+        }
+
+        if (!window.MurekaHost || typeof window.MurekaHost.syncChat !== "function") {
+            return "The app needs an update for the chat";
+        }
+
+        window.MurekaHost.syncChat(syncRelay(), syncRoomName(), JSON.stringify({ from: syncName(), text: t }));
+
+        return "";
+    }
+
+    // How long the relay keeps the messages, in words
+    function chatKeepText() {
+
+        const ms = syncChat.keep;
+
+        if (!(ms > 0)) {
+            return "";
+        }
+
+        const h = ms / 3600000;
+
+        return "Messages go after " + (h >= 1 ? (Math.round(h * 10) / 10) + " h" : Math.max(1, Math.round(ms / 60000)) + " min")
+            + ", for everyone.";
+    }
+
+    // The clock time of a message, with the day when not today
+    function chatWhen(at) {
+
+        if (!at) {
+            return "";
+        }
+
+        const d = new Date(at);
+        const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+        return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
+    }
+
+    // A small orange pill with the unread count on a Together button's
+    // upper corner
+    function paintChatCount(btn, n) {
+
+        let pill = btn.querySelector(".mp-chat-count");
+
+        if (!pill) {
+
+            pill = document.createElement("span");
+            pill.className = "mp-chat-count";
+            btn.appendChild(pill);
+
+            if (getComputedStyle(btn).position === "static") {
+                btn.style.position = "relative";
+            }
+        }
+
+        pill.textContent = n > 0 ? String(n > 99 ? "99+" : n) : "";
+        pill.style.cssText = "position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;box-sizing:border-box;border-radius:7px;"
+            + "background:#ffb454;color:#000;font-size:9px;font-weight:700;line-height:14px;text-align:center;pointer-events:none;"
+            + (n > 0 ? "" : "display:none");
+    }
+
+    // The chat: the messages, newest at the bottom, each with who and when,
+    // this player's own on the right, and a field to write in. Enter sends,
+    // Shift+Enter starts a new line. Escape or Close goes back
+    function openSyncChat() {
+
+        if (!panelEl) {
+            return;
+        }
+
+        if (!syncInRoom()) {
+
+            showToast("Join a room first", false);
+            return;
+        }
+
+        const dialog = makeDialog({
+            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
+                + "height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px",
+            onCancel: function () {
+                syncChatRepaint = null;
+                syncPaint();
+            }
+        });
+        const card = dialog.card;
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const shut = makeButton("Close", "#444", "#fff", function () {
+            done();
+        });
+        const note = document.createElement("div");
+        const listBox = document.createElement("div");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const send = makeButton("Send", ACCENT, "#000", function () {
+            post();
+        });
+        let shownSeq = -1;
+        const done = function () {
+
+            syncChatRepaint = null;
+            dialog.close();
+            syncPaint();
+            publishHostSoon();
+        };
+
+        head.classList.add("mp-row8");
+        title.textContent = "Chat in " + syncRoomLabel();
+        title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        shut.style.flex = "0 0 auto";
+        head.appendChild(title);
+        head.appendChild(shut);
+        note.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        listBox.style.cssText = "flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"
+            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
+        foot.classList.add("mp-row8");
+        field.rows = 2;
+        field.maxLength = CHAT_TEXT_MAX;
+        field.placeholder = "Write to everyone in the room";
+        field.style.cssText = "flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:6px;"
+            + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none";
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+
+                ev.preventDefault();
+                post();
+            }
+        });
+        send.style.flex = "0 0 auto";
+        foot.appendChild(field);
+        foot.appendChild(send);
+        card.appendChild(head);
+        card.appendChild(note);
+        card.appendChild(listBox);
+        card.appendChild(foot);
+        panelEl.appendChild(dialog.back);
+
+        function post() {
+
+            const why = chatSend(field.value);
+
+            if (why) {
+
+                showToast(why, false);
+                return;
+            }
+
+            field.value = "";
+            field.focus();
+        }
+
+        function paint() {
+
+            if (shownSeq === syncChat.seq) {
+                return;
+            }
+
+            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
+            const me = syncName();
+
+            shownSeq = syncChat.seq;
+            note.textContent = chatKeepText();
+            note.style.display = note.textContent ? "" : "none";
+            listBox.textContent = "";
+
+            for (const m of syncChat.msgs) {
+
+                const mine = m.from === me;
+                const box = document.createElement("div");
+                const top = document.createElement("div");
+                const who = document.createElement("span");
+                const when = document.createElement("span");
+                const text = document.createElement("div");
+
+                box.style.cssText = "max-width:85%;padding:6px 10px;border-radius:10px;display:flex;flex-direction:column;gap:2px;"
+                    + (mine ? "align-self:flex-end;background:rgba(" + ACCENT_RGB + ",0.16)" : "align-self:flex-start;background:#1c1c21");
+                top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:11px";
+                who.textContent = mine ? "You" : m.from;
+                who.style.cssText = "font-weight:600;color:" + (mine ? ACCENT : "#ffb454");
+                when.textContent = chatWhen(m.at);
+                when.style.cssText = "color:#888";
+                text.textContent = m.text;
+                text.style.cssText = "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:#eee";
+                top.appendChild(who);
+                top.appendChild(when);
+                box.appendChild(top);
+                box.appendChild(text);
+                listBox.appendChild(box);
+            }
+
+            if (!syncChat.msgs.length) {
+
+                const empty = document.createElement("div");
+
+                empty.textContent = "No messages yet. What you write goes to everyone in the room.";
+                empty.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
+                listBox.appendChild(empty);
+            }
+
+            if (atEnd || shownSeq <= 1) {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+        }
+
+        syncChatRepaint = paint;
+        paint();
+        listBox.scrollTop = listBox.scrollHeight;
+        chatMarkSeen();
+        syncPaint();
+        publishHostSoon();
     }
 
     // How listening together stands, in one line
@@ -42164,6 +42524,22 @@
             return;
         }
 
+        // The room's chat, on whichever stream this player reads
+        if ((m.type === "chat" || m.type === "chatlog") && m.data) {
+
+            chatHeard(m.type, m.data);
+            return;
+        }
+
+        if (m.type === "chatSent") {
+
+            if (m.ok === false) {
+                showToast("Message not sent: " + String(m.error || "no answer"), false);
+            }
+
+            return;
+        }
+
         // A command for the sharing player here
         if (m.type === "cmd" && m.data && m.data.cmd) {
 
@@ -42537,6 +42913,13 @@
             { label: "Active rooms", fn: openSyncRoomsMenu },
             { label: "Create a new room", fn: askSyncNewRoom }
         ];
+
+        if (syncInRoom()) {
+
+            const n = chatUnread();
+
+            choices.unshift({ label: "Chat" + (n > 0 ? " (" + n + " new)" : ""), fn: openSyncChat });
+        }
 
         if (settings.syncOn === true) {
 
@@ -71583,6 +71966,22 @@
             likeComment({ id: String(a.id || ""), level: Number(a.level) || 1 }).then(function (r) {
                 reply({ ok: true, liked: r.liked, likes: r.likes });
             }, failed);
+        } else if (op === "chatList") {
+
+            // The web view's chat open: what is read there counts as read
+            if (a.seen === true) {
+
+                chatWebAt = Date.now();
+                chatMarkSeen();
+            }
+
+            reply({ ok: true, room: syncRoomLabel(), inRoom: syncInRoom(), me: syncName(), keep: syncChat.keep,
+                keepText: chatKeepText(), seq: syncChat.seq, msgs: syncChat.msgs });
+        } else if (op === "chatSend") {
+
+            const why = chatSend(String(a.text || ""));
+
+            reply(why ? { ok: false, why: why } : { ok: true });
         } else if (op === "msgList") {
 
             const after = String(a.after || "");
@@ -75911,6 +76310,77 @@
     }
 
     /* How many are in the room, a small pill on Together's corner */
+    /* The room's chat messages not read yet, orange on the upper corner */
+    .ctlChat {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        min-width: 1.4em;
+        height: 1.4em;
+        padding: 0 0.3em;
+        box-sizing: border-box;
+        border-radius: 0.7em;
+        background: #ffb454;
+        color: #000;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4em;
+        text-align: center;
+        pointer-events: none;
+    }
+
+    /* A chat message: who and when over the text, this player's own on
+       the right */
+    .chatList {
+        gap: 6px;
+    }
+
+    .chatMsg {
+        flex: 0 0 auto;
+        align-self: flex-start;
+        max-width: 85%;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: #1c1c21;
+    }
+
+    .chatMsg.mine {
+        align-self: flex-end;
+        background: rgba(72, 225, 235, 0.16);
+    }
+
+    .chatTop {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 0.75em;
+        color: var(--muted, #888);
+    }
+
+    .chatWho {
+        font-weight: 600;
+        color: #ffb454;
+    }
+
+    .chatMsg.mine .chatWho {
+        color: var(--accent);
+    }
+
+    .chatText {
+        line-height: 1.4;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: #eee;
+    }
+
+    .chatKeep {
+        font-size: 0.75em;
+        color: var(--muted, #888);
+    }
+
     .ctlCount {
         position: absolute;
         bottom: 4px;
@@ -88730,6 +89200,24 @@
         count.textContent = n > 0 ? String(n) : "";
         count.style.display = n > 0 ? "" : "none";
 
+        // Chat messages from the others not read yet, on the upper corner
+        let chat = $("togetherBtn").querySelector(".ctlChat");
+        const unread = s && Number(s.togetherChatUnread) > 0 ? Number(s.togetherChatUnread) : 0;
+
+        if (!chat) {
+
+            chat = document.createElement("span");
+            chat.className = "ctlChat";
+            $("togetherBtn").appendChild(chat);
+        }
+
+        chat.textContent = unread > 99 ? "99+" : unread > 0 ? String(unread) : "";
+        chat.style.display = unread > 0 ? "" : "none";
+
+        if (chatPaint) {
+            chatPaint(s);
+        }
+
         // Lit while the playing song is in the playlist songs went into last
         const toPl = s && s.toPlaylist ? s.toPlaylist : null;
 
@@ -101310,8 +101798,14 @@
 
         const on = state.together === "on";
         const room = String(state.togetherRoom || "");
+        const unread = Number(state.togetherChatUnread) || 0;
 
         openChoice(on ? "Listening together in " + room : "Listening together", [
+            state.togetherIn ? { icon: "comment", label: "Chat" + (unread > 0 ? " (" + unread + " new)" : ""), cls: unread > 0 ? "accent" : "", fn: function () {
+
+                closeSongMenu();
+                openTogetherChat();
+            } } : null,
             { icon: "together", label: "Active rooms", fn: function () {
 
                 closeSongMenu();
@@ -106928,6 +107422,219 @@
         const s = Math.max(0, Math.round(sec));
 
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    // The room's chat, read through the Android device: the messages,
+    // newest at the bottom, each with who and when, this player's own on
+    // the right, and a field to write in. Enter sends, Shift+Enter starts
+    // a new line. Read again as the phone's chat changes, and while open
+    // what comes counts as read. Escape or Close goes back
+    let chatPaint = null;
+
+    function openTogetherChat() {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const shut = document.createElement("button");
+        const keep = document.createElement("div");
+        const listBox = document.createElement("div");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const sendBtn = document.createElement("button");
+        let unBack = null;
+        let shownSeq = -1;
+        let asking = false;
+        let first = true;
+        const timer = setInterval(function () {
+            load();
+        }, 3000);
+        const close = function () {
+
+            clearInterval(timer);
+            chatPaint = null;
+            back.remove();
+
+            if (unBack) {
+                unBack();
+            }
+        };
+
+        back.className = "cmBack";
+        card.className = "cmCard";
+        head.className = "cmHead";
+        title.className = "cmTitle";
+        title.textContent = "Chat";
+        shut.type = "button";
+        shut.className = "chip";
+        shut.textContent = "Close";
+        shut.addEventListener("click", close);
+        keep.className = "chatKeep";
+        keep.style.display = "none";
+        listBox.className = "cmList chatList";
+        foot.className = "cmFoot";
+        field.rows = 2;
+        field.maxLength = 1000;
+        field.placeholder = "Write to everyone in the room";
+        sendBtn.type = "button";
+        sendBtn.className = "chip crPrimary";
+        sendBtn.textContent = "Send";
+        sendBtn.addEventListener("click", post);
+
+        // The page's own keys never hear what is typed here
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+
+                ev.preventDefault();
+                post();
+            } else if (ev.key === "Escape") {
+
+                ev.preventDefault();
+                close();
+            }
+        });
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        head.appendChild(title);
+        head.appendChild(shut);
+        foot.appendChild(field);
+        foot.appendChild(sendBtn);
+        card.appendChild(head);
+        card.appendChild(keep);
+        card.appendChild(listBox);
+        card.appendChild(foot);
+        back.appendChild(card);
+        document.body.appendChild(back);
+        unBack = onBack(close);
+        listBox.appendChild(loadingNode("Reading the chat"));
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text) {
+                return;
+            }
+
+            sendBtn.disabled = true;
+            crAsk({ op: "chatSend", text: text }).then(function (r) {
+
+                sendBtn.disabled = false;
+
+                if (r && r.ok) {
+
+                    field.value = "";
+                    field.focus();
+                    setTimeout(load, 600);
+                } else {
+                    toast("Message not sent" + (r && r.why ? ": " + r.why : ""), "bad");
+                }
+            });
+        }
+
+        function paint(r) {
+
+            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
+            const msgs = Array.isArray(r.msgs) ? r.msgs : [];
+
+            title.textContent = "Chat in " + String(r.room || "the room");
+            keep.textContent = String(r.keepText || "");
+            keep.style.display = keep.textContent ? "" : "none";
+            listBox.textContent = "";
+
+            for (const m of msgs) {
+
+                const mine = String(m.from) === String(r.me);
+                const box = document.createElement("div");
+                const top = document.createElement("div");
+                const who = document.createElement("span");
+                const when = document.createElement("span");
+                const text = document.createElement("div");
+
+                box.className = "chatMsg" + (mine ? " mine" : "");
+                top.className = "chatTop";
+                who.className = "chatWho";
+                who.textContent = mine ? "You" : String(m.from || "Someone");
+                when.textContent = chatWhen(Number(m.at) || 0);
+                text.className = "chatText";
+                text.textContent = String(m.text || "");
+                top.appendChild(who);
+                top.appendChild(when);
+                box.appendChild(top);
+                box.appendChild(text);
+                listBox.appendChild(box);
+            }
+
+            if (!msgs.length) {
+
+                const note = document.createElement("div");
+
+                note.className = "cmNote";
+                note.textContent = r.inRoom === false ? "Not in a room now. Join one to chat." : "No messages yet. What you write goes to everyone in the room.";
+                listBox.appendChild(note);
+            }
+
+            if (atEnd || first) {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+
+            first = false;
+        }
+
+        function load() {
+
+            if (asking) {
+                return;
+            }
+
+            asking = true;
+            crAsk({ op: "chatList", seen: true }).then(function (r) {
+
+                asking = false;
+
+                if (!r || !r.ok) {
+                    return;
+                }
+
+                if (Number(r.seq) !== shownSeq || first) {
+
+                    shownSeq = Number(r.seq);
+                    paint(r);
+                }
+            });
+        }
+
+        // The phone's chat changed: read again at once
+        chatPaint = function (s) {
+
+            if (s && Number(s.togetherChatSeq) !== shownSeq) {
+                load();
+            }
+        };
+        load();
+        field.focus();
+    }
+
+    // The clock time of a message, with the day when not today
+    function chatWhen(at) {
+
+        if (!at) {
+            return "";
+        }
+
+        const d = new Date(at);
+        const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+        return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
     }
 
     // Mureka's notifications, newest first, read through the Android
