@@ -1373,6 +1373,8 @@ In development.
 - **A comment's place in the song in milliseconds.** Sent in seconds, the tag did not show on Mureka's page, so the place goes as milliseconds, as other times at Mureka do, and is read back the same way.
 - **Share the debug log as a file.** Under Developer, Share the debug log as a file opens the share sheet with the log as a text file, to save to Files or send, where Safari on the iPhone will not paste a long log copied; a download where there is no share sheet. Copy debug log says how big the log is, and the notifications' whole answer is kept the first time only, as the player reads them every ten minutes.
 - **Comments are sent without a place in the song.** Mureka's page showed no place for a comment sent with one, in seconds or milliseconds alike, so Tag my comment at is gone and every comment and reply goes as moment -1. A comment Mureka holds with a place still shows it, with its play button. In the player and the web view.
+- **The header's fold button on the left.** In the web view the button that folds a list's header away is now first in its row, in the big list's search line and in the small list's top line, so it is in sight without scrolling the row sideways in the car. On a phone the song count in the search field no longer runs under it. The mobile player has no such button.
+- **No gap over the web view's list on a phone.** The list starts right under the line below the view chips, and the empty loading line above the list no longer takes room anywhere.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

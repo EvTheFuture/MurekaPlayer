@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.213";
+    const VERSION = "2.0.1.214";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -75659,6 +75659,12 @@
         display: none !important;
     }
 
+    /* The fold button first in its row, at the left edge where it is in
+       sight without scrolling the row sideways */
+    .headFoldBtn {
+        flex: 0 0 auto;
+    }
+
     /* Points up while the header shows, down to bring it back */
     .headFoldBtn svg {
         transform: rotate(180deg);
@@ -80345,6 +80351,11 @@
 
     /* The list's own buttons stay inside it, never over a page opened on
        top of the list such as the settings */
+    /* Nothing loading, no room taken in the list's column */
+    #libLoad:empty {
+        display: none;
+    }
+
     #rowsWrap {
         position: relative;
         isolation: isolate;
@@ -81416,6 +81427,11 @@
         border-bottom: 1px solid var(--line);
     }
 
+    /* The list right under that line, no gap between them */
+    html.phone #browse > #viewRow {
+        margin-bottom: -6px;
+    }
+
     /* Playing from as the first chip of the row, scrolling with the views
        like any other chip */
     #fromDock {
@@ -81789,6 +81805,7 @@
         <div id="mini">
             <div class="plHead" id="miniPlHead"></div>
             <div id="miniTop">
+                <button class="chip iconOnly headFoldBtn" id="miniHeadFold" type="button" data-icon="chevronDown" aria-label="Fold the header" title="Fold the header"></button>
                 <span id="miniCount"></span>
                 <button class="chip" id="miniSort" type="button" data-icon="mureka" aria-label="Sort the list" title="Sort the list"><span class="lbl">Sort</span></button>
                 <button class="chip iconOnly" id="miniFold" type="button" data-icon="sets" aria-label="Fold sets" title="Fold each set into one row, or show every song with its set's color"></button>
@@ -81797,7 +81814,6 @@
                 <button class="chip iconOnly" id="miniUpdate" type="button" data-icon="refresh" aria-label="Load new songs from Mureka" title="Load new songs from Mureka"></button>
                 <button class="chip iconOnly" id="miniRescan" type="button" data-icon="spin" aria-label="Rescan the whole library" title="Rescan the whole library"></button>
                 <button class="chip iconOnly" id="miniExpand" type="button" data-icon="fullscreen" aria-label="The whole song list" title="The whole song list"></button>
-                <button class="chip iconOnly headFoldBtn" id="miniHeadFold" type="button" data-icon="chevronDown" aria-label="Fold the header" title="Fold the header"></button>
                 <button class="chip iconOnly" id="miniClose" type="button" data-icon="close" aria-label="Close the list" title="Close the list"></button>
             </div>
             <div id="miniSearchRow">
@@ -81879,9 +81895,9 @@
 </div>
 <div id="browse">
     <div id="browseTop">
+        <button class="chip iconOnly headFoldBtn" id="browseHeadFold" type="button" data-icon="chevronDown" aria-label="Fold the header" title="Fold the header"></button>
         <input id="search" type="search" placeholder="Search songs" autocomplete="off">
         <button class="chip iconOnly" id="clearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
-        <button class="chip iconOnly headFoldBtn" id="browseHeadFold" type="button" data-icon="chevronDown" aria-label="Fold the header" title="Fold the header"></button>
         <button class="chip iconOnly" id="closeBrowse" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
     <div class="chipRow" id="viewRow">
