@@ -720,7 +720,6 @@
         align-items: center;
         justify-content: center;
         padding: 16px;
-        background: rgba(0, 0, 0, 0.7);
     }
 
     .pwCard {
@@ -770,10 +769,17 @@
 
     /* The online, hotspot and heat badges together, close to each other
        and taking no room in the bar while none of them shows */
+    /* The same room between all the badges, whichever are shown and in
+       whatever order they were dragged */
     #badges {
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
+        gap: 0.3em;
+    }
+
+    html.phone #badges {
+        gap: 6px;
     }
 
     #badges.none {
@@ -797,7 +803,6 @@
         display: none;
         flex: 0 1 auto;
         min-width: 0;
-        margin-right: 0.3em;
         overflow: hidden;
         color: var(--muted);
         font-size: 0.8em;
@@ -834,8 +839,7 @@
     #hotspotBadge {
         display: none;
         flex: 0 0 auto;
-        margin-left: 0.4em;
-        padding: 0.05em 0.45em;
+        padding: 0.125em 0.45em;
         border: 1px solid var(--line);
         border-radius: 0.6em;
         background: none;
@@ -869,8 +873,7 @@
     #wgBadge {
         display: none;
         flex: 0 0 auto;
-        margin-left: 0.4em;
-        padding: 0.05em 0.45em;
+        padding: 0.125em 0.45em;
         border: 1px solid var(--line);
         border-radius: 0.6em;
         background: none;
@@ -890,8 +893,9 @@
         flex: 0 0 auto;
         align-items: center;
         gap: 0.25em;
-        margin-left: 0.4em;
-        padding: 0.05em 0.45em;
+        box-sizing: border-box;
+        height: calc(1.5em + 2px);
+        padding: 0 0.45em;
         border: 1px solid var(--line);
         border-radius: 0.6em;
         background: none;
@@ -911,52 +915,75 @@
 
     #msgBadge .ico {
         display: block;
-        width: 1.1em;
-        height: 1.1em;
+        width: 1.25em;
+        height: 1.25em;
     }
 
     html.phone #msgBadge {
-        margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
     }
 
-    /* A notification, lit while unread, the comment of a comment under it */
+    /* A notification: a disc in its kind's colour, who and when, what
+       happened, the comment of a comment and the song's cover. Lit, with
+       an accent edge, while unread */
+    .nfList {
+        gap: 8px;
+    }
+
     .nfItem {
+        flex: 0 0 auto;
         display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: 8px 10px;
-        border: none;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 9px 10px 9px 8px;
+        border-left: 3px solid transparent;
         border-radius: 8px;
-        background: #1d1d22;
-        color: #aaa;
-        font: inherit;
+        background: #1c1c21;
+        color: #999;
         text-align: left;
         cursor: pointer;
     }
 
     .nfItem.unread {
-        background: #2a2f33;
-        color: #ddd;
+        border-left-color: var(--accent);
+        background: #2c3238;
+        color: #ccc;
+    }
+
+    .nfDisc {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2em;
+        height: 2em;
+        border-radius: 50%;
+        opacity: 0.75;
+    }
+
+    .nfItem.unread .nfDisc {
+        opacity: 1;
+    }
+
+    .nfDisc .ico {
+        width: 1.05em;
+        height: 1.05em;
+    }
+
+    .nfMid {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
     }
 
     .nfTop {
         display: flex;
-        align-items: center;
+        align-items: baseline;
         gap: 8px;
-        font-size: 0.8em;
-    }
-
-    .nfDot {
-        flex: 0 0 auto;
-        width: 0.5em;
-        height: 0.5em;
-        border-radius: 50%;
-    }
-
-    .nfItem.unread .nfDot {
-        background: var(--accent);
+        font-size: 0.85em;
     }
 
     .nfWho {
@@ -965,7 +992,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-weight: 600;
-        color: #bbb;
+        color: #ccc;
     }
 
     .nfItem.unread .nfWho {
@@ -975,15 +1002,47 @@
     .nfWhen {
         flex: 0 0 auto;
         margin-left: auto;
+        font-size: 0.85em;
         color: var(--muted, #888);
     }
 
+    .nfWhat {
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+    }
+
+    .nfSong {
+        color: var(--accent);
+        font-weight: 600;
+        cursor: pointer;
+    }
+
     .nfSaid {
-        padding-left: 0.6em;
+        padding: 2px 0 2px 0.6em;
         border-left: 2px solid #ffb454;
         line-height: 1.4;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+        color: #aaa;
+    }
+
+    .nfItem.unread .nfSaid {
+        color: #eee;
+    }
+
+    .nfPic {
+        flex: 0 0 auto;
+        width: 2.75em;
+        height: 2.75em;
+        border-radius: 6px;
+        object-fit: cover;
+        background: var(--card);
+        cursor: pointer;
+    }
+
+    .nfSpin {
+        flex: 0 0 auto;
+        color: var(--muted);
     }
 
     /* A darker, quieter take on WireGuard's red, and a soft white */
@@ -1002,7 +1061,6 @@
     #heatBadge {
         display: none;
         flex: 0 0 auto;
-        margin-left: 0.4em;
         padding: 0 0.5em;
         border: 1px solid var(--line);
         border-radius: 0.6em;
@@ -1044,7 +1102,6 @@
     }
 
     html.phone #heatBadge {
-        margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
     }
@@ -1057,7 +1114,6 @@
         flex: 0 0 auto;
         align-items: center;
         gap: 0.3em;
-        margin-left: 0.4em;
         box-sizing: border-box;
         height: calc(1.5em + 2px);
         padding: 0 0.2em;
@@ -1111,14 +1167,12 @@
     }
 
     html.phone #batteryBadge {
-        margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
     }
 
     html.phone #hotspotBadge,
     html.phone #wgBadge {
-        margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
     }
@@ -1128,7 +1182,6 @@
     }
 
     html.phone #netBadge {
-        margin-left: 6px;
         font-size: 10px;
         vertical-align: 1px;
     }
@@ -1657,7 +1710,6 @@
     .cmBack {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2172,9 +2224,6 @@
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.45);
-        -webkit-backdrop-filter: blur(14px);
-        backdrop-filter: blur(14px);
     }
 
     /* The volume steps by hand, over the settings */
@@ -2188,9 +2237,6 @@
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.55);
-        -webkit-backdrop-filter: blur(14px);
-        backdrop-filter: blur(14px);
     }
 
     #editBox {
@@ -2258,9 +2304,6 @@
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.55);
-        -webkit-backdrop-filter: blur(14px);
-        backdrop-filter: blur(14px);
     }
 
     /* A dialog of the settings, a speaker's settings, as on the phone */
@@ -2271,9 +2314,6 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.55);
-        -webkit-backdrop-filter: blur(14px);
-        backdrop-filter: blur(14px);
     }
 
     .pPopBox {
@@ -3874,7 +3914,6 @@
     #helpPop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -4624,7 +4663,6 @@
     #confirmPop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -5576,7 +5614,6 @@
     #volPop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -5656,7 +5693,6 @@
     #fromPop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -5967,7 +6003,6 @@
     #ratePop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -6076,7 +6111,6 @@
     #ssPop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -7278,6 +7312,28 @@
         box-shadow: inset 0 0 0 3px var(--accent);
     }
 
+    /* The one veil behind every dialog, as behind the Bluetooth devices:
+       the page dimmed and blurred. A new dialog's backdrop takes the class
+       veil, or is added here, rather than a look of its own */
+    .veil,
+    #plPop,
+    #btPop,
+    #crPop,
+    #editPop,
+    #trainPop,
+    .pPop,
+    .cmBack,
+    .pwBack,
+    #helpPop,
+    #confirmPop,
+    #volPop,
+    #fromPop,
+    #ratePop,
+    #ssPop {
+        background: rgba(0, 0, 0, 0.45);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+    }
 </style>
 </head>
 <body>
@@ -10682,7 +10738,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -10795,6 +10851,71 @@
     function dbgFlag(v) {
 
         return v ? "y" : "n";
+    }
+
+    // The kinds of Mureka's notifications, by biz_code: a name, the colour
+    // of the disc in the list and its glyph, 24 units square with round
+    // strokes as the other icons. A like, a comment, a playlist add, a
+    // shared song looked at and a follow; anything else gets the bell
+    const MSG_KINDS = {
+        "1001": {
+            name: "Like",
+            color: "#ff6b9a",
+            shapes: [
+                ["path", { d: "M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" }]
+            ]
+        },
+        "1002": {
+            name: "Comment",
+            color: "#ffb454",
+            shapes: [
+                ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }]
+            ]
+        },
+        "1003": {
+            name: "Playlist",
+            color: "#b388ff",
+            shapes: [
+                ["line", { x1: "8", y1: "6", x2: "21", y2: "6" }],
+                ["line", { x1: "8", y1: "12", x2: "21", y2: "12" }],
+                ["line", { x1: "8", y1: "18", x2: "14", y2: "18" }],
+                ["line", { x1: "3", y1: "6", x2: "3.01", y2: "6" }],
+                ["line", { x1: "3", y1: "12", x2: "3.01", y2: "12" }],
+                ["line", { x1: "3", y1: "18", x2: "3.01", y2: "18" }],
+                ["line", { x1: "19", y1: "15", x2: "19", y2: "21" }],
+                ["line", { x1: "16", y1: "18", x2: "22", y2: "18" }]
+            ]
+        },
+        "1004": {
+            name: "Shared song",
+            color: "#64b5f6",
+            shapes: [
+                ["path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }],
+                ["circle", { cx: "12", cy: "12", r: "3" }]
+            ]
+        },
+        "2001": {
+            name: "Follow",
+            color: "#5fd38d",
+            shapes: [
+                ["path", { d: "M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }],
+                ["circle", { cx: "8.5", cy: "7", r: "4" }],
+                ["line", { x1: "20", y1: "8", x2: "20", y2: "14" }],
+                ["line", { x1: "23", y1: "11", x2: "17", y2: "11" }]
+            ]
+        }
+    };
+
+    function msgKind(code) {
+
+        return MSG_KINDS[String(code)] || {
+            name: "Notification",
+            color: "#9aa0a6",
+            shapes: [
+                ["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }],
+                ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
+            ]
+        };
     }
     // END SHARED misc
 
@@ -31360,22 +31481,25 @@
     }
 
     // Mureka's notifications, newest first, read through the Android
-    // device: who, what and when, the comment of a comment. A tap marks one
-    // read and plays its song, or opens the comments of a comment
+    // device: a disc in the kind's colour, who, what and when, the comment
+    // of a comment and the song's cover. A tap marks one read and opens the
+    // comments of a comment, or plays the song; the song's title and cover
+    // play it too. The list stays open behind, Escape goes back to it.
+    // Older ones load on their own near the end
     function openNotifications() {
 
         const back = document.createElement("div");
         const card = document.createElement("div");
         const head = document.createElement("div");
         const title = document.createElement("div");
+        const headSpin = icon("spin");
         const all = document.createElement("button");
         const shut = document.createElement("button");
         const listBox = document.createElement("div");
-        const note = document.createElement("div");
-        const more = document.createElement("button");
         let items = [];
         let last = "";
         let busy = false;
+        let first = true;
         let unBack = null;
         const close = function () {
 
@@ -31391,6 +31515,7 @@
         head.className = "cmHead";
         title.className = "cmTitle";
         title.textContent = "Notifications";
+        headSpin.classList.add("spin", "nfSpin");
         all.type = "button";
         all.className = "chip";
         all.textContent = "Mark all read";
@@ -31419,15 +31544,8 @@
         shut.className = "chip";
         shut.textContent = "Close";
         shut.addEventListener("click", close);
-        listBox.className = "cmList";
-        note.className = "cmNote";
-        more.type = "button";
-        more.className = "chip";
-        more.textContent = "More notifications";
-        more.style.display = "none";
-        more.addEventListener("click", function () {
-            load(false);
-        });
+        listBox.className = "cmList nfList";
+        listBox.addEventListener("scroll", nearEnd, { passive: true });
         back.addEventListener("click", function (ev) {
 
             if (ev.target === back) {
@@ -31436,65 +31554,137 @@
         });
 
         head.appendChild(title);
+        head.appendChild(headSpin);
         head.appendChild(all);
         head.appendChild(shut);
         card.appendChild(head);
         card.appendChild(listBox);
-        card.appendChild(more);
         back.appendChild(card);
         document.body.appendChild(back);
         unBack = onBack(close);
 
+        // The song played on the Android device, the list left open
+        function playIt(m) {
+
+            m.read = true;
+            paint();
+            crAsk({ op: "msgPlay", id: m.id });
+        }
+
         function row(m) {
 
-            const box = document.createElement("button");
+            const kind = msgKind(m.code);
+            const box = document.createElement("div");
+            const disc = document.createElement("span");
+            const mid = document.createElement("div");
             const top = document.createElement("div");
-            const dot = document.createElement("span");
             const who = document.createElement("span");
             const when = document.createElement("span");
             const what = document.createElement("div");
 
-            box.type = "button";
+            ICONS["nf" + m.code] = kind.shapes;
             box.className = "nfItem" + (m.read ? "" : " unread");
+            box.setAttribute("role", "button");
+            box.tabIndex = 0;
             box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            disc.className = "nfDisc";
+            disc.title = kind.name;
+            disc.style.color = kind.color;
+            disc.style.background = kind.color + "2e";
+            disc.appendChild(icon("nf" + m.code));
+            mid.className = "nfMid";
             top.className = "nfTop";
-            dot.className = "nfDot";
             who.className = "nfWho";
             who.textContent = m.who;
             when.className = "nfWhen";
             when.textContent = m.at ? commentAge(m.at) : "";
-            what.textContent = m.what;
-            top.appendChild(dot);
+            what.className = "nfWhat";
             top.appendChild(who);
             top.appendChild(when);
-            box.appendChild(top);
-            box.appendChild(what);
+            mid.appendChild(top);
+
+            // What happened, the song's title a link that plays it
+            const at = m.title && m.song ? String(m.what).indexOf("\"" + m.title + "\"") : -1;
+
+            if (at >= 0) {
+
+                const link = document.createElement("span");
+
+                link.className = "nfSong";
+                link.textContent = m.title;
+                link.title = "Play the song";
+                link.addEventListener("click", function (ev) {
+
+                    ev.stopPropagation();
+                    playIt(m);
+                });
+                what.appendChild(document.createTextNode(m.what.slice(0, at)));
+                what.appendChild(link);
+                what.appendChild(document.createTextNode(m.what.slice(at + m.title.length + 2)));
+            } else {
+                what.textContent = m.what;
+            }
+
+            mid.appendChild(what);
 
             if (m.text) {
 
                 const said = document.createElement("div");
 
                 said.className = "nfSaid";
+                said.style.borderLeftColor = kind.color;
                 said.textContent = m.text;
-                box.appendChild(said);
+                mid.appendChild(said);
             }
 
-            box.addEventListener("click", function () {
+            box.appendChild(disc);
+            box.appendChild(mid);
 
-                m.read = true;
+            if (m.cover) {
+
+                const pic = document.createElement("img");
+
+                pic.className = "nfPic";
+                pic.src = coverAt(m.cover);
+                pic.alt = "";
+                pic.loading = "lazy";
+                pic.addEventListener("error", function () {
+                    pic.remove();
+                });
 
                 if (m.song) {
-                    close();
-                } else {
-                    paint();
+
+                    pic.title = "Play the song";
+                    pic.addEventListener("click", function (ev) {
+
+                        ev.stopPropagation();
+                        playIt(m);
+                    });
                 }
 
+                box.appendChild(pic);
+            }
+
+            const open = function () {
+
+                m.read = true;
+                paint();
                 crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
 
                     if (r && r.ok && r.comments) {
                         openComments(r.comments);
                     }
                 });
+            };
+
+            box.addEventListener("click", open);
+            box.addEventListener("keydown", function (ev) {
+
+                if (ev.key === "Enter" || ev.key === " ") {
+
+                    ev.preventDefault();
+                    open();
+                }
             });
 
             return box;
@@ -31502,51 +31692,74 @@
 
         function paint() {
 
+            const keep = listBox.scrollTop;
+
             listBox.textContent = "";
 
             for (const m of items) {
                 listBox.appendChild(row(m));
             }
 
-            if (!items.length) {
+            if (!items.length && busy) {
+                listBox.appendChild(loadingNode("Reading Mureka's notifications"));
+            } else if (!items.length) {
 
-                note.textContent = busy ? "Reading Mureka's notifications..." : "No notifications";
+                const note = document.createElement("div");
+
+                note.className = "cmNote";
+                note.textContent = "No notifications";
                 listBox.appendChild(note);
+            } else if (busy && !first) {
+                listBox.appendChild(loadingNode("Loading older notifications"));
             }
 
+            listBox.scrollTop = keep;
+            headSpin.style.display = busy && first && items.length ? "" : "none";
             all.style.display = items.some(function (m) {
                 return !m.read || m.unreadThere;
             }) ? "" : "none";
-            more.style.display = last ? "" : "none";
         }
 
-        function load(first) {
+        // Older ones loaded once the list is scrolled near its end, or
+        // when it does not fill the box
+        function nearEnd() {
+
+            if (!busy && last && listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 240) {
+                load(false);
+            }
+        }
+
+        function load(firstPage) {
 
             if (busy) {
                 return;
             }
 
             busy = true;
-            more.disabled = true;
             paint();
-            crAsk({ op: "msgList", after: first ? "" : last }).then(function (r) {
+            crAsk({ op: "msgList", after: firstPage ? "" : last }).then(function (r) {
 
                 busy = false;
-                more.disabled = false;
+                first = false;
 
                 if (!r || !r.ok) {
 
+                    const note = document.createElement("div");
+
+                    last = "";
+                    paint();
+                    note.className = "cmNote";
                     note.textContent = "Could not read the notifications" + (r && r.why ? ": " + r.why : "");
-                    listBox.textContent = "";
                     listBox.appendChild(note);
                     return;
                 }
 
                 const list = Array.isArray(r.list) ? r.list : [];
 
-                items = first ? list : items.concat(list);
+                items = firstPage ? list : items.concat(list);
                 last = String(r.last || "");
                 paint();
+                nearEnd();
             });
         }
 
@@ -31587,6 +31800,26 @@
         head.className = "cmHead";
         title.className = "cmTitle";
         title.textContent = "Comments on \"" + (m.title || "Untitled") + "\"";
+
+        // The song's cover beside the title, a tap plays it on the Android
+        // device
+        if (m.cover) {
+
+            const pic = document.createElement("img");
+
+            pic.className = "nfPic";
+            pic.src = coverAt(m.cover);
+            pic.alt = "";
+            pic.title = "Play the song";
+            pic.addEventListener("error", function () {
+                pic.remove();
+            });
+            pic.addEventListener("click", function () {
+                send("playId", m.id);
+            });
+            head.appendChild(pic);
+        }
+
         shut.type = "button";
         shut.className = "chip";
         shut.textContent = "Close";
@@ -34226,10 +34459,14 @@
         const target = ev.target;
         const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
 
+        // Escape closes the newest dialog first, as the app's Back button
+        // does, then what closeTop closes
         if (ev.key === "Escape") {
 
             if (typing) {
                 target.blur();
+            } else if (backClosers.length > 0) {
+                backClosers[backClosers.length - 1]();
             } else {
                 closeTop();
             }

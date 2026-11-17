@@ -361,15 +361,10 @@ final class BtAudio {
                     rows.add(one);
                 }
 
-                // Connected first, then the ones that play sound, then by name
+                // The ones that play sound first, then by name. Not by
+                // connected, so a device connecting or going away does not
+                // move the rows under the finger
                 rows.sort((x, y) -> {
-
-                    int cx = x.optBoolean("connected") ? 0 : 1;
-                    int cy = y.optBoolean("connected") ? 0 : 1;
-
-                    if (cx != cy) {
-                        return cx - cy;
-                    }
 
                     int sx = soundKind(x.optString("kind")) ? 0 : 1;
                     int sy = soundKind(y.optString("kind")) ? 0 : 1;
