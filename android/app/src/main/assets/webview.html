@@ -1543,6 +1543,166 @@
         box-shadow: inset 0 0 0 2px var(--accent);
     }
 
+    /* A song's comments: a card over the page with the comments, their
+       replies set in, and a field at the foot */
+    .cmBack {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        box-sizing: border-box;
+        z-index: 2147483500;
+    }
+
+    .cmCard {
+        background: var(--panel, #26262c);
+        border: 1px solid #3a3a42;
+        border-radius: 12px;
+        padding: 14px;
+        width: 100%;
+        max-width: 640px;
+        max-height: 100%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .cmHead,
+    .cmFoot {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .cmTitle {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+    }
+
+    .cmList {
+        flex: 1 1 auto;
+        min-height: 4em;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overscroll-behavior: contain;
+    }
+
+    .cmItem {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: #1d1d22;
+    }
+
+    .cmItem.reply {
+        margin-left: 1.6em;
+        background: #202026;
+    }
+
+    .cmTop {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        font-size: 0.8em;
+    }
+
+    .cmWho {
+        font-weight: 600;
+        color: #ddd;
+    }
+
+    .cmWho.mine {
+        color: var(--accent);
+    }
+
+    .cmWhen,
+    .cmNote,
+    .cmMoreReplies {
+        color: var(--muted, #888);
+    }
+
+    .cmNote,
+    .cmMoreReplies {
+        font-size: 0.8em;
+    }
+
+    .cmMoreReplies {
+        margin-left: 2.2em;
+    }
+
+    .cmText {
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .cmActs {
+        display: flex;
+        gap: 18px;
+        font-size: 0.8em;
+    }
+
+    .cmLike,
+    .cmReply,
+    .cmX {
+        border: none;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+        font: inherit;
+        color: #999;
+    }
+
+    .cmLike.on {
+        color: #ff6b8a;
+    }
+
+    .cmX {
+        font-size: 1.4em;
+        line-height: 1;
+        padding: 0 4px;
+    }
+
+    .cmReplying {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8em;
+        color: #bbb;
+    }
+
+    .cmReplying span {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .cmFoot textarea {
+        flex: 1 1 auto;
+        min-width: 0;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border: 1px solid #4a4a52;
+        border-radius: 8px;
+        background: #1b1b20;
+        color: #fff;
+        font: inherit;
+        resize: none;
+        outline: none;
+    }
+
     .chip.crPrimary.crBottom {
         flex: 1 1 auto;
         justify-content: center;
@@ -7700,6 +7860,9 @@
     // The icons, drawn like the phone player's, 24 units square with round
     // strokes in the button's own color. Each is a list of shapes
     const ICONS = {
+        comment: [
+            ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }]
+        ],
         settings: [
             ["circle", { cx: "12", cy: "12", r: "3" }],
             ["path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }]
@@ -30760,6 +30923,12 @@
             }));
         }
 
+        box.appendChild(menuItem("comment", "Comments" + (m.comments > 0 ? " (" + m.comments + ")" : ""), function () {
+
+            close();
+            openComments(m);
+        }));
+
         box.appendChild(menuItem("refresh", "Refresh", function () {
 
             act("refresh");
@@ -30979,6 +31148,306 @@
                 stop();
             }
         }, 500);
+    }
+
+    // A song's comments on Mureka, read and written through the Android
+    // device: each comment with its replies under it, a like and Reply,
+    // more on asking, and a field to comment or reply at the foot
+    function commentAge(at) {
+
+        const s = Math.max(0, (Date.now() - at) / 1000);
+
+        if (s < 60) {
+            return "now";
+        }
+
+        if (s < 3600) {
+            return Math.floor(s / 60) + " min";
+        }
+
+        if (s < 86400) {
+            return Math.floor(s / 3600) + " h";
+        }
+
+        if (s < 86400 * 30) {
+            return Math.floor(s / 86400) + " d";
+        }
+
+        return new Date(at).toLocaleDateString();
+    }
+
+    function openComments(m) {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const shut = document.createElement("button");
+        const listBox = document.createElement("div");
+        const note = document.createElement("div");
+        const more = document.createElement("button");
+        const replying = document.createElement("div");
+        const replyText = document.createElement("span");
+        const replyCancel = document.createElement("button");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const send = document.createElement("button");
+        let last = "";
+        let replyTo = null;
+        let busy = false;
+        let unBack = null;
+        const close = function () {
+
+            back.remove();
+
+            if (unBack) {
+                unBack();
+            }
+        };
+
+        back.className = "cmBack";
+        card.className = "cmCard";
+        head.className = "cmHead";
+        title.className = "cmTitle";
+        title.textContent = "Comments on \"" + (m.title || "Untitled") + "\"";
+        shut.type = "button";
+        shut.className = "chip";
+        shut.textContent = "Close";
+        shut.addEventListener("click", close);
+        listBox.className = "cmList";
+        note.className = "cmNote";
+        more.type = "button";
+        more.className = "chip";
+        more.textContent = "More comments";
+        more.style.display = "none";
+        more.addEventListener("click", function () {
+            load(false);
+        });
+        replying.className = "cmReplying";
+        replyCancel.type = "button";
+        replyCancel.className = "cmX";
+        replyCancel.textContent = "\u00d7";
+        replyCancel.setAttribute("aria-label", "Do not reply");
+        replyCancel.addEventListener("click", function () {
+            setReply(null);
+        });
+        foot.className = "cmFoot";
+        field.rows = 2;
+        field.placeholder = "Write a comment";
+        send.type = "button";
+        send.className = "chip crPrimary";
+        send.textContent = "Send";
+        send.addEventListener("click", post);
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        head.appendChild(title);
+        head.appendChild(shut);
+        replying.appendChild(replyText);
+        replying.appendChild(replyCancel);
+        foot.appendChild(field);
+        foot.appendChild(send);
+        listBox.appendChild(note);
+        card.appendChild(head);
+        card.appendChild(listBox);
+        card.appendChild(more);
+        card.appendChild(replying);
+        card.appendChild(foot);
+        back.appendChild(card);
+        document.body.appendChild(back);
+        unBack = onBack(close);
+
+        function setReply(c) {
+
+            replyTo = c;
+            replying.style.display = c ? "flex" : "none";
+            replyText.textContent = c ? "Replying to " + c.name + ": " + c.text : "";
+            field.placeholder = c ? "Write a reply" : "Write a comment";
+
+            if (c) {
+                field.focus();
+            }
+        }
+
+        function row(c, depth) {
+
+            const box = document.createElement("div");
+            const top = document.createElement("div");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const text = document.createElement("div");
+            const acts = document.createElement("div");
+            const like = document.createElement("button");
+            const reply = document.createElement("button");
+            const paintLike = function () {
+
+                like.textContent = (c.liked ? "\u2665" : "\u2661") + (c.likes > 0 ? " " + c.likes : "");
+                like.classList.toggle("on", c.liked === true);
+            };
+
+            box.className = "cmItem" + (depth > 0 ? " reply" : "");
+            box.__commentId = c.id;
+            top.className = "cmTop";
+            who.className = "cmWho" + (c.mine ? " mine" : "");
+            who.textContent = c.name + (c.mine ? " (you)" : "");
+            when.className = "cmWhen";
+            when.textContent = c.at ? commentAge(c.at) : "";
+            text.className = "cmText";
+            text.textContent = c.text;
+            acts.className = "cmActs";
+            like.type = "button";
+            like.className = "cmLike";
+            reply.type = "button";
+            reply.className = "cmReply";
+            reply.textContent = "Reply";
+            paintLike();
+
+            like.addEventListener("click", function () {
+
+                crAsk({ op: "commentLike", id: c.id, level: c.level }).then(function (r) {
+
+                    if (r && r.ok) {
+
+                        c.liked = r.liked;
+                        c.likes = r.likes;
+                        paintLike();
+                    } else {
+                        toast("Could not like it" + (r && r.why ? ", " + r.why : ""), "bad");
+                    }
+                });
+            });
+
+            // A reply to a reply goes to the comment it is under
+            reply.addEventListener("click", function () {
+                setReply(depth > 0 && c.parent ? Object.assign({}, c, { id: c.parent }) : c);
+            });
+
+            top.appendChild(who);
+            top.appendChild(when);
+            acts.appendChild(like);
+            acts.appendChild(reply);
+            box.appendChild(top);
+            box.appendChild(text);
+            box.appendChild(acts);
+
+            return box;
+        }
+
+        function show(c) {
+
+            listBox.insertBefore(row(c, 0), note);
+
+            for (const r of c.replies || []) {
+                listBox.insertBefore(row(r, 1), note);
+            }
+
+            const left = (c.replyCount || 0) - (c.replies || []).length;
+
+            if (left > 0) {
+
+                const n = document.createElement("div");
+
+                n.className = "cmMoreReplies";
+                n.textContent = left + " more " + (left === 1 ? "reply" : "replies") + " on Mureka";
+                listBox.insertBefore(n, note);
+            }
+        }
+
+        function load(first) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            note.textContent = first ? "Reading the comments" : "Reading more";
+            note.style.display = "";
+            more.style.display = "none";
+
+            crAsk({ op: "comments", song: m.id, after: first ? "" : last }).then(function (r) {
+
+                busy = false;
+
+                if (!r || !r.ok) {
+
+                    note.textContent = "The comments could not be read" + (r && r.why ? ", " + r.why : "");
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                for (const c of list) {
+                    show(c);
+                }
+
+                last = r.last || last;
+                note.style.display = "none";
+
+                if (first && list.length === 0) {
+
+                    note.textContent = "No comments yet. Be the first.";
+                    note.style.display = "";
+                }
+
+                more.style.display = r.more && list.length > 0 ? "" : "none";
+            });
+        }
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text || busy) {
+                return;
+            }
+
+            send.disabled = true;
+
+            crAsk({ op: "commentAdd", song: m.id, text: text, parent: replyTo ? replyTo.id : "" }).then(function (r) {
+
+                send.disabled = false;
+
+                if (!r || !r.ok || !r.comment) {
+
+                    toast("Could not send it" + (r && r.why ? ", " + r.why : ""), "bad");
+                    return;
+                }
+
+                field.value = "";
+
+                // Shown at once, a reply under its comment, a comment on top
+                if (replyTo) {
+
+                    const at = Array.from(listBox.children).find(function (el) {
+                        return el.__commentId === replyTo.id;
+                    });
+
+                    listBox.insertBefore(row(r.comment, 1), at ? at.nextSibling : note);
+                } else {
+
+                    listBox.insertBefore(row(r.comment, 0), listBox.firstChild);
+                    note.style.display = "none";
+                }
+
+                toast(replyTo ? "Replied" : "Commented", "good");
+                setReply(null);
+            });
+        }
+
+        field.addEventListener("keydown", function (ev) {
+
+            if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+
+                ev.preventDefault();
+                post();
+            }
+        });
+
+        load(true);
     }
 
     // A place to paste a picture into, where the page may not read the
