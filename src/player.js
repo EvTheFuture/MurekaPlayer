@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.230";
+    const VERSION = "2.0.1.231";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -64127,6 +64127,57 @@
         return m + ":" + (s < 10 ? "0" : "") + s + "." + String(rest).padStart(3, "0");
     }
 
+    // The question before trimming, a line each: the song, the part kept,
+    // the new length against the old, what goes from either end and the
+    // new title when it is another
+    function trimAskPaint() {
+
+        const el = trimUi.askText;
+        const was = (tr.song.title || "").trim() || "Untitled";
+        const typed = trimUi.titleInput ? String(trimUi.titleInput.value || "").trim() : "";
+        const rows = [
+            ["Keeps", trimTimeText(tr.start) + " to " + trimTimeText(tr.end)],
+            ["New length", trimTimeText(tr.end - tr.start)],
+            ["Was", trimTimeText(tr.duration)]
+        ];
+        const head = document.createElement("div");
+        const grid = document.createElement("div");
+
+        if (tr.start >= 0.001) {
+            rows.push(["Cut at the start", trimTimeText(tr.start)]);
+        }
+
+        if (tr.end <= tr.duration - 0.001) {
+            rows.push(["Cut at the end", trimTimeText(tr.duration - tr.end)]);
+        }
+
+        if (typed && typed !== was) {
+            rows.push(["New title", typed]);
+        }
+
+        el.textContent = "";
+        head.textContent = "Trim \"" + was + "\"?";
+        head.style.cssText = "font-weight:600;font-size:16px;margin-bottom:10px;overflow-wrap:anywhere";
+        grid.style.cssText = "display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:baseline";
+
+        for (const r of rows) {
+
+            const label = document.createElement("span");
+            const value = document.createElement("span");
+
+            label.textContent = r[0];
+            label.style.cssText = "opacity:0.65;white-space:nowrap";
+            value.textContent = r[1];
+            value.style.cssText = "font-variant-numeric:tabular-nums;overflow-wrap:anywhere"
+                + (r[0] === "New length" ? ";font-weight:600" : "");
+            grid.appendChild(label);
+            grid.appendChild(value);
+        }
+
+        el.appendChild(head);
+        el.appendChild(grid);
+    }
+
     // Wake the sound engine. Safari also has an interrupted state, after
     // another sound took over the phone's audio, which a resume ends too
     function trimWake() {
@@ -64709,7 +64760,7 @@
         // The question before trimming, with the choice to delete the
         // original, over the trimmer
         ui.ask = document.createElement("div");
-        ui.ask.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;z-index:2";
+        ui.ask.style.cssText = "position:absolute;inset:0;" + DIALOG_VEIL + ";display:none;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;z-index:2";
 
         const askBox = document.createElement("div");
 
@@ -64798,8 +64849,7 @@
         // While Mureka works: a turning ring and what is going on, over
         // everything, so it cannot be missed nor anything pressed meanwhile
         ui.working = document.createElement("div");
-        ui.working.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.5);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:3;color:#fff;font-size:15px;"
-            + "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)";
+        ui.working.style.cssText = "position:absolute;inset:0;" + DIALOG_VEIL + ";display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:3;color:#fff;font-size:15px";
 
         const workingRing = document.createElement("span");
 
@@ -65823,8 +65873,7 @@
             return;
         }
 
-        trimUi.askText.textContent = "Trim \"" + (tr.song.title || "Untitled") + "\" to "
-            + trimTimeText(tr.start) + " - " + trimTimeText(tr.end) + "?";
+        trimAskPaint();
         trimUi.askDelete.set(false);
         trimUi.ask.style.display = "flex";
     }
@@ -84630,19 +84679,15 @@
         position: fixed;
         inset: 0;
         z-index: 71;
-        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
         padding: 16px;
     }
 
-    /* Dimmed and blurred behind the ring, as in Create */
+    /* Over the trimmer while Mureka works, the one veil behind it */
     .trimWorking {
         z-index: 72;
-        background: rgba(0, 0, 0, 0.5);
-        -webkit-backdrop-filter: blur(4px);
-        backdrop-filter: blur(4px);
         flex-direction: column;
         gap: 16px;
         color: #fff;
@@ -84696,6 +84741,7 @@
        the page dimmed and blurred. A new dialog's backdrop takes the class
        veil, or is added here, rather than a look of its own */
     .veil,
+    .trimCover,
     #plPop,
     #btPop,
     #crPop,
@@ -115489,6 +115535,57 @@
         return m + ":" + (s < 10 ? "0" : "") + s + "." + String(rest).padStart(3, "0");
     }
 
+    // The question before trimming, a line each: the song, the part kept,
+    // the new length against the old, what goes from either end and the
+    // new title when it is another
+    function trimAskPaint() {
+
+        const el = trimUi.askText;
+        const was = (tr.song.title || "").trim() || "Untitled";
+        const typed = trimUi.titleInput ? String(trimUi.titleInput.value || "").trim() : "";
+        const rows = [
+            ["Keeps", trimTimeText(tr.start) + " to " + trimTimeText(tr.end)],
+            ["New length", trimTimeText(tr.end - tr.start)],
+            ["Was", trimTimeText(tr.duration)]
+        ];
+        const head = document.createElement("div");
+        const grid = document.createElement("div");
+
+        if (tr.start >= 0.001) {
+            rows.push(["Cut at the start", trimTimeText(tr.start)]);
+        }
+
+        if (tr.end <= tr.duration - 0.001) {
+            rows.push(["Cut at the end", trimTimeText(tr.duration - tr.end)]);
+        }
+
+        if (typed && typed !== was) {
+            rows.push(["New title", typed]);
+        }
+
+        el.textContent = "";
+        head.textContent = "Trim \"" + was + "\"?";
+        head.style.cssText = "font-weight:600;font-size:16px;margin-bottom:10px;overflow-wrap:anywhere";
+        grid.style.cssText = "display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:baseline";
+
+        for (const r of rows) {
+
+            const label = document.createElement("span");
+            const value = document.createElement("span");
+
+            label.textContent = r[0];
+            label.style.cssText = "opacity:0.65;white-space:nowrap";
+            value.textContent = r[1];
+            value.style.cssText = "font-variant-numeric:tabular-nums;overflow-wrap:anywhere"
+                + (r[0] === "New length" ? ";font-weight:600" : "");
+            grid.appendChild(label);
+            grid.appendChild(value);
+        }
+
+        el.appendChild(head);
+        el.appendChild(grid);
+    }
+
     // Wake the sound engine. Safari also has an interrupted state, after
     // another sound took over the phone's audio, which a resume ends too
     function trimWake() {
@@ -117048,8 +117145,7 @@
             return;
         }
 
-        trimUi.askText.textContent = "Trim \"" + (tr.song.title || "Untitled") + "\" to "
-            + trimTimeText(tr.start) + " - " + trimTimeText(tr.end) + "?";
+        trimAskPaint();
         trimUi.askDelete.checked = false;
         trimUi.ask.style.display = "flex";
     }

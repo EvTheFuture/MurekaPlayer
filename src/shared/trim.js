@@ -296,6 +296,57 @@
         return m + ":" + (s < 10 ? "0" : "") + s + "." + String(rest).padStart(3, "0");
     }
 
+    // The question before trimming, a line each: the song, the part kept,
+    // the new length against the old, what goes from either end and the
+    // new title when it is another
+    function trimAskPaint() {
+
+        const el = trimUi.askText;
+        const was = (tr.song.title || "").trim() || "Untitled";
+        const typed = trimUi.titleInput ? String(trimUi.titleInput.value || "").trim() : "";
+        const rows = [
+            ["Keeps", trimTimeText(tr.start) + " to " + trimTimeText(tr.end)],
+            ["New length", trimTimeText(tr.end - tr.start)],
+            ["Was", trimTimeText(tr.duration)]
+        ];
+        const head = document.createElement("div");
+        const grid = document.createElement("div");
+
+        if (tr.start >= 0.001) {
+            rows.push(["Cut at the start", trimTimeText(tr.start)]);
+        }
+
+        if (tr.end <= tr.duration - 0.001) {
+            rows.push(["Cut at the end", trimTimeText(tr.duration - tr.end)]);
+        }
+
+        if (typed && typed !== was) {
+            rows.push(["New title", typed]);
+        }
+
+        el.textContent = "";
+        head.textContent = "Trim \"" + was + "\"?";
+        head.style.cssText = "font-weight:600;font-size:16px;margin-bottom:10px;overflow-wrap:anywhere";
+        grid.style.cssText = "display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:baseline";
+
+        for (const r of rows) {
+
+            const label = document.createElement("span");
+            const value = document.createElement("span");
+
+            label.textContent = r[0];
+            label.style.cssText = "opacity:0.65;white-space:nowrap";
+            value.textContent = r[1];
+            value.style.cssText = "font-variant-numeric:tabular-nums;overflow-wrap:anywhere"
+                + (r[0] === "New length" ? ";font-weight:600" : "");
+            grid.appendChild(label);
+            grid.appendChild(value);
+        }
+
+        el.appendChild(head);
+        el.appendChild(grid);
+    }
+
     // Wake the sound engine. Safari also has an interrupted state, after
     // another sound took over the phone's audio, which a resume ends too
     function trimWake() {
