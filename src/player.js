@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.239";
+    const VERSION = "2.0.1.240";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -46424,7 +46424,8 @@
         // A small mark while offline. With the internet back on the offline
         // page, a tap loads the real page at once
         offlineBadgeEl = document.createElement("span");
-        offlineBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(255,138,128,0.5);border-radius:8px;color:#ff8a80;font-weight:400;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+        offlineBadgeEl.style.cssText = "display:none;margin-left:6px;padding:0 6px;border:1px solid rgba(255,138,128,0.5);border-radius:8px;color:#ff8a80;font-weight:400;font-size:10px;line-height:15px;"
+            + "height:17px;box-sizing:border-box;vertical-align:middle;cursor:pointer";
 
         // Presses go on to the header, so a double tap on the badge folds or
         // opens the player as one on the header does. Its own action waits
@@ -46457,7 +46458,8 @@
         msgBadgeEl = document.createElement("span");
         msgBadgeCountEl = document.createElement("span");
         msgBadgeEl.style.cssText = "display:none;align-items:center;gap:3px;margin-left:6px;padding:0 6px;border:1px solid rgba(255,180,84,0.55);"
-            + "border-radius:8px;color:#ffb454;font-weight:600;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+            + "border-radius:8px;color:#ffb454;font-weight:600;font-size:10px;line-height:15px;height:17px;box-sizing:border-box;"
+            + "vertical-align:middle;cursor:pointer";
         msgBadgeEl.appendChild(iconBell(11));
         msgBadgeEl.appendChild(msgBadgeCountEl);
         msgBadgeEl.addEventListener("click", function (ev) {
@@ -72262,6 +72264,10 @@
     let msgUnread = 0;
     const msgById = new Map();
 
+    // Mureka's own count of unread notifications, what puts the red dot on
+    // its bell. It can count some the list here holds as read
+    let msgThere = 0;
+
     // Redraws an open list when the notifications change
     let msgRepaint = null;
 
@@ -72431,9 +72437,9 @@
     // The unread count, for the badges, and an open list redrawn
     function msgCount() {
 
-        msgUnread = msgList.filter(function (m) {
+        msgUnread = Math.max(msgThere, msgList.filter(function (m) {
             return !m.read;
-        }).length;
+        }).length);
         paintMsgBadge();
         publishHostSoon();
 
@@ -72481,6 +72487,8 @@
             m.unreadThere = false;
         }
 
+        msgThere = 0;
+        msgCount();
         dbgLog("Notifications", "marked read on Mureka");
     }
 
@@ -72691,6 +72699,25 @@
 
             const list = page.raw;
             const readIds = msgReadIds();
+
+            // Mureka's own count, as its bell shows it
+            try {
+
+                const res = await murekaFetch("/api/msg/new?time=" + Date.now(), { credentials: "include" });
+                const json = res.ok ? await res.json() : null;
+                const n = json && json.code === 0 && json.data ? Number(json.data.unread_message_number) : NaN;
+
+                if (isFinite(n)) {
+
+                    if (n !== msgThere) {
+                        dbgLog("Notifications", "Mureka counts " + n + " unread");
+                    }
+
+                    msgThere = Math.max(0, n);
+                }
+            } catch (e) {
+                dbgLog("Notifications", "Mureka's unread count could not be read, " + errText(e));
+            }
 
             msgList = list.map(function (item) {
                 return msgOf(item, readIds);
