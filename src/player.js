@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.218";
+    const VERSION = "2.0.1.219";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15013,6 +15013,365 @@
         };
     }
     // END SHARED misc
+
+    // BEGIN SHARED chat
+    // Written by embed-webview.sh from src/shared/chat.js. Change that
+    // file and run make embed, never the lines up to END SHARED chat
+    // The chat of a room, as both the player and the web view show it: how
+    // long messages are kept, the messages with who and when, this
+    // player's own on the right, and a field to write in. Typing @ opens a
+    // list of the people to mention, which the arrows move through and Tab
+    // or Enter picks. Enter sends, Shift+Enter starts a new line. A
+    // mention of a name is lit, and a message mentioning this player gets
+    // an orange edge. Shared by the player and the web view's page,
+    // src/shared/chat.js, inlined into both by embed-webview.sh
+    //
+    // opts: accent and accentRgb, the colours; send(text), a promise of
+    // why it could not go or ""; onEscape(), Escape with no list open;
+    // toast(text), a word for the one writing. Answers the element, paint
+    // with { me, msgs, keepText, names, emptyText } and focus
+    function makeChatView(opts) {
+
+        const accent = opts.accent || "#48e1eb";
+        const accentRgb = opts.accentRgb || "72,225,235";
+        const el = document.createElement("div");
+        const note = document.createElement("div");
+        const listBox = document.createElement("div");
+        const footWrap = document.createElement("div");
+        const pop = document.createElement("div");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const sendBtn = document.createElement("button");
+        let last = { me: "", msgs: [], names: [] };
+        let shownKey = "";
+        let picks = [];
+        let pickAt = 0;
+        let mentionFrom = -1;
+        let sending = false;
+
+        el.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px";
+        note.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        listBox.style.cssText = "flex:1 1 auto;min-height:60px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"
+            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
+        listBox.setAttribute("data-noswipe", "1");
+        footWrap.style.cssText = "position:relative;flex:0 0 auto";
+        pop.style.cssText = "display:none;position:absolute;left:0;bottom:calc(100% + 6px);min-width:180px;max-width:100%;max-height:220px;overflow-y:auto;"
+            + "flex-direction:column;padding:4px;box-sizing:border-box;border-radius:10px;background:#2c2c33;border:1px solid #44444c;"
+            + "box-shadow:0 6px 20px rgba(0,0,0,0.5);z-index:5";
+        foot.style.cssText = "display:flex;gap:8px;align-items:stretch";
+        field.rows = 2;
+        field.maxLength = 1000;
+        field.placeholder = "Write to everyone in the room, @ to mention";
+        field.style.cssText = "flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:8px;"
+            + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none";
+        sendBtn.type = "button";
+        sendBtn.textContent = "Send";
+        sendBtn.style.cssText = "flex:0 0 auto;padding:0 16px;border:none;border-radius:8px;background:" + accent + ";color:#000;font:inherit;"
+            + "font-weight:600;cursor:pointer";
+        sendBtn.addEventListener("click", post);
+        foot.appendChild(field);
+        foot.appendChild(sendBtn);
+        footWrap.appendChild(pop);
+        footWrap.appendChild(foot);
+        el.appendChild(note);
+        el.appendChild(listBox);
+        el.appendChild(footWrap);
+
+        // The page's own keys never hear what is typed here
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (pop.style.display !== "none" && picks.length) {
+
+                if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+
+                    ev.preventDefault();
+                    pickAt = (pickAt + (ev.key === "ArrowDown" ? 1 : picks.length - 1)) % picks.length;
+                    paintPop();
+                    return;
+                }
+
+                if (ev.key === "Tab" || (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing)) {
+
+                    ev.preventDefault();
+                    choose(picks[pickAt]);
+                    return;
+                }
+
+                if (ev.key === "Escape") {
+
+                    ev.preventDefault();
+                    closePop();
+                    return;
+                }
+            }
+
+            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+
+                ev.preventDefault();
+                post();
+            } else if (ev.key === "Escape" && opts.onEscape) {
+
+                ev.preventDefault();
+                opts.onEscape();
+            }
+        });
+        field.addEventListener("keyup", function (ev) {
+            ev.stopPropagation();
+        });
+        field.addEventListener("input", findMention);
+        field.addEventListener("click", findMention);
+        field.addEventListener("blur", function () {
+
+            // A press on the list comes before the blur takes it away
+            setTimeout(closePop, 150);
+        });
+
+        // The @ being typed before the caret, and the names that fit it
+        function findMention() {
+
+            const upTo = field.value.slice(0, field.selectionStart || 0);
+            const m = /(^|\s)@([^\s@]{0,30})$/.exec(upTo);
+
+            if (!m) {
+
+                closePop();
+                return;
+            }
+
+            const q = m[2].toLowerCase();
+
+            mentionFrom = upTo.length - m[2].length - 1;
+            picks = (last.names || []).filter(function (n) {
+                return n && n !== last.me && n.toLowerCase().indexOf(q) >= 0;
+            }).sort(function (a, b) {
+                return (a.toLowerCase().indexOf(q) === 0 ? 0 : 1) - (b.toLowerCase().indexOf(q) === 0 ? 0 : 1) || a.localeCompare(b);
+            }).slice(0, 8);
+            pickAt = 0;
+
+            if (!picks.length) {
+
+                closePop();
+                return;
+            }
+
+            paintPop();
+        }
+
+        function paintPop() {
+
+            pop.textContent = "";
+
+            picks.forEach(function (name, i) {
+
+                const row = document.createElement("div");
+
+                row.textContent = "@" + name;
+                row.style.cssText = "padding:6px 10px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                    + (i === pickAt ? "background:rgba(" + accentRgb + ",0.22);color:#fff" : "color:#ddd");
+                row.addEventListener("mousedown", function (ev) {
+
+                    ev.preventDefault();
+                    choose(name);
+                });
+                row.addEventListener("touchstart", function (ev) {
+
+                    ev.preventDefault();
+                    choose(name);
+                }, { passive: false });
+                pop.appendChild(row);
+            });
+
+            pop.style.display = "flex";
+
+            const on = pop.children[pickAt];
+
+            if (on && on.scrollIntoView) {
+                on.scrollIntoView({ block: "nearest" });
+            }
+        }
+
+        function closePop() {
+
+            pop.style.display = "none";
+            picks = [];
+        }
+
+        // The @ and what was typed after it become the whole name and a space
+        function choose(name) {
+
+            const caret = field.selectionStart || 0;
+            const before = field.value.slice(0, mentionFrom);
+            const after = field.value.slice(caret);
+            const put = "@" + name + " ";
+
+            field.value = before + put + after;
+            field.focus();
+            field.selectionStart = field.selectionEnd = before.length + put.length;
+            closePop();
+        }
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text || sending) {
+                return;
+            }
+
+            sending = true;
+            sendBtn.disabled = true;
+            Promise.resolve(opts.send(text)).then(function (why) {
+
+                sending = false;
+                sendBtn.disabled = false;
+
+                if (why) {
+
+                    if (opts.toast) {
+                        opts.toast(why);
+                    }
+
+                    return;
+                }
+
+                field.value = "";
+                closePop();
+                field.focus();
+            });
+        }
+
+        // A message's text with the mentions of known names lit, the
+        // longest name first where one begins another
+        function textNode(text, names, me) {
+
+            const box = document.createElement("div");
+            const known = names.concat(me ? [me] : []).filter(function (n) {
+                return n;
+            }).sort(function (a, b) {
+                return b.length - a.length;
+            });
+            let rest = String(text);
+
+            box.style.cssText = "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:#eee";
+
+            while (rest) {
+
+                let at = -1;
+                let who = "";
+
+                for (const n of known) {
+
+                    const i = rest.indexOf("@" + n);
+
+                    if (i >= 0 && (at < 0 || i < at)) {
+                        at = i;
+                        who = n;
+                    }
+                }
+
+                if (at < 0) {
+
+                    box.appendChild(document.createTextNode(rest));
+                    break;
+                }
+
+                const tag = document.createElement("span");
+
+                tag.textContent = "@" + who;
+                tag.style.cssText = "font-weight:600;color:" + (who === me ? "#ffb454" : accent);
+                box.appendChild(document.createTextNode(rest.slice(0, at)));
+                box.appendChild(tag);
+                rest = rest.slice(at + who.length + 1);
+            }
+
+            return box;
+        }
+
+        // The clock time of a message, with the day when not today
+        function whenText(at) {
+
+            if (!at) {
+                return "";
+            }
+
+            const d = new Date(at);
+            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+            return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
+        }
+
+        function paint(data) {
+
+            const msgs = Array.isArray(data.msgs) ? data.msgs : [];
+            const key = String(data.me) + "|" + msgs.length + "|" + (msgs.length ? msgs[msgs.length - 1].id + ":" + msgs[msgs.length - 1].at : "")
+                + "|" + (data.keepText || "") + "|" + (data.emptyText || "");
+
+            last = { me: String(data.me || ""), msgs: msgs, names: Array.isArray(data.names) ? data.names : [] };
+
+            if (key === shownKey) {
+                return;
+            }
+
+            const first = shownKey === "";
+            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
+
+            shownKey = key;
+            note.textContent = String(data.keepText || "");
+            note.style.display = note.textContent ? "" : "none";
+            listBox.textContent = "";
+
+            for (const m of msgs) {
+
+                const mine = String(m.from) === last.me;
+                const toMe = !mine && last.me && String(m.text).indexOf("@" + last.me) >= 0;
+                const box = document.createElement("div");
+                const top = document.createElement("div");
+                const who = document.createElement("span");
+                const when = document.createElement("span");
+
+                box.style.cssText = "flex:0 0 auto;max-width:85%;padding:6px 10px;border-radius:10px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box;"
+                    + (mine ? "align-self:flex-end;background:rgba(" + accentRgb + ",0.16)" : "align-self:flex-start;background:#1c1c21")
+                    + (toMe ? ";border-left:3px solid #ffb454" : "");
+                top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:11px";
+                who.textContent = mine ? "You" : String(m.from || "Someone");
+                who.style.cssText = "font-weight:600;color:" + (mine ? accent : "#ffb454");
+                when.textContent = whenText(Number(m.at) || 0);
+                when.style.cssText = "color:#888";
+                top.appendChild(who);
+                top.appendChild(when);
+                box.appendChild(top);
+                box.appendChild(textNode(String(m.text || ""), last.names, last.me));
+                listBox.appendChild(box);
+            }
+
+            if (!msgs.length) {
+
+                const empty = document.createElement("div");
+
+                empty.textContent = data.emptyText || "No messages yet. What you write goes to everyone in the room.";
+                empty.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
+                listBox.appendChild(empty);
+            }
+
+            if (atEnd || first) {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+        }
+
+        return {
+            el: el,
+            paint: paint,
+            focus: function () {
+                field.focus();
+            },
+            atEnd: function () {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+        };
+    }
+    // END SHARED chat
 
     // How long a speaker takes to play what the player sends, in ms, found
     // by ear in the training, -1 for not known
@@ -40932,7 +41291,10 @@
             }
 
             if (!syncChatRepaint && Date.now() - chatWebAt > 5000 && m.from !== syncName()) {
-                showToast(m.from + ": " + (m.text.length > 120 ? m.text.slice(0, 120) + "..." : m.text), true);
+
+                const toMe = m.text.indexOf("@" + syncName()) >= 0;
+
+                showToast(m.from + (toMe ? " mentioned you: " : ": ") + (m.text.length > 120 ? m.text.slice(0, 120) + "..." : m.text), true);
             }
         }
 
@@ -40986,19 +41348,6 @@
             + ", for everyone.";
     }
 
-    // The clock time of a message, with the day when not today
-    function chatWhen(at) {
-
-        if (!at) {
-            return "";
-        }
-
-        const d = new Date(at);
-        const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-        return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
-    }
-
     // A small orange pill with the unread count on a Together button's
     // upper corner
     function paintChatCount(btn, n) {
@@ -41022,10 +41371,36 @@
             + (n > 0 ? "" : "display:none");
     }
 
-    // The chat: the messages, newest at the bottom, each with who and when,
-    // this player's own on the right, and a field to write in. Enter sends,
-    // Shift+Enter starts a new line. Escape or Close goes back
-    function openSyncChat() {
+    // The chat, from the shared view: docked where the song list is, over
+    // it, or as a dialog of its own. Docked by default, Float and Dock
+    // switch, remembered. Escape or Close goes back to the list
+    let chatUi = null;
+
+    // The people to mention: those in the room and those who wrote
+    function chatNames() {
+
+        const me = syncName();
+        const out = [];
+        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncHolding ? syncMembersNow() : [];
+
+        for (const m of list) {
+            out.push(String(m.name || "").slice(0, 40));
+        }
+
+        for (const m of syncChat.msgs) {
+            out.push(m.from);
+        }
+
+        return Array.from(new Set(out)).filter(function (n) {
+            return n && n !== me;
+        });
+    }
+
+    function chatViewData() {
+        return { me: syncName(), msgs: syncChat.msgs, keepText: chatKeepText(), names: chatNames() };
+    }
+
+    function openSyncChat(mode) {
 
         if (!panelEl) {
             return;
@@ -41037,143 +41412,109 @@
             return;
         }
 
-        const dialog = makeDialog({
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
-                + "height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px",
-            onCancel: function () {
-                syncChatRepaint = null;
-                syncPaint();
+        if (chatUi) {
+            chatUi.close();
+        }
+
+        const docked = (mode || (settings.chatDock === false ? "float" : "dock")) === "dock" && listWrapEl && !!listWrapEl.offsetParent;
+        const view = makeChatView({
+            accent: ACCENT,
+            accentRgb: ACCENT_RGB,
+            send: function (text) {
+                return chatSend(text);
+            },
+            onEscape: function () {
+                done();
+            },
+            toast: function (text) {
+                showToast(text, false);
             }
         });
-        const card = dialog.card;
         const head = document.createElement("div");
         const title = document.createElement("div");
+        const swap = makeButton(docked ? "Float" : "Dock", "#333", "#fff", function () {
+
+            settings.chatDock = !docked;
+            saveSettings();
+            openSyncChat(docked ? "float" : "dock");
+        });
         const shut = makeButton("Close", "#444", "#fff", function () {
             done();
         });
-        const note = document.createElement("div");
-        const listBox = document.createElement("div");
-        const foot = document.createElement("div");
-        const field = document.createElement("textarea");
-        const send = makeButton("Send", ACCENT, "#000", function () {
-            post();
-        });
-        let shownSeq = -1;
+        let dialog = null;
+        let dock = null;
+        const ui = { close: null };
         const done = function () {
 
+            if (chatUi !== ui) {
+                return;
+            }
+
+            chatUi = null;
             syncChatRepaint = null;
-            dialog.close();
+
+            if (dialog) {
+                dialog.close();
+            }
+
+            if (dock) {
+                dock.remove();
+            }
+
             syncPaint();
             publishHostSoon();
         };
 
+        ui.close = done;
         head.classList.add("mp-row8");
         title.textContent = "Chat in " + syncRoomLabel();
         title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        swap.title = docked ? "The chat in a window of its own" : "The chat where the song list is";
+        swap.style.flex = "0 0 auto";
         shut.style.flex = "0 0 auto";
         head.appendChild(title);
+        head.appendChild(swap);
         head.appendChild(shut);
-        note.style.cssText = "font-size:11px;color:#888;line-height:1.4";
-        listBox.style.cssText = "flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"
-            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
-        foot.classList.add("mp-row8");
-        field.rows = 2;
-        field.maxLength = CHAT_TEXT_MAX;
-        field.placeholder = "Write to everyone in the room";
-        field.style.cssText = "flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:6px;"
-            + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none";
-        field.addEventListener("keydown", function (ev) {
 
-            ev.stopPropagation();
+        if (docked) {
 
-            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+            dock = document.createElement("div");
+            dock.style.cssText = "position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;gap:8px;padding:8px 2px 4px;"
+                + "box-sizing:border-box;background:#1d1d22";
+            dock.appendChild(head);
+            dock.appendChild(view.el);
+            listWrapEl.appendChild(dock);
+        } else {
 
-                ev.preventDefault();
-                post();
-            }
-        });
-        send.style.flex = "0 0 auto";
-        foot.appendChild(field);
-        foot.appendChild(send);
-        card.appendChild(head);
-        card.appendChild(note);
-        card.appendChild(listBox);
-        card.appendChild(foot);
-        panelEl.appendChild(dialog.back);
+            dialog = makeDialog({
+                cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
+                    + "height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px",
+                onCancel: function () {
 
-        function post() {
-
-            const why = chatSend(field.value);
-
-            if (why) {
-
-                showToast(why, false);
-                return;
-            }
-
-            field.value = "";
-            field.focus();
+                    dialog = null;
+                    done();
+                }
+            });
+            dialog.card.appendChild(head);
+            dialog.card.appendChild(view.el);
+            panelEl.appendChild(dialog.back);
         }
 
-        function paint() {
-
-            if (shownSeq === syncChat.seq) {
-                return;
-            }
-
-            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
-            const me = syncName();
-
-            shownSeq = syncChat.seq;
-            note.textContent = chatKeepText();
-            note.style.display = note.textContent ? "" : "none";
-            listBox.textContent = "";
-
-            for (const m of syncChat.msgs) {
-
-                const mine = m.from === me;
-                const box = document.createElement("div");
-                const top = document.createElement("div");
-                const who = document.createElement("span");
-                const when = document.createElement("span");
-                const text = document.createElement("div");
-
-                box.style.cssText = "max-width:85%;padding:6px 10px;border-radius:10px;display:flex;flex-direction:column;gap:2px;"
-                    + (mine ? "align-self:flex-end;background:rgba(" + ACCENT_RGB + ",0.16)" : "align-self:flex-start;background:#1c1c21");
-                top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:11px";
-                who.textContent = mine ? "You" : m.from;
-                who.style.cssText = "font-weight:600;color:" + (mine ? ACCENT : "#ffb454");
-                when.textContent = chatWhen(m.at);
-                when.style.cssText = "color:#888";
-                text.textContent = m.text;
-                text.style.cssText = "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:#eee";
-                top.appendChild(who);
-                top.appendChild(when);
-                box.appendChild(top);
-                box.appendChild(text);
-                listBox.appendChild(box);
-            }
-
-            if (!syncChat.msgs.length) {
-
-                const empty = document.createElement("div");
-
-                empty.textContent = "No messages yet. What you write goes to everyone in the room.";
-                empty.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
-                listBox.appendChild(empty);
-            }
-
-            if (atEnd || shownSeq <= 1) {
-                listBox.scrollTop = listBox.scrollHeight;
-            }
-        }
-
-        syncChatRepaint = paint;
-        paint();
-        listBox.scrollTop = listBox.scrollHeight;
+        chatUi = ui;
+        syncChatRepaint = function () {
+            view.paint(chatViewData());
+        };
+        syncChatRepaint();
+        view.atEnd();
         chatMarkSeen();
         syncPaint();
         publishHostSoon();
+
+        // With a mouse the field is ready to write in, a phone's keyboard
+        // comes up only when the field is tapped
+        if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+            view.focus();
+        }
     }
 
     // How listening together stands, in one line
@@ -71976,7 +72317,7 @@
             }
 
             reply({ ok: true, room: syncRoomLabel(), inRoom: syncInRoom(), me: syncName(), keep: syncChat.keep,
-                keepText: chatKeepText(), seq: syncChat.seq, msgs: syncChat.msgs });
+                keepText: chatKeepText(), seq: syncChat.seq, msgs: syncChat.msgs, names: chatNames() });
         } else if (op === "chatSend") {
 
             const why = chatSend(String(a.text || ""));
@@ -76329,56 +76670,26 @@
         pointer-events: none;
     }
 
-    /* A chat message: who and when over the text, this player's own on
-       the right */
-    .chatList {
-        gap: 6px;
+    /* The chat docked where the song list is: the list's own rows
+       hidden while it shows */
+    #mini.chatting > :not(.chatDock),
+    #browse.chatting > :not(.chatDock) {
+        display: none !important;
     }
 
-    .chatMsg {
-        flex: 0 0 auto;
-        align-self: flex-start;
-        max-width: 85%;
+    .chatDock {
+        flex: 1 1 auto;
+        min-height: 0;
         display: flex;
         flex-direction: column;
-        gap: 2px;
-        padding: 6px 10px;
-        border-radius: 10px;
-        background: #1c1c21;
-    }
-
-    .chatMsg.mine {
-        align-self: flex-end;
-        background: rgba(72, 225, 235, 0.16);
-    }
-
-    .chatTop {
-        display: flex;
-        align-items: baseline;
         gap: 8px;
-        font-size: 0.75em;
-        color: var(--muted, #888);
+        padding: 4px 2px;
+        box-sizing: border-box;
     }
 
-    .chatWho {
-        font-weight: 600;
-        color: #ffb454;
-    }
-
-    .chatMsg.mine .chatWho {
-        color: var(--accent);
-    }
-
-    .chatText {
-        line-height: 1.4;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        color: #eee;
-    }
-
-    .chatKeep {
-        font-size: 0.75em;
-        color: var(--muted, #888);
+    /* The chat as a dialog of its own, tall enough to read back */
+    .cmCard.chatCard {
+        height: min(86vh, 100%);
     }
 
     .ctlCount {
@@ -86839,6 +87150,365 @@
     }
     // END SHARED misc
 
+    // BEGIN SHARED chat
+    // Written by embed-webview.sh from src/shared/chat.js. Change that
+    // file and run make embed, never the lines up to END SHARED chat
+    // The chat of a room, as both the player and the web view show it: how
+    // long messages are kept, the messages with who and when, this
+    // player's own on the right, and a field to write in. Typing @ opens a
+    // list of the people to mention, which the arrows move through and Tab
+    // or Enter picks. Enter sends, Shift+Enter starts a new line. A
+    // mention of a name is lit, and a message mentioning this player gets
+    // an orange edge. Shared by the player and the web view's page,
+    // src/shared/chat.js, inlined into both by embed-webview.sh
+    //
+    // opts: accent and accentRgb, the colours; send(text), a promise of
+    // why it could not go or ""; onEscape(), Escape with no list open;
+    // toast(text), a word for the one writing. Answers the element, paint
+    // with { me, msgs, keepText, names, emptyText } and focus
+    function makeChatView(opts) {
+
+        const accent = opts.accent || "#48e1eb";
+        const accentRgb = opts.accentRgb || "72,225,235";
+        const el = document.createElement("div");
+        const note = document.createElement("div");
+        const listBox = document.createElement("div");
+        const footWrap = document.createElement("div");
+        const pop = document.createElement("div");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const sendBtn = document.createElement("button");
+        let last = { me: "", msgs: [], names: [] };
+        let shownKey = "";
+        let picks = [];
+        let pickAt = 0;
+        let mentionFrom = -1;
+        let sending = false;
+
+        el.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px";
+        note.style.cssText = "font-size:11px;color:#888;line-height:1.4";
+        listBox.style.cssText = "flex:1 1 auto;min-height:60px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"
+            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
+        listBox.setAttribute("data-noswipe", "1");
+        footWrap.style.cssText = "position:relative;flex:0 0 auto";
+        pop.style.cssText = "display:none;position:absolute;left:0;bottom:calc(100% + 6px);min-width:180px;max-width:100%;max-height:220px;overflow-y:auto;"
+            + "flex-direction:column;padding:4px;box-sizing:border-box;border-radius:10px;background:#2c2c33;border:1px solid #44444c;"
+            + "box-shadow:0 6px 20px rgba(0,0,0,0.5);z-index:5";
+        foot.style.cssText = "display:flex;gap:8px;align-items:stretch";
+        field.rows = 2;
+        field.maxLength = 1000;
+        field.placeholder = "Write to everyone in the room, @ to mention";
+        field.style.cssText = "flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:8px;"
+            + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none";
+        sendBtn.type = "button";
+        sendBtn.textContent = "Send";
+        sendBtn.style.cssText = "flex:0 0 auto;padding:0 16px;border:none;border-radius:8px;background:" + accent + ";color:#000;font:inherit;"
+            + "font-weight:600;cursor:pointer";
+        sendBtn.addEventListener("click", post);
+        foot.appendChild(field);
+        foot.appendChild(sendBtn);
+        footWrap.appendChild(pop);
+        footWrap.appendChild(foot);
+        el.appendChild(note);
+        el.appendChild(listBox);
+        el.appendChild(footWrap);
+
+        // The page's own keys never hear what is typed here
+        field.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (pop.style.display !== "none" && picks.length) {
+
+                if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+
+                    ev.preventDefault();
+                    pickAt = (pickAt + (ev.key === "ArrowDown" ? 1 : picks.length - 1)) % picks.length;
+                    paintPop();
+                    return;
+                }
+
+                if (ev.key === "Tab" || (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing)) {
+
+                    ev.preventDefault();
+                    choose(picks[pickAt]);
+                    return;
+                }
+
+                if (ev.key === "Escape") {
+
+                    ev.preventDefault();
+                    closePop();
+                    return;
+                }
+            }
+
+            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+
+                ev.preventDefault();
+                post();
+            } else if (ev.key === "Escape" && opts.onEscape) {
+
+                ev.preventDefault();
+                opts.onEscape();
+            }
+        });
+        field.addEventListener("keyup", function (ev) {
+            ev.stopPropagation();
+        });
+        field.addEventListener("input", findMention);
+        field.addEventListener("click", findMention);
+        field.addEventListener("blur", function () {
+
+            // A press on the list comes before the blur takes it away
+            setTimeout(closePop, 150);
+        });
+
+        // The @ being typed before the caret, and the names that fit it
+        function findMention() {
+
+            const upTo = field.value.slice(0, field.selectionStart || 0);
+            const m = /(^|\s)@([^\s@]{0,30})$/.exec(upTo);
+
+            if (!m) {
+
+                closePop();
+                return;
+            }
+
+            const q = m[2].toLowerCase();
+
+            mentionFrom = upTo.length - m[2].length - 1;
+            picks = (last.names || []).filter(function (n) {
+                return n && n !== last.me && n.toLowerCase().indexOf(q) >= 0;
+            }).sort(function (a, b) {
+                return (a.toLowerCase().indexOf(q) === 0 ? 0 : 1) - (b.toLowerCase().indexOf(q) === 0 ? 0 : 1) || a.localeCompare(b);
+            }).slice(0, 8);
+            pickAt = 0;
+
+            if (!picks.length) {
+
+                closePop();
+                return;
+            }
+
+            paintPop();
+        }
+
+        function paintPop() {
+
+            pop.textContent = "";
+
+            picks.forEach(function (name, i) {
+
+                const row = document.createElement("div");
+
+                row.textContent = "@" + name;
+                row.style.cssText = "padding:6px 10px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                    + (i === pickAt ? "background:rgba(" + accentRgb + ",0.22);color:#fff" : "color:#ddd");
+                row.addEventListener("mousedown", function (ev) {
+
+                    ev.preventDefault();
+                    choose(name);
+                });
+                row.addEventListener("touchstart", function (ev) {
+
+                    ev.preventDefault();
+                    choose(name);
+                }, { passive: false });
+                pop.appendChild(row);
+            });
+
+            pop.style.display = "flex";
+
+            const on = pop.children[pickAt];
+
+            if (on && on.scrollIntoView) {
+                on.scrollIntoView({ block: "nearest" });
+            }
+        }
+
+        function closePop() {
+
+            pop.style.display = "none";
+            picks = [];
+        }
+
+        // The @ and what was typed after it become the whole name and a space
+        function choose(name) {
+
+            const caret = field.selectionStart || 0;
+            const before = field.value.slice(0, mentionFrom);
+            const after = field.value.slice(caret);
+            const put = "@" + name + " ";
+
+            field.value = before + put + after;
+            field.focus();
+            field.selectionStart = field.selectionEnd = before.length + put.length;
+            closePop();
+        }
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text || sending) {
+                return;
+            }
+
+            sending = true;
+            sendBtn.disabled = true;
+            Promise.resolve(opts.send(text)).then(function (why) {
+
+                sending = false;
+                sendBtn.disabled = false;
+
+                if (why) {
+
+                    if (opts.toast) {
+                        opts.toast(why);
+                    }
+
+                    return;
+                }
+
+                field.value = "";
+                closePop();
+                field.focus();
+            });
+        }
+
+        // A message's text with the mentions of known names lit, the
+        // longest name first where one begins another
+        function textNode(text, names, me) {
+
+            const box = document.createElement("div");
+            const known = names.concat(me ? [me] : []).filter(function (n) {
+                return n;
+            }).sort(function (a, b) {
+                return b.length - a.length;
+            });
+            let rest = String(text);
+
+            box.style.cssText = "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:#eee";
+
+            while (rest) {
+
+                let at = -1;
+                let who = "";
+
+                for (const n of known) {
+
+                    const i = rest.indexOf("@" + n);
+
+                    if (i >= 0 && (at < 0 || i < at)) {
+                        at = i;
+                        who = n;
+                    }
+                }
+
+                if (at < 0) {
+
+                    box.appendChild(document.createTextNode(rest));
+                    break;
+                }
+
+                const tag = document.createElement("span");
+
+                tag.textContent = "@" + who;
+                tag.style.cssText = "font-weight:600;color:" + (who === me ? "#ffb454" : accent);
+                box.appendChild(document.createTextNode(rest.slice(0, at)));
+                box.appendChild(tag);
+                rest = rest.slice(at + who.length + 1);
+            }
+
+            return box;
+        }
+
+        // The clock time of a message, with the day when not today
+        function whenText(at) {
+
+            if (!at) {
+                return "";
+            }
+
+            const d = new Date(at);
+            const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+            return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
+        }
+
+        function paint(data) {
+
+            const msgs = Array.isArray(data.msgs) ? data.msgs : [];
+            const key = String(data.me) + "|" + msgs.length + "|" + (msgs.length ? msgs[msgs.length - 1].id + ":" + msgs[msgs.length - 1].at : "")
+                + "|" + (data.keepText || "") + "|" + (data.emptyText || "");
+
+            last = { me: String(data.me || ""), msgs: msgs, names: Array.isArray(data.names) ? data.names : [] };
+
+            if (key === shownKey) {
+                return;
+            }
+
+            const first = shownKey === "";
+            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
+
+            shownKey = key;
+            note.textContent = String(data.keepText || "");
+            note.style.display = note.textContent ? "" : "none";
+            listBox.textContent = "";
+
+            for (const m of msgs) {
+
+                const mine = String(m.from) === last.me;
+                const toMe = !mine && last.me && String(m.text).indexOf("@" + last.me) >= 0;
+                const box = document.createElement("div");
+                const top = document.createElement("div");
+                const who = document.createElement("span");
+                const when = document.createElement("span");
+
+                box.style.cssText = "flex:0 0 auto;max-width:85%;padding:6px 10px;border-radius:10px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box;"
+                    + (mine ? "align-self:flex-end;background:rgba(" + accentRgb + ",0.16)" : "align-self:flex-start;background:#1c1c21")
+                    + (toMe ? ";border-left:3px solid #ffb454" : "");
+                top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:11px";
+                who.textContent = mine ? "You" : String(m.from || "Someone");
+                who.style.cssText = "font-weight:600;color:" + (mine ? accent : "#ffb454");
+                when.textContent = whenText(Number(m.at) || 0);
+                when.style.cssText = "color:#888";
+                top.appendChild(who);
+                top.appendChild(when);
+                box.appendChild(top);
+                box.appendChild(textNode(String(m.text || ""), last.names, last.me));
+                listBox.appendChild(box);
+            }
+
+            if (!msgs.length) {
+
+                const empty = document.createElement("div");
+
+                empty.textContent = data.emptyText || "No messages yet. What you write goes to everyone in the room.";
+                empty.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
+                listBox.appendChild(empty);
+            }
+
+            if (atEnd || first) {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+        }
+
+        return {
+            el: el,
+            paint: paint,
+            focus: function () {
+                field.focus();
+            },
+            atEnd: function () {
+                listBox.scrollTop = listBox.scrollHeight;
+            }
+        };
+    }
+    // END SHARED chat
+
     // Add one line to the log, and show it at once while the overlay is up.
     // It is kept with the overlay off as well, so switching it on shows what
     // just happened
@@ -90860,10 +91530,16 @@
     }
 
     // The seek bar and the times move smoothly between the polls
-    // The position the bar shows. It runs on with the clock and is eased
+    // The position the bar shows. It runs on with the clock and is pulled
     // toward where the phone says the song is, so the small differences
     // between one word from the phone and the next never make it jump.
-    // A real change, a seek, a pause or a new song, is taken at once
+    // Each word from the phone is off by some tens of milliseconds, its
+    // own clock and the way here. Taken in quickly, a part of the gap each
+    // frame, that made the waveform hitch a little as each state came, a
+    // couple of times a second. Now a small gap is made up running at most
+    // 3 percent fast or slow, which the eye does not see, a larger one at
+    // up to a quarter. A real change, a seek, a pause or a new song, is
+    // taken at once
     let shownPos = 0;
     let shownAt = 0;
     let shownId = "";
@@ -90873,13 +91549,17 @@
         const now = performance.now();
         const playing = !!(state && state.playing);
         const id = state ? String(state.id || "") : "";
-        let next = shownPos + (playing ? (now - shownAt) / 1000 : 0);
+        const dt = Math.min(0.25, Math.max(0, (now - shownAt) / 1000));
+        let next = shownPos + (playing ? dt : 0);
         const off = target - next;
 
         if (!playing || id !== shownId || Math.abs(off) > 0.6) {
             next = target;
         } else {
-            next += off * 0.06;
+
+            const most = (Math.abs(off) > 0.15 ? 0.25 : 0.03) * dt;
+
+            next += Math.max(-most, Math.min(most, off * Math.min(1, dt * 2)));
         }
 
         shownPos = next;
@@ -99387,6 +100067,10 @@
 
     function closeMini() {
 
+        if (chatClose && $("mini").classList.contains("chatting")) {
+            chatClose();
+        }
+
         miniOpen = false;
         miniToken += 1;
         $("app").classList.remove("miniOpen");
@@ -107424,171 +108108,160 @@
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
     }
 
-    // The room's chat, read through the Android device: the messages,
-    // newest at the bottom, each with who and when, this player's own on
-    // the right, and a field to write in. Enter sends, Shift+Enter starts
-    // a new line. Read again as the phone's chat changes, and while open
-    // what comes counts as read. Escape or Close goes back
+    // The room's chat, read through the Android device, from the shared
+    // view: docked where the song list is, the small list beside the song
+    // or the list under it on a phone, or as a dialog of its own. Docked by
+    // default, Float and Dock switch, remembered in this browser. Read
+    // again as the phone's chat changes, and while open what comes counts
+    // as read. Escape or Close goes back
+    const CHAT_DOCK_KEY = "murekaChatDock";
     let chatPaint = null;
+    let chatClose = null;
 
-    function openTogetherChat() {
+    function openTogetherChat(mode) {
 
-        const back = document.createElement("div");
-        const card = document.createElement("div");
+        let want = mode;
+
+        if (!want) {
+
+            try {
+                want = localStorage.getItem(CHAT_DOCK_KEY) === "float" ? "float" : "dock";
+            } catch (e) {
+                want = "dock";
+            }
+        }
+
+        if (chatClose) {
+            chatClose();
+        }
+
+        const docked = want === "dock";
+        const view = makeChatView({
+            send: function (text) {
+
+                return crAsk({ op: "chatSend", text: text }).then(function (r) {
+
+                    if (r && r.ok) {
+                        setTimeout(load, 500);
+                        return "";
+                    }
+
+                    return "Message not sent" + (r && r.why ? ": " + r.why : "");
+                });
+            },
+            onEscape: function () {
+                close();
+            },
+            toast: function (text) {
+                toast(text, "bad");
+            }
+        });
         const head = document.createElement("div");
         const title = document.createElement("div");
+        const swap = document.createElement("button");
         const shut = document.createElement("button");
-        const keep = document.createElement("div");
-        const listBox = document.createElement("div");
-        const foot = document.createElement("div");
-        const field = document.createElement("textarea");
-        const sendBtn = document.createElement("button");
+        let box = null;
+        let back = null;
+        let host = null;
         let unBack = null;
         let shownSeq = -1;
         let asking = false;
-        let first = true;
         const timer = setInterval(function () {
             load();
         }, 3000);
         const close = function () {
 
-            clearInterval(timer);
+            if (chatClose !== close) {
+                return;
+            }
+
+            chatClose = null;
             chatPaint = null;
-            back.remove();
+            clearInterval(timer);
+
+            if (back) {
+                back.remove();
+            }
+
+            if (box) {
+                box.remove();
+            }
+
+            if (host) {
+                host.classList.remove("chatting");
+            }
 
             if (unBack) {
                 unBack();
             }
         };
 
-        back.className = "cmBack";
-        card.className = "cmCard";
         head.className = "cmHead";
         title.className = "cmTitle";
         title.textContent = "Chat";
+        swap.type = "button";
+        swap.className = "chip";
+        swap.textContent = docked ? "Float" : "Dock";
+        swap.title = docked ? "The chat in a window of its own" : "The chat where the song list is";
+        swap.addEventListener("click", function () {
+
+            try {
+                localStorage.setItem(CHAT_DOCK_KEY, docked ? "float" : "dock");
+            } catch (e) {
+            }
+
+            openTogetherChat(docked ? "float" : "dock");
+        });
         shut.type = "button";
         shut.className = "chip";
         shut.textContent = "Close";
         shut.addEventListener("click", close);
-        keep.className = "chatKeep";
-        keep.style.display = "none";
-        listBox.className = "cmList chatList";
-        foot.className = "cmFoot";
-        field.rows = 2;
-        field.maxLength = 1000;
-        field.placeholder = "Write to everyone in the room";
-        sendBtn.type = "button";
-        sendBtn.className = "chip crPrimary";
-        sendBtn.textContent = "Send";
-        sendBtn.addEventListener("click", post);
-
-        // The page's own keys never hear what is typed here
-        field.addEventListener("keydown", function (ev) {
-
-            ev.stopPropagation();
-
-            if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
-
-                ev.preventDefault();
-                post();
-            } else if (ev.key === "Escape") {
-
-                ev.preventDefault();
-                close();
-            }
-        });
-        back.addEventListener("click", function (ev) {
-
-            if (ev.target === back) {
-                close();
-            }
-        });
-
         head.appendChild(title);
+        head.appendChild(swap);
         head.appendChild(shut);
-        foot.appendChild(field);
-        foot.appendChild(sendBtn);
-        card.appendChild(head);
-        card.appendChild(keep);
-        card.appendChild(listBox);
-        card.appendChild(foot);
-        back.appendChild(card);
-        document.body.appendChild(back);
-        unBack = onBack(close);
-        listBox.appendChild(loadingNode("Reading the chat"));
 
-        function post() {
+        if (docked) {
 
-            const text = field.value.trim();
+            // The small list beside the song opened for it, on a phone the
+            // list under the song
+            if (isPhone()) {
+                host = $("browse");
+            } else {
 
-            if (!text) {
-                return;
+                if (!miniOpen) {
+                    openMini();
+                }
+
+                host = $("mini");
             }
 
-            sendBtn.disabled = true;
-            crAsk({ op: "chatSend", text: text }).then(function (r) {
+            box = document.createElement("div");
+            box.className = "chatDock";
+            box.appendChild(head);
+            box.appendChild(view.el);
+            host.appendChild(box);
+            host.classList.add("chatting");
+        } else {
 
-                sendBtn.disabled = false;
+            const card = document.createElement("div");
 
-                if (r && r.ok) {
+            back = document.createElement("div");
+            back.className = "cmBack";
+            card.className = "cmCard chatCard";
+            card.appendChild(head);
+            card.appendChild(view.el);
+            back.appendChild(card);
+            back.addEventListener("click", function (ev) {
 
-                    field.value = "";
-                    field.focus();
-                    setTimeout(load, 600);
-                } else {
-                    toast("Message not sent" + (r && r.why ? ": " + r.why : ""), "bad");
+                if (ev.target === back) {
+                    close();
                 }
             });
+            document.body.appendChild(back);
         }
 
-        function paint(r) {
-
-            const atEnd = listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 40;
-            const msgs = Array.isArray(r.msgs) ? r.msgs : [];
-
-            title.textContent = "Chat in " + String(r.room || "the room");
-            keep.textContent = String(r.keepText || "");
-            keep.style.display = keep.textContent ? "" : "none";
-            listBox.textContent = "";
-
-            for (const m of msgs) {
-
-                const mine = String(m.from) === String(r.me);
-                const box = document.createElement("div");
-                const top = document.createElement("div");
-                const who = document.createElement("span");
-                const when = document.createElement("span");
-                const text = document.createElement("div");
-
-                box.className = "chatMsg" + (mine ? " mine" : "");
-                top.className = "chatTop";
-                who.className = "chatWho";
-                who.textContent = mine ? "You" : String(m.from || "Someone");
-                when.textContent = chatWhen(Number(m.at) || 0);
-                text.className = "chatText";
-                text.textContent = String(m.text || "");
-                top.appendChild(who);
-                top.appendChild(when);
-                box.appendChild(top);
-                box.appendChild(text);
-                listBox.appendChild(box);
-            }
-
-            if (!msgs.length) {
-
-                const note = document.createElement("div");
-
-                note.className = "cmNote";
-                note.textContent = r.inRoom === false ? "Not in a room now. Join one to chat." : "No messages yet. What you write goes to everyone in the room.";
-                listBox.appendChild(note);
-            }
-
-            if (atEnd || first) {
-                listBox.scrollTop = listBox.scrollHeight;
-            }
-
-            first = false;
-        }
+        chatClose = close;
+        unBack = onBack(close);
 
         function load() {
 
@@ -107601,15 +108274,14 @@
 
                 asking = false;
 
-                if (!r || !r.ok) {
+                if (!r || !r.ok || chatClose !== close) {
                     return;
                 }
 
-                if (Number(r.seq) !== shownSeq || first) {
-
-                    shownSeq = Number(r.seq);
-                    paint(r);
-                }
+                shownSeq = Number(r.seq);
+                title.textContent = "Chat in " + String(r.room || "the room");
+                view.paint({ me: r.me, msgs: r.msgs, keepText: r.keepText, names: r.names,
+                    emptyText: r.inRoom === false ? "Not in a room now. Join one to chat." : "" });
             });
         }
 
@@ -107621,20 +108293,10 @@
             }
         };
         load();
-        field.focus();
-    }
 
-    // The clock time of a message, with the day when not today
-    function chatWhen(at) {
-
-        if (!at) {
-            return "";
+        if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+            view.focus();
         }
-
-        const d = new Date(at);
-        const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-        return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString([], { weekday: "short" }) + " " + time;
     }
 
     // Mureka's notifications, newest first, read through the Android
