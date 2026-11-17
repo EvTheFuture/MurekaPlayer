@@ -892,16 +892,21 @@
         gap: 0.25em;
         margin-left: 0.4em;
         padding: 0.05em 0.45em;
-        border: 1px solid rgba(255, 180, 84, 0.55);
+        border: 1px solid var(--line);
         border-radius: 0.6em;
         background: none;
-        color: #ffb454;
+        color: var(--muted);
         font: inherit;
         font-size: 0.75em;
         font-weight: 600;
         line-height: 1.5;
         white-space: nowrap;
         cursor: pointer;
+    }
+
+    #msgBadge.unread {
+        border-color: rgba(255, 180, 84, 0.55);
+        color: #ffb454;
     }
 
     #msgBadge .ico {
@@ -12789,7 +12794,8 @@
     // the badge is not shown
     let wgShown = null;
 
-    // The bell with the count of unread notifications, while there are some
+    // The bell, always there for the old ones too, orange with the count
+    // of unread notifications while there are some
     let msgBadgeShown = -1;
 
     function paintMsgBadge(s) {
@@ -12802,11 +12808,16 @@
         }
 
         msgBadgeShown = n;
-        el.style.display = n > 0 ? "inline-flex" : "none";
+        el.style.display = "inline-flex";
+        el.classList.toggle("unread", n > 0);
         el.textContent = "";
         el.appendChild(icon("bell"));
-        el.appendChild(document.createTextNode(n >= 20 ? "20+" : String(n)));
-        el.title = n + (n === 1 ? " new notification" : " new notifications") + " on Mureka";
+
+        if (n > 0) {
+            el.appendChild(document.createTextNode(n >= 20 ? "20+" : String(n)));
+        }
+
+        el.title = n > 0 ? n + (n === 1 ? " new notification" : " new notifications") + " on Mureka" : "Notifications";
     }
 
     $("msgBadge").addEventListener("click", function (ev) {

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.215";
+    const VERSION = "2.0.1.216";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -44413,8 +44413,8 @@
         headerTitle.appendChild(offlineBadgeEl);
         paintOfflineBadge();
 
-        // Unread notifications, a tap shows them. Shown only while there
-        // are some
+        // The notifications, a tap shows them, with the count of the
+        // unread ones while there are some
         msgBadgeEl = document.createElement("span");
         msgBadgeCountEl = document.createElement("span");
         msgBadgeEl.style.cssText = "display:none;align-items:center;gap:3px;margin-left:6px;padding:0 6px;border:1px solid rgba(255,180,84,0.55);"
@@ -70289,9 +70289,16 @@
             return;
         }
 
-        msgBadgeEl.style.display = msgUnread > 0 ? "inline-flex" : "none";
+        // Always there, for the old ones too: a plain grey bell, orange
+        // with the count while some are unread
+        const any = msgUnread > 0;
+
+        msgBadgeEl.style.display = "inline-flex";
+        msgBadgeEl.style.color = any ? "#ffb454" : "#888";
+        msgBadgeEl.style.borderColor = any ? "rgba(255,180,84,0.55)" : "#4a4a52";
+        msgBadgeCountEl.style.display = any ? "" : "none";
         msgBadgeCountEl.textContent = msgUnread >= MSG_PAGE ? MSG_PAGE + "+" : String(msgUnread);
-        msgBadgeEl.title = msgUnread + (msgUnread === 1 ? " new notification" : " new notifications") + " on Mureka";
+        msgBadgeEl.title = any ? msgUnread + (msgUnread === 1 ? " new notification" : " new notifications") + " on Mureka" : "Notifications";
     }
 
     // Mureka's own unread mark cleared, as its page does after reading
@@ -76016,16 +76023,21 @@
         gap: 0.25em;
         margin-left: 0.4em;
         padding: 0.05em 0.45em;
-        border: 1px solid rgba(255, 180, 84, 0.55);
+        border: 1px solid var(--line);
         border-radius: 0.6em;
         background: none;
-        color: #ffb454;
+        color: var(--muted);
         font: inherit;
         font-size: 0.75em;
         font-weight: 600;
         line-height: 1.5;
         white-space: nowrap;
         cursor: pointer;
+    }
+
+    #msgBadge.unread {
+        border-color: rgba(255, 180, 84, 0.55);
+        color: #ffb454;
     }
 
     #msgBadge .ico {
@@ -87913,7 +87925,8 @@
     // the badge is not shown
     let wgShown = null;
 
-    // The bell with the count of unread notifications, while there are some
+    // The bell, always there for the old ones too, orange with the count
+    // of unread notifications while there are some
     let msgBadgeShown = -1;
 
     function paintMsgBadge(s) {
@@ -87926,11 +87939,16 @@
         }
 
         msgBadgeShown = n;
-        el.style.display = n > 0 ? "inline-flex" : "none";
+        el.style.display = "inline-flex";
+        el.classList.toggle("unread", n > 0);
         el.textContent = "";
         el.appendChild(icon("bell"));
-        el.appendChild(document.createTextNode(n >= 20 ? "20+" : String(n)));
-        el.title = n + (n === 1 ? " new notification" : " new notifications") + " on Mureka";
+
+        if (n > 0) {
+            el.appendChild(document.createTextNode(n >= 20 ? "20+" : String(n)));
+        }
+
+        el.title = n > 0 ? n + (n === 1 ? " new notification" : " new notifications") + " on Mureka" : "Notifications";
     }
 
     $("msgBadge").addEventListener("click", function (ev) {
