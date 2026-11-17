@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.200";
+    const VERSION = "2.0.1.201";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -759,7 +759,17 @@
                     // play head, the page waits for it to come into view
                     // rather than turning back for it, unless it goes back
                     // further than where the turn began
-                    if (Math.abs(next - p) > 1e-6) {
+                    // A jump of more than a page, a new song starting or a
+                    // seek far off, goes there at once rather than sliding
+                    // the whole way
+                    const far = f < p - s || f > p + 2 * s;
+
+                    if (far) {
+
+                        z.glide = null;
+                        z.page = next;
+                        z.turnFrac = null;
+                    } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
                         z.page = next;
@@ -82203,7 +82213,17 @@
                     // play head, the page waits for it to come into view
                     // rather than turning back for it, unless it goes back
                     // further than where the turn began
-                    if (Math.abs(next - p) > 1e-6) {
+                    // A jump of more than a page, a new song starting or a
+                    // seek far off, goes there at once rather than sliding
+                    // the whole way
+                    const far = f < p - s || f > p + 2 * s;
+
+                    if (far) {
+
+                        z.glide = null;
+                        z.page = next;
+                        z.turnFrac = null;
+                    } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
                         z.page = next;
@@ -86945,6 +86965,8 @@
     // The zoom of the waveform, made with the seek bar's handlers below
     let waveZoomer = null;
 
+    let waveLookLogged = "";
+
     function drawWave(frac) {
 
         const canvas = $("wave");
@@ -86994,6 +87016,18 @@
         }
 
         waveShown = key;
+
+        // The waveform's look written to the log each time it changes, with
+        // whether this browser has a look of its own over the phone's
+        const lookText = [look, state ? state.waveZoomPlayHead : "", state ? state.wavePageColorTo : "", "played " + playedFill,
+            "rest " + restFill, "progress " + fill, "head " + headFill, "width " + (state ? state.wavePlayHeadWidth : ""),
+            "own look " + (localSettings() ? "on" : "off")].join(", ");
+
+        if (lookText !== waveLookLogged) {
+
+            waveLookLogged = lookText;
+            dbgLog("Wave", "drawn as " + lookText);
+        }
 
         if (canvas.width !== w || canvas.height !== h) {
 

@@ -262,7 +262,17 @@
                     // play head, the page waits for it to come into view
                     // rather than turning back for it, unless it goes back
                     // further than where the turn began
-                    if (Math.abs(next - p) > 1e-6) {
+                    // A jump of more than a page, a new song starting or a
+                    // seek far off, goes there at once rather than sliding
+                    // the whole way
+                    const far = f < p - s || f > p + 2 * s;
+
+                    if (far) {
+
+                        z.glide = null;
+                        z.page = next;
+                        z.turnFrac = null;
+                    } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
                         z.page = next;
