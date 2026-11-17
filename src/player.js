@@ -1456,7 +1456,7 @@
 
     // The event log, newest last. It is kept with the overlay off as well,
     // so switching it on shows what just happened
-    const DEBUG_LOG_KEEP = 300;
+    const DEBUG_LOG_KEEP = 600;
     const DEBUG_LOG_SHOW = 80;
     const debugLog = [];
 
@@ -1464,7 +1464,7 @@
     // log is on. Safari reloads a page it had to close, and the log of the
     // page before then comes first in the new one, marked as such
     const DEBUG_LOG_TAB_KEY = "mureka_player_debug_before";
-    const DEBUG_LOG_TAB_LINES = 150;
+    const DEBUG_LOG_TAB_LINES = 300;
     let debugLogTabTimer = 0;
 
     try {
@@ -23310,6 +23310,13 @@
                 // say, goes to another host. Its host and path are logged,
                 // never its query, which carries the signature
                 if (u.host !== location.host && sending && /^https?:$/.test(u.protocol)) {
+
+                    // The site's ad tags, analytics and session recorders
+                    // left out, dozens a minute that crowd the log
+                    if (/(^|\.)(google\.com|doubleclick\.net|clarity\.ms|reddit\.com|openai\.com|on\.aws|google-analytics\.com|facebook\.com)$/.test(u.host)
+                        || /^abt\./.test(u.host)) {
+                        return;
+                    }
 
                     dbgLog("Mureka", String(method).toUpperCase() + " to " + u.host + u.pathname.slice(0, 120)
                         + (body && typeof body === "object" ? " [" + (body.constructor && body.constructor.name ? body.constructor.name : "data") + "]" : ""));
