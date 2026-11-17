@@ -1369,6 +1369,7 @@ In development.
 - **A cleaner debug log.** The site's ad tags, analytics and session recorders are left out of the log, and it keeps 600 lines, 300 of them over a reload, so a capture on Mureka's own pages fits.
 - **Delete your own comments.** Your own comments and replies have Delete, asked once more first, a comment going with its replies, and the song read again for its count. Uses Mureka's /api/comment/delete with comment_id and comment_level. In the player and the web view.
 - **The debug log keeps Mureka's mention answers.** The people Mureka offers to @-mention in a comment are kept whole in the log, to learn how mentions are sent.
+- **Comments tagged with a place in the song.** While the song is the one playing, the comments have Tag my comment at, with where the song is now, sent to Mureka as its moment in whole seconds, to be checked against how Mureka's own page shows it. A tagged comment shows its place, and a tap plays the song from there, the song started first when another is playing. In the player and the web view.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
