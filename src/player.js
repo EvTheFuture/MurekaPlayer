@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.236";
+    const VERSION = "2.0.1.237";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -28047,6 +28047,7 @@
         ["i", "Information about the playing song"],
         ["c", "Copy the link to the playing song"],
         ["d", "Download the playing song"],
+        ["t", "Chat in the room, out and ready to write in, or tucked away"],
         ["r", "Refresh, the same as Load"],
         ["R", "Rescan"],
         ["z", "Whole window, then full height, then your own size"],
@@ -28613,6 +28614,13 @@
                     openInfo(currentSong);
                 }
 
+                handled();
+                return;
+            }
+
+            if (key === "t" && syncAvailable()) {
+
+                chatByKey();
                 handled();
                 return;
             }
@@ -42295,6 +42303,22 @@
             newAfter: chatUi ? chatUi.newAfter : 0 };
     }
 
+    // The chat by key: out and ready to write in, or tucked into its edge
+    // when it shows already
+    function chatByKey() {
+
+        if (!chatUi) {
+            openSyncChat();
+        } else if (chatUi.win.folded()) {
+
+            chatUi.win.unfold();
+            chatUi.win.raise();
+            chatUi.focus();
+        } else {
+            chatUi.win.fold();
+        }
+    }
+
     // The chat goes with the room: joining one it comes, tucked into its
     // edge, and leaving it goes too
     let chatRoomSeen = "";
@@ -42415,6 +42439,7 @@
 
         ui.close = done;
         ui.win = win;
+        ui.focus = view.focus;
 
         // Whether an element is the chat's, and Escape for it: the window
         // tucked into its edge. False when there is nothing to do, tucked
@@ -110156,6 +110181,23 @@
     let chatPaint = null;
     let chatClose = null;
     let chatWin = null;
+    let chatFocus = null;
+
+    // The chat by key: out and ready to write in, or tucked into its edge
+    // when it shows already. In no room, said so
+    function chatByKey() {
+
+        if (!chatWin) {
+            openChatHere();
+        } else if (chatWin.folded()) {
+
+            chatWin.unfold();
+            chatWin.raise();
+            chatFocus();
+        } else {
+            chatWin.fold();
+        }
+    }
 
     // The chat goes with the phone's room: joining one it comes, tucked
     // into its edge, and leaving it goes too
@@ -110249,6 +110291,7 @@
 
             chatClose = null;
             chatWin = null;
+            chatFocus = null;
             chatPaint = null;
             clearInterval(timer);
 
@@ -110326,6 +110369,7 @@
 
         chatClose = close;
         chatWin = win;
+        chatFocus = view.focus;
         backWhileOpen();
 
         function load() {
@@ -112482,6 +112526,7 @@
         ["i", "Information about the playing song"],
         ["c", "Copy the link to the playing song"],
         ["d", "Download the playing song"],
+        ["t", "Chat in the room, out and ready to write in, or tucked away"],
         ["r", "Refresh, the same as Load"],
         ["R", "Rescan"],
         ["q", "Queue"],
@@ -113509,6 +113554,8 @@
             send("refresh", { queue: queueInView() });
         } else if (key === "R") {
             send("rescan");
+        } else if (key === "t") {
+            chatByKey();
         } else if (key === "q") {
             openBrowse("queue");
         } else if (key === "z") {
