@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.211";
+    const VERSION = "2.0.1.212";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23444,10 +23444,19 @@
             }
         };
 
+        // Notifications kept whole the first time only, the player reads
+        // them every ten minutes and their shape is known
+        let msgWhole = false;
+
         const logAnswer = function (what, status, text) {
 
             const pass = /cos-token/.test(what);
-            const long = /playlist\/detail|comment|mention|\/api\/msg\//.test(what) || MAKING.test(what);
+            const msg = /\/api\/msg\//.test(what);
+            const long = /playlist\/detail|comment|mention/.test(what) || MAKING.test(what) || (msg && !msgWhole);
+
+            if (msg) {
+                msgWhole = true;
+            }
 
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
                 + (pass ? passShape(text) : redact(text)).replace(/\s+/g, " ").slice(0, long ? 6000 : 800));
@@ -47064,16 +47073,52 @@
         return lines.join("\n");
     }
 
+    // The log as a text file, to share or save where a long log is too much
+    // for the clipboard: the share sheet where the browser has one, Safari
+    // on the iPhone, else a download
+    function saveDebugLog(ev) {
+
+        const btn = ev && ev.currentTarget ? ev.currentTarget : null;
+        const text = debugLogText();
+        const name = "mureka-player-log-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".txt";
+        const file = typeof File === "function" ? new File([text], name, { type: "text/plain" }) : null;
+
+        if (file && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+
+            navigator.share({ files: [file], title: "Mureka Player debug log" }).then(function () {
+                buttonDone(btn, "Shared", true);
+            }, function () {
+                buttonDone(btn, "Not shared", false);
+            });
+            return;
+        }
+
+        const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+        const a = document.createElement("a");
+
+        a.href = url;
+        a.download = name;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () {
+            URL.revokeObjectURL(url);
+        }, 60000);
+        buttonDone(btn, "Saved", true);
+    }
+
     function copyDebugLog(ev) {
 
         const btn = ev && ev.currentTarget ? ev.currentTarget : null;
         const text = debugLogText();
+        const size = Math.round(text.length / 1024) + " kB";
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
 
             navigator.clipboard.writeText(text).then(function () {
 
-                setStatus("Debug log copied");
+                setStatus("Debug log copied, " + size);
                 buttonDone(btn, "Copied", true);
             }, function () {
 
@@ -52684,6 +52729,13 @@
         logRow.appendChild(copyLogBtn);
         logRow.appendChild(clearLogBtn);
 
+        // A long log as a file, for when the clipboard will not take it
+        const saveLogBtn = makeButton("Share the debug log as a file", "#333", "#fff", saveDebugLog);
+
+        // Not in the web view's copy, where it would share on the phone
+        saveLogBtn.dataset.hostSkip = "1";
+        saveLogBtn.style.marginTop = "8px";
+
         const copyFeedBtn = makeButton("Copy last feed JSON", "#333", "#fff", copyFeedJson);
 
         settingsEl.appendChild(head);
@@ -54801,6 +54853,7 @@
         devPage.appendChild(withHint(debugOverlayRow, "A see-through layer over the player listing keys, taps, media buttons, "
             + (isApkHost() ? "commands " : "") + "and playback as they happen, with live numbers at the top. Taps go to the player underneath, except on the cross in its top right corner, which turns it off."));
         devPage.appendChild(logRow);
+        devPage.appendChild(saveLogBtn);
 
         if (isApkHost()) {
 

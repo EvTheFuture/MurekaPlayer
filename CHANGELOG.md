@@ -1371,6 +1371,7 @@ In development.
 - **The debug log keeps Mureka's mention answers.** The people Mureka offers to @-mention in a comment are kept whole in the log, to learn how mentions are sent.
 - **Comments tagged with a place in the song.** While the song is the one playing, the comments have Tag my comment at, with where the song is now, sent to Mureka as its moment in whole seconds, to be checked against how Mureka's own page shows it. A tagged comment shows its place, and a tap plays the song from there, the song started first when another is playing. In the player and the web view.
 - **A comment's place in the song in milliseconds.** Sent in seconds, the tag did not show on Mureka's page, so the place goes as milliseconds, as other times at Mureka do, and is read back the same way.
+- **Share the debug log as a file.** Under Developer, Share the debug log as a file opens the share sheet with the log as a text file, to save to Files or send, where Safari on the iPhone will not paste a long log copied; a download where there is no share sheet. Copy debug log says how big the log is, and the notifications' whole answer is kept the first time only, as the player reads them every ten minutes.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
