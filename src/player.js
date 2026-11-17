@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.196";
+    const VERSION = "2.0.1.197";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -621,8 +621,8 @@
         const GLIDE_MS = 350;
 
         // A page turn slower than a glide back after a move, eased in and
-        // out, so the waveform sets off and arrives gently
-        const PAGE_GLIDE_MS = 1100;
+        // out over two seconds, so the waveform sets off and arrives gently
+        const PAGE_GLIDE_MS = 2000;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
         const HOLD_MS = 350;
@@ -649,15 +649,16 @@
 
         // Turning pages: the view stands still while the play head runs
         // across it, and turns to the next part when the play head nears
-        // its right edge, or to wherever the song is when it is out of view.
-        // The play head lands this far in from the left
-        const PAGE_TURN = 0.92;
+        // its right edge, at four fifths of the way across, so it has room
+        // to set off slowly, or to wherever the song is when it is out of
+        // view. The play head lands this far in from the left
+        const PAGE_TURN = 0.82;
         const PAGE_LEAD = 0.03;
 
         // How long the play head's pace is measured over, and how far ahead
         // of it a page turn may count on it getting, as part of the view
         const PACE_SAMPLE_MS = 250;
-        const PAGE_AHEAD_MAX = 0.15;
+        const PAGE_AHEAD_MAX = 0.3;
 
         function pages() {
             return !!(hooks.pages && hooks.pages());
@@ -81923,8 +81924,8 @@
         const GLIDE_MS = 350;
 
         // A page turn slower than a glide back after a move, eased in and
-        // out, so the waveform sets off and arrives gently
-        const PAGE_GLIDE_MS = 1100;
+        // out over two seconds, so the waveform sets off and arrives gently
+        const PAGE_GLIDE_MS = 2000;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
         const HOLD_MS = 350;
@@ -81951,15 +81952,16 @@
 
         // Turning pages: the view stands still while the play head runs
         // across it, and turns to the next part when the play head nears
-        // its right edge, or to wherever the song is when it is out of view.
-        // The play head lands this far in from the left
-        const PAGE_TURN = 0.92;
+        // its right edge, at four fifths of the way across, so it has room
+        // to set off slowly, or to wherever the song is when it is out of
+        // view. The play head lands this far in from the left
+        const PAGE_TURN = 0.82;
         const PAGE_LEAD = 0.03;
 
         // How long the play head's pace is measured over, and how far ahead
         // of it a page turn may count on it getting, as part of the view
         const PACE_SAMPLE_MS = 250;
-        const PAGE_AHEAD_MAX = 0.15;
+        const PAGE_AHEAD_MAX = 0.3;
 
         function pages() {
             return !!(hooks.pages && hooks.pages());

@@ -1354,6 +1354,7 @@ In development.
 - **The version scripts run with any sed.** update-manifest-version.sh and release-bookmarklet.sh write a new file and move it over the old one, rather than sed -i, which takes different arguments in GNU sed, BusyBox and macOS.
 - **Find matching sets when creating.** Under Put them in a set, Find matching sets lays every set against what the form has so far: the title against the songs' titles and the set's own name, the lyrics against the songs' lyrics, read first from the stored details where not read yet and for up to 40 songs from Mureka, and the style against the songs' genres and moods. The sets alike come in a list, likeliest first, each with why, under a new set with a name made from the title, the lyrics' first sung line or the style, one no set has yet. Choosing one turns Put them in a set on with it. In the player and the web view.
 - **Create at the bottom of the create page too,** within reach after the last setting, in the player and the web view.
+- **Page turns earlier and slower.** Turning pages, the waveform turns when the play head is 82 % across instead of 92 %, and the turn takes 2 s instead of 1.1 s, eased in and out, so it moves at about half the speed. The play head still lands a little in from the left edge. In the player and the web view.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
