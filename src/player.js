@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.228";
+    const VERSION = "2.0.1.229";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15670,6 +15670,7 @@
         }
 
         tab.appendChild(tabCount);
+
         // A tap opens it again. Dragged, the tab follows the finger and
         // settles on the edge nearest to where it is let go, anywhere along
         // it, and stays there, remembered
@@ -15679,8 +15680,6 @@
             ev.stopPropagation();
 
             const start = { x: ev.clientX, y: ev.clientY };
-            const box = tab.getBoundingClientRect();
-            const grab = { x: ev.clientX - box.left, y: ev.clientY - box.top };
             let moved = false;
 
             try {
@@ -15694,9 +15693,9 @@
                     return;
                 }
 
+                // Turned as it goes for the edge it would settle on
                 moved = true;
-                tab.style.left = Math.round(e.clientX - grab.x) + "px";
-                tab.style.top = Math.round(e.clientY - grab.y) + "px";
+                shapeTab(e.clientX, e.clientY, true);
             };
             const up = function (e) {
 
@@ -15727,11 +15726,19 @@
         // window's middle, at that place along the edge
         function placeTab() {
 
+            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
+
+            shapeTab(at ? at.x : rect.x + rect.w / 2, at ? at.y : rect.y + rect.h / 2, false);
+        }
+
+        // The tab turned for the edge nearest to x, y: on that edge, or
+        // while dragged, free with its middle there
+        function shapeTab(x, y, free) {
+
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
-            const cx = at ? Math.max(0, Math.min(vw, at.x)) : rect.x + rect.w / 2;
-            const cy = at ? Math.max(0, Math.min(vh, at.y)) : rect.y + rect.h / 2;
+            const cx = Math.max(0, Math.min(vw, x));
+            const cy = Math.max(0, Math.min(vh, y));
             const near = [["l", cx], ["r", vw - cx], ["t", cy], ["b", vh - cy]].sort(function (a, b) {
                 return a[1] - b[1];
             })[0][0];
@@ -15742,8 +15749,16 @@
             tab.style.flexDirection = side ? "column" : "row";
             tab.style.width = (side ? thin : long) + "px";
             tab.style.height = (side ? long : thin) + "px";
-            tab.style.left = (near === "l" ? 0 : near === "r" ? vw - thin : Math.max(0, Math.min(vw - long, cx - long / 2))) + "px";
-            tab.style.top = (near === "t" ? 0 : near === "b" ? vh - thin : Math.max(0, Math.min(vh - long, cy - long / 2))) + "px";
+
+            if (free) {
+
+                tab.style.left = Math.round(cx - (side ? thin : long) / 2) + "px";
+                tab.style.top = Math.round(cy - (side ? long : thin) / 2) + "px";
+            } else {
+                tab.style.left = (near === "l" ? 0 : near === "r" ? vw - thin : Math.max(0, Math.min(vw - long, cx - long / 2))) + "px";
+                tab.style.top = (near === "t" ? 0 : near === "b" ? vh - thin : Math.max(0, Math.min(vh - long, cy - long / 2))) + "px";
+            }
+
             tab.style.borderRadius = near === "l" ? "0 10px 10px 0" : near === "r" ? "10px 0 0 10px" : near === "t" ? "0 0 10px 10px" : "10px 10px 0 0";
         }
 
@@ -38261,6 +38276,7 @@
             togetherReady: syncRelayOk(syncRelay()),
             addChoice: settings.addChoice || "",
             togetherIn: syncInRoom(),
+            togetherRoomKey: chatRoomKey(),
             togetherChatUnread: chatUnread(),
             togetherChatMention: chatMentionsUnread() > 0,
             togetherChatSeq: syncChat.seq,
@@ -41811,6 +41827,8 @@
             paintChatCount(ctl, chatUnread(), chatMentionsUnread() > 0);
         }
 
+        chatFollowRoom();
+
         // The count on the tab of a chat tucked into an edge
         if (chatUi && chatUi.win) {
             chatUi.win.badge(chatUnread());
@@ -42159,9 +42177,8 @@
             + (n > 0 ? "" : "display:none");
     }
 
-    // The chat, from the shared view: docked where the song list is, over
-    // it, or as a dialog of its own. Docked by default, Float and Dock
-    // switch, remembered. Escape or Close goes back to the list
+    // The chat, from the shared view, in a window floating over the
+    // player. Escape tucks it into its edge, Close closes it
     let chatUi = null;
 
     // The people to mention: those in the room and those who wrote
@@ -42228,7 +42245,42 @@
             newAfter: chatUi ? chatUi.newAfter : 0 };
     }
 
-    function openSyncChat(mode) {
+    // The chat goes with the room: joining one it comes, tucked into its
+    // edge, and leaving it goes too
+    let chatRoomSeen = "";
+
+    // The room this player is in, by its name on the relay, or ""
+    function chatRoomKey() {
+        return syncInRoom() ? String(syncFollowing ? syncFollowing.room : syncRoomName()) : "";
+    }
+
+    function chatFollowRoom() {
+
+        const room = chatRoomKey();
+
+        if (room === chatRoomSeen || !panelEl) {
+            return;
+        }
+
+        chatRoomSeen = room;
+
+        if (!room) {
+
+            if (chatUi) {
+                chatUi.close();
+            }
+
+            return;
+        }
+
+        if (!chatUi) {
+            openSyncChat(true);
+        }
+    }
+
+    // The chat in the room, a window floating over the player. tucked
+    // opens it tucked into its edge, out of the way
+    function openSyncChat(tucked) {
 
         if (!panelEl) {
             return;
@@ -42244,7 +42296,6 @@
             chatUi.close();
         }
 
-        const docked = (mode || (settings.chatDock === false ? "float" : "dock")) === "dock" && listWrapEl && !!listWrapEl.offsetParent;
         const view = makeChatView({
             accent: ACCENT,
             accentRgb: ACCENT_RGB,
@@ -42257,8 +42308,8 @@
             },
             onEscape: function () {
 
-                // A floating window is tucked into its edge, docked it closes
-                if (win && !win.folded()) {
+                // Tucked into its edge, from there it closes
+                if (!win.folded()) {
                     win.fold();
                 } else {
                     done();
@@ -42268,19 +42319,10 @@
                 showToast(text, false);
             }
         });
-        const head = document.createElement("div");
         const title = document.createElement("div");
-        const swap = makeButton(docked ? "Float" : "Dock", "#333", "#fff", function () {
-
-            settings.chatDock = !docked;
-            saveSettings();
-            openSyncChat(docked ? "float" : "dock");
-        });
         const shut = makeButton("Close", "#444", "#fff", function () {
             done();
         });
-        let win = null;
-        let dock = null;
         const ui = { close: null, win: null, newAfter: chatSeen() };
         const done = function () {
 
@@ -42290,106 +42332,77 @@
 
             chatUi = null;
             syncChatRepaint = null;
-
-            if (win) {
-                win.close();
-            }
-
-            if (dock) {
-                dock.remove();
-            }
-
+            win.close();
             syncPaint();
             publishHostSoon();
         };
 
-        ui.close = done;
+        // Moved by its bar, sized from its edges, tucked into the nearest
+        // edge and back. In the panel, over its content and under its
+        // dialogs, so a question asked from the chat comes over it
+        const win = makeFloatWindow({
+            key: "chat",
+            z: 9,
+            minW: 240,
+            minH: 220,
+            tabIcon: iconChat(18),
+            onFold: function (folded) {
 
-        // Whether an element is the chat's, and Escape for it: a floating
-        // window tucked into its edge, docked it closes. False when there
-        // is nothing to do, tucked away already
+                if (!folded) {
+
+                    // The line moves to what came while tucked away
+                    ui.newAfter = chatSeen();
+                    syncChatRepaint();
+                    view.atEnd();
+                    chatMarkSeen();
+                }
+
+                syncPaint();
+                publishHostSoon();
+            }
+        });
+
+        ui.close = done;
+        ui.win = win;
+
+        // Whether an element is the chat's, and Escape for it: the window
+        // tucked into its edge. False when there is nothing to do, tucked
+        // away already
         ui.has = function (node) {
-            return !!node && ((win && win.el.contains(node)) || (dock && dock.contains(node)));
+            return !!node && win.el.contains(node);
         };
         ui.escape = function () {
 
-            if (win && !win.folded()) {
+            if (!win.folded()) {
 
                 win.fold();
                 return true;
             }
 
-            if (dock) {
-
-                done();
-                return true;
-            }
-
             return false;
         };
-        head.classList.add("mp-row8");
         chatTitleSet(title, syncRoomLabel(), ACCENT);
-        title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-        swap.title = docked ? "The chat in a window of its own" : "The chat where the song list is";
-        swap.style.flex = "0 0 auto";
+        title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:move";
         shut.style.flex = "0 0 auto";
-
-        if (docked) {
-
-            head.appendChild(title);
-            head.appendChild(swap);
-            head.appendChild(shut);
-            dock = document.createElement("div");
-            dock.style.cssText = "position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;gap:8px;padding:8px 2px 4px;"
-                + "box-sizing:border-box;background:#1d1d22";
-            dock.appendChild(head);
-            dock.appendChild(view.el);
-            listWrapEl.appendChild(dock);
-        } else {
-
-            // A window floating over the player, moved by its bar, sized
-            // from its edges, tucked into the nearest edge and back
-            // In the panel, over its content and under its dialogs, so a
-            // question asked from the chat comes over it
-            win = makeFloatWindow({
-                key: "chat",
-                z: 9,
-                minW: 240,
-                minH: 220,
-                tabIcon: iconChat(18),
-                onFold: function (folded) {
-
-                    if (!folded) {
-
-                        // The line moves to what came while tucked away
-                        ui.newAfter = chatSeen();
-                        syncChatRepaint();
-                        view.atEnd();
-                        chatMarkSeen();
-                    }
-
-                    syncPaint();
-                    publishHostSoon();
-                }
-            });
-            ui.win = win;
-            title.style.cursor = "move";
-            win.head.appendChild(title);
-            win.head.appendChild(swap);
-            win.head.appendChild(shut);
-            win.body.appendChild(view.el);
-            win.el.style.fontFamily = "system-ui,sans-serif";
-            win.el.style.fontSize = "14px";
-        }
-
+        win.head.appendChild(title);
+        win.head.appendChild(shut);
+        win.body.appendChild(view.el);
+        win.el.style.fontFamily = "system-ui,sans-serif";
+        win.el.style.fontSize = "14px";
         chatUi = ui;
         chatLoad();
         syncChatRepaint = function () {
             view.paint(chatViewData());
         };
 
-        if (win) {
-            win.show(panelEl);
+        win.show(panelEl);
+
+        // Opened on purpose it comes out of its edge, tucked away by joining
+        // a room it stays there
+        if (tucked && !win.folded()) {
+            win.fold();
+        } else if (!tucked && win.folded()) {
+            win.unfold();
         }
 
         syncChatRepaint();
@@ -42398,12 +42411,13 @@
         if (chatShown()) {
             chatMarkSeen();
         }
+
         syncPaint();
         publishHostSoon();
 
         // With a mouse the field is ready to write in, a phone's keyboard
         // comes up only when the field is tapped
-        if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+        if (!tucked && window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
             view.focus();
         }
     }
@@ -77774,23 +77788,6 @@
         background: #ff6b9a;
     }
 
-    /* The chat docked where the song list is: the list's own rows
-       hidden while it shows */
-    #mini.chatting > :not(.chatDock),
-    #browse.chatting > :not(.chatDock) {
-        display: none !important;
-    }
-
-    .chatDock {
-        flex: 1 1 auto;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 4px 2px;
-        box-sizing: border-box;
-    }
-
     /* The chat window's title, it is moved by it, cut short when narrow */
     .chatWinTitle {
         flex: 1 1 auto;
@@ -88944,6 +88941,7 @@
         }
 
         tab.appendChild(tabCount);
+
         // A tap opens it again. Dragged, the tab follows the finger and
         // settles on the edge nearest to where it is let go, anywhere along
         // it, and stays there, remembered
@@ -88953,8 +88951,6 @@
             ev.stopPropagation();
 
             const start = { x: ev.clientX, y: ev.clientY };
-            const box = tab.getBoundingClientRect();
-            const grab = { x: ev.clientX - box.left, y: ev.clientY - box.top };
             let moved = false;
 
             try {
@@ -88968,9 +88964,9 @@
                     return;
                 }
 
+                // Turned as it goes for the edge it would settle on
                 moved = true;
-                tab.style.left = Math.round(e.clientX - grab.x) + "px";
-                tab.style.top = Math.round(e.clientY - grab.y) + "px";
+                shapeTab(e.clientX, e.clientY, true);
             };
             const up = function (e) {
 
@@ -89001,11 +88997,19 @@
         // window's middle, at that place along the edge
         function placeTab() {
 
+            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
+
+            shapeTab(at ? at.x : rect.x + rect.w / 2, at ? at.y : rect.y + rect.h / 2, false);
+        }
+
+        // The tab turned for the edge nearest to x, y: on that edge, or
+        // while dragged, free with its middle there
+        function shapeTab(x, y, free) {
+
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
-            const cx = at ? Math.max(0, Math.min(vw, at.x)) : rect.x + rect.w / 2;
-            const cy = at ? Math.max(0, Math.min(vh, at.y)) : rect.y + rect.h / 2;
+            const cx = Math.max(0, Math.min(vw, x));
+            const cy = Math.max(0, Math.min(vh, y));
             const near = [["l", cx], ["r", vw - cx], ["t", cy], ["b", vh - cy]].sort(function (a, b) {
                 return a[1] - b[1];
             })[0][0];
@@ -89016,8 +89020,16 @@
             tab.style.flexDirection = side ? "column" : "row";
             tab.style.width = (side ? thin : long) + "px";
             tab.style.height = (side ? long : thin) + "px";
-            tab.style.left = (near === "l" ? 0 : near === "r" ? vw - thin : Math.max(0, Math.min(vw - long, cx - long / 2))) + "px";
-            tab.style.top = (near === "t" ? 0 : near === "b" ? vh - thin : Math.max(0, Math.min(vh - long, cy - long / 2))) + "px";
+
+            if (free) {
+
+                tab.style.left = Math.round(cx - (side ? thin : long) / 2) + "px";
+                tab.style.top = Math.round(cy - (side ? long : thin) / 2) + "px";
+            } else {
+                tab.style.left = (near === "l" ? 0 : near === "r" ? vw - thin : Math.max(0, Math.min(vw - long, cx - long / 2))) + "px";
+                tab.style.top = (near === "t" ? 0 : near === "b" ? vh - thin : Math.max(0, Math.min(vh - long, cy - long / 2))) + "px";
+            }
+
             tab.style.borderRadius = near === "l" ? "0 10px 10px 0" : near === "r" ? "10px 0 0 10px" : near === "t" ? "0 0 10px 10px" : "10px 10px 0 0";
         }
 
@@ -91626,6 +91638,8 @@
         }
 
         $("chatBtn").title = s && s.togetherIn ? "Chat in " + String(s.togetherRoom || "the room") : "Chat, in a room";
+
+        chatFollowRoom(s);
 
         if (chatPaint) {
             chatPaint(s);
@@ -101818,10 +101832,6 @@
 
     function closeMini() {
 
-        if (chatClose && $("mini").classList.contains("chatting")) {
-            chatClose();
-        }
-
         miniOpen = false;
         miniToken += 1;
         $("app").classList.remove("miniOpen");
@@ -109893,33 +109903,51 @@
     }
 
     // The room's chat, read through the Android device, from the shared
-    // view: docked where the song list is, the small list beside the song
-    // or the list under it on a phone, or as a dialog of its own. Docked by
-    // default, Float and Dock switch, remembered in this browser. Read
-    // again as the phone's chat changes, and while open what comes counts
-    // as read. Escape or Close goes back
-    const CHAT_DOCK_KEY = "murekaChatDock";
+    // view, in a window floating over the page. Read again as the phone's
+    // chat changes, and while open what comes counts as read. Escape tucks
+    // it into its edge, Close closes it
     let chatPaint = null;
     let chatClose = null;
 
-    function openTogetherChat(mode) {
+    // The chat goes with the phone's room: joining one it comes, tucked
+    // into its edge, and leaving it goes too
+    let chatRoomSeen = "";
 
-        let want = mode;
+    function chatFollowRoom(s) {
 
-        if (!want) {
-
-            try {
-                want = localStorage.getItem(CHAT_DOCK_KEY) === "float" ? "float" : "dock";
-            } catch (e) {
-                want = "dock";
-            }
+        if (!s) {
+            return;
         }
+
+        const room = s.togetherIn ? String(s.togetherRoomKey || s.togetherRoom || "") : "";
+
+        if (room === chatRoomSeen) {
+            return;
+        }
+
+        chatRoomSeen = room;
+
+        if (!room) {
+
+            if (chatClose) {
+                chatClose();
+            }
+
+            return;
+        }
+
+        if (!chatClose) {
+            openTogetherChat(true);
+        }
+    }
+
+    // tucked opens it tucked into its edge, out of the way
+    function openTogetherChat(tucked) {
 
         if (chatClose) {
             chatClose();
         }
 
-        const docked = want === "dock";
         const view = makeChatView({
             send: function (text) {
 
@@ -109953,13 +109981,9 @@
                 });
             }
         });
-        const head = document.createElement("div");
         const title = document.createElement("div");
-        const swap = document.createElement("button");
         const shut = document.createElement("button");
-        let box = null;
         let win = null;
-        let host = null;
         let unBack = null;
         let shownSeq = -1;
         let asking = false;
@@ -109979,112 +110003,79 @@
             chatPaint = null;
             clearInterval(timer);
 
-            if (win) {
-                win.close();
-            }
-
-            if (box) {
-                box.remove();
-            }
-
-            if (host) {
-                host.classList.remove("chatting");
-            }
+            win.close();
 
             if (unBack) {
                 unBack();
             }
         };
 
-        head.className = "cmHead";
         title.className = "cmTitle";
         title.textContent = "Chat";
-        swap.type = "button";
-        swap.className = "chip";
-        swap.textContent = docked ? "Float" : "Dock";
-        swap.title = docked ? "The chat in a window of its own" : "The chat where the song list is";
-        swap.addEventListener("click", function () {
-
-            try {
-                localStorage.setItem(CHAT_DOCK_KEY, docked ? "float" : "dock");
-            } catch (e) {
-            }
-
-            openTogetherChat(docked ? "float" : "dock");
-        });
         shut.type = "button";
         shut.className = "chip";
         shut.textContent = "Close";
         shut.addEventListener("click", close);
-        if (docked) {
 
-            head.appendChild(title);
-            head.appendChild(swap);
-            head.appendChild(shut);
-
-            // The small list beside the song opened for it, on a phone the
-            // list under the song
-            if (isPhone()) {
-                host = $("browse");
-            } else {
-
-                if (!miniOpen) {
-                    openMini();
-                }
-
-                host = $("mini");
-            }
-
-            box = document.createElement("div");
-            box.className = "chatDock";
-            box.appendChild(head);
-            box.appendChild(view.el);
-            host.appendChild(box);
-            host.classList.add("chatting");
-        } else {
-
-            // A window floating over the page, moved by its bar, sized
-            // from its edges, tucked into the nearest edge and back. Tucked
-            // away, what comes is not read yet and counts on its tab
-            win = makeFloatWindow({
-                key: "chat",
-                z: 45,
-                minW: 260,
-                minH: 220,
-                tabIcon: icon("chat"),
-                onFold: function (folded) {
-
-                    if (!folded) {
-
-                        newAfter = null;
-                        load();
-                        view.atEnd();
-                    }
-
-                    win.badge(folded && state ? Number(state.togetherChatUnread) || 0 : 0);
-                }
-            });
-            title.classList.add("chatWinTitle");
-            win.head.appendChild(title);
-            win.head.appendChild(swap);
-            win.head.appendChild(shut);
-            win.body.appendChild(view.el);
-            win.show(document.body);
-        }
-
-        // Escape or Back: a floating window is tucked into its edge, and
-        // closes from there; docked it closes
+        // Escape or Back tucks it into its edge. Tucked away it waits there
+        // and leaves Escape and Back to the rest
         const escape = function () {
+            win.fold();
+        };
+        const backWhileOpen = function () {
 
-            if (win && !win.folded()) {
-                win.fold();
-            } else {
-                close();
+            if (win.folded()) {
+
+                if (unBack) {
+                    unBack();
+                    unBack = null;
+                }
+            } else if (!unBack) {
+                unBack = onBack(escape);
             }
         };
 
+        // Moved by its bar, sized from its edges, tucked into the nearest
+        // edge and back. Tucked away, what comes is not read yet and counts
+        // on its tab
+        win = makeFloatWindow({
+            key: "chat",
+            z: 45,
+            minW: 260,
+            minH: 220,
+            tabIcon: icon("chat"),
+            onFold: function (folded) {
+
+                if (!folded) {
+
+                    newAfter = null;
+                    load();
+                    view.atEnd();
+                }
+
+                win.badge(folded && state ? Number(state.togetherChatUnread) || 0 : 0);
+
+                if (chatClose === close) {
+                    backWhileOpen();
+                }
+            }
+        });
+        title.classList.add("chatWinTitle");
+        win.head.appendChild(title);
+        win.head.appendChild(shut);
+        win.body.appendChild(view.el);
+        win.show(document.body);
+
+        // Opened on purpose it comes out of its edge, tucked away by
+        // joining a room it stays there
+        if (tucked && !win.folded()) {
+            win.fold();
+        } else if (!tucked && win.folded()) {
+            win.unfold();
+        }
+
         chatClose = close;
-        unBack = onBack(escape);
+        backWhileOpen();
 
         function load() {
 
@@ -110127,7 +110118,7 @@
         };
         load();
 
-        if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+        if (!tucked && window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
             view.focus();
         }
     }

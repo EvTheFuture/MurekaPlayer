@@ -70,6 +70,7 @@
         }
 
         tab.appendChild(tabCount);
+
         // A tap opens it again. Dragged, the tab follows the finger and
         // settles on the edge nearest to where it is let go, anywhere along
         // it, and stays there, remembered
@@ -79,8 +80,6 @@
             ev.stopPropagation();
 
             const start = { x: ev.clientX, y: ev.clientY };
-            const box = tab.getBoundingClientRect();
-            const grab = { x: ev.clientX - box.left, y: ev.clientY - box.top };
             let moved = false;
 
             try {
@@ -94,9 +93,9 @@
                     return;
                 }
 
+                // Turned as it goes for the edge it would settle on
                 moved = true;
-                tab.style.left = Math.round(e.clientX - grab.x) + "px";
-                tab.style.top = Math.round(e.clientY - grab.y) + "px";
+                shapeTab(e.clientX, e.clientY, true);
             };
             const up = function (e) {
 
@@ -127,11 +126,19 @@
         // window's middle, at that place along the edge
         function placeTab() {
 
+            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
+
+            shapeTab(at ? at.x : rect.x + rect.w / 2, at ? at.y : rect.y + rect.h / 2, false);
+        }
+
+        // The tab turned for the edge nearest to x, y: on that edge, or
+        // while dragged, free with its middle there
+        function shapeTab(x, y, free) {
+
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
-            const cx = at ? Math.max(0, Math.min(vw, at.x)) : rect.x + rect.w / 2;
-            const cy = at ? Math.max(0, Math.min(vh, at.y)) : rect.y + rect.h / 2;
+            const cx = Math.max(0, Math.min(vw, x));
+            const cy = Math.max(0, Math.min(vh, y));
             const near = [["l", cx], ["r", vw - cx], ["t", cy], ["b", vh - cy]].sort(function (a, b) {
                 return a[1] - b[1];
             })[0][0];
@@ -142,8 +149,16 @@
             tab.style.flexDirection = side ? "column" : "row";
             tab.style.width = (side ? thin : long) + "px";
             tab.style.height = (side ? long : thin) + "px";
-            tab.style.left = (near === "l" ? 0 : near === "r" ? vw - thin : Math.max(0, Math.min(vw - long, cx - long / 2))) + "px";
-            tab.style.top = (near === "t" ? 0 : near === "b" ? vh - thin : Math.max(0, Math.min(vh - long, cy - long / 2))) + "px";
+
+            if (free) {
+
+                tab.style.left = Math.round(cx - (side ? thin : long) / 2) + "px";
+                tab.style.top = Math.round(cy - (side ? long : thin) / 2) + "px";
+            } else {
+                tab.style.left = (near === "l" ? 0 : near === "r" ? vw - thin : Math.max(0, Math.min(vw - long, cx - long / 2))) + "px";
+                tab.style.top = (near === "t" ? 0 : near === "b" ? vh - thin : Math.max(0, Math.min(vh - long, cy - long / 2))) + "px";
+            }
+
             tab.style.borderRadius = near === "l" ? "0 10px 10px 0" : near === "r" ? "10px 0 0 10px" : near === "t" ? "0 0 10px 10px" : "10px 10px 0 0";
         }
 
