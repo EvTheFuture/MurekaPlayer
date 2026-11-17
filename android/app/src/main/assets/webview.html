@@ -9136,6 +9136,11 @@
             waveZoomKeep: s.waveZoomKeep === true,
             progressLook: progressLook(s.waveZoomProgressLook),
             headMode: playHeadMode(s.waveZoomPlayHead),
+            pageTurn: lookNumber(s.wavePageTurn, 50, 98, 82),
+            pageLand: lookNumber(s.wavePageLand, 0, 45, 18),
+            pageGlide: lookNumber(s.wavePageGlide, 200, 6000, 2000),
+            pageColorTo: s.wavePageColorTo === "head" ? "head" : "song",
+            headWidth: lookNumber(s.wavePlayHeadWidth, 1, 8, 1),
             lyrics: s.lyricsWhere === "off" || s.lyricsWhere === "cover" ? s.lyricsWhere : "info",
             volUnit: s.volUnit === "steps" ? "steps" : "percent",
             onlineBadge: s.onlineBadge === "always" ? "always" : "fade",
@@ -9155,6 +9160,11 @@
             sideShift: s.lyricLayout && typeof s.lyricLayout.sideShift === "number" ? s.lyricLayout.sideShift : 0,
             shift: s.lyricLayout && typeof s.lyricLayout.shift === "number" ? s.lyricLayout.shift : 60
         });
+    }
+
+    // A number of the look kept within its range, or the fallback
+    function lookNumber(v, lo, hi, fallback) {
+        return typeof v === "number" && isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
     }
 
     // A look of this browser's own, started from the phone's. The phone's
@@ -9214,6 +9224,15 @@
         // set follows the phone
         s.waveZoomPlayHead = PLAY_HEAD_MODES.indexOf(look.headMode) !== -1
             ? look.headMode : playHeadMode(raw.waveZoomPlayHead);
+
+        // Turning pages and the play head's width. A look kept before they
+        // could be set follows the phone
+        s.wavePageTurn = lookNumber(look.pageTurn, 50, 98, lookNumber(raw.wavePageTurn, 50, 98, 82));
+        s.wavePageLand = lookNumber(look.pageLand, 0, 45, lookNumber(raw.wavePageLand, 0, 45, 18));
+        s.wavePageGlide = lookNumber(look.pageGlide, 200, 6000, lookNumber(raw.wavePageGlide, 200, 6000, 2000));
+        s.wavePageColorTo = look.pageColorTo === "head" || look.pageColorTo === "song" ? look.pageColorTo
+            : (raw.wavePageColorTo === "head" ? "head" : "song");
+        s.wavePlayHeadWidth = lookNumber(look.headWidth, 1, 8, lookNumber(raw.wavePlayHeadWidth, 1, 8, 1));
 
         // Our own waveform when chosen and the phone has it ready, and
         // whether it is still being worked out there
@@ -9467,6 +9486,11 @@
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "select", values: ["mureka", "song"] },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
         { label: "Play head zoomed in", page: "Web view", key: "headMode", kind: "select", values: PLAY_HEAD_MODES },
+        { label: "Turn the page at, % across", page: "Web view", key: "pageTurn", kind: "step", step: 1, min: 50, max: 98 },
+        { label: "Play head lands at, % in", page: "Web view", key: "pageLand", kind: "step", step: 1, min: 0, max: 45 },
+        { label: "Page turn time, ms", page: "Web view", key: "pageGlide", kind: "step", step: 100, min: 200, max: 6000 },
+        { label: "Played colors turning pages", page: "Web view", key: "pageColorTo", kind: "select", values: ["song", "head"] },
+        { label: "Play head width, px", page: "Web view", key: "headWidth", kind: "step", step: 1, min: 1, max: 8 },
         { label: "Song's progress on the waveform", page: "Web view", key: "progressLook", kind: "select",
             values: PROGRESS_LOOKS },
         { label: "Lyrics", page: "Web view", key: "lyrics", kind: "select", values: ["off", "info", "cover"] },
