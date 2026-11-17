@@ -1663,15 +1663,6 @@
         color: #999;
     }
 
-    .cmTag {
-        display: none;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.8em;
-        color: #bbb;
-        cursor: pointer;
-    }
-
     .cmAt {
         border: none;
         background: none;
@@ -31224,9 +31215,6 @@
         const replying = document.createElement("div");
         const replyText = document.createElement("span");
         const replyCancel = document.createElement("button");
-        const tagRow = document.createElement("label");
-        const tagBox = document.createElement("input");
-        const tagText = document.createElement("span");
         const foot = document.createElement("div");
         const field = document.createElement("textarea");
         const send = document.createElement("button");
@@ -31234,19 +31222,8 @@
         let replyTo = null;
         let busy = false;
         let unBack = null;
-        // Tagged with where the song is, while it is the one playing on
-        // the Android device
-        const paintTag = function () {
-
-            const here = !!state && String(state.id) === String(m.id) && isFinite(Number(state.position));
-
-            tagRow.style.display = here ? "flex" : "none";
-            tagText.textContent = "Tag my comment at " + (here ? cmTime(Number(state.position)) : "");
-        };
-        const tagTimer = setInterval(paintTag, 1000);
         const close = function () {
 
-            clearInterval(tagTimer);
             back.remove();
 
             if (unBack) {
@@ -31280,10 +31257,6 @@
         replyCancel.addEventListener("click", function () {
             setReply(null);
         });
-        tagBox.type = "checkbox";
-        tagRow.className = "cmTag";
-        tagRow.appendChild(tagBox);
-        tagRow.appendChild(tagText);
         foot.className = "cmFoot";
         field.rows = 2;
         field.placeholder = "Write a comment";
@@ -31309,12 +31282,10 @@
         card.appendChild(listBox);
         card.appendChild(more);
         card.appendChild(replying);
-        card.appendChild(tagRow);
         card.appendChild(foot);
         back.appendChild(card);
         document.body.appendChild(back);
         unBack = onBack(close);
-        paintTag();
 
         function setReply(c) {
 
@@ -31528,7 +31499,7 @@
 
             send.disabled = true;
 
-            crAsk({ op: "commentAdd", song: m.id, text: text, parent: replyTo ? replyTo.id : "", tag: tagBox.checked && tagRow.style.display !== "none" }).then(function (r) {
+            crAsk({ op: "commentAdd", song: m.id, text: text, parent: replyTo ? replyTo.id : "" }).then(function (r) {
 
                 send.disabled = false;
 

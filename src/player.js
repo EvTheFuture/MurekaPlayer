@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.212";
+    const VERSION = "2.0.1.213";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70287,14 +70287,12 @@
         return { list: list, more: list.length >= COMMENT_PAGE && !!last, last: last, total: total };
     }
 
-    // A comment written, or a reply to one, and the song's count after it
-    // A comment can be tagged with a place in the song, Mureka's moment,
-    // sent in milliseconds, as seconds did not show on Mureka's page; -1
-    // for none. Read back the same way, in seconds here
-    async function addComment(songId, text, parent, moment) {
+    // A comment written, or a reply to one, and the song's count after it.
+    // Sent untagged, moment -1, as Mureka's page showed no place for a
+    // moment in seconds or milliseconds alike
+    async function addComment(songId, text, parent) {
 
-        const at = Number(moment) >= 0 ? Math.round(Number(moment) * 1000) : -1;
-        const body = { song_id: Number(songId) || songId, content: String(text), moment: at, comment_level: parent ? 2 : 1 };
+        const body = { song_id: Number(songId) || songId, content: String(text), moment: -1, comment_level: parent ? 2 : 1 };
 
         if (parent) {
             body.comment_id = Number(parent) || parent;
@@ -70340,13 +70338,6 @@
         const s = Math.max(0, Math.round(sec));
 
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-    }
-
-    // Where the playing song is, when it is the song asked about, in
-    // whole seconds, else -1
-    function momentNow(songId) {
-        return currentSong && String(currentSong.song_id) === String(songId) && audio && isFinite(audio.currentTime)
-            ? Math.round(audio.currentTime) : -1;
     }
 
     // A tagged comment's place played: the song moved there when it is the
@@ -70429,9 +70420,6 @@
         const replying = document.createElement("div");
         const replyText = document.createElement("span");
         const replyCancel = document.createElement("button");
-        const tagRow = document.createElement("label");
-        const tagBox = document.createElement("input");
-        const tagText = document.createElement("span");
         const foot = document.createElement("div");
         const field = document.createElement("textarea");
         const send = makeButton("Send", ACCENT, "#000", function () {
@@ -70463,25 +70451,6 @@
         replying.appendChild(replyText);
         replying.appendChild(replyCancel);
 
-        // Tagged with where the song is, while it is the one playing
-        tagBox.type = "checkbox";
-        tagRow.style.cssText = "display:none;align-items:center;gap:8px;font-size:12px;color:#bbb;cursor:pointer";
-        tagRow.appendChild(tagBox);
-        tagRow.appendChild(tagText);
-
-        const paintTag = function () {
-
-            const at = momentNow(song.song_id);
-
-            tagRow.style.display = at >= 0 ? "flex" : "none";
-            tagText.textContent = "Tag my comment at " + (at >= 0 ? momentText(at) : "");
-
-            if (!dialog.back.isConnected) {
-                clearInterval(tagTimer);
-            }
-        };
-        const tagTimer = setInterval(paintTag, 1000);
-
         foot.classList.add("mp-row8");
         field.rows = 2;
         field.placeholder = "Write a comment";
@@ -70495,10 +70464,8 @@
         card.appendChild(listBox);
         card.appendChild(moreBtn);
         card.appendChild(replying);
-        card.appendChild(tagRow);
         card.appendChild(foot);
         panelEl.appendChild(dialog.back);
-        paintTag();
 
         function setReply(c) {
 
@@ -70696,7 +70663,7 @@
 
             send.disabled = true;
 
-            addComment(song.song_id, text, replyTo ? replyTo.id : "", tagBox.checked ? momentNow(song.song_id) : -1).then(function (c) {
+            addComment(song.song_id, text, replyTo ? replyTo.id : "").then(function (c) {
 
                 send.disabled = false;
                 field.value = "";
@@ -70794,8 +70761,7 @@
             }, failed);
         } else if (op === "commentAdd") {
 
-            addComment(String(a.song || ""), String(a.text || "").slice(0, 2000), String(a.parent || ""),
-                a.tag === true ? momentNow(String(a.song || "")) : -1).then(function (c) {
+            addComment(String(a.song || ""), String(a.text || "").slice(0, 2000), String(a.parent || "")).then(function (c) {
                 reply({ ok: true, comment: c });
             }, failed);
         } else if (op === "commentSeek") {
@@ -76294,15 +76260,6 @@
         cursor: pointer;
         font: inherit;
         color: #999;
-    }
-
-    .cmTag {
-        display: none;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.8em;
-        color: #bbb;
-        cursor: pointer;
     }
 
     .cmAt {
@@ -105857,9 +105814,6 @@
         const replying = document.createElement("div");
         const replyText = document.createElement("span");
         const replyCancel = document.createElement("button");
-        const tagRow = document.createElement("label");
-        const tagBox = document.createElement("input");
-        const tagText = document.createElement("span");
         const foot = document.createElement("div");
         const field = document.createElement("textarea");
         const send = document.createElement("button");
@@ -105867,19 +105821,8 @@
         let replyTo = null;
         let busy = false;
         let unBack = null;
-        // Tagged with where the song is, while it is the one playing on
-        // the Android device
-        const paintTag = function () {
-
-            const here = !!state && String(state.id) === String(m.id) && isFinite(Number(state.position));
-
-            tagRow.style.display = here ? "flex" : "none";
-            tagText.textContent = "Tag my comment at " + (here ? cmTime(Number(state.position)) : "");
-        };
-        const tagTimer = setInterval(paintTag, 1000);
         const close = function () {
 
-            clearInterval(tagTimer);
             back.remove();
 
             if (unBack) {
@@ -105913,10 +105856,6 @@
         replyCancel.addEventListener("click", function () {
             setReply(null);
         });
-        tagBox.type = "checkbox";
-        tagRow.className = "cmTag";
-        tagRow.appendChild(tagBox);
-        tagRow.appendChild(tagText);
         foot.className = "cmFoot";
         field.rows = 2;
         field.placeholder = "Write a comment";
@@ -105942,12 +105881,10 @@
         card.appendChild(listBox);
         card.appendChild(more);
         card.appendChild(replying);
-        card.appendChild(tagRow);
         card.appendChild(foot);
         back.appendChild(card);
         document.body.appendChild(back);
         unBack = onBack(close);
-        paintTag();
 
         function setReply(c) {
 
@@ -106161,7 +106098,7 @@
 
             send.disabled = true;
 
-            crAsk({ op: "commentAdd", song: m.id, text: text, parent: replyTo ? replyTo.id : "", tag: tagBox.checked && tagRow.style.display !== "none" }).then(function (r) {
+            crAsk({ op: "commentAdd", song: m.id, text: text, parent: replyTo ? replyTo.id : "" }).then(function (r) {
 
                 send.disabled = false;
 
