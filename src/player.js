@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.237";
+    const VERSION = "2.0.1.238";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -774,7 +774,11 @@
                     z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn()) {
+                } else if (((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn())
+                    && !(z.glide && z.glide.turn && f >= p - s && f <= p + 2 * s)) {
+
+                    // In the middle of a turn, aimed at the play head as it
+                    // goes, only a jump far off turns again
 
                     // Where the play head will be once the page has turned,
                     // so it lands close to the left edge rather than where
@@ -799,7 +803,7 @@
                         z.turnFrac = null;
                     } else if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -933,15 +937,39 @@
                 return v;
             }
 
-            const target = follow(frac);
+            let target = follow(frac);
 
             if (z.glide) {
 
                 const g = z.glide;
-                const k = Math.min(1, (performance.now() - g.at) / (g.ms || GLIDE_MS));
+                const now = performance.now();
+                const k = Math.min(1, (now - g.at) / (g.ms || GLIDE_MS));
+
+                // A page turn aims, all the way, at where the play head will
+                // be as it ends, counted again each time from where it is
+                // now and the time left. What its pace was guessed wrong by
+                // shrinks to nothing as the turn ends, so the play head
+                // lands just where asked, at 0 right on the left edge,
+                // however its pace was measured or the position came
+                if (g.turn && pages()) {
+
+                    const f = Math.max(0, Math.min(1, frac));
+                    const left = Math.max(0, g.at + (g.ms || GLIDE_MS) - now);
+                    const ahead = isFinite(z.pace) ? Math.max(0, Math.min(span() * PAGE_AHEAD_MAX, (z.pace || 0) * left)) : 0;
+
+                    target = clampStart(f + ahead - span() * pageLead());
+                    z.page = target;
+                }
 
                 if (k >= 1) {
+
                     z.glide = null;
+
+                    // Landed ahead of a play head that moves in steps, the
+                    // page waits for it rather than turning back
+                    if (g.turn) {
+                        z.turnFrac = target > frac ? Math.max(0, Math.min(1, frac)) : null;
+                    }
                 } else {
 
                     // Out of a move: quick, slowing at the end. A page turn:
@@ -1124,8 +1152,10 @@
             hooks.preview(z.dragFrac());
 
             // Held still a moment, it zooms instead: sliding up zooms in and
-            // sliding down zooms out, and letting go seeks nothing. Moved
-            // before then, sideways or not, it stays a drag
+            // sliding down zooms out, and letting go seeks nothing. Slid up
+            // or down before then it zooms at once, and a finger settling a
+            // little up or down still counts as held. Moved sideways before
+            // then, it stays a drag
             const pressed = z.drag;
 
             clearTimeout(z.holdTimer);
@@ -1134,7 +1164,7 @@
 
                 z.holdTimer = setTimeout(function () {
 
-                    if (z.drag !== pressed || pressed.moved || pressed.movedY || pointers.size !== 1) {
+                    if (z.drag !== pressed || pressed.moved || pointers.size !== 1) {
                         return;
                     }
 
@@ -1177,6 +1207,23 @@
 
             if (z.drag) {
 
+                const dx = Math.abs(ev.clientX - z.drag.x);
+                const dy = Math.abs(ev.clientY - z.drag.y);
+
+                // Sliding up or down before any move sideways is a zoom
+                // too, at once, not waiting to be held still: the finger
+                // that slides to zoom moves a little while it settles, and
+                // that little made it a drag that seeked on letting go
+                if (!z.drag.moved && hooks.zoomable() && pointers.size === 1 && dy > 2 * TAP_MOVE && dy > 2 * dx) {
+
+                    clearTimeout(z.holdTimer);
+                    z.holdZoom = { y: z.drag.y, zoom: z.zoom };
+                    z.drag = null;
+                    hooks.preview(null);
+                    setZoom(z.holdZoom.zoom * Math.exp((z.holdZoom.y - ev.clientY) / HOLD_ZOOM_PX));
+                    return;
+                }
+
                 z.drag.px = across(ev);
                 z.drag.lastY = ev.clientY;
 
@@ -1187,9 +1234,7 @@
                 }
 
                 if (Math.abs(ev.clientY - z.drag.y) > TAP_MOVE) {
-
                     z.drag.movedY = true;
-                    clearTimeout(z.holdTimer);
                 }
 
                 hooks.preview(z.dragFrac());
@@ -86447,7 +86492,11 @@
                     z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn()) {
+                } else if (((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn())
+                    && !(z.glide && z.glide.turn && f >= p - s && f <= p + 2 * s)) {
+
+                    // In the middle of a turn, aimed at the play head as it
+                    // goes, only a jump far off turns again
 
                     // Where the play head will be once the page has turned,
                     // so it lands close to the left edge rather than where
@@ -86472,7 +86521,7 @@
                         z.turnFrac = null;
                     } else if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -86606,15 +86655,39 @@
                 return v;
             }
 
-            const target = follow(frac);
+            let target = follow(frac);
 
             if (z.glide) {
 
                 const g = z.glide;
-                const k = Math.min(1, (performance.now() - g.at) / (g.ms || GLIDE_MS));
+                const now = performance.now();
+                const k = Math.min(1, (now - g.at) / (g.ms || GLIDE_MS));
+
+                // A page turn aims, all the way, at where the play head will
+                // be as it ends, counted again each time from where it is
+                // now and the time left. What its pace was guessed wrong by
+                // shrinks to nothing as the turn ends, so the play head
+                // lands just where asked, at 0 right on the left edge,
+                // however its pace was measured or the position came
+                if (g.turn && pages()) {
+
+                    const f = Math.max(0, Math.min(1, frac));
+                    const left = Math.max(0, g.at + (g.ms || GLIDE_MS) - now);
+                    const ahead = isFinite(z.pace) ? Math.max(0, Math.min(span() * PAGE_AHEAD_MAX, (z.pace || 0) * left)) : 0;
+
+                    target = clampStart(f + ahead - span() * pageLead());
+                    z.page = target;
+                }
 
                 if (k >= 1) {
+
                     z.glide = null;
+
+                    // Landed ahead of a play head that moves in steps, the
+                    // page waits for it rather than turning back
+                    if (g.turn) {
+                        z.turnFrac = target > frac ? Math.max(0, Math.min(1, frac)) : null;
+                    }
                 } else {
 
                     // Out of a move: quick, slowing at the end. A page turn:
@@ -86797,8 +86870,10 @@
             hooks.preview(z.dragFrac());
 
             // Held still a moment, it zooms instead: sliding up zooms in and
-            // sliding down zooms out, and letting go seeks nothing. Moved
-            // before then, sideways or not, it stays a drag
+            // sliding down zooms out, and letting go seeks nothing. Slid up
+            // or down before then it zooms at once, and a finger settling a
+            // little up or down still counts as held. Moved sideways before
+            // then, it stays a drag
             const pressed = z.drag;
 
             clearTimeout(z.holdTimer);
@@ -86807,7 +86882,7 @@
 
                 z.holdTimer = setTimeout(function () {
 
-                    if (z.drag !== pressed || pressed.moved || pressed.movedY || pointers.size !== 1) {
+                    if (z.drag !== pressed || pressed.moved || pointers.size !== 1) {
                         return;
                     }
 
@@ -86850,6 +86925,23 @@
 
             if (z.drag) {
 
+                const dx = Math.abs(ev.clientX - z.drag.x);
+                const dy = Math.abs(ev.clientY - z.drag.y);
+
+                // Sliding up or down before any move sideways is a zoom
+                // too, at once, not waiting to be held still: the finger
+                // that slides to zoom moves a little while it settles, and
+                // that little made it a drag that seeked on letting go
+                if (!z.drag.moved && hooks.zoomable() && pointers.size === 1 && dy > 2 * TAP_MOVE && dy > 2 * dx) {
+
+                    clearTimeout(z.holdTimer);
+                    z.holdZoom = { y: z.drag.y, zoom: z.zoom };
+                    z.drag = null;
+                    hooks.preview(null);
+                    setZoom(z.holdZoom.zoom * Math.exp((z.holdZoom.y - ev.clientY) / HOLD_ZOOM_PX));
+                    return;
+                }
+
                 z.drag.px = across(ev);
                 z.drag.lastY = ev.clientY;
 
@@ -86860,9 +86952,7 @@
                 }
 
                 if (Math.abs(ev.clientY - z.drag.y) > TAP_MOVE) {
-
                     z.drag.movedY = true;
-                    clearTimeout(z.holdTimer);
                 }
 
                 hooks.preview(z.dragFrac());
