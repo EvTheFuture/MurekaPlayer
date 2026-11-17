@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.195";
+    const VERSION = "2.0.1.196";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -67387,6 +67387,251 @@
         return createSuggestMemo.id;
     }
 
+    // Every set laid against the form, on asking: the lyrics of the sets'
+    // songs read first where not read yet, from the stored details and, for
+    // a few, from Mureka. The sets that look like the form, likeliest first,
+    // each with why, and a name for a new set. Tells how far it has come
+    const CREATE_MATCH_FETCH_MAX = 40;
+    const CREATE_MATCH_MIN = 0.3;
+    const CREATE_MATCH_SHOWN = 10;
+
+    async function createMatchSets(progress) {
+
+        const d = loadCreateDraft();
+        const tell = typeof progress === "function" ? progress : function () {};
+        const songs = [];
+
+        songSets.forEach(function (set) {
+
+            for (const m of setSongs(set.id)) {
+                songs.push(m);
+            }
+        });
+
+        // The lyrics, only when the form has lyrics to lay against them
+        const wantLyrics = d.kind === "song" && d.lyrics.trim().length > 0;
+        let fetched = 0;
+
+        if (wantLyrics) {
+
+            const missing = songs.filter(function (m) {
+                return !lyricPrints.has(String(m.song_id)) && lyricLengths.get(String(m.song_id)) !== 0 && !isPendingSong(m);
+            });
+
+            for (let i = 0; i < missing.length; i++) {
+
+                const m = missing[i];
+
+                if (i % 10 === 0) {
+                    tell("Reading the lyrics of the sets' songs, " + i + " of " + missing.length);
+                }
+
+                let entry = await loadDetailFromStore(m.song_id);
+
+                if (!entry && fetched < CREATE_MATCH_FETCH_MAX && !offlineMode()) {
+
+                    fetched += 1;
+                    entry = await fetchDetail(m);
+                }
+
+                if (entry && entry.lyrics) {
+                    noteLyricPrint(m.song_id, entry.lyrics);
+                }
+            }
+        }
+
+        tell("Laying the form against " + songSets.size + (songSets.size === 1 ? " set" : " sets"));
+
+        let print = null;
+
+        if (wantLyrics) {
+
+            noteLyricPrint("__create", d.lyrics);
+            print = lyricPrints.get("__create") || null;
+            lyricPrints.delete("__create");
+        }
+
+        const title = d.title.trim();
+        const styleWords = new Set(textWords(d.style.toLowerCase()));
+        const found = [];
+
+        songSets.forEach(function (set) {
+
+            let best = { score: 0, why: [] };
+
+            for (const m of setSongs(set.id)) {
+
+                const why = [];
+                let like = 0;
+                const t = title ? titleLikeness(title, m.title) : 0;
+
+                if (t >= 1) {
+
+                    like += 0.6;
+                    why.push("same title");
+                } else if (t >= 0.35) {
+
+                    like += 0.6 * t;
+                    why.push("similar title");
+                }
+
+                const theirs = print ? lyricPrints.get(String(m.song_id)) : null;
+
+                if (theirs) {
+
+                    const l = printLikeness(print, theirs);
+
+                    if (l >= 0.8) {
+
+                        like += l;
+                        why.push("same lyrics");
+                    } else if (l >= 0.2) {
+
+                        like += l;
+                        why.push("similar lyrics");
+                    }
+                }
+
+                // The style's words among the song's genres and moods
+                const tags = textWords([].concat(m.genres || [], m.moods || []).map(String).join(" ").toLowerCase());
+
+                if (styleWords.size > 0 && tags.length > 0) {
+
+                    const share = tags.filter(function (w) {
+                        return styleWords.has(w);
+                    }).length / tags.length;
+
+                    if (share >= 0.3) {
+
+                        like += 0.5 * share;
+                        why.push("style alike");
+                    }
+                }
+
+                if (like > best.score) {
+                    best = { score: like, why: why };
+                }
+            }
+
+            // The set's own name like the title
+            const named = title ? titleLikeness(title, set.name) : 0;
+
+            if (named >= 0.35) {
+
+                best.score += 0.5 * named;
+                best.why = best.why.concat(["named alike"]);
+            }
+
+            if (best.score >= CREATE_MATCH_MIN) {
+
+                best.score += 0.1 * setRecency(set);
+                found.push({ id: set.id, name: set.name, color: set.color, count: setSongs(set.id).length, score: best.score, why: best.why });
+            }
+        });
+
+        found.sort(function (a, b) {
+            return b.score - a.score;
+        });
+
+        return { sets: found.slice(0, CREATE_MATCH_SHOWN), name: createNewSetName(d), looked: songSets.size, fetched: fetched };
+    }
+
+    // A name for a new set from the form: the title without a version mark
+    // after it, else the lyrics' first sung line, else the style's first
+    // words. One no set has yet
+    function createNewSetName(d) {
+
+        const clean = function (text) {
+            return String(text || "").replace(/\s+/g, " ").trim();
+        };
+        let name = clean(d.title).replace(/\s*([-(\[#]\s*)?(v|ver|version|take|remix|mix)?\s*\d+\s*[)\]]?$/i, "").trim();
+
+        if (!name && d.kind === "song") {
+
+            const line = String(d.lyrics || "").split("\n").map(clean).find(function (x) {
+                return x && !/^[\[(].*[\])]$/.test(x);
+            });
+
+            name = line ? line.replace(/[,.;:!?]+$/, "") : "";
+        }
+
+        if (!name) {
+
+            name = textWords(d.style).slice(0, 3).join(" ");
+            name = name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
+        }
+
+        name = (name || "New set").slice(0, 40).trim();
+
+        const taken = new Set();
+
+        songSets.forEach(function (set) {
+            taken.add(String(set.name).toLowerCase());
+        });
+
+        // The title as written, version mark and all, when the name without
+        // it is a set already
+        const typed = clean(d.title).slice(0, 40).trim();
+
+        if (taken.has(name.toLowerCase()) && typed && !taken.has(typed.toLowerCase())) {
+            return typed;
+        }
+
+        let out = name;
+
+        for (let n = 2; taken.has(out.toLowerCase()); n++) {
+            out = name + " " + n;
+        }
+
+        return out;
+    }
+
+    // The matching sets on the device's own form, in a list to choose from,
+    // a new set with the name suggested first
+    async function createMatchFromPage() {
+
+        const pick = createPicker("Matching sets", null, function (x) {
+
+            if (x.id === "new") {
+                changeCreateDraft({ setOn: true, setId: "new", setName: x.name });
+            } else {
+                changeCreateDraft({ setOn: true, setId: x.id });
+            }
+        });
+
+        pick.empty("Looking through the sets");
+
+        try {
+
+            const r = await createMatchSets(function (text) {
+                pick.empty(text);
+            });
+
+            pick.list.textContent = "";
+            pick.add([{ label: "New set: " + r.name, sub: "A set of their own, named so", color: CTRL_ACCENT, value: { id: "new", name: r.name } }]
+                .concat(r.sets.map(function (x) {
+
+                    return {
+                        label: x.name,
+                        sub: [x.count + (x.count === 1 ? " song" : " songs"), x.why.join(", ")].filter(Boolean).join(", "),
+                        color: x.color,
+                        value: { id: x.id }
+                    };
+                })));
+
+            if (r.sets.length === 0) {
+
+                const none = document.createElement("div");
+
+                none.textContent = r.looked === 0 ? "There are no sets yet." : "None of the " + r.looked + " sets looks like what the form makes.";
+                none.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
+                pick.list.appendChild(none);
+            }
+        } catch (e) {
+            pick.empty("The sets could not be looked through, " + errText(e));
+        }
+    }
+
     // A field emptied, with Undo
     function createClearField(field, name) {
 
@@ -68445,6 +68690,16 @@
             changeCreateDraft(changes);
         });
         createEl.appendChild(ui.setRow);
+
+        // Every set laid against what is written so far, the ones alike
+        // offered with a name for a new one
+        const matchRow = document.createElement("div");
+
+        ui.matchBtn = act("Find matching sets", createMatchFromPage);
+        ui.matchBtn.style.flex = "0 0 auto";
+        matchRow.classList.add("mp-row8");
+        matchRow.appendChild(ui.matchBtn);
+        createEl.appendChild(matchRow);
         ui.setBox = document.createElement("div");
         ui.setBox.classList.add("mp-col8");
         // The set chosen, in its own color, a list to change it
@@ -68480,6 +68735,14 @@
         foot.style.cssText = "font-size:12px;color:#888;line-height:1.5";
         foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
         createEl.appendChild(foot);
+
+        // Create again at the end, within reach after the last setting
+        ui.makeBottom = makeButton("Create", ACCENT, "#000", function () {
+            createFromPage(false);
+        });
+        ui.makeBottom.style.padding = "10px 18px";
+        ui.acts.push(ui.makeBottom);
+        createEl.appendChild(ui.makeBottom);
 
         // While Mureka works the page dims under a large turning ring, as
         // in the trimmer, the text still seen filling in
@@ -69503,6 +69766,11 @@
 
             createReset();
             reply({ ok: true, state: hostCreateState() });
+        } else if (op === "matchSets") {
+
+            createMatchSets().then(function (r) {
+                reply({ ok: true, list: r.sets, name: r.name, looked: r.looked });
+            }, failed);
         } else if (op === "state") {
             reply({ ok: true, state: hostCreateState() });
         } else if (op === "stop") {
@@ -74849,6 +75117,13 @@
         border-color: var(--accent);
         color: #000;
         font-weight: 600;
+    }
+
+    .chip.crPrimary.crBottom {
+        flex: 1 1 auto;
+        justify-content: center;
+        text-align: center;
+        padding: 10px 18px;
     }
 
     .chip.crPrimary:disabled {
@@ -102347,6 +102622,10 @@
         });
         ui.acts.push(ui.setOn);
         ready.appendChild(crLine("Put them in a set", [ui.setOn]));
+
+        // Every set laid against what is written so far, the ones alike
+        // offered with a name for a new one
+        ready.appendChild(crRow([crChip("Find matching sets", openCrMatch)]));
         ui.setBox = document.createElement("div");
         ui.setBox.className = "crBlock";
         ui.setPick = document.createElement("button");
@@ -102373,6 +102652,11 @@
         foot.className = "plRowCount crFoot";
         foot.textContent = "Mureka makes two songs each time. They show at the top of the list while they are made, and play like any other once ready.";
         form.appendChild(foot);
+
+        // Create again at the end, within reach after the last setting
+        form.appendChild(crRow([crChip("Create", function () {
+            crMake(false);
+        }, "crPrimary crBottom")]));
         crUi.acts.push($("crMake"));
         crUi.acts.push($("crReset"));
     }
@@ -102847,6 +103131,63 @@
         const s = Math.round((Number(ms) || 0) / 1000);
 
         return s > 0 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : "";
+    }
+
+    // The sets that look like the form, worked out on the phone, a new
+    // set with the name suggested first
+    function openCrMatch() {
+
+        crPickKind = "match";
+        $("crPickTitle").textContent = "Matching sets";
+        $("crPickUpload").style.display = "none";
+        $("crPickTag").style.display = "none";
+        $("crPickMore").style.display = "none";
+        crPickNote("Looking through the sets, reading their lyrics where needed");
+        showCrPick(true);
+
+        crAsk({ op: "matchSets" }).then(function (r) {
+
+            if (crPickKind !== "match") {
+                return;
+            }
+
+            if (!r || !r.ok) {
+
+                crPickNote((r && r.why) || "The sets could not be looked through");
+                return;
+            }
+
+            const rows = $("crPickRows");
+            const list = Array.isArray(r.list) ? r.list : [];
+            const name = String(r.name || "New set");
+
+            rows.textContent = "";
+            rows.appendChild(crPickRow("New set: " + name, "A set of their own, named so", function () {
+
+                showCrPick(false);
+                crSet({ setOn: true, setId: "new", setName: name });
+            }, "#48e1eb"));
+
+            for (const x of list) {
+
+                const sub = [x.count + (x.count === 1 ? " song" : " songs"), (x.why || []).join(", ")].filter(Boolean).join(", ");
+
+                rows.appendChild(crPickRow(x.name, sub, function () {
+
+                    showCrPick(false);
+                    crSet({ setOn: true, setId: x.id });
+                }, x.color));
+            }
+
+            if (list.length === 0) {
+
+                const none = document.createElement("div");
+
+                none.className = "plRowCount";
+                none.textContent = r.looked === 0 ? "There are no sets yet." : "None of the " + r.looked + " sets looks like what the form makes.";
+                rows.appendChild(none);
+            }
+        });
     }
 
     function openCrPick(kind) {
