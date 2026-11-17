@@ -11,6 +11,17 @@
     // why it could not go or ""; onEscape(), Escape with no list open;
     // toast(text), a word for the one writing. Answers the element, paint
     // with { me, msgs, keepText, names, emptyText } and focus
+    // The chat's title: Chat in and the room's name in the accent colour
+    function chatTitleSet(el, room, accent) {
+
+        const name = document.createElement("span");
+
+        el.textContent = "Chat in ";
+        name.textContent = room || "the room";
+        name.style.color = accent || "#48e1eb";
+        el.appendChild(name);
+    }
+
     function makeChatView(opts) {
 
         const accent = opts.accent || "#48e1eb";

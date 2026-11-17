@@ -1392,6 +1392,7 @@ In development.
 - **The web view's chat no longer refused as busy.** A question from a web view to the phone (the chat, the notifications, making songs) took the turn kept for large uploads, one at a time, and held it while the phone answered, so another question meanwhile was refused and read as "The Android device could not be reached". Questions no longer take that turn, and a busy answer says so.
 - **The chat's history read from the relay as the chat opens**, in case the room's stream missed it, joined before the relay had the chat say. A relay without the chat says it needs an update.
 - **Together shows both its swipes**: an arrow at its top for the menu and one at its foot for the chat, on the phone too. A button group's mark sits in the middle of the button, as the other arrows do.
+- **A double tap on the chat window's bar tucks it away**, into the nearest edge, instead of a button of its own between Dock and Close. The room's name in the chat's title is cyan. In the player and the web view.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

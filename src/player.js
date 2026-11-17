@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.222";
+    const VERSION = "2.0.1.223";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15030,6 +15030,17 @@
     // why it could not go or ""; onEscape(), Escape with no list open;
     // toast(text), a word for the one writing. Answers the element, paint
     // with { me, msgs, keepText, names, emptyText } and focus
+    // The chat's title: Chat in and the room's name in the accent colour
+    function chatTitleSet(el, room, accent) {
+
+        const name = document.createElement("span");
+
+        el.textContent = "Chat in ";
+        name.textContent = room || "the room";
+        name.style.color = accent || "#48e1eb";
+        el.appendChild(name);
+    }
+
     function makeChatView(opts) {
 
         const accent = opts.accent || "#48e1eb";
@@ -15380,8 +15391,8 @@
     // A window of its own floating over the page, not shutting the page
     // away: a little see-through with the page blurred behind it, moved by
     // its top bar and sized from any edge or corner, with a mouse or a
-    // finger. Its collapse button tucks it into the nearest edge of the
-    // screen as a small tab, which a tap opens again. Where it was, how big
+    // finger. A double tap on its top bar tucks it into the nearest edge of
+    // the screen as a small tab, which a tap opens again. Where it was, how big
     // and whether tucked away are remembered in this browser.
     // Shared by the player and the web view's page, src/shared/floatwin.js,
     // inlined into both by embed-webview.sh
@@ -15390,7 +15401,7 @@
     // its first size; minW and minH; tabIcon, an element for the tab;
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
-    // body, foldBtn (the collapse button, for the head), close(),
+    // body, close(),
     // fold(), unfold(), folded() and badge(n), a count on the tab
     function makeFloatWindow(opts) {
 
@@ -15403,14 +15414,15 @@
         const EDGE = 10;
         const CORNER = 22;
         let rect = null;
+        let lastTap = 0;
         const tab = document.createElement("div");
         const tabCount = document.createElement("span");
-        const foldBtn = document.createElement("button");
 
         el.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
             + "box-sizing:border-box;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(30,30,36,0.82);"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(0,0,0,0.55);color:#fff";
         head.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none";
+        head.title = "Drag to move, double tap to tuck it into the edge";
         body.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column";
         el.appendChild(head);
         el.appendChild(body);
@@ -15452,18 +15464,6 @@
 
             ev.stopPropagation();
             unfold();
-        });
-
-        foldBtn.type = "button";
-        foldBtn.title = "Tuck it into the nearest edge";
-        foldBtn.setAttribute("aria-label", "Collapse to the edge");
-        foldBtn.textContent = "\u2013";
-        foldBtn.style.cssText = "flex:0 0 auto;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);"
-            + "color:#ddd;font:inherit;font-size:20px;line-height:1;cursor:pointer;padding:0";
-        foldBtn.addEventListener("click", function (ev) {
-
-            ev.stopPropagation();
-            fold();
         });
 
         // The nearest edge to the window's middle, and the tab on it there
@@ -15552,6 +15552,7 @@
                 ev.stopPropagation();
 
                 const start = { x: ev.clientX, y: ev.clientY, r: { x: rect.x, y: rect.y, w: rect.w, h: rect.h } };
+                let moved = false;
 
                 try {
                     handle.setPointerCapture(ev.pointerId);
@@ -15563,6 +15564,10 @@
                     const dx = e.clientX - start.x;
                     const dy = e.clientY - start.y;
                     const r = start.r;
+
+                    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+                        moved = true;
+                    }
 
                     if (sides.move) {
 
@@ -15597,12 +15602,27 @@
 
                     place();
                 };
-                const up = function () {
+                const up = function (e) {
 
                     handle.removeEventListener("pointermove", move);
                     handle.removeEventListener("pointerup", up);
                     handle.removeEventListener("pointercancel", up);
                     keep();
+
+                    // Two taps on the bar, close in time and not moved,
+                    // tuck it away
+                    if (sides.move && !moved && e.type === "pointerup") {
+
+                        const now = Date.now();
+
+                        if (now - lastTap < 400) {
+
+                            lastTap = 0;
+                            fold();
+                        } else {
+                            lastTap = now;
+                        }
+                    }
                 };
 
                 handle.addEventListener("pointermove", move);
@@ -15659,7 +15679,6 @@
             tab: tab,
             head: head,
             body: body,
-            foldBtn: foldBtn,
             fold: fold,
             unfold: unfold,
             folded: function () {
@@ -41867,7 +41886,7 @@
 
         ui.close = done;
         head.classList.add("mp-row8");
-        title.textContent = "Chat in " + syncRoomLabel();
+        chatTitleSet(title, syncRoomLabel(), ACCENT);
         title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
         swap.title = docked ? "The chat in a window of its own" : "The chat where the song list is";
         swap.style.flex = "0 0 auto";
@@ -41911,7 +41930,6 @@
             title.style.cursor = "move";
             win.head.appendChild(title);
             win.head.appendChild(swap);
-            win.head.appendChild(win.foldBtn);
             win.head.appendChild(shut);
             win.body.appendChild(view.el);
             win.el.style.fontFamily = "system-ui,sans-serif";
@@ -87648,6 +87666,17 @@
     // why it could not go or ""; onEscape(), Escape with no list open;
     // toast(text), a word for the one writing. Answers the element, paint
     // with { me, msgs, keepText, names, emptyText } and focus
+    // The chat's title: Chat in and the room's name in the accent colour
+    function chatTitleSet(el, room, accent) {
+
+        const name = document.createElement("span");
+
+        el.textContent = "Chat in ";
+        name.textContent = room || "the room";
+        name.style.color = accent || "#48e1eb";
+        el.appendChild(name);
+    }
+
     function makeChatView(opts) {
 
         const accent = opts.accent || "#48e1eb";
@@ -87998,8 +88027,8 @@
     // A window of its own floating over the page, not shutting the page
     // away: a little see-through with the page blurred behind it, moved by
     // its top bar and sized from any edge or corner, with a mouse or a
-    // finger. Its collapse button tucks it into the nearest edge of the
-    // screen as a small tab, which a tap opens again. Where it was, how big
+    // finger. A double tap on its top bar tucks it into the nearest edge of
+    // the screen as a small tab, which a tap opens again. Where it was, how big
     // and whether tucked away are remembered in this browser.
     // Shared by the player and the web view's page, src/shared/floatwin.js,
     // inlined into both by embed-webview.sh
@@ -88008,7 +88037,7 @@
     // its first size; minW and minH; tabIcon, an element for the tab;
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
-    // body, foldBtn (the collapse button, for the head), close(),
+    // body, close(),
     // fold(), unfold(), folded() and badge(n), a count on the tab
     function makeFloatWindow(opts) {
 
@@ -88021,14 +88050,15 @@
         const EDGE = 10;
         const CORNER = 22;
         let rect = null;
+        let lastTap = 0;
         const tab = document.createElement("div");
         const tabCount = document.createElement("span");
-        const foldBtn = document.createElement("button");
 
         el.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
             + "box-sizing:border-box;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(30,30,36,0.82);"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(0,0,0,0.55);color:#fff";
         head.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none";
+        head.title = "Drag to move, double tap to tuck it into the edge";
         body.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column";
         el.appendChild(head);
         el.appendChild(body);
@@ -88070,18 +88100,6 @@
 
             ev.stopPropagation();
             unfold();
-        });
-
-        foldBtn.type = "button";
-        foldBtn.title = "Tuck it into the nearest edge";
-        foldBtn.setAttribute("aria-label", "Collapse to the edge");
-        foldBtn.textContent = "\u2013";
-        foldBtn.style.cssText = "flex:0 0 auto;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);"
-            + "color:#ddd;font:inherit;font-size:20px;line-height:1;cursor:pointer;padding:0";
-        foldBtn.addEventListener("click", function (ev) {
-
-            ev.stopPropagation();
-            fold();
         });
 
         // The nearest edge to the window's middle, and the tab on it there
@@ -88170,6 +88188,7 @@
                 ev.stopPropagation();
 
                 const start = { x: ev.clientX, y: ev.clientY, r: { x: rect.x, y: rect.y, w: rect.w, h: rect.h } };
+                let moved = false;
 
                 try {
                     handle.setPointerCapture(ev.pointerId);
@@ -88181,6 +88200,10 @@
                     const dx = e.clientX - start.x;
                     const dy = e.clientY - start.y;
                     const r = start.r;
+
+                    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+                        moved = true;
+                    }
 
                     if (sides.move) {
 
@@ -88215,12 +88238,27 @@
 
                     place();
                 };
-                const up = function () {
+                const up = function (e) {
 
                     handle.removeEventListener("pointermove", move);
                     handle.removeEventListener("pointerup", up);
                     handle.removeEventListener("pointercancel", up);
                     keep();
+
+                    // Two taps on the bar, close in time and not moved,
+                    // tuck it away
+                    if (sides.move && !moved && e.type === "pointerup") {
+
+                        const now = Date.now();
+
+                        if (now - lastTap < 400) {
+
+                            lastTap = 0;
+                            fold();
+                        } else {
+                            lastTap = now;
+                        }
+                    }
                 };
 
                 handle.addEventListener("pointermove", move);
@@ -88277,7 +88315,6 @@
             tab: tab,
             head: head,
             body: body,
-            foldBtn: foldBtn,
             fold: fold,
             unfold: unfold,
             folded: function () {
@@ -109103,7 +109140,6 @@
             title.classList.add("chatWinTitle");
             win.head.appendChild(title);
             win.head.appendChild(swap);
-            win.head.appendChild(win.foldBtn);
             win.head.appendChild(shut);
             win.body.appendChild(view.el);
             win.show(document.body);
@@ -109128,7 +109164,7 @@
                 }
 
                 shownSeq = Number(r.seq);
-                title.textContent = "Chat in " + String(r.room || "the room");
+                chatTitleSet(title, String(r.room || ""), "var(--accent)");
                 view.paint({ me: r.me, msgs: r.msgs, keepText: r.keepText, names: r.names,
                     emptyText: r.inRoom === false ? "Not in a room now. Join one to chat." : "" });
             });
