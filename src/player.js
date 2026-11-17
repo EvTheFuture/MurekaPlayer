@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.240";
+    const VERSION = "2.0.1.241";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -72722,6 +72722,21 @@
             msgList = list.map(function (item) {
                 return msgOf(item, readIds);
             });
+
+            // Mureka counts the newest ones since its bell was last cleared,
+            // while its list may give them all as read. Those newest ones are
+            // the new ones here, marked as such, unless opened here
+            for (let i = 0; i < Math.min(msgThere, msgList.length); i += 1) {
+
+                const m = msgList[i];
+
+                if (!readIds.has(m.id)) {
+
+                    m.read = false;
+                    m.unreadThere = true;
+                }
+            }
+
             msgLast = page.last;
             msgCount();
             msgFillNames(msgList).catch(function () {
@@ -73349,6 +73364,7 @@
         const head = document.createElement("div");
         const title = document.createElement("div");
         const headSpin = msgSpinner(12);
+        const spacer = document.createElement("div");
         const allBtn = makeButton("Mark all read", "#333", "#fff", function () {
 
             allBtn.disabled = true;
@@ -73374,14 +73390,19 @@
             dialog.close();
         };
 
+        // The buttons at the right on the title's line, Close there too
+        // while Mark all read is away
         head.classList.add("mp-row8");
+        head.style.alignItems = "center";
         title.textContent = "Notifications";
         title.style.cssText = "font-weight:600;min-width:0";
         headSpin.style.display = "none";
-        allBtn.style.cssText += ";flex:0 0 auto;margin-left:auto";
+        spacer.style.flex = "1 1 auto";
+        allBtn.style.cssText += ";flex:0 0 auto";
         shut.style.flex = "0 0 auto";
         head.appendChild(title);
         head.appendChild(headSpin);
+        head.appendChild(spacer);
         head.appendChild(allBtn);
         head.appendChild(shut);
         listBox.style.cssText = "flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
@@ -73428,6 +73449,18 @@
             when.style.cssText = "flex:0 0 auto;margin-left:auto;font-size:11px;color:#888";
             what.style.cssText = "font-size:13px;line-height:1.4;overflow-wrap:anywhere;color:" + (m.read ? "#999" : "#ccc");
             top.appendChild(who);
+
+            // A new one says so beside the name, not by its colours alone
+            if (!m.read) {
+
+                const tag = document.createElement("span");
+
+                tag.textContent = "New";
+                tag.style.cssText = "flex:0 0 auto;padding:0 6px;border-radius:7px;background:" + ACCENT + ";color:#000;"
+                    + "font-size:10px;font-weight:700;line-height:15px";
+                top.appendChild(tag);
+            }
+
             top.appendChild(when);
             mid.appendChild(top);
 
@@ -73539,7 +73572,8 @@
 
             listBox.scrollTop = keep;
             headSpin.style.display = busy && first && all.length ? "" : "none";
-            allBtn.style.display = all.some(function (m) {
+            // Also for Mureka's own count, unread ones this list may not hold
+            allBtn.style.display = msgThere > 0 || all.some(function (m) {
                 return !m.read || m.unreadThere;
             }) ? "" : "none";
         }
@@ -78635,6 +78669,17 @@
 
     .nfItem.unread .nfWho {
         color: #fff;
+    }
+
+    .nfNew {
+        flex: 0 0 auto;
+        padding: 0 0.45em;
+        border-radius: 0.6em;
+        background: var(--accent);
+        color: #000;
+        font-size: 0.75em;
+        font-weight: 700;
+        line-height: 1.5;
     }
 
     .nfWhen {
@@ -110737,6 +110782,17 @@
             when.textContent = m.at ? commentAge(m.at) : "";
             what.className = "nfWhat";
             top.appendChild(who);
+
+            // A new one says so beside the name, not by its colours alone
+            if (!m.read) {
+
+                const tag = document.createElement("span");
+
+                tag.className = "nfNew";
+                tag.textContent = "New";
+                top.appendChild(tag);
+            }
+
             top.appendChild(when);
             mid.appendChild(top);
 
@@ -110852,7 +110908,11 @@
 
             listBox.scrollTop = keep;
             headSpin.style.display = busy && first && items.length ? "" : "none";
-            all.style.display = items.some(function (m) {
+            // Also for the unread ones Mureka counts, which this list may
+            // give as read
+            const counted = state && Number(state.msgUnread) > 0;
+
+            all.style.display = counted || items.some(function (m) {
                 return !m.read || m.unreadThere;
             }) ? "" : "none";
         }

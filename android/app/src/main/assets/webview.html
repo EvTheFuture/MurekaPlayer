@@ -1053,6 +1053,17 @@
         color: #fff;
     }
 
+    .nfNew {
+        flex: 0 0 auto;
+        padding: 0 0.45em;
+        border-radius: 0.6em;
+        background: var(--accent);
+        color: #000;
+        font-size: 0.75em;
+        font-weight: 700;
+        line-height: 1.5;
+    }
+
     .nfWhen {
         flex: 0 0 auto;
         margin-left: auto;
@@ -33153,6 +33164,17 @@
             when.textContent = m.at ? commentAge(m.at) : "";
             what.className = "nfWhat";
             top.appendChild(who);
+
+            // A new one says so beside the name, not by its colours alone
+            if (!m.read) {
+
+                const tag = document.createElement("span");
+
+                tag.className = "nfNew";
+                tag.textContent = "New";
+                top.appendChild(tag);
+            }
+
             top.appendChild(when);
             mid.appendChild(top);
 
@@ -33268,7 +33290,11 @@
 
             listBox.scrollTop = keep;
             headSpin.style.display = busy && first && items.length ? "" : "none";
-            all.style.display = items.some(function (m) {
+            // Also for the unread ones Mureka counts, which this list may
+            // give as read
+            const counted = state && Number(state.msgUnread) > 0;
+
+            all.style.display = counted || items.some(function (m) {
                 return !m.read || m.unreadThere;
             }) ? "" : "none";
         }
