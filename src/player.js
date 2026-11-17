@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.201";
+    const VERSION = "2.0.1.202";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -39813,11 +39813,47 @@
         return path;
     }
 
+    // An element's own style, written on it or given by one of the shared
+    // style classes, the way the web view's settings read a row's layout,
+    // color and size. The page's own and inherited styles do not count
+    let playerClassStyles = null;
+
+    function ownStyle(el, prop) {
+
+        if (el.style[prop]) {
+            return el.style[prop];
+        }
+
+        if (!playerClassStyles) {
+
+            playerClassStyles = {};
+
+            for (const name of Object.keys(PLAYER_CLASS_CSS)) {
+
+                const probe = document.createElement("div");
+
+                probe.style.cssText = PLAYER_CLASS_CSS[name];
+                playerClassStyles[name] = probe.style;
+            }
+        }
+
+        for (const name of el.classList) {
+
+            const st = playerClassStyles[name];
+
+            if (st && st[prop]) {
+                return st[prop];
+            }
+        }
+
+        return "";
+    }
+
     // A button lit in the accent color. The browser writes a color set as
     // #48e1eb back as rgb(72, 225, 235), spaces and all, so the spaces go
     function hostOn(el) {
 
-        const bg = String(el.style.background || el.style.backgroundColor || "").toLowerCase().replace(/\s+/g, "");
+        const bg = String(ownStyle(el, "background") || ownStyle(el, "backgroundColor") || "").toLowerCase().replace(/\s+/g, "");
 
         return bg.indexOf(ACCENT) >= 0 || bg.indexOf(ACCENT_RGB) >= 0;
     }
@@ -39829,7 +39865,7 @@
     function hostWalk(el, out, path) {
 
         // Skipped when hidden, unless only meant to show in the web view
-        if (!el || el.nodeType !== 1 || (el.style.display === "none" && !el.dataset.webOnly) || el.dataset.hostSkip) {
+        if (!el || el.nodeType !== 1 || (ownStyle(el, "display") === "none" && !el.dataset.webOnly) || el.dataset.hostSkip) {
             return;
         }
 
@@ -39958,7 +39994,7 @@
                 danger: el.dataset.hostDanger === "1",
                 ring: el.dataset.hostRing === "1",
                 imp: el.dataset.hostImport === "1",
-                wide: el.style.textAlign === "left",
+                wide: ownStyle(el, "textAlign") === "left",
                 full: el.dataset.hostFull === "1",
                 copy: typeof el.__copyText === "function" ? String(el.__copyText() || "") : undefined
             });
@@ -40005,7 +40041,7 @@
 
         Array.from(el.children).forEach(function (c, i) {
 
-            if (c.style.display !== "none" || c.dataset.webOnly) {
+            if (ownStyle(c, "display") !== "none" || c.dataset.webOnly) {
                 kids.push({ el: c, path: path + "." + i });
             }
         });
@@ -40047,7 +40083,7 @@
         // A row drawn as a tappable block, the tag lists and the creators.
         // Its pieces are kept apart, so a tag and its count do not run
         // together, and a tick in front of it means it is selected
-        if (el.style.cursor === "pointer" && !el.querySelector("button,input,select,textarea")) {
+        if (ownStyle(el, "cursor") === "pointer" && !el.querySelector("button,input,select,textarea")) {
 
             const parts = [];
             let on = hostOn(el);
@@ -40081,7 +40117,7 @@
 
             // Text laid out in lines of its own, the lyrics and the style
             // prompt, goes as it is, capitals and line breaks kept
-            const ws = String(el.style.whiteSpace || "");
+            const ws = String(ownStyle(el, "whiteSpace") || "");
 
             if ((ws === "pre-wrap" || ws === "pre-line" || ws === "pre") && el.textContent.trim()) {
 
@@ -40095,13 +40131,13 @@
 
                 // Hints and status lines are small or grey on the phone, the
                 // rest of the standalone lines are section headings
-                const rgb = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(String(el.style.color || ""));
+                const rgb = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(String(ownStyle(el, "color") || ""));
                 const grey = !!rgb && rgb[1] === rgb[2] && rgb[2] === rgb[3] && Number(rgb[1]) < 180;
 
                 out.push({
                     t: "text",
                     s: text,
-                    small: parseFloat(el.style.fontSize || "13") <= 12 || grey,
+                    small: parseFloat(ownStyle(el, "fontSize") || "13") <= 12 || grey,
                     line: el.dataset.sectionLine === "1",
                     plain: el.dataset.hostPlain === "1",
                     status: el.dataset.hostStatus === "1"
@@ -40112,7 +40148,7 @@
         }
 
         // Things laid out side by side on the phone stay together
-        if (el.style.display === "flex" && el.style.flexDirection !== "column") {
+        if (ownStyle(el, "display") === "flex" && ownStyle(el, "flexDirection") !== "column") {
 
             const row = [];
 
@@ -110982,6 +111018,34 @@
 
     // Build the player, then hold the screen on right away if it is always
     // meant to be
+    // The shared styles by class, for the style sheet and for reading an
+    // element's own style the way an inline style is read
+    const PLAYER_CLASS_CSS = {
+        "mp-row6": "display:flex;gap:6px",
+        "mp-bold": "font-weight:600",
+        "mp-between": "display:flex;align-items:center;justify-content:space-between;gap:8px",
+        "mp-row8": "display:flex;gap:8px",
+        "mp-mid10": "display:flex;align-items:center;gap:10px",
+        "mp-grow": "flex:1;min-width:0",
+        "mp-col6": "display:flex;flex-direction:column;gap:6px",
+        "mp-soft": "color:#bbb",
+        "mp-text": "color:#ccc;font-size:13px;line-height:1.5",
+        "mp-wrap6": "display:flex;gap:6px;flex-wrap:wrap",
+        "mp-row6b": "display:flex;gap:6px;margin-bottom:6px",
+        "mp-col8": "display:flex;flex-direction:column;gap:8px",
+        "mp-hint": "font-size:11px;color:#888;line-height:1.4",
+        "mp-band": "display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0",
+        "mp-line": "display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333",
+        "mp-key": "flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px",
+        "mp-col12": "display:flex;flex-direction:column;gap:12px",
+        "mp-top10": "display:flex;align-items:flex-start;gap:10px",
+        "mp-note": "padding:6px 2px;color:#888",
+        "mp-col4": "display:flex;flex-direction:column;gap:4px",
+        "mp-box": "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c",
+        "mp-val": "flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px",
+        "mp-mid8": "display:flex;align-items:center;gap:8px"
+    };
+
     // The styles many of the player's parts share, as classes of one style
     // sheet rather than written out on each. Each class is named twice in
     // its rule, so the page's own rules for an element or a class do not
@@ -110995,30 +111059,9 @@
         const sheet = document.createElement("style");
 
         sheet.id = "mureka-player-styles";
-        sheet.textContent = ""
-            + ".mp-row6.mp-row6{display:flex;gap:6px}"
-            + ".mp-bold.mp-bold{font-weight:600}"
-            + ".mp-between.mp-between{display:flex;align-items:center;justify-content:space-between;gap:8px}"
-            + ".mp-row8.mp-row8{display:flex;gap:8px}"
-            + ".mp-mid10.mp-mid10{display:flex;align-items:center;gap:10px}"
-            + ".mp-grow.mp-grow{flex:1;min-width:0}"
-            + ".mp-col6.mp-col6{display:flex;flex-direction:column;gap:6px}"
-            + ".mp-soft.mp-soft{color:#bbb}"
-            + ".mp-text.mp-text{color:#ccc;font-size:13px;line-height:1.5}"
-            + ".mp-wrap6.mp-wrap6{display:flex;gap:6px;flex-wrap:wrap}"
-            + ".mp-row6b.mp-row6b{display:flex;gap:6px;margin-bottom:6px}"
-            + ".mp-col8.mp-col8{display:flex;flex-direction:column;gap:8px}"
-            + ".mp-hint.mp-hint{font-size:11px;color:#888;line-height:1.4}"
-            + ".mp-band.mp-band{display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0}"
-            + ".mp-line.mp-line{display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #333}"
-            + ".mp-key.mp-key{flex:0 0 112px;color:rgb(150, 150, 150);font-size:12px;line-height:18px}"
-            + ".mp-col12.mp-col12{display:flex;flex-direction:column;gap:12px}"
-            + ".mp-top10.mp-top10{display:flex;align-items:flex-start;gap:10px}"
-            + ".mp-note.mp-note{padding:6px 2px;color:#888}"
-            + ".mp-col4.mp-col4{display:flex;flex-direction:column;gap:4px}"
-            + ".mp-box.mp-box{margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#26262c}"
-            + ".mp-val.mp-val{flex:1 1 auto;min-width:0;color:rgb(232, 232, 232);font-size:13px;line-height:18px}"
-            + ".mp-mid8.mp-mid8{display:flex;align-items:center;gap:8px}";
+        sheet.textContent = Object.keys(PLAYER_CLASS_CSS).map(function (name) {
+            return "." + name + "." + name + "{" + PLAYER_CLASS_CSS[name] + "}";
+        }).join("");
         (document.head || document.documentElement).appendChild(sheet);
     }
 
