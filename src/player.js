@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.238";
+    const VERSION = "2.0.1.239";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13634,17 +13634,34 @@
             cache.songs.splice(idx, 1);
         }
 
-        // Take it out of the queue too, keeping the current position sane
-        const qi = queue.findIndex(function (s) {
-            return s.song_id === song.song_id;
+        // Take it out of the queue too, from every place it has there: a
+        // song put in again by hand is in it twice. The playing one goes on
+        // from its own place, not from the first, which sent the queue back
+        // to songs played already
+        const playingAt = wasCurrent && queue[queuePos] && queue[queuePos].song_id === song.song_id ? queuePos : -1;
+        const places = [];
+
+        queue.forEach(function (x, i) {
+
+            if (x.song_id === song.song_id) {
+                places.push(i);
+            }
         });
 
-        if (qi !== -1) {
+        const countBefore = function (at) {
+            return places.filter(function (i) {
+                return i < at;
+            }).length;
+        };
+        const chosen = playingAt !== -1 ? playingAt : (places.length > 0 ? places[0] : -1);
+        const qi = chosen === -1 ? -1 : chosen - countBefore(chosen);
 
-            queue.splice(qi, 1);
+        if (places.length > 0) {
 
-            if (qi < queuePos) {
-                queuePos -= 1;
+            queuePos -= countBefore(queuePos);
+
+            for (let k = places.length - 1; k >= 0; k -= 1) {
+                queue.splice(places[k], 1);
             }
         }
 
@@ -19241,7 +19258,12 @@
         // there, the queue stays as it is
         if (queueOwn) {
 
-            const at = queue.findIndex(function (s) {
+            // In it more than once, put in again by hand, the place still to
+            // come plays rather than one played already
+            const ahead = queue.findIndex(function (s, i) {
+                return i > queuePos && s.song_id === songId;
+            });
+            const at = ahead !== -1 ? ahead : queue.findIndex(function (s) {
                 return s.song_id === songId;
             });
 
@@ -23843,6 +23865,11 @@
 
         goneSkips = 0;
         queueMoveDir = 1;
+
+        // Put in by hand, once playing it has had its turn. Left marked, it
+        // came back as put in by hand whenever the queue went back before it
+        playNextMarks.delete(String(song.song_id));
+        playLastMarks.delete(String(song.song_id));
 
         ensureAudio();
         currentSong = song;
